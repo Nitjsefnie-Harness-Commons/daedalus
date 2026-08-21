@@ -1,0 +1,48 @@
+name: types
+
+# pyright over the bridge, the CLI and the scripts. The suites are excluded in
+# pyrightconfig.json: they load their target by path and reach into module
+# internals on purpose, which a type checker can only ever call an error.
+#
+# pythonPlatform is "All" rather than the runner's: the bridge branches on
+# platform at runtime, and those branches should be checked wherever this runs.
+#
+# The `mcp` extra is installed for one reason: mcp_server.py imports httpx,
+# starlette and the MCP SDK, and without them every line that touches them
+# reads as an unresolved import rather than as code anyone checked.
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: types-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pyright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install the type checker and the MCP server's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install ".[mcp]"
+
+      - name: pyright
+        run: pyright

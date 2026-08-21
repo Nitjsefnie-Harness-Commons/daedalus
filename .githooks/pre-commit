@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Block a commit that would record disagreeing version strings.
+#
+# Checks the INDEX, not the working tree — what the commit would actually
+# record. This catches the classic half-bump (manifest and background.js
+# staged, page.js or the dashboard footer forgotten).
+#
+# The hook reports and refuses; it does not rewrite files. A hook that edits
+# your tree mid-commit would stage content you never reviewed.
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+exec python3 "$root/scripts/check_versions.py" --staged

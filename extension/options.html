@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font: 13px/1.6 system-ui, sans-serif; padding: 16px; min-width: 320px; }
+  label { display: block; margin-top: 12px; font-weight: 600; }
+  input { width: 100%; padding: 6px 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; font: inherit; box-sizing: border-box; }
+  .status { margin-top: 16px; padding: 8px 12px; border-radius: 4px; font-size: 12px; }
+  .ok { background: #e8f5e9; color: #2e7d32; }
+  .err { background: #fbe9e7; color: #c62828; }
+  .info { background: #e3f2fd; color: #1565c0; }
+  button { margin-top: 12px; padding: 6px 16px; border: none; border-radius: 4px; background: #1976d2; color: #fff; cursor: pointer; font: inherit; }
+  button:hover { background: #1565c0; }
+</style>
+</head>
+<body>
+  <h3>Daedalus Extension</h3>
+
+  <label>Token</label>
+  <input type="text" id="token" placeholder="Generated on install — replace only to match an existing bridge">
+
+  <label>Server URL</label>
+  <input type="text" id="server" placeholder="https://daedalus.example.com">
+
+  <button id="save">Save</button>
+  <div id="status" class="status info">Not configured</div>
+
+  <script src="options.js"></script>
+</body>
+</html>

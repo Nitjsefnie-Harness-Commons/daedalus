@@ -1,0 +1,17 @@
+{
+    "typeCheckingMode": "basic",
+    "pythonVersion": "3.13",
+    "include": [
+        "*.py",
+        "scripts/*.py",
+        "daedalus_cli"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "tests",
+        ".venv",
+        "node_modules"
+    ],
+    "reportMissingModuleSource": "none",
+    "pythonPlatform": "All"
+}

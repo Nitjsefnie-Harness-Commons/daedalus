@@ -1,0 +1,120 @@
+# Deny by default; nothing is tracked unless a rule below names it.
+#
+# The usual shape of this file is the opposite -- list the junk, let everything
+# else through -- and that shape has two failures this one does not. A new kind
+# of file matches no rule and is one reflexive `git add` from the history. And
+# the deny list is itself published: every path it names announces that such a
+# file exists in the working tree, so naming a private file in order to exclude
+# it still tells the reader that file exists.
+#
+# Inverted, a file nobody named does not get committed, and this file describes
+# only what ships.
+#
+# The keep list names FILES, not extensions. This repository keeps its two
+# Markdown documents at the root; a `!/**/*.md` rule would also re-admit any
+# note dropped into a different directory. Naming files individually has no gap.
+#
+# Git will not look inside a directory it has ignored, so each directory below
+# is re-opened before its files are named back.
+#
+# Regenerate after adding files:
+#   python3 <this script's path> <repo>
+#
+# Forgetting to regenerate means the new file is simply not tracked, which
+# `git status` shows as nothing to commit -- check that what you added appears
+# in the commit.
+
+*
+
+
+# ─── root ───
+!/.gitignore
+!/.pylintrc
+!/CLAUDE.md
+!/LICENSE
+!/README.md
+!/mcp_server.py
+!/pyproject.toml
+!/pyrightconfig.json
+!/requirements-dev.txt
+!/run_tests.py
+!/server.py
+!/setup.cfg
+
+# ─── .githooks ───
+!/.githooks/
+!/.githooks/pre-commit
+!/.githooks/pre-push
+
+# ─── .github/workflows ───
+!/.github/
+!/.github/workflows/
+!/.github/workflows/lint.yml
+!/.github/workflows/release.yml
+!/.github/workflows/tests.yml
+!/.github/workflows/types.yml
+
+# ─── daedalus_cli ───
+!/daedalus_cli/
+!/daedalus_cli/__init__.py
+!/daedalus_cli/cli.py
+
+# ─── dashboard ───
+!/dashboard/
+!/dashboard/api.js
+!/dashboard/app.js
+!/dashboard/index.html
+!/dashboard/sse.js
+!/dashboard/style.css
+
+# ─── dashboard/sections ───
+!/dashboard/
+!/dashboard/sections/
+!/dashboard/sections/_util.js
+!/dashboard/sections/block-rules.js
+!/dashboard/sections/cdp.js
+!/dashboard/sections/cookies.js
+!/dashboard/sections/css-injector.js
+!/dashboard/sections/eval.js
+!/dashboard/sections/fetch-timings.js
+!/dashboard/sections/hotfixes.js
+!/dashboard/sections/net-capture.js
+!/dashboard/sections/overview.js
+!/dashboard/sections/screenshot.js
+!/dashboard/sections/settings.js
+!/dashboard/sections/tabs.js
+!/dashboard/sections/uploads.js
+
+# ─── examples ───
+!/examples/
+!/examples/hls-segment-relay.js
+!/examples/kill-hls.js
+!/examples/open-tabs.js
+!/examples/react-fill-input.js
+!/examples/request-log-hotfix.js
+!/examples/scrape-discord-messages.js
+
+# ─── extension ───
+!/extension/
+!/extension/background.js
+!/extension/content.js
+!/extension/manifest.json
+!/extension/options.html
+!/extension/options.js
+!/extension/page.js
+
+# ─── scripts ───
+!/scripts/
+!/scripts/check_versions.py
+!/scripts/gen_gitignore.py
+!/scripts/mcp_probe.py
+
+# ─── tests ───
+!/tests/
+!/tests/_util.py
+!/tests/test_bridge_http.py
+!/tests/test_cli.py
+!/tests/test_mcp_server.py
+!/tests/test_path_safety.py
+!/tests/test_repo_contract.py
+!/tests/test_stream_lifecycle.py

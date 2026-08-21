@@ -1,0 +1,64 @@
+name: lint
+
+# Two gates, one job each so a failure says which tool found it.
+#
+# Style opinions stay off (max-line-length = 10000 in setup.cfg, and .pylintrc
+# disables the formatting and metric checks): these exist for real defects, not
+# formatting preferences. Every disable in .pylintrc names the pattern it is
+# there for.
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pycodestyle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: pycodestyle
+        run: git ls-files '*.py' | xargs pycodestyle
+
+  pylint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: pylint
+        run: git ls-files '*.py' | xargs pylint --rcfile=.pylintrc

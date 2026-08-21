@@ -1,0 +1,68 @@
+name: release
+
+# Publishes the wheel a consumer installs. The checksum file is not optional
+# decoration: an installer that fetches "the newest release" has no other way
+# to prove it got the artifact this workflow built, so SHA256SUMS ships beside
+# the wheel and the installer verifies against it before installing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the build backend and the MCP dependencies
+        # The MCP suite skips without them, so a release could otherwise
+        # publish after every MCP behaviour test quietly skipped.
+        run: python -m pip install --upgrade pip build . ".[mcp]"
+
+      # A mistagged release publishes a wheel whose version contradicts the
+      # tag, and the checksums then make the wrong pairing authoritative.
+      - name: Refuse a tag that does not match the version being built
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          built=$(python -c "import daedalus_cli; print(daedalus_cli.__version__)")
+          if [ "$tagged" != "$built" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package version $built" >&2
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches package version $built"
+
+      - name: Run every suite before publishing anything
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python run_tests.py
+
+      - name: Build the wheel
+        run: python -m build --wheel
+
+      - name: Publish checksums beside the wheel
+        working-directory: dist
+        run: sha256sum *.whl > SHA256SUMS
+
+      - name: Attach the wheel and its checksums to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/SHA256SUMS
+          generate_release_notes: true

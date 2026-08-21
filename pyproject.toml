@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daedalus-cli"
+dynamic = ["version"]
+description = "Command-line client for a Daedalus browser bridge"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Nitjsefnie" }]
+keywords = ["browser", "automation", "chrome-extension", "mcp", "agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+# Stdlib only, deliberately: the CLI is what an agent shells out to, often once
+# per step, so its import cost is paid constantly and a dependency tree here
+# would be a tax on every call. The MCP server has real dependencies and is not
+# part of this wheel for exactly that reason.
+dependencies = []
+
+# The MCP server is not part of the wheel, but its dependencies are declared
+# so a checkout can install them in one step and the type checker can resolve
+# them in CI. `pip install .[mcp]` when you intend to run mcp_server.py.
+[project.optional-dependencies]
+mcp = ["httpx>=0.27", "mcp>=1.2", "starlette>=0.37"]
+
+[project.urls]
+Homepage = "https://github.com/Nitjsefnie-Harness-Commons/daedalus"
+Issues = "https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues"
+
+[project.scripts]
+daedalus = "daedalus_cli.cli:main"
+
+[tool.setuptools]
+packages = ["daedalus_cli"]
+
+[tool.setuptools.dynamic]
+# Single source of truth, and `scripts/check_versions.py` ties that source to
+# the extension's version so the wheel cannot drift from the wire format.
+version = { attr = "daedalus_cli.__version__" }
