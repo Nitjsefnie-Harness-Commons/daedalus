@@ -477,6 +477,21 @@ def test_list_tabs_tool_against_real_bridge(tmp):
         assert tabs[0]['title'] == 'M'
 
 
+def _relative_or_synthetic(target):
+    """A traversal-shaped path to `target`, or a synthetic one if impossible.
+
+    Windows puts the temporary directory and the checkout on different
+    drives, and os.path.relpath raises rather than answering across a mount
+    boundary. What the caller needs is a path-shaped argument the MCP tools
+    must refuse; whether it resolves to the sentinel is beside the point,
+    because the refusal happens at the schema before any filesystem access.
+    """
+    try:
+        return os.path.relpath(target, _util.ROOT)
+    except ValueError:
+        return os.path.join(*(['..'] * 6), *target.parts[-2:])
+
+
 def test_live_mcp_has_no_server_path_authority(tmp):
     """A bearer can submit inline source but cannot make MCP read host paths.
 
@@ -504,8 +519,8 @@ def test_live_mcp_has_no_server_path_authority(tmp):
     except OSError as exc:
         _util.skip(f'symlink creation unavailable: {type(exc).__name__}')
 
-    traversal = os.path.relpath(traversal_secret, _util.ROOT)
-    symlink_escape = os.path.relpath(link, _util.ROOT)
+    traversal = _relative_or_synthetic(traversal_secret)
+    symlink_escape = _relative_or_synthetic(link)
     attempted_paths = (str(absolute_secret), traversal, symlink_escape)
     with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
         mod, port = _start_mcp_in_process(base)
@@ -1105,7 +1120,7 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
             elapsed = time.time() - started
             assert crash_line is not None, (
                 f'no crash line in the child output: {output!r}')
-            assert 'Address already in use' in crash_line, crash_line
+            assert _util.is_bind_error(crash_line), crash_line
             assert elapsed < 5, f'the crash surfaced after {elapsed:.1f}s'
     finally:
         squatter.close()

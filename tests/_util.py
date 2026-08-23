@@ -282,6 +282,25 @@ def log_safe_cases():
     )
 
 
+BIND_ERROR_MARKERS = (
+    'Address already in use',                   # POSIX
+    'Only one usage of each socket address',    # Windows WSAEADDRINUSE
+    'forbidden by its access permissions',      # Windows WSAEACCES
+)
+
+
+def is_bind_error(text):
+    """Whether `text` carries the operating system's own bind refusal.
+
+    What these tests contract is that a bind failure arrives AS ITSELF —
+    not retried into a fresh port, not flattened into a timeout. Which
+    sentence the operating system uses to say it is not part of that
+    contract, and pinning the POSIX wording failed Windows for reporting
+    its own error correctly.
+    """
+    return any(marker in text for marker in BIND_ERROR_MARKERS)
+
+
 class Skipped(Exception):
     """Raised by a test that cannot hold on this platform or install."""
 

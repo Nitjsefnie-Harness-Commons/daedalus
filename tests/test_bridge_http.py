@@ -863,7 +863,7 @@ def test_an_explicit_port_collision_surfaces_verbatim(tmp):
         with _util.bridge(tmp, env={'DAEDALUS_PORT': str(taken)}):
             pass
     except RuntimeError as failure:
-        assert 'Address already in use' in str(failure), failure
+        assert _util.is_bind_error(str(failure)), failure
     else:
         raise AssertionError('a squatted explicit port started a bridge')
     finally:

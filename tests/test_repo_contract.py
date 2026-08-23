@@ -208,7 +208,11 @@ def _gitignore_invalid_output_result(tmp, failing_command):
             return real_run(
                 [sys.executable, '-c',
                  'import os; os.write(1, bytes([255]))'],
-                capture_output=True, text=True,
+                capture_output=True, text=True, encoding='utf-8',
+                # Pinned: byte 255 is undecodable as UTF-8 but a perfectly
+                # good 'y with diaeresis' under the Windows code page, so
+                # inheriting the locale meant this simulated nothing there
+                # and the generator succeeded instead of reporting.
                 check=kwargs.get('check', False),
                 timeout=kwargs.get('timeout'))
         return real_run(args, **kwargs)

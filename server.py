@@ -1456,7 +1456,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(500, {'error': 'upload storage failure'})
         size = len(raw)
         del raw  # drop the decoded copy before responding
-        rel = str(dest.relative_to(UPLOAD_DIR))
+        # as_posix, not str: the wire format has to be one shape on
+        # every platform, and the listing routes already build these
+        # with forward slashes. str() yields backslashes on Windows,
+        # so POST /upload and GET /uploads disagreed about the same
+        # file and a client could not feed one to the other.
+        rel = dest.relative_to(UPLOAD_DIR).as_posix()
         print(f'[UPLOAD] {rel} ({size} bytes)', flush=True)
         return self._json(200, {'ok': True, 'path': rel, 'size': size})
 
