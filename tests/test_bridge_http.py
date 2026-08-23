@@ -773,8 +773,22 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
     """
     _util.require_undecodable_names(tmp)
     strict = {'PYTHONIOENCODING': 'utf-8:strict'}
-    with _util.bridge(tmp, env=strict) as (base, docroot):
+    # The bridge's own log goes into every failure here. This test has failed
+    # intermittently with nothing but "no data frame arrived", and its
+    # DELIVERED lines are the only direct evidence of whether the drain ever
+    # saw the file it was waiting for.
+    served = []
+    with _util.bridge(tmp, env=strict, output=served) as (base, docroot):
         conn, response = _stream_response(base, TOK, tab='extension')
+
+        def frame(what):
+            try:
+                return _next_stream_data(response)
+            except AssertionError as failure:
+                raise AssertionError(
+                    f'{what}: {failure}; the bridge said: '
+                    f'{"".join(served)!r}') from failure
+
         try:
             assert response.status == 200, response.status
             commands = os.fsencode(Path(docroot) / 'commands')
@@ -782,19 +796,19 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
             with open(commands + b'/' + os.fsencode(TOK) + b'_\xfftab.json',
                       'wb') as handle:
                 handle.write(b'{"id":"legacybad","code":"1"}')
-            first = _next_stream_data(response)
+            first = frame('the legacy dropped file')
             assert first.get('id') == 'legacybad', first
             # A queue directory whose name carries the raw byte.
             bad_dir = commands + b'/' + os.fsencode(TOK) + b'_\xffdir'
             os.mkdir(bad_dir)
             with open(bad_dir + b'/0000000000001_000001.json', 'wb') as handle:
                 handle.write(b'{"id":"qbad","code":"1"}')
-            second = _next_stream_data(response)
+            second = frame('the queued command under a dropped name')
             assert second.get('id') == 'qbad', second
             status, _ = _put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '2'})
             assert status == 200, status
-            third = _next_stream_data(response)
+            third = frame('the command enqueued afterwards')
             assert third.get('id') == 'after', third
         finally:
             response.close()

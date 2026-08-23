@@ -3975,7 +3975,8 @@ def _js_tab_routing_violations(path, rel):
         inner = names_before(body_end, depth + 1, floor=body_start)
         if kind == 'expr':
             return resolve(body_start, body_end, inner, depth + 1)
-        returns = [m for m in re.finditer(r'\breturn\b', mask[body_start:body_end])]
+        returns = list(re.finditer(r'\breturn\b',
+                                   mask[body_start:body_end]))
         if not returns:
             return _JS_UNPROVABLE
         merged = {}
