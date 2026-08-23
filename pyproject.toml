@@ -48,3 +48,26 @@ packages = ["daedalus_cli"]
 # Single source of truth, and `scripts/check_versions.py` ties that source to
 # the extension's version so the wheel cannot drift from the wire format.
 version = { attr = "daedalus_cli.__version__" }
+
+[tool.coverage.run]
+# parallel, because every suite is measured in its own subprocess and then
+# combined — the same shape run_tests.py executes. Measuring one merged
+# process would report coverage for a program nobody runs.
+parallel = true
+# The bridge fixture ends every child with terminate(), and coverage saves on
+# interpreter exit — which SIGTERM is not. Without this the only children that
+# record anything are the few that exit on their own, and server.py, the file
+# those children ARE, reports a fraction of what the suites actually execute.
+sigterm = true
+source = ["."]
+omit = ["tests/*", ".venv/*", "build/*", "dist/*", "*/site-packages/*"]
+
+[tool.coverage.paths]
+# The runner's own tests copy run_tests.py into a temp tree and run it where
+# it stands, so its lines are recorded under that path. Combining maps them
+# back onto the source; without this the file every one of those tests drives
+# reports 0%, and the total understates by about two points.
+repo = [".", "*/tree"]
+
+[tool.coverage.report]
+exclude_also = ["if __name__ == .__main__.:"]

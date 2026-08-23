@@ -37,6 +37,7 @@
 !/pyproject.toml
 !/pyrightconfig.json
 !/requirements-dev.txt
+!/requirements-test.txt
 !/run_tests.py
 !/server.py
 !/setup.cfg
