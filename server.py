@@ -459,6 +459,9 @@ _server_start_ts = time.time()
 _last_delivery_ts = 0.0
 
 
+_REFUSED_BODY_DRAIN = 65536
+
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
@@ -801,6 +804,31 @@ class Handler(BaseHTTPRequestHandler):
             if clen > _TRIM_THRESHOLD:
                 _malloc_trim()
 
+    def _drain_refused_body(self, clen):
+        """Absorb a refused body, up to a bound, before answering it.
+
+        Closing a socket that still has unread data sends RST rather than
+        FIN, and an RST DISCARDS whatever the peer has not read yet — so the
+        413 written a moment later never reaches the client, and the refusal
+        arrives as a connection reset instead. That is why an oversized body
+        of nine bytes could fail a caller that was handling the refusal
+        correctly.
+
+        Bounded on purpose: the cap exists so a huge body is never read into
+        this process, and draining without a limit would give that away. Past
+        the bound the early close stands, which is the right trade for a
+        caller sending far more than the server will take.
+        """
+        remaining = min(clen, _REFUSED_BODY_DRAIN)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 8192))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+
     def _declared_body_length(self):
         """Parse and bound the Content-Length header of a body-reading request.
 
@@ -823,10 +851,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {'error': 'invalid Content-Length'})
             return None
         if clen > MAX_BODY_SIZE:
-            # The refused body is NOT drained: the unread bytes die with the
-            # socket. That holds only while protocol_version stays at the
+            self._drain_refused_body(clen)
+            # Anything past the drain bound is NOT read: those bytes die with
+            # the socket. That holds only while protocol_version stays at the
             # HTTP/1.0 default, which keeps close_connection true on every
-            # request — raise it and this guard must drain first, or the
+            # request — raise it and the drain must become total, or a
             # leftover body would be parsed as the next kept-alive request.
             self._json(413, {'error': 'request body too large'})
             return None
