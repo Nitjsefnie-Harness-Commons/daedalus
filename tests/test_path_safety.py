@@ -72,7 +72,7 @@ def test_an_embedded_nul_tab_id_is_answered_not_dropped(tmp):
             {'token': TOKEN, 'tabId': 'tab-01', 'id': 'ok', 'result': 'kept'})
         assert status == 200 and body == {'ok': True}, (status, body)
         stored = docroot / 'results' / f'{TOKEN}_tab-01.json'
-        assert json.loads(stored.read_text())['result'] == 'kept'
+        assert json.loads(stored.read_text(encoding='utf-8'))['result'] == 'kept'
         status, body = _util.get_json(base + '/health')
         assert status == 200 and body['ok'] is True, (status, body)
 

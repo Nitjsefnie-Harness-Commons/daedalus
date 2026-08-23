@@ -539,7 +539,7 @@ def test_live_mcp_has_no_server_path_authority(tmp):
                         if command_path.name in handled:
                             continue
                         handled.add(command_path.name)
-                        command = json.loads(command_path.read_text())
+                        command = json.loads(command_path.read_text(encoding='utf-8'))
                         if command.get('type') == 'store-hotfix':
                             stored.append({
                                 'id': command['fixId'],
@@ -657,7 +657,7 @@ def test_ping_tool_round_trip(tmp):
             queued = sorted(set(qdir.glob('*.json')) - answered)
             assert len(queued) == 1, queued
             answered.add(queued[0])
-            command = json.loads(queued[0].read_text())
+            command = json.loads(queued[0].read_text(encoding='utf-8'))
             status, _ = _util.post_json(base + '/result', {
                 'token': TOK, 'id': command['id'], 'result': 'MCP Title',
                 'error': None, 'ts': 1, 'world': world,

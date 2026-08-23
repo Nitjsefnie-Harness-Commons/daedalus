@@ -215,7 +215,7 @@ def test_put_command_broadcast_writes_queue_file(tmp):
         assert body['target'] == 'broadcast', body
         files = _queue_files(docroot, TOK)
         assert len(files) == 1, files
-        data = json.loads(files[0].read_text())
+        data = json.loads(files[0].read_text(encoding='utf-8'))
         assert data['id'] == 'c1' and data['code'] == '1+1'
         assert data['_did'] == body['did'], (data, body)
         assert 'token' not in data  # routing fields stay out of the payload
@@ -230,7 +230,7 @@ def test_put_command_per_tab_goes_to_tab_queue(tmp):
         assert body['target'] == 'tab=tab1', body
         files = _queue_files(docroot, f'{TOK}_tab1')
         assert len(files) == 1, files
-        data = json.loads(files[0].read_text())
+        data = json.loads(files[0].read_text(encoding='utf-8'))
         assert data['id'] == 'c2'
         assert 'tab' not in data and 'token' not in data  # routing-only fields
         # Nothing landed in the broadcast queue.
@@ -332,9 +332,9 @@ def test_put_command_fifo_order(tmp):
         assert len(files) == 3, files
         # Lexical filename order is enqueue order (ms + counter stem), and the
         # delivery ids sort the same way.
-        ids = [json.loads(f.read_text())['id'] for f in files]
+        ids = [json.loads(f.read_text(encoding='utf-8'))['id'] for f in files]
         assert ids == ['c0', 'c1', 'c2'], ids
-        dids = [json.loads(f.read_text())['_did'] for f in files]
+        dids = [json.loads(f.read_text(encoding='utf-8'))['_did'] for f in files]
         assert dids == sorted(dids), dids
 
 
@@ -546,7 +546,7 @@ def test_result_path_component_byte_boundaries(tmp):
              'result': 'kept'})
         assert status == 200 and body == {'ok': True}, (status, body)
         stored = docroot / 'results' / f'{token}_{boundary_tab}.json'
-        assert json.loads(stored.read_text())['result'] == 'kept'
+        assert json.loads(stored.read_text(encoding='utf-8'))['result'] == 'kept'
         status, body = _util.get_json(
             base + f'/result?token={token}&tab={boundary_tab}')
         assert status == 200 and body['result'] == 'kept', (status, body)
@@ -569,7 +569,7 @@ def test_result_did_becomes_roundtrip_ms(tmp):
                'ts': 1, '_did': did}
         status, _ = _util.post_json(base + '/result', res)
         assert status == 200, status
-        stored = json.loads((Path(docroot) / 'results' / f'{TOK}.json').read_text())
+        stored = json.loads((Path(docroot) / 'results' / f'{TOK}.json').read_text(encoding='utf-8'))
         assert '_did' not in stored, stored
         assert stored['deliveryId'] == did, stored
         assert isinstance(stored['roundtrip_ms'], int) and stored['roundtrip_ms'] >= 0
@@ -1711,7 +1711,7 @@ def test_segment_job_mint_idempotent_and_owned(tmp):
         # The record sits beside the job's directory, both under the docroot.
         seg_dir = Path(docroot) / 'segments' / job
         assert seg_dir.is_dir(), os.listdir(Path(docroot) / 'segments')
-        record = json.loads((Path(docroot) / 'segments' / f'{job}.json').read_text())
+        record = json.loads((Path(docroot) / 'segments' / f'{job}.json').read_text(encoding='utf-8'))
         assert record == {
             'token': TOK,
             'sig': sig,
@@ -1740,12 +1740,12 @@ def test_legacy_segment_job_migrates_with_existing_usage(tmp):
         record_path.write_text(json.dumps(legacy))
 
         status, body = _mint_job(base, 'othertok', job)
-        assert status == 401 and json.loads(record_path.read_text()) == legacy, (
+        assert status == 401 and json.loads(record_path.read_text(encoding='utf-8')) == legacy, (
             status, body)
 
         status, body = _mint_job(base, TOK, job)
         assert status == 200 and body['sig'] == sig, (status, body)
-        assert json.loads(record_path.read_text()) == {
+        assert json.loads(record_path.read_text(encoding='utf-8')) == {
             'token': TOK,
             'sig': sig,
             'max_segment_index': 10,
@@ -1782,7 +1782,7 @@ def test_segment_index_is_bound_by_minted_job_quota(tmp):
         assert not list((Path(docroot) / 'segments' / job).glob('*.ts'))
 
         record = json.loads(
-            (Path(docroot) / 'segments' / f'{job}.json').read_text())
+            (Path(docroot) / 'segments' / f'{job}.json').read_text(encoding='utf-8'))
         assert record['max_segment_index'] == 10, record
         assert record['max_segment_count'] == 1, record
         assert record['max_bytes'] == 16, record
@@ -2457,7 +2457,7 @@ def test_a_browser_target_survives_routing_but_the_routing_fields_do_not(tmp):
         assert status == 200, body
         queued = list((docroot / 'commands' / f'{TOK}_extension').glob('*.json'))
         assert len(queued) == 1, f'expected one queued command, got {queued}'
-        cmd = json.loads(queued[0].read_text())
+        cmd = json.loads(queued[0].read_text(encoding='utf-8'))
         assert cmd.get('tabId') == 42, f'the browser target was lost: {cmd}'
         assert 'tab' not in cmd, f'the routing tab leaked into the command: {cmd}'
         assert 'token' not in cmd, f'the token leaked into the command: {cmd}'

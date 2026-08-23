@@ -228,7 +228,7 @@ def test_exec_no_result_enqueues_broadcast(tmp):
         qdir = Path(docroot) / 'commands' / TOK
         files = sorted(qdir.glob('*.json'))
         assert len(files) == 1, files
-        data = json.loads(files[0].read_text())
+        data = json.loads(files[0].read_text(encoding='utf-8'))
         assert data['id'] == 'job1' and data['code'] == 'return 1+1', data
 
 
@@ -245,7 +245,7 @@ def test_exec_full_round_trip(tmp):
             qdir = Path(docroot) / 'commands' / f'{TOK}_tab9'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
                       what='the enqueued command file')
-            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text())
+            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
             assert queued['id'] == 'job7' and queued['code'] == 'document.title'
             # The extension's answer, posted the way the extension posts it.
             status, _ = _util.post_json(base + '/result', {
@@ -320,7 +320,7 @@ def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
                       what='the enqueued command file')
-            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text())
+            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
             # A foreign result first (results share one slot per tab, so the
             # own result posted after it overwrites the slot) ...
             status, _ = _util.post_json(base + '/result', {
@@ -365,7 +365,7 @@ def test_typed_command_does_not_return_a_stale_fixed_id_result(tmp):
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
                       what='the fresh cookies command')
-            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text())
+            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
             # Let the first poll observe the stale result before answering the
             # newly queued invocation as the extension would.
             time.sleep(0.7)
@@ -404,7 +404,7 @@ def _run_same_id_client_overlap(tmp, completion_order):
                 lambda: qdir.is_dir()
                 and len(list(qdir.glob('*.json'))) == len(owners),
                 what='both same-id client commands')
-            queued = [json.loads(path.read_text())
+            queued = [json.loads(path.read_text(encoding='utf-8'))
                       for path in sorted(qdir.glob('*.json'))]
             by_owner = {command['domain']: command for command in queued}
             assert set(by_owner) == set(owners), by_owner
@@ -465,7 +465,7 @@ def test_put_reads_code_from_file(tmp):
         assert r.returncode == 0, (r.returncode, r.stderr)
         files = sorted((Path(docroot) / 'commands' / TOK).glob('*.json'))
         assert len(files) == 1, files
-        data = json.loads(files[0].read_text())
+        data = json.loads(files[0].read_text(encoding='utf-8'))
         assert data['id'] == 'pid1' and data['code'] == '1 + 2;', data
 
 
@@ -476,7 +476,7 @@ def test_navigate_constructs_location_href(tmp):
         assert r.returncode == 0, (r.returncode, r.stderr)
         files = sorted((Path(docroot) / 'commands' / TOK).glob('*.json'))
         assert len(files) == 1, files
-        data = json.loads(files[0].read_text())
+        data = json.loads(files[0].read_text(encoding='utf-8'))
         assert data['id'] == '_nav'
         assert data['code'] == 'location.href = "https://example.com/x?a=\\"b\\""', data
 
@@ -577,7 +577,7 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
                       what='the screenshot command')
-            command = json.loads(sorted(qdir.glob('*.json'))[0].read_text())
+            command = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
             assert command['id'] == screenshot_id, command
             status, body = _util.post_json(base + '/upload', {
                 'token': TOK,
@@ -650,7 +650,7 @@ def test_segment_status_subcommand_encodes_job_and_capability(tmp):
                                        {'token': TOK, 'job': job})
         assert status == 200, (status, body)
         record_path = docroot / 'segments' / f'{job}.json'
-        record = json.loads(record_path.read_text())
+        record = json.loads(record_path.read_text(encoding='utf-8'))
         record['sig'] = sig
         record_path.write_text(json.dumps(record))
 
