@@ -15,6 +15,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -392,6 +393,35 @@ def test_put_command_validation(tmp):
         # The rejected tokens created no queue directories.
         names = [p.name for p in (Path(docroot) / 'commands').iterdir()]
         assert names == [TOK], names
+
+
+def test_a_result_survives_a_data_root_read_under_any_locale(tmp):
+    """Stored JSON is UTF-8 on both sides, not whatever the machine prefers.
+
+    Results are written as `json.dumps(..., ensure_ascii=False).encode()` —
+    UTF-8 — and were read back with `Path.read_text()`, which decodes with
+    the process locale. The two agree only where that locale is UTF-8. Under
+    a C locale the read raises and the fetch answers 500; under a Windows
+    code page it does not raise at all and quietly returns a DIFFERENT id,
+    so a caller waiting for its own result waits until it times out.
+
+    Forcing the child's locale reproduces the platform difference here
+    rather than only on the runner that has it.
+    """
+    ascii_locale = {'LC_ALL': 'C', 'LANG': 'C', 'PYTHONCOERCECLOCALE': '0',
+                    'PYTHONUTF8': '0'}
+    wanted = 'shot&branch#caf\u00e9 \u4e16\u754c'
+    with _util.bridge(tmp, env=ascii_locale) as (base, _docroot):
+        status, _ = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': 'extension', 'id': wanted,
+            'result': wanted, 'error': None, 'ts': 1})
+        assert status == 200, status
+        status, got = _util.get_json(
+            base + '/result?' + urllib.parse.urlencode(
+                {'token': TOK, 'tab': 'extension'}))
+        assert status == 200, (status, got)
+        assert got['id'] == wanted, (repr(got.get('id')), repr(wanted))
+        assert got['result'] == wanted, (repr(got.get('result')), repr(wanted))
 
 
 def test_result_roundtrip_and_consume(tmp):

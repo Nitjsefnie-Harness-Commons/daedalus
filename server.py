@@ -299,7 +299,7 @@ def _remove_expired_command_file(path, now, legacy=False):
         if legacy:
             if path.name.startswith('.') or not path.name.endswith('.json'):
                 return
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding='utf-8'))
             if not isinstance(data, dict):
                 return
         path.unlink()
@@ -377,7 +377,7 @@ def _enqueue_command(token, tab, cmd):
         cmd = {**cmd, '_did': seq}
         tmp = qdir / f'.{seq}.tmp'
         try:
-            tmp.write_text(json.dumps(cmd, ensure_ascii=False))
+            tmp.write_text(json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
             os.replace(str(tmp), str(qdir / f'{seq}.json'))
         except (OSError, UnicodeEncodeError):
             # A refused enqueue must not leave its hidden temp behind: the
@@ -409,7 +409,7 @@ def _segment_record_path(job):
 def _load_segment_record(job):
     """Return `job`'s JSON object, or None when absent, unreadable, or malformed."""
     try:
-        record = json.loads(_segment_record_path(job).read_text())
+        record = json.loads(_segment_record_path(job).read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError, ValueError):
         return None
     return record if isinstance(record, dict) else None
@@ -720,7 +720,7 @@ class Handler(BaseHTTPRequestHandler):
                 print(f'[STREAM] TTL-DROP {_log_safe(qdir.name)}/{_log_safe(name)}', flush=True)
                 continue
             try:
-                data = json.loads(f.read_text())
+                data = json.loads(f.read_text(encoding='utf-8'))
             except (OSError, json.JSONDecodeError, ValueError):
                 try: f.unlink()  # malformed/vanished — attempt removal
                 except OSError: pass
@@ -750,7 +750,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path.exists():
             return 0
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, json.JSONDecodeError, RecursionError, ValueError):
             return 0
         if not isinstance(data, dict):
@@ -930,7 +930,7 @@ class Handler(BaseHTTPRequestHandler):
             with _command_fs_lock:
                 if cmd_file.exists():
                     try:
-                        candidate = json.loads(cmd_file.read_text())
+                        candidate = json.loads(cmd_file.read_text(encoding='utf-8'))
                         if isinstance(candidate, dict):
                             data = candidate
                             cmd_file.unlink()
@@ -1117,7 +1117,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not res_file.exists():
                     response = {'pending': True}
                 else:
-                    data = json.loads(res_file.read_text())
+                    data = json.loads(res_file.read_text(encoding='utf-8'))
                     if not isinstance(data, dict):
                         raise ValueError('result slot is not a JSON object')
                     generation = data.get('resultGeneration', '')
@@ -1372,7 +1372,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 tmp = SEG_DIR / f'.{job}.json.tmp'
                 try:
-                    tmp.write_text(json.dumps(record))
+                    tmp.write_text(json.dumps(record), encoding='utf-8')
                     os.replace(tmp, _segment_record_path(job))
                 except OSError:
                     try:
@@ -1395,7 +1395,7 @@ class Handler(BaseHTTPRequestHandler):
             tmp = SEG_DIR / f'.{job}.json.tmp'
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
-                tmp.write_text(json.dumps(record))
+                tmp.write_text(json.dumps(record), encoding='utf-8')
                 os.replace(tmp, _segment_record_path(job))  # atomic publish
             except OSError:
                 # Job names may contain dots, so the flat namespace collides
