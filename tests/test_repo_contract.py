@@ -302,6 +302,36 @@ def test_gitignore_names_a_tracked_path_containing_a_space(tmp):
         'the generated .gitignore still ignores the tracked space-named file')
 
 
+def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
+    """A failure the console cannot spell must still be reported.
+
+    The detail carries whatever the test was comparing, and on a legacy code
+    page `print` raises rather than degrading. One failing assertion holding
+    an arrow used to abort the whole file with UnicodeEncodeError, so the
+    report was lost AND every test after it in that file never ran. A runner
+    that cannot say what went wrong is worse than the thing that went wrong.
+    """
+    del tmp
+    program = (
+        'import sys\n'
+        'sys.path.insert(0, "tests")\n'
+        'import _util\n'
+        'def test_arrow(d):\n'
+        '    assert False, "wanted \u2192 got \u2190 caf\u00e9"\n'
+        'raise SystemExit(_util.runner([test_arrow]))\n')
+    env = dict(os.environ)
+    env['PYTHONIOENCODING'] = 'cp1252'
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    result = subprocess.run(
+        [sys.executable, '-c', program], cwd=str(ROOT), env=env,
+        capture_output=True, text=True, encoding='cp1252', timeout=60)
+    assert 'UnicodeEncodeError' not in result.stderr, result.stderr
+    assert 'Traceback' not in result.stderr, result.stderr
+    assert 'FAIL  test_arrow' in result.stdout, result.stdout
+    assert '0/1 passed' in result.stdout, result.stdout
+    assert result.returncode == 1, (result.returncode, result.stdout)
+
+
 def test_gitignore_survives_an_undecodable_byte_in_the_repo_path(tmp):
     """A repository path carrying a raw byte must not crash the generator.
 

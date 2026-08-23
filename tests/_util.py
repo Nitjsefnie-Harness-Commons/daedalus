@@ -525,6 +525,33 @@ def _assertion_site(exc):
     return f'{os.path.basename(last.filename)}:{last.lineno}: {last.line}'
 
 
+def _report_safely():
+    """Make sure a failure can always be reported.
+
+    A failure detail carries whatever the test was comparing, and on Windows
+    the runner's stdout is a legacy code page where `print` raises rather
+    than degrading. One failing assertion whose message held an arrow
+    therefore aborted the whole file with a UnicodeEncodeError, and every
+    test after it never ran — the report was lost along with the tests.
+
+    A runner that cannot say what went wrong is worse than the thing that
+    went wrong, so the stream degrades instead: `errors='replace'`
+    throughout, and UTF-8 where the output is a pipe or a file, which is
+    what `run_tests.py` reads.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if reconfigure is None:
+            continue
+        try:
+            if os.environ.get('PYTHONIOENCODING') or stream.isatty():
+                reconfigure(errors='replace')
+            else:
+                reconfigure(encoding='utf-8', errors='replace')
+        except (OSError, ValueError):
+            continue
+
+
 def runner(tests, tmp_prefix='daedalustests_'):
     """Shared main(): run every callable, print PASS/FAIL, return exit code.
 
@@ -533,6 +560,7 @@ def runner(tests, tmp_prefix='daedalustests_'):
     it was given against a path the code produced would otherwise see two
     spellings of one directory and call them different.
     """
+    _report_safely()
     failed, skipped = [], []
     with tempfile.TemporaryDirectory(prefix=tmp_prefix) as tmp:
         tmp = os.path.realpath(tmp)
