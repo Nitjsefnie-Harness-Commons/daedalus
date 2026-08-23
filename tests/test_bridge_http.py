@@ -2087,11 +2087,17 @@ def test_a_refused_put_absorbs_its_body_so_the_answer_survives(tmp):
     """A PUT the bridge refuses must still deliver the refusal.
 
     An unread body makes the close an RST, and an RST discards the answer
-    the client has not read yet — the reset that has already been seen on a
-    refused body once. A refused PUT never reads its body at all.
+    the client has not read yet — a reset this suite has already seen twice
+    on a refused body. A refused PUT never reads its body at all.
+
+    The payload stays inside the drain bound on purpose. Past that bound the
+    early close is the documented trade, made so that a body far larger than
+    the server will take is never read into the process; a test asserting a
+    404 there would be asserting against the design rather than for it, and
+    on macOS it duly reported the reset.
     """
     with _util.bridge(tmp) as (base, _docroot):
-        payload = b'x' * 200000
+        payload = b'x' * 8192
         status, body = _util.request(
             base + '/nope', 'PUT', body=payload,
             headers={'Content-Type': 'application/octet-stream'})
