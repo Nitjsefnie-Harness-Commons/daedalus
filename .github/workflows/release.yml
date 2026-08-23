@@ -61,7 +61,9 @@ jobs:
 
       - name: Publish checksums beside the wheel
         working-directory: dist
-        run: sha256sum *.whl > SHA256SUMS
+        # `--` so a wheel whose name began with a dash would be read
+        # as a file rather than as options (shellcheck SC2035).
+        run: sha256sum -- *.whl > SHA256SUMS
 
       - name: Attach the wheel and its checksums to the release
         # zizmor: ignore[superfluous-actions] — `gh release` can upload
