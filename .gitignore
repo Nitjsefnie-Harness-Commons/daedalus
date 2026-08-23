@@ -59,6 +59,7 @@
 # ─── .github/workflows ───
 !/.github/
 !/.github/workflows/
+!/.github/workflows/actionlint.yml
 !/.github/workflows/lint.yml
 !/.github/workflows/release.yml
 !/.github/workflows/tests.yml
