@@ -321,24 +321,42 @@ def free_port():
         'consumed too much of the ephemeral range')
 
 
-def _drain_lines(stream, collected):
-    """Move every child stdout line into `collected`.
+def drain_lines(proc, collected=None):
+    """Start relaying the child's stdout lines into a list, and return it.
 
     Nothing else may read the pipe: the readiness line the fixture waits for
     travels on this stream, and an undrained pipe would eventually fill and
     block the child.
     """
-    for line in stream:
-        collected.append(line)
+    collected = [] if collected is None else collected
+
+    def pump():
+        for line in proc.stdout:
+            collected.append(line)
+
+    threading.Thread(target=pump, daemon=True,
+                     name='bridge-stdout-drain').start()
+    return collected
 
 
-def _await_listening_line(proc, drained, timeout=20):
+def await_listening_line(proc, drained, timeout=20):
     """Return the port the child actually bound, read from its Listening line.
 
     server.py prints the line only after ThreadingHTTPServer has bound, so
-    the number it carries is the bound port itself, never a guess. A child
-    that exits first gets its captured output attached, the way the health
-    poll used to report it.
+    the number it carries is the bound port itself, never a guess.
+
+    The announcement is SEARCHED FOR across every line the child has printed
+    so far, not assumed to be the first one. A bridge prints whatever its
+    platform gives it cause to before it gets that far — a malloc-tuning
+    diagnostic where mallopt is not a glibc symbol, an MCP bootstrap failure
+    where that front end's dependencies are missing — and a reader that
+    inspected only the first line would take one of those for the
+    announcement, miss the port, and time out on a bridge that came up fine.
+
+    The scan stays bounded in both directions: a child that exits is
+    reported the moment it does, and one that stays up without announcing
+    fails at `timeout`. Either way the failure carries the child's captured
+    output, which is what says which line arrived instead.
     """
     deadline = time.time() + timeout
     seen = 0
@@ -354,8 +372,9 @@ def _await_listening_line(proc, drained, timeout=20):
             raise RuntimeError('bridge exited during startup:\n'
                                + ''.join(drained))
         if time.time() > deadline:
-            raise RuntimeError('bridge did not announce its port in 20s:\n'
-                               + ''.join(drained))
+            raise RuntimeError(
+                f'bridge did not announce its port in {timeout}s:\n'
+                + ''.join(drained))
         time.sleep(0.05)
 
 
@@ -395,12 +414,9 @@ def bridge(tmp, env=None, output=None):
         [sys.executable, str(ROOT / 'server.py')],
         cwd=str(ROOT), env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    drained = output if output is not None else []
-    threading.Thread(
-        target=_drain_lines, args=(proc.stdout, drained), daemon=True,
-        name='bridge-stdout-drain').start()
+    drained = drain_lines(proc, output)
     try:
-        base = f'http://127.0.0.1:{_await_listening_line(proc, drained)}'
+        base = f'http://127.0.0.1:{await_listening_line(proc, drained)}'
         deadline = time.time() + 20
         while True:
             if proc.poll() is not None:

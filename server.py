@@ -3,7 +3,7 @@
 import hmac, itertools, json, math, os, pathlib, secrets, shutil, threading, time, uuid
 import ctypes, ctypes.util
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from socketserver import ThreadingMixIn
+from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 from daedalus_cli import ambiguous_request_carrier
@@ -461,6 +461,24 @@ _last_delivery_ts = 0.0
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
+
+    def server_bind(self):
+        """Bind and record the address without a reverse-DNS lookup.
+
+        HTTPServer.server_bind resolves the bound host through
+        socket.getfqdn, i.e. a name-service round trip, after the socket is
+        already listening and before the caller regains control. Where that
+        lookup is slow or answered by nothing — a host with no reverse zone
+        for loopback, a resolver behind a firewall — startup stops here, so
+        the Listening line, which is the only readiness signal the bridge
+        emits, arrives minutes late or not at all while the port is in fact
+        open. Nothing reads server_name, so record the literal bind host and
+        keep startup free of the network.
+        """
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
 
 
 class _JSONObject(dict):

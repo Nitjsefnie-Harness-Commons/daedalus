@@ -12,7 +12,6 @@ never ran it and it only ever executed when somebody remembered it existed.
 """
 import http.client
 import os
-import re
 import subprocess
 import sys
 import time
@@ -49,21 +48,90 @@ def test_port_zero_binds_an_ephemeral_port_and_announces_it(tmp):
         cwd=_util.ROOT, env=env, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, text=True)
     try:
-        port = None
-        deadline = time.time() + 20
-        while port is None and time.time() < deadline:
-            if proc.poll() is not None:
-                raise AssertionError(
-                    'bridge exited with DAEDALUS_PORT=0: '
-                    + proc.stdout.read()[:400])
-            match = re.search(
-                r'\[Daedalus\] Listening on 127\.0\.0\.1:(\d+)',
-                proc.stdout.readline())
-            if match:
-                port = int(match.group(1))
+        # Read through the shared reader rather than off the first line: it
+        # searches the whole output and gives up on a deadline, so a child
+        # that prints something else first is read correctly and one that
+        # never announces fails here instead of blocking on readline().
+        port = _util.await_listening_line(proc, _util.drain_lines(proc))
         assert port, 'no Listening line carrying an actual port'
         status, health = _util.get_json(f'http://127.0.0.1:{port}/health')
         assert status == 200 and health['ok'] is True, (status, health)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
+def _noise_path(tmp, name, body):
+    """A PYTHONPATH directory whose sitecustomize runs `body` at startup."""
+    directory = Path(tmp) / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'sitecustomize.py').write_text(body, encoding='utf-8')
+    return str(directory)
+
+
+def test_a_line_printed_before_the_announcement_does_not_hide_it(tmp):
+    """Startup output the reader does not recognise is skipped, not taken.
+
+    The bridge prints whatever its platform gives it cause to before it
+    binds — on a non-glibc host `mallopt` is missing and the malloc-tuning
+    diagnostic goes out first, and a checkout without the MCP dependencies
+    reports that bootstrap failure too. Those lines are worth keeping, so
+    readiness has to be found by searching the output for the announcement.
+    """
+    noise = ('print("[Daedalus] malloc tuning unavailable: '
+             'dlsym(0x0, mallopt): symbol not found", flush=True)\n')
+    output = []
+    with _util.bridge(tmp, env={'PYTHONPATH': _noise_path(tmp, 'noise', noise)},
+                      output=output) as (base, _docroot):
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
+    noise_at = next((index for index, line in enumerate(output)
+                     if 'malloc tuning unavailable' in line), None)
+    listening_at = next((index for index, line in enumerate(output)
+                         if 'Listening on' in line), None)
+    assert noise_at is not None and listening_at is not None, output
+    assert noise_at < listening_at, output
+
+
+def test_the_announcement_does_not_wait_on_a_reverse_dns_lookup(tmp):
+    """Startup must not depend on a name service answering.
+
+    HTTPServer.server_bind resolves the bound host through socket.getfqdn
+    once the socket is already listening. Where that lookup hangs — a host
+    with no reverse zone for loopback, a resolver that never answers — the
+    announcement is the thing that stalls, so every caller waiting on
+    readiness times out against a bridge whose port is in fact open.
+    """
+    stall = ('import socket, time\n'
+             'socket.getfqdn = lambda name="": time.sleep(600) or name\n')
+    with _util.bridge(
+            tmp,
+            env={'PYTHONPATH': _noise_path(tmp, 'stalled-dns', stall)},
+    ) as (base, _docroot):
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
+
+
+def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
+    """The search is bounded, and says what the child printed instead."""
+    del tmp
+    proc = subprocess.Popen(
+        [sys.executable, '-c',
+         'import sys, time; print("nothing to do with the port", flush=True); '
+         'time.sleep(600)'],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        started = time.time()
+        failure = ''
+        try:
+            _util.await_listening_line(proc, _util.drain_lines(proc), timeout=1)
+        except RuntimeError as e:
+            failure = str(e)
+        elapsed = time.time() - started
+        assert failure, 'a silent child was read as an announcement'
+        assert elapsed < 10, elapsed
+        assert 'did not announce its port in 1s' in failure, failure
+        assert 'nothing to do with the port' in failure, failure
     finally:
         proc.terminate()
         proc.wait(timeout=10)
