@@ -1,0 +1,20 @@
+# The actions in .github/workflows/ are pinned to commit SHAs, which is the
+# point — a tag is a moving pointer and a SHA is not. The cost is that
+# nothing updates them, so this asks Dependabot for one pull request per
+# action when a new release appears; it rewrites the SHA and the trailing
+# version comment together, which makes a refresh a reviewed change rather
+# than a silent one.
+#
+# Wednesday and off the hour, for the same reason the workflow crons are:
+# every schedule on GitHub fires at :00 on Monday, and jobs queue there.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "05:17"
+    open-pull-requests-limit: 4
+    commit-message:
+      prefix: ci

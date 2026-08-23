@@ -6,6 +6,7 @@ direct _log_safe unit test, which imports the module instead. Storage failure
 tests inject OSError at filesystem boundaries; all requests still cross the
 real HTTP, parsing, path-handling, and on-disk queue layers.
 """
+import ast
 import base64
 import concurrent.futures
 import http.client
@@ -1275,6 +1276,44 @@ def test_bridge_storage_fails_closed_without_a_configured_token(tmp):
         assert status == 200 and health['ok'] is True, (status, health)
 
 
+# Routes the bridge answers without the configured token, by design: the
+# liveness probe, the dashboard assets, and the two page-facing segment
+# routes, which carry a job-scoped capability instead. Everything else the
+# handler routes is a control route and belongs in the matrix below.
+_CAPABILITY_OR_PUBLIC_ROUTES = frozenset({
+    '/health', '/dashboard', '/segment', '/segment-status',
+})
+
+
+def _handler_routes():
+    """Every request path server.py compares a target against.
+
+    Derived from the source rather than listed here, so a control route
+    added later is covered by the matrix or fails the test that claims to
+    cover every one of them. The handler dispatches through `if
+    parsed.path == '...'` chains rather than a table, so the chain is what
+    is read; a route introduced in some other shape would be missed, and
+    that shape does not exist in this file today.
+    """
+    tree = ast.parse((_util.ROOT / 'server.py').read_text(encoding='utf-8'))
+    routes = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare) or len(node.ops) != 1:
+            continue
+        if not isinstance(node.ops[0], ast.Eq):
+            continue
+        target = node.left
+        if not (isinstance(target, ast.Attribute) and target.attr == 'path'):
+            continue
+        for candidate in node.comparators:
+            if (isinstance(candidate, ast.Constant)
+                    and isinstance(candidate.value, str)
+                    and candidate.value.startswith('/')):
+                routes.add(candidate.value)
+    assert routes, 'no request paths found in server.py'
+    return routes
+
+
 def test_wrong_token_is_refused_on_every_bridge_control_route(tmp):
     """A page relay cannot turn its own well-shaped token into authority."""
     wrong = 'attackerchosen'
@@ -1317,6 +1356,14 @@ def test_wrong_token_is_refused_on_every_bridge_control_route(tmp):
                 method, path, status, raw)
 
         assert all(status == 401 for _route, status in replies), replies
+
+        # The list above is checked against the handler, not trusted: a
+        # control route added later either enters the matrix or fails here.
+        exercised = {'/stream'} | {path.split('?', 1)[0]
+                                   for _method, path, _body in calls}
+        missing = _handler_routes() - _CAPABILITY_OR_PUBLIC_ROUTES - exercised
+        assert not missing, sorted(missing)
+
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
 
