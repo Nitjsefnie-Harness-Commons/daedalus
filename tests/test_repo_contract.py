@@ -819,16 +819,18 @@ def _real_extension_page(tmp, bridge_url, token, page_url):
 
     Every test that reaches a real browser comes through here, so this is
     where the one boundary lives. Getting a usable browser is an environment
-    question: the binaries have to exist, Chromium has to start, expose
-    DevTools, run the unpacked extension's service worker to completion and
-    load the fixture page. None of that is a claim about this repository, so
-    where it does not happen the test skips with the reason — a browser that
-    cannot be launched, cannot run an MV3 service worker, or is refused a
-    profile is a property of the machine.
+    question: the binaries have to exist, and Chromium has to start, expose
+    DevTools and run the unpacked extension's service worker. None of that
+    is a claim about this repository, so where it does not happen the test
+    skips with the reason — a browser that cannot be launched, cannot run an
+    MV3 service worker, or is refused a profile is a property of the machine.
 
     From the configuration step on, the browser has demonstrably worked and
     everything asserted is the extension's own behaviour, so those stay hard
-    failures. Skipping the environment costs no coverage of the extension
+    failures. Loading the fixture page is on that side of the line: the page
+    and the script that sets __evalPageReady are files in this repository,
+    served by this suite's own origin, so a page that never reports ready is
+    a defect here rather than a property of the machine. Skipping the environment costs no coverage of the extension
     source itself: this suite also runs background.js, content.js and page.js
     under Node, which does not need a browser and fails outright if that
     source is broken.
@@ -907,7 +909,8 @@ def _real_extension_page(tmp, bridge_url, token, page_url):
                 break
             time.sleep(0.05)
         else:
-            _util.skip('this Chromium never finished loading the fixture page')
+            raise AssertionError(
+                'the fixture page never set __evalPageReady: ' + page_url)
 
         _cdp_eval(node, worker_target, 'registerAllTabs()')
         deadline = time.time() + 15
@@ -1048,6 +1051,44 @@ def test_main_world_transport_failure_and_genuine_null_are_distinct(tmp):
     assert genuine_null['result'] is None, genuine_null
     assert genuine_null.get('error') is None, genuine_null
     assert genuine_null.get('world') == 'page-main', genuine_null
+
+
+def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):
+    """Past the fixture's own boundary, a page that will not load is a bug.
+
+    By the time readiness is awaited, the browser has started, exposed
+    DevTools, booted the extension's service worker and taken its
+    configuration — the fixture's own docstring says everything from there
+    on is the extension's behaviour and stays a hard failure. The fixture
+    page and the script that sets __evalPageReady are repository files, so a
+    skip there hides a defect in them behind an environment excuse.
+
+    The check itself has to distinguish the two skips: a machine with no
+    browser skips honestly, and only a skip raised AT the readiness step is
+    the defect under test.
+    """
+    token = 'readyboundarytok'
+    with _util.bridge(
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+                      'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
+        with _eval_page_server() as pages:
+            # Served as a 404, so nothing ever sets __evalPageReady.
+            page_url = pages + '/never-ready.html'
+            reported = None
+            try:
+                with _real_extension_page(
+                        tmp, bridge_url, token, page_url):
+                    raise AssertionError(
+                        'the fixture yielded a page that never reported ready')
+            except _util.Skipped as skipped:
+                if 'never finished loading the fixture page' in str(skipped):
+                    raise AssertionError(
+                        'page readiness was reported as an environment skip: '
+                        + str(skipped)) from skipped
+                raise
+            except AssertionError as failure:
+                reported = str(failure)
+            assert reported and '__evalPageReady' in reported, reported
 
 
 def test_strict_csp_page_uses_cdp_once_after_source_free_preflight(tmp):
