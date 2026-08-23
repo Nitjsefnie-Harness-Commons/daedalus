@@ -876,12 +876,11 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         last_error = 'no evaluation was attempted'
         while time.time() < deadline:
             try:
-                # What is asserted is that the worker's own script ran to
-                # the end: a script that threw defines none of these.
-                # Waiting on keepaliveTimer waited on the async boot chain
-                # instead, and a worker that answers with the timer still
-                # unset — which is what the ubuntu legs reported — is a
-                # different thing from a worker that never loaded. The
+                # What is asserted is that the worker's own script ran to the
+                # end: a script that threw defines none of these. Waiting on
+                # keepaliveTimer instead waited on the async boot chain, and
+                # a worker that answers with the timer still unset is a
+                # different thing from a worker that never loaded — the
                 # fixture configures the extension explicitly two steps
                 # below, so it does not need that chain to have finished.
                 if _cdp_eval(
@@ -3790,6 +3789,42 @@ def _js_split_top_level(mask, text, start, end):
     return [(s, e) for s, e in spans if text[s:e].strip()]
 
 
+def _js_top_level(mask, start, end, char):
+    """Offset of the first `char` at bracket depth 0 in the span, or None."""
+    depth = 0
+    for i in range(start, end):
+        c = mask[i]
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+            if depth < 0:
+                return None
+        elif c == char and depth == 0:
+            return i
+    return None
+
+
+def _js_statement_end(mask, pos):
+    """Offset of the `;` ending the statement that starts at `pos`.
+
+    Falls back to the end of the line at depth 0, for the rare unterminated
+    statement, and to the end of the file when neither is found.
+    """
+    depth = 0
+    for i in range(pos, len(mask)):
+        c = mask[i]
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+        elif c == ';' and depth == 0:
+            return i
+        elif c == '\n' and depth == 0 and mask[pos:i].strip():
+            return i
+    return len(mask)
+
+
 def _js_object_entries(mask, text, obj_start):
     """Top-level entries of the object literal opening at `obj_start`:
     [(key, value_text_or_None_for_shorthand, key_offset)]. A spread has a
@@ -3835,18 +3870,73 @@ def _js_object_entries(mask, text, obj_start):
     return entries
 
 
+# A name whose object exists but whose contents this scanner cannot prove.
+# Distinct from an unknown name (a parameter, an import): unknown is silence,
+# unprovable is a claim that something happened here and was not followed.
+_JS_UNPROVABLE = object()
+
+
+def _js_function_body(mask, name):
+    """`(kind, start, end)` of a same-file function's body, or None.
+
+    `kind` is 'block' for a braced body (start is the `{`) and 'expr' for a
+    concise arrow body (the span is the expression). Only the first
+    declaration of a name is read; a file that declares one twice gets the
+    first, which is the conservative half of a shape nothing here uses.
+    """
+    patterns = (
+        r'\bfunction\s+' + re.escape(name) + r'\s*\(',
+        r'\b(?:const|let|var)\s+' + re.escape(name)
+        + r'\s*=\s*(?:async\s+)?function\s*[\w$]*\s*\(',
+        r'\b(?:const|let|var)\s+' + re.escape(name)
+        + r'\s*=\s*(?:async\s*)?\(',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, mask)
+        if not match:
+            continue
+        paren = match.end() - 1
+        after = _js_bracket_end(mask, paren)
+        arrow = re.match(r'\s*=>\s*', mask[after:])
+        if arrow:
+            body = after + arrow.end()
+            if mask[body:body + 1] == '{':
+                return ('block', body, _js_bracket_end(mask, body))
+            if mask[body:body + 1] == '(':
+                return ('expr', body + 1, _js_bracket_end(mask, body) - 1)
+            semi = mask.find(';', body)
+            return ('expr', body, len(mask) if semi == -1 else semi)
+        brace = mask.find('{', after)
+        if brace != -1:
+            return ('block', brace, _js_bracket_end(mask, brace))
+    return None
+
+
 def _js_tab_routing_violations(path, rel):
     """The dashboard side of the same contract: the fields object of an
     extCmd call, and a runCommand object carrying `type`, may contain `tab`
     only as the literal 'extension'. runCommand objects carrying `code` are
-    eval sends and route by tab legitimately. Inline object literals, names
-    initialized directly by object literals, same-name direct property writes,
-    tracked object spreads, literal computed keys, and the third extCmd options
-    argument are resolved before the call. Aliases, helper parameter flow,
-    ternary initializers, and Object.assign writes are not modeled."""
+    eval sends and route by tab legitimately.
+
+    Resolved before the call: inline object literals, names initialized by
+    object literals, aliases of such names, ternary initializers whose
+    branches both resolve, `Object.assign` writes, same-name direct property
+    writes, tracked object spreads, literal computed keys, the third extCmd
+    options argument, and a call to a same-file helper that returns an
+    object it built.
+
+    An object that escapes into another call is marked unprovable from that
+    point, and an unprovable object reaching a sender is a violation: a
+    helper that writes `target.tab` through a parameter cannot be followed,
+    so it is reported rather than trusted. An unresolvable sender argument
+    is reported for the same reason. A name this scanner never saw assigned
+    — a parameter, an import — stays unknown rather than unprovable, which
+    is the one silence left.
+    """
     text = path.read_text(encoding='utf-8')
     mask = _js_mask(text)
     violations = []
+    senders = ('extCmd', 'extcmd', 'runCommand')
 
     def line_of(pos):
         return text.count('\n', 0, pos) + 1
@@ -3854,29 +3944,89 @@ def _js_tab_routing_violations(path, rel):
     def is_extension_literal(value):
         return value is not None and re.fullmatch(r'["\']extension["\']', value)
 
-    def object_state(obj_start, named):
+    def object_state(obj_start, named, depth):
         """Resolve relevant state from a literal and tracked object spreads."""
         state = {}
         for key, value, off in _js_object_entries(mask, text, obj_start):
             if key is None:
                 spread = value.strip()
                 if spread.startswith('{'):
-                    merged = object_state(mask.index('{', off), named)
+                    merged = object_state(mask.index('{', off), named, depth)
                 elif re.fullmatch(r'[\w$]+', spread):
                     merged = named.get(spread)
                 else:
                     merged = None
+                if merged is _JS_UNPROVABLE:
+                    return _JS_UNPROVABLE
                 if merged is not None:
                     state.update(merged)
             else:
                 state[key] = (line_of(off), value)
         return state
 
+    def helper_state(name, depth):
+        """What a same-file helper returns, when it returns what it built."""
+        if depth > 3:
+            return _JS_UNPROVABLE
+        body = _js_function_body(mask, name)
+        if body is None:
+            return _JS_UNPROVABLE
+        kind, body_start, body_end = body
+        inner = names_before(body_end, depth + 1, floor=body_start)
+        if kind == 'expr':
+            return resolve(body_start, body_end, inner, depth + 1)
+        returns = [m for m in re.finditer(r'\breturn\b', mask[body_start:body_end])]
+        if not returns:
+            return _JS_UNPROVABLE
+        merged = {}
+        for m in returns:
+            expr_start = body_start + m.end()
+            semi = mask.find(';', expr_start)
+            expr_end = body_end if semi == -1 or semi > body_end else semi
+            state = resolve(expr_start, expr_end, inner, depth + 1)
+            if state is _JS_UNPROVABLE:
+                return _JS_UNPROVABLE
+            if state is None:
+                continue
+            merged.update(state)
+        return merged
+
+    def resolve(span_start, span_end, named, depth):
+        """Resolve an expression span to a key state, None, or unprovable."""
+        expr = mask[span_start:span_end].strip()
+        raw = text[span_start:span_end].strip()
+        if not expr:
+            return None
+        if expr.startswith('{'):
+            return object_state(span_start + mask[span_start:span_end].index('{'),
+                                named, depth)
+        if re.fullmatch(r'[\w$]+', expr):
+            if raw in ('null', 'undefined'):
+                return None
+            return named.get(expr)
+        question = _js_top_level(mask, span_start, span_end, '?')
+        if question is not None:
+            colon = _js_top_level(mask, question + 1, span_end, ':')
+            if colon is not None:
+                left = resolve(question + 1, colon, named, depth)
+                right = resolve(colon + 1, span_end, named, depth)
+                if left is _JS_UNPROVABLE or right is _JS_UNPROVABLE:
+                    return _JS_UNPROVABLE
+                merged = dict(left or {})
+                merged.update(right or {})
+                return merged
+        call = re.fullmatch(r'([\w$]+)\s*\(.*\)', expr, re.DOTALL)
+        if call:
+            return helper_state(call.group(1), depth)
+        return _JS_UNPROVABLE
+
     events = []  # (pos, kind, match)
-    for m in re.finditer(r'\b(?:const|let|var)\s+([\w$]+)\s*=\s*\{', mask):
+    for m in re.finditer(r'\b(?:const|let|var)\s+([\w$]+)\s*=', mask):
         events.append((m.start(), 'init', m))
     for m in re.finditer(r'\b([\w$]+)\s*\.\s*tab(?![\w$])\s*=', mask):
         events.append((m.start(), 'prop', m))
+    for m in re.finditer(r'\bObject\s*\.\s*assign\s*\(', mask):
+        events.append((m.start(), 'assign', m))
     # The bracket form is found in the raw text because the mask blanks
     # string contents, making `['tab']` unreadable there — but then a match
     # that begins inside a blanked span is a mention in a string or comment,
@@ -3885,66 +4035,133 @@ def _js_tab_routing_violations(path, rel):
     for m in re.finditer(r'\b([\w$]+)\s*\[\s*["\']tab["\']\s*\]\s*=', text):
         if mask[m.start()] == text[m.start()]:
             events.append((m.start(), 'prop', m))
+    # A tracked object handed to any other call escapes: a helper that writes
+    # through its parameter is invisible from here, so the object stops being
+    # provable at that point rather than being trusted on its literal.
+    for m in re.finditer(r'\b([\w$]+)\s*\(', mask):
+        if m.group(1) in senders or m.group(1) in ('if', 'for', 'while',
+                                                   'switch', 'catch',
+                                                   'function', 'return'):
+            continue
+        # Object.assign's target is modelled above, so it is not an escape;
+        # every other call taking the object is one, member calls included.
+        if re.search(r'Object\s*\.\s*$', mask[:m.start()]):
+            continue
+        events.append((m.start(), 'escape', m))
     events.sort(key=lambda e: e[0])
 
-    def named_state_at(call_start):
-        """Tracked `tab` state of named objects from the assignments that
-        precede the call. Judging every call against end-of-file state let a
-        later, unrelated `const f = {...}` erase an earlier violation."""
-        named = {}  # object name -> {key: (lineno, value_text)}
+    def names_before(limit, depth, floor=0):
+        """Tracked state of named objects from the assignments before `limit`.
+
+        Judging every call against end-of-file state let a later, unrelated
+        `const f = {...}` erase an earlier violation, so the walk stops at
+        the call. `floor` restricts the walk to one function body.
+        """
+        named = {}
         for start, kind, m in events:
-            if start >= call_start:
+            if start >= limit:
                 break
-            name = m.group(1)
+            if start < floor:
+                continue
             if kind == 'init':
-                obj_start = mask.index('{', m.start())
-                named[name] = object_state(obj_start, named)
+                name = m.group(1)
+                stmt_end = _js_statement_end(mask, m.end())
+                named[name] = resolve(m.end(), stmt_end, named, depth)
+            elif kind == 'assign':
+                open_paren = mask.index('(', m.start())
+                call_end = _js_bracket_end(mask, open_paren)
+                args = _js_split_top_level(mask, text, open_paren + 1,
+                                           call_end - 1)
+                if not args:
+                    continue
+                target = mask[args[0][0]:args[0][1]].strip()
+                if not re.fullmatch(r'[\w$]+', target):
+                    continue
+                state = named.get(target)
+                if state is _JS_UNPROVABLE:
+                    continue
+                if state is None:
+                    state = {}
+                for span in args[1:]:
+                    merged = resolve(span[0], span[1], named, depth)
+                    if merged is _JS_UNPROVABLE:
+                        state = _JS_UNPROVABLE
+                        break
+                    if merged:
+                        state.update(merged)
+                named[target] = state
+            elif kind == 'escape':
+                open_paren = mask.index('(', m.start())
+                call_end = _js_bracket_end(mask, open_paren)
+                for span in _js_split_top_level(mask, text, open_paren + 1,
+                                                call_end - 1):
+                    arg = mask[span[0]:span[1]].strip()
+                    if re.fullmatch(r'[\w$]+', arg) and arg in named:
+                        named[arg] = _JS_UNPROVABLE
             else:
+                name = m.group(1)
                 eq = mask.index('=', m.start())
                 semi = mask.find(';', eq)
                 semi = len(mask) if semi == -1 else semi
-                named.setdefault(name, {})['tab'] = (
-                    line_of(m.start()), text[eq + 1:semi].strip())
+                state = named.get(name)
+                if state is _JS_UNPROVABLE:
+                    continue
+                if state is None:
+                    state = {}
+                state['tab'] = (line_of(m.start()), text[eq + 1:semi].strip())
+                named[name] = state
         return named
 
     def argument_state(span, named):
         start, end = span
-        arg = mask[start:end].strip()
-        if arg.startswith('{'):
-            return object_state(start + mask[start:end].index('{'), named)
-        if re.fullmatch(r'[\w$]+', arg):
-            return named.get(arg)
-        return None
+        return resolve(start, end, named, 0)
 
     for m in re.finditer(r'\b(?:extCmd|extcmd|runCommand)\s*\(', mask):
+        # `function extCmd(type, fields = {}, opts = {})` is where a sender is
+        # declared, not where one is called; its parameter list is not a
+        # payload and resolving it would report the definition of every
+        # sender as unprovable.
+        if mask[:m.start()].rstrip().endswith('function'):
+            continue
         call_name = re.match(r'[\w$]+', mask[m.start():]).group(0)
         open_paren = mask.index('(', m.start())
         call_end = _js_bracket_end(mask, open_paren)
         args = _js_split_top_level(mask, text, open_paren + 1, call_end - 1)
         tab_entries = []
-        named = named_state_at(m.start())
+        unprovable = []
+        named = names_before(m.start(), 0)
         if call_name == 'runCommand':
             if not args:
                 continue
             keys = argument_state(args[0], named)
+            if keys is _JS_UNPROVABLE:
+                unprovable.append(line_of(m.start()))
             # A `type` key makes this a typed send; eval sends carry `code`.
-            if keys and 'type' in keys and 'tab' in keys:
+            elif keys and 'type' in keys and 'tab' in keys:
                 tab_entries.append(keys['tab'])
         else:  # extCmd(type, fields, ...)
             if len(args) < 2:
                 continue
             fields = argument_state(args[1], named)
-            if fields and 'tab' in fields:
+            if fields is _JS_UNPROVABLE:
+                unprovable.append(line_of(m.start()))
+            elif fields and 'tab' in fields:
                 tab_entries.append(fields['tab'])
             if len(args) >= 3:
                 opts = argument_state(args[2], named)
-                if opts and 'tab' in opts:
+                if opts is _JS_UNPROVABLE:
+                    unprovable.append(line_of(m.start()))
+                elif opts and 'tab' in opts:
                     tab_entries.append(opts['tab'])
-            # A computed argument (extCmd('cdp', buildFields())) is opaque.
         for lineno, value in tab_entries:
             if not is_extension_literal(value):
                 violations.append(
                     f'{rel}:{lineno}: `tab` in a typed command send')
+        for lineno in unprovable:
+            violations.append(
+                f'{rel}:{lineno}: a command send whose fields this guard '
+                'cannot resolve — inline the object or build it in a helper '
+                'that returns one')
     return list(dict.fromkeys(violations))
 
 
@@ -3970,16 +4187,22 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     `type`, and eval genuinely routes by tab. Python payloads are followed
     through literals (annotated or not), `dict(...)`, subscript assignments,
     `update({...})`, `|= {...}`, source order and `if`/`else` branches.
-    JavaScript inline literals, names initialized directly by object literals,
-    tracked object spreads, literal computed keys, same-name direct `tab`
-    property assignments, and the third extCmd argument are checked in source
-    order.
+    JavaScript inline literals, names initialized by object literals,
+    aliases of those names, ternary initializers whose branches resolve,
+    `Object.assign` writes, tracked object spreads, literal computed keys,
+    same-name direct `tab` property assignments, calls to same-file helpers
+    that return the object they built, and the third extCmd argument are
+    checked in source order. An object handed to any other call stops being
+    provable there, and an unprovable object reaching a sender is reported
+    rather than trusted — a helper that writes through its parameter cannot
+    be followed, so it is not silently believed.
 
     What is NOT enforced:
-    - Values returned by helpers are opaque: `const f = buildFields(); ...
-      extCmd('inject-css', f)`, `extCmd('cdp', buildFields())`, and the three
-      `extCmd('net-capture*', fields(...))` sends in
-      dashboard/sections/net-capture.js are not checked.
+    - A name this scanner never saw assigned — a parameter, an import — is
+      unknown rather than unprovable, and unknown stays silent. That is what
+      keeps `extCmd('fetch-timings', opts)` and the `...opts` spread inside
+      `extCmd` itself quiet; the third-argument check covers the override
+      those spreads could carry.
     - A Python /command payload built by a non-`dict(...)` call or by
       `dict(...)` with a positional argument is skipped. An untracked
       `**spread` after a visible `type` is rejected, but an untracked spread
@@ -3992,22 +4215,15 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
       (`d = f()`, `d.update(f())`, `d |= g()`) is dropped from tracking from
       that point rather than trusted on stale keys; a later `d['tab'] = ...`
       is tracked again.
-    - JavaScript object spreads from helper calls or other computed
-      expressions are skipped, and computed keys other than string literals
-      are skipped. Inline object spreads and spreads of tracked names, plus
-      literal computed keys such as `['tab']`, are checked.
-    - JavaScript aliases are not followed: a write through `const alias =
-      fields; alias.tab = target` is invisible when `fields` reaches a sender.
-    - JavaScript helper parameter flow is not modeled: an object mutated through
-      a parameter inside a helper is opaque at the caller's sender.
-    - JavaScript ternary initializers are not resolved, even when either branch
-      is an object literal.
-    - JavaScript Object.assign writes are not tracked.
+    - Computed keys other than string literals are skipped. Inline object
+      spreads and spreads of tracked names, plus literal computed keys such
+      as `['tab']`, are checked; a spread of an unknown name is skipped.
     - For a named runCommand object, `type`/`code` are read from its literal
       initializer; later property assignments to those two keys are not
-      tracked. Later `.tab` and `['tab']` assignments are tracked only when
-      written through the same name that is passed directly to the sender;
-      aliases are not followed.
+      tracked. `.tab` and `['tab']` assignments are tracked through the name
+      and through an alias of it.
+    - A helper is resolved from its first declaration in the file, and only
+      through three levels of helper calls.
     - JavaScript name state is file-wide and source-ordered, not
       block-scoped or execution-ordered: a call is judged against every
       same-named assignment that precedes it in the file — including ones in
@@ -4157,7 +4373,43 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         ('js', "async function f(target) {\n"
                "  await extCmd('cdp', {}, { tab: target });\n"
                "}\n"),
+        # Shapes that used to be disclosed gaps, each promoted here when it
+        # started being caught: an alias, a helper writing through its
+        # parameter, a ternary initializer, an Object.assign write, and a
+        # helper that returns the object it built.
+        ('js', "async function f(tid) {\n"
+               "  const fields = {};\n"
+               "  const alias = fields;\n"
+               "  alias.tab = tid;\n"
+               "  await extCmd('screenshot', fields);\n"
+               "}\n"),
+        ('js', "function addTab(target, tid) {\n"
+               "  target.tab = tid;\n"
+               "}\n"
+               "async function f(tid) {\n"
+               "  const fields = {};\n"
+               "  addTab(fields, tid);\n"
+               "  await extCmd('screenshot', fields);\n"
+               "}\n"),
+        ('js', "async function f(flag, tid) {\n"
+               "  const fields = flag ? { tab: tid } : {};\n"
+               "  await extCmd('screenshot', fields);\n"
+               "}\n"),
+        ('js', "async function f(tid) {\n"
+               "  const fields = {};\n"
+               "  Object.assign(fields, { tab: tid });\n"
+               "  await extCmd('screenshot', fields);\n"
+               "}\n"),
+        ('js', "function build(tid) {\n"
+               "  const f = {};\n"
+               "  f.tab = tid;\n"
+               "  return f;\n"
+               "}\n"
+               "async function g(tid) {\n"
+               "  await extCmd('screenshot', build(tid));\n"
+               "}\n"),
     ]
+
     legitimate = [
         ('py', "async def f(cmd_id, code, tab_id):\n"
                "    payload = {'id': cmd_id, 'code': code}\n"
@@ -4192,32 +4444,20 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                "  await extCmd('cookies', fields);\n"
                "}\n"),
     ]
+
     disclosed_js_limits = [
-        ('alias write',
-         "async function f(tid) {\n"
-         "  const fields = {};\n"
-         "  const alias = fields;\n"
-         "  alias.tab = tid;\n"
+        # Name state is file-wide and source-ordered rather than scoped and
+        # execution-ordered: an assignment written after the call is invisible
+        # to it even when it runs first.
+        ('assignment after the call that runs before it',
+         "async function send() {\n"
          "  await extCmd('screenshot', fields);\n"
-         "}\n"),
-        ('helper parameter mutation',
-         "function addTab(target, tid) {\n"
-         "  target.tab = tid;\n"
          "}\n"
-         "async function f(tid) {\n"
-         "  const fields = {};\n"
-         "  addTab(fields, tid);\n"
-         "  await extCmd('screenshot', fields);\n"
-         "}\n"),
-        ('ternary initializer',
-         "async function f(flag, tid) {\n"
-         "  const fields = flag ? { tab: tid } : {};\n"
-         "  await extCmd('screenshot', fields);\n"
-         "}\n"),
-        ('Object.assign write',
-         "async function f(tid) {\n"
-         "  const fields = {};\n"
-         "  Object.assign(fields, { tab: tid });\n"
+         "const fields = { tab: 'not-extension' };\n"),
+        # A name this scanner never saw assigned — a parameter, an import —
+        # is unknown rather than unprovable, and unknown stays silent.
+        ('fields arriving as a parameter',
+         "async function f(fields) {\n"
          "  await extCmd('screenshot', fields);\n"
          "}\n"),
     ]
