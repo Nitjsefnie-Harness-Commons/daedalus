@@ -40,7 +40,11 @@ os.environ['DAEDALUS_TOKEN'] = TOK
 def cli_env(**overrides):
     """A clean environment: none of the CLI's config vars leak in from ours."""
     env = dict(os.environ)
-    for k in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID'):
+    # PYTHONIOENCODING goes too, so the CLI applies its own rule for a piped
+    # stream instead of inheriting whatever this runner was started with. A
+    # test that wants a specific one passes it back through overrides.
+    for k in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID',
+              'PYTHONIOENCODING'):
         env.pop(k, None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     env.update(overrides)
@@ -49,13 +53,14 @@ def cli_env(**overrides):
 
 def run_cli(args, env, timeout=60):
     return subprocess.run(CLI + args, cwd=str(_util.ROOT), env=env,
-                          capture_output=True, text=True, timeout=timeout)
+                          capture_output=True, text=True, encoding='utf-8',
+                          timeout=timeout)
 
 
 def run_python(code, env, timeout=60):
     return subprocess.run([sys.executable, '-c', code], cwd=str(_util.ROOT),
                           env=env, capture_output=True, text=True,
-                          timeout=timeout)
+                          encoding='utf-8', timeout=timeout)
 
 
 def _wait_for(predicate, timeout=15, what='condition'):
@@ -234,7 +239,8 @@ def test_exec_full_round_trip(tmp):
         proc = subprocess.Popen(
             CLI + ['exec', 'job7', 'document.title', '-t', '20'],
             cwd=str(_util.ROOT), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_tab9'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
@@ -273,7 +279,8 @@ def test_waiter_leaves_a_foreign_result_in_place(tmp):
         proc = subprocess.Popen(
             CLI + ['cookies'],
             cwd=str(_util.ROOT), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
@@ -307,7 +314,8 @@ def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
         proc = subprocess.Popen(
             CLI + ['cookies'],
             cwd=str(_util.ROOT), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
@@ -351,7 +359,8 @@ def test_typed_command_does_not_return_a_stale_fixed_id_result(tmp):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
             CLI + ['cookies'], cwd=str(_util.ROOT), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
@@ -385,7 +394,8 @@ def _run_same_id_client_overlap(tmp, completion_order):
             owner: subprocess.Popen(
                 CLI + ['cookies', '--domain', owner],
                 cwd=str(_util.ROOT), env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding='utf-8')
             for owner in owners
         }
         try:
@@ -556,7 +566,8 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
             CLI + ['screenshot', '--id', screenshot_id,
                    '--output', str(output), '--timeout', '20'],
             cwd=str(_util.ROOT), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),

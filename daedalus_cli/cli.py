@@ -157,30 +157,40 @@ def _output_markers():
     return fancy
 
 
-MARK = _output_markers()
+def _configure_stdio():
+    """Give the output an encoding both a person and a program can rely on.
 
+    Two unrelated consumers read this. A terminal has a code page its user
+    chose, and overriding it produces mojibake on the very console it was
+    meant to help — so a tty keeps its encoding and the markers above fall
+    back to ASCII instead of the command dying. A pipe or a file has no such
+    opinion, and leaving it on the locale makes the bytes a caller receives
+    depend on the machine: a program reading this output on Windows decoded
+    UTF-8 bytes as cp1252 and got mojibake for every non-ASCII id. A non-tty
+    stream is therefore pinned to UTF-8, which is what a consumer can
+    actually depend on.
 
-def _soften_stdio():
-    """Stop caller data from being able to abort the command.
-
-    The markers above are ours to choose; a tab title, an upload name or a
-    job id is not, and on a legacy code page any of them can be unencodable.
-    `errors='replace'` cannot fail and shows the reader that a character was
-    dropped, which is strictly better than losing the whole line to a
-    traceback. Streams an embedder has replaced with something that does not
-    reconfigure are left exactly as they are.
+    An explicit PYTHONIOENCODING is an operator decision and is left alone
+    in both cases. `errors='replace'` applies throughout, because caller
+    data — a tab title, an upload name, a job id — is not ours to choose and
+    must never be able to abort the command.
     """
+    pinned = bool(os.environ.get('PYTHONIOENCODING'))
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, 'reconfigure', None)
         if reconfigure is None:
             continue
         try:
-            reconfigure(errors='replace')
+            if pinned or stream.isatty():
+                reconfigure(errors='replace')
+            else:
+                reconfigure(encoding='utf-8', errors='replace')
         except (OSError, ValueError):
             continue
 
 
-_soften_stdio()
+_configure_stdio()
+MARK = _output_markers()
 
 
 def validate_result(res):
