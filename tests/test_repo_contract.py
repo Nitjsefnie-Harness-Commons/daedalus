@@ -814,7 +814,8 @@ def _wait_for_devtools(profile, process):
 
 
 @contextlib.contextmanager
-def _real_extension_page(tmp, bridge_url, token, page_url):
+def _real_extension_page(tmp, bridge_url, token, page_url,
+                         extension_root=None):
     """Yield (node, page target, tab id) for a real page under the extension.
 
     Every test that reaches a real browser comes through here, so this is
@@ -837,7 +838,7 @@ def _real_extension_page(tmp, bridge_url, token, page_url):
     """
     node, browser = _browser_requirements()
     profile = Path(tmp) / 'chromium-profile'
-    extension = EXTENSION_ROOT.resolve()
+    extension = (extension_root or EXTENSION_ROOT).resolve()
     process = subprocess.Popen(
         [
             browser,
@@ -883,8 +884,10 @@ def _real_extension_page(tmp, bridge_url, token, page_url):
                     pass
             time.sleep(0.05)
         else:
-            _util.skip('the extension service worker never finished booting '
-                       'in this Chromium')
+            raise AssertionError(
+                'the extension service worker never finished booting: '
+                'DevTools exposed its target, so the browser reached the '
+                'extension and never saw keepaliveTimer set')
 
         storage = json.dumps({
             'daedalus-token': token,
@@ -1051,6 +1054,48 @@ def test_main_world_transport_failure_and_genuine_null_are_distinct(tmp):
     assert genuine_null['result'] is None, genuine_null
     assert genuine_null.get('error') is None, genuine_null
     assert genuine_null.get('world') == 'page-main', genuine_null
+
+
+def test_a_worker_that_never_boots_is_a_failure_not_a_skip(tmp):
+    """A broken extension must not be reported as a broken machine.
+
+    The fixture skipped when the service worker never finished booting, so a
+    real MV3 defect passed CI in silence. The Node-based tests do not cover
+    what that skip hides: they run the same source against fakes with no
+    chrome.runtime.id, so a fault conditioned on being a real worker is
+    invisible there too — which is why this mutation is exactly that fault.
+
+    By the time the boot is awaited, DevTools has already exposed the
+    worker's own target, so the browser has reached the extension. What
+    happens after that is the extension's behaviour.
+    """
+    _browser_requirements()  # skips honestly where no browser exists
+    broken = Path(tmp) / 'broken-extension'
+    shutil.copytree(EXTENSION_ROOT, broken)
+    worker = broken / 'background.js'
+    worker.write_text(
+        "if (chrome.runtime.id) { throw new Error('injected worker fault'); }\n"
+        + worker.read_text(encoding='utf-8'), encoding='utf-8')
+
+    token = 'workerboottok'
+    with _util.bridge(
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+                      'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
+        with _eval_page_server() as pages:
+            reported = None
+            try:
+                with _real_extension_page(
+                        tmp, bridge_url, token, pages + '/plain.html',
+                        extension_root=broken):
+                    raise AssertionError(
+                        'the fixture yielded with a worker that cannot boot')
+            except _util.Skipped as skipped:
+                raise AssertionError(
+                    'a broken extension was reported as an environment skip: '
+                    + str(skipped)) from skipped
+            except AssertionError as failure:
+                reported = str(failure)
+            assert reported and 'service worker' in reported, reported
 
 
 def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):
