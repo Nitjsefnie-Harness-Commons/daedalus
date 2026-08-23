@@ -52,7 +52,7 @@ Repeated authority carriers are rejected before any value is selected, including
 - `DELETE /upload` — remove: `{token, id, filename}` | `{token, id}` | `{token}`.
 - `GET /screenshot?token=X[&id=Y]` — serve latest screenshot.
 - `GET /dashboard[/<asset>]` — serve the web dashboard (HTML + ES modules) from `dashboard/` in the repo. A reverse proxy routes it to the bridge; paths containing `..` are rejected.
-- `POST /segment-job` — mint (or re-fetch) an HLS job's segment capability: `{token, job}` → `{ok, sig}`. Idempotent for the owning token; 409 when the job name is owned by a different token.
+- `POST /segment-job` — mint (or re-fetch) an HLS job's segment capability: `{token, job}` → `{ok, sig}`. Idempotent for the owning token; 409 when the job name is owned by a different token; 500 when a record exists but cannot be read, which is never replaced by a fresh mint.
 - `POST /segment?job=X&seg=N&total=T&sig=S` — raw binary HLS segment storage (`$DAEDALUS_DIR/segments/{job}/{seg:06d}.ts`); `sig` is the job-scoped capability from `POST /segment-job`, never the bridge token.
 - `GET /segment-status?job=X&sig=S` — list received segments `{done[], count}`.
 

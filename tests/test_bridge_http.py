@@ -2045,6 +2045,29 @@ def test_a_segment_body_without_a_declared_length_is_refused(tmp):
         assert not stored, stored
 
 
+def test_a_corrupt_job_record_is_not_replaced_by_a_fresh_mint(tmp):
+    """A record that cannot be read is not a job that does not exist.
+
+    Both arrived as None, and the mint reads None as "not minted yet", so a
+    truncated record was overwritten with a fresh owner and capability — the
+    job's resume identity destroyed, and the caller told the mint succeeded.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        job = _seg_job()
+        status, minted = _mint_job(base, TOK, job)
+        assert status == 200, (status, minted)
+        record_path = Path(docroot) / 'segments' / f'{job}.json'
+        corrupt = '{"token": "' + TOK + '", "sig": "'
+        record_path.write_text(corrupt, encoding='utf-8')
+
+        status, body = _mint_job(base, TOK, job)
+        assert status == 500, (status, body)
+        assert record_path.read_text(encoding='utf-8') == corrupt
+
+        status, body = _util.get_json(base + '/health')
+        assert status == 200 and body['ok'] is True, (status, body)
+
+
 def test_segment_resume_contract(tmp):
     with _util.bridge(tmp) as (base, docroot):
         job = _seg_job()

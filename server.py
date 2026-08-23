@@ -406,13 +406,35 @@ def _segment_record_path(job):
     return SEG_DIR / f'{job}.json'
 
 
+class _SegmentRecordError(Exception):
+    """A job record exists but could not be read as one."""
+
+
 def _load_segment_record(job):
-    """Return `job`'s JSON object, or None when absent, unreadable, or malformed."""
+    """Return `job`'s JSON object, or None when there is no record at all.
+
+    A record that exists and cannot be read raises instead of arriving as
+    None: the mint reads None as "this job does not exist yet" and writes a
+    fresh owner and capability over whatever is there, so collapsing the two
+    turned local corruption into a destroyed resume identity reported as a
+    successful mint.
+    """
     try:
-        record = json.loads(_segment_record_path(job).read_text(encoding='utf-8'))
-    except (OSError, json.JSONDecodeError, ValueError):
+        raw = _segment_record_path(job).read_text(encoding='utf-8')
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+        # No record file here. The last two are the dotted-name collision,
+        # where one job's record path is another job's directory (or below
+        # its record file); the mint answers that as an unavailable name.
         return None
-    return record if isinstance(record, dict) else None
+    except OSError as why:
+        raise _SegmentRecordError('record unreadable') from why
+    try:
+        record = json.loads(raw)
+    except (json.JSONDecodeError, ValueError, RecursionError) as why:
+        raise _SegmentRecordError('record is not JSON') from why
+    if not isinstance(record, dict):
+        raise _SegmentRecordError('record is not an object')
+    return record
 
 
 def _segment_record_for_sig(job, sig):
@@ -421,7 +443,13 @@ def _segment_record_for_sig(job, sig):
     compare_digest raises TypeError on non-ASCII str input, and the sig arrives
     as a query string, so both sides are gated before the comparison.
     """
-    record = _load_segment_record(job)
+    try:
+        record = _load_segment_record(job)
+    except _SegmentRecordError:
+        # Fail closed: without a readable record nothing can be authorized,
+        # and this path never writes one, so the corrupt record survives for
+        # the mint to answer for.
+        return None
     expected = record.get('sig', '') if record else ''
     if not isinstance(expected, str) or not expected or not expected.isascii():
         return None
@@ -1388,7 +1416,11 @@ class Handler(BaseHTTPRequestHandler):
         if not job or _unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
         with _seg_lock:
-            record = _load_segment_record(job)
+            try:
+                record = _load_segment_record(job)
+            except _SegmentRecordError:
+                return self._json(
+                    500, {'error': 'segment storage failure'})
             if record is not None:
                 if record.get('token') != token:
                     return self._json(
