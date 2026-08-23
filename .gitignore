@@ -46,6 +46,15 @@
 !/.githooks/pre-commit
 !/.githooks/pre-push
 
+# ─── .github ───
+!/.github/
+!/.github/PULL_REQUEST_TEMPLATE.md
+
+# ─── .github/ISSUE_TEMPLATE ───
+!/.github/
+!/.github/ISSUE_TEMPLATE/
+!/.github/ISSUE_TEMPLATE/issue.md
+
 # ─── .github/workflows ───
 !/.github/
 !/.github/workflows/
