@@ -541,7 +541,9 @@ def test_upload_listing_encodes_delimiter_and_unicode_id(tmp):
             ['uploads', '--id', upload_id],
             cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert result.returncode == 0, (result.returncode, result.stderr)
-        assert f'{upload_id}/payload.txt' in result.stdout, result.stdout
+        wanted = f'{upload_id}/payload.txt'
+        assert wanted in result.stdout, (
+            repr(wanted), repr(result.stdout))
 
 
 def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
@@ -584,7 +586,9 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
             if proc.poll() is None:
                 proc.kill()
                 proc.communicate()
-        assert proc.returncode == 0, (proc.returncode, stdout, stderr)
+        assert proc.returncode == 0, (
+            proc.returncode, repr(stdout), repr(stderr),
+            repr(screenshot_id))
         assert output.read_bytes() == b'encoded-screenshot'
 
 
@@ -637,7 +641,8 @@ def test_segment_status_subcommand_encodes_job_and_capability(tmp):
         r = run_cli(['segment-status', job],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode == 0, (r.returncode, r.stderr)
-        assert f'Job: {job}  Segments: 0' in r.stdout, r.stdout
+        wanted = f'Job: {job}  Segments: 0'
+        assert wanted in r.stdout, (repr(wanted), repr(r.stdout))
 
 
 def test_segment_status_subcommand_reports_a_foreign_job_cleanly(tmp):
