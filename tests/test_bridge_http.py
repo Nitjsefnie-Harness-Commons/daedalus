@@ -2083,6 +2083,25 @@ def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
     assert 'absent: None' in output, output
 
 
+def test_a_refused_put_absorbs_its_body_so_the_answer_survives(tmp):
+    """A PUT the bridge refuses must still deliver the refusal.
+
+    An unread body makes the close an RST, and an RST discards the answer
+    the client has not read yet — the reset that has already been seen on a
+    refused body once. A refused PUT never reads its body at all.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        payload = b'x' * 200000
+        status, body = _util.request(
+            base + '/nope', 'PUT', body=payload,
+            headers={'Content-Type': 'application/octet-stream'})
+        assert status == 404, (status, body)
+        assert json.loads(body)['error'] == 'not found', body
+
+        status, body = _util.get_json(base + '/health')
+        assert status == 200 and body['ok'] is True, (status, body)
+
+
 def test_a_corrupt_job_record_is_not_replaced_by_a_fresh_mint(tmp):
     """A record that cannot be read is not a job that does not exist.
 

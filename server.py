@@ -962,7 +962,9 @@ class Handler(BaseHTTPRequestHandler):
         content_type = self.headers.get('Content-Type', '')
         parsed = self._request_target()
         if parsed is None:
-            return
+            # The 400 is written; its body was never read, and an unread
+            # body turns the close into an RST that discards the answer.
+            return self._drain_refused_body(clen)
         if (parsed.path == '/segment'
                 and ('octet-stream' in content_type
                      or 'application/json' not in content_type)):
@@ -1159,10 +1161,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         parsed = self._request_target()
         if parsed is None:
-            return
+            # The 400 is written; its body was never read.
+            return self._drain_refused_body(clen)
         if parsed.path == '/command':
             return self._handle_put_command(clen)
-        return self._json(404, {'error': 'not found'})
+        self._json(404, {'error': 'not found'})
+        # A refused PUT never reads its body, and closing a socket that
+        # still holds unread data sends RST — which discards the answer
+        # written a moment ago, so the caller sees a connection reset
+        # instead of the 404. Same mechanism as the oversize-body drain.
+        return self._drain_refused_body(clen)
 
     def _handle_put_command(self, clen):
         """PUT /command — write a command for delivery via SSE."""
