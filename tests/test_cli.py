@@ -611,6 +611,52 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
         assert output.read_bytes() == b'encoded-screenshot'
 
 
+def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
+    """The raw download must report the refusal, not just its status.
+
+    The command round trip succeeds and only the follow-up fetch of the
+    stored image fails, so the status number is the operator's only clue
+    unless the body travels with it.
+    """
+    screenshot_id = 'shot-' + uuid.uuid4().hex[:8]
+    output = Path(tmp) / 'captured.png'
+    served = []
+    with _util.bridge(tmp, output=served) as (base, docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        proc = subprocess.Popen(
+            CLI + ['screenshot', '--id', screenshot_id,
+                   '--output', str(output), '--timeout', '20'],
+            cwd=str(_util.ROOT), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
+        try:
+            qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
+                      what='the screenshot command')
+            command = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            # The result claims a stored file; nothing was uploaded, so the
+            # download that follows it is refused.
+            status, body = _util.post_json(base + '/result', {
+                'token': TOK,
+                'tabId': 'extension',
+                'id': screenshot_id,
+                'result': {'path': f'{screenshot_id}/screenshot.png',
+                           'size': 18},
+                'error': None,
+                'ts': 1,
+                '_did': command['_did'],
+            })
+            assert status == 200, (status, body)
+            _stdout, stderr = proc.communicate(timeout=30)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+    assert proc.returncode != 0, (proc.returncode, ''.join(served))
+    assert 'HTTP 404' in stderr, (stderr, ''.join(served))
+    assert 'no uploads' in stderr, (stderr, ''.join(served))
+
+
 def test_segment_job_subcommand_prints_a_working_capability(tmp):
     job = 'clijob-' + uuid.uuid4().hex[:12]
     with _util.bridge(tmp) as (base, _docroot):

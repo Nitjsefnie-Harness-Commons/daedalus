@@ -92,7 +92,7 @@ def api_raw(method, path):
         with urllib.request.urlopen(req, timeout=30) as r:
             return r.read()
     except urllib.error.HTTPError as e:
-        sys.exit(f'HTTP {e.code}')
+        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
 
