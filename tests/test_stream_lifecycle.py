@@ -12,6 +12,7 @@ never ran it and it only ever executed when somebody remembered it existed.
 """
 import http.client
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -110,6 +111,48 @@ def test_the_announcement_does_not_wait_on_a_reverse_dns_lookup(tmp):
     ) as (base, _docroot):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
+
+
+def test_a_unix_socket_subclass_binds_the_way_the_stdlib_binds_it(tmp):
+    """The override must accept every address the stdlib method accepts.
+
+    HTTPServer.server_bind assigns the second element of the address as it
+    stands. Coercing it with int() changes what the method accepts: an
+    AF_UNIX address is its own path, so that element is a character of the
+    path, and a subclass the stdlib would have bound raises ValueError under
+    the override instead.
+    """
+    if not hasattr(socket, 'AF_UNIX'):
+        _util.skip('no AF_UNIX on this platform')
+    docroot = Path(tmp) / 'docroot'
+    sock = Path(tmp) / 's.sock'
+    probe = (
+        'import socket\n'
+        'from http.server import BaseHTTPRequestHandler\n'
+        'import server\n'
+        f'path = {str(sock)!r}\n'
+        'class UnixServer(server.ThreadingHTTPServer):\n'
+        '    address_family = socket.AF_UNIX\n'
+        'srv = UnixServer(path, BaseHTTPRequestHandler)\n'
+        'try:\n'
+        '    print("bound", repr(srv.server_name), repr(srv.server_port))\n'
+        'finally:\n'
+        '    srv.server_close()\n'
+    )
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': str(docroot),
+        # The probe binds its own AF_UNIX socket; this one is never bound.
+        'DAEDALUS_PORT': '0',
+        'PYTHONDONTWRITEBYTECODE': '1',
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', probe], cwd=_util.ROOT, env=env,
+        capture_output=True, text=True, timeout=60)
+    output = (proc.stdout + proc.stderr).strip()
+    assert proc.returncode == 0, output
+    expected = f'bound {str(sock)[0]!r} {str(sock)[1]!r}'
+    assert expected in output, (expected, output)
 
 
 def test_a_child_that_never_announces_fails_on_the_deadline(tmp):

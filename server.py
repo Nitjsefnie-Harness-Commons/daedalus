@@ -475,13 +475,18 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         for loopback, a resolver behind a firewall — startup stops here, so
         the Listening line, which is the only readiness signal the bridge
         emits, arrives minutes late or not at all while the port is in fact
-        open. Nothing reads server_name, so record the literal bind host and
-        keep startup free of the network.
+        open. This repository's handler never reads server_name — the
+        standard library's CGIHTTPRequestHandler does, so the claim is about
+        Daedalus, not about the attribute — so record the literal bind host
+        and keep startup free of the network. The lookup is the only
+        deliberate difference: the port is assigned exactly as the standard
+        library assigns it, so an address the stdlib method binds is not
+        rejected here.
         """
         TCPServer.server_bind(self)
         host, port = self.server_address[:2]
         self.server_name = str(host)
-        self.server_port = int(port)
+        self.server_port = port
 
 
 class _JSONObject(dict):
