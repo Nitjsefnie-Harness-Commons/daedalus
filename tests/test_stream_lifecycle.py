@@ -94,6 +94,27 @@ def test_a_line_printed_before_the_announcement_does_not_hide_it(tmp):
     assert noise_at < listening_at, output
 
 
+def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
+    """The degraded start must be actionable, not just observed.
+
+    Without the optional dependencies the bridge comes up normally and the
+    MCP endpoint silently is not there, so a reader following the README's
+    MCP section sees a working bridge and a client that cannot connect. The
+    line that reports the failure is the one place that can name the install
+    that fixes it.
+    """
+    blocked = 'import sys\nsys.modules["mcp_server"] = None\n'
+    output = []
+    with _util.bridge(tmp,
+                      env={'PYTHONPATH': _noise_path(tmp, 'nomcp', blocked)},
+                      output=output) as (base, _docroot):
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
+    reported = [line for line in output if 'MCP bootstrap failed' in line]
+    assert reported, output
+    assert any('.[mcp]' in line for line in reported), reported
+
+
 def test_the_announcement_does_not_wait_on_a_reverse_dns_lookup(tmp):
     """Startup must not depend on a name service answering.
 
@@ -125,15 +146,17 @@ def test_a_unix_socket_subclass_binds_the_way_the_stdlib_binds_it(tmp):
     if not hasattr(socket, 'AF_UNIX'):
         _util.skip('no AF_UNIX on this platform')
     docroot = Path(tmp) / 'docroot'
-    sock = Path(tmp) / 's.sock'
+    # Bound by a bare relative name from inside tmp: an AF_UNIX path is
+    # limited to about a hundred bytes, and macOS runners hand out temp
+    # directories long enough to exceed that on their own.
     probe = (
-        'import socket\n'
+        'import os, socket\n'
         'from http.server import BaseHTTPRequestHandler\n'
         'import server\n'
-        f'path = {str(sock)!r}\n'
+        f'os.chdir({str(tmp)!r})\n'
         'class UnixServer(server.ThreadingHTTPServer):\n'
         '    address_family = socket.AF_UNIX\n'
-        'srv = UnixServer(path, BaseHTTPRequestHandler)\n'
+        'srv = UnixServer("s.sock", BaseHTTPRequestHandler)\n'
         'try:\n'
         '    print("bound", repr(srv.server_name), repr(srv.server_port))\n'
         'finally:\n'
@@ -151,7 +174,7 @@ def test_a_unix_socket_subclass_binds_the_way_the_stdlib_binds_it(tmp):
         capture_output=True, text=True, timeout=60)
     output = (proc.stdout + proc.stderr).strip()
     assert proc.returncode == 0, output
-    expected = f'bound {str(sock)[0]!r} {str(sock)[1]!r}'
+    expected = "bound 's' '.'"  # the address is the path; [:2] splits it
     assert expected in output, (expected, output)
 
 
