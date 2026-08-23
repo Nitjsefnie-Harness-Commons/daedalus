@@ -815,21 +815,55 @@ def _browser_requirements():
     return node, browser
 
 
+_WORKER_READY_PROBE = (
+    '(() => { try { return typeof loadConfig === "function" '
+    '&& typeof ensureKeepAlive === "function" '
+    '&& typeof startStream === "function"; } '
+    'catch (_) { return false; } })()')
+
+_WORKER_STATE_PROBE = (
+    '(() => { try { return JSON.stringify({'
+    'id: (typeof chrome !== "undefined" && chrome.runtime)'
+    ' ? chrome.runtime.id : null,'
+    'loadConfig: typeof loadConfig,'
+    'ensureKeepAlive: typeof ensureKeepAlive,'
+    'startStream: typeof startStream,'
+    'version: typeof VERSION !== "undefined" ? VERSION '
+    ': null}); } catch (e) { return "probe failed: " '
+    '+ (e && e.message); } })()')
+
+
 def _devtools_targets(port):
     with urllib.request.urlopen(
             f'http://127.0.0.1:{port}/json/list', timeout=2) as reply:
         return json.load(reply)
 
 
+def _worker_targets(targets):
+    """Every service worker that could be an extension's background worker.
+
+    More than one extension can be loaded at once, and a CI runner's browser
+    carries one of its own, so this is a list rather than the first match:
+    which of them is this extension's is a question only the worker's own
+    declarations answer, and DevTools happens to list the other one first.
+    """
+    return [item for item in targets
+            if item.get('type') == 'service_worker'
+            and item.get('url', '').endswith('/background.js')]
+
+
 def _wait_for_devtools(profile, process):
-    """Wait for the DevTools endpoint, the page, and the extension worker.
+    """Wait for the DevTools endpoint, the page, and a background worker.
 
     Everything this waits on is the browser starting, not the extension
     behaving, so an environment where it does not arrive skips rather than
     fails — see _real_extension_page for where that boundary sits.
     """
     port_file = Path(profile) / 'DevToolsActivePort'
-    deadline = time.time() + 15
+    # A cold runner's first browser start is slower than every later one: the
+    # ubuntu legs timed out here on the first browser test of the run and
+    # reached the same browser without trouble in the ones after it.
+    deadline = time.time() + 30
     while time.time() < deadline:
         if process.poll() is not None:
             _util.skip('Chromium exited before DevTools became available')
@@ -841,22 +875,27 @@ def _wait_for_devtools(profile, process):
                     targets = _devtools_targets(port)
                     page = next((item for item in targets
                                  if item.get('type') == 'page'), None)
-                    worker = next((item for item in targets
-                                   if item.get('type') == 'service_worker'
-                                   and item.get('url', '').endswith(
-                                       '/background.js')), None)
-                    if page and worker:
-                        return page, worker, port
+                    workers = _worker_targets(targets)
+                    if page and workers:
+                        return page, workers, port
                 except (OSError, ValueError):
                     pass
         time.sleep(0.05)
-    _util.skip('this browser never exposed the fixture page and the '
+    _util.skip('this browser never exposed the fixture page and an '
                'extension service worker over DevTools')
+
+
+def _worker_state(node, target):
+    """What one worker says about itself, for a failure that names which."""
+    try:
+        return _cdp_eval(node, target, _WORKER_STATE_PROBE)
+    except AssertionError as why:
+        return f'could not be read back: {why}'
 
 
 @contextlib.contextmanager
 def _real_extension_page(tmp, bridge_url, token, page_url,
-                         extension_root=None):
+                         extension_root=None, extra_extensions=()):
     """Yield (node, page target, tab id) for a real page under the extension.
 
     Every test that reaches a real browser comes through here, so this is
@@ -880,6 +919,10 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
     node, browser = _browser_requirements()
     profile = Path(tmp) / 'chromium-profile'
     extension = (extension_root or EXTENSION_ROOT).resolve()
+    # Ours last: a browser that carries an extension of its own lists that
+    # one first, which is the order the CI legs see.
+    loaded = ','.join(str(Path(item).resolve())
+                      for item in (*extra_extensions, extension))
     process = subprocess.Popen(
         [
             browser,
@@ -891,8 +934,8 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
             '--no-default-browser-check',
             '--remote-allow-origins=*',
             '--remote-debugging-port=0',
-            '--disable-extensions-except=' + str(extension),
-            '--load-extension=' + str(extension),
+            '--disable-extensions-except=' + loaded,
+            '--load-extension=' + loaded,
             '--user-data-dir=' + str(profile),
             'about:blank',
         ],
@@ -901,9 +944,8 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL)
     try:
-        page, worker, devtools_port = _wait_for_devtools(profile, process)
+        page, workers, devtools_port = _wait_for_devtools(profile, process)
         page_target = page['webSocketDebuggerUrl']
-        worker_target = worker['webSocketDebuggerUrl']
         # Load the page before waiting on the worker. An MV3 worker goes
         # dormant on its own after about thirty idle seconds, and evaluating
         # in it over CDP does not wake it — on a slow machine the worker
@@ -916,45 +958,40 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         deadline = time.time() + 30
         last_error = 'no evaluation was attempted'
         answered = False
+        worker_target = None
         while time.time() < deadline:
-            try:
-                # What is asserted is that the worker's own script ran to the
-                # end: a script that threw defines none of these. Waiting on
-                # keepaliveTimer instead waited on the async boot chain, and
-                # a worker that answers with the timer still unset is a
-                # different thing from a worker that never loaded — the
-                # fixture configures the extension explicitly two steps
-                # below, so it does not need that chain to have finished.
-                if _cdp_eval(
-                        node, worker_target,
-                        '(() => { try { return typeof loadConfig === '
-                        '"function" && typeof ensureKeepAlive === "function" '
-                        '&& typeof startStream === "function"; } '
-                        'catch (_) { return false; } })()') is True:
-                    break
-                answered = True
-                last_error = 'the worker answered without its declarations'
-            except AssertionError as failure:
-                last_error = f'evaluating in the worker failed: {failure}'
+            for candidate in workers:
+                target = candidate['webSocketDebuggerUrl']
                 try:
-                    targets = _devtools_targets(devtools_port)
-                    worker = next(item for item in targets
-                                  if item.get('type') == 'service_worker'
-                                  and item.get('url', '').endswith(
-                                      '/background.js'))
-                    worker_target = worker['webSocketDebuggerUrl']
-                except StopIteration:
+                    # What is asserted is that the worker's own script ran to
+                    # the end: a script that threw defines none of these, and
+                    # so does another extension's worker. Waiting on
+                    # keepaliveTimer instead waited on the async boot chain,
+                    # and a worker that answers with the timer still unset is
+                    # a different thing from a worker that never loaded — the
+                    # fixture configures the extension explicitly two steps
+                    # below, so it does not need that chain to have finished.
+                    if _cdp_eval(node, target, _WORKER_READY_PROBE) is True:
+                        worker_target = target
+                        break
+                    answered = True
+                    last_error = 'the worker answered without its declarations'
+                except AssertionError as failure:
+                    last_error = f'evaluating in the worker failed: {failure}'
+            if worker_target:
+                break
+            try:
+                workers = _worker_targets(_devtools_targets(devtools_port))
+                if not workers:
                     last_error = 'no service worker target is listed any more'
-                except (OSError, ValueError) as why:
-                    last_error = f'listing DevTools targets failed: {why}'
-            # Every attempt spawns a node process to speak CDP. At twenty a
-            # second that is six hundred processes over this window, and on
-            # a two-core runner the connections start failing for want of
-            # resources rather than because the worker is unwell — which is
-            # what the ubuntu legs reported while the worker's own state
-            # read back healthy.
+            except (OSError, ValueError) as why:
+                last_error = f'listing DevTools targets failed: {why}'
+            # Every attempt spawns one node process per candidate to
+            # speak CDP, so this polls twice a second rather than twenty
+            # times. Polling faster bought nothing on the runner that was
+            # failing here, and a two-core machine pays for every spawn.
             time.sleep(0.5)
-        else:
+        if worker_target is None:
             # Two different states wear the same timeout. A worker that
             # answers is one this machine can reach, so what it says about
             # itself is the extension's own behaviour and stays a failure —
@@ -963,26 +1000,13 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
             # target and refuses every debugger connection to it, which is a
             # property of the machine and skips like the launch steps do.
             if answered:
-                state = 'unreadable'
-                try:
-                    state = _cdp_eval(
-                        node, worker_target,
-                        '(() => { try { return JSON.stringify({'
-                        'id: (typeof chrome !== "undefined" && chrome.runtime)'
-                        ' ? chrome.runtime.id : null,'
-                        'loadConfig: typeof loadConfig,'
-                        'ensureKeepAlive: typeof ensureKeepAlive,'
-                        'startStream: typeof startStream,'
-                        'version: typeof VERSION !== "undefined" ? VERSION '
-                        ': null}); } catch (e) { return "probe failed: " '
-                        '+ (e && e.message); } })()')
-                except AssertionError as why:
-                    state = f'could not be read back: {why}'
+                states = [_worker_state(node, item['webSocketDebuggerUrl'])
+                          for item in workers]
                 raise AssertionError(
                     'the extension service worker never finished loading: '
                     'DevTools exposed its target and the fixture page was '
-                    f'loaded to wake it. Last: {last_error}. Worker state: '
-                    f'{state}')
+                    f'loaded to wake it. Last: {last_error}. Worker states: '
+                    f'{states}')
             # Never reached at all: the target vanished, or every
             # debugger connection to it was refused. Both say the browser
             # did not get as far as running the extension, which is where
@@ -1261,6 +1285,45 @@ def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):
             except AssertionError as failure:
                 reported = str(failure)
             assert reported and '__evalPageReady' in reported, reported
+
+
+def test_the_fixture_reaches_its_own_worker_past_another_extension(tmp):
+    """A second extension's background worker is not mistaken for ours.
+
+    Every ubuntu CI leg runs a browser that carries an extension of its own,
+    so DevTools lists two service workers whose URL ends in /background.js —
+    and it lists the other one first. A fixture that took the first match
+    attached to it and polled it for declarations it does not have, which is
+    what the legs reported: a worker answering with none of them, or nothing
+    at all once that worker's target had stopped.
+    """
+    _browser_requirements()  # skips honestly where no browser exists
+    decoy = Path(tmp) / 'decoy-extension'
+    decoy.mkdir()
+    (decoy / 'manifest.json').write_text(json.dumps({
+        'manifest_version': 3,
+        'name': 'decoy',
+        'version': '1.0',
+        'background': {'service_worker': 'background.js'},
+    }), encoding='utf-8')
+    (decoy / 'background.js').write_text(
+        'globalThis.__decoyWorker = true;\n', encoding='utf-8')
+
+    token = 'decoyworkertok'
+    with _util.bridge(
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+                      'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
+        with _eval_page_server() as pages:
+            with _real_extension_page(
+                    tmp, bridge_url, token, pages + '/plain.html',
+                    extra_extensions=(decoy,)) as (_node, _page, tab_id):
+                # Reaching a value back through the bridge is what proves the
+                # configured worker was this extension's: the decoy has no
+                # stream to carry the command.
+                answer = _real_eval(bridge_url, token, tab_id, 'decoy-eval',
+                                    'return 1 + 1')
+                assert answer.get('error') is None, answer
+                assert answer.get('result') == 2, answer
 
 
 def test_a_hotfix_replays_on_a_page_that_forbids_eval_and_blob(tmp):
