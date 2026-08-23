@@ -13,7 +13,7 @@ format is the thing being versioned, and both ends have to claim the same one.
 
 from collections.abc import Iterable
 
-__version__ = "0.18.0"
+__version__ = "0.18.1"
 
 _REQUEST_FIELD_CARRIERS = {
     'token': 'token',
