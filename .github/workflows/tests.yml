@@ -5,9 +5,9 @@ name: tests
 # /var to /private/var) and process teardown all differ per platform, and all
 # four are load-bearing here.
 #
-# No install step: the bridge and the CLI are stdlib-only on purpose. The MCP
-# server is the one part with dependencies, and its suite skips when they are
-# absent rather than failing.
+# The bridge and the CLI are stdlib-only on purpose. The MCP server is the one
+# part with dependencies, so the matrix installs the package and its mcp extra
+# rather than letting that suite skip.
 
 on:
   push:
@@ -70,7 +70,7 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --wheel
 
-      - name: Install it with no checkout in reach and run every command
+      - name: Install it with no checkout in reach and run its entry point
         run: |
           python -m venv "$RUNNER_TEMP/probe"
           "$RUNNER_TEMP/probe/bin/pip" install dist/*.whl
