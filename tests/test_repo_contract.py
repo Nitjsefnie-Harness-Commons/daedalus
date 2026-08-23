@@ -876,13 +876,22 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         last_error = 'no evaluation was attempted'
         while time.time() < deadline:
             try:
+                # What is asserted is that the worker's own script ran to
+                # the end: a script that threw defines none of these.
+                # Waiting on keepaliveTimer waited on the async boot chain
+                # instead, and a worker that answers with the timer still
+                # unset — which is what the ubuntu legs reported — is a
+                # different thing from a worker that never loaded. The
+                # fixture configures the extension explicitly two steps
+                # below, so it does not need that chain to have finished.
                 if _cdp_eval(
                         node, worker_target,
-                        '(() => { try { return typeof keepaliveTimer !== '
-                        '"undefined" && keepaliveTimer !== null; } '
+                        '(() => { try { return typeof loadConfig === '
+                        '"function" && typeof ensureKeepAlive === "function" '
+                        '&& typeof startStream === "function"; } '
                         'catch (_) { return false; } })()') is True:
                     break
-                last_error = 'the worker answered, keepaliveTimer unset'
+                last_error = 'the worker answered without its declarations'
             except AssertionError as failure:
                 last_error = f'evaluating in the worker failed: {failure}'
                 try:
@@ -899,7 +908,7 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
             time.sleep(0.05)
         else:
             raise AssertionError(
-                'the extension service worker never finished booting: '
+                'the extension service worker never finished loading: '
                 'DevTools exposed its target and the fixture page was '
                 f'loaded to wake it. Last: {last_error}')
 
@@ -910,7 +919,8 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         configured = _cdp_eval(
             node, worker_target,
             '(async () => { await chrome.storage.local.set(' + storage
-            + '); await loadConfig(); stopStream(); startStream(); '
+            + '); await loadConfig(); ensureKeepAlive(); stopStream(); '
+            + 'startStream(); '
             + 'return config.token === ' + json.dumps(token)
             + ' && config.serverUrl === ' + json.dumps(bridge_url)
             + '; })()')
