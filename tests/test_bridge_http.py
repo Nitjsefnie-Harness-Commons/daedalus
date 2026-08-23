@@ -106,16 +106,26 @@ def _stream_response(base, token, tab=None):
     return conn, conn.getresponse()
 
 
-def _read_stream_data(base, token, tab=None):
-    """Read the first data payload from a real SSE stream."""
+def _read_stream_data(base, token, tab=None, timeout=30):
+    """Read the first data payload from a real SSE stream.
+
+    Bounded by the same monotonic deadline as _next_stream_data, and for the
+    same reason: the stream's keepalives arrive more often than the
+    connection's socket timeout and reset it, so a read bounded only by the
+    socket waits out a lost command for as long as the bridge stays healthy.
+    The ceiling is generous — it bounds waiting for a frame the bridge may
+    legitimately need time to deliver under load, never what is asserted
+    about the frame.
+    """
     conn, response = _stream_response(base, token, tab)
     try:
         assert response.status == 200, response.status
-        while True:
-            line = response.readline()
-            assert line, 'stream closed before sending a data frame'
-            if line.startswith(b'data: '):
-                return json.loads(line[len(b'data: '):])
+        try:
+            return _next_stream_data(response, timeout=timeout)
+        except AssertionError as failure:
+            raise AssertionError(
+                f'{failure}: waiting on the stream for '
+                f'token={token!r} tab={tab!r}') from failure
     finally:
         response.close()
         conn.close()
@@ -272,6 +282,31 @@ def test_stream_derived_queue_name_matches_command_enqueue(tmp):
         assert streamed['id'] == 'boundary-stream', streamed
 
         _assert_oversize_stream_matches_enqueue(base)
+
+
+def test_a_lost_command_ends_the_read_instead_of_riding_keepalives(tmp):
+    """An undelivered command must fail its reader, not outlive the suite.
+
+    The stream's keepalives reset the connection's socket timeout, and they
+    arrive more often than that timeout, so a reader bounded only by the
+    socket waits for exactly as long as the bridge stays healthy: a lost
+    command hangs the run with no diagnosis instead of failing with one.
+    """
+    outcome = []
+    with _util.bridge(
+            tmp, env={'DAEDALUS_STREAM_KEEPALIVE': '1'}) as (base, _docroot):
+        def read():
+            try:
+                _read_stream_data(base, TOK, 'nothing-is-sent-here', timeout=3)
+                outcome.append('a data frame arrived on an idle stream')
+            except AssertionError as failure:
+                outcome.append(str(failure))
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(timeout=20)
+        assert not reader.is_alive(), 'the read is still riding keepalives'
+    assert outcome and 'within 3 seconds' in outcome[0], outcome
 
 
 def test_stream_modes_deliver_end_to_end(tmp):
