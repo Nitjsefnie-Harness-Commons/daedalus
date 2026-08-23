@@ -42,7 +42,7 @@ reports the failed MCP bootstrap at startup and `/mcp` is not served.
 2. **Tab IDs**: Chrome's native `tabs` API — each tab is identified by its Chrome `tabId`, registered on create/update with a 30s `chrome.alarms` heartbeat
 3. **Single SSE stream**: `background.js` opens one persistent `fetch` SSE connection (`tab=extension`) and dispatches incoming commands to the right tab
 4. **Page bridge**: `content.js` (ISOLATED world) relays `window.GM` messages between background and `page.js` (MAIN world). Eval uses `chrome.scripting` MAIN-world injection first. A source-free dynamic-compilation probe routes CSP-blocked pages to CDP; failure to attach there reaches the page relay. Every channel executes with page `MAIN`-world semantics.
-5. **Hotfixes**: Stored in the extension-wide `chrome.storage.local` key `daedalus-hotfixes` (not per-token), replayed in each eligible top-level page on load, and version-gated for non-permanent fixes. Rotating the token neither isolates nor clears this store.
+5. **Hotfixes**: Stored in the extension-wide `chrome.storage.local` key `daedalus-hotfixes` (not per-token), replayed by the background in each eligible top-level page on load — MAIN-world injection, or CDP where page CSP forbids dynamic compilation — and version-gated for non-permanent fixes. Rotating the token neither isolates nor clears this store.
 
 ## Sending Commands
 
@@ -345,12 +345,12 @@ with `GM.getValue('daedalus-token')` or repoint the bridge with
 `GM.setValue('daedalus-server', ...)`, silently. `tests/test_repo_contract.py`
 pins the rule.
 
-Hotfix source is deliberately page-delivered state, not confidential extension
-state. `content.js` reads the `daedalus-hotfixes` record, selects permanent
-fixes plus non-permanent fixes matching the extension version, and posts the
-selected full objects into each eligible page. MAIN-world `page.js` then
-evaluates each object's `code`, so the page can observe that page-delivered
-source.
+Hotfix source is deliberately page-observable state, not confidential
+extension state. The background selects permanent fixes plus non-permanent
+fixes matching the extension version and runs each one in the page through
+the same channels ordinary eval uses — MAIN-world injection where the page
+permits dynamic compilation, CDP where it does not — so the page can observe
+the source it executes on either channel.
 
 **An MCP bearer cannot name a server-host file for the MCP process to read.**
 The MCP `put`, CSS injection/removal, and hotfix-storage tools accept inline

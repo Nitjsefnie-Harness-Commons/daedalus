@@ -196,16 +196,13 @@ function connectKeepAlive() {
 
 // ─── Hotfix replay ───
 
+// The background replays: it can reach the page through MAIN-world injection
+// and, where page CSP forbids dynamic compilation, through CDP. This script
+// can do neither — posting the source into the page left the page's own
+// `eval` and a blob <script> as the only options, and a CSP that refuses both
+// refused every fix.
 (function replayHotfixes() {
-  const version = chrome.runtime.getManifest().version;
-  chrome.storage.local.get(['daedalus-hotfixes'], (data) => {
-    const stored = data['daedalus-hotfixes'];
-    if (!stored || !stored.fixes) return;
-    const fixes = stored.fixes.filter(f => f.permanent === true || stored.version === version);
-    if (fixes.length > 0) {
-      window.postMessage({ direction: 'daedalus-hotfix-replay', fixes }, '*');
-    }
-  });
+  chrome.runtime.sendMessage({ type: 'replayHotfixes' });
 })();
 
 // ─── Boot ───

@@ -92,22 +92,6 @@
   function _stripTrailing(code) {
     return code.replace(/[\s;]+$/, '');
   }
-  function _injectScript(src) {
-    // Used by the hotfix-replay path. Best-effort: blob first, inline fallback.
-    try {
-      const b = new Blob([src], { type: 'application/javascript' });
-      const u = URL.createObjectURL(b);
-      const s = document.createElement('script');
-      s.src = u;
-      s.onload = s.onerror = () => { URL.revokeObjectURL(u); s.remove(); };
-      (document.head || document.documentElement).appendChild(s);
-    } catch (_) {
-      const s = document.createElement('script');
-      s.textContent = src;
-      (document.head || document.documentElement).appendChild(s);
-      s.remove();
-    }
-  }
   function _wrap(code, key, hasAwait, hasReturn) {
     const codeExpr = _stripTrailing(code);
     const isExpr = _isExpression(codeExpr);
@@ -125,29 +109,6 @@
       return "try{window['" + key + "']={r:(" + code + ")}}catch(e){window['" + key + "']={e:e.message||String(e)}}";
     }
   }
-
-  // ─── Hotfix replay from content script ───
-
-  window.addEventListener('message', (e) => {
-    if (e.source !== window || !e.data || e.data.direction !== 'daedalus-hotfix-replay') return;
-    const fixes = e.data.fixes || [];
-    for (const hf of fixes) {
-      try {
-        eval(hf.code);
-      } catch (err) {
-        if (_isCspEval(err)) {
-          try { _injectScript(hf.code); } catch (err2) {
-            console.error('[Daedalus] hotfix-replay (csp-fallback):' + hf.id, err2);
-          }
-        } else {
-          console.error('[Daedalus] hotfix-replay:' + hf.id, err);
-        }
-      }
-    }
-    if (fixes.length > 0) {
-      console.log('[Daedalus] Replayed ' + fixes.length + ' hotfix(es)');
-    }
-  });
 
   // ─── Receive eval commands from content script ───
 
