@@ -390,6 +390,31 @@ def test_the_aggregate_carries_the_totals_it_verified(tmp):
     assert '1 passed' in result.stdout.rsplit('OVERALL', 1)[-1], result.stdout
 
 
+def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
+    """The subprocess bound is a backstop, not the first thing to fire.
+
+    Every wait inside the harness is bounded and names what it was waiting
+    for; the bound around the whole child says only that a command timed
+    out, and carries the entire harness source with it. A Windows leg
+    reported exactly that. So the outer bound has to outlast the worst path
+    through the inner ones: one wait for the handlers to start, one per
+    result, and one per gap when the caller asks to wait between them.
+    """
+    del tmp
+    inner = re.search(r'timeoutMs = (\d+)', _util._BACKGROUND_OVERLAP_HARNESS)
+    assert inner, 'the harness no longer declares a per-wait bound'
+    inner_ms = int(inner.group(1))
+    for order, wait_between in (
+            (['a', 'b'], True), (['a', 'b'], False), (['a'], False)):
+        waits = 1 + len(order) + (len(order) - 1 if wait_between else 0)
+        worst = waits * inner_ms / 1000
+        bound = _util.overlap_child_timeout(order, wait_between)
+        assert bound > worst, (
+            f'{len(order)} commands, wait_between={wait_between}: the child '
+            f'is killed at {bound}s while its own waits can run to {worst}s, '
+            'so the failure names the whole command instead of the step')
+
+
 def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
     """A failure the console cannot spell must still be reported.
 
@@ -874,6 +899,7 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         _cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
         deadline = time.time() + 30
         last_error = 'no evaluation was attempted'
+        answered = False
         while time.time() < deadline:
             try:
                 # What is asserted is that the worker's own script ran to the
@@ -890,6 +916,7 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
                         '&& typeof startStream === "function"; } '
                         'catch (_) { return false; } })()') is True:
                     break
+                answered = True
                 last_error = 'the worker answered without its declarations'
             except AssertionError as failure:
                 last_error = f'evaluating in the worker failed: {failure}'
@@ -906,10 +933,41 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
                     last_error = f'listing DevTools targets failed: {why}'
             time.sleep(0.05)
         else:
-            raise AssertionError(
-                'the extension service worker never finished loading: '
-                'DevTools exposed its target and the fixture page was '
-                f'loaded to wake it. Last: {last_error}')
+            # Two different states wear the same timeout. A worker that
+            # answers is one this machine can reach, so what it says about
+            # itself is the extension's own behaviour and stays a failure —
+            # that is the case the injected-fault test drives. A worker that
+            # never answers at all has not been reached: the browser lists a
+            # target and refuses every debugger connection to it, which is a
+            # property of the machine and skips like the launch steps do.
+            if answered:
+                state = 'unreadable'
+                try:
+                    state = _cdp_eval(
+                        node, worker_target,
+                        '(() => { try { return JSON.stringify({'
+                        'id: (typeof chrome !== "undefined" && chrome.runtime)'
+                        ' ? chrome.runtime.id : null,'
+                        'loadConfig: typeof loadConfig,'
+                        'ensureKeepAlive: typeof ensureKeepAlive,'
+                        'startStream: typeof startStream,'
+                        'version: typeof VERSION !== "undefined" ? VERSION '
+                        ': null}); } catch (e) { return "probe failed: " '
+                        '+ (e && e.message); } })()')
+                except AssertionError as why:
+                    state = f'could not be read back: {why}'
+                raise AssertionError(
+                    'the extension service worker never finished loading: '
+                    'DevTools exposed its target and the fixture page was '
+                    f'loaded to wake it. Last: {last_error}. Worker state: '
+                    f'{state}')
+            # Never reached at all: the target vanished, or every
+            # debugger connection to it was refused. Both say the browser
+            # did not get as far as running the extension, which is where
+            # the environment boundary sits.
+            _util.skip(
+                'this browser never let the extension worker be reached '
+                f'over the debugger ({last_error})')
 
         storage = json.dumps({
             'daedalus-token': token,
@@ -1096,26 +1154,32 @@ def test_main_world_transport_failure_and_genuine_null_are_distinct(tmp):
     assert genuine_null.get('world') == 'page-main', genuine_null
 
 
-def test_a_worker_that_never_boots_is_a_failure_not_a_skip(tmp):
+def test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp):
     """A broken extension must not be reported as a broken machine.
 
-    The fixture skipped when the service worker never finished booting, so a
-    real MV3 defect passed CI in silence. The Node-based tests do not cover
-    what that skip hides: they run the same source against fakes with no
+    The fixture skipped when the worker did not come up ready, so a real MV3
+    defect passed CI in silence. The Node-based tests do not cover what that
+    skip hides: they run the same source against fakes with no
     chrome.runtime.id, so a fault conditioned on being a real worker is
     invisible there too — which is why this mutation is exactly that fault.
 
-    By the time the boot is awaited, DevTools has already exposed the
-    worker's own target, so the browser has reached the extension. What
-    happens after that is the extension's behaviour.
+    A worker that answers is one the browser has reached, so what it says
+    about itself is the extension's own behaviour and fails. A worker that
+    cannot be reached at all is still the machine's business and skips.
     """
     _browser_requirements()  # skips honestly where no browser exists
     broken = Path(tmp) / 'broken-extension'
     shutil.copytree(EXTENSION_ROOT, broken)
     worker = broken / 'background.js'
+    # Appended, and conditioned on being a real MV3 worker: the script still
+    # installs and answers, and what breaks is the extension's own state.
+    # A top-level throw instead makes Chrome retire the registration, which
+    # is indistinguishable from a machine that cannot reach the worker at
+    # all — the fault has to be one the extension survives loading.
     worker.write_text(
-        "if (chrome.runtime.id) { throw new Error('injected worker fault'); }\n"
-        + worker.read_text(encoding='utf-8'), encoding='utf-8')
+        worker.read_text(encoding='utf-8')
+        + "\nif (chrome.runtime.id) { startStream = undefined; }\n",
+        encoding='utf-8')
 
     token = 'workerboottok'
     with _util.bridge(

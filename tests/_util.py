@@ -197,6 +197,23 @@ async function waitForResultConsume() {
 """
 
 
+_OVERLAP_INNER_WAIT_S = 15
+
+
+def overlap_child_timeout(order, wait_between):
+    """How long to let the overlap harness run before killing it.
+
+    Every wait inside the harness is bounded and names what it was waiting
+    for; this bound names nothing but the command, and carries the whole
+    harness source into the failure. It is a backstop, so it has to outlast
+    the worst inner path — one wait for the handlers, one per result, and
+    one per gap when the caller waits between them — or a slow machine gets
+    the useless message instead of the useful one.
+    """
+    waits = 1 + len(order) + (len(order) - 1 if wait_between else 0)
+    return _OVERLAP_INNER_WAIT_S * (waits + 1)
+
+
 def run_background_overlap(background, commands, order, result_base='',
                            token='overlap-token', wait_between=False):
     """Run same-id cookie commands through the shipped background worker."""
@@ -207,7 +224,8 @@ def run_background_overlap(background, commands, order, result_base='',
         [node, '-e', _BACKGROUND_OVERLAP_HARNESS, str(background),
          json.dumps(commands), json.dumps(order), result_base, token,
          '1' if wait_between else '0'],
-        cwd=ROOT, capture_output=True, text=True, timeout=45)
+        cwd=ROOT, capture_output=True, text=True,
+        timeout=overlap_child_timeout(order, wait_between))
     if result.returncode != 0:
         raise AssertionError(
             (result.returncode, result.stdout, result.stderr))
