@@ -782,6 +782,22 @@ def _cdp_eval(node, target, expression):
     return response.get('result', {}).get('value')
 
 
+def _browser_version(browser):
+    """What the browser calls itself, for a skip that has to be actionable.
+
+    A leg that skips the real-browser tests says nothing useful unless it
+    says which browser refused: the fixture works on one Chromium and not on
+    whatever a runner image happens to ship, and that difference is the
+    whole question.
+    """
+    try:
+        reported = subprocess.run(
+            [browser, '--version'], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as why:
+        return f'{browser} (version unreadable: {type(why).__name__})'
+    return f'{browser} ({reported.stdout.strip() or reported.stderr.strip()})'
+
+
 def _browser_requirements():
     node = shutil.which('node')
     browser = next((path for name in (
@@ -834,7 +850,7 @@ def _wait_for_devtools(profile, process):
                 except (OSError, ValueError):
                     pass
         time.sleep(0.05)
-    _util.skip('this Chromium never exposed the fixture page and the '
+    _util.skip('this browser never exposed the fixture page and the '
                'extension service worker over DevTools')
 
 
@@ -931,7 +947,13 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
                     last_error = 'no service worker target is listed any more'
                 except (OSError, ValueError) as why:
                     last_error = f'listing DevTools targets failed: {why}'
-            time.sleep(0.05)
+            # Every attempt spawns a node process to speak CDP. At twenty a
+            # second that is six hundred processes over this window, and on
+            # a two-core runner the connections start failing for want of
+            # resources rather than because the worker is unwell — which is
+            # what the ubuntu legs reported while the worker's own state
+            # read back healthy.
+            time.sleep(0.5)
         else:
             # Two different states wear the same timeout. A worker that
             # answers is one this machine can reach, so what it says about
@@ -967,7 +989,8 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
             # the environment boundary sits.
             _util.skip(
                 'this browser never let the extension worker be reached '
-                f'over the debugger ({last_error})')
+                f'over the debugger: {_browser_version(browser)} — '
+                f'{last_error}')
 
         storage = json.dumps({
             'daedalus-token': token,
@@ -991,7 +1014,7 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
                     node, page_target,
                     'globalThis.__evalPageReady === true') is True:
                 break
-            time.sleep(0.05)
+            time.sleep(0.25)  # one node process per attempt; see above
         else:
             raise AssertionError(
                 'the fixture page never set __evalPageReady: ' + page_url)
