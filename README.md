@@ -25,6 +25,17 @@ For multi-tab parallel scraping, disable Chrome's background tab throttling:
 chrome --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding
 ```
 
+The bridge itself (`server.py`) is stdlib-only and needs no install. The CLI
+and the in-process MCP endpoint are the Python package in this repository:
+
+```bash
+pip install .            # the `daedalus` CLI
+pip install ".[mcp]"     # ... and the MCP endpoint's dependencies
+```
+
+Without the `mcp` extra the bridge still starts and serves everything else; it
+reports the failed MCP bootstrap at startup and `/mcp` is not served.
+
 ## How It Works
 
 1. **Token**: Generated once on install via `crypto.randomUUID()`, stored in `chrome.storage.local`
@@ -35,7 +46,7 @@ chrome --disable-background-timer-throttling --disable-backgrounding-occluded-wi
 
 ## Sending Commands
 
-Daedalus exposes its extension command surface as an MCP server at `<your-bridge>/mcp` (streamable-HTTP transport). Before dispatching a request, it requires the Bearer value to exactly match the bridge token resolved through the CLI's existing configuration path: `TOKEN` overrides `DAEDALUS_TOKEN`, including an optional `_settings` provider. With no configured token, the MCP surface fails closed with `401`. Add it to Claude Code (or any MCP client) with:
+Daedalus exposes its extension command surface as an MCP server at `<your-bridge>/mcp` (streamable-HTTP transport). Before dispatching a request, it requires the Bearer value to exactly match the bridge token resolved through the CLI's existing configuration path: `TOKEN` overrides `DAEDALUS_TOKEN`, including an optional `_settings` provider. With no configured token, the MCP surface fails closed with `401`. The endpoint exists only when the `mcp` extra is installed (see "Install" above). Add it to Claude Code (or any MCP client) with:
 
 ```json
 {

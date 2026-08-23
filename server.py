@@ -1610,7 +1610,13 @@ if __name__ == '__main__':
         import mcp_server
         mcp_server.start_in_thread(f'http://127.0.0.1:{bridge_port}')
     except Exception as e:
-        print(f'[Daedalus] MCP bootstrap failed: {_log_safe(e)}', flush=True)
+        # ASCII only, and it names the install: without the optional
+        # dependencies the bridge otherwise starts normally and /mcp simply
+        # is not there, which reads as a client problem rather than a
+        # missing extra.
+        print('[Daedalus] MCP bootstrap failed, so /mcp is not served - '
+              'install its dependencies with: pip install ".[mcp]" - '
+              f'{_log_safe(e)}', flush=True)
     # ASCII only, deliberately: this line is the bridge's sole readiness
     # signal, and a console whose code page cannot encode a decorative
     # character raises rather than degrading, so the announcement would be
