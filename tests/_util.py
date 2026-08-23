@@ -337,19 +337,23 @@ _drawn_ports = set()
 
 
 def free_port():
-    """A port nothing is listening on, for a listener that cannot announce one.
+    """A port nothing is listening on, for a test that wants a dead address.
 
-    The bridge fixture no longer uses this: its child binds port 0 and names
-    the port it actually got on its Listening line, so there is no window
-    between choosing a number and binding it. The remaining callers are the
-    MCP listener tests, whose uvicorn startup cannot report the port back
-    through an existing channel; there the release/rebind window is handled
-    by retrying only a verified startup EADDRINUSE. The same-process half of
-    the window stays closed outright: a number this helper has handed out is
-    never handed out again, so a port a test reserved for one purpose cannot
-    be reallocated to another started afterwards. The redraw is bounded: a
-    process that has handed out a substantial fraction of the ephemeral range
-    gets an explicit RuntimeError rather than a silent infinite retry.
+    No fixture draws numbers any more: both the bridge child and the MCP
+    listener bind port 0 and announce the port they actually got, so there is
+    no window between choosing a number and binding it. What is left is the
+    opposite need — the CLI connection-failure test, which wants an address
+    it can be sure nothing answers on, and never binds it at all.
+
+    Two tests still replace this helper with a squatted port. They are
+    guarding the fixtures rather than calling it: if a fixture went back to
+    drawing a number, it would bind the squatter's port and fail.
+
+    A number this helper has handed out is never handed out again, so a port
+    one test reserved cannot be reallocated to another started afterwards.
+    The redraw is bounded: a process that has handed out a substantial
+    fraction of the ephemeral range gets an explicit RuntimeError rather than
+    a silent infinite retry.
     """
     for _attempt in range(100):
         with socket.socket() as s:
