@@ -335,7 +335,9 @@ def _serve_crash_line(mod, failure):
     """Run _serve with its app factory raising `failure`, capturing the crash
     line through a strict-encoding stderr — the condition that used to turn
     the diagnostic itself into the traceback."""
-    def crash():
+    # The stub stands in for the real factory, which _serve calls with the
+    # transport-security settings, so it has to accept what that call passes.
+    def crash(**_settings):
         raise failure
     mod.mcp.streamable_http_app = crash
     buf = io.BytesIO()
@@ -1142,7 +1144,7 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
     def crashing_loader(base, port):
         mod = real_loader(base, port)
 
-        def crash():
+        def crash(**_settings):
             raise RuntimeError('address already in use')
         mod.mcp.streamable_http_app = crash
         return mod

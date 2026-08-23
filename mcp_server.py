@@ -13,7 +13,7 @@ import hmac, json, os, socket, sys, threading
 from contextvars import ContextVar
 from typing import Any
 import httpx
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import MCPServer, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -29,9 +29,10 @@ LOCAL_URL = os.environ.get(
     'DAEDALUS_LOCAL_URL',
     f'http://127.0.0.1:{os.environ.get("DAEDALUS_PORT", "8081")}')
 MCP_PORT = int(os.environ.get('DAEDALUS_MCP_PORT', '8086'))
-# FastMCP auto-enables DNS rebinding protection when host is localhost; include the
-# public hostname the reverse proxy fronts us with, so proxied requests are
-# not rejected with a 421.
+# The app auto-enables DNS rebinding protection for a localhost bind only when
+# it is given no settings of its own; these are passed explicitly, so the list
+# has to include the public hostname the reverse proxy fronts us with or
+# proxied requests are rejected with a 421.
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
     'DAEDALUS_MCP_ALLOWED_HOSTS',
     '127.0.0.1:*,localhost:*'
@@ -39,13 +40,7 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
 
 _token: ContextVar[str] = ContextVar('daedalus_token', default='')
 
-mcp = FastMCP(
-    'daedalus', host='127.0.0.1', port=MCP_PORT,
-    transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=ALLOWED_HOSTS,
-    ),
-)
+mcp = MCPServer('daedalus')
 
 
 @mcp.tool()
@@ -772,7 +767,12 @@ _bound = threading.Event()
 def _serve():
     global bound_port, startup_error
     try:
-        app = mcp.streamable_http_app()
+        app = mcp.streamable_http_app(
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=ALLOWED_HOSTS,
+            ),
+        )
         app.add_middleware(_BearerAuth)
         import uvicorn
         # Bind ourselves and hand the socket over: the actual port is known
