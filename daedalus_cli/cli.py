@@ -55,6 +55,21 @@ def _query_path(path, params):
     return f'{path}?{query}' if query else path
 
 
+def _http_error_detail(e):
+    """The body of a failed response, JSON-decoded when it is JSON.
+
+    An HTTPError body can only be read once. Reading it inside the JSON
+    attempt and again in the fallback left the fallback with an empty
+    string, so a front end answering with a plain-text page was reported as
+    a status and nothing else.
+    """
+    raw = e.read()
+    try:
+        return json.loads(raw)
+    except Exception:
+        return raw.decode(errors='replace')
+
+
 def api(method, path, body=None):
     url = URL + path
     data = json.dumps(body).encode() if body else None
@@ -64,11 +79,7 @@ def api(method, path, body=None):
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        try:
-            err = json.loads(e.read())
-        except Exception:
-            err = e.read().decode()
-        sys.exit(f'HTTP {e.code}: {err}')
+        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
 
@@ -95,11 +106,7 @@ def api_delete(path, body):
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        try:
-            err = json.loads(e.read())
-        except Exception:
-            err = e.read().decode()
-        sys.exit(f'HTTP {e.code}: {err}')
+        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
 
@@ -389,11 +396,7 @@ def do_segment_status(args):
     except urllib.error.HTTPError as e:
         if e.code == 409:
             sys.exit(f'segment-status: job "{args.job}" is owned by a different token')
-        try:
-            err = json.loads(e.read())
-        except Exception:
-            err = e.read().decode()
-        sys.exit(f'HTTP {e.code}: {err}')
+        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
     res = api('GET', _query_path(

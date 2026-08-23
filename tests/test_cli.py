@@ -7,10 +7,13 @@ against a model of it. The CLI is always run as a subprocess, the way a shell
 would run it.
 """
 import base64
+import contextlib
+import http.server
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -681,6 +684,71 @@ def test_segment_status_subcommand_reports_a_foreign_job_cleanly(tmp):
         assert r.returncode != 0, (r.returncode, r.stdout)
         assert 'owned by a different token' in r.stderr, r.stderr
         assert 'HTTP 409' not in r.stderr, r.stderr
+
+
+class _RefusingFrontEndHandler(http.server.BaseHTTPRequestHandler):
+    """Answer every request the way a proxy that never reached the bridge does.
+
+    The body is HTML rather than JSON on purpose: that is the shape a front
+    end in front of the bridge produces, and the CLI has to carry its text
+    through rather than reporting a status with nothing after it.
+    """
+
+    BODY = b'<html><body>502 upstream is not answering</body></html>'
+
+    def _refuse(self):
+        declared = self.headers.get('Content-Length')
+        if declared:
+            self.rfile.read(int(declared))
+        self.send_response(502)
+        self.send_header('Content-Type', 'text/html')
+        self.send_header('Content-Length', str(len(self.BODY)))
+        self.end_headers()
+        self.wfile.write(self.BODY)
+
+    do_GET = _refuse
+    do_PUT = _refuse
+    do_POST = _refuse
+    do_DELETE = _refuse
+
+    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
+        del format, args
+
+
+@contextlib.contextmanager
+def _refusing_front_end():
+    server = http.server.ThreadingHTTPServer(
+        ('127.0.0.1', 0), _RefusingFrontEndHandler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        yield f'http://127.0.0.1:{server.server_address[1]}'
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=10)
+
+
+def test_a_non_json_error_body_reaches_the_operator(tmp):
+    """An error the bridge did not write must still arrive with its text.
+
+    Every one of these paths read the body once to try JSON and then read it
+    again for the fallback; the second read of a consumed response is empty,
+    so the operator saw "HTTP 502:" and nothing else.
+    """
+    del tmp
+    with _refusing_front_end() as base:
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        commands = (
+            ['tabs'],                               # api
+            ['uploads', '--delete', '--id', 'x'],   # api_delete
+            ['segment-status', 'somejob'],          # the segment-job mint
+        )
+        for command in commands:
+            r = run_cli(command, env)
+            assert r.returncode != 0, (command, r.returncode, r.stdout)
+            assert 'HTTP 502' in r.stderr, (command, r.stderr)
+            assert 'upstream is not answering' in r.stderr, (command, r.stderr)
 
 
 def test_connection_failure_is_a_clean_error(tmp):
