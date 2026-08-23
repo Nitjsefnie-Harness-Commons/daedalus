@@ -204,17 +204,16 @@ def _gitignore_invalid_output_result(tmp, failing_command):
     real_run = generator.subprocess.run
 
     def emit_invalid_bytes(args, **kwargs):
+        # Raise the decode failure rather than trying to provoke one from a
+        # real child. subprocess decodes with the locale, and the byte that
+        # is undecodable as UTF-8 is an ordinary character under the Windows
+        # code page — so the previous spelling of this injection simulated
+        # nothing there and the generator succeeded. What the generator
+        # contracts is that a decode failure at either Git boundary becomes
+        # an operator-shaped result, and that is exactly what this asks it.
         if failing_command in args:
-            return real_run(
-                [sys.executable, '-c',
-                 'import os; os.write(1, bytes([255]))'],
-                capture_output=True, text=True, encoding='utf-8',
-                # Pinned: byte 255 is undecodable as UTF-8 but a perfectly
-                # good 'y with diaeresis' under the Windows code page, so
-                # inheriting the locale meant this simulated nothing there
-                # and the generator succeeded instead of reporting.
-                check=kwargs.get('check', False),
-                timeout=kwargs.get('timeout'))
+            raise UnicodeDecodeError(
+                'utf-8', b'\xff', 0, 1, 'invalid start byte')
         return real_run(args, **kwargs)
 
     generator.subprocess.run = emit_invalid_bytes
