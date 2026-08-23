@@ -63,6 +63,7 @@
 !/.github/workflows/actionlint.yml
 !/.github/workflows/lint.yml
 !/.github/workflows/release.yml
+!/.github/workflows/speed.yml
 !/.github/workflows/tests.yml
 !/.github/workflows/types.yml
 
@@ -120,6 +121,11 @@
 !/scripts/check_versions.py
 !/scripts/gen_gitignore.py
 !/scripts/mcp_probe.py
+
+# ─── scripts/ci ───
+!/scripts/
+!/scripts/ci/
+!/scripts/ci/compare_durations.py
 
 # ─── tests ───
 !/tests/

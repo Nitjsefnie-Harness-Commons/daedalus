@@ -584,13 +584,20 @@ def runner(tests, tmp_prefix='daedalustests_'):
     """
     _report_safely()
     failed, skipped = [], []
+    durations = {}
     with tempfile.TemporaryDirectory(prefix=tmp_prefix) as tmp:
         tmp = os.path.realpath(tmp)
         for t in tests:
             d = os.path.join(tmp, t.__name__)
             os.makedirs(d, exist_ok=True)
+            started = time.monotonic()
             try:
                 t(d)
+                # Only a passing test is timed. The speed comparison
+                # intersects the two sides on name, so a test that failed on
+                # one of them has to be absent rather than present with a
+                # duration that measures how long it took to give up.
+                durations[t.__name__] = time.monotonic() - started
                 print(f'  PASS  {t.__name__}')
             except Skipped as e:
                 skipped.append(t.__name__)
@@ -607,11 +614,11 @@ def runner(tests, tmp_prefix='daedalustests_'):
     if skipped:
         summary += f', {len(skipped)} skipped'
     print(summary)
-    _write_summary(len(tests), passed, len(skipped), len(failed))
+    _write_summary(len(tests), passed, len(skipped), len(failed), durations)
     return 1 if failed else 0
 
 
-def _write_summary(total, passed, skipped, failed):
+def _write_summary(total, passed, skipped, failed, durations=None):
     """Hand the counts to the aggregate runner, when one asked for them.
 
     The aggregate cannot see them otherwise: every suite streams straight to
@@ -619,6 +626,10 @@ def _write_summary(total, passed, skipped, failed):
     out of it would trade live output for the number. A run whose coverage
     was entirely skipped has to be distinguishable from a verified one, and
     an exit code alone cannot say that.
+
+    `tests` carries one duration per PASSING test, for the same reader and the
+    same reason: the speed comparison needs per-test numbers, because a total
+    moves whenever a test is added or removed.
     """
     path = os.environ.get('DAEDALUS_TEST_SUMMARY')
     if not path:
@@ -626,7 +637,8 @@ def _write_summary(total, passed, skipped, failed):
     try:
         with open(path, 'w', encoding='utf-8') as handle:
             json.dump({'total': total, 'passed': passed,
-                       'skipped': skipped, 'failed': failed}, handle)
+                       'skipped': skipped, 'failed': failed,
+                       'tests': durations or {}}, handle)
     except OSError:
         pass
 

@@ -3345,6 +3345,87 @@ def _copy_versioned_tree(dest):
     return checker
 
 
+def _durations_tree(tmp, side, rounds):
+    """Write one summary directory per round, as run_tests.py would."""
+    dirs = []
+    for index, tests in enumerate(rounds, start=1):
+        d = Path(tmp) / f'{side}-{index}'
+        d.mkdir(parents=True)
+        (d / 'test_suite.json').write_text(json.dumps({
+            'total': len(tests), 'passed': len(tests),
+            'skipped': 0, 'failed': 0, 'tests': tests,
+        }), encoding='utf-8')
+        dirs.append(str(d))
+    return dirs
+
+
+def _compare_durations():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'compare_durations.py')
+
+
+def test_speed_comparison_takes_each_test_s_minimum_across_rounds(tmp):
+    """The floor is what moves when code gets slower, so rounds take a min.
+
+    A single test can move by multiples between two runs of identical code.
+    Averaging carries that noise into the verdict; the minimum estimates the
+    quantity that actually changes.
+    """
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'a': 9.0}, {'a': 1.0}])
+    head = _durations_tree(tmp, 'head', [{'a': 8.0}, {'a': 1.0}])
+    assert compare.side_durations(base) == {'a': 1.0}
+    assert compare.main(['--base', *base, '--head', *head]) == 0
+
+
+def test_speed_comparison_ignores_a_test_only_one_side_ran(tmp):
+    """Adding or removing a test must not move the number.
+
+    This is the whole reason the comparison is per-test rather than a suite
+    total: a release that grew three tests would otherwise read as a
+    regression, and one that deleted three as an improvement.
+    """
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'shared': 1.0, 'gone': 50.0}])
+    head = _durations_tree(tmp, 'head', [{'shared': 1.0, 'added': 50.0}])
+    shared, base_total, head_total, _moves = compare.compare(
+        compare.side_durations(base), compare.side_durations(head))
+    assert shared == ['shared'], shared
+    assert (base_total, head_total) == (1.0, 1.0), (base_total, head_total)
+    assert compare.main(['--base', *base, '--head', *head]) == 0
+
+
+def test_speed_comparison_fails_only_past_its_budget(tmp):
+    """A slowdown inside the budget passes; one past it fails."""
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'a': 1.0}])
+    within = _durations_tree(tmp, 'within', [{'a': 1.2}])
+    past = _durations_tree(tmp, 'past', [{'a': 1.4}])
+    assert compare.main(['--base', *base, '--head', *within,
+                         '--max-regression', '0.30']) == 0
+    assert compare.main(['--base', *base, '--head', *past,
+                         '--max-regression', '0.30']) == 1
+
+
+def test_speed_comparison_passes_when_the_baseline_predates_durations(tmp):
+    """A release from before the runner timed tests is not a fast release.
+
+    Every release that exists when this lands reports no per-test durations,
+    so a comparator that treated the empty side as zero would fail every run
+    until the next release. It says so and passes instead.
+    """
+    compare = _compare_durations()
+    old = Path(tmp) / 'base-1'
+    old.mkdir(parents=True)
+    (old / 'test_suite.json').write_text(json.dumps({
+        'total': 1, 'passed': 1, 'skipped': 0, 'failed': 0,
+    }), encoding='utf-8')
+    head = _durations_tree(tmp, 'head', [{'a': 1.0}])
+    summary = Path(tmp) / 'summary.md'
+    assert compare.main(['--base', str(old), '--head', *head,
+                         '--summary-file', str(summary)]) == 0
+    assert 'no per-test durations' in summary.read_text(encoding='utf-8')
+
+
 def test_check_versions_passes_on_tree(tmp):
     r = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'check_versions.py')],
                        capture_output=True, text=True, timeout=60)
@@ -3456,7 +3537,7 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
 
 
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
-    """The scanner input is the non-empty set of 66 tracked release paths."""
+    """The scanner input is the non-empty set of 68 tracked release paths."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
@@ -3467,7 +3548,7 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(_iter_tree_files())
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 66, f'expected 66 tracked paths, found {len(tracked)}'
+    assert len(tracked) == 68, f'expected 68 tracked paths, found {len(tracked)}'
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run every suite; exit non-zero if any suite fails or ran no coverage."""
+import contextlib
 import json
 import os
 import subprocess
@@ -24,6 +25,18 @@ def _read_summary(path):
     return summary
 
 
+@contextlib.contextmanager
+def _summary_dir(keep):
+    """Where the per-suite summaries are written for this run."""
+    if keep:
+        path = Path(keep)
+        path.mkdir(parents=True, exist_ok=True)
+        yield str(path)
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        yield tmp
+
+
 def main() -> int:
     suites = sorted((ROOT / "tests").glob("test_*.py"))
     if not suites:
@@ -31,7 +44,12 @@ def main() -> int:
         return 1
     failed, empty = [], []
     passed = skipped = 0
-    with tempfile.TemporaryDirectory() as summaries:
+    # The per-suite summaries are a temp file nobody keeps, because the
+    # aggregate below is all this program reports. The speed comparison wants
+    # the durations inside them, so it names a directory to keep them in
+    # rather than this program growing a second output of its own.
+    keep = os.environ.get("DAEDALUS_TEST_SUMMARY_DIR")
+    with _summary_dir(keep) as summaries:
         for suite in suites:
             print(f"=== {suite.name} ===", flush=True)
             summary_path = Path(summaries) / f"{suite.stem}.json"
