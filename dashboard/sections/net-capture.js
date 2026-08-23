@@ -71,19 +71,26 @@ export function mount(container, bus) {
   root.querySelector('[data-role=start]').addEventListener('click', async () => {
     try {
       const r = await extCmd('net-capture', fields(true));
-      statusEl.innerHTML = r.already
-        ? `<span class="amber">already capturing</span> on tab ${r.tabId} · ${r.buffered} buffered`
-        : `<span class="cyan">capturing</span> on tab ${r.tabId}`;
+      clear(statusEl);
+      statusEl.append(r.already
+        ? h('span', { class: 'amber' }, 'already capturing')
+        : h('span', { class: 'cyan' }, 'capturing'));
+      statusEl.append(r.already
+        ? ` on tab ${r.tabId} · ${r.buffered} buffered`
+        : ` on tab ${r.tabId}`);
     } catch (e) { toast(errMsg(e), 'err'); }
   });
 
   root.querySelector('[data-role=poll]').addEventListener('click', async () => {
     try {
       const r = await extCmd('net-capture-get', fields(false), { timeout: 30000 });
-      statusEl.innerHTML = `<span class="cyan">${r.count}</span> request(s) on tab ${r.tabId}`;
+      clear(statusEl);
+      statusEl.append(h('span', { class: 'cyan' }, String(r.count)),
+                      ` request(s) on tab ${r.tabId}`);
       render(r.requests || []);
     } catch (e) {
-      statusEl.innerHTML = '<span class="red">' + errMsg(e) + '</span>';
+      clear(statusEl);
+      statusEl.append(h('span', { class: 'red' }, errMsg(e)));
     }
   });
 
@@ -91,10 +98,14 @@ export function mount(container, bus) {
     try {
       const r = await extCmd('net-capture-stop', fields(false), { timeout: 30000 });
       if (!r.stopped) {
-        statusEl.innerHTML = '<span class="dim">' + (r.reason || 'not capturing') + '</span>';
+        clear(statusEl);
+        statusEl.append(
+          h('span', { class: 'dim' }, String(r.reason || 'not capturing')));
         return;
       }
-      statusEl.innerHTML = `<span class="green">stopped</span>  tab=${r.tabId}  captured=${r.count}`;
+      clear(statusEl);
+      statusEl.append(h('span', { class: 'green' }, 'stopped'),
+                      `  tab=${r.tabId}  captured=${r.count}`);
       render(r.requests || []);
     } catch (e) { toast(errMsg(e), 'err'); }
   });

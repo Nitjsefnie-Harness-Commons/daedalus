@@ -88,7 +88,8 @@ export function mount(container, bus) {
       );
       loadRecent();
     } catch (e) {
-      meta.innerHTML = '<span class="red">' + errMsg(e) + '</span>';
+      clear(meta);
+      meta.append(h('span', { class: 'red' }, errMsg(e)));
       toast(errMsg(e), 'err');
     } finally {
       captureBtn.disabled = false;

@@ -1,6 +1,7 @@
 // Daedalus dashboard — entry point. Loads sections, boots SSE, wires meta bars.
 
 import { getToken, getServer } from './api.js';
+import { h, clear } from './sections/_util.js';
 import { start as startSse, subscribe, lastEventAt } from './sse.js';
 
 import { mount as mountOverview } from './sections/overview.js';
@@ -72,14 +73,16 @@ function mountSections() {
     const name = el.dataset.section;
     const fn = MOUNTS[name];
     if (!fn) {
-      el.innerHTML = `<div class="dim italic">(no module for "${name}")</div>`;
+      clear(el);
+      el.appendChild(h('div', { class: 'dim italic' }, `(no module for "${name}")`));
       continue;
     }
     try {
       fn(el, bus);
     } catch (e) {
       console.error(`[mount] ${name} failed`, e);
-      el.innerHTML = `<pre class="pane err">mount failed: ${e.message}</pre>`;
+      clear(el);
+      el.appendChild(h('pre', { class: 'pane err' }, `mount failed: ${e.message}`));
     }
   }
 }

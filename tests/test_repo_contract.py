@@ -2754,6 +2754,113 @@ const fs = require('fs');
 """
 
 
+def _blank_js_comments(source):
+    """Return `source` with comments blanked and string literals intact.
+
+    A single forward walk, because a `//` inside a string literal does not
+    start a comment. Regex literals are NOT modelled: one containing a quote
+    or a comment opener would desynchronise this walk. The dashboard sources
+    contain none, and the scanner below would report a violation rather than
+    stay silent if that changed, which is the direction an unmodelled shape
+    should fail in.
+    """
+    out = []
+    index, end = 0, len(source)
+    quote = None
+    while index < end:
+        char = source[index]
+        if quote:
+            out.append(char)
+            if char == '\\' and index + 1 < end:
+                out.append(source[index + 1])
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in '\'"`':
+            quote = char
+            out.append(char)
+            index += 1
+            continue
+        if char == '/' and source[index + 1:index + 2] == '/':
+            while index < end and source[index] != '\n':
+                out.append(' ')
+                index += 1
+            continue
+        if char == '/' and source[index + 1:index + 2] == '*':
+            while index < end and source[index:index + 2] != '*/':
+                out.append('\n' if source[index] == '\n' else ' ')
+                index += 1
+            out.append('  ')
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return ''.join(out)
+
+
+def _expression_after(source, start):
+    """Return the text from `start` to the statement's terminating `;`."""
+    index, end = start, len(source)
+    depth = 0
+    quote = None
+    while index < end:
+        char = source[index]
+        if quote:
+            if char == '\\':
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in '\'"`':
+            quote = char
+        elif char in '([{':
+            depth += 1
+        elif char in ')]}':
+            depth -= 1
+        elif char == ';' and depth == 0:
+            return source[start:index]
+        index += 1
+    return source[start:]
+
+
+_CONSTANT_MARKUP = re.compile(
+    r"^(?:'(?:[^'\\\n]|\\.)*'"
+    r'|"(?:[^"\\\n]|\\.)*"'
+    r'|`(?:[^`\\$]|\\.|\$(?!\{))*`)$')
+
+
+def test_dashboard_never_builds_markup_from_a_value(tmp):
+    """innerHTML in the dashboard is only ever a constant.
+
+    Several catch paths concatenated an error string — or an
+    extension-supplied reason — into innerHTML, so text the dashboard did not
+    author could become markup. The rule enforced here is the one that keeps
+    itself true: a value reaches the page through text nodes or the `h`
+    helper, never through markup, so an assignment that is not a literal is a
+    violation whatever the value happens to be today. `+=` never qualifies.
+    """
+    del tmp
+    violations = []
+    sources = sorted((ROOT / 'dashboard').rglob('*.js'))
+    assert sources, 'no dashboard sources found'
+    for path in sources:
+        blanked = _blank_js_comments(path.read_text(encoding='utf-8'))
+        for match in re.finditer(r'\.innerHTML\s*(\+?=)(?!=)', blanked):
+            line = blanked.count('\n', 0, match.start()) + 1
+            expression = _expression_after(blanked, match.end()).strip()
+            if match.group(1) == '=' and _CONSTANT_MARKUP.match(expression):
+                continue
+            violations.append(
+                f'{path.relative_to(ROOT)}:{line}: '
+                f'innerHTML {match.group(1)} {expression[:80]}')
+    assert not violations, '\n'.join(violations)
+
+
 def test_dashboard_labels_eval_world_as_a_channel(tmp):
     """Dashboard text presents `world` only as execution-channel metadata."""
     del tmp

@@ -71,7 +71,8 @@ export function mount(container, bus) {
       }
       if (current && Array.from(sel.options).some(o => o.value === current)) sel.value = current;
     } catch (e) {
-      sel.innerHTML = `<option value="">(err: ${errMsg(e)})</option>`;
+      clear(sel);
+      sel.appendChild(h('option', { value: '' }, `(err: ${errMsg(e)})`));
     }
   }
   populateTabs();
@@ -113,7 +114,8 @@ export function mount(container, bus) {
       const ms = Date.now() - t0;
       resultEl.className = 'pane err';
       resultEl.textContent = errMsg(e);
-      metaEl.innerHTML = `<span class="red">error</span>  ${ms}ms`;
+      clear(metaEl);
+      metaEl.append(h('span', { class: 'red' }, 'error'), `  ${ms}ms`);
       pushHistory({ code, tabId, ms, ok: false, err: errMsg(e), ts: Date.now() });
     }
   }

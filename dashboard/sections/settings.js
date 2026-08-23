@@ -1,6 +1,6 @@
 // §12 SETTINGS — token, server URL, extension reload, broadcast caveat.
 
-import { h, toast, errMsg, armedAction } from './_util.js';
+import { h, clear, toast, errMsg, armedAction } from './_util.js';
 import { getToken, setToken, getServer, setServer, extCmd, api } from '../api.js';
 import { restart as restartSse } from '../sse.js';
 
@@ -50,6 +50,13 @@ export function mount(container, bus) {
   const statusEl = root.querySelector('[data-role=status]');
   const toggleBtn = root.querySelector('[data-role=toggle-visible]');
 
+  // Status is built from nodes, never markup: the text can carry an error
+  // string the dashboard did not author.
+  function setStatus(...parts) {
+    clear(statusEl);
+    statusEl.append(...parts);
+  }
+
   toggleBtn.addEventListener('click', () => {
     const t = tokenEl.type === 'password' ? 'text' : 'password';
     tokenEl.type = t;
@@ -69,11 +76,11 @@ export function mount(container, bus) {
     for (const el of document.querySelectorAll('[data-meta=server]')) el.textContent = srv || '(same origin)';
     try {
       await api.get('/tabs?token=' + encodeURIComponent(tok));
-      statusEl.innerHTML = '<span class="green">connected</span>';
+      setStatus(h('span', { class: 'green' }, 'connected'));
       toast('settings saved', 'ok');
       restartSse();
     } catch (e) {
-      statusEl.innerHTML = '<span class="red">server unreachable: ' + errMsg(e) + '</span>';
+      setStatus(h('span', { class: 'red' }, 'server unreachable: ' + errMsg(e)));
     }
   });
 
@@ -83,9 +90,10 @@ export function mount(container, bus) {
     const t0 = Date.now();
     try {
       const tabs = await api.get('/tabs?token=' + encodeURIComponent(tok));
-      statusEl.innerHTML = `<span class="green">ok</span>  ${tabs.length} tabs  ${Date.now() - t0}ms`;
+      setStatus(h('span', { class: 'green' }, 'ok'),
+                `  ${tabs.length} tabs  ${Date.now() - t0}ms`);
     } catch (e) {
-      statusEl.innerHTML = '<span class="red">' + errMsg(e) + '</span>';
+      setStatus(h('span', { class: 'red' }, errMsg(e)));
     }
   });
 

@@ -24,7 +24,10 @@ export function mount(container) {
       const r = await extCmd('fetch-timings', opts);
       const t = (r && r.timings) || [];
       document.querySelector('#s08 [data-sub]').textContent = `${t.length} entr${t.length === 1 ? 'y' : 'ies'}`;
-      metaEl.innerHTML = `nativeToBase64 = <span class="${r.hasNativeToBase64 ? 'green' : 'amber'}">${r.hasNativeToBase64}</span>`;
+      clear(metaEl);
+      metaEl.append('nativeToBase64 = ',
+                    h('span', { class: r.hasNativeToBase64 ? 'green' : 'amber' },
+                      String(r.hasNativeToBase64)));
       clear(listEl);
       if (t.length === 0) { listEl.appendChild(h('div', { class: 'dim italic small' }, 'ring buffer empty.')); return; }
       const ok = t.filter(x => !x.error);
@@ -32,7 +35,10 @@ export function mount(container) {
         const totals = ok.map(x => x.ms_total).sort((a, b) => a - b);
         const mid = totals[Math.floor(totals.length / 2)];
         const mean = totals.reduce((a, b) => a + b, 0) / totals.length;
-        metaEl.innerHTML += `  ·  median <span class="cyan">${mid.toFixed(0)}ms</span>  ·  mean ${mean.toFixed(0)}ms  ·  ${ok.length}/${t.length} ok`;
+        metaEl.append('  ·  median ',
+                      h('span', { class: 'cyan' }, `${mid.toFixed(0)}ms`),
+                      `  ·  mean ${mean.toFixed(0)}ms`
+                      + `  ·  ${ok.length}/${t.length} ok`);
       }
       const table = h('table', { class: 't' },
         h('thead', {}, h('tr', {},
