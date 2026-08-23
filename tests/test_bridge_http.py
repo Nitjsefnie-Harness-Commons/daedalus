@@ -704,6 +704,7 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
     it here, because this box's C.UTF-8 stdio would mask it), the DELIVERED
     log line used to raise UnicodeEncodeError and tear the stream down.
     """
+    _util.require_undecodable_names(tmp)
     strict = {'PYTHONIOENCODING': 'utf-8:strict'}
     with _util.bridge(tmp, env=strict) as (base, docroot):
         conn, response = _stream_response(base, TOK, tab='extension')
@@ -738,6 +739,7 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
 
 def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
     """The TTL-DROP log line takes the same raw name and must not kill the stream."""
+    _util.require_undecodable_names(tmp)
     strict = {'PYTHONIOENCODING': 'utf-8:strict'}
     with _util.bridge(tmp, env=strict) as (base, docroot):
         qdir = Path(docroot) / 'commands' / TOK
@@ -776,6 +778,7 @@ def test_startup_survives_an_undecodable_byte_in_the_data_root(tmp):
     C.UTF-8 stdio would mask it), printing it raised UnicodeEncodeError and
     the server exited 1 before ever serving a request.
     """
+    _util.require_undecodable_names(tmp)
     bad_root = os.fsencode(tmp) + b'/\xffdocroot'
     os.mkdir(bad_root)
     env = {'PYTHONIOENCODING': 'utf-8:strict',

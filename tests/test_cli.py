@@ -25,6 +25,13 @@ from daedalus_cli import __version__  # noqa: E402
 os.environ.setdefault('DAEDALUS_MCP_PORT', '0')
 
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
+
+# The CLI picks its decorative markers from what the console can encode, so a
+# test that pinned the arrow would pass here and fail on a Windows code page
+# for a CLI that was behaving correctly. What is contracted is that a marker
+# immediately precedes the id, not which glyph carries it.
+OUT_MARKS = ('\u2192', '->')
+IN_MARKS = ('\u2190', '<-')
 TOK = 'clitok'
 os.environ['TOKEN'] = ''
 os.environ['DAEDALUS_TOKEN'] = TOK
@@ -91,6 +98,37 @@ def test_result_printer_labels_eval_world_as_a_channel(tmp):
     assert '@channel=module-main' in result.stdout, result.stdout
     assert '[privileged]' not in result.stdout, result.stdout
     assert '[untrusted]' not in result.stdout, result.stdout
+
+
+def test_the_printer_survives_a_console_that_cannot_encode_it(tmp):
+    """A legacy code page degrades the output; it never aborts the command.
+
+    Windows consoles default to one — cp1252 on the hosted runners — where
+    `print` raises UnicodeEncodeError rather than degrading, and the arrow in
+    the result header used to abort `daedalus result` with a traceback and no
+    output at all. Two different things can be unencodable: the markers this
+    module chooses, which fall back to ASCII, and caller data such as a tab
+    title, which cannot be chosen and is replaced character by character.
+    Both are exercised here, because fixing only the markers would leave the
+    command still able to die on somebody's page title.
+    """
+    del tmp
+    code = (
+        'from daedalus_cli.cli import print_result\n'
+        'print_result({"id":"job7", "result":"caf\\u00e9 \\u4e16\\u754c", '
+        '"error":None, "ts":1, "token":"tok", "world":"cdp"})\n')
+    # Parent and child agree on the code page, the way a real console and the
+    # process writing to it do; decoding this child as UTF-8 would fail in the
+    # test rather than in the code under test.
+    result = subprocess.run(
+        [sys.executable, '-c', code], cwd=str(_util.ROOT),
+        env=cli_env(PYTHONIOENCODING='cp1252'), capture_output=True,
+        text=True, encoding='cp1252', timeout=60)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    assert 'UnicodeEncodeError' not in result.stderr, result.stderr
+    assert '<- job7' in result.stdout, result.stdout
+    assert '@channel=cdp' in result.stdout, result.stdout
 
 
 def test_missing_token_is_an_error(tmp):
@@ -180,7 +218,8 @@ def test_exec_no_result_enqueues_broadcast(tmp):
         r = run_cli(['exec', 'job1', 'return 1+1', '--no-result', '-b'],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode == 0, (r.returncode, r.stderr)
-        assert '→ job1' in r.stdout and 'broadcast' in r.stdout, r.stdout
+        assert any(f'{m} job1' in r.stdout for m in OUT_MARKS), r.stdout
+        assert 'broadcast' in r.stdout, r.stdout
         qdir = Path(docroot) / 'commands' / TOK
         files = sorted(qdir.glob('*.json'))
         assert len(files) == 1, files
@@ -214,7 +253,8 @@ def test_exec_full_round_trip(tmp):
                 proc.kill()
                 proc.communicate()
         assert proc.returncode == 0, (proc.returncode, out, err)
-        assert '← job7' in out and '@channel=page:cdp' in out, out
+        assert any(f'{m} job7' in out for m in IN_MARKS), out
+        assert '@channel=page:cdp' in out, out
         assert 'Hello Title' in out, out
         # The CLI consumed its own result.
         assert not (Path(docroot) / 'results' / f'{TOK}_tab9.json').exists()

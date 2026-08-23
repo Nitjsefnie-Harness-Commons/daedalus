@@ -309,6 +309,7 @@ def test_gitignore_survives_an_undecodable_byte_in_the_repo_path(tmp):
     .gitignore had already been written. Run as a subprocess because the
     strict encoding has to be in force before the interpreter starts.
     """
+    _util.require_undecodable_names(tmp)
     repo = os.fsencode(tmp) + b'/\xffrepo'
     os.mkdir(repo)
     subprocess.run(['git', '-C', repo, 'init', '-q'], check=True)

@@ -137,14 +137,60 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
 
 # ─── Result display ───
 
+def _output_markers():
+    """Pick the decorative markers this console can actually represent.
+
+    A Windows console defaults to a legacy code page — cp1252 on the hosted
+    runners — and `print` raises UnicodeEncodeError there instead of
+    degrading, so one arrow in a header aborted the command with a traceback
+    and printed nothing at all. The markers carry no information the
+    surrounding words do not, so where the stream cannot encode them they
+    become ASCII rather than the command becoming a crash.
+    """
+    fancy = {'in': '\u2190', 'out': '\u2192', 'warn': '\u26a0'}
+    encoding = getattr(sys.stdout, 'encoding', None) or 'ascii'
+    try:
+        for glyph in fancy.values():
+            glyph.encode(encoding)
+    except (LookupError, UnicodeEncodeError):
+        return {'in': '<-', 'out': '->', 'warn': '!'}
+    return fancy
+
+
+MARK = _output_markers()
+
+
+def _soften_stdio():
+    """Stop caller data from being able to abort the command.
+
+    The markers above are ours to choose; a tab title, an upload name or a
+    job id is not, and on a legacy code page any of them can be unencodable.
+    `errors='replace'` cannot fail and shows the reader that a character was
+    dropped, which is strictly better than losing the whole line to a
+    traceback. Streams an embedder has replaced with something that does not
+    reconfigure are left exactly as they are.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors='replace')
+        except (OSError, ValueError):
+            continue
+
+
+_soften_stdio()
+
+
 def validate_result(res):
     """Check result JSON has expected fields, warn on missing."""
     expected = {'id', 'result', 'error', 'ts', 'token'}
     missing = expected - set(res.keys())
     if missing:
-        print(f'⚠ Missing fields: {", ".join(sorted(missing))}', file=sys.stderr)
+        print(f'{MARK["warn"]} Missing fields: {", ".join(sorted(missing))}', file=sys.stderr)
     if 'id' in res and not isinstance(res['id'], str):
-        print(f'⚠ id is {type(res["id"]).__name__}, expected str', file=sys.stderr)
+        print(f'{MARK["warn"]} id is {type(res["id"]).__name__}, expected str', file=sys.stderr)
 
 
 def _format_eval_world(world):
@@ -159,7 +205,7 @@ def print_result(res, raw=False):
 
     validate_result(res)
 
-    hdr = f'← {res.get("id", "?")}'
+    hdr = f'{MARK["in"]} {res.get("id", "?")}'
     t = res.get('tabId', '')
     world = res.get('world', '')
     ms = res.get('exec_ms')
@@ -201,7 +247,7 @@ def send_and_wait(cmd_id, code, target_tab, wait, timeout):
 
     resp = api('PUT', '/command', payload)
     target = resp.get('target', '?')
-    print(f'→ {cmd_id} → {target}  ({len(code)} bytes)')
+    print(f'{MARK["out"]} {cmd_id} {MARK["out"]} {target}  ({len(code)} bytes)')
 
     if not wait:
         return
@@ -382,7 +428,7 @@ def do_screenshot(args):
         cmd_payload['tabId'] = int(args.chrome_tab)
 
     resp = api('PUT', '/command', {**cmd_payload, 'token': token(), 'tab': 'extension'})
-    print(f'→ screenshot → {resp.get("target", "?")}')
+    print(f'{MARK["out"]} screenshot {MARK["out"]} {resp.get("target", "?")}')
 
     timeout = args.timeout or 15
     res = wait_for_result(
@@ -394,7 +440,7 @@ def do_screenshot(args):
     result = res.get('result', {})
     path = result.get('path', '')
     size = result.get('size', 0)
-    print(f'← uploaded: {path} ({size} bytes)')
+    print(f'{MARK["in"]} uploaded: {path} ({size} bytes)')
     # Optionally save locally
     if args.output:
         ss_url = _query_path(
@@ -569,7 +615,7 @@ def do_open_tab(args):
     if args.pinned:
         fields['pinned'] = True
     result = ext_cmd('_open_tab', 'open-tab', **fields)
-    print(f'Opened tab {result.get("tabId", "?")} → {args.url}')
+    print(f'Opened tab {result.get("tabId", "?")} {MARK["out"]} {args.url}')
 
 
 def do_open_tabs(args):
@@ -583,7 +629,7 @@ def do_open_tabs(args):
     opened = result.get('opened', [])
     errors = result.get('errors', [])
     for o in opened:
-        print(f'Opened tab {o.get("tabId", "?")} → {o.get("url", "")}')
+        print(f'Opened tab {o.get("tabId", "?")} {MARK["out"]} {o.get("url", "")}')
     for e in errors:
         print(f'FAILED {e.get("url", "?")}: {e.get("error", "")}')
     print(f'{len(opened)} opened, {len(errors)} failed')
@@ -601,7 +647,7 @@ def do_ext_navigate(args):
     if args.chrome_tab:
         fields['tabId'] = int(args.chrome_tab)
     result = ext_cmd('_nav', 'navigate', **fields)
-    print(f'Navigated tab {result.get("tabId", "?")} → {args.url}')
+    print(f'Navigated tab {result.get("tabId", "?")} {MARK["out"]} {args.url}')
 
 
 def do_ext_reload(args):

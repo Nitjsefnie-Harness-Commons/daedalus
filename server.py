@@ -1572,6 +1572,12 @@ if __name__ == '__main__':
         mcp_server.start_in_thread(f'http://127.0.0.1:{bridge_port}')
     except Exception as e:
         print(f'[Daedalus] MCP bootstrap failed: {_log_safe(e)}', flush=True)
-    print(f'[Daedalus] Listening on 127.0.0.1:{bridge_port} — base={_log_safe(BASE)}',
-          flush=True)
+    # ASCII only, deliberately: this line is the bridge's sole readiness
+    # signal, and a console whose code page cannot encode a decorative
+    # character raises rather than degrading, so the announcement would be
+    # lost and every caller waiting on it would time out against a bridge
+    # whose port is already open. cp437, still a Windows console default,
+    # has no em dash.
+    print(f'[Daedalus] Listening on 127.0.0.1:{bridge_port} - '
+          f'base={_log_safe(BASE)}', flush=True)
     httpd.serve_forever()

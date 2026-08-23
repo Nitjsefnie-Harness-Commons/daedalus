@@ -291,6 +291,29 @@ def skip(reason):
     raise Skipped(reason)
 
 
+def require_undecodable_names(directory):
+    """Skip unless this filesystem will hold a name that is not valid UTF-8.
+
+    Several tests exist because a Linux filesystem stores raw bytes, so a
+    filename can arrive that no decoder can read, and the bridge has to
+    survive it. The behaviour is real and the tests are worth keeping — but
+    APFS rejects such a name with `Illegal byte sequence` and Windows refuses
+    to decode it at all, so on those platforms the fixture cannot be built
+    and the test was reporting the platform's refusal as a bridge failure.
+
+    Probe once, here, rather than in each test: a caller that gets past this
+    is on a filesystem where the scenario under test can actually occur.
+    """
+    probe = os.fsencode(str(directory)) + b'/\xffprobe'
+    try:
+        os.mkdir(probe)
+    except (OSError, UnicodeError, ValueError) as why:
+        skip('this filesystem will not hold a name that is not valid UTF-8 '
+             f'({type(why).__name__})')
+    else:
+        os.rmdir(probe)
+
+
 _drawn_ports = set()
 
 
