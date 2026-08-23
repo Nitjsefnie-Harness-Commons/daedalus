@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
+<!-- Without this the document, and every classic script it loads,
+     decode as windows-1252: options.js carries an em dash, which
+     the page then rendered as "a-euro-quote". dashboard/index.html
+     already declares it; this page was the one that did not. -->
+<meta charset="utf-8">
 <style>
   body { font: 13px/1.6 system-ui, sans-serif; padding: 16px; min-width: 320px; }
   label { display: block; margin-top: 12px; font-weight: 600; }

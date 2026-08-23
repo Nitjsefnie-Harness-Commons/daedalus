@@ -302,6 +302,28 @@ def test_gitignore_names_a_tracked_path_containing_a_space(tmp):
         'the generated .gitignore still ignores the tracked space-named file')
 
 
+def test_every_served_page_declares_its_encoding(tmp):
+    """An HTML page without a charset is decoded as windows-1252.
+
+    A browser given no declaration falls back to a legacy code page, and the
+    fallback applies to every classic script the document loads as well as to
+    the markup — so a single em dash in a sibling .js file renders as three
+    wrong characters. The extension's options page shipped that way and
+    displayed its own success message mangled.
+
+    Cheap to state and cheap to keep: any page added later inherits the same
+    requirement instead of rediscovering it in a screenshot.
+    """
+    del tmp
+    pages = [p for p in _iter_tree_files() if p.suffix == '.html']
+    assert pages, 'no HTML pages found to check'
+    missing = [
+        str(p.relative_to(ROOT)) for p in pages
+        if not re.search(r'<meta[^>]*charset', p.read_text(encoding='utf-8'),
+                         re.IGNORECASE)]
+    assert not missing, f'HTML without a charset declaration: {missing}'
+
+
 def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
     """A failure the console cannot spell must still be reported.
 
