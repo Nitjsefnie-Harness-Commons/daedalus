@@ -589,7 +589,28 @@ def runner(tests, tmp_prefix='daedalustests_'):
     if skipped:
         summary += f', {len(skipped)} skipped'
     print(summary)
+    _write_summary(len(tests), passed, len(skipped), len(failed))
     return 1 if failed else 0
+
+
+def _write_summary(total, passed, skipped, failed):
+    """Hand the counts to the aggregate runner, when one asked for them.
+
+    The aggregate cannot see them otherwise: every suite streams straight to
+    the runner's own stdout, and capturing that stream to parse a number back
+    out of it would trade live output for the number. A run whose coverage
+    was entirely skipped has to be distinguishable from a verified one, and
+    an exit code alone cannot say that.
+    """
+    path = os.environ.get('DAEDALUS_TEST_SUMMARY')
+    if not path:
+        return
+    try:
+        with open(path, 'w', encoding='utf-8') as handle:
+            json.dump({'total': total, 'passed': passed,
+                       'skipped': skipped, 'failed': failed}, handle)
+    except OSError:
+        pass
 
 
 def collect(namespace):

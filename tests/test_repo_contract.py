@@ -324,6 +324,72 @@ def test_every_served_page_declares_its_encoding(tmp):
     assert not missing, f'HTML without a charset declaration: {missing}'
 
 
+_ALL_SKIPPED_SUITE = """import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _util
+
+
+def test_needs_something_absent(d):
+    _util.skip('nothing to run against here')
+
+
+raise SystemExit(_util.runner(_util.collect(dict(globals()))))
+"""
+
+_PASSING_SUITE = """import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _util
+
+
+def test_arithmetic(d):
+    assert 1 + 1 == 2
+
+
+raise SystemExit(_util.runner(_util.collect(dict(globals()))))
+"""
+
+
+def _runner_tree(tmp, suites):
+    """A copy of run_tests.py over fabricated suites, run where it stands."""
+    root = Path(tmp) / 'tree'
+    (root / 'tests').mkdir(parents=True)
+    shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
+    shutil.copy2(ROOT / 'tests' / '_util.py', root / 'tests' / '_util.py')
+    for name, source in suites.items():
+        (root / 'tests' / name).write_text(source, encoding='utf-8')
+    env = dict(os.environ)
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    return subprocess.run(
+        [sys.executable, 'run_tests.py'], cwd=str(root), env=env,
+        capture_output=True, text=True, timeout=300)
+
+
+def test_a_suite_that_ran_no_coverage_is_not_an_overall_pass(tmp):
+    """A run that executed nothing must not read as a verified one.
+
+    Per-suite lines carried the skip counts, but the aggregate was a boolean
+    over exit codes, so a suite whose every test skipped — no browser, no
+    dependencies — was indistinguishable from a verified one at exactly the
+    line a reader and CI both key on.
+    """
+    result = _runner_tree(tmp, {
+        'test_all_skipped.py': _ALL_SKIPPED_SUITE,
+        'test_passing.py': _PASSING_SUITE,
+    })
+    assert 'OVERALL: PASS' not in result.stdout, result.stdout
+    assert 'test_all_skipped.py' in result.stdout, result.stdout
+    assert result.returncode != 0, (result.returncode, result.stdout)
+
+
+def test_the_aggregate_carries_the_totals_it_verified(tmp):
+    """A pass says how much was run and how much was skipped."""
+    result = _runner_tree(tmp, {'test_passing.py': _PASSING_SUITE})
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr)
+    assert 'OVERALL: PASS' in result.stdout, result.stdout
+    assert '1 passed' in result.stdout.rsplit('OVERALL', 1)[-1], result.stdout
+
+
 def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
     """A failure the console cannot spell must still be reported.
 

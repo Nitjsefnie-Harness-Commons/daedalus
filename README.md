@@ -475,6 +475,14 @@ top-level `await` — so exactly that one file fails the syntax check.
 
 ## Development
 
+`python3 run_tests.py` runs every suite and prints one aggregate line naming
+what it verified: how many suites ran, how many tests passed, and how many
+skipped. A suite in which every test skipped verified nothing, so it is
+reported as
+`OVERALL: INCOMPLETE` with a nonzero exit rather than as a pass; the usual
+cause is a missing dependency, and the `NO COVERAGE` line above it names the
+suite. Installing the `mcp` extra (see "Install") is what the MCP suite needs.
+
 The version string lives in several places across the extension, the dashboard
 and the CLI package. `python3 scripts/check_versions.py` is the list — it names
 every site and reports how many it found, which is why this paragraph does not
