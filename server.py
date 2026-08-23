@@ -419,12 +419,20 @@ def _load_segment_record(job):
     turned local corruption into a destroyed resume identity reported as a
     successful mint.
     """
+    path = _segment_record_path(job)
+    if not path.is_file():
+        # No record file here: nothing at that name, or the dotted-name
+        # collision where this job's record path is another job's directory
+        # (or sits below its record file), which the mint answers as an
+        # unavailable name. Asked as a question about the path rather than
+        # by exception type, because the type differs per platform: reading
+        # a directory raises IsADirectoryError on Linux and PermissionError
+        # on Windows, and a check that names types turns one platform's
+        # spelling into a storage failure on another.
+        return None
     try:
-        raw = _segment_record_path(job).read_text(encoding='utf-8')
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
-        # No record file here. The last two are the dotted-name collision,
-        # where one job's record path is another job's directory (or below
-        # its record file); the mint answers that as an unavailable name.
+        raw = path.read_text(encoding='utf-8')
+    except FileNotFoundError:
         return None
     except OSError as why:
         raise _SegmentRecordError('record unreadable') from why
