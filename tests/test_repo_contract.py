@@ -863,7 +863,17 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         page, worker, devtools_port = _wait_for_devtools(profile, process)
         page_target = page['webSocketDebuggerUrl']
         worker_target = worker['webSocketDebuggerUrl']
-        deadline = time.time() + 10
+        # Load the page before waiting on the worker. An MV3 worker goes
+        # dormant on its own after about thirty idle seconds, and evaluating
+        # in it over CDP does not wake it — on a slow machine the worker
+        # that DevTools listed a moment ago can already be gone, and the
+        # wait then polls a target nothing will ever answer. The content
+        # script's keepalive port is an event the worker listens for, so
+        # loading the page is what revives it, exactly as an ordinary
+        # browsing session does.
+        _cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
+        deadline = time.time() + 30
+        last_error = 'no evaluation was attempted'
         while time.time() < deadline:
             try:
                 if _cdp_eval(
@@ -872,7 +882,9 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
                         '"undefined" && keepaliveTimer !== null; } '
                         'catch (_) { return false; } })()') is True:
                     break
-            except AssertionError:
+                last_error = 'the worker answered, keepaliveTimer unset'
+            except AssertionError as failure:
+                last_error = f'evaluating in the worker failed: {failure}'
                 try:
                     targets = _devtools_targets(devtools_port)
                     worker = next(item for item in targets
@@ -880,14 +892,16 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
                                   and item.get('url', '').endswith(
                                       '/background.js'))
                     worker_target = worker['webSocketDebuggerUrl']
-                except (OSError, ValueError, StopIteration):
-                    pass
+                except StopIteration:
+                    last_error = 'no service worker target is listed any more'
+                except (OSError, ValueError) as why:
+                    last_error = f'listing DevTools targets failed: {why}'
             time.sleep(0.05)
         else:
             raise AssertionError(
                 'the extension service worker never finished booting: '
-                'DevTools exposed its target, so the browser reached the '
-                'extension and never saw keepaliveTimer set')
+                'DevTools exposed its target and the fixture page was '
+                f'loaded to wake it. Last: {last_error}')
 
         storage = json.dumps({
             'daedalus-token': token,
@@ -938,6 +952,23 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=10)
+
+
+def _real_ext_command(bridge_url, token, cmd_id, payload):
+    """Send a typed extension command and return its delivered result."""
+    body = {'token': token, 'tab': 'extension', 'id': cmd_id, **payload}
+    status, raw = _util.request(bridge_url + '/command', 'PUT', body=body)
+    assert status == 200, (status, raw)
+    sent = json.loads(raw)
+    deadline = time.time() + 20
+    query = urllib.parse.urlencode({'token': token, 'tab': 'extension'})
+    while time.time() < deadline:
+        result_status, result = _util.get_json(bridge_url + '/result?' + query)
+        if (result_status == 200 and isinstance(result, dict)
+                and result.get('deliveryId') == sent.get('did')):
+            return result
+        time.sleep(0.05)
+    raise AssertionError(f'{cmd_id!r} did not return its delivery result')
 
 
 def _real_eval(bridge_url, token, tab_id, cmd_id, code):
@@ -1134,6 +1165,51 @@ def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):
             except AssertionError as failure:
                 reported = str(failure)
             assert reported and '__evalPageReady' in reported, reported
+
+
+def test_a_hotfix_replays_on_a_page_that_forbids_eval_and_blob(tmp):
+    """A stored hotfix reaches a page whose CSP refuses the page relay.
+
+    Replay used to run in the page: the page's own `eval`, then a blob
+    <script>. A CSP with neither `unsafe-eval` nor `blob:` — github.com's,
+    and this fixture's strict page — refuses both, and the blocked blob load
+    reported nothing back, so the fix simply never applied. The background
+    can reach the page by the same route ordinary eval uses when the page
+    refuses dynamic compilation, so replay goes through it.
+    """
+    token = 'hotfixcsptok'
+    with _util.bridge(
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+                      'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
+        with _eval_page_server() as pages:
+            with _real_extension_page(
+                    tmp, bridge_url, token,
+                    pages + '/plain.html') as (node, page, _tab_id):
+                stored = _real_ext_command(bridge_url, token, 'store-csp-fix', {
+                    'type': 'store-hotfix',
+                    'fixId': 'csp-fix',
+                    'code': 'globalThis.__hotfixApplied = true;',
+                    'permanent': True,
+                })
+                assert stored.get('error') is None, stored
+
+                # A load of the strict page replays it: script-src 'self',
+                # so neither page-side path the old relay had is available.
+                _cdp_call(node, page, 'Page.navigate',
+                          {'url': pages + '/strict.html'})
+                deadline = time.time() + 20
+                applied = None
+                while time.time() < deadline:
+                    if _cdp_eval(node, page,
+                                 'globalThis.__evalPageReady === true') is True:
+                        applied = _cdp_eval(
+                            node, page, 'globalThis.__hotfixApplied === true')
+                        if applied is True:
+                            break
+                    time.sleep(0.1)
+                assert applied is True, (
+                    'the hotfix never applied on a page whose CSP forbids '
+                    f'eval and blob scripts (last read: {applied!r})')
 
 
 def test_strict_csp_page_uses_cdp_once_after_source_free_preflight(tmp):
