@@ -864,6 +864,7 @@ def _wait_for_devtools(profile, process):
     # ubuntu legs timed out here on the first browser test of the run and
     # reached the same browser without trouble in the ones after it.
     deadline = time.time() + 30
+    seen = 'it never wrote a DevTools port'
     while time.time() < deadline:
         if process.poll() is not None:
             _util.skip('Chromium exited before DevTools became available')
@@ -878,11 +879,42 @@ def _wait_for_devtools(profile, process):
                     workers = _worker_targets(targets)
                     if page and workers:
                         return page, workers, port
-                except (OSError, ValueError):
-                    pass
+                    seen = (f'{len(targets)} targets on port {port}, '
+                            f'a page: {page is not None}, '
+                            f'background workers: {len(workers)}')
+                except (OSError, ValueError) as why:
+                    seen = f'listing its targets failed: {why}'
         time.sleep(0.05)
     _util.skip('this browser never exposed the fixture page and an '
-               'extension service worker over DevTools')
+               f'extension service worker over DevTools — {seen}')
+
+
+def _ready_worker(node, workers):
+    """The worker among `workers` whose script declares this extension.
+
+    Returns (target, reached, error). `reached` says whether any of them
+    could be evaluated in at all, which is the line between a machine that
+    cannot talk to a worker and an extension that did not load.
+
+    What is asserted is that the worker's own script ran to the end: a script
+    that threw defines none of these, and neither does another extension's
+    worker. Waiting on keepaliveTimer instead waited on the async boot chain,
+    and a worker that answers with the timer still unset is a different thing
+    from a worker that never loaded — the caller configures the extension
+    explicitly, so it does not need that chain to have finished.
+    """
+    reached = False
+    error = 'no service worker target is listed'
+    for candidate in workers:
+        target = candidate['webSocketDebuggerUrl']
+        try:
+            if _cdp_eval(node, target, _WORKER_READY_PROBE) is True:
+                return target, True, None
+            reached = True
+            error = 'the worker answered without its declarations'
+        except AssertionError as failure:
+            error = f'evaluating in the worker failed: {failure}'
+    return None, reached, error
 
 
 def _worker_state(node, target):
@@ -960,30 +992,13 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
         answered = False
         worker_target = None
         while time.time() < deadline:
-            for candidate in workers:
-                target = candidate['webSocketDebuggerUrl']
-                try:
-                    # What is asserted is that the worker's own script ran to
-                    # the end: a script that threw defines none of these, and
-                    # so does another extension's worker. Waiting on
-                    # keepaliveTimer instead waited on the async boot chain,
-                    # and a worker that answers with the timer still unset is
-                    # a different thing from a worker that never loaded — the
-                    # fixture configures the extension explicitly two steps
-                    # below, so it does not need that chain to have finished.
-                    if _cdp_eval(node, target, _WORKER_READY_PROBE) is True:
-                        worker_target = target
-                        break
-                    answered = True
-                    last_error = 'the worker answered without its declarations'
-                except AssertionError as failure:
-                    last_error = f'evaluating in the worker failed: {failure}'
+            worker_target, reached, error = _ready_worker(node, workers)
+            answered = answered or reached
             if worker_target:
                 break
+            last_error = error
             try:
                 workers = _worker_targets(_devtools_targets(devtools_port))
-                if not workers:
-                    last_error = 'no service worker target is listed any more'
             except (OSError, ValueError) as why:
                 last_error = f'listing DevTools targets failed: {why}'
             # Every attempt spawns one node process per candidate to
@@ -1020,16 +1035,37 @@ def _real_extension_page(tmp, bridge_url, token, page_url,
             'daedalus-token': token,
             'daedalus-server': bridge_url,
         })
-        configured = _cdp_eval(
-            node, worker_target,
+        configure = (
             '(async () => { await chrome.storage.local.set(' + storage
             + '); await loadConfig(); ensureKeepAlive(); stopStream(); '
             + 'startStream(); '
             + 'return config.token === ' + json.dumps(token)
             + ' && config.serverUrl === ' + json.dumps(bridge_url)
             + '; })()')
+        deadline = time.time() + 30
+        while True:
+            try:
+                configured = _cdp_eval(node, worker_target, configure)
+            except AssertionError as failure:
+                configured = f'the call failed: {failure}'
+            if configured is True or time.time() >= deadline:
+                break
+            # An MV3 worker stops when it goes idle and the next event starts
+            # a fresh one, so the worker that answered a moment ago can be
+            # gone by the time it is configured. Look it up again rather than
+            # reporting the browser's own lifecycle as this extension's
+            # failure to take its configuration.
+            time.sleep(0.5)
+            try:
+                workers = _worker_targets(_devtools_targets(devtools_port))
+            except (OSError, ValueError):
+                workers = []
+            replacement, _reached, _error = _ready_worker(node, workers)
+            if replacement:
+                worker_target = replacement
         assert configured is True, (
-            'extension worker did not load test configuration')
+            f'extension worker did not load test configuration ({configured!r}'
+            f'). Worker state: {_worker_state(node, worker_target)}')
         _cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
 
         deadline = time.time() + 15
