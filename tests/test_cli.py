@@ -560,7 +560,12 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
     """The screenshot download query preserves the command/upload id exactly."""
     screenshot_id = 'shot&branch#café'
     output = Path(tmp) / 'captured.png'
-    with _util.bridge(tmp) as (base, docroot):
+    # The bridge's own log goes into the failure. This test times out on
+    # Windows waiting for a result the test itself posted, and from a host
+    # where it passes there is no way to tell whether the bridge stored the
+    # result, stored it somewhere else, or never saw the request at all.
+    served = []
+    with _util.bridge(tmp, output=served) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
             CLI + ['screenshot', '--id', screenshot_id,
@@ -599,7 +604,7 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
                 proc.communicate()
         assert proc.returncode == 0, (
             proc.returncode, repr(stdout), repr(stderr),
-            repr(screenshot_id))
+            repr(screenshot_id), ''.join(served))
         assert output.read_bytes() == b'encoded-screenshot'
 
 
