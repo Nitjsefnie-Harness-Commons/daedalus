@@ -2015,6 +2015,36 @@ def test_segment_post_and_status_require_capability(tmp):
         assert status == 403, status
 
 
+def test_a_segment_body_without_a_declared_length_is_refused(tmp):
+    """An undeclared body is not an empty one.
+
+    A missing Content-Length was read as zero, and this is the one route
+    whose body is opaque bytes rather than JSON that has to parse: the
+    sender's segment was discarded, an empty .ts was written in its place,
+    and the answer was success.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        job = _seg_job()
+        _, minted = _mint_job(base, TOK, job)
+        sig = minted['sig']
+        port = int(base.rsplit(':', 1)[1])
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+        try:
+            conn.putrequest(
+                'POST', f'/segment?job={job}&seg=0&total=1&sig={sig}')
+            conn.putheader('Content-Type', 'application/octet-stream')
+            conn.endheaders()
+            conn.send(b'\x47' * 188)
+            response = conn.getresponse()
+            status, payload = response.status, response.read()
+        finally:
+            conn.close()
+        assert status == 411, (status, payload)
+        seg_dir = Path(docroot) / 'segments' / job
+        stored = sorted(seg_dir.glob('*.ts')) if seg_dir.is_dir() else []
+        assert not stored, stored
+
+
 def test_segment_resume_contract(tmp):
     with _util.bridge(tmp) as (base, docroot):
         job = _seg_job()

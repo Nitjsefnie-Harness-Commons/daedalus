@@ -56,7 +56,7 @@ Repeated authority carriers are rejected before any value is selected, including
 - `POST /segment?job=X&seg=N&total=T&sig=S` — raw binary HLS segment storage (`$DAEDALUS_DIR/segments/{job}/{seg:06d}.ts`); `sig` is the job-scoped capability from `POST /segment-job`, never the bridge token.
 - `GET /segment-status?job=X&sig=S` — list received segments `{done[], count}`.
 
-`DAEDALUS_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes) bounds every request body read by `POST`, `PUT`, and `DELETE`; an invalid or negative `Content-Length` returns 400, and a declared body over the limit returns 413.
+`DAEDALUS_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes) bounds every request body read by `POST`, `PUT`, and `DELETE`; a request with no `Content-Length` at all returns 411, an invalid or negative `Content-Length` returns 400, and a declared body over the limit returns 413.
 
 Filesystem-backed caller values share `_unsafe_component`: reject `..`, C0/C1 controls, surrogate code points, Windows-invalid path characters and device names, trailing dots/spaces, and UTF-8 encodings over 240 bytes. Tokens are also nonempty and reject dots and underscores. Accepted job names can still contain query delimiters such as `&` and `#`, so URL construction must encode them.
 

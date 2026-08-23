@@ -307,7 +307,7 @@ slot.
 
 `GET /stream` holds the SSE connection open indefinitely, proving liveness with a keepalive comment every `DAEDALUS_STREAM_KEEPALIVE` seconds (default 15) rather than cycling the connection on a timer; `DAEDALUS_STREAM_MAX_AGE` (default 3600) is a last-resort ceiling only. The close path is pinned by `tests/test_stream_lifecycle.py`.
 
-`DAEDALUS_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes, 64 MiB) bounds request bodies read by the `POST`, `PUT`, and `DELETE` handlers; a declared body larger than the limit receives `413`. Increase it when relaying larger segments or other payloads.
+`DAEDALUS_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes, 64 MiB) bounds request bodies read by the `POST`, `PUT`, and `DELETE` handlers; a declared body larger than the limit receives `413`, and a request that declares no `Content-Length` receives `411` rather than being read as an empty body. Increase it when relaying larger segments or other payloads.
 
 Filesystem-backed caller values use one path-component policy: it rejects
 `..`, C0/C1 control and surrogate characters, Windows-invalid path characters

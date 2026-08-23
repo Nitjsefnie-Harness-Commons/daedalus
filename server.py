@@ -460,6 +460,7 @@ _last_delivery_ts = 0.0
 
 
 _REFUSED_BODY_DRAIN = 65536
+_UNDECLARED_BODY_DRAIN_SECONDS = 0.25
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -834,21 +835,56 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
 
+    def _drain_undeclared_body(self):
+        """Absorb a bounded undeclared body so the refusal survives the close.
+
+        Same mechanism as _drain_refused_body: closing a socket that still
+        has unread data sends RST, and an RST discards the answer the client
+        has not read yet. With no declared length there is nothing to count
+        down, so the read is bounded by the same byte cap and by a short
+        timeout — a sender that declared no length has no claim on more.
+        """
+        try:
+            original = self.connection.gettimeout()
+        except OSError:
+            return
+        try:
+            self.connection.settimeout(_UNDECLARED_BODY_DRAIN_SECONDS)
+            self.rfile.read(_REFUSED_BODY_DRAIN)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                self.connection.settimeout(original)
+            except OSError:
+                pass
+
     def _declared_body_length(self):
         """Parse and bound the Content-Length header of a body-reading request.
 
         Every verb that reads a body (POST, PUT, DELETE) gates on this, so the
         refusal rules live in exactly one place. Returns the byte count the
         handler may read, or None once the request has already been answered:
-        400 for a value int() cannot parse (an uncaught ValueError here used
-        to kill the request thread, dropping the connection with no answer),
-        400 for a negative value (rfile.read(-1) reads to EOF, so a negative
-        length is not a small body — it is an unbounded one, and testing only
+        411 for no declaration at all (defaulting it to zero discarded the
+        body the sender did send — on the raw segment route that stored an
+        empty .ts and answered success, since those bytes are opaque rather
+        than JSON that has to parse), 400 for a value int() cannot parse (an
+        uncaught ValueError here used to kill the request thread, dropping
+        the connection with no answer), 400 for a negative value
+        (rfile.read(-1) reads to EOF, so a negative length is not a small
+        body — it is an unbounded one, and testing only
         `clen > MAX_BODY_SIZE` let it straight through), and 413 for one over
         MAX_BODY_SIZE.
+
+        Every request this bridge answers carries a body, so nothing it
+        serves loses a legitimate call to the 411.
         """
+        declared = self.headers.get('Content-Length')
+        if declared is None:
+            self._drain_undeclared_body()
+            return self._json(411, {'error': 'Content-Length required'})
         try:
-            clen = int(self.headers.get('Content-Length', 0))
+            clen = int(declared)
         except ValueError:
             self._json(400, {'error': 'invalid Content-Length'})
             return None
