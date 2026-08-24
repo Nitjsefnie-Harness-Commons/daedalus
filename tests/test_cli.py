@@ -394,6 +394,71 @@ def test_waiter_leaves_a_foreign_result_in_place(tmp):
         assert body.get('result') == 'not yours', body
 
 
+_WAIT_HARNESS = (
+    'import time\n'
+    'from daedalus_cli import cli\n'
+    'calls = []\n'
+    'PENDING = %s\n'
+    'def fake_api(method, path, body=None):\n'
+    '    calls.append(path)\n'
+    '    if PENDING:\n'
+    '        return {"pending": True}\n'
+    '    if "consume=1" in path:\n'
+    '        return {"consumed": True, "resultGeneration": "g1"}\n'
+    '    return {"id": "c1", "deliveryId": "d1", "resultGeneration": "g1",\n'
+    '            "result": 7, "error": None}\n'
+    'cli.api = fake_api\n'
+    'start = time.monotonic()\n'
+    'res = cli.wait_for_result("c1", "extension", "d1", %s)\n'
+    'print("ELAPSED", round(time.monotonic() - start, 3))\n'
+    'print("POLLS", len(calls))\n'
+    'print("RESULT", res if res is None else res["result"])\n')
+
+
+def _wait_harness_output(stdout):
+    """(elapsed, polls, result) from one _WAIT_HARNESS run."""
+    fields = {}
+    for line in stdout.splitlines():
+        key, _, value = line.partition(' ')
+        if key in ('ELAPSED', 'POLLS', 'RESULT'):
+            fields[key] = value
+    return float(fields['ELAPSED']), int(fields['POLLS']), fields['RESULT']
+
+
+def test_the_result_wait_polls_before_it_sleeps_the_full_interval(tmp):
+    """An already available result must not cost a fixed half second.
+
+    The waiter slept its whole interval before the first poll, so every
+    command that waited for a result paid 500ms of dead time even when the
+    result was already in the slot. The MCP poller had the same shape and was
+    already fixed; this is the CLI half.
+    """
+    del tmp
+    r = run_python(_WAIT_HARNESS % ('False', '2'), cli_env(DAEDALUS_TOKEN=TOK))
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    elapsed, polls, result = _wait_harness_output(r.stdout)
+    assert result == '7', r.stdout
+    # One peek and one conditional consume, and neither waited on a timer.
+    assert polls == 2, r.stdout
+    assert elapsed < 0.25, (elapsed, r.stdout)
+
+
+def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
+    """The short first wait is a ramp, not a busy loop.
+
+    Polling a pending slot at the opening interval for the whole timeout
+    would trade half a second of latency for a request flood, so the pinned
+    property is both bounds at once: more polls than a flat half-second wait
+    allows, far fewer than an unbacked-off one would make.
+    """
+    del tmp
+    r = run_python(_WAIT_HARNESS % ('True', '1.0'), cli_env(DAEDALUS_TOKEN=TOK))
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    _elapsed, polls, result = _wait_harness_output(r.stdout)
+    assert result == 'None', r.stdout
+    assert 4 <= polls <= 12, r.stdout
+
+
 def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
     """A foreign result seen mid-wait is neither returned as ours nor fatal:
     the waiter keeps polling and completes when its own result arrives."""

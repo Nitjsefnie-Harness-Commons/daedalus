@@ -117,13 +117,22 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     The PUT response's delivery id distinguishes this invocation from a stale
     result with the same command id. Conditional consume names the generation
     just peeked, so a newer result that replaces it remains for its owner.
+
+    The wait ramps 20ms -> `interval` instead of sleeping `interval` up front:
+    most commands finish in tens of milliseconds, and the fixed first sleep
+    charged half a second of dead time to every command that waited, however
+    fast the result actually landed. The ramp keeps a slot that stays pending
+    from becoming a request flood, which is what a flat short interval would
+    be. Same shape as the MCP poller, for the same reason.
     """
     params = {'token': token()}
     if target_tab:
         params['tab'] = target_tab
     t0 = time.time()
+    wait = 0.02
     while time.time() - t0 < timeout:
-        time.sleep(interval)
+        time.sleep(wait)
+        wait = min(wait * 2, interval)
         res = api('GET', _query_path('/result', params))
         if res.get('pending'):
             continue
