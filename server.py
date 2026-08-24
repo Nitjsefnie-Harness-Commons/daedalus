@@ -1408,9 +1408,11 @@ class Handler(BaseHTTPRequestHandler):
             if tab_id and _unsafe_component(tab_id):
                 return self._json(400, {'error': 'invalid path component'})
             try:
-                token_result_name = _derived_component(f'{token}.json')
-                tab_result_name = (_derived_component(
-                    f'{token}_{tab_id}.json') if tab_id else '')
+                token_result_slot = _under(
+                    RES_DIR, _derived_component(f'{token}.json'))
+                tab_result_slot = _under(
+                    RES_DIR, _derived_component(f'{token}_{tab_id}.json')
+                ) if tab_id else None
             except ValueError:
                 return self._json(400, {'error': 'invalid path component'})
             print(f'[RESULT] tab={tab_id[:8] if tab_id else "none"} id={_log_safe(body.get("id", ""))}', flush=True)
@@ -1446,12 +1448,10 @@ class Handler(BaseHTTPRequestHandler):
                     duplicate = bool(did) and did in _accepted_deliveries
                     if not duplicate:
                         # Per-tab result file
-                        if tab_id:
-                            _atomic_result_write(
-                                RES_DIR / tab_result_name, serialized)
+                        if tab_result_slot is not None:
+                            _atomic_result_write(tab_result_slot, serialized)
                         # Backward compat: also write to token-only file
-                        _atomic_result_write(
-                            RES_DIR / token_result_name, serialized)
+                        _atomic_result_write(token_result_slot, serialized)
                         if did:
                             _record_delivery(did)
             except OSError:
@@ -1601,11 +1601,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {'error': 'invalid path component'})
         # A requested tab selects its own slot; otherwise use the token slot.
         try:
-            result_name = _derived_component(
-                f'{token}_{tab}.json' if tab else f'{token}.json')
+            res_file = _under(RES_DIR, _derived_component(
+                f'{token}_{tab}.json' if tab else f'{token}.json'))
         except ValueError:
             return self._json(400, {'error': 'invalid path component'})
-        res_file = RES_DIR / result_name
         try:
             with _result_lock:
                 if not res_file.exists():
@@ -2130,9 +2129,12 @@ class Handler(BaseHTTPRequestHandler):
             rel = 'index.html'
         if any(_unsafe_component(part) for part in rel.split('/')):
             return self._json(400, {'error': 'bad path'})
-        target = DASHBOARD_DIR / rel
+        # Same containment as every other root, through the same helper:
+        # this route grew its own resolve-and-contain before there was one,
+        # and two spellings of one rule is one more than anybody will keep
+        # in step.
         try:
-            target.resolve().relative_to(DASHBOARD_DIR.resolve())
+            target = _under(DASHBOARD_DIR, *rel.split('/'))
         except (ValueError, OSError):
             return self._json(400, {'error': 'bad path'})
         if not target.is_file():
