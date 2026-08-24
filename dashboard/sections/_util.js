@@ -58,7 +58,7 @@ export function bindTabSelector(select, options) {
     }
     let tabs;
     try {
-      tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
+      tabs = await api.get('/tabs');
     } catch (e) {
       if (errorLabel) only(errorLabel(e));
       return;

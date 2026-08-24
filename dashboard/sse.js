@@ -1,11 +1,22 @@
 // Daedalus dashboard — SSE connection wrapper.
 // Subscribes to /stream?tab=dashboard and dispatches kind:'event' payloads
-// to all registered listeners. EventSource handles reconnect natively.
+// to all registered listeners.
+//
+// The stream is read with fetch, not EventSource. EventSource cannot set a
+// request header, so its only way to authenticate is to write the reusable
+// bridge token into the request target — where a reverse-proxy access log
+// keeps it for the whole life of the stream. Reconnect is consequently ours
+// to do: a generation counter makes sure only the newest attempt reschedules,
+// so a restart during a retry never leaves two readers running.
 
 import { getServer, getToken } from './api.js';
 
+const RETRY_MS = 3000;
+
 const listeners = new Set();
-let es = null;
+let abort = null;
+let retryTimer = null;
+let generation = 0;
 let currentToken = '';
 let lastEventTs = 0;
 
@@ -28,50 +39,98 @@ export function lastEventAt() {
   return lastEventTs;
 }
 
-export function start() {
+function emit(raw) {
+  lastEventTs = Date.now();
+  let payload;
+  try { payload = JSON.parse(raw); }
+  catch (err) { console.error('[sse] parse error', err, raw); return; }
+  // Only dispatch our own event frames. Broadcast eval commands
+  // that happen to reach this stream lack kind='event' and are ignored.
+  if (payload && payload.kind === 'event') {
+    dispatch(payload);
+  }
+}
+
+// One frame parser per connection. A frame can straddle two reads, so the
+// partial line and the frame being assembled are both state that has to
+// survive between chunks rather than being rebuilt from each one.
+function frameParser() {
+  let buffer = '';
+  let eventType = '';
+  let data = '';
+  return (chunk) => {
+    buffer += chunk;
+    for (;;) {
+      const end = buffer.indexOf('\n');
+      if (end < 0) return;
+      const line = buffer.slice(0, end).replace(/\r$/, '');
+      buffer = buffer.slice(end + 1);
+      if (line === '') {
+        if (eventType === 'command' && data) emit(data);
+        eventType = '';
+        data = '';
+      } else if (line.startsWith(':')) {
+        // keepalive comment — the bridge is alive, there is nothing to read
+      } else if (line.startsWith('event:')) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        data += line.slice(5).trim();
+      }
+    }
+  };
+}
+
+function teardown() {
+  generation++;
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  if (abort) { abort.abort(); abort = null; }
+}
+
+async function run(myGen) {
   const token = getToken();
-  currentToken = token;
-  if (!token) {
-    dispatch(statusEvent('no-token'));
-    return;
-  }
-  if (es) { es.close(); es = null; }
-
+  if (!token) { dispatch(statusEvent('no-token')); return; }
   const server = getServer() || '';
-  const streamUrl = server + '/stream?token=' + encodeURIComponent(token) + '&tab=dashboard';
   dispatch(statusEvent('connecting'));
-
+  const controller = new AbortController();
+  abort = controller;
   try {
-    es = new EventSource(streamUrl);
-  } catch (e) {
-    console.error('[sse] EventSource construct failed', e);
-    dispatch(statusEvent('error'));
-    return;
-  }
-
-  es.addEventListener('open', () => {
+    const resp = await fetch(server + '/stream?tab=dashboard', {
+      signal: controller.signal,
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (myGen !== generation) return;
+    if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
     lastEventTs = Date.now();
     dispatch(statusEvent('connected'));
-  });
-  es.addEventListener('error', () => {
-    // EventSource will auto-reconnect; surface the transition visually.
-    dispatch(statusEvent('reconnecting'));
-  });
-  es.addEventListener('command', (e) => {
-    lastEventTs = Date.now();
-    let payload;
-    try { payload = JSON.parse(e.data); }
-    catch (err) { console.error('[sse] parse error', err, e.data); return; }
-    // Only dispatch our own event frames. Broadcast eval commands
-    // that happen to reach this stream lack kind='event' and are ignored.
-    if (payload && payload.kind === 'event') {
-      dispatch(payload);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    const feed = frameParser();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (myGen !== generation) return;
+      if (done) break;
+      feed(decoder.decode(value, { stream: true }));
     }
-  });
+  } catch (e) {
+    if (e.name === 'AbortError' || myGen !== generation) return;
+    console.error('[sse] stream error', e);
+  }
+  if (myGen !== generation) return;
+  abort = null;
+  dispatch(statusEvent('reconnecting'));
+  retryTimer = setTimeout(() => {
+    if (myGen === generation) run(myGen);
+  }, RETRY_MS);
+}
+
+export function start() {
+  currentToken = getToken();
+  teardown();
+  run(generation);
 }
 
 export function stop() {
-  if (es) { es.close(); es = null; }
+  teardown();
   dispatch(statusEvent('idle'));
 }
 

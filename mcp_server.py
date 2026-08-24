@@ -18,7 +18,7 @@ from mcp.server.mcpserver import MCPServer, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from daedalus_cli import ambiguous_request_carrier
+from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.cli import token as _configured_token
 
 # The standalone MCP entry point derives its bridge URL from DAEDALUS_PORT.
@@ -337,15 +337,15 @@ async def segment_status(job: str) -> dict:
     # the job when the name has never been used.
     client = _http_client()
     found = await client.get(
-        '/segment-job', params={'token': _tok(), 'job': job})
+        '/segment-job', params={'job': job}, headers=_bridge_auth())
     if found.status_code == 404:
         raise RuntimeError(f'segment_status: no job named {job!r}')
     if found.status_code == 409:
         raise RuntimeError(f'segment_status: job {job!r} is owned by a different token')
     found.raise_for_status()
     sig = found.json()['sig']
-    r = await client.get(
-        '/segment-status', params={'job': job, 'sig': sig})
+    r = await client.get('/segment-status', params={'job': job},
+                         headers={SEGMENT_SIG_HEADER: sig})
     r.raise_for_status()
     data = r.json()
     done = data.get('done', [])
@@ -753,14 +753,15 @@ def _bridge_auth() -> dict[str, str]:
 
     The bridge settles credentials before it reads a request body, so a body
     token alone caps what this client may send at the unauthenticated window.
+    It is also what keeps a reusable credential out of a request target, which
+    a reverse-proxy access log retains and a query parameter cannot avoid.
     Same header, same value the MCP listener itself required to get here.
     """
     return {'Authorization': f'Bearer {_tok()}'}
 
 
 async def _get(path: str, **params) -> Any:
-    params['token'] = _tok()
-    r = await _http_client().get(path, params=params)
+    r = await _http_client().get(path, params=params, headers=_bridge_auth())
     r.raise_for_status()
     return r.json()
 
@@ -791,8 +792,7 @@ async def _get_raw(route: str, **params) -> bytes:
     """Fetch one bridge route as raw bytes. The route is named `route` rather
     than `path` so a caller can pass a `path` query parameter, which the
     screenshot download does."""
-    params['token'] = _tok()
-    r = await _http_client().get(route, params=params)
+    r = await _http_client().get(route, params=params, headers=_bridge_auth())
     r.raise_for_status()
     return r.content
 
@@ -810,15 +810,16 @@ async def _poll_result(tab: str, timeout: float, interval: float = 0.5,
     front: most commands finish in tens of milliseconds, and the fixed first
     sleep was adding half a second of dead time to every single tool call."""
     import asyncio, time
-    peek = {'token': _tok()}
+    peek = {}
     if tab:
         peek['tab'] = tab
+    auth = _bridge_auth()
     deadline = time.time() + timeout
     wait = 0.02
     while time.time() < deadline:
         await asyncio.sleep(wait)
         wait = min(wait * 2, interval)
-        r = await _http_client().get('/result', params=peek)
+        r = await _http_client().get('/result', params=peek, headers=auth)
         r.raise_for_status()
         data = r.json()
         if data.get('pending'):
@@ -832,7 +833,8 @@ async def _poll_result(tab: str, timeout: float, interval: float = 0.5,
         if not generation:
             continue
         take = {**peek, 'consume': '1', 'expected': generation}
-        consumed = await _http_client().get('/result', params=take)
+        consumed = await _http_client().get(
+            '/result', params=take, headers=auth)
         consumed.raise_for_status()
         receipt = consumed.json()
         if (receipt.get('consumed') is not True

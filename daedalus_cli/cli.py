@@ -15,7 +15,7 @@ depends on that: with no such module the environment is the only source.
 """
 import argparse, json, os, sys, time, urllib.request, urllib.error, urllib.parse
 
-from . import __version__
+from . import SEGMENT_SIG_HEADER, __version__
 
 try:
     # Optional embedding hook: an application may put a `_settings` module on
@@ -118,13 +118,15 @@ def _http_error_detail(e):
         return raw.decode(errors='replace')
 
 
-def api(method, path, body=None, timeout=30):
+def api(method, path, body=None, timeout=30, headers=None):
     url = URL + path
     data = json.dumps(body).encode() if body else None
     # The bridge decides credentials before it reads a body, so the token goes
     # in a header too. Without it a request larger than the bridge's
-    # unauthenticated window is refused before its body is read at all.
-    headers = {'Authorization': f'Bearer {token()}'}
+    # unauthenticated window is refused before its body is read at all. It is
+    # also what keeps a reusable credential out of the request target, where
+    # every proxy access log would keep it.
+    headers = dict(headers or {}, **{'Authorization': f'Bearer {token()}'})
     if data:
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -140,7 +142,8 @@ def api(method, path, body=None, timeout=30):
 def api_raw(method, path):
     """Like api() but returns raw bytes instead of JSON."""
     url = URL + path
-    req = urllib.request.Request(url, method=method)
+    req = urllib.request.Request(
+        url, method=method, headers={'Authorization': f'Bearer {token()}'})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return r.read()
@@ -181,7 +184,7 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     from becoming a request flood, which is what a flat short interval would
     be. Same shape as the MCP poller, for the same reason.
     """
-    params = {'token': token()}
+    params = {}
     if target_tab:
         params['tab'] = target_tab
     # One monotonic deadline for the whole wait, and every blocking step is
@@ -357,7 +360,7 @@ def send_and_wait(cmd_id, code, target_tab, wait, timeout):
 # ─── Subcommands ───
 
 def do_tabs(args):
-    tabs = api('GET', _query_path('/tabs', {'token': token()}))
+    tabs = api('GET', '/tabs')
     if getattr(args, 'json', False):
         print(json.dumps(tabs or [], indent=2))
         return
@@ -392,7 +395,7 @@ def do_exec(args):
 
 
 def do_result(args):
-    params = {'token': token()}
+    params = {}
     t = tab()
     if t:
         params['tab'] = t
@@ -467,8 +470,8 @@ def do_segment_status(args):
     # name used to create it and then report zero segments as though the name
     # had been right.
     req = urllib.request.Request(
-        _query_path(f'{URL}/segment-job', {'token': token(), 'job': args.job}),
-        method='GET')
+        _query_path(f'{URL}/segment-job', {'job': args.job}), method='GET',
+        headers={'Authorization': f'Bearer {token()}'})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             sig = json.loads(r.read())['sig']
@@ -480,8 +483,8 @@ def do_segment_status(args):
         sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
-    res = api('GET', _query_path(
-        '/segment-status', {'job': args.job, 'sig': sig}))
+    res = api('GET', _query_path('/segment-status', {'job': args.job}),
+              headers={SEGMENT_SIG_HEADER: sig})
     count = res.get('count', 0)
     done = res.get('done', [])
     print(f'Job: {args.job}  Segments: {count}')
@@ -542,7 +545,7 @@ def do_screenshot(args):
         # rather than a capture, and asking for it returns whichever
         # invocation finished last.
         selector = {'path': path} if path else {'id': cmd['id']}
-        ss_url = _query_path('/screenshot', {'token': token(), **selector})
+        ss_url = _query_path('/screenshot', selector)
         img = api_raw('GET', ss_url)
         with open(args.output, 'wb') as f:
             f.write(img)
@@ -883,7 +886,7 @@ def do_uploads(args):
         api_delete('/upload', body)
         print('Deleted')
         return
-    params = {'token': token()}
+    params = {}
     if args.id:
         params['id'] = args.id
     files = api('GET', _query_path('/upload', params))

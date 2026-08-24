@@ -31,7 +31,7 @@ export function mount(container, bus) {
     const token = getToken();
     if (!token) { host.innerHTML = '<div class="dim italic small">no token (§12 Settings)</div>'; return; }
     try {
-      tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
+      tabs = await api.get('/tabs');
       render();
     } catch (e) {
       host.innerHTML = '';

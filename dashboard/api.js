@@ -34,8 +34,16 @@ export function q(params) {
   return s ? '?' + s : '';
 }
 
+// The token rides in a header rather than in the request target. A reusable
+// credential written into a URL is retained by reverse-proxy access logs,
+// browser history and anything that copies the link; the header is not.
+function authHeaders() {
+  const token = getToken();
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
+}
+
 async function req(method, path, body) {
-  const init = { method, headers: {} };
+  const init = { method, headers: authHeaders() };
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
@@ -49,6 +57,18 @@ async function req(method, path, body) {
     throw new Error(`HTTP ${r.status}: ${msg}`);
   }
   return data;
+}
+
+// An <img src> cannot carry a header, so the bytes are fetched with one and
+// handed to the element as an object URL instead. The caller owns what comes
+// back and must URL.revokeObjectURL it once the element is gone.
+export async function objectUrl(path) {
+  const r = await fetch(url(path), { headers: authHeaders() });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new Error(`HTTP ${r.status}: ${data.error || r.statusText}`);
+  }
+  return URL.createObjectURL(await r.blob());
 }
 
 export const api = {
@@ -124,13 +144,13 @@ export async function runCommand({ tab = 'extension', type, code, id, timeout = 
       // Match both the command and its fresh delivery. Conditional consume
       // then deletes only the generation just peeked; if another caller
       // replaces the shared slot first, their result remains for them.
-      const res = await api.get('/result' + q({ token, tab: tabParam }));
+      const res = await api.get('/result' + q({ tab: tabParam }));
       if (!res || res.pending) continue;
       if (res.id !== cmdId || res.deliveryId !== deliveryId) continue;
       const generation = res.resultGeneration;
       if (!generation) continue;
       const consumed = await api.get('/result' + q({
-        token, tab: tabParam, consume: 1, expected: generation,
+        tab: tabParam, consume: 1, expected: generation,
       }));
       if (!consumed || consumed.consumed !== true
           || consumed.resultGeneration !== generation) continue;

@@ -6,7 +6,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
-from daedalus_cli import ambiguous_request_carrier
+from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.cli import token as _configured_token
 
 
@@ -481,12 +481,6 @@ MAX_SEGMENTS_PER_JOB = _env_int(
 MAX_SEGMENT_JOB_SIZE = _env_int(
     'DAEDALUS_MAX_SEGMENT_JOB_SIZE', 4 * 1024 * 1024 * 1024, 0)
 _SEGMENT_DECIMAL_MAX_DIGITS = 20
-
-# The non-URL carrier for a job capability. Its own header rather than
-# Authorization, because a segment route never sees the bridge token and must
-# not look as though it might: the documented poster is page JavaScript in a
-# hostile page's MAIN world.
-SEGMENT_SIG_HEADER = 'X-Daedalus-Segment-Sig'
 
 # ─── Command queue (directory-per-target, FIFO) ───
 # PUT /command enqueues into commands/{token}_{tab}/<seq>.json (per-tab) or

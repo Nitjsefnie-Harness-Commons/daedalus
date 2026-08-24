@@ -93,7 +93,7 @@ export function mount(container, bus) {
     const token = getToken();
     if (!token) { statEls.tabs.textContent = '—'; return; }
     try {
-      const tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
+      const tabs = await api.get('/tabs');
       statEls.tabs.textContent = tabs.length;
       // Also update the status line tab count
       for (const el of document.querySelectorAll('[data-meta="tab-count"]')) el.textContent = tabs.length;

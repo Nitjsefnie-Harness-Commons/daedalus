@@ -79,11 +79,12 @@ async function readBoundedBody(resp, limit) {
 // rides in a header as well as in the payload. A screenshot upload or a large
 // eval result carrying only a body token is refused unread, because a body
 // token cannot be checked without reading the body.
+function bridgeAuth(token) {
+  return { 'Authorization': 'Bearer ' + token };
+}
+
 function bridgeHeaders(token) {
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer ' + token,
-  };
+  return { 'Content-Type': 'application/json', ...bridgeAuth(token) };
 }
 
 // Timing ring buffer for diagnostics (last 500 fetch relay entries)
@@ -1646,12 +1647,16 @@ async function startStream() {
     }
   }, 5000);
 
-  const url = config.serverUrl + '/stream?token=' + encodeURIComponent(config.token) + '&tab=extension';
+  // The token travels in a header, not in the target: a stream URL is the
+  // one request target a proxy log keeps for the whole life of the stream.
+  const url = config.serverUrl + '/stream?tab=extension';
   const controller = new AbortController();
   sseAbort = controller;
 
   try {
-    const resp = await fetch(url, { signal: controller.signal });
+    const resp = await fetch(url, {
+      signal: controller.signal, headers: bridgeAuth(config.token),
+    });
     if (!resp.ok || !resp.body) {
       console.error('[Daedalus] Stream failed:', resp.status);
       if (myGen === streamGen) {

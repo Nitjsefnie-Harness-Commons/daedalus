@@ -17,8 +17,12 @@
 // Three endpoints do all the work; the first runs on the trusted side (CLI or
 // MCP), and this script only ever calls the other two:
 //   POST /segment-job                        {token, job} -> {ok, sig}
-//   GET  /segment-status?job=J&sig=S         -> {done:[1,2,...], count:N}
-//   POST /segment?job=J&seg=N&total=T&sig=S  raw arraybuffer body
+//   GET  /segment-status?job=J               -> {done:[1,2,...], count:N}
+//   POST /segment?job=J&seg=N&total=T        raw arraybuffer body
+//
+// Both carry the capability in the X-Daedalus-Segment-Sig header rather than
+// in the query: a sig authorizes this job until the job is gone, and a
+// request target is retained by proxy access logs and browser tooling.
 //
 // __SIG__ is a capability scoped to this one job, minted by POST /segment-job
 // — deliberately NOT the bridge token. This script runs in the page's MAIN
@@ -47,7 +51,8 @@ const CONCURRENCY = '__CONC__'.startsWith('__') ? 3 : parseInt('__CONC__', 10);
 // Playlist and segment reads go through the background GM bridge, which is not
 // subject to page CORS. The status GET and segment POST below are plain
 // page-side fetches to the bridge, so a cross-origin deployment must allow both
-// routes and handle the POST's preflight. The bridge adds no CORS headers; see
+// routes and handle their preflights — the capability header makes the status
+// GET preflight too. The bridge adds no CORS headers; see
 // "Deployment" in README.md. Without that policy, route both bridge requests
 // through the GM bridge instead.
 function gmGet(url, responseType) {
@@ -102,7 +107,8 @@ async function run() {
   // replaced safely, but the status-based resume/skip benefit is lost.
   let done = new Set();
   try {
-    const r = await fetch(`${SERVER}/segment-status?job=${encodeURIComponent(JOB)}&sig=${encodeURIComponent(SIG)}`);
+    const r = await fetch(`${SERVER}/segment-status?job=${encodeURIComponent(JOB)}`,
+      { headers: { 'X-Daedalus-Segment-Sig': SIG } });
     if (r.ok) done = new Set((await r.json()).done || []);
   } catch (_) { /* done stays empty; a fresh run is still idempotent */ }
 
@@ -126,10 +132,13 @@ async function run() {
         try {
           const bytes = await gmGet(segments[seg - 1], 'arraybuffer');
           const relay = `${SERVER}/segment?job=${encodeURIComponent(JOB)}`
-            + `&seg=${seg}&total=${TOTAL}&sig=${encodeURIComponent(SIG)}`;
+            + `&seg=${seg}&total=${TOTAL}`;
           const resp = await fetch(relay, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/octet-stream' },
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'X-Daedalus-Segment-Sig': SIG,
+            },
             body: bytes,
           });
           if (!resp.ok) throw new Error('relay HTTP ' + resp.status);

@@ -75,7 +75,7 @@ export function mount(container, bus) {
     for (const el of document.querySelectorAll('[data-meta=token-short]')) el.textContent = tok.slice(0, 8) + '…';
     for (const el of document.querySelectorAll('[data-meta=server]')) el.textContent = srv || '(same origin)';
     try {
-      await api.get('/tabs?token=' + encodeURIComponent(tok));
+      await api.get('/tabs');
       setStatus(h('span', { class: 'green' }, 'connected'));
       toast('settings saved', 'ok');
       restartSse();
@@ -89,7 +89,7 @@ export function mount(container, bus) {
     if (!tok) { toast('save a token first', 'warn'); return; }
     const t0 = Date.now();
     try {
-      const tabs = await api.get('/tabs?token=' + encodeURIComponent(tok));
+      const tabs = await api.get('/tabs');
       setStatus(h('span', { class: 'green' }, 'ok'),
                 `  ${tabs.length} tabs  ${Date.now() - t0}ms`);
     } catch (e) {

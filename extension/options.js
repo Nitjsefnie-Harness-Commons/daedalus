@@ -39,7 +39,7 @@ saveBtn.addEventListener('click', () => {
       return;
     }
     if (token) {
-      fetch(server + '/tabs?token=' + encodeURIComponent(token))
+      fetch(server + '/tabs', { headers: { 'Authorization': 'Bearer ' + token } })
         .then(r => r.ok ? r.json() : Promise.reject(r.status))
         .then(() => setStatus('ok', 'Connected — token saved'))
         .catch(e => setStatus('err', 'Server unreachable: ' + e));

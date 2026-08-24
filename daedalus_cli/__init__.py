@@ -15,6 +15,12 @@ from collections.abc import Iterable
 
 __version__ = "0.21.0a"
 
+# The non-URL carrier for an HLS job capability. Its own header rather than
+# Authorization, because a segment route never sees the bridge token and must
+# not look as though it might: the documented poster is page JavaScript in a
+# hostile page's MAIN world.
+SEGMENT_SIG_HEADER = 'X-Daedalus-Segment-Sig'
+
 _REQUEST_FIELD_CARRIERS = {
     'token': 'token',
     'sig': 'sig',

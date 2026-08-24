@@ -35,7 +35,7 @@ export function mount(container) {
     if (!token) { listEl.innerHTML = '<div class="dim italic small">no token.</div>'; return; }
     listEl.innerHTML = '<div class="dim italic small">loading…</div>';
     try {
-      const r = await api.get(`/upload?token=${encodeURIComponent(token)}&limit=${PAGE_SIZE}&offset=${offset}`);
+      const r = await api.get(`/upload?limit=${PAGE_SIZE}&offset=${offset}`);
       items = r.items || [];
       total = r.total || 0;
       render();
@@ -73,7 +73,10 @@ export function mount(container) {
     // server.py has no /uploads/ route. See "Deployment" in README.md.
     const dlUrl = `${server}/uploads/${f.path}`;
     const isImage = /\.(png|jpe?g|gif|webp)$/i.test(f.filename);
-    const previewUrl = isImage ? `${server}/screenshot?token=${encodeURIComponent(getToken())}&id=${encodeURIComponent(f.id)}` : '';
+    // The proxy-served path, not /screenshot?token=…: a preview link is a URL
+    // the browser keeps in its history, and this one names the exact file the
+    // row describes rather than whichever capture under that id finished last.
+    const previewUrl = isImage ? dlUrl : '';
     return h('tr', {},
       h('td', {},
         h('span', { class: 'mono amber', title: f.id }, truncate(f.id, 32)),

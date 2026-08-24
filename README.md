@@ -269,7 +269,7 @@ in each matching top-level page, which could otherwise read cookies its own
 Browser (matching tab)                           Server (your bridge host)
 ┌────────────────────────────────────────────┐   ┌──────────────────────┐
 │ MAIN world                                 │   │ bridge (server.py)   │
-│  ├─ page-main: default injection channel   │   │ /stream?token        │
+│  ├─ page-main: default injection channel   │   │ /stream (Bearer)     │
 │  └─ page.js: GM + relay channel            │   │ watches commands/    │
 │            ▲                               │   │                      │
 │            │ window.postMessage            │   │ /result writes       │
@@ -299,17 +299,20 @@ DAEDALUS_DIR=<data-dir> DAEDALUS_PORT=<port> DAEDALUS_TOKEN=<bridge-token> pytho
 
 Routes that read a JSON body — `POST`, `PUT` and `DELETE` — settle credentials **before** the body is read. Send `Authorization: Bearer <token>`, the same header and value the MCP listener requires. A body token cannot be checked without reading the body, so it is accepted only for a body within `DAEDALUS_MAX_UNAUTHENTICATED_BODY` (default 64 KiB); past that, a request with no header is answered 401 without being read. A request may carry both, but they must be the same token — two different ones are refused rather than resolved. Two `Authorization` headers are refused before either is selected.
 
+Authenticated `GET` routes take the same header, and every in-repo client sends it: a request target is retained by reverse-proxy access logs, browser history and anything that copies a URL, so a reusable credential written into one is durably recorded wherever the bridge is deployed. `GET /stream`, `/tabs`, `/result`, `/upload`, `/screenshot` and the `GET /segment-job` lookup all resolve the header first and fall back to `?token=`, which still works — a header and a query token in one request must be the same one. `POST /segment` and `GET /segment-status` carry their job-scoped capability in `X-Daedalus-Segment-Sig` on the same rules; a sig authorizes its job for as long as the job exists, so it is exactly as reusable as the bridge token. It gets its own header rather than `Authorization` because a segment route never sees the bridge token and must not look as though it might.
+
 The in-process MCP front end takes three optional settings, documented together because they describe one listener: `DAEDALUS_MCP_PORT` (default `8086`) is the loopback port it binds; its tool handlers use the bridge's actual bound loopback URL, including when `DAEDALUS_PORT=0`; `DAEDALUS_LOCAL_URL` explicitly overrides that URL for a standalone MCP deployment fronting a bridge that runs elsewhere; and `DAEDALUS_MCP_ALLOWED_HOSTS` (default `127.0.0.1:*,localhost:*`) is the comma-separated host allowlist its DNS-rebinding protection accepts, so fronting `/mcp` with a public hostname means naming that hostname there.
 
-Endpoints: `GET /stream`, `GET /tabs`, `GET /health`, `GET /dashboard[/<asset>]`, `POST /register`, `POST /sync-tabs`, `POST /unregister`, `POST /poll`, `POST /result`, `PUT /command`, `GET /result`, `POST/GET/DELETE /upload`, `GET /screenshot`, `POST /segment-job` (mint) + `GET /segment-job` (look up without minting), `POST /segment` + `GET /segment-status`. `POST /segment-job` requires the configured bridge token; only `POST /segment` and `GET /segment-status` take the job-scoped `sig`. See `CLAUDE.md` for payload and endpoint notes.
+Endpoints: `GET /stream`, `GET /tabs`, `GET /health`, `GET /dashboard[/<asset>]`, `POST /register`, `POST /sync-tabs`, `POST /unregister`, `POST /poll`, `POST /result`, `PUT /command`, `GET /result`, `POST/GET/DELETE /upload`, `GET /screenshot`, `POST /segment-job` (mint) + `GET /segment-job` (look up without minting), `POST /segment` + `GET /segment-status`. `POST /segment-job` requires the configured bridge token; only `POST /segment` and `GET /segment-status` take the job-scoped `sig`, in the `X-Daedalus-Segment-Sig` header or the `sig` query parameter. See `CLAUDE.md` for payload and endpoint notes.
 
 `POST /poll` consumes and deletes the legacy broadcast command file when one is present.
 
 `PUT /command` enqueues into a per-target FIFO directory queue (back-to-back commands to one tab no longer overwrite), stamps each with a delivery id (`_did`) so the extension can dedup a redelivered frame, and TTL-drops commands unclaimed after `DAEDALUS_CMD_TTL` seconds (default 90). A background collector applies that TTL and removes empty queue directories even when no SSE consumer ever connects. `GET /health` reports stream/registry/last-delivery liveness for detecting a silently-dead bridge. `POST /register` is update-only and answers `{ok, updated}`; `updated: false` means the registry held no such tab, so the client should re-sync through `POST /sync-tabs` instead of treating the call as a refresh.
 
 The bridge rejects repeated authority carriers instead of selecting one value:
-this includes `token` in query strings or JSON bodies and `job` / `sig` on the
-segment-capability routes, even when the repeated values are equal or blank.
+this includes `token` in query strings or JSON bodies, a repeated
+`X-Daedalus-Segment-Sig`, and `job` / `sig` on the segment-capability routes,
+even when the repeated values are equal or blank.
 The MCP transport likewise rejects repeated `Authorization`, `Mcp-Session-Id`,
 `Host`, and `Origin` headers, plus repeated `job` arguments for the segment
 tools.
@@ -466,8 +469,8 @@ does NOT do, because they belong to whatever sits in front of it:
   cross-origin, the example HLS relay's page-side `fetch` calls need access to
   both
   `GET /segment-status` and `POST /segment`; the proxy must allow the page
-  origin on both routes and handle the methods/headers required by the POST's
-  preflight. If the status GET is blocked, unavailable, non-2xx, or invalid,
+  origin on both routes and handle the methods/headers required by their
+  preflights — the capability header makes the status GET preflight too. If the status GET is blocked, unavailable, non-2xx, or invalid,
   the example treats the job as fresh and re-POSTs every segment. Those writes
   still replace the same per-index files, but the run loses its resume/skip
   savings. Route both requests through the extension's GM bridge instead if
