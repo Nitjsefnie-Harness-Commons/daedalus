@@ -32,6 +32,7 @@
 !/.gitignore
 !/.pylintrc
 !/CLAUDE.md
+!/CONTRIBUTING.md
 !/LICENSE
 !/README.md
 !/SECURITY.md
