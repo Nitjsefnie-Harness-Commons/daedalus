@@ -3609,6 +3609,35 @@ def test_every_tab_selector_uses_the_shared_controller(tmp):
     assert not private, private
 
 
+def test_no_dashboard_export_is_unreferenced(tmp):
+    """A public module surface nothing imports is untested code.
+
+    Three of them accumulated — getBinary, evalOn and debounce — and each was
+    found the same way, by someone happening to search for the name. This is
+    the search, run every time.
+    """
+    del tmp
+    root = ROOT / 'dashboard'
+    sources = {path: path.read_text(encoding='utf-8')
+               for path in sorted(root.rglob('*.js'))}
+    assert sources, 'no dashboard sources found'
+    markup = (root / 'index.html').read_text(encoding='utf-8')
+    unused = []
+    for path, text in sources.items():
+        declarations = re.finditer(
+            r'^export\s+(?:async\s+)?(?:function|const|let|class)\s+'
+            r'([A-Za-z_$][\w$]*)', _blank_js_comments(text), re.M)
+        for match in declarations:
+            name = match.group(1)
+            referenced = any(
+                re.search(r'\b' + re.escape(name) + r'\b', other)
+                for other_path, other in sources.items() if other_path != path)
+            if referenced or re.search(r'\b' + re.escape(name) + r'\b', markup):
+                continue
+            unused.append(f'{path.relative_to(ROOT).as_posix()}: {name}')
+    assert not unused, f'exported but referenced nowhere: {unused}'
+
+
 def test_dashboard_never_builds_markup_from_a_value(tmp):
     """innerHTML in the dashboard is only ever a constant.
 

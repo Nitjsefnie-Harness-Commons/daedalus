@@ -150,10 +150,3 @@ export async function extCmd(type, fields = {}, opts = {}) {
   const { result } = await runCommand({ tab: 'extension', type, fields, ...opts });
   return result;
 }
-
-// Return the full eval envelope. Its `world` value describes the execution
-// channel unchanged; it does not attest to the returned value.
-export async function evalOn(chromeTabId, code, opts = {}) {
-  const { result, envelope } = await runCommand({ tab: String(chromeTabId), code, ...opts });
-  return { result, envelope };
-}

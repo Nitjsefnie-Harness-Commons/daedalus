@@ -252,11 +252,3 @@ export function inlineEdit(cell, initial, originalText, onSubmit, { type = 'text
   input.select();
 }
 
-// Tiny debounce helper.
-export function debounce(fn, ms) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
-}
