@@ -3852,6 +3852,38 @@ def test_the_security_warning_names_every_capability_the_shim_grants(tmp):
     assert not missing, f'not named in the install-time warning: {missing}'
 
 
+def test_every_registry_call_checks_its_http_status(tmp):
+    """A refusal is not a success, and fetch does not say so on its own.
+
+    fetch resolves normally for 401, 413 and 500, so `await fetch(...)` with
+    only a network-error catch reads every refusal as a completed
+    registration. All three registry routes went out that way, so the
+    server's tab registry could sit stale with nothing reported anywhere.
+    """
+    del tmp
+    source = (_util.ROOT / 'extension' / 'background.js').read_text(
+        encoding='utf-8')
+
+    # No registry route may be fetched outside the one helper.
+    direct = []
+    for route in ('/register', '/unregister', '/sync-tabs'):
+        for match in re.finditer(
+                r'fetch\(\s*config\.serverUrl\s*\+\s*[\'"]'
+                + re.escape(route) + r'[\'"]', source):
+            direct.append(f'{route} at offset {match.start()}')
+    assert not direct, direct
+
+    for route in ('/register', '/unregister', '/sync-tabs'):
+        assert f"registryPost('{route}'" in source, route
+
+    # And the helper is what actually looks at the status.
+    _, marker, after = source.partition('async function registryPost(')
+    assert marker, 'registryPost is not defined the way this test finds it'
+    helper, _, _ = after.partition('\nasync function registerTab')
+    assert 'resp.ok' in helper, helper
+    assert 'console.error' in helper, helper
+
+
 def test_the_extension_never_logs_the_bridge_token(tmp):
     """The token is a reusable browser-control credential, not a diagnostic.
 

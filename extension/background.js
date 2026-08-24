@@ -139,21 +139,51 @@ function configured() {
   return Boolean(config.token && config.serverUrl);
 }
 
-async function registerTab(chromeTabId) {
-  if (!configured()) return;
+// One place for the tab-registry control plane's error handling. fetch
+// resolves normally for 401, 413 and 500, so a caller that only catches
+// network errors reads a refusal as a success — which is how the server's
+// registry could sit stale with nothing said about it anywhere.
+//
+// Returns the parsed answer, or null when the request was refused or never
+// arrived. The response detail is bounded: it is a diagnostic, not a payload.
+async function registryPost(path, payload) {
   try {
-    const tab = await chrome.tabs.get(chromeTabId);
-    await fetch(config.serverUrl + '/register', {
+    const resp = await fetch(config.serverUrl + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: config.token,
-        tabId: String(chromeTabId),
-        url: tab.url || '',
-        title: tab.title || '',
-      }),
+      body: JSON.stringify(payload),
     });
-  } catch (_) {}
+    if (!resp.ok) {
+      let detail = '';
+      try { detail = (await resp.text()).slice(0, 200); } catch (_) {}
+      console.error(`[Daedalus] ${path} refused: HTTP ${resp.status} ${detail}`);
+      return null;
+    }
+    try { return await resp.json(); } catch (_) { return {}; }
+  } catch (e) {
+    console.error(`[Daedalus] ${path} failed:`, (e && e.message) || e);
+    return null;
+  }
+}
+
+async function registerTab(chromeTabId) {
+  if (!configured()) return;
+  let tab;
+  try {
+    tab = await chrome.tabs.get(chromeTabId);
+  } catch (_) {
+    return;  // the tab went away between the event and this call
+  }
+  const answer = await registryPost('/register', {
+    token: config.token,
+    tabId: String(chromeTabId),
+    url: tab.url || '',
+    title: tab.title || '',
+  });
+  // /register is update-only: `updated: false` means the server has no such
+  // tab, so refreshing it did nothing. A full sync is what supplies it, and
+  // scheduleRegisterAllTabs coalesces, so a burst of these costs one.
+  if (answer && answer.updated === false) scheduleRegisterAllTabs();
 }
 
 // ─── Tab tracking ───
@@ -171,11 +201,7 @@ chrome.tabs.onCreated.addListener((tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (configured()) {
     // Immediate removal + full sync to ensure clean state
-    fetch(config.serverUrl + '/unregister', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: config.token, tabId: String(tabId) }),
-    }).catch(() => {});
+    registryPost('/unregister', { token: config.token, tabId: String(tabId) });
     scheduleRegisterAllTabs();
   }
 });
@@ -1730,11 +1756,7 @@ function registerAllTabs() {
       .filter(t => t.id)
       .map(t => ({ tabId: String(t.id), url: t.url || '', title: t.title || '' }));
     // Sync replaces entire server registry — removes ghost tabs from prior sessions
-    fetch(config.serverUrl + '/sync-tabs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: config.token, tabs: tabList }),
-    }).catch(() => {});
+    registryPost('/sync-tabs', { token: config.token, tabs: tabList });
   });
 }
 
