@@ -53,7 +53,8 @@
       else if (cb.resolve) cb.resolve();
       delete _pending[msg.reqId];
     } else if (msg.handler === 'listValues') {
-      if (cb.resolve) cb.resolve(msg.keys);
+      if (msg.error && cb.reject) cb.reject(new Error(msg.error));
+      else if (cb.resolve) cb.resolve(msg.keys);
       delete _pending[msg.reqId];
     } else if (msg.handler === 'download') {
       if (msg.event === 'load' && cb.onload) cb.onload();
@@ -285,9 +286,9 @@
     },
 
     listValues: function() {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         const reqId = gmPost('listValues', {});
-        _pending[reqId] = { resolve };
+        _pending[reqId] = { resolve, reject };
       });
     },
 

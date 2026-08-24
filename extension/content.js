@@ -16,6 +16,16 @@ const EVAL_TIMEOUT = 10000;
 // extension's, and page context may not read or write them. Everything else
 // with a string key behaves as a userscript expects.
 const RESERVED_KEY = /^daedalus-/;
+
+// chrome.runtime.lastError is the ONLY report a storage callback receives:
+// Chrome invokes the callback on failure exactly as on success, with the
+// store unchanged, so a callback that does not read it cannot tell a written
+// value from a quota rejection. Reading it also clears Chrome's own
+// "unchecked lastError" warning, which is why every callback reads it rather
+// than only the ones failure seems likely in.
+function storageError() {
+  return (chrome.runtime.lastError && chrome.runtime.lastError.message) || '';
+}
 const KEYED_STORAGE_HANDLERS = new Set(['getValue', 'setValue', 'deleteValue']);
 
 window.addEventListener('message', (e) => {
@@ -71,19 +81,25 @@ window.addEventListener('message', (e) => {
     });
   } else if (msg.handler === 'getValue') {
     chrome.storage.local.get([msg.key], (data) => {
+      const err = storageError();
+      if (err) return window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'getValue', error: err }, '*');
       const val = data[msg.key] !== undefined ? data[msg.key] : msg.defaultValue;
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'getValue', value: val }, '*');
     });
   } else if (msg.handler === 'setValue') {
     chrome.storage.local.set({ [msg.key]: msg.value }, () => {
-      window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue' }, '*');
+      const err = storageError();
+      window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
     });
   } else if (msg.handler === 'deleteValue') {
     chrome.storage.local.remove([msg.key], () => {
-      window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'deleteValue' }, '*');
+      const err = storageError();
+      window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'deleteValue', error: err }, '*');
     });
   } else if (msg.handler === 'listValues') {
     chrome.storage.local.get(null, (data) => {
+      const err = storageError();
+      if (err) return window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'listValues', error: err }, '*');
       // The reserved keys are filtered here too. Blocking reads while still
       // listing the names tells a page exactly what to go after and confirms a
       // bridge is configured; the namespace has to be invisible, not just

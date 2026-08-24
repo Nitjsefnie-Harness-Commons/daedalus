@@ -5603,6 +5603,132 @@ def test_the_background_relays_the_response_url_and_status_text(tmp):
         assert field in response, (field, response)
 
 
+_STORAGE_FAILURE_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+
+// Every chrome.storage call fails the way Chrome fails one: the callback is
+// invoked exactly as on success, the store is left alone, and the only trace
+// is chrome.runtime.lastError — which Chrome clears once the callback
+// returns, so it is set around the call and cleared after it.
+const [contentPath, pagePath] = process.argv.slice(1);
+const FAILURE = 'QUOTA_BYTES quota exceeded';
+const listeners = {};
+const messages = [];
+
+const windowObject = {
+  addEventListener(type, listener) {
+    (listeners[type] ||= []).push(listener);
+  },
+  postMessage(message) {
+    messages.push(message);
+  },
+};
+
+function failing(callback, value) {
+  chrome.runtime.lastError = { message: FAILURE };
+  try {
+    callback(value);
+  } finally {
+    chrome.runtime.lastError = null;
+  }
+}
+
+const chrome = {
+  runtime: {
+    lastError: null,
+    onMessage: { addListener() {} },
+    sendMessage() {},
+    getManifest() { return { version: '0.18.0' }; },
+    connect() {
+      return {
+        disconnect() {},
+        postMessage() {},
+        onDisconnect: { addListener() {} },
+      };
+    },
+  },
+  storage: {
+    local: {
+      get(keys, callback) { failing(callback, {}); },
+      set(values, callback) { failing(callback); },
+      remove(keys, callback) { failing(callback); },
+    },
+  },
+};
+
+const context = {
+  window: windowObject,
+  chrome,
+  navigator: { clipboard: { writeText: () => Promise.resolve() } },
+  location: { hostname: 'storage-failure.invalid' },
+  setInterval: () => 1,
+  clearInterval() {},
+  setTimeout: () => 1,
+  console: { log() {}, error() {} },
+};
+vm.runInNewContext(fs.readFileSync(contentPath, 'utf8'), context);
+vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), context);
+
+function flushMessages() {
+  while (messages.length) {
+    const data = messages.shift();
+    for (const listener of listeners.message) {
+      listener({ source: windowObject, data });
+    }
+  }
+}
+
+const outcomes = {};
+const settled = [];
+for (const [name, call] of [
+  ['getValue', () => windowObject.GM.getValue('ordinary', 'fallback')],
+  ['setValue', () => windowObject.GM.setValue('ordinary', 'value')],
+  ['deleteValue', () => windowObject.GM.deleteValue('ordinary')],
+  ['listValues', () => windowObject.GM.listValues()],
+]) {
+  settled.push(call().then(
+    (value) => { outcomes[name] = { settled: 'resolved', value: value ?? null }; },
+    (error) => { outcomes[name] = { settled: 'rejected', error: String(error && error.message) }; },
+  ));
+}
+flushMessages();
+
+Promise.all(settled).then(() => {
+  process.stdout.write(JSON.stringify(outcomes), () => process.exit(0));
+});
+"""
+
+
+def _run_storage_failure_harness():
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension storage boundary'
+    result = subprocess.run(
+        [node, '-e', _STORAGE_FAILURE_HARNESS,
+         str(ROOT / 'extension' / 'content.js'),
+         str(ROOT / 'extension' / 'page.js')],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def test_a_failed_storage_write_rejects_instead_of_resolving(tmp):
+    """Chrome reports a storage failure only through lastError.
+
+    The callbacks fire on failure exactly as on success, with the store
+    unchanged, so a relay that did not read chrome.runtime.lastError could
+    not tell the two apart — GM.setValue resolved successfully having stored
+    nothing, and the page had no way to find out.
+    """
+    del tmp
+    outcomes = _run_storage_failure_harness()
+    assert set(outcomes) == {
+        'getValue', 'setValue', 'deleteValue', 'listValues'}, outcomes
+    for name, outcome in sorted(outcomes.items()):
+        assert outcome['settled'] == 'rejected', (name, outcome)
+        assert 'QUOTA_BYTES quota exceeded' in outcome['error'], (name, outcome)
+
+
 def _run_storage_relay_harness():
     node = shutil.which('node')
     assert node, 'node is required to execute the extension storage boundary'
