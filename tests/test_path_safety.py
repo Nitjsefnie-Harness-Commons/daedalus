@@ -371,7 +371,11 @@ try:
         answer['escape'] = 'refused'
 finally:
     os.path.realpath = _real
-sys.stdout.write(json.dumps(answer))
+# Marked, and not alone on stdout: importing server.py prints a line there
+# on any platform without glibc -- '[Daedalus] malloc tuning unavailable' --
+# and the bridge's stdout is its log stream by design. Parsing the whole
+# stream as JSON worked only on Linux.
+sys.stdout.write('\nCONTAINMENT ' + json.dumps(answer) + '\n')
 """
 
 
@@ -401,7 +405,13 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
         [sys.executable, '-c', _CONTAINMENT_PROBE, str(docroot)],
         cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-    answer = json.loads(proc.stdout)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith('CONTAINMENT ')]
+    # The whole stream goes into the failure: a probe that answered nothing
+    # useful should say what it did print, not raise a decode error whose
+    # text names a column.
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    answer = json.loads(marked[0][len('CONTAINMENT '):])
     # The contained file is contained, whichever way each side is spelled.
     assert answer['contained'] == 'tok_extension.json', answer
     # And the backstop still refuses a real escape under the same spelling,
