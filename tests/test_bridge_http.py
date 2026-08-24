@@ -180,6 +180,28 @@ def _read_stream_data(base, token, tab=None, timeout=30):
         conn.close()
 
 
+def _framer(response, served):
+    """Read stream frames, attaching the bridge's own log to a timeout.
+
+    #23 is an intermittent "no data frame arrived" across this family of
+    tests, and the bridge's DELIVERED lines are the only direct evidence of
+    whether its drain ever saw the file the reader is waiting for. One test
+    captured them and one sighting was consequently diagnosable; the siblings
+    failed with nothing but the timeout, which is how the fifth sighting
+    arrived carrying no evidence at all. `served` is the list handed to
+    `_util.bridge(output=...)`.
+    """
+    def frame(what, **kwargs):
+        try:
+            return _next_stream_data(response, **kwargs)
+        except AssertionError as failure:
+            raise AssertionError(
+                f'{what}: {failure}; the bridge said: '
+                f'{"".join(served)!r}') from failure
+
+    return frame
+
+
 def _next_stream_data(response, timeout=10):
     """Read an open SSE response until the next data frame arrives.
 
@@ -822,20 +844,22 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
     the DELIVERED log line that raised UnicodeEncodeError and tore the stream
     down after the frame had already gone out.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    served = []
+    with _util.bridge(tmp, output=served) as (base, docroot):
         conn, response = _stream_response(base, TOK, tab='extension')
+        frame = _framer(response, served)
         try:
             assert response.status == 200, response.status
             qdir = Path(docroot) / 'commands' / TOK
             qdir.mkdir(parents=True)
             (qdir / '0000000000001_000001.json').write_bytes(
                 b'{"id":"\\ud800","code":"1"}')
-            first = _next_stream_data(response)
+            first = frame('the queued command with a surrogate id')
             assert first.get('code') == '1', first
             status, _ = _put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '2'})
             assert status == 200, status
-            second = _next_stream_data(response)
+            second = frame('the command enqueued afterwards')
             assert second.get('id') == 'after', second
         finally:
             response.close()
@@ -847,18 +871,20 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
 
 def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
     """The same lone surrogate in a legacy raw-write file must not kill the stream."""
-    with _util.bridge(tmp) as (base, docroot):
+    served = []
+    with _util.bridge(tmp, output=served) as (base, docroot):
         conn, response = _stream_response(base, TOK, tab='extension')
+        frame = _framer(response, served)
         try:
             assert response.status == 200, response.status
             legacy = Path(docroot) / 'commands' / f'{TOK}.json'
             legacy.write_bytes(b'{"id":"\\ud800","code":"1"}')
-            first = _next_stream_data(response)
+            first = frame('the legacy file with a surrogate id')
             assert first.get('code') == '1', first
             status, _ = _put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '2'})
             assert status == 200, status
-            second = _next_stream_data(response)
+            second = frame('the command enqueued afterwards')
             assert second.get('id') == 'after', second
         finally:
             response.close()
@@ -926,15 +952,7 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
     served = []
     with _util.bridge(tmp, env=strict, output=served) as (base, docroot):
         conn, response = _stream_response(base, TOK, tab='extension')
-
-        def frame(what):
-            try:
-                return _next_stream_data(response)
-            except AssertionError as failure:
-                raise AssertionError(
-                    f'{what}: {failure}; the bridge said: '
-                    f'{"".join(served)!r}') from failure
-
+        frame = _framer(response, served)
         try:
             assert response.status == 200, response.status
             commands = os.fsencode(Path(docroot) / 'commands')
@@ -968,7 +986,8 @@ def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
     """The TTL-DROP log line takes the same raw name and must not kill the stream."""
     _util.require_undecodable_names(tmp)
     strict = {'PYTHONIOENCODING': 'utf-8:strict'}
-    with _util.bridge(tmp, env=strict) as (base, docroot):
+    served = []
+    with _util.bridge(tmp, env=strict, output=served) as (base, docroot):
         qdir = Path(docroot) / 'commands' / TOK
         qdir.mkdir(parents=True)
         stale = os.fsencode(qdir) + b'/\xffexpired.json'
@@ -977,13 +996,14 @@ def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
         os.utime(stale, (0, 0))  # far past CMD_TTL; the GC's first pass is
         # 30s after bridge start, so the stream's first drain sees this file.
         conn, response = _stream_response(base, TOK, tab='extension')
+        read = _framer(response, served)
         try:
             assert response.status == 200, response.status
             status, _ = _put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '2'})
             assert status == 200, status
-            frame = _next_stream_data(response)
-            assert frame.get('id') == 'after', frame
+            delivered = read('the command enqueued after the expired entry')
+            assert delivered.get('id') == 'after', delivered
         finally:
             response.close()
             conn.close()
@@ -994,6 +1014,36 @@ def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
         health_status, health = _util.get_json(base + '/health')
         assert health_status == 200 and health['ok'] is True, (
             health_status, health)
+
+
+def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
+    """The diagnostic has to fire, or it reads as absent evidence.
+
+    #23's fifth sighting produced nothing but "no data frame arrived" because
+    the capture existed on one test in the family and not its siblings. A
+    capture that is wired but silent would look exactly the same from a
+    failure report, so this drives a real timeout and reads what comes out.
+    """
+    served = []
+    with _util.bridge(tmp, output=served) as (base, _docroot):
+        conn, response = _stream_response(base, TOK, tab='extension')
+        read = _framer(response, served)
+        message = ''
+        try:
+            try:
+                read('a command nobody ever sent', timeout=1)
+            except AssertionError as failure:
+                message = str(failure)
+        finally:
+            response.close()
+            conn.close()
+    assert message, 'the read returned instead of timing out'
+    assert 'a command nobody ever sent' in message, message
+    assert 'no data frame arrived within 1 seconds' in message, message
+    # The fixture cannot return before the announcement it reads the port
+    # from, so this line is in `served` whatever else the bridge has logged.
+    assert 'the bridge said: ' in message, message
+    assert '[Daedalus] Listening on 127.0.0.1:' in message, message
 
 
 def test_startup_survives_an_undecodable_byte_in_the_data_root(tmp):
