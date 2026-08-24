@@ -58,13 +58,17 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
-def _runner_tree(tmp, suites, directory='tree'):
+def _runner_tree(tmp, suites, under='.'):
     """A copy of run_tests.py over fabricated suites, run where it stands.
 
-    `directory` is a parameter so one test can build two trees and compare
-    what the aggregate says about each.
+    `under` names a PARENT directory, so one test can build two trees and
+    compare what the aggregate says about each. The tree itself is always
+    called `tree`: coverage maps `*/tree` back onto this repository — see the
+    `[tool.coverage.paths]` note in pyproject.toml — and a tree by any other
+    name is measured under a path that no longer exists when the report is
+    read, which fails the coverage job rather than the suite.
     """
-    root = Path(tmp) / directory
+    root = Path(tmp) / under / 'tree'
     (root / 'tests').mkdir(parents=True)
     shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
     shutil.copy2(ROOT / 'tests' / '_util.py', root / 'tests' / '_util.py')
@@ -115,7 +119,7 @@ def test_a_suite_that_named_what_it_needs_is_unrun_rather_than_empty(tmp):
     undeclared = _runner_tree(tmp, {
         'test_all_skipped.py': _ALL_SKIPPED_SUITE,
         'test_passing.py': _PASSING_SUITE,
-    }, directory='undeclared')
+    }, under='undeclared')
     assert 'OVERALL: PASS' not in undeclared.stdout, undeclared.stdout
     assert undeclared.returncode != 0, undeclared.stdout
 
