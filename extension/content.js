@@ -123,8 +123,18 @@ window.addEventListener('message', (e) => {
     window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'notification' }, '*');
   } else if (msg.handler === 'download') {
     chrome.runtime.sendMessage({ type: 'download', url: msg.url, filename: msg.name }, (resp) => {
-      if (resp && resp.error) {
-        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'download', event: 'error', error: resp.error }, '*');
+      // Three ways this fails; only one of them used to be noticed. A
+      // sendMessage that never reaches the worker reports through
+      // chrome.runtime.lastError and passes NO response, so `resp` was
+      // undefined, `resp && resp.error` was false, and the page got a load
+      // event for a download that was never started. A response carrying no
+      // downloadId is the same story arriving from the other side.
+      const err = chrome.runtime.lastError && chrome.runtime.lastError.message;
+      const failure = err || (resp && resp.error)
+        || (!resp && 'no response from background (service worker dead?)')
+        || (resp.downloadId === undefined && 'background started no download');
+      if (failure) {
+        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'download', event: 'error', error: failure }, '*');
       } else {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'download', event: 'load' }, '*');
       }

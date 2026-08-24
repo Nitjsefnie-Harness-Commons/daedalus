@@ -5603,6 +5603,127 @@ def test_the_background_relays_the_response_url_and_status_text(tmp):
         assert field in response, (field, response)
 
 
+_DOWNLOAD_RELAY_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+
+// Argument is the background outcome to simulate: "lastError" (the worker
+// never answered), "empty" (answered without a downloadId), "error" (answered
+// with one), or "ok".
+const [contentPath, pagePath, mode] = process.argv.slice(1);
+const listeners = {};
+const messages = [];
+
+const windowObject = {
+  addEventListener(type, listener) {
+    (listeners[type] ||= []).push(listener);
+  },
+  postMessage(message) {
+    messages.push(message);
+  },
+};
+
+const chrome = {
+  runtime: {
+    lastError: null,
+    onMessage: { addListener() {} },
+    getManifest() { return { version: '0.18.0' }; },
+    connect() {
+      return {
+        disconnect() {},
+        postMessage() {},
+        onDisconnect: { addListener() {} },
+      };
+    },
+    sendMessage(message, callback) {
+      if (!callback) return;
+      if (mode === 'lastError') {
+        // Chrome's shape for an undelivered message: lastError set, and the
+        // callback invoked with no response at all.
+        chrome.runtime.lastError = { message: 'Could not establish connection.' };
+        try { callback(undefined); } finally { chrome.runtime.lastError = null; }
+        return;
+      }
+      if (mode === 'empty') return callback({});
+      if (mode === 'error') return callback({ error: 'Invalid filename' });
+      callback({ downloadId: 7 });
+    },
+  },
+};
+
+const context = {
+  window: windowObject,
+  chrome,
+  navigator: { clipboard: { writeText: () => Promise.resolve() } },
+  location: { hostname: 'download-test.invalid' },
+  setInterval: () => 1,
+  clearInterval() {},
+  setTimeout: () => 1,
+  console: { log() {}, error() {} },
+};
+vm.runInNewContext(fs.readFileSync(contentPath, 'utf8'), context);
+vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), context);
+
+function flushMessages() {
+  while (messages.length) {
+    const data = messages.shift();
+    for (const listener of listeners.message) {
+      listener({ source: windowObject, data });
+    }
+  }
+}
+
+const events = [];
+windowObject.GM.download({
+  url: 'about:blank',
+  name: 'file.bin',
+  onload: () => events.push('load'),
+  onerror: (detail) => events.push('error:' + (detail && detail.error)),
+});
+flushMessages();
+
+process.stdout.write(JSON.stringify({ events }), () => process.exit(0));
+"""
+
+
+def _run_download_relay_harness(mode):
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension download boundary'
+    result = subprocess.run(
+        [node, '-e', _DOWNLOAD_RELAY_HARNESS,
+         str(ROOT / 'extension' / 'content.js'),
+         str(ROOT / 'extension' / 'page.js'), mode],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def test_a_download_that_never_started_reaches_onerror(tmp):
+    """An absent response is a failure, not a success with nothing in it.
+
+    The relay tested `resp && resp.error`, so the one case where Chrome
+    passes NO response — a sendMessage that never reached the worker,
+    reported through lastError — skipped the error branch entirely and the
+    page was handed a load event for a download that was never started.
+    """
+    del tmp
+    undelivered = _run_download_relay_harness('lastError')
+    assert undelivered['events'] == [
+        'error:Could not establish connection.'], undelivered
+
+    # Answered, but with no download to point at.
+    empty = _run_download_relay_harness('empty')
+    assert empty['events'] == ['error:background started no download'], empty
+
+    # The failure the relay always did report still reports.
+    refused = _run_download_relay_harness('error')
+    assert refused['events'] == ['error:Invalid filename'], refused
+
+    # And a real download is still a load.
+    started = _run_download_relay_harness('ok')
+    assert started['events'] == ['load'], started
+
+
 _STORAGE_FAILURE_HARNESS = r"""
 const fs = require('fs');
 const vm = require('vm');
