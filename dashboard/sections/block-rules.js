@@ -1,6 +1,6 @@
 // §06 BLOCK RULES — declarativeNetRequest session rules.
 
-import { h, clear, errMsg, toast, armedAction } from './_util.js';
+import { h, field, spacer, clear, errMsg, toast, armedAction } from './_util.js';
 import { extCmd } from '../api.js';
 
 export function mount(container) {
@@ -13,9 +13,9 @@ export function mount(container) {
     h('div', { class: 'divider' }),
     h('div', { class: 'small dim', style: { marginBottom: '8px' } }, 'ADD NEW RULE'),
     h('div', { class: 'row' },
-      h('div', { class: 'grow' }, h('label', {}, 'url filter pattern'), h('input', { type: 'text', data: { role: 'pat' }, placeholder: '*/favicon.ico  ·  *.ad-server.com/*  ·  ||tracker.io^' })),
-      h('div', {}, h('label', {}, 'chrome tab id (optional)'), h('input', { type: 'number', data: { role: 'tid' }, placeholder: 'all tabs', style: { width: '140px' } })),
-      h('div', {}, h('label', {}, '\u00a0'), h('button', { class: 'primary', data: { role: 'add' } }, 'ADD')),
+      h('div', { class: 'grow' }, field('url filter pattern', h('input', { type: 'text', data: { role: 'pat' }, placeholder: '*/favicon.ico  ·  *.ad-server.com/*  ·  ||tracker.io^' }))),
+      h('div', {}, field('chrome tab id (optional)', h('input', { type: 'number', data: { role: 'tid' }, placeholder: 'all tabs', style: { width: '140px' } }))),
+      h('div', {}, spacer(), h('button', { class: 'primary', data: { role: 'add' } }, 'ADD')),
     ),
     h('div', { class: 'hint' }, 'Session rules only. Resource types: xmlhttprequest, media, other. Scoped to specified tab or (if blank) all currently open tabs. Extension host always excluded.'),
   );

@@ -6,10 +6,10 @@ import { api, extCmd, getToken } from '../api.js';
 export function mount(container, bus) {
   const root = h('div', {},
     h('div', { class: 'toolbar' },
-      h('input', { type: 'text', placeholder: 'filter url/title…', data: { role: 'filter' }, style: { minWidth: '240px' } }),
+      h('input', { type: 'text', 'aria-label': 'filter tabs by url or title', placeholder: 'filter url/title…', data: { role: 'filter' }, style: { minWidth: '240px' } }),
       h('button', { class: 'sm', onclick: () => load() }, 'refresh'),
       h('span', { style: { flex: '1' } }),
-      h('input', { type: 'text', placeholder: 'https://… (space/newline-separated for bulk)', data: { role: 'open-url' }, style: { minWidth: '320px' } }),
+      h('input', { type: 'text', 'aria-label': 'urls to open, space or newline separated', placeholder: 'https://… (space/newline-separated for bulk)', data: { role: 'open-url' }, style: { minWidth: '320px' } }),
       h('button', { class: 'primary sm', onclick: () => openNew() }, '+ open tab(s)'),
     ),
     h('div', { data: { role: 'table-host' } },
@@ -96,7 +96,7 @@ export function mount(container, bus) {
     inlineEdit(urlCell, initial, originalText, async (url) => {
       try { await extCmd('navigate', { tabId: Number(tabId), url }); toast('navigating tab ' + tabId, 'ok'); }
       catch (e) { toast(errMsg(e), 'err'); }
-    }, { type: 'url' });
+    }, { type: 'url', label: 'navigate tab ' + tabId + ' to a new url' });
   }
   async function shoot(tabId) {
     try {

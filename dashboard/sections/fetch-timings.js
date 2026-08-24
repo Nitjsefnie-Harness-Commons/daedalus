@@ -9,7 +9,7 @@ export function mount(container) {
       h('button', { data: { role: 'refresh' } }, 'refresh'),
       h('button', { class: 'ghost sm danger', data: { role: 'reset' } }, 'reset buffer'),
       h('span', { style: { flex: '1' } }),
-      h('span', { class: 'small dim', data: { role: 'meta' } }, ''),
+      h('span', { class: 'small dim', role: 'status', data: { role: 'meta' } }, ''),
     ),
     h('div', { data: { role: 'list' } }, h('div', { class: 'dim italic small' }, 'loading…')),
   );

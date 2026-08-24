@@ -1,37 +1,37 @@
 // §07 NET CAPTURE — CDP-backed request/response capture.
 
-import { h, clear, fmtSize, truncate, errMsg, toast, pretty, bindTabSelector } from './_util.js';
+import { h, field, spacer, clear, fmtSize, truncate, errMsg, toast, pretty, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken } from '../api.js';
 
 export function mount(container, bus) {
   const root = h('div', {},
     h('div', { class: 'row' },
-      h('div', {}, h('label', {}, 'tab'), h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } }, h('option', { value: '' }, '(active tab)'))),
-      h('div', {}, h('label', {}, 'max'), h('input', { type: 'number', value: '1000', min: '10', max: '10000', data: { role: 'max' }, style: { width: '90px' } })),
-      h('div', {}, h('label', {}, 'regex filter'), h('input', { type: 'text', data: { role: 'filter' }, placeholder: 'e.g. \\.m3u8$' })),
+      h('div', {}, field('tab', h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } }, h('option', { value: '' }, '(active tab)')))),
+      h('div', {}, field('max', h('input', { type: 'number', value: '1000', min: '10', max: '10000', data: { role: 'max' }, style: { width: '90px' } }))),
+      h('div', {}, field('regex filter', h('input', { type: 'text', data: { role: 'filter' }, placeholder: 'e.g. \\.m3u8$' }))),
       h('div', {},
-        h('label', {}, '\u00a0'),
+        spacer(),
         h('button', { class: 'primary', data: { role: 'start' } }, 'START'),
       ),
       h('div', {},
-        h('label', {}, '\u00a0'),
+        spacer(),
         h('button', { data: { role: 'poll' } }, 'poll'),
       ),
       h('div', {},
-        h('label', {}, '\u00a0'),
+        spacer(),
         h('label', { style: { display: 'inline-flex', gap: '6px', alignItems: 'center' } },
           h('input', { type: 'checkbox', data: { role: 'bodies' } }),
           h('span', {}, 'bodies'),
         ),
       ),
       h('div', {},
-        h('label', {}, '\u00a0'),
+        spacer(),
         h('button', { class: 'danger', data: { role: 'stop' } }, 'STOP'),
       ),
     ),
     h('div', { class: 'hint' }, 'START attaches CDP Network domain to the tab. Requests buffer until STOP (or manual poll). bodies=on fetches response bodies before closing — slow for large captures.'),
     h('div', { class: 'toolbar', style: { marginTop: '10px' } },
-      h('span', { class: 'small dim', data: { role: 'status' } }, 'not capturing.'),
+      h('span', { class: 'small dim', role: 'status', data: { role: 'status' } }, 'not capturing.'),
     ),
     h('div', { data: { role: 'list' } }),
   );

@@ -1,6 +1,6 @@
 // §12 SETTINGS — token, server URL, extension reload, broadcast caveat.
 
-import { h, clear, toast, errMsg, armedAction } from './_util.js';
+import { h, field, spacer, clear, toast, errMsg, armedAction } from './_util.js';
 import { getToken, setToken, getServer, setServer, extCmd, api } from '../api.js';
 import { restart as restartSse } from '../sse.js';
 
@@ -8,18 +8,18 @@ export function mount(container, bus) {
   const root = h('div', {},
     h('div', { class: 'row' },
       h('div', { class: 'grow' },
-        h('label', {}, 'bridge token'),
-        h('input', { type: 'password', value: getToken(), data: { role: 'token' }, placeholder: 'paste from Chrome extension options page', autocomplete: 'off' }),
+        field('bridge token',
+          h('input', { type: 'password', value: getToken(), data: { role: 'token' }, placeholder: 'paste from Chrome extension options page', autocomplete: 'off' })),
       ),
       h('div', {},
-        h('label', {}, '\u00a0'),
+        spacer(),
         h('button', { class: 'ghost sm', data: { role: 'toggle-visible' } }, 'show'),
       ),
     ),
     h('div', { class: 'row', style: { marginTop: '10px' } },
       h('div', { class: 'grow' },
-        h('label', {}, 'server url'),
-        h('input', { type: 'url', value: getServer(), data: { role: 'server' }, placeholder: '(blank = same origin)' }),
+        field('server url',
+          h('input', { type: 'url', value: getServer(), data: { role: 'server' }, placeholder: '(blank = same origin)' })),
       ),
     ),
     h('div', { class: 'toolbar', style: { marginTop: '12px' } },
@@ -27,7 +27,7 @@ export function mount(container, bus) {
       h('button', { class: 'ghost sm', data: { role: 'ping' } }, 'ping server'),
       h('button', { class: 'ghost sm danger', data: { role: 'ext-reload' } }, 'ext-reload'),
       h('span', { style: { flex: '1' } }),
-      h('span', { class: 'dim small', data: { role: 'status' } }, ''),
+      h('span', { class: 'dim small', role: 'status', data: { role: 'status' } }, ''),
     ),
     h('div', { class: 'divider' }),
     h('div', { class: 'dim small' },

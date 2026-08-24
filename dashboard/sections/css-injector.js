@@ -1,6 +1,6 @@
 // §10 CSS INJECT — inject + remove CSS per tab via chrome.scripting.
 
-import { h, clear, truncate, errMsg, toast, bindTabSelector } from './_util.js';
+import { h, field, clear, truncate, errMsg, toast, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken } from '../api.js';
 
 const STORE_KEY = 'daedalus-dash-css-sessions';
@@ -8,12 +8,12 @@ const STORE_KEY = 'daedalus-dash-css-sessions';
 export function mount(container, bus) {
   const root = h('div', {},
     h('div', { class: 'row' },
-      h('div', {}, h('label', {}, 'tab'), h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } }, h('option', { value: '' }, '(active tab)'))),
-      h('div', {}, h('label', {}, 'all frames'), h('input', { type: 'checkbox', data: { role: 'all' } })),
+      h('div', {}, field('tab', h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } }, h('option', { value: '' }, '(active tab)')))),
+      h('div', {}, field('all frames', h('input', { type: 'checkbox', data: { role: 'all' } }))),
     ),
     h('div', { style: { marginTop: '8px' } },
-      h('label', {}, 'css'),
-      h('textarea', { data: { role: 'css' }, placeholder: 'body { background: #ffcc00 !important; }', spellcheck: false, style: { minHeight: '140px' } }),
+      field('css',
+        h('textarea', { data: { role: 'css' }, placeholder: 'body { background: #ffcc00 !important; }', spellcheck: false, style: { minHeight: '140px' } })),
     ),
     h('div', { class: 'toolbar', style: { marginTop: '8px' } },
       h('button', { class: 'primary', data: { role: 'inject' } }, 'INJECT'),

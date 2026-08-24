@@ -1,6 +1,6 @@
 // §09 CDP — raw Chrome DevTools Protocol method invocation.
 
-import { h, errMsg, pretty, toast, bindTabSelector } from './_util.js';
+import { h, field, errMsg, pretty, toast, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken } from '../api.js';
 
 const COMMON = [
@@ -25,13 +25,13 @@ const COMMON = [
 export function mount(container, bus) {
   const root = h('div', {},
     h('div', { class: 'row' },
-      h('div', {}, h('label', {}, 'tab'), h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } }, h('option', { value: '' }, '(active tab)'))),
-      h('div', { class: 'grow' }, h('label', {}, 'method'), h('input', { type: 'text', data: { role: 'method' }, placeholder: 'Page.navigate', list: 'cdp-common' })),
+      h('div', {}, field('tab', h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } }, h('option', { value: '' }, '(active tab)')))),
+      h('div', { class: 'grow' }, field('method', h('input', { type: 'text', data: { role: 'method' }, placeholder: 'Page.navigate', list: 'cdp-common' }))),
       h('datalist', { id: 'cdp-common' }, COMMON.map(m => h('option', { value: m }))),
     ),
     h('div', { style: { marginTop: '8px' } },
-      h('label', {}, 'params (json)'),
-      h('textarea', { data: { role: 'params' }, placeholder: '{}', spellcheck: false, style: { fontFamily: 'var(--mono)' } }),
+      field('params (json)',
+        h('textarea', { data: { role: 'params' }, placeholder: '{}', spellcheck: false, style: { fontFamily: 'var(--mono)' } })),
     ),
     h('div', { class: 'toolbar', style: { marginTop: '8px' } },
       h('button', { class: 'primary', data: { role: 'run' } }, 'RUN'),
@@ -39,7 +39,7 @@ export function mount(container, bus) {
     ),
     h('div', { style: { marginTop: '10px' } },
       h('div', { class: 'small dim' }, 'result'),
-      h('pre', { class: 'pane empty', data: { role: 'result' } }, 'no result yet.'),
+      h('pre', { class: 'pane empty', role: 'status', data: { role: 'result' } }, 'no result yet.'),
     ),
   );
   container.appendChild(root);

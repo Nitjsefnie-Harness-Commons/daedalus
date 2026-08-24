@@ -96,6 +96,30 @@ export function bindTabSelector(select, options) {
   return populate;
 }
 
+// Label a control, and associate the two.
+//
+// Every section renders into one document, so a `for`/`id` pair only works
+// when the id is unique document-wide; a counter is what guarantees that
+// without each section inventing a naming scheme of its own. A sibling
+// <label> with no `for` is not a label at all — the accessibility tree showed
+// thirty controls with no name and fourteen with an empty one.
+let fieldSeq = 0;
+
+export function field(text, control, attrs) {
+  if (!control.id) {
+    fieldSeq += 1;
+    control.id = 'dfx-' + fieldSeq;
+  }
+  return [h('label', { ...(attrs || {}), for: control.id }, text), control];
+}
+
+// The blank cell that keeps a button's top edge aligned with the inputs
+// beside it. It was written as an empty <label>, which announces a nameless
+// label and associates with nothing; it is presentation, so it says so.
+export function spacer() {
+  return h('span', { class: 'label-spacer', 'aria-hidden': 'true' }, '\u00a0');
+}
+
 export function clear(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
@@ -147,11 +171,17 @@ export function toast(msg, type = 'info') {
   if (!host) {
     host = document.createElement('div');
     host.id = 'daedalus-toasts';
+    // The audit found no live region anywhere on the page, so every toast
+    // was invisible to a screen reader. Polite for the host; an error names
+    // itself an alert so it interrupts rather than queues behind a success.
+    host.setAttribute('role', 'status');
+    host.setAttribute('aria-live', 'polite');
     host.style.cssText = 'position:fixed;top:54px;right:18px;z-index:100;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:380px;';
     document.body.appendChild(host);
   }
   const el = h('div', {
     class: 'chip ' + type,
+    role: type === 'err' ? 'alert' : null,
     style: {
       padding: '6px 12px',
       background: 'var(--panel)',
@@ -220,9 +250,12 @@ export function armedAction(handler, { confirmLabel = 'sure?', timeout = 2500 } 
 // Swap a cell's content for a single-line input. Enter submits via onSubmit
 // (called with the trimmed string); Escape or blur restores `originalText`.
 // Returns nothing — the caller owns the cell element.
-export function inlineEdit(cell, initial, originalText, onSubmit, { type = 'text' } = {}) {
+export function inlineEdit(cell, initial, originalText, onSubmit,
+                           { type = 'text', label = 'edit' } = {}) {
   const input = h('input', {
-    type, value: initial,
+    // No visible label can exist here — the input replaces the cell it edits
+    // — so the name has to be carried on the control itself.
+    type, value: initial, 'aria-label': label,
     style: { width: '100%', fontSize: '11px', padding: '2px 4px', background: 'var(--bg)' },
   });
   let done = false;

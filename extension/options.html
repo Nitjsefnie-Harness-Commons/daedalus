@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <!-- Without this the document, and every classic script it loads,
      decode as windows-1252: options.js carries an em dash, which
      the page then rendered as "a-euro-quote". dashboard/index.html
      already declares it; this page was the one that did not. -->
 <meta charset="utf-8">
+<title>Daedalus Extension Options</title>
 <style>
   body { font: 13px/1.6 system-ui, sans-serif; padding: 16px; min-width: 320px; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
   label { display: block; margin-top: 12px; font-weight: 600; }
   input { width: 100%; padding: 6px 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; font: inherit; box-sizing: border-box; }
   .status { margin-top: 16px; padding: 8px 12px; border-radius: 4px; font-size: 12px; }
@@ -19,16 +21,16 @@
 </style>
 </head>
 <body>
-  <h3>Daedalus Extension</h3>
+  <h1>Daedalus Extension</h1>
 
-  <label>Token</label>
+  <label for="token">Token</label>
   <input type="text" id="token" placeholder="Generated on install — replace only to match an existing bridge">
 
-  <label>Server URL</label>
+  <label for="server">Server URL</label>
   <input type="text" id="server" placeholder="https://daedalus.example.com">
 
   <button id="save">Save</button>
-  <div id="status" class="status info">Not configured</div>
+  <div id="status" class="status info" role="status" aria-live="polite">Not configured</div>
 
   <script src="options.js"></script>
 </body>

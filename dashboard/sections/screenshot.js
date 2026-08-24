@@ -1,34 +1,34 @@
 // §03 SCREENSHOT — capture + latest image viewer per tab.
 
-import { h, clear, fmtSize, fmtDateTime, truncate, errMsg, toast, bindTabSelector } from './_util.js';
+import { h, field, spacer, clear, fmtSize, fmtDateTime, truncate, errMsg, toast, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken, nextId, getServer } from '../api.js';
 
 export function mount(container, bus) {
   const root = h('div', {},
     h('div', { class: 'row' },
       h('div', {},
-        h('label', {}, 'tab'),
-        h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } },
-          h('option', { value: '' }, '(active tab)'),
-        ),
+        field('tab',
+          h('select', { data: { role: 'tab' }, style: { minWidth: '260px' } },
+            h('option', { value: '' }, '(active tab)'),
+          )),
       ),
       h('div', {},
-        h('label', {}, 'format'),
-        h('select', { data: { role: 'fmt' } },
-          h('option', { value: 'png' }, 'png'),
-          h('option', { value: 'jpeg' }, 'jpeg'),
-        ),
+        field('format',
+          h('select', { data: { role: 'fmt' } },
+            h('option', { value: 'png' }, 'png'),
+            h('option', { value: 'jpeg' }, 'jpeg'),
+          )),
       ),
       h('div', {},
-        h('label', {}, 'quality (jpeg)'),
-        h('input', { type: 'number', value: '80', min: '1', max: '100', data: { role: 'q' }, style: { width: '64px' } }),
+        field('quality (jpeg)',
+          h('input', { type: 'number', value: '80', min: '1', max: '100', data: { role: 'q' }, style: { width: '64px' } })),
       ),
       h('div', {},
-        h('label', {}, '\u00a0'),
+        spacer(),
         h('button', { class: 'primary', data: { role: 'capture' } }, 'CAPTURE'),
       ),
     ),
-    h('div', { class: 'dim small', data: { role: 'meta' }, style: { marginTop: '10px' } }, 'no capture yet.'),
+    h('div', { class: 'dim small', role: 'status', data: { role: 'meta' }, style: { marginTop: '10px' } }, 'no capture yet.'),
     h('div', { data: { role: 'image' }, style: { marginTop: '10px' } }),
     h('div', { class: 'divider' }),
     h('div', { class: 'small dim', style: { marginBottom: '8px' } }, 'RECENT CAPTURES'),
@@ -70,7 +70,7 @@ export function mount(container, bus) {
       clear(imgHost);
       imgHost.appendChild(
         h('a', { href: imgUrl, target: '_blank', rel: 'noopener', title: 'open full-size in new tab', style: { display: 'block', cursor: 'zoom-in' } },
-          h('img', { src: imgUrl, style: { maxWidth: '100%', border: '1px solid var(--border)', display: 'block' } }),
+          h('img', { src: imgUrl, alt: 'Screenshot of ' + (r.tabUrl || 'the captured tab'), style: { maxWidth: '100%', border: '1px solid var(--border)', display: 'block' } }),
         ),
       );
       loadRecent();
@@ -95,7 +95,7 @@ export function mount(container, bus) {
       for (const f of files.slice(0, 24)) {
         const url = (getServer() || '') + '/screenshot?token=' + encodeURIComponent(token) + '&id=' + encodeURIComponent(f.id);
         grid.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener', style: { display: 'block', border: '1px solid var(--border)', padding: '4px', background: 'var(--bg)' } },
-          h('img', { src: url, style: { width: '100%', display: 'block' } }),
+          h('img', { src: url, alt: 'Screenshot ' + f.id, style: { width: '100%', display: 'block' } }),
           h('div', { class: 'dimmer small', style: { marginTop: '4px' } }, truncate(f.id, 22)),
           h('div', { class: 'dimmer small' }, `${fmtSize(f.size)}  ${fmtDateTime(f.mtime)}`),
         ));

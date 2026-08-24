@@ -13,8 +13,8 @@
   --border: #1F232B;
   --border-2: #2A2F3A;
   --text: #C7CBD1;
-  --text-dim: #6B7280;
-  --text-dimmer: #474C56;
+  --text-dim: #9399A4;
+  --text-dimmer: #7D8594;
   --amber: #E8A33D;
   --cyan: #4FD1C5;
   --red: #F56565;
@@ -287,7 +287,7 @@ button.armed, .btn.armed {
   to { background: rgba(245, 101, 101, 0.16); }
 }
 
-label {
+label, .label-spacer {
   display: block;
   color: var(--text-dimmer);
   text-transform: uppercase;

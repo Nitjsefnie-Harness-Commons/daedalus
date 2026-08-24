@@ -1,6 +1,6 @@
 // §05 HOTFIXES — list, store, clear persistent code injected on every page load.
 
-import { h, clear, fmtDateTime, truncate, errMsg, toast, armedAction } from './_util.js';
+import { h, field, clear, fmtDateTime, truncate, errMsg, toast, armedAction } from './_util.js';
 import { extCmd } from '../api.js';
 
 export function mount(container) {
@@ -16,8 +16,8 @@ export function mount(container) {
     h('div', { class: 'divider' }),
     h('div', { class: 'small dim', style: { marginBottom: '8px' } }, 'STORE NEW / UPDATE'),
     h('div', { class: 'row' },
-      h('div', {}, h('label', {}, 'fix id'), h('input', { type: 'text', data: { role: 'id' }, placeholder: 'my-fix' })),
-      h('div', { class: 'grow' }, h('label', {}, 'code'), h('textarea', { data: { role: 'code' }, placeholder: 'console.log("hotfix ran")', spellcheck: false })),
+      h('div', {}, field('fix id', h('input', { type: 'text', data: { role: 'id' }, placeholder: 'my-fix' }))),
+      h('div', { class: 'grow' }, field('code', h('textarea', { data: { role: 'code' }, placeholder: 'console.log("hotfix ran")', spellcheck: false }))),
     ),
     h('div', { class: 'toolbar', style: { marginTop: '8px' } },
       h('button', { class: 'primary', data: { role: 'store' } }, 'STORE'),

@@ -1,6 +1,6 @@
 // §02 EVAL — run JS in a target tab, see results. History in localStorage.
 
-import { h, clear, fmtTime, truncate, errMsg, toast, pretty, formatEvalWorld, bindTabSelector } from './_util.js';
+import { h, field, clear, fmtTime, truncate, errMsg, toast, pretty, formatEvalWorld, bindTabSelector } from './_util.js';
 import { api, runCommand, getToken } from '../api.js';
 
 const HISTORY_KEY = 'daedalus-dash-eval-history';
@@ -9,20 +9,23 @@ const HISTORY_MAX = 30;
 export function mount(container, bus) {
   const root = h('div', {},
     h('div', { class: 'row' },
-      h('div', {}, h('label', {}, 'target tab'), selectTarget()),
-      h('div', {}, h('label', {}, 'timeout (ms)'), h('input', { type: 'number', value: '10000', min: '1000', max: '60000', data: { role: 'timeout' }, style: { width: '96px' } })),
-      h('div', { class: 'grow' }, h('label', {}, 'code'), h('textarea', { data: { role: 'code' }, spellcheck: false, placeholder: 'document.title' })),
+      h('div', {}, field('target tab',
+        h('select', { data: { role: 'tab-select' } },
+          h('option', { value: '' }, 'loading tabs…'),
+        ))),
+      h('div', {}, field('timeout (ms)', h('input', { type: 'number', value: '10000', min: '1000', max: '60000', data: { role: 'timeout' }, style: { width: '96px' } }))),
+      h('div', { class: 'grow' }, field('code', h('textarea', { data: { role: 'code' }, spellcheck: false, placeholder: 'document.title' }))),
     ),
     h('div', { class: 'toolbar', style: { marginTop: '10px' } },
       h('button', { class: 'primary', data: { role: 'run' } }, 'RUN ⏎'),
       h('button', { class: 'ghost sm', data: { role: 'broadcast' } }, 'broadcast'),
       h('span', { style: { flex: '1' } }),
-      h('span', { class: 'dim small', data: { role: 'meta' } }, ''),
+      h('span', { class: 'dim small', role: 'status', data: { role: 'meta' } }, ''),
     ),
     h('div', { style: { display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '12px', marginTop: '10px' } },
       h('div', {},
         h('div', { class: 'small dim', style: { marginBottom: '4px' } }, 'result'),
-        h('pre', { class: 'pane empty', data: { role: 'result' } }, 'no result yet. ⏎ or Cmd/Ctrl-Enter to run.'),
+        h('pre', { class: 'pane empty', role: 'status', data: { role: 'result' } }, 'no result yet. ⏎ or Cmd/Ctrl-Enter to run.'),
       ),
       h('div', {},
         h('div', { class: 'toolbar', style: { marginBottom: '4px' } },
@@ -135,10 +138,4 @@ export function mount(container, bus) {
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
   }
   renderHistory();
-}
-
-function selectTarget() {
-  return h('select', { data: { role: 'tab-select' } },
-    h('option', { value: '' }, 'loading tabs…'),
-  );
 }
