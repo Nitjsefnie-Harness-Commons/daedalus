@@ -93,10 +93,21 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/probe/bin/daedalus" --version
 
+      # Uploaded only when the smoke test above did NOT pass. This job exists
+      # to prove the wheel imports and exposes its entry point, and it proved
+      # that the moment the step before this one succeeded — keeping the
+      # artifact after that retained a distributable wheel per push, per pull
+      # request and per manual run, 90 days each. Durable wheels belong to
+      # releases, which release.yml publishes with checksums.
+      #
+      # A wheel whose smoke test failed is the one worth having: it is the
+      # artifact you need to reproduce the failure, and it is rare.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: ${{ failure() }}
         with:
-          name: wheel
+          name: wheel-failed-smoke-test
           path: dist/*.whl
+          retention-days: 14
 
   coverage:
     # A JOB of its own, not steps inside the matrix above: the matrix is
