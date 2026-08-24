@@ -482,6 +482,12 @@ MAX_SEGMENT_JOB_SIZE = _env_int(
     'DAEDALUS_MAX_SEGMENT_JOB_SIZE', 4 * 1024 * 1024 * 1024, 0)
 _SEGMENT_DECIMAL_MAX_DIGITS = 20
 
+# The non-URL carrier for a job capability. Its own header rather than
+# Authorization, because a segment route never sees the bridge token and must
+# not look as though it might: the documented poster is page JavaScript in a
+# hostile page's MAIN world.
+SEGMENT_SIG_HEADER = 'X-Daedalus-Segment-Sig'
+
 # ─── Command queue (directory-per-target, FIFO) ───
 # PUT /command enqueues into commands/{token}_{tab}/<seq>.json (per-tab) or
 # commands/{token}/<seq>.json (broadcast). Directory form so back-to-back
@@ -995,6 +1001,76 @@ class Handler(BaseHTTPRequestHandler):
         credentials = params.get('token', [])
         return credentials[0] if credentials else ''
 
+    def _authorization_bearer(self):
+        """The Bearer credential this request carries, before it is checked.
+
+        Returns `(present, token)` — `present` says whether an Authorization
+        header was sent at all, which is not the same question as whether it
+        carried anything — or None once the request has been answered. An
+        empty Bearer value is a credential that fails, not an absent one.
+        """
+        duplicate = ambiguous_request_carrier(
+            name.encode('latin-1', 'replace')
+            for name in self.headers.keys() if name.lower() == 'authorization')
+        if duplicate is not None:
+            self._json(400, {'error': 'duplicate Authorization header'})
+            return None
+        header = self.headers.get('Authorization', '')
+        if not header:
+            return False, ''
+        if not header.lower().startswith('bearer '):
+            self._json(401, {'error': 'missing Bearer token'})
+            return None
+        return True, header[7:].strip()
+
+    def _bridge_token(self, params):
+        """The bridge token a GET route is acting under, or None once answered.
+
+        A request target is retained by reverse-proxy access logs, browser
+        tooling, and anything that copies a URL, so a reusable token written
+        into one is durably recorded by every deployment that logs. The
+        header is the carrier that keeps it out of all of them.
+
+        The query form still works, because removing it would break every
+        deployed caller and the leak is what this is about. A request that
+        uses both must agree, on the same rule a body token already follows.
+        """
+        carrier = self._authorization_bearer()
+        if carrier is None:
+            return None
+        present, header_token = carrier
+        query = self._query_bridge_token(params)
+        if not present:
+            return query if self._require_bridge_token(query) else None
+        if query and query != header_token:
+            self._json(400, {'error': 'conflicting token'})
+            return None
+        return header_token if self._require_bridge_token(header_token) else None
+
+    def _segment_capability(self, params):
+        """The job capability a segment route acts under, or None once answered.
+
+        A sig authorizes every write and status read for its job for as long
+        as the job exists, so it is exactly as reusable as the bridge token
+        and belongs out of the request target for the same reason. It follows
+        the same rules: the header decides, both carriers must agree, and the
+        query form still works because every deployed relay script uses it.
+        """
+        duplicate = ambiguous_request_carrier(
+            name.encode('latin-1', 'replace') for name in self.headers.keys()
+            if name.lower() == SEGMENT_SIG_HEADER.lower())
+        if duplicate is not None:
+            self._json(400, {'error': 'duplicate segment capability header'})
+            return None
+        header = self.headers.get(SEGMENT_SIG_HEADER, '')
+        query = params.get('sig', [''])[0]
+        if not header:
+            return query
+        if query and query != header:
+            self._json(400, {'error': 'conflicting sig'})
+            return None
+        return header
+
     def _require_bridge_token(self, token):
         """Answer an error unless `token` matches the configured bridge secret."""
         if _bad_token(token):
@@ -1029,14 +1105,11 @@ class Handler(BaseHTTPRequestHandler):
         The older body-token form still works below MAX_UNAUTHENTICATED_BODY,
         because a body that small is not the problem this is about.
         """
-        duplicate = ambiguous_request_carrier(
-            name.encode('latin-1', 'replace')
-            for name in self.headers.keys() if name.lower() == 'authorization')
-        if duplicate is not None:
-            self._json(400, {'error': 'duplicate Authorization header'})
+        carrier = self._authorization_bearer()
+        if carrier is None:
             return None
-        header = self.headers.get('Authorization', '')
-        if not header:
+        present, token = carrier
+        if not present:
             if clen > MAX_UNAUTHENTICATED_BODY:
                 # Answered without reading: naming the size would tell an
                 # unauthenticated caller what the bound is, and 401 is the
@@ -1044,10 +1117,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(401, {'error': 'unauthorized'})
                 return None
             return ''
-        if not header.lower().startswith('bearer '):
-            self._json(401, {'error': 'missing Bearer token'})
-            return None
-        token = header[7:].strip()
         return token if self._require_bridge_token(token) else None
 
     def _body_token(self, body, authenticated):
@@ -1086,8 +1155,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_list_uploads(params)
 
         if parsed.path == '/tabs':
-            token = self._query_bridge_token(params)
-            if not self._require_bridge_token(token):
+            token = self._bridge_token(params)
+            if token is None:
                 return None
             with _tab_lock:
                 tabs = _tab_registry.get(token, {})
@@ -1111,9 +1180,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path != '/stream':
             return self._json(404, {'error': 'not found'})
-        token = self._query_bridge_token(params)
+        token = self._bridge_token(params)
         tab = params.get('tab', [''])[0]
-        if not self._require_bridge_token(token):
+        if token is None:
             print('[STREAM] REJECTED unauthorized token', flush=True)
             return None
         if tab and _unsafe_component(tab):
@@ -1819,11 +1888,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_get_result(self, params):
         """Fetch a result, optionally consuming one expected generation."""
-        token = self._query_bridge_token(params)
+        token = self._bridge_token(params)
         tab = params.get('tab', [''])[0]
         consume = params.get('consume', [''])[0] == '1'
         expected = params.get('expected', [''])[0]
-        if not self._require_bridge_token(token):
+        if token is None:
             return None
         if tab and _unsafe_component(tab):
             return self._json(400, {'error': 'invalid path component'})
@@ -1859,11 +1928,11 @@ class Handler(BaseHTTPRequestHandler):
         """GET /upload?token=X[&id=Y][&limit=N&offset=M] — list uploaded files.
         When limit or offset is provided, returns {items, total, limit, offset}.
         Without either, returns a bare array (back-compat)."""
-        token = self._query_bridge_token(params)
+        token = self._bridge_token(params)
         upload_id = params.get('id', [''])[0]
         limit_p = params.get('limit', [None])[0]
         offset_p = params.get('offset', [None])[0]
-        if not self._require_bridge_token(token):
+        if token is None:
             return None
         if upload_id and _unsafe_component(upload_id):
             return self._json(400, {'error': 'invalid path component'})
@@ -1945,7 +2014,9 @@ class Handler(BaseHTTPRequestHandler):
         job = params.get('job', [''])[0]
         seg = params.get('seg', [''])[0]
         total = params.get('total', [''])[0]
-        sig = params.get('sig', [''])[0]
+        sig = self._segment_capability(params)
+        if sig is None:
+            return None
         if not job or not seg:
             self._json(400, {'error': 'missing job or seg'})
             return None
@@ -2089,7 +2160,9 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_segment_status(self, params):
         """GET /segment-status?job=X&sig=S — list received segments."""
         job = params.get('job', [''])[0]
-        sig = params.get('sig', [''])[0]
+        sig = self._segment_capability(params)
+        if sig is None:
+            return None
         if not job or _unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
         # Both path uses inside one guard: the directory and the record the
@@ -2124,9 +2197,9 @@ class Handler(BaseHTTPRequestHandler):
         conflate "no such job" with "wrong sig" to avoid being an existence
         oracle, and a caller holding the bridge token is owed neither.
         """
-        token = self._query_bridge_token(params)
+        token = self._bridge_token(params)
         job = params.get('job', [''])[0]
-        if not self._require_bridge_token(token):
+        if token is None:
             return None
         if not job or _unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
@@ -2378,10 +2451,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_get_screenshot(self, params):
         """GET /screenshot?token=X&id=Y — serve latest screenshot for that id. Or token only for latest across all ids. With `path=<upload path>`, serve that exact file instead."""
-        token = self._query_bridge_token(params)
+        token = self._bridge_token(params)
         upload_id = params.get('id', [''])[0]
         named = params.get('path', [''])[0]
-        if not self._require_bridge_token(token):
+        if token is None:
             return None
         if named:
             return self._serve_named_upload(token, named)

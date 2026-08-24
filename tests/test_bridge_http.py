@@ -3656,5 +3656,220 @@ def test_every_body_verb_settles_credentials_before_the_body(tmp):
                 method, payload)
 
 
+def _header_stream(base, target, headers):
+    """Open a stream whose credential travels in headers, not the target."""
+    port = int(base.rsplit(':', 1)[1])
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+    conn.putrequest('GET', target)
+    for name, value in headers:
+        conn.putheader(name, value)
+    conn.endheaders()
+    return conn, conn.getresponse()
+
+
+def test_authenticated_get_routes_accept_a_bearer_header(tmp):
+    """A reusable credential need not be written into the request target.
+
+    A request target is retained by reverse-proxy access logs, browser
+    tooling and anything that copies a URL, so the token every authenticated
+    GET carried was reusable and durably recorded. The header is the carrier
+    that keeps it out of all three.
+    """
+    auth = {'Authorization': f'Bearer {TOK}'}
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _util.get_json(base + '/tabs', headers=auth)
+        assert status == 200 and payload == [], (status, payload)
+        status, payload = _util.get_json(base + '/result', headers=auth)
+        assert status == 200 and payload == {'pending': True}, (status, payload)
+        status, payload = _util.get_json(base + '/upload', headers=auth)
+        assert status == 200 and payload == [], (status, payload)
+        # Reached its handler rather than the credential check: an
+        # unauthorized caller never learns that the job does not exist.
+        status, payload = _util.get_json(
+            base + '/segment-job?job=nosuchjob', headers=auth)
+        assert status == 404 and payload == {'error': 'no such job'}, (
+            status, payload)
+        status, payload = _util.get_json(base + '/screenshot', headers=auth)
+        assert status == 404 and payload == {'error': 'no uploads'}, (
+            status, payload)
+
+
+def test_the_stream_accepts_a_bearer_header(tmp):
+    """The extension's own stream carries no credential in its target."""
+    served = []
+    with _util.bridge(tmp, output=served) as (base, _docroot):
+        conn, response = _header_stream(
+            base, '/stream?tab=extension',
+            (('Authorization', f'Bearer {TOK}'),))
+        frame = _framer(response, served)
+        try:
+            assert response.status == 200, response.status
+            status, _ = _put_command(
+                base, {'token': TOK, 'id': 'headerauth', 'code': '1'})
+            assert status == 200, status
+            delivered = frame('the command sent to a header-authorized stream')
+            assert delivered.get('id') == 'headerauth', delivered
+        finally:
+            response.close()
+            conn.close()
+
+
+def test_an_unauthorized_bearer_header_is_refused_on_a_get(tmp):
+    """The header is a credential, not a hint: a wrong one is not ignored."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _util.get_json(
+            base + '/tabs', headers={'Authorization': 'Bearer wrongtoken'})
+        assert status == 401 and payload == {'error': 'unauthorized'}, (
+            status, payload)
+        status, payload = _util.get_json(
+            base + '/tabs', headers={'Authorization': f'Basic {TOK}'})
+        assert status == 401 and payload == {
+            'error': 'missing Bearer token'}, (status, payload)
+
+
+def test_a_get_header_and_query_token_must_agree(tmp):
+    """Two different tokens in one request is an ambiguous carrier."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _util.get_json(
+            base + '/tabs?token=other',
+            headers={'Authorization': f'Bearer {TOK}'})
+        assert status == 400 and payload == {
+            'error': 'conflicting token'}, (status, payload)
+        # Repeating the same one is not a disagreement.
+        status, payload = _util.get_json(
+            base + f'/tabs?token={TOK}',
+            headers={'Authorization': f'Bearer {TOK}'})
+        assert status == 200 and payload == [], (status, payload)
+
+
+def test_a_duplicate_authorization_header_is_refused_on_a_get(tmp):
+    """Two Authorization headers are refused before either is selected."""
+    with _util.bridge(tmp) as (base, _docroot):
+        conn, response = _header_stream(
+            base, '/tabs',
+            (('Authorization', f'Bearer {TOK}'),
+             ('Authorization', f'Bearer {TOK}')))
+        try:
+            status, payload = response.status, json.loads(response.read())
+        finally:
+            response.close()
+            conn.close()
+        assert status == 400 and payload == {
+            'error': 'duplicate Authorization header'}, (status, payload)
+
+
+def test_a_query_token_still_authorizes_a_get(tmp):
+    """The older carrier keeps working; this removes a leak, not a route."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _util.get_json(base + f'/tabs?token={TOK}')
+        assert status == 200 and payload == [], (status, payload)
+        status, payload = _util.get_json(base + '/tabs?token=wrong')
+        assert status == 401 and payload == {'error': 'unauthorized'}, (
+            status, payload)
+        status, payload = _util.get_json(base + '/tabs')
+        assert status == 400 and payload == {'error': 'bad token'}, (
+            status, payload)
+
+
+def test_segment_routes_accept_a_capability_header(tmp):
+    """A job capability is reusable for its job, so it stays out of the target.
+
+    `sig` authorizes every write and status read for its job until the job is
+    gone. Written into a request target it is retained by the same logs and
+    tooling a bridge token would be, with no expiry to bound the exposure.
+    """
+    job = _seg_job()
+    with _util.bridge(tmp) as (base, docroot):
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        status, raw = _util.request(
+            base + f'/segment?job={job}&seg=1&total=1', 'POST', body=b'bytes',
+            headers={'Content-Type': 'application/octet-stream',
+                     'X-Daedalus-Segment-Sig': sig})
+        assert status == 200, (status, raw)
+        stored = Path(docroot) / 'segments' / job / '000001.ts'
+        assert stored.is_file(), sorted(
+            (Path(docroot) / 'segments' / job).iterdir())
+        status, payload = _util.get_json(
+            base + f'/segment-status?job={job}',
+            headers={'X-Daedalus-Segment-Sig': sig})
+        assert status == 200 and payload == {'done': [1], 'count': 1}, (
+            status, payload)
+
+
+def test_a_wrong_segment_capability_header_is_refused(tmp):
+    """The header is checked, not trusted, on both segment routes."""
+    job = _seg_job()
+    with _util.bridge(tmp) as (base, _docroot):
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        status, raw = _util.request(
+            base + f'/segment?job={job}&seg=1&total=1', 'POST', body=b'bytes',
+            headers={'Content-Type': 'application/octet-stream',
+                     'X-Daedalus-Segment-Sig': 'notthesig'})
+        assert status == 403, (status, raw)
+        status, payload = _util.get_json(
+            base + f'/segment-status?job={job}',
+            headers={'X-Daedalus-Segment-Sig': 'notthesig'})
+        assert status == 403 and payload == {'error': 'bad sig'}, (
+            status, payload)
+
+
+def test_a_segment_header_and_query_sig_must_agree(tmp):
+    """Two different capabilities in one request is an ambiguous carrier."""
+    job = _seg_job()
+    with _util.bridge(tmp) as (base, _docroot):
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        status, payload = _util.get_json(
+            base + f'/segment-status?job={job}&sig=other',
+            headers={'X-Daedalus-Segment-Sig': sig})
+        assert status == 400 and payload == {'error': 'conflicting sig'}, (
+            status, payload)
+        # Repeating the same one is not a disagreement.
+        status, payload = _util.get_json(
+            base + f'/segment-status?job={job}&sig={sig}',
+            headers={'X-Daedalus-Segment-Sig': sig})
+        assert status == 200 and payload == {'done': [], 'count': 0}, (
+            status, payload)
+
+
+def test_a_duplicate_segment_capability_header_is_refused(tmp):
+    """Two capability headers are refused before either is selected."""
+    job = _seg_job()
+    with _util.bridge(tmp) as (base, _docroot):
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        conn, response = _header_stream(
+            base, f'/segment-status?job={job}',
+            (('X-Daedalus-Segment-Sig', sig),
+             ('X-Daedalus-Segment-Sig', sig)))
+        try:
+            status, payload = response.status, json.loads(response.read())
+        finally:
+            response.close()
+            conn.close()
+        assert status == 400 and payload == {
+            'error': 'duplicate segment capability header'}, (status, payload)
+
+
+def test_a_query_sig_still_authorizes_a_segment_route(tmp):
+    """The older carrier keeps working; every deployed relay script uses it."""
+    job = _seg_job()
+    with _util.bridge(tmp) as (base, _docroot):
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        status, raw = _post_segment(base, job, sig, 1)
+        assert status == 200, (status, raw)
+        status, payload = _util.get_json(
+            base + f'/segment-status?job={job}&sig={sig}')
+        assert status == 200 and payload == {'done': [1], 'count': 1}, (
+            status, payload)
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))

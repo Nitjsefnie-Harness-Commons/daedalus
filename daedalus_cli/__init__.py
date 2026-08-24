@@ -22,6 +22,7 @@ _REQUEST_FIELD_CARRIERS = {
 }
 _REQUEST_HEADER_CARRIERS = {
     b'authorization': 'token',
+    b'x-daedalus-segment-sig': 'sig',
     b'mcp-session-id': 'mcp-session-id',
     b'host': 'host',
     b'origin': 'origin',
