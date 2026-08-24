@@ -39,7 +39,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The wait below can spend half an hour reading the gates on this commit,
+    # and the suite and build come after it. A ceiling shorter than the wait
+    # would kill the job for being patient, which is the one thing it is now
+    # supposed to be.
+    timeout-minutes: 60
 
     steps:
       # FIRST, before a checkout, an install, a test run or a build. This job
@@ -87,6 +91,75 @@ jobs:
           else
             echo "No release exists for $TAG yet."
           fi
+
+      - name: Wait for the gates that ran on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        # v0.19.0 went public two seconds before `tests` concluded and nine
+        # minutes before `speed` did, because a tag started every workflow
+        # independently and this one never read the others.
+        #
+        # Every `push:` trigger is filtered to `branches: [main]`, so a tag
+        # push now starts this workflow alone — the other gates ran when the
+        # commit landed on main, against this exact SHA. What is left is to
+        # read them.
+        #
+        # A ZERO count is a failure rather than a pass. A tag on a commit
+        # whose gates never ran, or whose runs have aged out of retention,
+        # would otherwise satisfy "nothing is pending" on the first tick,
+        # which is how a gate comes to report clean forever. Zero is tolerated
+        # only for the first few minutes, because a branch push and its tag
+        # can arrive together and the branch's runs take a moment to register.
+        #
+        # No individual workflow is named as required. `speed`, `version` and
+        # `actionlint` all carry path filters, so a name that legitimately did
+        # not run would deadlock this wait — and the suite is not the thing at
+        # risk here anyway, since the job runs it again below against the
+        # tree it is about to build.
+        run: |
+          grace=$(( $(date +%s) + 5 * 60 ))
+          deadline=$(( $(date +%s) + 30 * 60 ))
+          while :; do
+            runs="$(gh api -H 'Cache-Control: no-cache' --paginate \
+                      "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" \
+                      --jq '.workflow_runs[]
+                            | select(.name != "release")
+                            | select(.event != "issue_comment")
+                            | "\(.name)\t\(.status)\t\(.conclusion)"')"
+            total=$(printf '%s\n' "$runs" | awk 'NF { n++ } END { print n + 0 }')
+            pending=$(printf '%s\n' "$runs" \
+              | awk -F'\t' 'NF && $2 != "completed" { n++ } END { print n + 0 }')
+            bad=$(printf '%s\n' "$runs" \
+              | awk -F'\t' 'NF && $2 == "completed" && $3 != "success" \
+                             && $3 != "skipped" { print $1 " (" $3 ")" }')
+
+            if [ -n "$bad" ]; then
+              echo "a gate on $SHA did not pass:" >&2
+              printf '%s\n' "$bad" >&2
+              exit 1
+            fi
+            if [ "$total" -gt 0 ] && [ "$pending" -eq 0 ]; then
+              echo "$total gates on $SHA, all green:"
+              printf '%s\n' "$runs"
+              exit 0
+            fi
+            now=$(date +%s)
+            if [ "$total" -eq 0 ] && [ "$now" -ge "$grace" ]; then
+              echo "no workflow other than release ran on $SHA. Tag a commit" >&2
+              echo "whose gates have run, and check they have not aged out" >&2
+              echo "of Actions retention." >&2
+              exit 1
+            fi
+            if [ "$now" -ge "$deadline" ]; then
+              echo "gates on $SHA did not finish within 30 minutes:" >&2
+              printf '%s\n' "$runs" >&2
+              exit 1
+            fi
+            echo "waiting: $total gates, $pending still running"
+            sleep 20
+          done
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

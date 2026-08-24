@@ -4728,6 +4728,43 @@ def _pinned_actions():
     return used
 
 
+def test_a_release_waits_for_the_gates_on_its_own_commit(tmp):
+    """Publication reads the other gates instead of racing them.
+
+    v0.19.0 went public two seconds before `tests` concluded and nine minutes
+    before `speed` did: the tag started every workflow independently and the
+    release never looked at any of them.
+
+    The property that makes the wait a gate rather than a pause is that ZERO
+    runs is a failure. "Nothing is pending" is true of a commit whose gates
+    never ran, so a wait that only counted pending work would pass instantly
+    on exactly the tag that deserved to be stopped.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'release.yml').read_text(
+        encoding='utf-8')
+    _, marker, after = workflow.partition('- name: Wait for the gates')
+    assert marker, 'the release does not wait for anything'
+    step, _, _ = after.partition('- uses: actions/checkout')
+    assert 'head_sha=$SHA' in step, step
+    # Itself excluded, or the wait waits for its own run to finish.
+    assert 'select(.name != "release")' in step, step
+    assert '"$total" -eq 0' in step and 'exit 1' in step, step
+
+    # The wait has to come before the expensive half and before anything is
+    # published, or it is a report rather than a gate.
+    order = [workflow.index('- name: Wait for the gates'),
+             workflow.index('run: python run_tests.py'),
+             workflow.index('softprops/action-gh-release')]
+    assert order == sorted(order), order
+
+    # A ceiling shorter than the wait would kill the job for being patient.
+    ceiling = int(re.search(r'timeout-minutes: (\d+)', workflow).group(1))
+    waited = int(re.search(r'deadline=\$\(\( \$\(date \+%s\) \+ (\d+) \* 60',
+                           workflow).group(1))
+    assert ceiling > waited, (ceiling, waited)
+
+
 def test_a_release_attests_every_artifact_it_publishes(tmp):
     """SHA256SUMS says the files go together; provenance says where from.
 
