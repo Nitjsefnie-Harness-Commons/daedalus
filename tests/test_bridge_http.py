@@ -86,6 +86,43 @@ def _raw_request(base, request_bytes):
     return b''.join(chunks)
 
 
+def _stalled_request(base, body_bytes=b'{'):
+    """Open one connection whose declared body never finishes arriving.
+
+    Returns the connected socket, which the caller closes. Nothing is read
+    here: what these tests measure is whether the bridge answers a body that
+    stops mid-flight, so the read belongs in the test, with its own bound.
+    """
+    port = int(base.rsplit(':', 1)[1])
+    sock = socket.create_connection(('127.0.0.1', port), timeout=30)
+    sock.sendall(b'POST /result HTTP/1.0\r\n'
+                 b'Content-Type: application/json\r\n'
+                 b'Content-Length: 1000000\r\n\r\n' + body_bytes)
+    return sock
+
+
+def _read_answer(sock, timeout):
+    """One answer; b'' where the peer closed without sending one; None where
+    nothing arrived inside `timeout`, i.e. the request is still being held.
+
+    A close after unread request bytes arrives as a reset rather than an EOF,
+    so both spellings of "closed on me" report the same b''.
+    """
+    sock.settimeout(timeout)
+    chunks = []
+    while True:
+        try:
+            chunk = sock.recv(65536)
+        except socket.timeout:
+            return b''.join(chunks) if chunks else None
+        except ConnectionResetError:
+            break
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
 def _queue_files(docroot, name):
     qdir = Path(docroot) / 'commands' / name
     if not qdir.is_dir():
@@ -2283,6 +2320,59 @@ def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
     assert 'collision: None' in output, output
     assert 'corrupt: raised' in output, output
     assert 'absent: None' in output, output
+
+
+def test_an_incomplete_body_never_holds_a_request_worker(tmp):
+    """A declared body that stops mid-flight is answered, not waited on.
+
+    One client per stalled body used to hold one request thread for as long
+    as it kept the socket open, so an unauthenticated peer could grow the
+    bridge's thread count by opening connections and sending a single byte.
+    """
+    with _util.bridge(
+            tmp, env={'DAEDALUS_REQUEST_TIMEOUT': '2'}) as (base, _docroot):
+        sock = _stalled_request(base)
+        try:
+            started = time.time()
+            answer = _read_answer(sock, 30)
+            elapsed = time.time() - started
+        finally:
+            sock.close()
+        assert answer.startswith(b'HTTP/1.0 408'), answer[:120]
+        assert elapsed < 20, elapsed
+        # The bridge kept serving: the stalled request took nothing with it.
+        status, body = _util.get_json(base + '/health')
+        assert status == 200 and body['ok'] is True, (status, body)
+
+
+def test_request_workers_are_capped_rather_than_grown_per_connection(tmp):
+    """Past the cap a connection is closed instead of given a thread."""
+    with _util.bridge(tmp, env={'DAEDALUS_MAX_REQUEST_WORKERS': '2',
+                                'DAEDALUS_REQUEST_TIMEOUT': '30'}) as (
+                                    base, _docroot):
+        held = [_stalled_request(base), _stalled_request(base)]
+        refused = _stalled_request(base)
+        try:
+            # The cap is spent on the two held bodies, so this one is closed
+            # without an answer rather than given a worker of its own.
+            assert _read_answer(refused, 10) == b'', 'over-cap connection was served'
+            # ... and the two under the cap are still being waited on.
+            for sock in held:
+                assert _read_answer(sock, 1) is None, 'a held body was answered early'
+        finally:
+            for sock in held + [refused]:
+                sock.close()
+        # Closing them frees the workers, so the bridge answers again.
+        deadline = time.time() + 10
+        while True:
+            try:
+                status, body = _util.get_json(base + '/health')
+            except OSError as exc:  # the last worker may not be released yet
+                status, body = 0, exc
+            if status == 200:
+                break
+            assert time.time() < deadline, (status, body)
+        assert body['ok'] is True, body
 
 
 def test_a_refused_put_absorbs_its_body_so_the_answer_survives(tmp):

@@ -286,6 +286,19 @@ STREAM_MAX_AGE = _env_positive_float('DAEDALUS_STREAM_MAX_AGE', 3600)
 STREAM_KEEPALIVE = _env_positive_float('DAEDALUS_STREAM_KEEPALIVE', 15)
 # Maximum bytes read from any HTTP request body; override for larger relays.
 MAX_BODY_SIZE = _env_int('DAEDALUS_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
+
+# Per-operation socket deadline for a request. A peer that declares a body and
+# then stops sending held its worker for as long as it kept the socket open,
+# so opening connections was enough to grow the thread count without ever
+# authenticating. It bounds each read and write rather than the request as a
+# whole, so an upload that keeps arriving is never cut off for being large.
+REQUEST_TIMEOUT = _env_positive_float('DAEDALUS_REQUEST_TIMEOUT', 60)
+
+# Hard ceiling on concurrently-served connections. The deadline above bounds
+# how long one worker lives; this bounds how many exist at once, which the
+# deadline alone cannot do — a fast enough arrival rate outruns any deadline.
+MAX_REQUEST_WORKERS = _env_int(
+    'DAEDALUS_MAX_REQUEST_WORKERS', 256, 1, 4096)
 # Fixed HLS quotas copied into each trusted job record when its capability is
 # minted. A page-visible job signature cannot alter these per-request.
 MAX_SEGMENT_INDEX = _env_int('DAEDALUS_MAX_SEGMENT_INDEX', 99999, 0)
@@ -534,8 +547,50 @@ _REFUSED_BODY_DRAIN = 65536
 _UNDECLARED_BODY_DRAIN_SECONDS = 0.25
 
 
+_worker_lock = threading.Lock()
+_live_workers = 0
+
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
+
+    def process_request(self, request, client_address):
+        """Admit a connection only while the bridge is under its worker cap.
+
+        The count is kept here rather than around the handler because this
+        runs in the accept loop, before a thread exists: past the cap the
+        connection is closed instead of being given one, which is the whole
+        point — a thread spawned and then refused has already cost what the
+        cap exists to bound. The refusal is a close rather than a 503, since
+        writing one would put a blocking send in the accept loop, and a peer
+        that is over the cap is the last one to hand the listener to.
+        """
+        global _live_workers
+        with _worker_lock:
+            admitted = _live_workers < MAX_REQUEST_WORKERS
+            if admitted:
+                _live_workers += 1
+        if not admitted:
+            print(f'[HTTP] REFUSED at worker cap {MAX_REQUEST_WORKERS}',
+                  flush=True)
+            return self.shutdown_request(request)
+        try:
+            return super().process_request(request, client_address)
+        except BaseException:
+            # Spawning the worker failed, so nothing will run the release
+            # below. Exhaustion is exactly what the cap guards against, and
+            # a leaked count here would make the cap tighten permanently.
+            with _worker_lock:
+                _live_workers -= 1
+            raise
+
+    def process_request_thread(self, request, client_address):
+        global _live_workers
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with _worker_lock:
+                _live_workers -= 1
 
     def server_bind(self):
         """Bind and record the address without a reverse-DNS lookup.
@@ -569,6 +624,11 @@ class _JSONObject(dict):
 
 
 class Handler(BaseHTTPRequestHandler):
+    # socketserver applies this to the connection, so it bounds the request
+    # line, the headers and the body alike. It is per socket operation: a
+    # transfer that keeps making progress renews it and is never cut short.
+    timeout = REQUEST_TIMEOUT
+
     def _request_target(self):
         """Parse the request target, answering 400 when it is malformed.
 
@@ -973,11 +1033,27 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return clen
 
+    def _read_body(self, clen):
+        """Read one declared body, or None once a deadline answered it.
+
+        Every verb that reads a body goes through here, so the deadline is
+        stated once: a peer that declares a length and then stops sending is
+        answered 408 and its worker released, rather than parked on the read
+        until the peer decides to close.
+        """
+        try:
+            return self.rfile.read(clen)
+        except TimeoutError:
+            self._json(408, {'error': 'request body timed out'})
+            return None
+
     def _load_json_object(self, clen):
         """Read one JSON body, answering 400 unless it is an object."""
+        raw = self._read_body(clen)
+        if raw is None:
+            return None
         try:
-            body = json.loads(
-                self.rfile.read(clen), object_pairs_hook=_JSONObject)
+            body = json.loads(raw, object_pairs_hook=_JSONObject)
         except RecursionError:
             self._json(400, {'error': 'JSON body too deeply nested'})
             return None
@@ -1003,7 +1079,10 @@ class Handler(BaseHTTPRequestHandler):
         if (parsed.path == '/segment'
                 and ('octet-stream' in content_type
                      or 'application/json' not in content_type)):
-            return self._handle_segment(self.rfile.read(clen))
+            raw = self._read_body(clen)
+            if raw is None:
+                return None
+            return self._handle_segment(raw)
         body = self._load_json_object(clen)
         if body is None:
             return

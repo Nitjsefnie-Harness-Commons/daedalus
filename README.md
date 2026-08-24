@@ -309,6 +309,8 @@ slot.
 
 `DAEDALUS_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes, 64 MiB) bounds request bodies read by the `POST`, `PUT`, and `DELETE` handlers; a declared body larger than the limit receives `413`, and a request that declares no `Content-Length` receives `411` rather than being read as an empty body. Increase it when relaying larger segments or other payloads.
 
+`DAEDALUS_REQUEST_TIMEOUT` (default 60 seconds) bounds each socket operation of a request — request line, headers and body. It renews on every operation that makes progress, so a large upload that keeps arriving is never cut short, while a peer that declares a body and then stops sending receives `408` and gives its worker back instead of holding it for as long as it keeps the socket open. `DAEDALUS_MAX_REQUEST_WORKERS` (default 256, range 1-4096) caps how many connections are served at once: past the cap a new connection is closed without an answer rather than given a thread. An open `GET /stream` holds one of those slots for its lifetime, so raise the cap rather than lower it if many streams share one bridge.
+
 Filesystem-backed caller values use one path-component policy: it rejects
 `..`, C0/C1 control and surrogate characters, Windows-invalid path characters
 and device names, trailing dots or spaces, and UTF-8 encodings longer than 240
