@@ -1604,7 +1604,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ms_total: +(performance.now() - t0).toFixed(1),
           ts: Date.now(),
         });
-        sendResponse({ error: isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message });
+        // `timedOut` travels beside the message because a timeout is its own
+        // event to the caller: flattening it into an error string left
+        // page.js's ontimeout branch unreachable.
+        sendResponse({ error: isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message,
+          timedOut: isAbort });
       }
     })();
     return true; // async sendResponse

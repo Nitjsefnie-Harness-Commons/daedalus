@@ -52,7 +52,8 @@ window.addEventListener('message', (e) => {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'error',
           error: err || 'no response from background (service worker dead?)' }, '*');
       } else if (resp.error) {
-        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'error', error: resp.error }, '*');
+        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest',
+          event: resp.timedOut ? 'timeout' : 'error', error: resp.error }, '*');
       } else {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'load',
           status: resp.status, data: resp.data, headers: resp.headers, finalUrl: msg.url }, '*');

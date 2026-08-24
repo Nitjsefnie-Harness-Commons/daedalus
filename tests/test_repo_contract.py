@@ -3446,12 +3446,12 @@ def test_speed_comparison_fails_only_past_its_budget(tmp):
                          '--max-regression', '0.30']) == 1
 
 
-def test_speed_comparison_passes_when_the_baseline_predates_durations(tmp):
-    """A release from before the runner timed tests is not a fast release.
+def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
+    """An unmeasured side is not a fast side, and must not divide the total.
 
-    Every release that exists when this lands reports no per-test durations,
-    so a comparator that treated the empty side as zero would fail every run
-    until the next release. It says so and passes instead.
+    The timing instrument belongs to the comparison rather than to either
+    checkout, so an empty side means its timing step failed. A comparator that
+    treated that as zero seconds would report an infinite speedup.
     """
     compare = _compare_durations()
     old = Path(tmp) / 'base-1'
@@ -3463,7 +3463,7 @@ def test_speed_comparison_passes_when_the_baseline_predates_durations(tmp):
     summary = Path(tmp) / 'summary.md'
     assert compare.main(['--base', str(old), '--head', *head,
                          '--summary-file', str(summary)]) == 0
-    assert 'no per-test durations' in summary.read_text(encoding='utf-8')
+    assert 'produced no per-test durations' in summary.read_text(encoding='utf-8')
 
 
 def test_check_versions_passes_on_tree(tmp):
@@ -3577,7 +3577,7 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
 
 
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
-    """The scanner input is the non-empty set of 68 tracked release paths."""
+    """The scanner input is the non-empty set of 69 tracked release paths."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
@@ -3588,7 +3588,7 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(_iter_tree_files())
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 68, f'expected 68 tracked paths, found {len(tracked)}'
+    assert len(tracked) == 69, f'expected 69 tracked paths, found {len(tracked)}'
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (
@@ -4997,6 +4997,135 @@ main().catch((error) => {
   process.exitCode = 1;
 });
 """
+
+
+_FETCH_RELAY_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+
+const [contentPath, pagePath, responseText] = process.argv.slice(1);
+const backgroundResponse = JSON.parse(responseText);
+const listeners = {};
+const messages = [];
+const posted = [];
+const sent = [];
+
+const windowObject = {
+  addEventListener(type, listener) {
+    (listeners[type] ||= []).push(listener);
+  },
+  postMessage(message) {
+    posted.push(message);
+    messages.push(message);
+  },
+};
+
+const chrome = {
+  runtime: {
+    lastError: null,
+    onMessage: { addListener() {} },
+    sendMessage(payload, callback) {
+      sent.push(payload);
+      // content.js asks for a hotfix replay at load with no callback at all.
+      if (typeof callback === 'function') callback(backgroundResponse);
+    },
+    getManifest() { return { version: '0.0.0' }; },
+    connect() {
+      return {
+        disconnect() {},
+        postMessage() {},
+        onDisconnect: { addListener() {} },
+      };
+    },
+  },
+  storage: {
+    local: {
+      get(keys, callback) { callback({}); },
+      set(values, callback) { callback(); },
+      remove(keys, callback) { callback(); },
+    },
+  },
+};
+
+const context = {
+  window: windowObject,
+  document: { documentElement: {}, addEventListener() {} },
+  chrome,
+  location: { hostname: 'page.invalid', href: 'about:blank' },
+  setTimeout, clearTimeout, setInterval, clearInterval,
+  performance,
+  console: { log() {}, error() {} },
+};
+context.globalThis = context;
+vm.runInNewContext(fs.readFileSync(contentPath, 'utf8'), context);
+vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), context);
+
+function flushMessages() {
+  let guard = 0;
+  while (messages.length && guard++ < 100) {
+    const data = messages.shift();
+    for (const listener of listeners.message || []) {
+      listener({ source: windowObject, data });
+    }
+  }
+}
+
+const events = [];
+windowObject.GM.xmlhttpRequest({
+  url: 'about:blank#slow',
+  timeout: 50,
+  onload: () => events.push('load'),
+  onerror: (detail) => events.push('error:' + (detail && detail.error)),
+  ontimeout: () => events.push('timeout'),
+});
+flushMessages();
+
+// The content script arms a keepalive timer that would hold the event loop
+// open forever; exit once the answer has actually been flushed.
+process.stdout.write(JSON.stringify({
+  events,
+  relayed: posted
+    .filter((m) => m.direction === 'daedalus-bg-to-page')
+    .map((m) => m.event),
+  requestedTimeout: (sent.find((m) => m.type === 'fetch') || {}).timeout,
+}), () => process.exit(0));
+"""
+
+
+def _run_fetch_relay_harness(background_response):
+    """Drive GM.xmlhttpRequest through content.js and page.js under Node."""
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension fetch relay'
+    result = subprocess.run(
+        [node, '-e', _FETCH_RELAY_HARNESS,
+         str(ROOT / 'extension' / 'content.js'),
+         str(ROOT / 'extension' / 'page.js'),
+         json.dumps(background_response)],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def test_a_fetch_timeout_reaches_ontimeout_and_not_onerror(tmp):
+    """A timeout is its own event, not an error that happens to say so.
+
+    page.js has had an `ontimeout` branch all along, and nothing could reach
+    it: the background flattened an aborted fetch into an error string, and
+    content.js relays anything with an `error` as `event: 'error'`. A caller
+    that distinguished the two saw every timeout as a generic failure.
+    """
+    del tmp
+    timed_out = _run_fetch_relay_harness(
+        {'error': 'fetch timeout after 50ms', 'timedOut': True})
+    assert timed_out['events'] == ['timeout'], timed_out
+    assert timed_out['relayed'] == ['timeout'], timed_out
+    assert timed_out['requestedTimeout'] == 50, timed_out
+
+    # An ordinary failure still arrives as one.
+    failed = _run_fetch_relay_harness({'error': 'network unreachable'})
+    assert failed['events'] == ['error:network unreachable'], failed
+    assert failed['relayed'] == ['error'], failed
 
 
 def _run_storage_relay_harness():
