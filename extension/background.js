@@ -1660,7 +1660,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ms_total: +(tEncoded - t0).toFixed(1),
           ts: Date.now(),
         });
-        sendResponse({ status: resp.status, data, headers });
+        // finalUrl and statusText come from the RESPONSE, not the request:
+        // after a redirect chain resp.url is where the body actually came
+        // from, and reporting the requested URL told a caller a redirect had
+        // not happened. Both are relayed verbatim; content.js falls back to
+        // the request URL only when a response carries none.
+        sendResponse({ status: resp.status, statusText: resp.statusText,
+          finalUrl: resp.url, data, headers });
       } catch (e) {
         clearTimeout(timeoutId);
         const isAbort = e.name === 'AbortError';

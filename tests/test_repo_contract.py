@@ -5358,10 +5358,11 @@ function flushMessages() {
 }
 
 const events = [];
+let loadDetail = null;
 windowObject.GM.xmlhttpRequest({
   url: 'about:blank#slow',
   timeout: 50,
-  onload: () => events.push('load'),
+  onload: (detail) => { loadDetail = detail; events.push('load'); },
   onerror: (detail) => events.push('error:' + (detail && detail.error)),
   ontimeout: () => events.push('timeout'),
 });
@@ -5371,6 +5372,7 @@ flushMessages();
 // open forever; exit once the answer has actually been flushed.
 process.stdout.write(JSON.stringify({
   events,
+  loadDetail,
   relayed: posted
     .filter((m) => m.direction === 'daedalus-bg-to-page')
     .map((m) => m.event),
@@ -5558,6 +5560,47 @@ def test_a_fetch_timeout_reaches_ontimeout_and_not_onerror(tmp):
     failed = _run_fetch_relay_harness({'error': 'network unreachable'})
     assert failed['events'] == ['error:network unreachable'], failed
     assert failed['relayed'] == ['error'], failed
+
+
+def test_a_redirected_fetch_reports_where_the_body_came_from(tmp):
+    """finalUrl is the response's URL, not the one the caller asked for.
+
+    The relay filled finalUrl in from the request, so a caller following a
+    redirect chain was told no redirect had happened — and statusText was
+    never carried at all, so the page API always reported an empty one.
+    """
+    del tmp
+    loaded = _run_fetch_relay_harness({
+        'status': 200, 'statusText': 'OK', 'data': 'body', 'headers': {},
+        'finalUrl': 'https://redirected.example.com/final'})
+    assert loaded['events'] == ['load'], loaded
+    detail = loaded['loadDetail']
+    assert detail['finalUrl'] == 'https://redirected.example.com/final', detail
+    assert detail['statusText'] == 'OK', detail
+
+    # A background that reports neither still works: the request URL is the
+    # fallback it always was, rather than the answer it used to be.
+    plain = _run_fetch_relay_harness(
+        {'status': 200, 'data': 'body', 'headers': {}})
+    assert plain['loadDetail']['finalUrl'] == 'about:blank#slow', plain
+    assert plain['loadDetail']['statusText'] == '', plain
+
+
+def test_the_background_relays_the_response_url_and_status_text(tmp):
+    """The other half of the same contract, at its source.
+
+    The relay test above starts from what the background answered. This one
+    pins that the background actually reads them off the Response rather than
+    off the request it was handed.
+    """
+    del tmp
+    source = (_util.ROOT / 'extension' / 'background.js').read_text(
+        encoding='utf-8')
+    _, marker, after = source.partition('sendResponse({ status: resp.status,')
+    assert marker, 'the fetch success response is not shaped as this test finds it'
+    response, _, _ = after.partition('}\n')
+    for field in ('statusText: resp.statusText', 'finalUrl: resp.url'):
+        assert field in response, (field, response)
 
 
 def _run_storage_relay_harness():

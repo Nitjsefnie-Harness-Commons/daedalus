@@ -55,8 +55,14 @@ window.addEventListener('message', (e) => {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest',
           event: resp.timedOut ? 'timeout' : 'error', error: resp.error }, '*');
       } else {
+        // resp.finalUrl is where the body came from after any redirects;
+        // msg.url is only where the caller asked. Falling back to the request
+        // URL keeps a background that reports neither working, but it is a
+        // fallback rather than the answer it used to be.
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'load',
-          status: resp.status, data: resp.data, headers: resp.headers, finalUrl: msg.url }, '*');
+          status: resp.status, statusText: resp.statusText || '',
+          data: resp.data, headers: resp.headers,
+          finalUrl: resp.finalUrl || msg.url }, '*');
       }
     });
   } else if (msg.handler === 'openInTab') {
