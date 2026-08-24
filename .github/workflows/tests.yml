@@ -318,8 +318,23 @@ jobs:
           # No co-author trailer: no model authored this commit.
           git commit -m "ci: raise the coverage ratchet to ${MEASURED}% measured" \
             -m 'Raised by .github/workflows/tests.yml from the coverage this run took.'
-          # HEAD:main, never a force: a rejected push means main moved while
-          # this ran, and the next push measures again and raises then. Losing
-          # a raise costs nothing; overwriting someone's commit does.
-          GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts' \
-            git push "git@github.com:${REPO}.git" HEAD:main
+          # HEAD:main, never a force: overwriting someone's commit to record a
+          # coverage number is never the right trade.
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts'
+          if git push "git@github.com:${REPO}.git" HEAD:main; then
+            exit 0
+          fi
+          # A rejected push is usually main moving while this ran, and failing
+          # the job for that would turn `coverage` — a required context — red
+          # for an ordinary concurrent push. Distinguish it rather than
+          # swallowing it: if the remote really did move past the commit this
+          # run measured, the next push raises instead and there is nothing
+          # wrong here. If it did not, the push failed for some other reason
+          # and this job should say so.
+          git fetch --quiet "git@github.com:${REPO}.git" main
+          if [ "$(git rev-parse HEAD^)" = "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "the ratchet push was rejected while main stood still" >&2
+            exit 1
+          fi
+          echo 'Main moved while this run measured; the next push raises instead.' \
+            >> "$GITHUB_STEP_SUMMARY"
