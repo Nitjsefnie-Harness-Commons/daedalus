@@ -57,7 +57,11 @@ async function loadConfig() {
   if (!config.token) {
     config.token = crypto.randomUUID();
     await chrome.storage.local.set({ 'daedalus-token': config.token });
-    console.log('[Daedalus] Generated token:', config.token);
+    // The value stays out of the log: it is a reusable browser-control
+    // credential, and this line put it into DevTools output, screen
+    // recordings and diagnostic bundles on every first run. The options
+    // page is where an operator reads it back.
+    console.log('[Daedalus] Generated a token; read it in the extension options page.');
   }
   return config;
 }

@@ -3695,6 +3695,34 @@ def test_check_versions_sites_all_present_in_copy(tmp):
     assert m and int(m.group(1)) == expected, r.stdout
 
 
+def test_the_extension_never_logs_the_bridge_token(tmp):
+    """The token is a reusable browser-control credential, not a diagnostic.
+
+    First-run bootstrap printed the whole generated token, which put it into
+    extension DevTools output, screen recordings and any diagnostic bundle
+    collected from them — all places a credential outlives the moment it was
+    useful in. A truncated prefix is not what this pins: the version banner
+    logs eight characters to say which bridge is configured, and that stays.
+    """
+    del tmp
+    offenders = []
+    for name in ('background.js', 'content.js', 'page.js', 'options.js'):
+        path = _util.ROOT / 'extension' / name
+        if not path.is_file():
+            continue
+        for number, line in enumerate(
+                path.read_text(encoding='utf-8').splitlines(), 1):
+            if 'console.' not in line or '.token' not in line:
+                continue
+            # A short prefix is a legitimate diagnostic — the version banner
+            # prints one to identify which bridge this extension is talking
+            # to. The whole value is the credential itself.
+            if '.token.substring(' in line or '.token.slice(' in line:
+                continue
+            offenders.append(f'{name}:{number}: {line.strip()}')
+    assert not offenders, offenders
+
+
 def test_extension_ships_no_default_server(tmp):
     src = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
     # The constant exists and is empty: an unconfigured install must not dial
