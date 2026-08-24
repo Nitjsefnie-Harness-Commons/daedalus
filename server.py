@@ -164,6 +164,36 @@ def _unsafe_component(value):
     return device_stem in _WINDOWS_DEVICE_NAMES
 
 
+_EXTENDED_PREFIX = '\\\\?\\'
+_EXTENDED_UNC_PREFIX = '\\\\?\\UNC\\'
+
+
+def _path_key(path):
+    r"""A comparable spelling of an already-resolved path.
+
+    Two `realpath` results under one root are not guaranteed to be spelled the
+    same way. On Windows the `\\?\` extended-length prefix that
+    `_getfinalpathname` returns is stripped only when a second call on the
+    stripped path agrees, or fails with the same winerror as the first — and
+    that verification call fails with a sharing violation while another thread
+    is replacing the file, where the first call had succeeded. The directory,
+    which nothing is replacing, then comes back bare while the file under it
+    keeps the prefix, and comparing the two as strings says the file escaped
+    its root. Every filesystem-backed route shares that comparison, so a
+    concurrent writer could turn any of them into a 400.
+
+    Case is normalized for the same reason and not as a concession: these are
+    two spellings of one path, and on a case-insensitive filesystem a
+    case-sensitive comparison answers a question nobody asked.
+    """
+    text = os.fspath(path)
+    if text.startswith(_EXTENDED_UNC_PREFIX):
+        text = '\\\\' + text[len(_EXTENDED_UNC_PREFIX):]
+    elif text.startswith(_EXTENDED_PREFIX):
+        text = text[len(_EXTENDED_PREFIX):]
+    return os.path.normcase(text)
+
+
 def _under(root, *parts):
     """Join `parts` under `root` and refuse a result that lands outside it.
 
@@ -189,9 +219,13 @@ def _under(root, *parts):
     resolved_root = os.path.realpath(root)
     candidate = os.path.realpath(
         os.path.join(resolved_root, *(str(part) for part in parts)))
-    if (candidate != resolved_root
-            and not candidate.startswith(resolved_root + os.sep)):
+    root_key = _path_key(resolved_root)
+    candidate_key = _path_key(candidate)
+    if (candidate_key != root_key
+            and not candidate_key.startswith(root_key + os.sep)):
         raise ValueError(f'path escapes its root: {parts!r}')
+    # The resolved path, not the normalized key: the key exists to compare two
+    # spellings, and the caller needs the one the filesystem answers to.
     return pathlib.Path(candidate)
 
 

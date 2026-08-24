@@ -13,7 +13,9 @@ OUTSIDE the docroot as well — that is the part that actually matters.
 """
 import json
 import os
+import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -323,6 +325,88 @@ def test_one_token_cannot_read_another_tokens_results(tmp):
 
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='pathsafety_')
+
+
+_CONTAINMENT_PROBE = r"""
+import json
+import os
+import os.path
+import sys
+
+import server
+
+root = sys.argv[1]
+name = 'tok_extension.json'
+with open(os.path.join(root, name), 'w', encoding='utf-8') as handle:
+    handle.write('{}')
+
+# ntpath.realpath can return one path bare and another under it with the
+# \\?\ extended-length prefix still attached: the prefix is stripped only
+# when a second _getfinalpathname call on the stripped path agrees, and that
+# call fails with a sharing violation exactly while another thread replaces
+# the file. The resulting pair of spellings is reproduced here rather than
+# waited for -- waiting is what left it as an unexplained intermittent 400 on
+# one Windows leg, and an idle Linux box will never produce it.
+_real = os.path.realpath
+
+
+def one_side_prefixed(path, *args, **kwargs):
+    resolved = _real(path, *args, **kwargs)
+    if os.path.basename(resolved) == name:
+        return '\\\\?\\' + resolved
+    return resolved
+
+
+os.path.realpath = one_side_prefixed
+answer = {}
+try:
+    try:
+        answer['contained'] = os.path.basename(str(server._under(root, name)))
+    except ValueError as failure:
+        answer['contained'] = 'REFUSED: ' + str(failure)
+    try:
+        server._under(root, '..', name)
+        answer['escape'] = 'ALLOWED'
+    except ValueError:
+        answer['escape'] = 'refused'
+finally:
+    os.path.realpath = _real
+sys.stdout.write(json.dumps(answer))
+"""
+
+
+def test_containment_survives_two_spellings_of_one_root(tmp):
+    """A concurrent writer must not make a contained path look like an escape.
+
+    `_under` resolves the root and the candidate in two separate calls and
+    compares the results as strings. Those two calls are not obliged to spell
+    one directory the same way, and on Windows they do not while something
+    else is replacing the file being named: the directory comes back bare and
+    the file under it keeps the extended-length prefix, so the containment
+    check reports an escape and the route answers 400 to a caller that named
+    nothing wrong.
+
+    Every filesystem-backed route shares `_under`, so this is checked on the
+    helper rather than through whichever route happened to expose it.
+    """
+    docroot = Path(tmp) / 'docroot'
+    docroot.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': str(docroot),
+        'DAEDALUS_PORT': '0',
+        'PYTHONDONTWRITEBYTECODE': '1',
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', _CONTAINMENT_PROBE, str(docroot)],
+        cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+    answer = json.loads(proc.stdout)
+    # The contained file is contained, whichever way each side is spelled.
+    assert answer['contained'] == 'tok_extension.json', answer
+    # And the backstop still refuses a real escape under the same spelling,
+    # which is the half a looser comparison would have given away.
+    assert answer['escape'] == 'refused', answer
 
 
 if __name__ == '__main__':
