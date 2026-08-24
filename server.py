@@ -583,7 +583,13 @@ _seg_lock = threading.Lock()
 
 
 def _segment_record_path(job):
-    return SEG_DIR / f'{job}.json'
+    """The record beside a job's directory, refused if it lands outside.
+
+    Raises ValueError like `_under`. Every route reaching here has already
+    answered for a bad job name, so a containment failure joins that answer
+    rather than becoming a storage error.
+    """
+    return _under(SEG_DIR, f'{job}.json')
 
 
 class _SegmentRecordError(Exception):
@@ -1687,8 +1693,8 @@ class Handler(BaseHTTPRequestHandler):
         finalized .ts set stays inside the record's index, count, and byte
         quotas; stale temp writes are removed before the next admission.
 
-        Returns (job, segment index, quota) for a request that may proceed,
-        or None once the refusal has been written. The quota travels with the
+        Returns (job, segment index, quota, directory) for a request that may
+        proceed,        or None once the refusal has been written. The quota travels with the
         admission rather than being read again under the write lock: a
         record's recorded limits are fixed at mint and never rewritten, so
         re-reading them would cost a second file read per segment and settle
@@ -1723,18 +1729,26 @@ class Handler(BaseHTTPRequestHandler):
 
         # `total` is untrusted progress metadata supplied by the page on every
         # request. Only the server-minted record controls storage.
-        with _seg_lock:
-            record = _segment_record_for_sig(job, sig)
-            quota = _segment_quota(record) if record is not None else None
+        try:
+            seg_dir = _under(SEG_DIR, job)
+            with _seg_lock:
+                record = _segment_record_for_sig(job, sig)
+                quota = _segment_quota(record) if record is not None else None
+        except ValueError:
+            self._json(400, {'error': 'invalid param'})
+            return None
         if quota is None:
             self._json(403, {'error': 'bad sig'})
             return None
         if segment_index > quota[0]:
             self._json(400, {'error': 'seg out of range'})
             return None
-        return job, segment_index, quota
+        # The directory travels with the admission so the namespace is decided
+        # once, here, where the refusal is a 400 about the request rather than
+        # a storage error raised under the write lock.
+        return job, segment_index, quota, seg_dir
 
-    def _handle_segment(self, raw, job, segment_index, quota):
+    def _handle_segment(self, raw, job, segment_index, quota, seg_dir):
         """Store one admitted segment body under the job's remaining budget.
 
         The capability, the parameter shapes and the quota were settled by
@@ -1744,7 +1758,6 @@ class Handler(BaseHTTPRequestHandler):
         """
         _, max_count, max_bytes = quota
         with _seg_lock:
-            seg_dir = SEG_DIR / job
             filename = f'{segment_index:06d}.ts'
             tmp = seg_dir / f'.{filename}.tmp'
             final = seg_dir / filename
@@ -1808,10 +1821,17 @@ class Handler(BaseHTTPRequestHandler):
         sig = params.get('sig', [''])[0]
         if not job or _unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
-        if not _segment_sig_ok(job, sig):
+        # Both path uses inside one guard: the directory and the record the
+        # sig is checked against are separate joins, and either can be the one
+        # that leaves the namespace.
+        try:
+            seg_dir = _under(SEG_DIR, job)
+            authorized = _segment_sig_ok(job, sig)
+        except ValueError:
+            return self._json(400, {'error': 'bad job'})
+        if not authorized:
             # Unknown job and wrong sig get the same answer: no existence oracle.
             return self._json(403, {'error': 'bad sig'})
-        seg_dir = SEG_DIR / job
         try:
             done = sorted(int(f.stem) for f in seg_dir.iterdir()
                           if f.suffix == '.ts' and f.stem.isascii()
@@ -1842,6 +1862,8 @@ class Handler(BaseHTTPRequestHandler):
         with _seg_lock:
             try:
                 record = _load_segment_record(job)
+            except ValueError:
+                return self._json(400, {'error': 'bad job'})
             except _SegmentRecordError:
                 return self._json(500, {'error': 'segment storage failure'})
             if record is None:
@@ -1869,6 +1891,11 @@ class Handler(BaseHTTPRequestHandler):
         with _seg_lock:
             try:
                 record = _load_segment_record(job)
+                job_dir = _under(SEG_DIR, job)
+                tmp = _under(SEG_DIR, f'.{job}.json.tmp')
+                record_path = _segment_record_path(job)
+            except ValueError:
+                return self._json(400, {'error': 'bad job'})
             except _SegmentRecordError:
                 return self._json(
                     500, {'error': 'segment storage failure'})
@@ -1892,7 +1919,6 @@ class Handler(BaseHTTPRequestHandler):
                         MAX_SEGMENT_JOB_SIZE)):
                     return self._json(409, {'error': 'job record cannot resume'})
 
-                job_dir = SEG_DIR / job
                 try:
                     if not job_dir.is_dir():
                         return self._json(
@@ -1923,10 +1949,9 @@ class Handler(BaseHTTPRequestHandler):
                     'max_segment_count': MAX_SEGMENTS_PER_JOB,
                     'max_bytes': MAX_SEGMENT_JOB_SIZE,
                 }
-                tmp = SEG_DIR / f'.{job}.json.tmp'
                 try:
                     tmp.write_text(json.dumps(record), encoding='utf-8')
-                    os.replace(tmp, _segment_record_path(job))
+                    os.replace(tmp, record_path)
                 except OSError:
                     try:
                         tmp.unlink()
@@ -1946,13 +1971,11 @@ class Handler(BaseHTTPRequestHandler):
                 'max_segment_count': MAX_SEGMENTS_PER_JOB,
                 'max_bytes': MAX_SEGMENT_JOB_SIZE,
             }
-            job_dir = SEG_DIR / job
             made_dir = not job_dir.exists()
-            tmp = SEG_DIR / f'.{job}.json.tmp'
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
                 tmp.write_text(json.dumps(record), encoding='utf-8')
-                os.replace(tmp, _segment_record_path(job))  # atomic publish
+                os.replace(tmp, record_path)  # atomic publish
             except OSError:
                 # Job names may contain dots, so the flat namespace collides
                 # in EITHER minting order: with job 'a' taken, this mkdir for

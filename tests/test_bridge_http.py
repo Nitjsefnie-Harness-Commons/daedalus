@@ -3182,6 +3182,42 @@ def test_register_refuses_unhashable_tab_ids_and_stays_healthy(tmp):
                    for _tab_id, status, error, stored in replies), replies
 
 
+def test_a_segment_job_that_escapes_through_a_symlink_is_refused(tmp):
+    """A job name can be spotless and still name somewhere else.
+
+    `escape` passes every component rule, so the only thing that can notice a
+    symlink out of the segment root is a check on where the path landed. The
+    mint would otherwise create a record and a directory outside the bridge's
+    own tree, under a name the caller chose.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        job = _seg_job()
+        status, _ = _mint_job(base, TOK, job)
+        assert status == 200, status
+
+        outside = Path(docroot) / 'not-segments'
+        outside.mkdir()
+        try:
+            (Path(docroot) / 'segments' / 'escape').symlink_to(
+                outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as why:
+            _util.skip(f'this filesystem will not hold a symlink: {why}')
+
+        status, raw = _mint_job(base, TOK, 'escape')
+        assert (status, raw.get('error')) == (400, 'bad job'), (status, raw)
+        assert sorted(outside.iterdir()) == [], list(outside.iterdir())
+
+        # The record is a sibling of the directory, `<job>.json`, so it is a
+        # second join and escapes independently of the first.
+        elsewhere = outside / 'stolen.json'
+        elsewhere.write_text('{}', encoding='utf-8')
+        (Path(docroot) / 'segments' / 'record.json').symlink_to(elsewhere)
+        query = urllib.parse.urlencode({'token': TOK, 'job': 'record'})
+        status, raw = _util.get_json(f'{base}/segment-job?{query}')
+        assert (status, raw.get('error')) == (400, 'bad job'), (status, raw)
+        assert elsewhere.read_text(encoding='utf-8') == '{}', 'it was rewritten'
+
+
 def test_segment_job_dotted_name_collision_is_a_clean_409(tmp):
     """Job names may contain dots, so '<name>' and '<name>.json' collide on
     disk whichever is minted first: one side's record file is the other

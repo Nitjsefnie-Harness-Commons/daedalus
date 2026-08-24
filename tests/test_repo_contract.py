@@ -886,8 +886,14 @@ def _wait_for_devtools(profile, process):
                 except (OSError, ValueError) as why:
                     seen = f'listing its targets failed: {why}'
         time.sleep(0.05)
-    _util.skip('this browser never exposed the fixture page and an '
-               f'extension service worker over DevTools — {seen}')
+    # `raise` rather than `_util.skip(...)` at this one site. The helper is
+    # annotated NoReturn and pylint honours it, but a reader — and at least
+    # one scanner — sees a function that returns a triple on one path and
+    # falls off the end on the other. The raise says what happens without
+    # asking anyone to resolve an annotation in another module.
+    raise _util.Skipped(
+        'this browser never exposed the fixture page and an '
+        f'extension service worker over DevTools — {seen}')
 
 
 def _ready_worker(node, workers):
