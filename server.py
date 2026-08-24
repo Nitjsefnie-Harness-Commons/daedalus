@@ -1690,7 +1690,11 @@ class Handler(BaseHTTPRequestHandler):
         data_b64 = body.get('data', '')
         filename = body.get('filename', '')
         fmt = body.get('format', 'png')
-        if fmt not in SCREENSHOT_TYPES:
+        # isinstance BEFORE the membership test: `[] in SCREENSHOT_TYPES`
+        # raises TypeError rather than answering False, and an exception here
+        # killed the request thread, so the caller got a dropped connection
+        # instead of the refusal this line already knew how to write.
+        if not isinstance(fmt, str) or fmt not in SCREENSHOT_TYPES:
             return self._json(400, {'error': 'unsupported format'})
         if not upload_id:
             return self._json(400, {'error': 'missing id'})

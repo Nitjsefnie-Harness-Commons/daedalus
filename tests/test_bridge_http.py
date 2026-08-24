@@ -1322,6 +1322,25 @@ def test_upload_list_screenshot_delete(tmp):
         assert status == 404, (status, body)
 
 
+def test_an_unhashable_upload_format_is_refused_not_dropped(tmp):
+    """A format that is not a string must never reach a membership test.
+
+    `[] in SCREENSHOT_TYPES` raises TypeError instead of answering False, and
+    the exception killed the request thread — so an authenticated caller got a
+    dropped connection where the same line already knew how to write a 400.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        for value in ([], {}, ['png'], 5, None, True):
+            status, body = _util.post_json(base + '/upload', {
+                'token': TOK, 'id': 'fmt', 'filename': 'shot.png',
+                'data': base64.b64encode(PNG).decode(), 'format': value})
+            assert status == 400, (value, status, body)
+            assert body == {'error': 'unsupported format'}, (value, body)
+        # The bridge is still answering: no request thread was lost.
+        status, body = _util.get_json(base + '/health')
+        assert status == 200 and body['ok'] is True, (status, body)
+
+
 def test_upload_validation_and_traversal(tmp):
     with _util.bridge(tmp) as (base, docroot):
         docroot = Path(docroot)
