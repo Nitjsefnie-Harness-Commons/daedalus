@@ -813,6 +813,42 @@ def test_navigate_constructs_location_href(tmp):
         assert data['code'] == 'location.href = "https://example.com/x?a=\\"b\\""', data
 
 
+def test_reload_dispatches_to_the_tab_and_to_every_tab(tmp):
+    """`reload` reached its handler and died there, in every invocation.
+
+    The handler reads `args.broadcast` the way `put` and `exec` do, but the
+    subparser declared no arguments at all, so the attribute never existed and
+    the command raised AttributeError before building a request. Nothing
+    caught it because no test dispatched `reload`: the eval-style commands are
+    tested one at a time, and this was the one nobody wrote.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab-7')
+        r = run_cli(['reload'], env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert 'AttributeError' not in r.stderr, r.stderr
+        targeted = sorted(
+            (Path(docroot) / 'commands' / f'{TOK}_tab-7').glob('*.json'))
+        assert len(targeted) == 1, targeted
+        data = json.loads(targeted[0].read_text(encoding='utf-8'))
+        assert data['id'] == '_reload', data
+        assert data['code'] == 'location.reload()', data
+
+        # -b is what the handler was written for: no tab, so the command goes
+        # to the token's broadcast queue instead of the per-tab one.
+        r = run_cli(['reload', '-b'], env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        broadcast = sorted((Path(docroot) / 'commands' / TOK).glob('*.json'))
+        assert len(broadcast) == 1, broadcast
+        data = json.loads(broadcast[0].read_text(encoding='utf-8'))
+        assert data['id'] == '_reload', data
+        assert data['code'] == 'location.reload()', data
+        # Still one: -b replaces the per-tab target rather than adding to it.
+        targeted = sorted(
+            (Path(docroot) / 'commands' / f'{TOK}_tab-7').glob('*.json'))
+        assert len(targeted) == 1, targeted
+
+
 def test_result_subcommand_fetch_and_consume(tmp):
     with _util.bridge(tmp) as (base, docroot):
         _util.post_json(base + '/result', {
