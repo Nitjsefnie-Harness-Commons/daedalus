@@ -3913,6 +3913,30 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
     assert 'exit 1' in step, step
 
 
+def test_the_coverage_ratchet_records_what_it_was_calibrated_to(tmp):
+    """The floor, the flag and the measurement it was set against agree.
+
+    The ratchet is raised by hand, so nothing keeps it near the number it was
+    calibrated against except someone remembering — and it had drifted 3.2
+    points below measured coverage, which is a regression budget rather than
+    a ratchet. Pinning the recorded measurement next to the floor makes
+    raising one without the other fail here instead of silently widening it.
+    """
+    del tmp
+    workflow = (_util.ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    measured = re.search(r'#\s*measured:\s*([0-9.]+)', workflow)
+    floor = re.search(r'#\s*floor:\s*([0-9.]+)', workflow)
+    assert measured and floor, 'the coverage gate records no calibration'
+    measured, floor = float(measured.group(1)), float(floor.group(1))
+    flag = re.search(r'--fail-under=([0-9.]+)', workflow)
+    assert flag, workflow
+    assert float(flag.group(1)) == floor, (flag.group(1), floor)
+    assert floor < measured, (floor, measured)
+    assert measured - floor <= 2.0, (
+        f'the ratchet allows a {measured - floor:.1f} point regression')
+
+
 def test_manifest_version_matches_package(tmp):
     # check_versions.py covers this, but the manifest translation rule
     # (0.16.0a -> 0.16.0.1) is subtle enough to pin directly.

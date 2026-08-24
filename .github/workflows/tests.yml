@@ -207,8 +207,16 @@ jobs:
 
       - name: Coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        # A RATCHET, not a target. 70 sits just under the 71.5% measured when
-        # this landed, so ordinary churn stays green and a real regression goes
-        # red. Raise the floor by hand as coverage climbs — never lower it to
-        # make a red build green.
-        run: python -m coverage report --fail-under=70 --precision=1
+        # A RATCHET, not a target. The floor sits just under what this job
+        # actually measures, so ordinary churn stays green and a real
+        # regression goes red. Raise it by hand as coverage climbs — never
+        # lower it to make a red build green.
+        #
+        # The two numbers below are checked against each other and against the
+        # flag by test_the_coverage_ratchet_records_what_it_was_calibrated_to.
+        # The buffer absorbs measurement variation — which suites reach a
+        # subprocess before it exits, and which optional dependency set the
+        # runner resolved — not a licence to regress into it.
+        # measured: 73.3
+        # floor: 72
+        run: python -m coverage report --fail-under=72 --precision=1
