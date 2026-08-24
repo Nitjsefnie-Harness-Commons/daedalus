@@ -38,6 +38,10 @@ name: audit
 
 on:
   push:
+    # main only. A branch pushed while a pull request is open would run
+    # this a second time against the same SHA, and a branch with no pull
+    # request open is not a tree anyone is reviewing.
+    branches: [main]
     # Deny-list rather than an allow-list, matching the other gates: a new
     # dependency surface must not be able to appear unwatched.
     paths-ignore:

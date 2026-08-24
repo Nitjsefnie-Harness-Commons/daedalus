@@ -27,6 +27,10 @@ name: actionlint
 
 on:
   push:
+    # main only. A branch pushed while a pull request is open would run
+    # this a second time against the same SHA, and a branch with no pull
+    # request open is not a tree anyone is reviewing.
+    branches: [main]
     paths:
       - ".github/workflows/**"
       - ".github/dependabot.yml"

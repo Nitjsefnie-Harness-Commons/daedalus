@@ -4432,6 +4432,57 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
+def _workflow_triggers(workflow):
+    """The `on:` mapping as {trigger name: its indented lines}.
+
+    Text rather than a YAML parse: the suites are stdlib only, and the shape
+    asked about here is one nesting level deep.
+    """
+    triggers, current, inside = {}, None, False
+    for line in workflow.splitlines():
+        if not inside:
+            inside = line.startswith('on:')
+            continue
+        if line and not line.startswith(' '):
+            break
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if (line.startswith('  ') and not line.startswith('   ')
+                and stripped.endswith(':')):
+            current = stripped[:-1]
+            triggers[current] = []
+        elif current is not None:
+            triggers[current].append(stripped)
+    return triggers
+
+
+def test_no_workflow_gates_one_commit_twice(tmp):
+    """A pull request's head SHA gets one run per workflow, not two.
+
+    A branch pushed to this repository fires `push`, and opening a pull
+    request from it fires `pull_request` against the same SHA — so seven
+    workflows ran twice on every Dependabot pull request, `tests` included
+    with its twelve matrix legs. Six open pull requests saturated the runner
+    pool and pushes to main sat queued behind work already done.
+
+    The fix is a `branches:` filter on `push`, which this pins. A branch with
+    no pull request open then gets no run at all, which is the trade: it is
+    not a tree anyone is reviewing.
+    """
+    del tmp
+    checked = []
+    for path in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
+        triggers = _workflow_triggers(path.read_text(encoding='utf-8'))
+        if 'pull_request' not in triggers or 'push' not in triggers:
+            continue
+        checked.append(path.name)
+        assert any(line.startswith('branches:') for line in triggers['push']), (
+            f'{path.name} runs on every branch push AND on pull_request, so a '
+            f'pull request from this repository gates its head SHA twice')
+    assert checked, 'no workflow declares both triggers; has one been renamed?'
+
+
 def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     """Before merge, and against the base SHA rather than the last release.
 

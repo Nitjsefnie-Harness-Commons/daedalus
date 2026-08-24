@@ -40,6 +40,10 @@ name: speed
 
 on:
   push:
+    # main only. A branch pushed while a pull request is open would run
+    # this a second time against the same SHA, and a branch with no pull
+    # request open is not a tree anyone is reviewing.
+    branches: [main]
     # Deny-list rather than an allow-list: a new top-level code directory
     # would silently stop being measured under an allow-list.
     paths-ignore:
