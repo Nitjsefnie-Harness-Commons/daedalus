@@ -34,6 +34,13 @@ updates:
   # open their pull requests in the same minute.
   - package-ecosystem: pip
     directory: /
+    # Every Python dependency here is pinned exactly, so what arrives is one
+    # pull request per package that moved, carrying the version CI is about
+    # to test. The setting is belt-and-braces for a bound added later: it
+    # moves a range only when the current one cannot accept the new version,
+    # rather than rewriting a deliberate bound because something newer
+    # shipped.
+    versioning-strategy: increase-if-necessary
     schedule:
       interval: weekly
       day: wednesday

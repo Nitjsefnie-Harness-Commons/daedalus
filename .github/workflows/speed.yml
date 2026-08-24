@@ -14,9 +14,10 @@ name: speed
 # floor, which is the quantity that actually changes when code gets slower.
 #
 # Each side installs ITS OWN dependencies from ITS OWN tree. That is not
-# incidental here: the baseline pins mcp<2 and this line requires mcp>=2, and a
-# release that got slower because a bumped library got slower is a real
-# regression that holding dependencies fixed would hide.
+# incidental here: the baseline floors the versions this line pins exactly, so
+# the two sides resolve differently on purpose — and a release that got slower
+# because a bumped library got slower is a real regression that holding
+# dependencies fixed would hide.
 #
 # TWO BASELINES, chosen by what the run is answering. On a push to a branch
 # the question is "is this line slower than what we shipped", so the baseline
