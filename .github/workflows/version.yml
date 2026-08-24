@@ -1,0 +1,93 @@
+name: version
+
+# One public version identifies one distributable content set.
+#
+# The version is bumped only when a release is cut, so between releases every
+# commit on this branch built a wheel that called itself the released version
+# while shipping different content — two artifacts named `daedalus-cli 0.19.0`
+# with different digests, and no way to tell from the outside which one a
+# machine had. The extension carries the same string, so the same ambiguity
+# reached the page.
+#
+# The rule this gate enforces is narrow and mechanical: the version in the
+# tree must not be one that has already been published. That is the whole
+# check — it needs no history and no diff, because a published version is
+# already claimed by the content that was released under it, and anything
+# else claiming it is the collision.
+#
+# In practice the discipline is: cut the release, then immediately bump the
+# canonical version to the NEXT one with an `a` suffix — 0.21.0a after
+# releasing 0.20.0. `a` rather than a `.dev` suffix because Chrome rejects a
+# letter-suffixed manifest version and scripts/check_versions.py already
+# translates that one shape (0.21.0a -> 0.21.0.1); and the NEXT version
+# rather than the released one because 0.20.0a sorts BEFORE 0.20.0, which
+# would name post-release work as a pre-release of what it comes after.
+#
+# The release commit itself is not caught: it sets the version before the tag
+# exists, so the gate passes, and the tag is published after. The first push
+# that follows a release fails here until the bump lands, which is exactly
+# when someone should be told.
+
+on:
+  push:
+    # main only. A branch pushed while a pull request is open would run
+    # this a second time against the same SHA, and a branch with no pull
+    # request open is not a tree anyone is reviewing.
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: version-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unpublished:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Nothing here pushes, and a token left in .git/config is reusable
+          # by every later step in the job.
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: The version this tree claims is not already published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        # `--print` runs the ordinary cross-site consistency check first and
+        # sends its report to stderr, so a tree whose seven sites disagree
+        # fails here rather than handing one of them to the query below.
+        #
+        # The release lookup branches on the EXIT CODE, never on the output:
+        # `gh api` prints its JSON error body to stdout on a 404 and exits
+        # nonzero, so a test of the text would read a "not found" payload as
+        # a found release.
+        run: |
+          version="$(python3 scripts/check_versions.py --print)"
+          echo "tree claims version $version"
+          if gh api -H "Cache-Control: no-cache" \
+               "repos/$REPO/releases/tags/v$version" >/dev/null 2>&1; then
+            echo "v$version is already published, and this tree is not that" >&2
+            echo "release. Bump every site in one pass before pushing again:" >&2
+            echo "  python3 scripts/check_versions.py --set <next>a" >&2
+            exit 1
+          fi
+          echo "v$version is unpublished, so this tree is free to claim it."

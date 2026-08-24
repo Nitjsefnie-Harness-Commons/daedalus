@@ -10,12 +10,14 @@ releases stale.
   python3 scripts/check_versions.py --staged     # check what a commit would record
   python3 scripts/check_versions.py --rev HEAD   # check a revision
   python3 scripts/check_versions.py --set 0.18.0 # rewrite every site
+  python3 scripts/check_versions.py --print      # the canonical version alone
 
 Chrome rejects a letter-suffixed version, so the manifest carries the suffix as
 a fourth numeric segment (0.16.0a -> 0.16.0.1). That translation is expected,
 not drift.
 """
 import argparse
+import contextlib
 import pathlib
 import re
 import subprocess
@@ -131,6 +133,22 @@ def apply(version):
     return check()
 
 
+def print_canonical(staged=False, rev=None):
+    """Print the canonical version alone; still refuse a tree that disagrees.
+
+    Whatever reads this must not be handed a version from a tree whose sites
+    disagree, so the ordinary check still runs — its report goes to stderr so
+    stdout carries the version and nothing else.
+    """
+    with contextlib.redirect_stdout(sys.stderr):
+        status = check(staged, rev)
+    if status:
+        return status
+    found = collect(staged, rev)
+    print(next(v for p, d, v in found if (p, d) == CANONICAL))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -138,14 +156,19 @@ def main():
     src.add_argument('--staged', action='store_true',
                      help='read from the index (what a commit would record)')
     src.add_argument('--rev', help='read from a revision, e.g. HEAD')
-    ap.add_argument('--set', dest='set_to', metavar='VERSION',
-                    help='rewrite every site in the working tree to VERSION')
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument('--set', dest='set_to', metavar='VERSION',
+                      help='rewrite every site in the working tree to VERSION')
+    mode.add_argument('--print', dest='print_only', action='store_true',
+                      help='print the canonical version alone, for a script to read')
     args = ap.parse_args()
 
     if args.set_to:
         if args.staged or args.rev:
             raise SystemExit('--set rewrites the working tree; drop --staged/--rev')
         return apply(args.set_to)
+    if args.print_only:
+        return print_canonical(staged=args.staged, rev=args.rev)
     return check(staged=args.staged, rev=args.rev)
 
 

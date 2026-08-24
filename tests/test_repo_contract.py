@@ -4087,7 +4087,7 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
 
 
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
-    """The scanner input is the non-empty set of 77 tracked release paths."""
+    """The scanner input is the non-empty set of 78 tracked release paths."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
@@ -4098,7 +4098,7 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(_iter_tree_files())
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 77, f'expected 77 tracked paths, found {len(tracked)}'
+    assert len(tracked) == 78, f'expected 78 tracked paths, found {len(tracked)}'
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (
@@ -4455,6 +4455,69 @@ def _workflow_triggers(workflow):
         elif current is not None:
             triggers[current].append(stripped)
     return triggers
+
+
+def test_the_version_gate_refuses_an_already_published_version(tmp):
+    """Two artifacts must not both call themselves the same released version.
+
+    The version is bumped only when a release is cut, so every commit between
+    releases built a wheel naming itself the released version while shipping
+    different content — two files called `daedalus-cli 0.19.0` with different
+    digests. The gate is one question, asked of the released tag rather than
+    of a diff: is this version already claimed?
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'version.yml').read_text(
+        encoding='utf-8')
+    assert 'scripts/check_versions.py --print' in workflow, workflow
+    assert 'releases/tags/v$version' in workflow, workflow
+    # `gh api` prints its JSON error body to stdout on a 404 and exits
+    # nonzero, so the branch has to be on the exit code — a test of the text
+    # would read a "not found" payload as a release that exists.
+    assert 'if gh api' in workflow, workflow
+    assert 'exit 1' in workflow, workflow
+    # The version reaches the script by environment, not by interpolation.
+    _, _, body = workflow.partition('run: |')
+    assert '${{' not in body, 'an expression is interpolated into the script'
+
+
+def test_the_tree_does_not_claim_a_version_it_already_released(tmp):
+    """The local half of that gate: a released version is spent.
+
+    This asks git rather than the network, so it holds in a checkout with no
+    remote: a tag `v<version>` that exists and is not this commit means the
+    tree is claiming a version whose content is already published.
+    """
+    del tmp
+    checker = _util.load(ROOT / 'scripts' / 'check_versions.py', 'check_versions_tag')
+    version = next(v for p, d, v in checker.collect() if (p, d) == checker.CANONICAL)
+    tag = subprocess.run(
+        ['git', '-C', str(ROOT), 'rev-list', '-n', '1', f'v{version}'],
+        capture_output=True, text=True, check=False, timeout=30)
+    if tag.returncode != 0:
+        return  # no such tag: the version is unspent, which is the point
+    head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
+                          capture_output=True, text=True, check=True, timeout=30)
+    assert tag.stdout.strip() == head.stdout.strip(), (
+        f'the tree claims version {version}, which tag v{version} already '
+        f'published at {tag.stdout.strip()[:12]}; bump every site with '
+        f'scripts/check_versions.py --set <next>a')
+
+
+def test_check_versions_prints_the_canonical_version_alone(tmp):
+    """`--print` is what a script reads, so stdout carries nothing else."""
+    del tmp
+    r = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts' / 'check_versions.py'), '--print'],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    checker = _util.load(ROOT / 'scripts' / 'check_versions.py',
+                         'check_versions_print')
+    expected = next(v for p, d, v in checker.collect()
+                    if (p, d) == checker.CANONICAL)
+    assert r.stdout.strip() == expected, (r.stdout, expected)
+    # The consistency report still runs; it just does not land on stdout.
+    assert 'consistent across' in r.stderr, r.stderr
 
 
 def test_no_workflow_gates_one_commit_twice(tmp):

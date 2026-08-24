@@ -74,6 +74,7 @@
 !/.github/workflows/speed.yml
 !/.github/workflows/tests.yml
 !/.github/workflows/types.yml
+!/.github/workflows/version.yml
 
 # ─── daedalus_cli ───
 !/daedalus_cli/
