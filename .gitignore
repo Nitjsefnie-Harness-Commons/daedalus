@@ -39,6 +39,7 @@
 !/README.md
 !/SECURITY.md
 !/mcp_server.py
+!/mcp_transport.py
 !/pyproject.toml
 !/pyrightconfig.json
 !/requirements-dev.txt
