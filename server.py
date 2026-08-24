@@ -632,8 +632,35 @@ _REFUSED_BODY_DRAIN = 65536
 _UNDECLARED_BODY_DRAIN_SECONDS = 0.25
 
 
-_worker_lock = threading.Lock()
-_live_workers = 0
+class _WorkerCount:
+    """Live request workers, and the cap on how many may exist at once.
+
+    The count and the lock guarding it are one object because every mutation
+    has to hold that lock, and a module-level pair invites a call site that
+    takes one without the other. Two operations, so the pairing an admitted
+    worker owes a release is checkable by reading them rather than by finding
+    every place that touches a counter.
+    """
+
+    def __init__(self, cap):
+        self._cap = cap
+        self._lock = threading.Lock()
+        self._live = 0
+
+    def admit(self):
+        """True when a slot was taken, and then the caller owes a release."""
+        with self._lock:
+            if self._live >= self._cap:
+                return False
+            self._live += 1
+            return True
+
+    def release(self):
+        with self._lock:
+            self._live -= 1
+
+
+_workers = _WorkerCount(MAX_REQUEST_WORKERS)
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -650,12 +677,7 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         writing one would put a blocking send in the accept loop, and a peer
         that is over the cap is the last one to hand the listener to.
         """
-        global _live_workers
-        with _worker_lock:
-            admitted = _live_workers < MAX_REQUEST_WORKERS
-            if admitted:
-                _live_workers += 1
-        if not admitted:
+        if not _workers.admit():
             print(f'[HTTP] REFUSED at worker cap {MAX_REQUEST_WORKERS}',
                   flush=True)
             return self.shutdown_request(request)
@@ -665,17 +687,14 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
             # Spawning the worker failed, so nothing will run the release
             # below. Exhaustion is exactly what the cap guards against, and
             # a leaked count here would make the cap tighten permanently.
-            with _worker_lock:
-                _live_workers -= 1
+            _workers.release()
             raise
 
     def process_request_thread(self, request, client_address):
-        global _live_workers
         try:
             super().process_request_thread(request, client_address)
         finally:
-            with _worker_lock:
-                _live_workers -= 1
+            _workers.release()
 
     def server_bind(self):
         """Bind and record the address without a reverse-DNS lookup.
@@ -702,10 +721,25 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 class _JSONObject(dict):
+    """A parsed JSON object that remembers whether a key arrived twice.
+
+    Duplicate keys collapse when the pairs become a dict, so the carrier says
+    something the items no longer can. Equality has to include it for the same
+    reason: two bodies with identical items are not the same request when one
+    of them named an authority carrier twice, and inherited dict equality
+    would call them equal. Comparison against a plain dict is unchanged.
+    """
+
     def __init__(self, pairs):
         super().__init__(pairs)
         self.duplicate_carrier = ambiguous_request_carrier(
             key for key, _value in pairs)
+
+    def __eq__(self, other):
+        if isinstance(other, _JSONObject):
+            return (super().__eq__(other)
+                    and self.duplicate_carrier == other.duplicate_carrier)
+        return super().__eq__(other)
 
 
 class Handler(BaseHTTPRequestHandler):

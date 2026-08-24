@@ -668,9 +668,24 @@ class _BearerAuth(BaseHTTPMiddleware):
 
 
 class _CarrierJSONObject(dict):
+    """A parsed JSON object that keeps the pairs it was built from.
+
+    A duplicate key collapses into one dict entry, so the pair list is the
+    only record that it was sent twice — which is exactly what the repeated
+    `job` argument check reads. Equality includes it for that reason:
+    inherited dict equality would report two bodies as the same request when
+    only one of them repeated a key. Comparison against a plain dict is
+    unchanged.
+    """
+
     def __init__(self, pairs):
         super().__init__(pairs)
         self.pairs = pairs
+
+    def __eq__(self, other):
+        if isinstance(other, _CarrierJSONObject):
+            return super().__eq__(other) and self.pairs == other.pairs
+        return super().__eq__(other)
 
 
 def _job_carrier_names(request_body):

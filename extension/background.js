@@ -1400,7 +1400,11 @@ async function handleEval(cmd) {
       await failMainWorld('no result envelope');
       return;
     }
-    const isEnvelope = res !== null && typeof res === 'object';
+    // `typeof null === 'object'`, so this test is only safe because the
+    // guard above already returned on null and undefined. Keep them
+    // together: separating them makes every non-envelope result look like an
+    // envelope with undefined fields.
+    const isEnvelope = typeof res === 'object';
     const val = isEnvelope ? res.r : res;
     const err = isEnvelope ? res.e || null : null;
     const extra = { world: 'page-main' };

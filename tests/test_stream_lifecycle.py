@@ -181,10 +181,13 @@ def test_a_unix_socket_subclass_binds_the_way_the_stdlib_binds_it(tmp):
 def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
     """The search is bounded, and says what the child printed instead."""
     del tmp
+    # Built before the list rather than inside it: two adjacent literals
+    # between commas read as a missing comma, which is a different program.
+    program = ('import sys, time; '
+               'print("nothing to do with the port", flush=True); '
+               'time.sleep(600)')
     proc = subprocess.Popen(
-        [sys.executable, '-c',
-         'import sys, time; print("nothing to do with the port", flush=True); '
-         'time.sleep(600)'],
+        [sys.executable, '-c', program],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         started = time.time()
