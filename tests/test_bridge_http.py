@@ -2983,6 +2983,24 @@ def test_dashboard_static_serving(tmp):
         assert status == 404, status
 
 
+def test_dashboard_responses_refuse_cross_origin_framing(tmp):
+    """The token-bearing control surface must not be embeddable.
+
+    /dashboard drives the browser and carries the bridge token, so a page
+    that can frame it can overlay its controls. Neither frame-ancestors nor
+    X-Frame-Options was sent on any dashboard response.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        for path in ('/dashboard', '/dashboard/app.js'):
+            request = urllib.request.Request(base + path)
+            with urllib.request.urlopen(request, timeout=10) as response:
+                assert response.status == 200, (path, response.status)
+                headers = response.headers
+            assert headers.get('X-Frame-Options') == 'DENY', (path, dict(headers))
+            assert headers.get('Content-Security-Policy') == (
+                "frame-ancestors 'none'"), (path, dict(headers))
+
+
 def test_dashboard_refuses_traversal(tmp):
     with _util.bridge(tmp) as (base, _docroot):
         server_py = (_util.ROOT / 'server.py').read_bytes()

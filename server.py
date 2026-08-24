@@ -1822,6 +1822,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', mime)
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-cache')
+        # This page holds the bridge token and drives the browser, so being
+        # framed by another origin puts those controls under someone else's
+        # overlay. frame-ancestors is the one that governs; X-Frame-Options
+        # is carried beside it for anything that never learned CSP. Sent on
+        # every dashboard response, assets included: a framed script or
+        # stylesheet is a smaller prize than the document, but the header
+        # costs nothing and the exception would be the thing to get wrong.
+        self.send_header(
+            'Content-Security-Policy', "frame-ancestors 'none'")
+        self.send_header('X-Frame-Options', 'DENY')
         self.end_headers()
         self.wfile.write(data)
 
