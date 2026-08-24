@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -1007,6 +1008,32 @@ def test_result_partial_temp_write_preserves_the_existing_slot(tmp):
         health_status, health = _util.get_json(base + '/health')
         assert health_status == 200 and health['ok'] is True, (
             health_status, health)
+
+
+def test_every_accepted_screenshot_format_can_be_served_back(tmp):
+    """A format the upload route accepts must be one /screenshot can return.
+
+    `webp` was accepted, stored and answered 200, and then /screenshot said
+    `no screenshot` because discovery listed three suffixes and the accepted
+    set had four. The two lists are now one list, so they cannot drift again;
+    this walks every accepted format rather than naming the one that was
+    missing.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        for index, fmt in enumerate(('png', 'jpeg', 'jpg', 'webp')):
+            upload_id = f'shot{index}'
+            status, body = _util.post_json(base + '/upload', {
+                'token': TOK, 'id': upload_id,
+                'data': base64.b64encode(PNG).decode(), 'format': fmt})
+            assert status == 200, (fmt, status, body)
+            query = urllib.parse.urlencode({'token': TOK, 'id': upload_id})
+            request = urllib.request.Request(base + '/screenshot?' + query)
+            with urllib.request.urlopen(request, timeout=10) as reply:
+                served = reply.read()
+                content_type = reply.headers.get('Content-Type')
+            assert served == PNG, (fmt, len(served))
+            assert content_type and content_type.startswith('image/'), (
+                fmt, content_type)
 
 
 def test_upload_list_screenshot_delete(tmp):

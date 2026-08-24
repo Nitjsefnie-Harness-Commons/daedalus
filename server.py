@@ -279,6 +279,18 @@ _SEGMENT_DECIMAL_MAX_DIGITS = 20
 # Legacy single-file drops (commands/{token}[_{tab}].json) are still delivered
 # for the documented raw-write escape hatch.
 CMD_TTL = _env_positive_float('DAEDALUS_CMD_TTL', 90)
+
+# One table for every place a screenshot format is decided: what /upload
+# accepts, what /screenshot will discover on disk, and what content type it is
+# served with. They were three separate lists, and `webp` was in the first
+# only -- so the upload stored a file and answered 200 that /screenshot then
+# reported as absent.
+SCREENSHOT_TYPES = {
+    'png': 'image/png',
+    'jpeg': 'image/jpeg',
+    'jpg': 'image/jpeg',
+    'webp': 'image/webp',
+}
 _COMMAND_GC_INTERVAL = max(0.05, min(30.0, CMD_TTL))
 _seq_counter = itertools.count(1)
 
@@ -1546,7 +1558,7 @@ class Handler(BaseHTTPRequestHandler):
         data_b64 = body.get('data', '')
         filename = body.get('filename', '')
         fmt = body.get('format', 'png')
-        if fmt not in ('png', 'jpeg', 'jpg', 'webp'):
+        if fmt not in SCREENSHOT_TYPES:
             return self._json(400, {'error': 'unsupported format'})
         if not upload_id:
             return self._json(400, {'error': 'missing id'})
@@ -1602,7 +1614,7 @@ class Handler(BaseHTTPRequestHandler):
             if not d.is_dir():
                 continue
             for f in d.iterdir():
-                if f.suffix.lower() in ('.png', '.jpeg', '.jpg'):
+                if f.suffix.lower().lstrip('.') in SCREENSHOT_TYPES:
                     if not latest or f.stat().st_mtime > latest.stat().st_mtime:
                         latest = f
         if not latest:
@@ -1648,7 +1660,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_file(self, path, fmt):
         """Serve a binary file, streamed so large files aren't fully buffered in RAM."""
-        mime_map = {'png': 'image/png', 'jpeg': 'image/jpeg', 'jpg': 'image/jpeg',
+        mime_map = {**SCREENSHOT_TYPES,
                     'json': 'application/json', 'txt': 'text/plain'}
         mime = mime_map.get(fmt, 'application/octet-stream')
         size = path.stat().st_size
