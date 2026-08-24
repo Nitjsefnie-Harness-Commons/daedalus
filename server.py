@@ -537,13 +537,11 @@ def _remove_expired_command_file(path, now, legacy=False):
     """Remove one expired, complete command artifact without following symlinks.
 
     Queue entries are published by this process with rename, so their `.json`
-    and stale `.tmp` names are safe to collect, as is a `.claim` left behind
-    by a consumer that died between claiming a command and unlinking it —
-    nothing else will ever look at that name. A top-level legacy file is
+    and stale `.tmp` names are safe to collect. A top-level legacy file is
     caller-published: malformed content may still have an open writer and is
     left untouched until it becomes a complete JSON object.
     """
-    if not path.name.endswith(('.json', '.tmp', '.claim')):
+    if not path.name.endswith(('.json', '.tmp')):
         return
     try:
         if now - path.lstat().st_mtime <= CMD_TTL:
@@ -661,28 +659,6 @@ def _enqueue_command(token, tab, cmd):
 # relay presents the capability (sig) rather than the bridge token, because
 # anything that script carries the visited page can read.
 _seg_lock = threading.Lock()
-
-
-def _claim_command(path):
-    """Move `path` aside so exactly one consumer can deliver it, or None.
-
-    Two streams can cover one queue: an extension stream drains every per-tab
-    queue, and a specific-tab stream drains its own. Discovering a file is
-    therefore not owning it, and both used to read it, write the frame, and
-    only then race to unlink — so one command went out twice under a single
-    delivery id.
-
-    The rename is the claim, and it needs no lock: a source can only be moved
-    once, so the consumer that loses finds nothing there and delivers nothing.
-    The claimed name starts with a dot, which every queue scan already skips,
-    so no later pass picks it up either.
-    """
-    claimed = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.claim')
-    try:
-        path.rename(claimed)
-    except OSError:
-        return None
-    return claimed
 
 
 def _segment_record_path(job):
@@ -1399,28 +1375,14 @@ class Handler(BaseHTTPRequestHandler):
                 try: f.unlink()
                 except OSError: pass  # the TTL sweep takes it
                 continue
-            claimed = _claim_command(f)
-            if claimed is None:
-                continue  # another consumer covering this queue got it first
             if chrome_tab is not None:
                 data['chromeTab'] = chrome_tab
-            delivered = False
-            try:
-                self._write_frame(data)
-                delivered = True
-            finally:
-                if not delivered:
-                    # A claim is only good while its holder can deliver it.
-                    # Put it back under the visible name rather than losing it
-                    # to one no scan looks at; the socket error still tears the
-                    # stream down, and the next consumer redelivers.
-                    try: claimed.rename(f)
-                    except OSError: pass  # the TTL sweep takes it
-            # The frame is already on the wire. A claimed file that will not
-            # unlink is swept by the TTL collector rather than redelivered,
-            # because no scan sees a dotted name.
-            try: claimed.unlink()
-            except OSError: pass  # the TTL sweep takes it
+            self._write_frame(data)  # BEFORE unlink
+            # The frame is already on the wire. A file that will not unlink is
+            # redelivered on the next tick and deduplicated by the `_did` the
+            # frame carries, which is why delivery does not depend on this.
+            try: f.unlink()
+            except OSError: pass  # a redelivery is deduplicated by _did
             _last_delivery_ts = time.time()
             count += 1
             print(f'[STREAM] DELIVERED q={_log_safe(qdir.name)} id={_log_safe(data.get("id", ""))} did={_log_safe(data.get("_did", ""))}', flush=True)

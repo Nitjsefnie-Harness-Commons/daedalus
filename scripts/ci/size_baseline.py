@@ -43,8 +43,8 @@ TEST_CEILING = 700
 # #127, #128, #129 and #130 are the standing work to empty this table.
 BASELINE = {
     'tests/test_repo_contract.py': 7802,
-    'tests/test_bridge_http.py': 4102,
-    'server.py': 2662,
+    'tests/test_bridge_http.py': 3975,
+    'server.py': 2624,
     'extension/background.js': 1943,
     'tests/test_mcp_server.py': 1507,
     'daedalus_cli/cli.py': 1329,
