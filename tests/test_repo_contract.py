@@ -11,9 +11,7 @@ import ast
 import contextlib
 import http.server
 import importlib
-import io
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -26,280 +24,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _jsread import (blank_js_comments, js_bracket_end,  # noqa: E402
+                     js_mask, js_object_entries, js_split_top_level)
 from _repo import iter_tree_files  # noqa: E402
 sys.path.insert(0, str(_util.ROOT))
 CLI_MODULE = importlib.import_module('daedalus_cli.cli')
 
 ROOT = _util.ROOT
 EXTENSION_ROOT = ROOT / 'extension'
-
-
-def test_gitignore_postcondition_detects_an_ignored_tracked_file(tmp):
-    """The generator's final check must inspect paths already in the index."""
-    repo = Path(tmp) / 'repo'
-    repo.mkdir()
-    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
-    tracked = repo / 'tracked.txt'
-    tracked.write_text('published\n', encoding='utf-8')
-    subprocess.run(
-        ['git', '-C', str(repo), 'add', '-f', 'tracked.txt'], check=True)
-
-    generator = _util.load(
-        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_mutation')
-    baseline = generator.main(repo)
-    assert baseline == 0, (
-        'the postcondition rejected the generated tracked-file allow rule')
-    real_run = generator.subprocess.run
-
-    def mutate_before_postcondition(args, **kwargs):
-        if 'check-ignore' in args:
-            (repo / '.gitignore').write_text('*\n', encoding='utf-8')
-        return real_run(args, **kwargs)
-
-    generator.subprocess.run = mutate_before_postcondition
-    try:
-        result = generator.main(repo)
-    finally:
-        generator.subprocess.run = real_run
-
-    assert result == 1, (
-        'the postcondition accepted a tracked file ignored by the mutation')
-
-
-def test_gitignore_postcondition_rejects_a_fatal_check_error(tmp):
-    """A failed Git check cannot report that every tracked file is named."""
-    repo = Path(tmp) / 'repo'
-    repo.mkdir()
-    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
-    tracked = repo / 'tracked.txt'
-    tracked.write_text('published\n', encoding='utf-8')
-    subprocess.run(
-        ['git', '-C', str(repo), 'add', '-f', 'tracked.txt'], check=True)
-
-    generator = _util.load(
-        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_fatal')
-    real_run = generator.subprocess.run
-
-    def inject_fatal_check_error(args, **kwargs):
-        if 'check-ignore' in args:
-            return subprocess.CompletedProcess(
-                args, 128, stdout='',
-                stderr='fatal: injected check failure')
-        return real_run(args, **kwargs)
-
-    generator.subprocess.run = inject_fatal_check_error
-    error = io.StringIO()
-    try:
-        with contextlib.redirect_stderr(error):
-            result = generator.main(repo)
-    finally:
-        generator.subprocess.run = real_run
-
-    assert result != 0, 'a fatal check error was reported as release-safe'
-    assert 'fatal: injected check failure' in error.getvalue(), (
-        'the fatal check diagnostic was hidden from the operator')
-
-
-def test_gitignore_rejects_match_status_without_matched_paths(tmp):
-    """Git match status without paths is an inconsistent failed guard."""
-    repo = Path(tmp) / 'repo'
-    repo.mkdir()
-    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
-    tracked = repo / 'tracked.txt'
-    tracked.write_text('published\n', encoding='utf-8')
-    subprocess.run(
-        ['git', '-C', str(repo), 'add', '-f', 'tracked.txt'], check=True)
-
-    generator = _util.load(
-        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_empty_match')
-    real_run = generator.subprocess.run
-
-    def inject_empty_match(args, **kwargs):
-        if 'check-ignore' in args:
-            return subprocess.CompletedProcess(
-                args, 0, stdout='', stderr='')
-        return real_run(args, **kwargs)
-
-    generator.subprocess.run = inject_empty_match
-    error = io.StringIO()
-    try:
-        with contextlib.redirect_stderr(error):
-            result = generator.main(repo)
-    finally:
-        generator.subprocess.run = real_run
-
-    assert result == 1, 'Git match status without paths was release-safe'
-    assert 'reported matches without naming paths' in error.getvalue(), (
-        'the inconsistent Git result was hidden from the operator')
-
-
-def _gitignore_exception_result(tmp, exception_type, failing_command):
-    """Run the generator with one Git command raising an injected exception."""
-    repo = Path(tmp) / f'{exception_type.__name__}-{failing_command}'
-    repo.mkdir()
-    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
-    tracked = repo / 'tracked.txt'
-    tracked.write_text('published\n', encoding='utf-8')
-    subprocess.run(
-        ['git', '-C', str(repo), 'add', '-f', 'tracked.txt'], check=True)
-
-    module_name = f'gen_gitignore_{exception_type.__name__}_{failing_command}'
-    generator = _util.load(ROOT / 'scripts' / 'gen_gitignore.py', module_name)
-    real_run = generator.subprocess.run
-
-    def inject_exception(args, **kwargs):
-        if failing_command in args:
-            if exception_type is FileNotFoundError:
-                raise FileNotFoundError('injected launch failure')
-            raise subprocess.TimeoutExpired(args, kwargs.get('timeout'))
-        return real_run(args, **kwargs)
-
-    generator.subprocess.run = inject_exception
-    error = io.StringIO()
-    result = None
-    caught = None
-    try:
-        with contextlib.redirect_stderr(error):
-            result = generator.main(repo)
-    except (OSError, subprocess.SubprocessError) as failure:
-        caught = failure
-    finally:
-        generator.subprocess.run = real_run
-    return result, caught, error.getvalue()
-
-
-def test_gitignore_reports_launch_failures_from_both_git_calls(tmp):
-    """A Git launch failure at either boundary returns an operator failure."""
-    for command in ('ls-files', 'check-ignore'):
-        result, caught, error = _gitignore_exception_result(
-            tmp, FileNotFoundError, command)
-        assert caught is None, (command, caught)
-        assert result == 1, command
-        assert f'git {command} failed' in error, (command, error)
-
-
-def test_gitignore_reports_timeouts_from_both_git_calls(tmp):
-    """A Git timeout at either boundary returns an operator failure."""
-    for command in ('ls-files', 'check-ignore'):
-        result, caught, error = _gitignore_exception_result(
-            tmp, subprocess.TimeoutExpired, command)
-        assert caught is None, (command, caught)
-        assert result == 1, command
-        assert f'git {command} failed' in error, (command, error)
-
-
-def _gitignore_invalid_output_result(tmp, failing_command):
-    """Run one Git boundary against a child that writes invalid UTF-8."""
-    repo = Path(tmp) / f'invalid-output-{failing_command}'
-    repo.mkdir()
-    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
-    tracked = repo / 'tracked.txt'
-    tracked.write_text('published\n', encoding='utf-8')
-    subprocess.run(
-        ['git', '-C', str(repo), 'add', '-f', 'tracked.txt'], check=True)
-
-    generator = _util.load(
-        ROOT / 'scripts' / 'gen_gitignore.py',
-        f'gen_gitignore_invalid_output_{failing_command}')
-    real_run = generator.subprocess.run
-
-    def emit_invalid_bytes(args, **kwargs):
-        # Raise the decode failure rather than trying to provoke one from a
-        # real child. subprocess decodes with the locale, and the byte that
-        # is undecodable as UTF-8 is an ordinary character under the Windows
-        # code page — so the previous spelling of this injection simulated
-        # nothing there and the generator succeeded. What the generator
-        # contracts is that a decode failure at either Git boundary becomes
-        # an operator-shaped result, and that is exactly what this asks it.
-        if failing_command in args:
-            raise UnicodeDecodeError(
-                'utf-8', b'\xff', 0, 1, 'invalid start byte')
-        return real_run(args, **kwargs)
-
-    generator.subprocess.run = emit_invalid_bytes
-    error = io.StringIO()
-    result = None
-    caught = None
-    try:
-        with contextlib.redirect_stderr(error):
-            result = generator.main(repo)
-    except UnicodeDecodeError as failure:
-        caught = failure
-    finally:
-        generator.subprocess.run = real_run
-    return result, caught, error.getvalue()
-
-
-def test_gitignore_reports_invalid_output_from_both_git_calls(tmp):
-    """Invalid output at either Git boundary returns an operator failure."""
-    for command in ('ls-files', 'check-ignore'):
-        result, caught, error = _gitignore_invalid_output_result(tmp, command)
-        assert caught is None, (command, caught)
-        assert result == 1, command
-        assert f'git {command} failed' in error, (command, error)
-
-
-def test_gitignore_bounds_both_git_calls(tmp):
-    """Both local Git operations receive an explicit finite timeout."""
-    repo = Path(tmp) / 'repo'
-    repo.mkdir()
-    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
-    tracked = repo / 'tracked.txt'
-    tracked.write_text('published\n', encoding='utf-8')
-    subprocess.run(
-        ['git', '-C', str(repo), 'add', '-f', 'tracked.txt'], check=True)
-
-    generator = _util.load(
-        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_timeouts')
-    real_run = generator.subprocess.run
-    timeouts = []
-
-    def record_timeout(args, **kwargs):
-        timeouts.append(kwargs.get('timeout'))
-        return real_run(args, **kwargs)
-
-    generator.subprocess.run = record_timeout
-    try:
-        result = generator.main(repo)
-    finally:
-        generator.subprocess.run = real_run
-
-    assert result == 0, result
-    assert len(timeouts) == 2, timeouts
-    assert all(isinstance(item, (int, float)) and item > 0
-               for item in timeouts), timeouts
-
-
-def test_gitignore_names_a_tracked_path_containing_a_space(tmp):
-    """A space in a tracked filename must survive enumeration as ONE path.
-
-    `git ls-files` without `-z` separates paths on whitespace, so
-    'has space.txt' became two tokens; the generator then named and
-    postcondition-checked the FRAGMENTS and reported success while the real
-    file stayed ignored — a fail-open postcondition on the most ordinary
-    filename shape there is.
-    """
-    repo = Path(tmp) / 'repo'
-    repo.mkdir()
-    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
-    (repo / 'plain.txt').write_text('published\n', encoding='utf-8')
-    (repo / 'has space.txt').write_text('published\n', encoding='utf-8')
-    subprocess.run(
-        ['git', '-C', str(repo), 'add', '-f', 'plain.txt', 'has space.txt'],
-        check=True)
-
-    generator = _util.load(
-        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_space')
-    result = generator.main(repo)
-    assert result == 0, 'the generator rejected its own space-named allow rule'
-    rules = (repo / '.gitignore').read_text(encoding='utf-8').splitlines()
-    assert '!/has space.txt' in rules, rules
-    ignored = subprocess.run(
-        ['git', '-C', str(repo), 'check-ignore', '--no-index', '--',
-         'has space.txt'],
-        capture_output=True, check=False)
-    assert ignored.returncode != 0, (
-        'the generated .gitignore still ignores the tracked space-named file')
 
 
 def test_every_served_page_declares_its_encoding(tmp):
@@ -322,185 +54,6 @@ def test_every_served_page_declares_its_encoding(tmp):
         if not re.search(r'<meta[^>]*charset', p.read_text(encoding='utf-8'),
                          re.IGNORECASE)]
     assert not missing, f'HTML without a charset declaration: {missing}'
-
-
-_ALL_SKIPPED_SUITE = """import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _util
-
-
-def test_needs_something_absent(d):
-    _util.skip('nothing to run against here')
-
-
-raise SystemExit(_util.runner(_util.collect(dict(globals()))))
-"""
-
-_PASSING_SUITE = """import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _util
-
-
-def test_arithmetic(d):
-    assert 1 + 1 == 2
-
-
-raise SystemExit(_util.runner(_util.collect(dict(globals()))))
-"""
-
-
-def _runner_tree(tmp, suites):
-    """A copy of run_tests.py over fabricated suites, run where it stands."""
-    root = Path(tmp) / 'tree'
-    (root / 'tests').mkdir(parents=True)
-    shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
-    shutil.copy2(ROOT / 'tests' / '_util.py', root / 'tests' / '_util.py')
-    for name, source in suites.items():
-        (root / 'tests' / name).write_text(source, encoding='utf-8')
-    env = dict(os.environ)
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    return subprocess.run(
-        [sys.executable, 'run_tests.py'], cwd=str(root), env=env,
-        capture_output=True, text=True, timeout=300)
-
-
-def test_a_suite_that_ran_no_coverage_is_not_an_overall_pass(tmp):
-    """A run that executed nothing must not read as a verified one.
-
-    Per-suite lines carried the skip counts, but the aggregate was a boolean
-    over exit codes, so a suite whose every test skipped — no browser, no
-    dependencies — was indistinguishable from a verified one at exactly the
-    line a reader and CI both key on.
-    """
-    result = _runner_tree(tmp, {
-        'test_all_skipped.py': _ALL_SKIPPED_SUITE,
-        'test_passing.py': _PASSING_SUITE,
-    })
-    assert 'OVERALL: PASS' not in result.stdout, result.stdout
-    assert 'test_all_skipped.py' in result.stdout, result.stdout
-    assert result.returncode != 0, (result.returncode, result.stdout)
-
-
-def test_the_aggregate_carries_the_totals_it_verified(tmp):
-    """A pass says how much was run and how much was skipped."""
-    result = _runner_tree(tmp, {'test_passing.py': _PASSING_SUITE})
-    assert result.returncode == 0, (result.returncode, result.stdout,
-                                    result.stderr)
-    assert 'OVERALL: PASS' in result.stdout, result.stdout
-    assert '1 passed' in result.stdout.rsplit('OVERALL', 1)[-1], result.stdout
-
-
-def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
-    """The subprocess bound is a backstop, not the first thing to fire.
-
-    Every wait inside the harness is bounded and names what it was waiting
-    for; the bound around the whole child says only that a command timed
-    out, and carries the entire harness source with it. A Windows leg
-    reported exactly that. So the outer bound has to outlast the worst path
-    through the inner ones: one wait for the handlers to start, one per
-    result, and one per gap when the caller asks to wait between them.
-    """
-    del tmp
-    inner = re.search(r'timeoutMs = (\d+)', _util._BACKGROUND_OVERLAP_HARNESS)
-    assert inner, 'the harness no longer declares a per-wait bound'
-    inner_ms = int(inner.group(1))
-    for order, wait_between in (
-            (['a', 'b'], True), (['a', 'b'], False), (['a'], False)):
-        waits = 1 + len(order) + (len(order) - 1 if wait_between else 0)
-        worst = waits * inner_ms / 1000
-        bound = _util.overlap_child_timeout(order, wait_between)
-        assert bound > worst, (
-            f'{len(order)} commands, wait_between={wait_between}: the child '
-            f'is killed at {bound}s while its own waits can run to {worst}s, '
-            'so the failure names the whole command instead of the step')
-
-
-def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
-    """A failure the console cannot spell must still be reported.
-
-    The detail carries whatever the test was comparing, and on a legacy code
-    page `print` raises rather than degrading. One failing assertion holding
-    an arrow used to abort the whole file with UnicodeEncodeError, so the
-    report was lost AND every test after it in that file never ran. A runner
-    that cannot say what went wrong is worse than the thing that went wrong.
-    """
-    del tmp
-    program = (
-        'import sys\n'
-        'sys.path.insert(0, "tests")\n'
-        'import _util\n'
-        'def test_arrow(d):\n'
-        '    assert False, "wanted \u2192 got \u2190 caf\u00e9"\n'
-        'raise SystemExit(_util.runner([test_arrow]))\n')
-    env = dict(os.environ)
-    env['PYTHONIOENCODING'] = 'cp1252'
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    result = subprocess.run(
-        [sys.executable, '-c', program], cwd=str(ROOT), env=env,
-        capture_output=True, text=True, encoding='cp1252', timeout=60)
-    assert 'UnicodeEncodeError' not in result.stderr, result.stderr
-    assert 'Traceback' not in result.stderr, result.stderr
-    assert 'FAIL  test_arrow' in result.stdout, result.stdout
-    assert '0/1 passed' in result.stdout, result.stdout
-    assert result.returncode == 1, (result.returncode, result.stdout)
-
-
-def test_gitignore_survives_an_undecodable_byte_in_the_repo_path(tmp):
-    """A repository path carrying a raw byte must not crash the generator.
-
-    argv arrives via surrogateescape, so a byte 0xff in the path becomes
-    U+DCFF in the value the diagnostics print; under
-    PYTHONIOENCODING=utf-8:strict both the success line and the failure
-    lines raised UnicodeEncodeError — the success one AFTER a correct
-    .gitignore had already been written. Run as a subprocess because the
-    strict encoding has to be in force before the interpreter starts.
-    """
-    _util.require_undecodable_names(tmp)
-    repo = os.fsencode(tmp) + b'/\xffrepo'
-    os.mkdir(repo)
-    subprocess.run(['git', '-C', repo, 'init', '-q'], check=True)
-    with open(repo + b'/tracked.txt', 'wb') as handle:
-        handle.write(b'published\n')
-    subprocess.run(['git', '-C', repo, 'add', '-f', 'tracked.txt'],
-                   check=True)
-
-    env = {**os.environ, 'PYTHONIOENCODING': 'utf-8:strict'}
-    script = str(ROOT / 'scripts' / 'gen_gitignore.py')
-    ok = subprocess.run([sys.executable, script, os.fsdecode(repo)],
-                        capture_output=True, text=True, env=env, check=False)
-    assert ok.returncode == 0, (ok.returncode, ok.stdout, ok.stderr)
-
-    not_a_repo = os.fsencode(tmp) + b'/\xffplain'
-    os.mkdir(not_a_repo)
-    fail = subprocess.run(
-        [sys.executable, script, os.fsdecode(not_a_repo)],
-        capture_output=True, text=True, env=env, check=False)
-    assert fail.returncode == 1, (fail.returncode, fail.stdout, fail.stderr)
-    assert 'UnicodeEncodeError' not in fail.stderr, fail.stderr
-    assert 'FAIL' in fail.stderr, fail.stderr
-
-
-def test_gitignore_log_safe_never_raises_and_stays_useful(tmp):
-    """The generator's copy of the log safeguard must not itself raise.
-
-    Same finding as the server copy: str(value) and the encode step ran
-    outside any fallback, so a conversion-limited huge int, an exception
-    object with a failing __str__, or a str subclass with a raising encode
-    or a non-string decode turned the diagnostic into the failure. The
-    copies cannot share an implementation (importing server.py requires its
-    env and runs module-level config), so they are kept behavior-identical —
-    this test holds the generator's copy to the same shared contract.
-    """
-    del tmp
-    generator = _util.load(
-        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_log_safe')
-
-    for value, expected in _util.log_safe_cases():
-        assert generator._log_safe(value) == expected, (
-            f'_log_safe({type(value).__name__}) disagrees')
-    # Ordinary values pass through in full, ASCII and non-ASCII alike.
-    assert generator._log_safe('plain ascii') == 'plain ascii'
-    assert generator._log_safe('héllo — 世界') == 'héllo — 世界'
 
 
 def test_extension_same_id_overlap_keeps_each_delivery_id(tmp):
@@ -3673,53 +3226,6 @@ const fs = require('fs');
 """
 
 
-def _blank_js_comments(source):
-    """Return `source` with comments blanked and string literals intact.
-
-    A single forward walk, because a `//` inside a string literal does not
-    start a comment. Regex literals are NOT modelled: one containing a quote
-    or a comment opener would desynchronise this walk. The dashboard sources
-    contain none, and the scanner below would report a violation rather than
-    stay silent if that changed, which is the direction an unmodelled shape
-    should fail in.
-    """
-    out = []
-    index, end = 0, len(source)
-    quote = None
-    while index < end:
-        char = source[index]
-        if quote:
-            out.append(char)
-            if char == '\\' and index + 1 < end:
-                out.append(source[index + 1])
-                index += 2
-                continue
-            if char == quote:
-                quote = None
-            index += 1
-            continue
-        if char in '\'"`':
-            quote = char
-            out.append(char)
-            index += 1
-            continue
-        if char == '/' and source[index + 1:index + 2] == '/':
-            while index < end and source[index] != '\n':
-                out.append(' ')
-                index += 1
-            continue
-        if char == '/' and source[index + 1:index + 2] == '*':
-            while index < end and source[index:index + 2] != '*/':
-                out.append('\n' if source[index] == '\n' else ' ')
-                index += 1
-            out.append('  ')
-            index += 2
-            continue
-        out.append(char)
-        index += 1
-    return ''.join(out)
-
-
 def _expression_after(source, start):
     """Return the text from `start` to the statement's terminating `;`."""
     index, end = start, len(source)
@@ -3899,7 +3405,7 @@ def test_no_dashboard_export_is_unreferenced(tmp):
     for path, text in sources.items():
         declarations = re.finditer(
             r'^export\s+(?:async\s+)?(?:function|const|let|class)\s+'
-            r'([A-Za-z_$][\w$]*)', _blank_js_comments(text), re.M)
+            r'([A-Za-z_$][\w$]*)', blank_js_comments(text), re.M)
         for match in declarations:
             name = match.group(1)
             referenced = any(
@@ -3926,7 +3432,7 @@ def test_dashboard_never_builds_markup_from_a_value(tmp):
     sources = sorted((ROOT / 'dashboard').rglob('*.js'))
     assert sources, 'no dashboard sources found'
     for path in sources:
-        blanked = _blank_js_comments(path.read_text(encoding='utf-8'))
+        blanked = blank_js_comments(path.read_text(encoding='utf-8'))
         for match in re.finditer(r'\.innerHTML\s*(\+?=)(?!=)', blanked):
             line = blanked.count('\n', 0, match.start()) + 1
             expression = _expression_after(blanked, match.end()).strip()
@@ -3968,152 +3474,6 @@ def test_dashboard_failed_consume_is_not_a_success(tmp):
         cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
-
-
-# GM.info is metadata about the shim, not a capability it grants, so the
-# install-time warning has nothing to say about it.
-_GM_NON_CAPABILITIES = frozenset({'GM.info'})
-
-
-def test_the_security_warning_names_every_capability_the_shim_grants(tmp):
-    """The warning has to keep up with the surface it is warning about.
-
-    It described the consequence as cross-origin requests, while the same
-    page-facing relay also opened tabs, started downloads, raised
-    notifications, wrote the clipboard and shared extension-wide storage
-    between origins. Those were all in the API table and none of them in the
-    warning, which is the half a reader makes an install decision from.
-    """
-    del tmp
-    readme = (_util.ROOT / 'README.md').read_text(encoding='utf-8')
-    _, _, after = readme.partition('## GM Bridge')
-    table, _, _ = after.partition('## Architecture')
-    granted = {f'GM.{name}' for name in re.findall(r'`GM\.([a-zA-Z]+)', table)}
-    granted -= _GM_NON_CAPABILITIES
-    assert len(granted) > 5, granted  # the table was found and parsed
-
-    _, _, after = readme.partition('## Security')
-    warning, _, _ = after.partition('**The bridge token and server URL')
-    missing = sorted(name for name in granted if name not in warning)
-    assert not missing, f'not named in the install-time warning: {missing}'
-
-
-def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
-    """One documented maximum, enforced at each place the value can enter.
-
-    The buffer lives in the service worker and grows to hold headers and
-    response bodies, so its size is a memory budget. `cmd.maxRequests || 1000`
-    kept whatever arrived: -1 evicted the only event on arrival, leaving an
-    empty capture, and 1e9 buffered everything.
-    """
-    del tmp
-    background = (_util.ROOT / 'extension' / 'background.js').read_text(
-        encoding='utf-8')
-    cli = (_util.ROOT / 'daedalus_cli' / 'cli.py').read_text(encoding='utf-8')
-    mcp = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
-
-    ceilings = {
-        'background.js': re.search(r'NET_CAPTURE_MAX = (\d+)', background),
-        'cli.py': re.search(r'NET_CAPTURE_MAX = (\d+)', cli),
-        'mcp_server.py': re.search(r'NET_CAPTURE_MAX = (\d+)', mcp),
-    }
-    missing = sorted(name for name, m in ceilings.items() if m is None)
-    assert not missing, f'no capture ceiling declared in: {missing}'
-    values = {name: int(m.group(1)) for name, m in ceilings.items()}
-    assert len(set(values.values())) == 1, values
-
-    # And the buffer is bounded by the validated value rather than by an
-    # inline default that accepts whatever it is handed. Comments are blanked
-    # first: the ones explaining this change quote the expression it replaced.
-    code = _blank_js_comments(background)
-    assert 'maxRequests || 1000' not in code, 'an unvalidated fallback remains'
-    assert '_netCaptureLimit(cmd.maxRequests)' in code, \
-        'the capture allocation does not validate its limit'
-
-
-def test_every_registry_call_checks_its_http_status(tmp):
-    """A refusal is not a success, and fetch does not say so on its own.
-
-    fetch resolves normally for 401, 413 and 500, so `await fetch(...)` with
-    only a network-error catch reads every refusal as a completed
-    registration. All three registry routes went out that way, so the
-    server's tab registry could sit stale with nothing reported anywhere.
-    """
-    del tmp
-    source = (_util.ROOT / 'extension' / 'background.js').read_text(
-        encoding='utf-8')
-
-    # No registry route may be fetched outside the one helper.
-    direct = []
-    for route in ('/register', '/unregister', '/sync-tabs'):
-        for match in re.finditer(
-                r'fetch\(\s*config\.serverUrl\s*\+\s*[\'"]'
-                + re.escape(route) + r'[\'"]', source):
-            direct.append(f'{route} at offset {match.start()}')
-    assert not direct, direct
-
-    for route in ('/register', '/unregister', '/sync-tabs'):
-        assert f"registryPost('{route}'" in source, route
-
-    # And the helper is what actually looks at the status.
-    _, marker, after = source.partition('async function registryPost(')
-    assert marker, 'registryPost is not defined the way this test finds it'
-    helper, _, _ = after.partition('\nasync function registerTab')
-    assert 'resp.ok' in helper, helper
-    assert 'console.error' in helper, helper
-
-
-def test_the_extension_never_logs_the_bridge_token(tmp):
-    """The token is a reusable browser-control credential, not a diagnostic.
-
-    First-run bootstrap printed the whole generated token, which put it into
-    extension DevTools output, screen recordings and any diagnostic bundle
-    collected from them — all places a credential outlives the moment it was
-    useful in. A truncated prefix is not what this pins: the version banner
-    logs eight characters to say which bridge is configured, and that stays.
-    """
-    del tmp
-    offenders = []
-    for name in ('background.js', 'content.js', 'page.js', 'options.js'):
-        path = _util.ROOT / 'extension' / name
-        if not path.is_file():
-            continue
-        for number, line in enumerate(
-                path.read_text(encoding='utf-8').splitlines(), 1):
-            if 'console.' not in line or '.token' not in line:
-                continue
-            # A short prefix is a legitimate diagnostic — the version banner
-            # prints one to identify which bridge this extension is talking
-            # to. The whole value is the credential itself.
-            if '.token.substring(' in line or '.token.slice(' in line:
-                continue
-            offenders.append(f'{name}:{number}: {line.strip()}')
-    assert not offenders, offenders
-
-
-def test_extension_ships_no_default_server(tmp):
-    src = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
-    # The constant exists and is empty: an unconfigured install must not dial
-    # anything.
-    m = re.search(r"const\s+DEFAULT_SERVER\s*=\s*'([^']*)'", src)
-    assert m, 'DEFAULT_SERVER constant not found in background.js'
-    assert m.group(1) == '', f'DEFAULT_SERVER ships a URL: {m.group(1)!r}'
-    # No hardcoded bridge URL anywhere else in the service worker either.
-    assert 'http://' not in src and 'https://' not in src, \
-        'background.js contains a hardcoded URL'
-
-
-def test_extension_startstream_stays_idle_without_url(tmp):
-    src = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
-    start = src.index('async function startStream()')
-    rest = src[start:]
-    nxt = rest.find('\nasync function ', 1)
-    body = rest[:nxt] if nxt != -1 else rest
-    guard = 'if (!config.serverUrl) return;'
-    assert guard in body, 'startStream() lost its no-server-URL guard'
-    # The guard must come before the first fetch the stream would make.
-    assert body.index(guard) < body.index('fetch('), \
-        'startStream() fetches before refusing an empty server URL'
 
 
 # ─── Typed-command routing guard: `tab` vs `tabId` ───
@@ -4428,72 +3788,6 @@ def _py_tab_routing_violations(path, rel):
     return list(dict.fromkeys(violations))
 
 
-def _js_mask(text):
-    """Blank string and comment contents, preserving positions and newlines,
-    so structure (brackets, commas, colons) can be read without false hits
-    from literal text."""
-    out = []
-    i, n = 0, len(text)
-    while i < n:
-        two = text[i:i + 2]
-        if two == '//':
-            j = text.find('\n', i)
-            j = n if j == -1 else j
-            out.append(' ' * (j - i))
-            i = j
-        elif two == '/*':
-            j = text.find('*/', i + 2)
-            j = n if j == -1 else j + 2
-            out.append(re.sub(r'[^\n]', ' ', text[i:j]))
-            i = j
-        elif text[i] in '\'"`':
-            j = i + 1
-            while j < n:
-                if text[j] == '\\':
-                    j += 2
-                elif text[j] == text[i]:
-                    j += 1
-                    break
-                else:
-                    j += 1
-            out.append(re.sub(r'[^\n]', ' ', text[i:j]))
-            i = j
-        else:
-            out.append(text[i])
-            i += 1
-    return ''.join(out)
-
-
-def _js_bracket_end(mask, open_pos):
-    """Offset just past the bracket matching the one at `open_pos`."""
-    depth = 0
-    for i in range(open_pos, len(mask)):
-        if mask[i] in '([{':
-            depth += 1
-        elif mask[i] in ')]}':
-            depth -= 1
-            if depth == 0:
-                return i + 1
-    return len(mask)
-
-
-def _js_split_top_level(mask, text, start, end):
-    """Split mask[start:end] on depth-0 commas. Emptiness is judged on the
-    ORIGINAL text: a blanked string is a real argument, not a gap."""
-    spans, depth, seg = [], 0, start
-    for i in range(start, end):
-        c = mask[i]
-        if c in '([{':
-            depth += 1
-        elif c in ')]}':
-            depth -= 1
-        elif c == ',' and depth == 0:
-            spans.append((seg, i))
-            seg = i + 1
-    spans.append((seg, end))
-    return [(s, e) for s, e in spans if text[s:e].strip()]
-
-
 def _js_top_level(mask, start, end, char):
     """Offset of the first `char` at bracket depth 0 in the span, or None."""
     depth = 0
@@ -4530,51 +3824,6 @@ def _js_statement_end(mask, pos):
     return len(mask)
 
 
-def _js_object_entries(mask, text, obj_start):
-    """Top-level entries of the object literal opening at `obj_start`:
-    [(key, value_text_or_None_for_shorthand, key_offset)]. A spread has a
-    None key and its expression as the value. Destructuring defaults
-    (`tab = 'extension'` in a parameter object) are not entries."""
-    obj_end = _js_bracket_end(mask, obj_start)
-    entries = []
-    for s, e in _js_split_top_level(mask, text, obj_start + 1, obj_end - 1):
-        seg_text = text[s:e]
-        stripped = seg_text.strip()
-        if stripped.startswith('...'):
-            spread_at = s + seg_text.index('...') + 3
-            while spread_at < e and text[spread_at].isspace():
-                spread_at += 1
-            entries.append((None, text[spread_at:e].strip(), spread_at))
-            continue
-        seg_mask = mask[s:e]
-        depth, colon, equals = 0, None, None
-        for i, c in enumerate(seg_mask):
-            if c in '([{':
-                depth += 1
-            elif c in ')]}':
-                depth -= 1
-            elif depth == 0 and c == ':' and colon is None:
-                colon = i
-            elif depth == 0 and c == '=' and equals is None:
-                equals = i
-        if equals is not None and (colon is None or equals < colon):
-            continue
-        if colon is None:
-            m = re.match(r'\s*([\w$]+)', seg_text)
-            if m:
-                entries.append((m.group(1), None, s + m.start(1)))
-            continue
-        key_text = seg_text[:colon].strip()
-        quoted = re.fullmatch(r'["\']([^"\']+)["\']', key_text)
-        computed = re.fullmatch(
-            r'\[\s*(["\'])([^"\']+)\1\s*\]', key_text)
-        key = quoted.group(1) if quoted else (
-            computed.group(2) if computed else key_text)
-        entries.append((key,
-                        seg_text[colon + 1:].strip(), s))
-    return entries
-
-
 # A name whose object exists but whose contents this scanner cannot prove.
 # Distinct from an unknown name (a parameter, an import): unknown is silence,
 # unprovable is a claim that something happened here and was not followed.
@@ -4601,19 +3850,19 @@ def _js_function_body(mask, name):
         if not match:
             continue
         paren = match.end() - 1
-        after = _js_bracket_end(mask, paren)
+        after = js_bracket_end(mask, paren)
         arrow = re.match(r'\s*=>\s*', mask[after:])
         if arrow:
             body = after + arrow.end()
             if mask[body:body + 1] == '{':
-                return ('block', body, _js_bracket_end(mask, body))
+                return ('block', body, js_bracket_end(mask, body))
             if mask[body:body + 1] == '(':
-                return ('expr', body + 1, _js_bracket_end(mask, body) - 1)
+                return ('expr', body + 1, js_bracket_end(mask, body) - 1)
             semi = mask.find(';', body)
             return ('expr', body, len(mask) if semi == -1 else semi)
         brace = mask.find('{', after)
         if brace != -1:
-            return ('block', brace, _js_bracket_end(mask, brace))
+            return ('block', brace, js_bracket_end(mask, brace))
     return None
 
 
@@ -4639,7 +3888,7 @@ def _js_tab_routing_violations(path, rel):
     is the one silence left.
     """
     text = path.read_text(encoding='utf-8')
-    mask = _js_mask(text)
+    mask = js_mask(text)
     violations = []
     senders = ('extCmd', 'extcmd', 'runCommand')
 
@@ -4652,7 +3901,7 @@ def _js_tab_routing_violations(path, rel):
     def object_state(obj_start, named, depth):
         """Resolve relevant state from a literal and tracked object spreads."""
         state = {}
-        for key, value, off in _js_object_entries(mask, text, obj_start):
+        for key, value, off in js_object_entries(mask, text, obj_start):
             if key is None:
                 spread = value.strip()
                 if spread.startswith('{'):
@@ -4775,9 +4024,9 @@ def _js_tab_routing_violations(path, rel):
                 named[name] = resolve(m.end(), stmt_end, named, depth)
             elif kind == 'assign':
                 open_paren = mask.index('(', m.start())
-                call_end = _js_bracket_end(mask, open_paren)
-                args = _js_split_top_level(mask, text, open_paren + 1,
-                                           call_end - 1)
+                call_end = js_bracket_end(mask, open_paren)
+                args = js_split_top_level(mask, text, open_paren + 1,
+                                          call_end - 1)
                 if not args:
                     continue
                 target = mask[args[0][0]:args[0][1]].strip()
@@ -4798,9 +4047,9 @@ def _js_tab_routing_violations(path, rel):
                 named[target] = state
             elif kind == 'escape':
                 open_paren = mask.index('(', m.start())
-                call_end = _js_bracket_end(mask, open_paren)
-                for span in _js_split_top_level(mask, text, open_paren + 1,
-                                                call_end - 1):
+                call_end = js_bracket_end(mask, open_paren)
+                for span in js_split_top_level(mask, text, open_paren + 1,
+                                               call_end - 1):
                     arg = mask[span[0]:span[1]].strip()
                     if re.fullmatch(r'[\w$]+', arg) and arg in named:
                         named[arg] = _JS_UNPROVABLE
@@ -4831,8 +4080,8 @@ def _js_tab_routing_violations(path, rel):
             continue
         call_name = re.match(r'[\w$]+', mask[m.start():]).group(0)
         open_paren = mask.index('(', m.start())
-        call_end = _js_bracket_end(mask, open_paren)
-        args = _js_split_top_level(mask, text, open_paren + 1, call_end - 1)
+        call_end = js_bracket_end(mask, open_paren)
+        args = js_split_top_level(mask, text, open_paren + 1, call_end - 1)
         tab_entries = []
         unprovable = []
         named = names_before(m.start(), 0)
@@ -6037,135 +5286,6 @@ def test_page_storage_allows_string_keys_and_filters_list_values(tmp):
 # touching this block.
 
 
-def _relay_sent_types(content):
-    """Runtime `type` value for each inline content-script send, or None."""
-    mask = _js_mask(content)
-    sent_types = []
-    for match in re.finditer(r'chrome\.runtime\.sendMessage\s*\(', mask):
-        open_paren = mask.index('(', match.start())
-        call_end = _js_bracket_end(mask, open_paren)
-        args = _js_split_top_level(
-            mask, content, open_paren + 1, call_end - 1)
-        if not args:
-            sent_types.append(None)
-            continue
-        start, end = args[0]
-        if not mask[start:end].strip().startswith('{'):
-            sent_types.append(None)
-            continue
-        obj_start = start + mask[start:end].index('{')
-        runtime_type = None
-        for key, value, _ in _js_object_entries(mask, content, obj_start):
-            # A spread after the last explicit type can replace it, so the
-            # runtime value is no longer statically readable.
-            if key is None:
-                runtime_type = None
-            elif key == 'type':
-                found = re.fullmatch(r"'([^'\\]+)'", value or '')
-                runtime_type = found.group(1) if found else None
-        sent_types.append(runtime_type)
-    return sent_types
-
-
-def _relay_handled_types(background):
-    """Unmasked single-quoted msg.type comparisons inside the listener."""
-    mask = _js_mask(background)
-    listener_start = mask.index('chrome.runtime.onMessage.addListener')
-    listener_end = _js_bracket_end(mask, mask.index('(', listener_start))
-    listener = background[listener_start:listener_end]
-    handled = set()
-    for match in re.finditer(r"msg\.type\s*===\s*'([^'\\]+)'", listener):
-        start = listener_start + match.start()
-        # Comments and strings are blank at the identifier's position. The
-        # raw source supplies the literal value only after this code check.
-        if mask[start:start + len('msg.type')] == 'msg.type':
-            handled.add(match.group(1))
-    return handled
-
-
-def _relay_coverage_violations(content, background):
-    """Return relay message types that the background listener cannot answer."""
-    # One result per call makes an unreadable type fail closed. Object entries
-    # are processed in source order, so a duplicate later `type` is the value
-    # JavaScript sends at runtime.
-    extracted = _relay_sent_types(content)
-    sent_types = [item for item in extracted if item is not None]
-    send_count = len(extracted)
-    if len(sent_types) != send_count:
-        return [
-            f'content.js has {send_count} chrome.runtime.sendMessage call(s) '
-            f'but only {len(sent_types)} readable single-quoted type(s) — '
-            'the relay shape changed and this guard is stale']
-    sent = set(sent_types)
-    if not sent:
-        return [
-            'found no chrome.runtime.sendMessage types in content.js — '
-            'the relay shape changed and this guard is stale']
-    # Only unmasked branches inside the onMessage listener count: comparisons
-    # in comments, strings, helpers, or code after the listener are excluded.
-    handled = _relay_handled_types(background)
-    missing = sorted(sent - handled)
-    if missing:
-        return [
-            'extension/content.js sends message type(s) '
-            + ', '.join(repr(item) for item in missing)
-            + ' but extension/background.js onMessage listener has no branch '
-            'for them — the send resolves undefined silently. Add the branch '
-            'in extension/background.js or remove the send in '
-            'extension/content.js.']
-    return []
-
-
-def test_every_content_script_message_type_has_a_background_branch(tmp):
-    """Every type content.js sends must have a branch in the background.
-
-    `content.js` relays page-context calls to the service worker with
-    `chrome.runtime.sendMessage({ type: ... })`. If the `onMessage` listener
-    in `background.js` has no branch for a type, the callback fires with
-    `undefined` and the page-side promise resolves to `undefined` with no
-    error logged anywhere. The `GM.cookie.list()` relay shipped exactly like
-    that — documented in the README, wired in content.js, and dead from the
-    day it was written because no `cookies` branch ever existed. (The
-    page-facing surface has since been removed; this guard keeps any future
-    relay from regressing the same way.) Duplicate object keys are evaluated
-    in source order, so the last `type` is checked. Unreadable send shapes
-    fail closed, and only unmasked comparisons inside the listener count as
-    handlers. What is NOT enforced: `_js_mask` does not parse regex literals,
-    so a regex literal containing a full `msg.type === 'value'` comparison
-    could still look like code to the handler scan.
-    """
-    del tmp
-    content = (ROOT / 'extension' / 'content.js').read_text(encoding='utf-8')
-    background = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
-    violations = _relay_coverage_violations(content, background)
-    assert not violations, '\n'.join(violations)
-
-    reversions = [
-        (
-            'duplicate type whose last value wins at runtime',
-            "chrome.runtime.sendMessage({ type: 'handled',"
-            " type: 'runtimeOnly' });",
-            "chrome.runtime.onMessage.addListener((msg) => {"
-            " if (msg.type === 'handled') {} });",
-            'runtimeOnly',
-        ),
-        (
-            'comparison that exists only in a comment',
-            "chrome.runtime.sendMessage({ type: 'commentOnly' });",
-            "chrome.runtime.onMessage.addListener((msg) => {"
-            " // if (msg.type === 'commentOnly') {}\n});",
-            'commentOnly',
-        ),
-    ]
-    for label, content_mutation, background_mutation, missing_type in reversions:
-        found = _relay_coverage_violations(
-            content_mutation, background_mutation)
-        assert any(missing_type in item for item in found), (
-            f'{label} was NOT caught — the guard asserts a contract it does '
-            f'not enforce:\ncontent: {content_mutation}\n'
-            f'background: {background_mutation}\nviolations: {found}')
-
-
 _CONTROL_TAGS = ('input', 'select', 'textarea')
 
 
@@ -6261,7 +5381,7 @@ def test_every_dashboard_control_carries_an_accessible_name(tmp):
     unnamed, misparsed = [], []
     seen = 0
     for path in sources:
-        blanked = _blank_js_comments(path.read_text(encoding='utf-8'))
+        blanked = blank_js_comments(path.read_text(encoding='utf-8'))
         rel = path.relative_to(ROOT).as_posix()
         for tag in _CONTROL_TAGS:
             for match in re.finditer(r"\bh\(\s*'" + tag + r"'", blanked):
@@ -6307,7 +5427,7 @@ def test_every_dashboard_image_carries_an_alternative(tmp):
     missing = []
     seen = 0
     for path in sources:
-        blanked = _blank_js_comments(path.read_text(encoding='utf-8'))
+        blanked = blank_js_comments(path.read_text(encoding='utf-8'))
         rel = path.relative_to(ROOT).as_posix()
         for match in re.finditer(r"\bh\(\s*'img'", blanked):
             seen += 1
