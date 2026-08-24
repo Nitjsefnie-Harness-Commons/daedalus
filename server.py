@@ -1304,8 +1304,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _drain_queue(self, qdir, chrome_tab, killed_event):
         """Deliver every ready command from a directory queue, FIFO. Returns the
-        count delivered. TTL-expired, unreadable, invalid-JSON, and non-object
-        entries are skipped after an unlink attempt. The socket write happens
+        count delivered. TTL-expired and non-object entries are removed;
+        unreadable or invalid-JSON entries remain for a later scan because a
+        non-atomic publisher may still be writing them. The socket write happens
         BEFORE unlink, so a failed write leaves the command queued for redelivery
         (a socket error propagates out to tear the stream down)."""
         global _last_delivery_ts
@@ -1336,10 +1337,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 data = json.loads(f.read_text(encoding='utf-8'))
             except (OSError, json.JSONDecodeError, ValueError):
-                # Malformed or vanished. Removal is attempted so it stops
-                # being rescanned; failing that, the TTL sweep takes it.
-                try: f.unlink()
-                except OSError: pass  # the TTL sweep takes it
+                # A visible final name may still have an older non-atomic
+                # writer. Leave it in place so that writer does not finish a
+                # command into an unlinked inode; the TTL sweep bounds retries
+                # for an entry that never becomes valid.
                 continue
             if not isinstance(data, dict):
                 # Same: readable JSON that is not a command object.
