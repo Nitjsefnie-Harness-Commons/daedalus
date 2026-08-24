@@ -314,9 +314,9 @@ def _notify_dashboard(token, payload):
         return
     try:
         queue_name, _ = _command_target_names(token, 'dashboard')
+        dash_dir = _under(CMD_DIR, queue_name)
     except ValueError:
         return
-    dash_dir = CMD_DIR / queue_name
     try:
         with _command_fs_lock:
             dash_dir.mkdir(parents=True, exist_ok=True)
@@ -547,7 +547,7 @@ def _enqueue_command(token, tab, cmd):
     if tab and _unsafe_component(tab):
         raise ValueError(f'unsafe tab component: {tab!r}')
     queue_name, _ = _command_target_names(token, tab)
-    qdir = CMD_DIR / queue_name
+    qdir = _under(CMD_DIR, queue_name)
     with _command_fs_lock:
         qdir.mkdir(parents=True, exist_ok=True)
         seq = _next_seq()
@@ -899,11 +899,18 @@ class Handler(BaseHTTPRequestHandler):
         if tab and _unsafe_component(tab):
             print(f'[STREAM] REJECTED unsafe tab: {tab!r}', flush=True)
             return self._json(400, {'error': 'invalid path component'})
+        # Resolved once, here, rather than per tick: the loop below runs
+        # for the life of the connection, and the namespace a stream reads
+        # from is decided when it is admitted, not re-decided every second.
         try:
             target_queue_name, target_legacy_name = _command_target_names(
                 token, tab)
             broadcast_queue_name, broadcast_legacy_name = (
                 _command_target_names(token))
+            target_queue = _under(CMD_DIR, target_queue_name)
+            target_legacy = _under(CMD_DIR, target_legacy_name)
+            broadcast_queue = _under(CMD_DIR, broadcast_queue_name)
+            broadcast_legacy = _under(CMD_DIR, broadcast_legacy_name)
         except ValueError:
             print('[STREAM] REJECTED unsafe derived target', flush=True)
             return self._json(400, {'error': 'invalid path component'})
@@ -953,13 +960,12 @@ class Handler(BaseHTTPRequestHandler):
                 delivered = 0
                 if tab == 'dashboard':
                     delivered += self._drain_queue(
-                        CMD_DIR / target_queue_name, None, killed_event)
+                        target_queue, None, killed_event)
                 elif tab == 'extension':
                     # Typed commands addressed to the extension itself
                     delivered += self._drain_queue(
-                        CMD_DIR / target_queue_name, None, killed_event)
-                    delivered += self._drain_legacy_file(
-                        CMD_DIR / target_legacy_name, None)
+                        target_queue, None, killed_event)
+                    delivered += self._drain_legacy_file(target_legacy, None)
                     # Per-tab eval queues for every other tab (tag chromeTab so bg can route)
                     prefix = f'{token}_'
                     for entry in sorted(CMD_DIR.iterdir()):
@@ -971,21 +977,21 @@ class Handler(BaseHTTPRequestHandler):
                         delivered += self._drain_queue(entry, sub, killed_event)
                     # Broadcast queue + legacy per-tab raw-file drops
                     delivered += self._drain_queue(
-                        CMD_DIR / broadcast_queue_name, None, killed_event)
+                        broadcast_queue, None, killed_event)
                     delivered += self._drain_legacy_ext(
                         token, target_legacy_name, killed_event)
                 else:  # specific-tab stream (rare — normal clients use tab=extension)
                     delivered += self._drain_queue(
-                        CMD_DIR / target_queue_name, None, killed_event)
+                        target_queue, None, killed_event)
                     if tab:
                         delivered += self._drain_queue(
-                            CMD_DIR / broadcast_queue_name, None, killed_event)
+                            broadcast_queue, None, killed_event)
                         delivered += self._drain_legacy_file(
-                            CMD_DIR / target_legacy_name, None)
+                            target_legacy, None)
                 # Broadcast legacy raw-file — skip for dashboard so it doesn't steal commands
                 if tab != 'dashboard':
                     delivered += self._drain_legacy_file(
-                        CMD_DIR / broadcast_legacy_name, None)
+                        broadcast_legacy, None)
 
                 now = time.time()
                 if now - last_ka >= STREAM_KEEPALIVE:
@@ -1367,8 +1373,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {'ok': True, 'removed': removed is not None})
 
         elif self.path == '/poll':
-            _, legacy_name = _command_target_names(token)
-            cmd_file = CMD_DIR / legacy_name
+            # Both of these raise ValueError on a name that cannot be a safe
+            # component or a path that leaves the queue root, and this route
+            # had no guard for the first of them either.
+            try:
+                _, legacy_name = _command_target_names(token)
+                cmd_file = _under(CMD_DIR, legacy_name)
+            except ValueError:
+                return self._json(400, {'error': 'invalid path component'})
             data = {}
             with _command_fs_lock:
                 if cmd_file.exists():
