@@ -19,7 +19,12 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
-from daedalus_cli.cli import token as _configured_token
+from daedalus_cli.output import configure_stdio
+from daedalus_cli.transport import token as _configured_token
+
+# Same reason as the bridge: this process prints crash lines carrying values
+# it did not choose. See server.py.
+configure_stdio()
 
 # The standalone MCP entry point derives its bridge URL from DAEDALUS_PORT.
 # The in-process server passes the bridge's actual bound URL to start_in_thread,

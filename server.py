@@ -7,7 +7,16 @@ from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
-from daedalus_cli.cli import token as _configured_token
+from daedalus_cli.output import configure_stdio
+from daedalus_cli.transport import token as _configured_token
+
+# The bridge logs ids and page-supplied text it did not choose, to a console
+# whose encoding it did not choose either: under a C locale a result id
+# carrying an accent killed the handler thread mid-request and the client saw
+# the connection close. This used to happen by accident — importing the CLI
+# ran it as an import side effect — so it is called here, where a reader can
+# see the bridge depends on it.
+configure_stdio()
 
 
 def _log_safe(value):

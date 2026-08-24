@@ -56,17 +56,27 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
     del tmp
     background = (_util.ROOT / 'extension' / 'background.js').read_text(
         encoding='utf-8')
-    cli = (_util.ROOT / 'daedalus_cli' / 'cli.py').read_text(encoding='utf-8')
+    # The ceiling may live in any module of the CLI package, so the package is
+    # searched rather than one file named by hand. Every declaration found is
+    # kept: concatenating the package and taking the first match would let a
+    # stale copy answer for a module that had diverged, which is the one thing
+    # this test exists to catch.
+    package = sorted((_util.ROOT / 'daedalus_cli').glob('*.py'))
+    declared = [(path.name, int(m.group(1)))
+                for path in package
+                for m in re.finditer(r'NET_CAPTURE_MAX = (\d+)',
+                                     path.read_text(encoding='utf-8'))]
+    assert len(declared) == 1, f'expected one CLI declaration, found {declared}'
     mcp = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
 
     ceilings = {
         'background.js': re.search(r'NET_CAPTURE_MAX = (\d+)', background),
-        'cli.py': re.search(r'NET_CAPTURE_MAX = (\d+)', cli),
         'mcp_server.py': re.search(r'NET_CAPTURE_MAX = (\d+)', mcp),
     }
     missing = sorted(name for name, m in ceilings.items() if m is None)
     assert not missing, f'no capture ceiling declared in: {missing}'
     values = {name: int(m.group(1)) for name, m in ceilings.items()}
+    values[f'daedalus_cli/{declared[0][0]}'] = declared[0][1]
     assert len(set(values.values())) == 1, values
 
     # And the buffer is bounded by the validated value rather than by an
