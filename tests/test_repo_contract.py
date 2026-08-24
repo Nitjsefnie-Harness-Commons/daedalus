@@ -4087,7 +4087,7 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
 
 
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
-    """The scanner input is the non-empty set of 76 tracked release paths."""
+    """The scanner input is the non-empty set of 77 tracked release paths."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
@@ -4098,7 +4098,7 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(_iter_tree_files())
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 76, f'expected 76 tracked paths, found {len(tracked)}'
+    assert len(tracked) == 77, f'expected 77 tracked paths, found {len(tracked)}'
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (
@@ -4397,6 +4397,74 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
     # clean lint — both would be the same silent pass in a different place.
     assert 'nullglob' in step, step
     assert 'exit 1' in step, step
+
+
+def test_the_audit_covers_every_python_dependency_surface(tmp):
+    """pip-audit is handed each requirements file and every declared extra.
+
+    The published wheel declares no dependencies, so `pip-audit .` over this
+    project collects zero packages — an audit that can never fire. What the
+    repository actually depends on is spread across the requirements files and
+    the extras table, and a surface added to either without being added here
+    would leave the gate green while going unchecked.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
+        encoding='utf-8')
+    listed = subprocess.run(
+        ['git', '-C', str(ROOT), 'ls-files', '-z', 'requirements*.txt'],
+        capture_output=True, check=True, timeout=30)
+    requirement_files = [
+        os.fsdecode(path) for path in listed.stdout.split(b'\0') if path]
+    assert requirement_files, 'no requirements file is tracked'
+    for name in requirement_files:
+        assert f'--requirement {name}' in workflow, name
+
+    # The extras are read out of pyproject.toml rather than listed, so a
+    # second extra cannot escape the audit by nobody remembering it here.
+    assert "['optional-dependencies'].values()" in workflow, workflow
+    generated = re.search(r'> (\S+-requirements\.txt)', workflow)
+    assert generated, 'the workflow generates no extras file'
+    assert f'--requirement {generated.group(1)}' in workflow, generated.group(1)
+    # An empty generated file narrows the gate in silence: pip-audit accepts
+    # it, the other surfaces still report clean, and the only third-party code
+    # that runs in production goes unaudited.
+    assert f'! -s {generated.group(1)}' in workflow, workflow
+
+
+def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
+    """Each dependency manifest in the tree has an ecosystem watching it.
+
+    Dependabot covered `github-actions` alone while the Python pins — the mcp
+    extra, the lint pins and the coverage pin — were frozen indefinitely. The
+    check is keyed off what is tracked rather than off a remembered list, so a
+    manifest of a new kind fails here instead of ageing unwatched.
+    """
+    del tmp
+    config = (ROOT / '.github' / 'dependabot.yml').read_text(encoding='utf-8')
+    ecosystems = {
+        'pyproject.toml': 'pip',
+        'requirements-dev.txt': 'pip',
+        'requirements-test.txt': 'pip',
+        'package.json': 'npm',
+        'Gemfile': 'bundler',
+        'go.mod': 'gomod',
+        'Cargo.toml': 'cargo',
+        'Dockerfile': 'docker',
+    }
+    listed = subprocess.run(
+        ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
+        check=True, timeout=30)
+    tracked = {os.fsdecode(path) for path in listed.stdout.split(b'\0') if path}
+    required = {'github-actions'} if any(
+        name.startswith('.github/workflows/') for name in tracked) else set()
+    for name in tracked:
+        ecosystem = ecosystems.get(os.path.basename(name))
+        if ecosystem:
+            required.add(ecosystem)
+    assert required, 'the repository tracks no dependency manifest at all'
+    for ecosystem in sorted(required):
+        assert f'package-ecosystem: {ecosystem}' in config, ecosystem
 
 
 def test_the_coverage_ratchet_records_what_it_was_calibrated_to(tmp):

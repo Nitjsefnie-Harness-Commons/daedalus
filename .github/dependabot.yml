@@ -18,3 +18,26 @@ updates:
     open-pull-requests-limit: 4
     commit-message:
       prefix: ci
+
+  # The Python surface: the `mcp` extra in pyproject.toml, which is the only
+  # third-party code that runs in production, and the lint/type/coverage pins
+  # in requirements-dev.txt and requirements-test.txt. All three live at the
+  # repository root, so one entry covers them.
+  #
+  # audit.yml answers "is what we froze still safe" on a daily cron; this
+  # answers "is there something newer", which is the half a scanner cannot do.
+  # Neither replaces the other, and both are needed because the pins exist to
+  # stop a tool release turning CI red on an unchanged commit — a pin nobody
+  # ever moves is how a dependency quietly ages out of support.
+  #
+  # Later in the Wednesday window than the actions entry, so the two do not
+  # open their pull requests in the same minute.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "05:41"
+    open-pull-requests-limit: 4
+    commit-message:
+      prefix: build
