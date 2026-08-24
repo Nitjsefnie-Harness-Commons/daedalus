@@ -23,6 +23,25 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      # FIRST, before a checkout, an install, a test run or a build. This job
+      # holds contents: write, and workflow_dispatch accepts any ref — so a
+      # manual run started on a branch reached the publishing step, where the
+      # action defaults tag_name to github.ref_name and would cut a release
+      # named after the branch. The version-versus-tag check below could not
+      # catch that: it only ran when the ref was already a tag.
+      - name: Refuse a run that is not on a v* tag
+        if: ${{ github.ref_type != 'tag' || !startsWith(github.ref_name, 'v') }}
+        env:
+          # Through the environment, not interpolated into the script: a ref
+          # name is caller-controlled text.
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "release publishes only from a v* tag; this run is on" >&2
+          echo "$REF_TYPE '$REF_NAME'. Tag the commit and let the tag push" >&2
+          echo "start the release, or dispatch this workflow on that tag." >&2
+          exit 1
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # Nothing here pushes, and a token left in .git/config
@@ -41,7 +60,9 @@ jobs:
       # A mistagged release publishes a wheel whose version contradicts the
       # tag, and the checksums then make the wrong pairing authoritative.
       - name: Refuse a tag that does not match the version being built
-        if: startsWith(github.ref, 'refs/tags/')
+        # No `if:` any more — the guard above has already established that
+        # this run is on a v* tag, so this check is unconditional rather
+        # than skipping itself on exactly the refs it could not vouch for.
         run: |
           tagged="${GITHUB_REF_NAME#v}"
           built=$(python -c "import daedalus_cli; print(daedalus_cli.__version__)")
