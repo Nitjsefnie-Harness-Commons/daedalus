@@ -34,6 +34,7 @@
 !/CLAUDE.md
 !/LICENSE
 !/README.md
+!/SECURITY.md
 !/mcp_server.py
 !/pyproject.toml
 !/pyrightconfig.json
