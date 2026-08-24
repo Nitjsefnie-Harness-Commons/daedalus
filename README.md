@@ -346,6 +346,15 @@ UTF-8 job names are accepted, so clients must URL-encode them in query strings.
 stored quotas continues to use its recorded values. `DAEDALUS_MAX_BODY_SIZE`
 also bounds each individual segment request.
 
+Each record also carries the job's running `stored_count` and `stored_bytes`,
+updated as segments are written and seeded by counting the directory at mint.
+Enforcing the quotas from those totals is what keeps admission a fixed cost:
+counting the directory on every segment made each new one cost more than the
+last, from 110 requests/s on an empty job down to 4 at the 10,000-segment cap.
+A record predating the totals is converted by one count on its next write.
+`DAEDALUS_DEBUG_TIMING=1` prints a per-phase `[SEGMENT-TIMING]` line for each
+segment write, and is inert otherwise.
+
 ## Security
 
 Read this before installing the extension.

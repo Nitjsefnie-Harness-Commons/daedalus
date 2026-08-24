@@ -454,6 +454,13 @@ MAX_JSON_DEPTH = _env_int('DAEDALUS_MAX_JSON_DEPTH', 100, 1, 500)
 MAX_UNAUTHENTICATED_BODY = _env_int(
     'DAEDALUS_MAX_UNAUTHENTICATED_BODY', 64 * 1024, 0)
 
+# Per-phase timing for the segment write path, read once at import and inert
+# when off. Committed with the fix rather than removed after measuring it: the
+# next regression on this path needs the same attribution, and rebuilding it by
+# hand in a REPL measures something other than what the bridge runs.
+DEBUG_TIMING = os.environ.get('DAEDALUS_DEBUG_TIMING') == '1'
+
+
 # Per-operation socket deadline for a request. A peer that declares a body and
 # then stops sending held its worker for as long as it kept the socket open,
 # so opening connections was enough to grow the thread count without ever
@@ -718,6 +725,99 @@ def _segment_quota(record):
     return max_index, max_count, max_bytes
 
 
+def _segment_usage(record):
+    """Return the record's (count, bytes) totals, or None when absent.
+
+    None means "not recorded yet", which is the lazy-migration signal: a job
+    minted before totals were kept has none, and one recount converts it. It
+    is deliberately not zero, because zero is also what an empty job records
+    and the two must not be confused.
+    """
+    count = record.get('stored_count')
+    stored = record.get('stored_bytes')
+    # Checked one at a time rather than in a loop over both, matching
+    # _segment_quota above: a loop hides the narrowing from a type checker,
+    # which then reads the returned pair as possibly None all the way into
+    # the arithmetic that spends it.
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        return None
+    if not isinstance(stored, int) or isinstance(stored, bool) or stored < 0:
+        return None
+    return count, stored
+
+
+def _recount_segments(seg_dir):
+    """Count and measure a job's stored segments by reading the directory.
+
+    The expensive path, kept for exactly two callers: converting a job whose
+    record predates the totals, and the sweep that removes temps a crash left
+    behind. It is off the per-segment path, which is the whole point.
+
+    Returns None when the directory cannot be enumerated, so every caller
+    answers that in its own terms rather than letting the exception escape.
+    """
+    count = 0
+    stored = 0
+    try:
+        entries = list(seg_dir.iterdir())
+    except FileNotFoundError:
+        return 0, 0
+    except OSError:
+        # Not a directory at all, or unreadable. A job name may contain a
+        # dot, so one job's directory is another's record file: enumerating
+        # it raises, and the answer to that is the caller's existing refusal,
+        # not an exception escaping into a dropped connection.
+        return None
+    for path in entries:
+        if path.name.startswith('.') and path.name.endswith('.ts.tmp'):
+            try:
+                path.unlink()
+            except OSError:
+                # A temp that will not go is not worth failing a write over;
+                # it is invisible to the .ts accounting either way.
+                pass
+            continue
+        if path.suffix != '.ts':
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if not stat.st_mode & 0o170000 == 0o100000:
+            continue
+        count += 1
+        stored += stat.st_size
+    return count, stored
+
+
+def _write_segment_usage(job, count, stored):
+    """Persist a job's totals, leaving every other field of its record alone.
+
+    Read-modify-write under the caller's lock. A record that has become
+    unreadable is left alone rather than replaced: the mint is the only
+    writer allowed to answer for corruption, and overwriting here would
+    destroy the owner and capability a resume depends on.
+    """
+    try:
+        record = _load_segment_record(job)
+    except _SegmentRecordError:
+        return
+    if record is None:
+        return
+    record['stored_count'] = count
+    record['stored_bytes'] = stored
+    path = _segment_record_path(job)
+    tmp = path.with_name(f'.{path.name}.tmp')
+    try:
+        tmp.write_text(json.dumps(record), encoding='utf-8')
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
 # ─── Health / observability ───
 
 
@@ -837,6 +937,26 @@ class _JSONObject(dict):
             return (super().__eq__(other)
                     and self.duplicate_carrier == other.duplicate_carrier)
         return super().__eq__(other)
+
+
+def _log_segment_timing(job, stored, marks):
+    """Print one per-phase line for a segment write, when DEBUG_TIMING is on.
+
+    The measured total is printed beside the sum of the named parts. A gap
+    between them is an unmeasured phase, and that arithmetic is the only thing
+    that makes instrumentation with holes visible.
+    """
+    # Each mark is named for the phase that ENDS at it, so an interval is
+    # reported under what it did. Naming intervals after the mark they start
+    # from reads plausibly and is off by one, which is how a first pass here
+    # blamed the byte sum for the directory scans' cost.
+    parts = [(name, (ts - marks[i][1]) * 1000)
+             for i, (name, ts) in enumerate(marks[1:])]
+    total_ms = (marks[-1][1] - marks[0][1]) * 1000
+    print(f'[SEGMENT-TIMING] {_log_safe(job)} stored={stored} '
+          + ' '.join(f'{name}={ms:.2f}' for name, ms in parts)
+          + f' parts={sum(ms for _n, ms in parts):.2f} total={total_ms:.2f}',
+          flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1876,24 +1996,47 @@ class Handler(BaseHTTPRequestHandler):
         segments arriving together cannot both spend the same remaining bytes.
         """
         _, max_count, max_bytes = quota
+        marks = [('enter', time.perf_counter())] if DEBUG_TIMING else None
         with _seg_lock:
+            if marks is not None:
+                marks.append(('acquire', time.perf_counter()))
             filename = f'{segment_index:06d}.ts'
             tmp = seg_dir / f'.{filename}.tmp'
             final = seg_dir / filename
             try:
                 seg_dir.mkdir(parents=True, exist_ok=True)
-                for path in seg_dir.iterdir():
-                    if path.name.startswith('.') and path.name.endswith('.ts.tmp'):
-                        path.unlink()
-                segment_files = [
-                    path for path in seg_dir.iterdir()
-                    if path.is_file() and path.suffix == '.ts'
-                ]
-                if not final.is_file() and len(segment_files) >= max_count:
+                # The totals are read here rather than carried from admission,
+                # and this is the difference between them and the quota: a
+                # quota is fixed at mint, while these change with every write,
+                # so a value read outside this lock could be spent twice.
+                try:
+                    record = _load_segment_record(job)
+                except _SegmentRecordError:
+                    record = None
+                usage = _segment_usage(record) if record is not None else None
+                if usage is None:
+                    # A job minted before totals were kept, converted once.
+                    # This is the only scan left on this path, and no segment
+                    # written afterwards pays for it.
+                    usage = _recount_segments(seg_dir)
+                    if usage is None:
+                        return self._json(
+                            500, {'error': 'segment storage failure'})
+                stored_count, stored_bytes = usage
+                if marks is not None:
+                    marks.append(('usage', time.perf_counter()))
+                # One stat, for the one file this request may be replacing.
+                try:
+                    replaced_bytes = final.stat().st_size
+                    replacing = True
+                except FileNotFoundError:
+                    replaced_bytes = 0
+                    replacing = False
+                if marks is not None:
+                    marks.append(('replaced', time.perf_counter()))
+                if not replacing and stored_count >= max_count:
                     return self._json(
                         413, {'error': 'segment count limit exceeded'})
-                stored_bytes = sum(path.stat().st_size for path in segment_files)
-                replaced_bytes = final.stat().st_size if final.is_file() else 0
                 if stored_bytes - replaced_bytes + len(raw) > max_bytes:
                     return self._json(413, {'error': 'job byte limit exceeded'})
                 try:
@@ -1905,6 +2048,15 @@ class Handler(BaseHTTPRequestHandler):
                     except FileNotFoundError:
                         # os.replace consumed it, which is the success path.
                         pass
+                if marks is not None:
+                    marks.append(('write', time.perf_counter()))
+                _write_segment_usage(
+                    job,
+                    stored_count + (0 if replacing else 1),
+                    stored_bytes - replaced_bytes + len(raw))
+                if marks is not None:
+                    marks.append(('record', time.perf_counter()))
+                    _log_segment_timing(job, stored_count, marks)
             except OSError:
                 return self._json(500, {'error': 'segment storage failure'})
         print(f'[SEGMENT] {job}/{filename} ({len(raw)} bytes)', flush=True)
@@ -2027,6 +2179,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(409, {'error': 'job record cannot resume'})
                 quota = _segment_quota(record)
                 if quota is not None:
+                    # A resume is the right moment to reconcile: this counts
+                    # the directory, refreshes the totals, and sweeps temps a
+                    # crashed write left behind. It is O(files), which is why
+                    # it lives here and not on the per-segment path -- a job
+                    # is minted once per resume, not once per segment.
+                    #
+                    # It also heals the one drift the write path can leave: a
+                    # crash between publishing a segment and recording it.
+                    reconciled = _recount_segments(job_dir)
+                    if reconciled is not None and (
+                            record.get('stored_count'),
+                            record.get('stored_bytes')) != reconciled:
+                        _write_segment_usage(job, *reconciled)
                     return self._json(200, {'ok': True, 'sig': sig})
 
                 quota_fields = (
@@ -2067,6 +2232,12 @@ class Handler(BaseHTTPRequestHandler):
                     'max_segment_index': MAX_SEGMENT_INDEX,
                     'max_segment_count': MAX_SEGMENTS_PER_JOB,
                     'max_bytes': MAX_SEGMENT_JOB_SIZE,
+                    # This branch has already counted and measured the job to
+                    # decide whether it fits current quotas, so seeding the
+                    # totals here costs nothing and spares the first segment
+                    # write a recount.
+                    'stored_count': len(segment_files),
+                    'stored_bytes': stored_bytes,
                 }
                 try:
                     tmp.write_text(json.dumps(record), encoding='utf-8')
@@ -2083,12 +2254,20 @@ class Handler(BaseHTTPRequestHandler):
                         500, {'error': 'segment storage failure'})
                 return self._json(200, {'ok': True, 'sig': sig})
             sig = secrets.token_urlsafe(32)
+            # Counted, not assumed empty: a record can be deleted while its
+            # directory survives, and seeding zero there would hand the job a
+            # budget it has already spent. This is also where a temp left by a
+            # crashed write is swept, which is off the per-segment path.
+            seeded = _recount_segments(job_dir)
+            seeded_count, seeded_bytes = seeded if seeded is not None else (0, 0)
             record = {
                 'token': token,
                 'sig': sig,
                 'max_segment_index': MAX_SEGMENT_INDEX,
                 'max_segment_count': MAX_SEGMENTS_PER_JOB,
                 'max_bytes': MAX_SEGMENT_JOB_SIZE,
+                'stored_count': seeded_count,
+                'stored_bytes': seeded_bytes,
             }
             made_dir = not job_dir.exists()
             try:

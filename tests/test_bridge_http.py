@@ -2345,6 +2345,8 @@ def test_segment_job_mint_idempotent_and_owned(tmp):
             'max_segment_index': 99_999,
             'max_segment_count': 10_000,
             'max_bytes': 4 * 1024 * 1024 * 1024,
+            'stored_count': 0,
+            'stored_bytes': 0,
         }, record
 
 
@@ -2372,12 +2374,17 @@ def test_legacy_segment_job_migrates_with_existing_usage(tmp):
 
         status, body = _mint_job(base, TOK, job)
         assert status == 200 and body['sig'] == sig, (status, body)
+        # Exact equality on purpose: the migration must add what it needs and
+        # nothing else. The totals are seeded from the count this branch
+        # already made, so the first segment write does not have to recount.
         assert json.loads(record_path.read_text(encoding='utf-8')) == {
             'token': TOK,
             'sig': sig,
             'max_segment_index': 10,
             'max_segment_count': 3,
             'max_bytes': 5,
+            'stored_count': 1,
+            'stored_bytes': 3,
         }
 
         status, body = _post_segment(base, job, sig, '1', payload=b'de')
@@ -2386,6 +2393,102 @@ def test_legacy_segment_job_migrates_with_existing_usage(tmp):
         assert status == 413, (status, body)
         assert sorted(path.read_bytes() for path in seg_dir.glob('*.ts')) == [
             b'abc', b'de']
+
+
+def test_a_segment_write_reads_its_totals_instead_of_recounting(tmp):
+    """The write path trusts the record, and never counts the directory.
+
+    Admission used to scan the job directory twice and stat every stored
+    segment on every valid POST, so a job approaching its cap made each new
+    segment cost more than the last -- 6.6 requests/s at 5,000 stored against
+    110 on an empty job. The totals now live in the record.
+
+    Pinned without a clock, because a timing assertion decides differently on
+    a loaded runner. The record here claims the job is full while its
+    directory is empty: a handler that recounts sees nothing stored and
+    admits the write, and one that reads the record refuses it. The two
+    answers are opposite, so the mechanism is what is being measured.
+    """
+    env = {'DAEDALUS_MAX_SEGMENTS_PER_JOB': '4'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        job = _seg_job()
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        record_path = Path(docroot) / 'segments' / f'{job}.json'
+        record = json.loads(record_path.read_text(encoding='utf-8'))
+        assert record['stored_count'] == 0, record
+        record['stored_count'] = 4
+        record_path.write_text(json.dumps(record), encoding='utf-8')
+
+        seg_dir = Path(docroot) / 'segments' / job
+        assert not list(seg_dir.glob('*.ts')), sorted(seg_dir.iterdir())
+        status, body = _post_segment(base, job, sig, '0')
+        assert status == 413, (status, body)
+        assert json.loads(body) == {
+            'error': 'segment count limit exceeded'}, body
+        # And nothing was stored, so the refusal is the whole answer.
+        assert not list(seg_dir.glob('*.ts')), sorted(seg_dir.iterdir())
+
+
+def test_segment_totals_follow_writes_and_overwrites(tmp):
+    """Stored count and bytes stay exact, including when a segment is replaced.
+
+    The totals are only worth trusting if they track reality, so this walks
+    the three transitions that change them: a new segment, a second new one,
+    and an overwrite of the first -- which must move bytes without moving the
+    count, the case a naive increment gets wrong.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        job = _seg_job()
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        record_path = Path(docroot) / 'segments' / f'{job}.json'
+
+        def totals():
+            record = json.loads(record_path.read_text(encoding='utf-8'))
+            return record['stored_count'], record['stored_bytes']
+
+        assert totals() == (0, 0), totals()
+        assert _post_segment(base, job, sig, '0', payload=b'abc')[0] == 200
+        assert totals() == (1, 3), totals()
+        assert _post_segment(base, job, sig, '1', payload=b'de')[0] == 200
+        assert totals() == (2, 5), totals()
+        # Replacing segment 0 with a longer body: bytes move, count does not.
+        assert _post_segment(base, job, sig, '0', payload=b'wxyz')[0] == 200
+        assert totals() == (2, 6), totals()
+
+        # The record agrees with what is actually on disk.
+        seg_dir = Path(docroot) / 'segments' / job
+        stored = sorted(seg_dir.glob('*.ts'))
+        assert len(stored) == 2, stored
+        assert sum(path.stat().st_size for path in stored) == 6, stored
+
+
+def test_a_mint_seeds_totals_from_a_directory_it_did_not_create(tmp):
+    """A record can be gone while its segments are not, and zero would lie.
+
+    Seeding a fresh mint with zero would hand such a job a budget it has
+    already spent. The mint counts instead, which is also where a temp left
+    behind by a crashed write is swept -- off the per-segment path.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        job = _seg_job()
+        seg_dir = Path(docroot) / 'segments' / job
+        seg_dir.mkdir(parents=True)
+        (seg_dir / '000000.ts').write_bytes(b'abcd')
+        (seg_dir / '000001.ts').write_bytes(b'ef')
+        (seg_dir / '.000009.ts.tmp').write_bytes(b'crashed')
+
+        status, body = _mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        record = json.loads(
+            (Path(docroot) / 'segments' / f'{job}.json').read_text(
+                encoding='utf-8'))
+        assert (record['stored_count'], record['stored_bytes']) == (2, 6), record
+        # The crashed write's temp is gone, and it never counted toward bytes.
+        assert not list(seg_dir.glob('.*.tmp')), sorted(seg_dir.iterdir())
 
 
 def test_segment_index_is_bound_by_minted_job_quota(tmp):
@@ -2550,11 +2653,18 @@ def test_segment_write_failure_removes_temp_and_answers(tmp):
         assert statuses == [500, 500, 500] and not residue, (statuses, residue)
 
 
-def test_segment_admission_cleans_stale_temp_artifacts(tmp):
-    """A stale temp file is removed before another segment is admitted."""
+def test_a_stale_temp_never_enters_the_accounting_and_is_swept_on_resume(tmp):
+    """A crashed write's temp costs the job nothing, and the mint clears it.
+
+    Sweeping it cost a full directory scan on every admitted segment, which is
+    most of what made a large job slow. The guarantee that mattered was never
+    the sweep's timing: it is that a temp outside the finalized .ts set is not
+    charged against the job's byte budget. That still holds, and the
+    documented resume -- a re-mint by the owner -- is where the file goes.
+    """
     env = {
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
-        'DAEDALUS_MAX_SEGMENTS_PER_JOB': '1',
+        'DAEDALUS_MAX_SEGMENTS_PER_JOB': '2',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '3',
     }
     with _util.bridge(tmp, env=env) as (base, docroot):
@@ -2565,11 +2675,21 @@ def test_segment_admission_cleans_stale_temp_artifacts(tmp):
         stale = seg_dir / '.000001.ts.tmp'
         stale.write_bytes(b'stale bytes outside finalized accounting')
 
+        # 39 stale bytes against a 3-byte job budget: admitted anyway, which
+        # is the accounting guarantee. The write path no longer scans, so the
+        # temp is still there afterwards.
         status, body = _post_segment(base, job, sig, '0', payload=b'abc')
         assert status == 200, (status, body)
+        assert (seg_dir / '000000.ts').read_bytes() == b'abc'
+        record_path = Path(docroot) / 'segments' / (job + '.json')
+        record = json.loads(record_path.read_text(encoding='utf-8'))
+        assert (record['stored_count'], record['stored_bytes']) == (1, 3), record
+
+        # The owner's re-mint is the resume path, and it sweeps.
+        status, again = _mint_job(base, TOK, job)
+        assert status == 200 and again['sig'] == sig, (status, again)
         assert not stale.exists()
         assert list(seg_dir.glob('*.tmp')) == []
-        assert (seg_dir / '000000.ts').read_bytes() == b'abc'
 
 
 def test_segment_post_and_status_require_capability(tmp):
