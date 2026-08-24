@@ -50,6 +50,9 @@ async function loadConfig() {
     console.warn('[Daedalus] No server URL configured — open the extension '
       + 'options and set the bridge URL. Nothing will connect until then.');
   }
+  // Before any stream can deliver a command, so a restarted worker knows what
+  // the one before it already spent.
+  await _loadSeenDids();
   // Auto-generate token on first run
   if (!config.token) {
     config.token = crypto.randomUUID();
@@ -1408,14 +1411,41 @@ function dispatchCommand(receivedCommand) {
 // succeeded but whose unlink failed; skipping the repeat prevents double-exec of
 // non-idempotent typed commands (open-tab, etc.). Legacy frames without _did
 // have no stable delivery identity and are not deduplicated here.
+// The ledger is PERSISTED, because an MV3 worker is stopped whenever it goes
+// idle and the redelivery this guards against is precisely a command that
+// outlived one worker: kept in memory alone, at-most-once meant at most once
+// per worker boot, and a restart in between ran the command a second time.
 const _seenDids = new Set();
 const _seenDidOrder = [];
 const _SEEN_DID_MAX = 1000;
+const _SEEN_DID_KEY = 'daedalus-seen-dids';
+
+async function _loadSeenDids() {
+  try {
+    const stored = await chrome.storage.local.get([_SEEN_DID_KEY]);
+    const saved = stored[_SEEN_DID_KEY];
+    if (!Array.isArray(saved)) return;
+    for (const did of saved) {
+      if (typeof did === 'string' && !_seenDids.has(did)) {
+        _seenDids.add(did);
+        _seenDidOrder.push(did);
+      }
+    }
+  } catch (e) {
+    // A worker that cannot read the ledger still dedups what it sees itself.
+    console.warn('[Daedalus] Could not read the delivery ledger:', e.message);
+  }
+}
+
 function _isDuplicateDelivery(did) {
   if (_seenDids.has(did)) return true;
   _seenDids.add(did);
   _seenDidOrder.push(did);
   if (_seenDidOrder.length > _SEEN_DID_MAX) _seenDids.delete(_seenDidOrder.shift());
+  // Written back without awaiting: the in-memory check above is what makes
+  // this delivery unique, and the write is what makes the NEXT worker agree.
+  chrome.storage.local.set({ [_SEEN_DID_KEY]: _seenDidOrder.slice() })
+    .catch(() => {});
   return false;
 }
 

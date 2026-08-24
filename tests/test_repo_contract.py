@@ -2389,6 +2389,7 @@ const timers = [];
 const requests = [];
 const resultPayloads = [];
 const rules = [];
+const createdTabs = [];
 const cookieJar = [];
 const removeCalls = [];
 const storageStore = {
@@ -2472,6 +2473,10 @@ const chrome = {
     onUpdated: eventTarget(),
     onCreated: eventTarget(),
     onRemoved: eventTarget(),
+    create: async (details) => {
+      createdTabs.push(details);
+      return { id: 100 + createdTabs.length, windowId: 1, url: details.url };
+    },
     query: async (query) => {
       if (scenario === 'route' && Object.keys(query).length === 0) {
         return new Promise((resolve) => {
@@ -2845,6 +2850,36 @@ async function runUnblockZero() {
   };
 }
 
+function settle() {
+  // parseSSEChunk dispatches without awaiting, so let the real event loop
+  // drain before looking at what the handler did.
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function runDedupAcrossRestart() {
+  const frame = 'event: command\ndata: ' + JSON.stringify({
+    id: 'dedup-open', type: 'open-tab', url: 'about:blank',
+    _did: 'did-dedup-1',
+  }) + '\n\n';
+  const deliver = 'parseSSEChunk(' + JSON.stringify(frame) + ')';
+
+  vm.runInContext(deliver, context);
+  for (let turn = 0; turn < 6; turn++) await settle();
+
+  // A fresh worker instance over the SAME extension storage, which is what an
+  // MV3 restart is.
+  const restarted = makeContext();
+  vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), restarted);
+  await vm.runInContext('loadConfig()', restarted);
+  vm.runInContext(deliver, restarted);
+  for (let turn = 0; turn < 6; turn++) await settle();
+
+  return {
+    created: createdTabs.length,
+    posted: resultPayloads.map((item) => item._did || null),
+  };
+}
+
 async function runClearPartitioned() {
   cookieJar.push(
     { name: 'ordinary', domain: 'example.test', path: '/', secure: false },
@@ -2880,6 +2915,7 @@ async function run() {
   if (scenario === 'block-rule-restart') return runBlockRuleRestart();
   if (scenario === 'unblock-zero') return runUnblockZero();
   if (scenario === 'clear-partitioned') return runClearPartitioned();
+  if (scenario === 'dedup-restart') return runDedupAcrossRestart();
   throw new Error('unknown scenario: ' + scenario);
 }
 
@@ -3039,6 +3075,20 @@ def test_concurrent_hotfix_stores_both_survive(tmp):
         ],
         'storedIds': ['fix-a', 'fix-b'],
     }, actual
+
+
+def test_a_delivery_id_is_spent_once_across_worker_restarts(tmp):
+    """At-most-once has to survive the worker, or it is at-most-once per boot.
+
+    The ledger of spent delivery ids was module state, so an MV3 restart
+    emptied it. The bridge redelivers a command whose socket write succeeded
+    but whose unlink did not, which is exactly the case dedup exists for — and
+    a worker that restarted in between executed it a second time.
+    """
+    del tmp
+    actual = _run_extension_result_boundary('dedup-restart')
+    assert actual['created'] == 1, actual
+    assert actual['posted'].count('did-dedup-1') == 1, actual
 
 
 def test_clearing_cookies_removes_the_partitioned_ones_too(tmp):
