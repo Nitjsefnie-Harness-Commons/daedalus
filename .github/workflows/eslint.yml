@@ -1,0 +1,82 @@
+name: eslint
+
+# The JavaScript half of the tree had no static analysis at all: lint.yml runs
+# pycodestyle and pylint over *.py and types.yml runs pyright, while the
+# extension service worker, the page relay and the dashboard modules were
+# checked only where a bespoke test happened to model them.
+#
+# The value here is no-undef and no-unused-vars — a typo'd identifier in the
+# service worker should be found by CI rather than by a user whose browser
+# silently stopped relaying. Stylistic rules stay off, consistent with the
+# Python gate, which turns its formatting checks off for the same reason.
+#
+# There is deliberately NO package.json: the version is pinned right here and
+# installed with --no-save, so the repository does not read as having adopted
+# a build step it does not have.
+#
+# examples/ is NOT linted, and that is a real gap rather than an oversight.
+# Those files are snippets the bridge wraps in an async function before
+# running, so they carry top-level `return` AND top-level `await` together. No
+# espree sourceType describes that shape: `script` rejects the await, `module`
+# rejects the return. They are excluded in .eslintrc.json so a local run
+# agrees with this one, and the file list below excludes them too so the run
+# is silent rather than six ignore warnings deep.
+
+on:
+  push:
+    # Deny-list rather than an allow-list: a new top-level code directory
+    # would silently stop being linted under an allow-list.
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: this job only reads the tree. Without an explicit block it
+# inherits the repository default, which can be read/write for the whole token.
+permissions:
+  contents: read
+
+concurrency:
+  group: eslint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eslint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Nothing here pushes, and a token left in .git/config is reusable
+          # by every later step in the job.
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install eslint (pinned, no package.json, no build step)
+        # zizmor: ignore[adhoc-packages]
+        # The finding is "installs a package outside of a lockfile", and the
+        # absence of a lockfile is the deliberate design documented above: a
+        # package.json here would read as this repository having adopted a
+        # build step, which it has not. The package IS pinned to an exact
+        # version, so the drift the audit targets does not apply.
+        run: npm install --no-save --no-package-lock --no-audit --no-fund eslint@8.57.1
+
+      - name: eslint
+        # git ls-files, so the list is the tracked tree rather than a glob
+        # someone has to remember to widen. The pathspec excludes examples/
+        # for the reason at the top of this file, and the emptiness check
+        # keeps a list that matched nothing from reading as a clean lint.
+        run: |
+          mapfile -t sources < <(git ls-files '*.js' ':!:examples/*')
+          if [ "${#sources[@]}" -eq 0 ]; then
+            echo "no JavaScript matched; refusing to report a clean lint" >&2
+            exit 1
+          fi
+          printf 'linting %d files\n' "${#sources[@]}"
+          npx --no-install eslint "${sources[@]}"

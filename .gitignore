@@ -28,6 +28,7 @@
 
 
 # ─── root ───
+!/.eslintrc.json
 !/.gitignore
 !/.pylintrc
 !/CLAUDE.md
@@ -62,6 +63,7 @@
 !/.github/workflows/
 !/.github/workflows/actionlint.yml
 !/.github/workflows/codeql.yml
+!/.github/workflows/eslint.yml
 !/.github/workflows/lint.yml
 !/.github/workflows/release.yml
 !/.github/workflows/speed.yml
