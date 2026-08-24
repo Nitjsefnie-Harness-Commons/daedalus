@@ -715,6 +715,58 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
             raise AssertionError('segment_status on a foreign job did not raise')
 
 
+def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):
+    """Credentials are decided before the body is parsed, and it is capped.
+
+    The middleware read and JSON-parsed the whole POST body looking for
+    repeated tool arguments, and only then looked at the Authorization header
+    — so an unauthenticated caller could make the process materialize an
+    arbitrarily large request before being told 401, and got body-level
+    diagnostics it had no business seeing.
+
+    The order is observable through that diagnostic: a body carrying a
+    duplicate `job` argument answered 400 without any credentials, and now
+    answers 401. Size is pinned separately, since an authenticated caller is
+    the only one that ever reaches the cap.
+    """
+    _need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+    env = {'DAEDALUS_TOKEN': TOK, 'TOKEN': '',
+           'DAEDALUS_MCP_MAX_BODY_SIZE': '4096'}
+    with _bridge_with_live_mcp(tmp, env) as (_base, port):
+        url = f'http://127.0.0.1:{port}/mcp'
+        duplicate_carrier = (
+            b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":'
+            b'{"name":"segment_job","arguments":{"job":"a","job":"b"}}}')
+
+        status, body = _util.request(
+            url, 'POST', body=duplicate_carrier,
+            headers={'Content-Type': 'application/json'})
+        assert status == 401, (status, body)
+
+        # The same body WITH credentials still gets the duplicate refusal.
+        status, body = _util.request(
+            url, 'POST', body=duplicate_carrier,
+            headers={'Content-Type': 'application/json',
+                     'Authorization': f'Bearer {TOK}',
+                     'Accept': 'application/json, text/event-stream'})
+        assert status == 400, (status, body)
+        assert b'duplicate job' in body, body
+
+        oversized = json.dumps({
+            'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+            'params': {'pad': 'x' * 20000},
+        }).encode()
+        status, body = _util.request(
+            url, 'POST', body=oversized,
+            headers={'Content-Type': 'application/json',
+                     'Authorization': f'Bearer {TOK}',
+                     'Accept': 'application/json, text/event-stream'})
+        assert status == 413, (status, body)
+        assert b'too large' in body, body
+
+
 def test_bearer_middleware_requires_configured_token_on_live_mcp_port(tmp):
     """Only the configured bridge token may pass the live MCP middleware."""
     _need_deps()

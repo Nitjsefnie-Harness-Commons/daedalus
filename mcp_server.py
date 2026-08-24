@@ -29,6 +29,11 @@ LOCAL_URL = os.environ.get(
     'DAEDALUS_LOCAL_URL',
     f'http://127.0.0.1:{os.environ.get("DAEDALUS_PORT", "8081")}')
 MCP_PORT = int(os.environ.get('DAEDALUS_MCP_PORT', '8086'))
+# Mirrors the bridge's own DAEDALUS_MAX_BODY_SIZE default. The front end had no
+# bound at all, so one unauthenticated request could make the process hold
+# whatever it chose to send.
+MAX_BODY_SIZE = int(os.environ.get(
+    'DAEDALUS_MCP_MAX_BODY_SIZE', 64 * 1024 * 1024))
 # The app auto-enables DNS rebinding protection for a localhost bind only when
 # it is given no settings of its own; these are passed explicitly, so the list
 # has to include the public hostname the reverse proxy fronts us with or
@@ -547,13 +552,10 @@ class _BearerAuth(BaseHTTPMiddleware):
             return JSONResponse(
                 {'error': 'duplicate Origin header'}, status_code=400)
 
-        if request.method == 'POST':
-            raw = await request.body()
-            duplicate = _ambiguous_json_carrier(raw)
-            if duplicate is not None:
-                return JSONResponse(
-                    {'error': f'duplicate {duplicate}'}, status_code=400)
-
+        # Credentials are decided BEFORE the body is touched. Parsing it first
+        # made an unauthenticated caller able to have an arbitrarily large
+        # request materialized on its way to a 401, and handed it body-level
+        # diagnostics about a request it was never allowed to make.
         authorizations = request.headers.getlist('authorization')
         auth = authorizations[0] if authorizations else ''
         if not auth.lower().startswith('bearer '):
@@ -571,6 +573,33 @@ class _BearerAuth(BaseHTTPMiddleware):
                     authorized.encode('utf-8', 'surrogatepass'))):
             return JSONResponse({'error': 'unauthorized'}, status_code=401)
         _token.set(tok)
+
+        if request.method == 'POST':
+            declared = request.headers.get('content-length')
+            if declared is not None:
+                try:
+                    length = int(declared)
+                except ValueError:
+                    return JSONResponse(
+                        {'error': 'invalid Content-Length'}, status_code=400)
+                if length < 0:
+                    return JSONResponse(
+                        {'error': 'invalid Content-Length'}, status_code=400)
+                if length > MAX_BODY_SIZE:
+                    return JSONResponse(
+                        {'error': 'request body too large'}, status_code=413)
+            raw = await request.body()
+            # A body sent without a declared length is bounded here rather than
+            # by the check above; it has still been read, which is why the
+            # declared case is refused before reading at all.
+            if len(raw) > MAX_BODY_SIZE:
+                return JSONResponse(
+                    {'error': 'request body too large'}, status_code=413)
+            duplicate = _ambiguous_json_carrier(raw)
+            if duplicate is not None:
+                return JSONResponse(
+                    {'error': f'duplicate {duplicate}'}, status_code=400)
+
         return await call_next(request)
 
 
