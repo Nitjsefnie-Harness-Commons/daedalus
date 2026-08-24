@@ -3889,6 +3889,30 @@ def test_release_scanners_ignore_caches_and_scan_published_files(tmp):
         ROOT = real_root
 
 
+def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
+    """The gate on the gates must not skip a workflow it triggered on.
+
+    The job fires on every file under .github/workflows and zizmor scans the
+    whole directory, but actionlint was handed `.github/workflows/*.yml`
+    alone. A workflow using GitHub's other accepted extension would therefore
+    start this gate and be skipped by it — the silent-stop failure mode the
+    workflow's own header says the other gates cannot catch.
+    """
+    del tmp
+    workflow = (_util.ROOT / '.github' / 'workflows' / 'actionlint.yml').read_text(
+        encoding='utf-8')
+    _, marker, after = workflow.partition('- name: actionlint\n')
+    assert marker, 'the actionlint step is not named the way this test finds it'
+    step, _, _ = after.partition('- name: zizmor')
+    for pattern in ('.github/workflows/*.yml', '.github/workflows/*.yaml'):
+        assert pattern in step, (pattern, step)
+    # An extension nothing matches must not reach actionlint as a literal
+    # pattern, and a directory holding no workflows at all must not read as a
+    # clean lint — both would be the same silent pass in a different place.
+    assert 'nullglob' in step, step
+    assert 'exit 1' in step, step
+
+
 def test_manifest_version_matches_package(tmp):
     # check_versions.py covers this, but the manifest translation rule
     # (0.16.0a -> 0.16.0.1) is subtle enough to pin directly.

@@ -86,7 +86,21 @@ jobs:
 
       - name: actionlint
         id: actionlint
-        run: ./actionlint -color .github/workflows/*.yml
+        # Both extensions GitHub accepts, not just .yml. This job triggers on
+        # every file under .github/workflows and zizmor scans the whole
+        # directory, so a workflow named .yaml used to start this gate and
+        # then be skipped by it. nullglob keeps an extension nothing matches
+        # from arriving as a literal pattern, and the emptiness check keeps a
+        # directory with no workflows from reading as a clean lint — which
+        # would move the silent pass rather than remove it.
+        run: |
+          shopt -s nullglob
+          workflows=(.github/workflows/*.yml .github/workflows/*.yaml)
+          if [ ${#workflows[@]} -eq 0 ]; then
+            echo "no workflow files matched; refusing to report a clean lint" >&2
+            exit 1
+          fi
+          ./actionlint -color "${workflows[@]}"
 
       - name: zizmor
         # Runs even when actionlint is red, so one push reports both gates —
