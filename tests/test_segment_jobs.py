@@ -10,6 +10,7 @@ fresh one, and what `GET /segment-status` reports back.
 import http.client
 import json
 import os
+import subprocess
 import sys
 import urllib.parse
 import uuid
@@ -329,6 +330,43 @@ def test_segment_status_enumeration_error_is_answered(tmp):
         health_status, health = _util.get_json(base + '/health')
         assert health_status == 200 and health['ok'] is True, (
             health_status, health)
+
+
+def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
+    """Absent, name collision and corrupt are three answers, on every platform.
+
+    The first version of this separation asked which exception the read
+    raised, and that answer is per-platform: reading a directory raises
+    IsADirectoryError on Linux and PermissionError on Windows, so the
+    dotted-name collision — whose record path is another job's directory —
+    stayed a clean 409 here and became a storage failure there. The question
+    is about the path, so it is asked of the path.
+    """
+    probe = (
+        'import os, server\n'
+        'os.makedirs(server.SEG_DIR / "collide.json", exist_ok=True)\n'
+        'print("collision:", server._load_segment_record("collide"))\n'
+        '(server.SEG_DIR / "broken.json").write_text("{", encoding="utf-8")\n'
+        'try:\n'
+        '    server._load_segment_record("broken")\n'
+        'except server._SegmentRecordError:\n'
+        '    print("corrupt: raised")\n'
+        'print("absent:", server._load_segment_record("nothing"))\n')
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
+        'DAEDALUS_PORT': '0',
+        'DAEDALUS_TOKEN': TOK,
+        'PYTHONDONTWRITEBYTECODE': '1',
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', probe], cwd=_util.ROOT, env=env,
+        capture_output=True, text=True, timeout=60)
+    output = (proc.stdout + proc.stderr).strip()
+    assert proc.returncode == 0, output
+    assert 'collision: None' in output, output
+    assert 'corrupt: raised' in output, output
+    assert 'absent: None' in output, output
 
 
 def main():

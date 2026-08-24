@@ -93,7 +93,7 @@ environment, or read the extension's from its options page.
 
 ```bash
 python3 run_tests.py                    # all six suites
-python3 tests/test_bridge_http.py       # one suite
+python3 tests/test_bridge_streams.py    # one suite
 ```
 
 The suites start the real bridge as a child process and talk to it over
