@@ -61,6 +61,7 @@
 !/.github/
 !/.github/workflows/
 !/.github/workflows/actionlint.yml
+!/.github/workflows/codeql.yml
 !/.github/workflows/lint.yml
 !/.github/workflows/release.yml
 !/.github/workflows/speed.yml
