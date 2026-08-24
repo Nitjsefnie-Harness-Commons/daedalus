@@ -77,14 +77,22 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python run_tests.py
 
-      - name: Build the wheel
-        run: python -m build --wheel
+      - name: Build the wheel and the source distribution
+        # Both formats. The wheel is what almost everyone installs, but it is
+        # a built artifact: the sdist is what lets someone rebuild it, audit
+        # what went into it, or install on a platform no wheel targets. A
+        # release that ships only the wheel makes the git tag the sole source
+        # of the source, which is exactly the thing checksums exist to avoid
+        # depending on.
+        run: python -m build
 
-      - name: Publish checksums beside the wheel
+      - name: Publish checksums beside the artifacts
         working-directory: dist
-        # `--` so a wheel whose name began with a dash would be read
-        # as a file rather than as options (shellcheck SC2035).
-        run: sha256sum -- *.whl > SHA256SUMS
+        # `--` so an artifact whose name began with a dash would be read
+        # as a file rather than as options (shellcheck SC2035). Both formats
+        # are checksummed: an artifact published without one is an artifact
+        # nobody can verify, which is the whole reason this file exists.
+        run: sha256sum -- *.whl *.tar.gz > SHA256SUMS
 
       - name: Attach the wheel and its checksums to the release
         # zizmor: ignore[superfluous-actions] — `gh release` can upload
@@ -101,5 +109,6 @@ jobs:
         with:
           files: |
             dist/*.whl
+            dist/*.tar.gz
             dist/SHA256SUMS
           generate_release_notes: true
