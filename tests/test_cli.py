@@ -711,7 +711,7 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
                 'token': TOK,
                 'tabId': 'extension',
                 'id': screenshot_id,
-                'result': {'path': f'{screenshot_id}/screenshot.png',
+                'result': {'path': f'{TOK}/{screenshot_id}/screenshot.png',
                            'size': len(b'encoded-screenshot')},
                 'error': None,
                 'ts': 1,
@@ -727,6 +727,59 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
             proc.returncode, repr(stdout), repr(stderr),
             repr(screenshot_id), ''.join(served))
         assert output.read_bytes() == b'encoded-screenshot'
+
+
+def test_a_screenshot_download_ignores_a_later_capture_under_its_id(tmp):
+    """The saved bytes are this capture's, not the next one's.
+
+    `_ss` is the default screenshot id, so overlapping captures share an
+    upload directory; a download that asked for the id got whichever file
+    was newest when it asked, which is the other invocation's whenever one
+    landed in between.
+    """
+    output = Path(tmp) / 'captured.png'
+    served = []
+    with _util.bridge(tmp, output=served) as (base, docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        proc = subprocess.Popen(
+            CLI + ['screenshot', '--output', str(output), '--timeout', '20'],
+            cwd=str(_util.ROOT), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
+        try:
+            qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
+                      what='the screenshot command')
+            command = json.loads(
+                sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            assert command['id'] == '_ss', command
+            for name, payload in (('mine.png', b'this-invocation'),
+                                  ('later.png', b'the-next-invocation')):
+                status, body = _util.post_json(base + '/upload', {
+                    'token': TOK, 'id': '_ss', 'filename': name,
+                    'data': base64.b64encode(payload).decode()})
+                assert status == 200, (status, body)
+            # The overlapping capture is strictly newer on disk, so a fetch
+            # by id would answer with it. Stamped rather than assumed: two
+            # writes can share a timestamp.
+            shot_dir = Path(docroot) / 'uploads' / TOK / '_ss'
+            os.utime(shot_dir / 'mine.png', (1_700_000_000, 1_700_000_000))
+            os.utime(shot_dir / 'later.png', (1_700_000_100, 1_700_000_100))
+            status, body = _util.post_json(base + '/result', {
+                'token': TOK, 'tabId': 'extension', 'id': '_ss',
+                'result': {'path': f'{TOK}/_ss/mine.png',
+                           'size': len(b'this-invocation')},
+                'error': None, 'ts': 1, '_did': command['_did'],
+            })
+            assert status == 200, (status, body)
+            stdout, stderr = proc.communicate(timeout=30)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+    assert proc.returncode == 0, (
+        proc.returncode, repr(stdout), repr(stderr), ''.join(served))
+    assert output.read_bytes() == b'this-invocation', output.read_bytes()
 
 
 def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
@@ -758,7 +811,7 @@ def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
                 'token': TOK,
                 'tabId': 'extension',
                 'id': screenshot_id,
-                'result': {'path': f'{screenshot_id}/screenshot.png',
+                'result': {'path': f'{TOK}/{screenshot_id}/screenshot.png',
                            'size': 18},
                 'error': None,
                 'ts': 1,
@@ -772,7 +825,7 @@ def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
                 proc.communicate()
     assert proc.returncode != 0, (proc.returncode, ''.join(served))
     assert 'HTTP 404' in stderr, (stderr, ''.join(served))
-    assert 'no uploads' in stderr, (stderr, ''.join(served))
+    assert 'no screenshot' in stderr, (stderr, ''.join(served))
 
 
 def test_segment_job_subcommand_prints_a_working_capability(tmp):

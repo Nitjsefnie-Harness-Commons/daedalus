@@ -1727,12 +1727,37 @@ class Handler(BaseHTTPRequestHandler):
         print(f'[UPLOAD] {rel} ({size} bytes)', flush=True)
         return self._json(200, {'ok': True, 'path': rel, 'size': size})
 
+    def _serve_named_upload(self, token, named):
+        """Serve exactly the file a result named, not whatever is newest.
+
+        `named` is the `path` POST /upload answered with and the result
+        carries, token component included. Screenshot ids are reused — `_ss`
+        is the default one — so an id identifies a directory rather than a
+        capture, and the newest file in it belongs to whichever invocation
+        finished last. Every component is checked the way each was checked
+        on the way in, and the leading one has to be the caller's own token:
+        one token's paths never name another's storage.
+        """
+        parts = named.split('/')
+        if any(_unsafe_component(part) for part in parts):
+            return self._json(400, {'error': 'invalid path component'})
+        if parts[0] != token:
+            return self._json(404, {'error': 'no screenshot'})
+        target = UPLOAD_DIR.joinpath(*parts)
+        fmt = target.suffix.lstrip('.').lower()
+        if fmt not in SCREENSHOT_TYPES or not target.is_file():
+            return self._json(404, {'error': 'no screenshot'})
+        return self._serve_file(target, fmt)
+
     def _handle_get_screenshot(self, params):
-        """GET /screenshot?token=X&id=Y — serve latest screenshot for that id. Or token only for latest across all ids."""
+        """GET /screenshot?token=X&id=Y — serve latest screenshot for that id. Or token only for latest across all ids. With `path=<upload path>`, serve that exact file instead."""
         token = self._query_bridge_token(params)
         upload_id = params.get('id', [''])[0]
+        named = params.get('path', [''])[0]
         if not self._require_bridge_token(token):
             return
+        if named:
+            return self._serve_named_upload(token, named)
         if upload_id and _unsafe_component(upload_id):
             return self._json(400, {'error': 'invalid path component'})
         token_dir = UPLOAD_DIR / token

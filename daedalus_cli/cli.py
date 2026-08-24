@@ -456,8 +456,12 @@ def do_screenshot(args):
     print(f'{MARK["in"]} uploaded: {path} ({size} bytes)')
     # Optionally save locally
     if args.output:
-        ss_url = _query_path(
-            '/screenshot', {'token': token(), 'id': cmd['id']})
+        # Fetch the exact file this capture produced. Screenshot ids are
+        # reused -- `_ss` is the default one -- so an id names a directory
+        # rather than a capture, and asking for it returns whichever
+        # invocation finished last.
+        selector = {'path': path} if path else {'id': cmd['id']}
+        ss_url = _query_path('/screenshot', {'token': token(), **selector})
         img = api_raw('GET', ss_url)
         with open(args.output, 'wb') as f:
             f.write(img)

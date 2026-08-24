@@ -257,7 +257,11 @@ async def screenshot(cmd_id: str = '_ss', chrome_tab: int | None = None,
     meta = {'path': result_blob.get('path', ''), 'size': result_blob.get('size', 0)}
     if not include_image:
         return meta
-    img_bytes = await _get_raw('/screenshot', id=cmd_id)
+    # By path, not by id: ids are reused, so an id names a directory rather
+    # than a capture and its newest file belongs to whichever invocation
+    # finished last.
+    selector = {'path': meta['path']} if meta['path'] else {'id': cmd_id}
+    img_bytes = await _get_raw('/screenshot', **selector)
     return [meta, Image(data=img_bytes, format=format)]
 
 
@@ -695,9 +699,12 @@ async def _delete(path: str, body: dict) -> dict:
     return r.json()
 
 
-async def _get_raw(path: str, **params) -> bytes:
+async def _get_raw(route: str, **params) -> bytes:
+    """Fetch one bridge route as raw bytes. The route is named `route` rather
+    than `path` so a caller can pass a `path` query parameter, which the
+    screenshot download does."""
     params['token'] = _tok()
-    r = await _http_client().get(path, params=params)
+    r = await _http_client().get(route, params=params)
     r.raise_for_status()
     return r.content
 

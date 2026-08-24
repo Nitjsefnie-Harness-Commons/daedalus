@@ -211,7 +211,7 @@ The background service worker accepts typed commands (issued via MCP tools or by
 
 | Command | Purpose |
 |---------|---------|
-| `screenshot` | Capture visible tab as PNG |
+| `screenshot` | Capture visible tab as PNG. `--output` downloads the exact file this capture produced, by the `path` its result names — screenshot ids are reused, so `GET /screenshot?id=...` answers with whichever capture finished last |
 | `cdp` | Issue raw Chrome DevTools Protocol calls |
 | `net-capture` / `net-capture-stop` / `net-capture-get` | Full request/response interception via CDP |
 | `cookies` / `set-cookie` / `remove-cookie` / `clear-cookies` | Cookie jar access |

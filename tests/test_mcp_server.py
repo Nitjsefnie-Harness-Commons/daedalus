@@ -8,6 +8,7 @@ they are present the tool handlers are exercised against a real bridge, with
 the bearer token set the way the middleware would set it.
 """
 import asyncio
+import base64
 import contextlib
 import http.client
 import io
@@ -713,6 +714,64 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
             assert 'owned by a different token' in str(e), e
         else:
             raise AssertionError('segment_status on a foreign job did not raise')
+
+
+def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
+    """include_image must inline this capture's file, not the newest one.
+
+    `_ss` is the default screenshot id, so two captures share an upload
+    directory; the tool correlated its own result and then fetched by id,
+    which answers with whichever file landed last.
+    """
+    _need_deps()
+    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+        mod = _load_mcp(base)
+        mod._token.set(TOK)
+        qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+        failure = []
+
+        def extension():
+            """Stand in for the extension: store this capture, let a later one
+            land on top of it, then answer the command."""
+            try:
+                deadline = time.time() + 20
+                while not (qdir.is_dir() and any(qdir.glob('*.json'))):
+                    assert time.time() < deadline, 'no screenshot command'
+                    time.sleep(0.05)
+                command = json.loads(
+                    sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+                for name, payload in (('mine.png', b'this-invocation'),
+                                      ('later.png', b'the-next-invocation')):
+                    status, body = _util.post_json(base + '/upload', {
+                        'token': TOK, 'id': '_ss', 'filename': name,
+                        'data': base64.b64encode(payload).decode()})
+                    assert status == 200, (status, body)
+                # Stamped rather than assumed: two writes can share a
+                # timestamp, and which file is newest is the whole point.
+                shot_dir = Path(docroot) / 'uploads' / TOK / '_ss'
+                os.utime(shot_dir / 'mine.png', (1_700_000_000, 1_700_000_000))
+                os.utime(shot_dir / 'later.png', (1_700_000_100, 1_700_000_100))
+                status, body = _util.post_json(base + '/result', {
+                    'token': TOK, 'tabId': 'extension', 'id': '_ss',
+                    'result': {'path': f'{TOK}/_ss/mine.png',
+                               'size': len(b'this-invocation')},
+                    'error': None, 'ts': 1, '_did': command['_did'],
+                })
+                assert status == 200, (status, body)
+            except AssertionError as exc:
+                failure.append(exc)
+
+        responder = threading.Thread(target=extension, daemon=True)
+        responder.start()
+        try:
+            answer = asyncio.run(mod.screenshot(include_image=True, timeout=25))
+        finally:
+            responder.join(timeout=30)
+        assert not failure, failure
+        meta, image = answer
+        assert meta == {'path': f'{TOK}/_ss/mine.png',
+                        'size': len(b'this-invocation')}, meta
+        assert image.data == b'this-invocation', image.data
 
 
 def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):

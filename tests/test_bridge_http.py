@@ -1161,6 +1161,63 @@ def test_upload_pagination_is_validated_before_the_directory_is_looked_at(tmp):
         assert status == 400, (status, body)
 
 
+def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
+    """Fetching by id returns the newest file; a capture wants its own.
+
+    Screenshot ids are reused — `_ss` is the default — so a second capture
+    under the same id lands beside the first. A client that correlated its
+    own result and then fetched by id downloaded whichever file was newest
+    at that moment, which is the next invocation's whenever one overlapped.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        for name, payload in (('capture-a.png', PNG + b'-A'),
+                              ('capture-b.png', PNG + b'-B')):
+            status, body = _util.post_json(base + '/upload', {
+                'token': TOK, 'id': '_ss', 'filename': name,
+                'data': base64.b64encode(payload).decode()})
+            assert status == 200, (status, body)
+            assert body['path'] == f'{TOK}/_ss/{name}', body
+        # Order the two by mtime explicitly: which one an id fetch picks is
+        # the whole point, and a same-millisecond tie would decide it by
+        # directory order instead.
+        shot_dir = docroot / 'uploads' / TOK / '_ss'
+        os.utime(shot_dir / 'capture-a.png', (1_700_000_000, 1_700_000_000))
+        os.utime(shot_dir / 'capture-b.png', (1_700_000_100, 1_700_000_100))
+
+        status, newest = _util.get(base + f'/screenshot?token={TOK}&id=_ss')
+        assert status == 200 and newest == PNG + b'-B', (status, newest[:32])
+        for name, payload in (('capture-a.png', PNG + b'-A'),
+                              ('capture-b.png', PNG + b'-B')):
+            named = urllib.parse.urlencode(
+                {'token': TOK, 'path': f'{TOK}/_ss/{name}'})
+            status, served = _util.get(f'{base}/screenshot?{named}')
+            assert status == 200 and served == payload, (
+                name, status, served[:32])
+
+
+def test_a_screenshot_path_cannot_leave_its_own_token(tmp):
+    """The named path is a component list, checked the way every other is."""
+    with _util.bridge(tmp) as (base, docroot):
+        status, body = _util.post_json(base + '/upload', {
+            'token': TOK, 'id': 'mine', 'filename': 'shot.png',
+            'data': base64.b64encode(PNG).decode()})
+        assert status == 200, (status, body)
+        (docroot / 'uploads' / 'othertok' / 'theirs').mkdir(parents=True)
+        (docroot / 'uploads' / 'othertok' / 'theirs' / 'shot.png').write_bytes(
+            PNG + b'-THEIRS')
+        (docroot / 'uploads' / TOK / 'mine' / 'notes.txt').write_bytes(b'text')
+
+        for path, expected in (
+                ('../othertok/theirs/shot.png', 400),
+                (f'{TOK}/../othertok/theirs/shot.png', 400),
+                ('othertok/theirs/shot.png', 404),
+                (f'{TOK}/mine/notes.txt', 404),
+                (f'{TOK}/mine/absent.png', 404)):
+            query = urllib.parse.urlencode({'token': TOK, 'path': path})
+            status, body = _util.get(f'{base}/screenshot?{query}')
+            assert status == expected, (path, status, body[:120])
+
+
 def test_every_accepted_screenshot_format_can_be_served_back(tmp):
     """A format the upload route accepts must be one /screenshot can return.
 
