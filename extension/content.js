@@ -1,8 +1,6 @@
 // Daedalus Extension — content script (message relay)
 // Bridges page context (page.js) ↔ background service worker
 
-const EVAL_TIMEOUT = 10000;
-
 // ─── Relay: page context → background ───
 
 // The bridge's own settings live in the same chrome.storage.local that the GM
