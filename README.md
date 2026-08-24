@@ -36,6 +36,23 @@ pip install ".[mcp]"     # ... and the MCP endpoint's dependencies
 Without the `mcp` extra the bridge still starts and serves everything else; it
 reports the failed MCP bootstrap at startup and `/mcp` is not served.
 
+### Verifying a published release
+
+Every release publishes the wheel, the source distribution and a `SHA256SUMS`
+file covering both. `SHA256SUMS` proves the files go together; it does not
+prove where they came from, since it is published by the same authority as the
+artifacts. Each artifact therefore also carries a GitHub build attestation — a
+signed statement naming the workflow, the commit and the runner that produced
+it:
+
+```bash
+gh attestation verify daedalus_cli-<version>-py3-none-any.whl \
+  --repo Nitjsefnie-Harness-Commons/daedalus
+```
+
+Releases are immutable and `v*` tags cannot be moved or deleted, so a version,
+once published, names one set of files permanently.
+
 ## How It Works
 
 1. **Token**: Generated once on install via `crypto.randomUUID()`, stored in `chrome.storage.local`

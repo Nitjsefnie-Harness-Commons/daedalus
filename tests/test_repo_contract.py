@@ -4638,6 +4638,39 @@ def _pinned_actions():
     return used
 
 
+def test_a_release_attests_every_artifact_it_publishes(tmp):
+    """SHA256SUMS says the files go together; provenance says where from.
+
+    The checksum file is published by the same authority as the artifacts, so
+    anything able to replace one could replace both. A build attestation is a
+    signed statement naming the workflow, the commit and the runner, checkable
+    against GitHub rather than against this repository's own word — and it is
+    worth nothing if it covers fewer files than the release ships.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'release.yml').read_text(
+        encoding='utf-8')
+    assert 'id-token: write' in workflow, workflow
+    assert 'attestations: write' in workflow, workflow
+
+    _, marker, after = workflow.partition(
+        'uses: actions/attest-build-provenance@')
+    assert marker, 'the release publishes no build provenance'
+    attested, _, rest = after.partition('- name:')
+    subjects = set(re.findall(r'dist/\S+', attested))
+    published = set(re.findall(r'dist/\S+', rest))
+    # SHA256SUMS describes the artifacts rather than being one, so it is the
+    # single published path that is deliberately not a subject.
+    assert published - subjects == {'dist/SHA256SUMS'}, (subjects, published)
+
+    # The refusal has to come before the suite run and the build, or a rerun
+    # spends twenty minutes to be told the release already exists.
+    order = [workflow.index('already carries artifacts'),
+             workflow.index('actions/checkout@'),
+             workflow.index('run: python run_tests.py')]
+    assert order == sorted(order), order
+
+
 def test_one_action_family_is_pinned_to_one_version(tmp):
     """Two `uses:` lines from the same action must name the same commit.
 

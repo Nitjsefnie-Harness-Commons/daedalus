@@ -4,6 +4,18 @@ name: release
 # decoration: an installer that fetches "the newest release" has no other way
 # to prove it got the artifact this workflow built, so SHA256SUMS ships beside
 # the wheel and the installer verifies against it before installing.
+#
+# SHA256SUMS proves the published files go together. It does NOT prove where
+# they came from — it is published by the same authority as the artifacts, so
+# anything that could replace one could replace both. Build provenance is the
+# other half: a signed statement naming this workflow, this commit and the
+# runner that produced each file, verifiable with `gh attestation verify
+# <file> --repo <repo>` against GitHub rather than against this repository's
+# own word.
+#
+# Immutable releases are enabled on the repository, so a published release's
+# assets cannot be replaced at all. The pre-flight below refuses the same
+# attempt earlier, before a full suite run and a build have been spent on it.
 
 on:
   push:
@@ -11,7 +23,14 @@ on:
   workflow_dispatch:
 
 permissions:
+  # contents: write publishes the release. id-token and attestations are what
+  # the provenance step needs — it mints a short-lived OIDC token to prove to
+  # GitHub's attestation service which workflow is speaking, and writes the
+  # resulting statement. Neither can be narrowed further, and this stays the
+  # only job in the repository holding any of the three.
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -41,6 +60,33 @@ jobs:
           echo "$REF_TYPE '$REF_NAME'. Tag the commit and let the tag push" >&2
           echo "start the release, or dispatch this workflow on that tag." >&2
           exit 1
+
+      - name: Refuse a tag whose release already carries artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        # Immutable releases refuse the replacement at the API, but they refuse
+        # it after the suite has run and the wheel has been built — and a run
+        # that fails there reads as a release that nearly worked. A tag whose
+        # release already carries assets has been published; publishing it
+        # again is a different artifact under the same name. Branch on the exit
+        # code, never the output: `gh api` prints its JSON error body to stdout
+        # on a 404 and exits nonzero.
+        run: |
+          if assets="$(gh api -H "Cache-Control: no-cache" \
+                         "repos/$REPO/releases/tags/$TAG" \
+                         --jq '.assets | length' 2>/dev/null)"; then
+            if [ "$assets" != 0 ]; then
+              echo "$TAG is already published with $assets assets. A release" >&2
+              echo "is cut once; to ship a change, bump the version and tag" >&2
+              echo "the new commit." >&2
+              exit 1
+            fi
+            echo "A release exists for $TAG but carries no assets; continuing."
+          else
+            echo "No release exists for $TAG yet."
+          fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -93,6 +139,17 @@ jobs:
         # are checksummed: an artifact published without one is an artifact
         # nobody can verify, which is the whole reason this file exists.
         run: sha256sum -- *.whl *.tar.gz > SHA256SUMS
+
+      - name: Attest what this run built
+        # Runs before the upload, so a release never carries an artifact whose
+        # provenance failed to record. The subjects are the artifacts
+        # themselves rather than SHA256SUMS: a consumer verifies the file they
+        # installed, not a file that describes it.
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
 
       - name: Attach the wheel and its checksums to the release
         # zizmor: ignore[superfluous-actions] — `gh release` can upload
