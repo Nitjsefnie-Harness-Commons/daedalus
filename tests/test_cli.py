@@ -503,7 +503,12 @@ def _run_same_id_client_overlap(tmp, completion_order):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         processes = {
             owner: subprocess.Popen(
-                CLI + ['cookies', '--domain', owner],
+                # The client's patience has to cover this fixture's whole
+                # setup -- a node spawn and the harness's own waits -- and the
+                # default ten seconds does not on a loaded Windows runner:
+                # both clients exited with `Timeout (10s)` before the first
+                # result was posted, leaving nobody to consume it.
+                CLI + ['cookies', '--domain', owner, '--timeout', '120'],
                 cwd=str(_util.ROOT), env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding='utf-8')

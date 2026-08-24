@@ -472,9 +472,10 @@ def do_cookies(args):
     if args.url:
         cmd['url'] = args.url
     sent = api('PUT', '/command', cmd)
-    res = wait_for_result('_cookies', 'extension', sent.get('did'), 10)
+    timeout = args.timeout or 10
+    res = wait_for_result('_cookies', 'extension', sent.get('did'), timeout)
     if res is None:
-        sys.exit('Timeout (10s)')
+        sys.exit(f'Timeout ({timeout}s)')
     if res.get('error'):
         sys.exit(f'Cookie error: {res["error"]}')
     cookies = res.get('result', [])
@@ -526,10 +527,11 @@ def do_clear_cookies(args):
     if args.domain: cmd['domain'] = args.domain
     if args.url: cmd['url'] = args.url
     sent = api('PUT', '/command', cmd)
+    timeout = args.timeout or 10
     res = wait_for_result(
-        '_clear_cookies', 'extension', sent.get('did'), 10)
+        '_clear_cookies', 'extension', sent.get('did'), timeout)
     if res is None:
-        sys.exit('Timeout (10s)')
+        sys.exit(f'Timeout ({timeout}s)')
     if res.get('error'):
         sys.exit(f'Error: {res["error"]}')
     result = res.get('result', {})
@@ -1028,6 +1030,8 @@ def main():
     s.add_argument('-d', '--domain', help='Filter by domain')
     s.add_argument('-u', '--url', help='Filter by URL')
     s.add_argument('--raw', action='store_true', help='Print full JSON (no truncation)')
+    s.add_argument('-t', '--timeout', type=int, default=0,
+                   help='Result timeout seconds (default 10)')
 
     # set-cookie (extension)
     s = sub.add_parser('set-cookie', help='Set a cookie via extension')
@@ -1050,6 +1054,8 @@ def main():
     s = sub.add_parser('clear-cookies', help='Clear all cookies for a domain')
     s.add_argument('-d', '--domain', help='Domain to clear')
     s.add_argument('-u', '--url', help='URL to clear')
+    s.add_argument('-t', '--timeout', type=int, default=0,
+                   help='Result timeout seconds (default 10)')
 
     # cdp (extension)
     s = sub.add_parser('cdp', help='Send raw CDP command via extension')
