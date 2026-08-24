@@ -592,13 +592,21 @@ def _report_safely():
             continue
 
 
-def runner(tests, tmp_prefix='daedalustests_'):
+def runner(tests, tmp_prefix='daedalustests_', requires=None):
     """Shared main(): run every callable, print PASS/FAIL, return exit code.
 
     Each test takes one argument: an isolated temp dir, handed over fully
     resolved — macOS resolves /var to /private/var, and a test comparing a path
     it was given against a path the code produced would otherwise see two
     spellings of one directory and call them different.
+
+    `requires` names an external dependency the WHOLE suite needs — a real
+    browser, say. A suite that verified nothing is normally an aggregate
+    failure, because a suite whose every test skipped is indistinguishable
+    from a broken one; a suite that says what it needs is the one case where
+    it is distinguishable, and the aggregate reports it as unrun rather than
+    as verified. Only pass it where every test genuinely depends on the same
+    absent thing.
     """
     _report_safely()
     failed, skipped = [], []
@@ -625,11 +633,11 @@ def runner(tests, tmp_prefix='daedalustests_'):
     if skipped:
         summary += f', {len(skipped)} skipped'
     print(summary)
-    _write_summary(len(tests), passed, len(skipped), len(failed))
+    _write_summary(len(tests), passed, len(skipped), len(failed), requires)
     return 1 if failed else 0
 
 
-def _write_summary(total, passed, skipped, failed):
+def _write_summary(total, passed, skipped, failed, requires=None):
     """Hand the counts to the aggregate runner, when one asked for them.
 
     The aggregate cannot see them otherwise: every suite streams straight to
@@ -644,7 +652,8 @@ def _write_summary(total, passed, skipped, failed):
     try:
         with open(path, 'w', encoding='utf-8') as handle:
             json.dump({'total': total, 'passed': passed,
-                       'skipped': skipped, 'failed': failed}, handle)
+                       'skipped': skipped, 'failed': failed,
+                       'requires': requires}, handle)
     except OSError:
         # Not swallowed so much as reported elsewhere: run_tests.py reads this
         # file to aggregate counts and treats a suite that produced none as a

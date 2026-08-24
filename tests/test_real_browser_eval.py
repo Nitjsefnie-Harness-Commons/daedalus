@@ -300,7 +300,9 @@ def test_cdp_eval_throw_is_terminal(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='realbrowser_')
+    return _util.runner(_util.collect(globals()),
+                        tmp_prefix='realbrowser_',
+                        requires='Chromium and Node')
 
 
 if __name__ == '__main__':

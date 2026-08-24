@@ -31,6 +31,20 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
+_DEPENDENT_SUITE = """import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _util
+
+
+def test_needs_a_browser(d):
+    _util.skip('no browser here')
+
+
+raise SystemExit(_util.runner(_util.collect(dict(globals())),
+                              requires='a real browser'))
+"""
+
+
 _PASSING_SUITE = """import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util
@@ -44,9 +58,13 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
-def _runner_tree(tmp, suites):
-    """A copy of run_tests.py over fabricated suites, run where it stands."""
-    root = Path(tmp) / 'tree'
+def _runner_tree(tmp, suites, directory='tree'):
+    """A copy of run_tests.py over fabricated suites, run where it stands.
+
+    `directory` is a parameter so one test can build two trees and compare
+    what the aggregate says about each.
+    """
+    root = Path(tmp) / directory
     (root / 'tests').mkdir(parents=True)
     shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
     shutil.copy2(ROOT / 'tests' / '_util.py', root / 'tests' / '_util.py')
@@ -74,6 +92,32 @@ def test_a_suite_that_ran_no_coverage_is_not_an_overall_pass(tmp):
     assert 'OVERALL: PASS' not in result.stdout, result.stdout
     assert 'test_all_skipped.py' in result.stdout, result.stdout
     assert result.returncode != 0, (result.returncode, result.stdout)
+
+
+def test_a_suite_that_named_what_it_needs_is_unrun_rather_than_empty(tmp):
+    """A browser suite on a machine with no browser is not a broken suite.
+
+    The rule above exists because a suite whose every test skipped cannot be
+    told apart from one that is broken. A suite that says which external
+    dependency it needs IS distinguishable, so the aggregate names it as not
+    run here and still passes — while a suite that says nothing keeps failing
+    the run, which is what the second half of this asserts.
+    """
+    result = _runner_tree(tmp, {
+        'test_dependent.py': _DEPENDENT_SUITE,
+        'test_passing.py': _PASSING_SUITE,
+    })
+    assert 'OVERALL: PASS' in result.stdout, result.stdout
+    assert 'NOT RUN HERE: test_dependent.py' in result.stdout, result.stdout
+    assert 'needs a real browser' in result.stdout, result.stdout
+    assert result.returncode == 0, (result.returncode, result.stdout)
+
+    undeclared = _runner_tree(tmp, {
+        'test_all_skipped.py': _ALL_SKIPPED_SUITE,
+        'test_passing.py': _PASSING_SUITE,
+    }, directory='undeclared')
+    assert 'OVERALL: PASS' not in undeclared.stdout, undeclared.stdout
+    assert undeclared.returncode != 0, undeclared.stdout
 
 
 def test_the_aggregate_carries_the_totals_it_verified(tmp):
