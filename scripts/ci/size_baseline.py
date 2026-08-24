@@ -45,7 +45,7 @@ BASELINE = {
     'server.py': 2633,
     'extension/background.js': 1943,
     'tests/test_mcp_server.py': 1507,
-    'tests/test_cli.py': 1299,
+    'tests/test_cli.py': 1335,
     'mcp_server.py': 944,
 }
 
