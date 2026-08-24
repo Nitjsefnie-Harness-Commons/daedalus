@@ -532,8 +532,13 @@ def do_clear_cookies(args):
         sys.exit('Timeout (10s)')
     if res.get('error'):
         sys.exit(f'Error: {res["error"]}')
-    removed = res.get('result', {}).get('removed', 0)
-    print(f'Cleared {removed} cookies')
+    result = res.get('result', {})
+    print(f'Cleared {result.get("removed", 0)} cookies')
+    failed = result.get('failed') or []
+    if failed:
+        # Reported rather than folded into the count: a cookie the browser
+        # refused to remove is still there.
+        print(f'Could not remove {len(failed)}: {", ".join(failed)}')
 
 
 def do_cdp(args):

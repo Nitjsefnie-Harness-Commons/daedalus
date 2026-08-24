@@ -269,13 +269,21 @@ async function handleClearCookies(cmd) {
     if (cmd.url) details.url = cmd.url;
     const cookies = await chrome.cookies.getAll(details);
     let removed = 0;
+    const failed = [];
     for (const c of cookies) {
       const protocol = c.secure ? 'https' : 'http';
       const url = `${protocol}://${c.domain.replace(/^\./, '')}${c.path}`;
-      await chrome.cookies.remove({ url, name: c.name });
-      removed++;
+      const target = { url, name: c.name };
+      // A partitioned cookie is matched only when its partition is named, and
+      // a cookie in a non-default store only by that store. Dropping either
+      // left the cookie in place -- and the count was incremented per
+      // iteration rather than per removal, so it said the cookie had gone.
+      if (c.partitionKey) target.partitionKey = c.partitionKey;
+      if (c.storeId) target.storeId = c.storeId;
+      if (await chrome.cookies.remove(target)) removed++;
+      else failed.push(c.name);
     }
-    await postResult(cmd._execution, { removed }, null, 'extension');
+    await postResult(cmd._execution, { removed, failed }, null, 'extension');
   } catch (e) {
     await postResult(cmd._execution, null, e.message, 'extension');
   }

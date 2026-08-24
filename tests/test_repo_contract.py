@@ -2389,6 +2389,8 @@ const timers = [];
 const requests = [];
 const resultPayloads = [];
 const rules = [];
+const cookieJar = [];
+const removeCalls = [];
 const storageStore = {
   'daedalus-token': 'initial-token',
   'daedalus-server': 'https://initial.example.com',
@@ -2519,6 +2521,22 @@ const chrome = {
         throw new Error('Network.enable failed');
       }
       return {};
+    },
+  },
+  cookies: {
+    getAll: async () => cookieJar.map((cookie) => ({ ...cookie })),
+    remove: async (details) => {
+      removeCalls.push(details);
+      // Chrome matches a partitioned cookie only when the partition is named,
+      // and answers null when nothing matched -- which is the whole bug: the
+      // caller counted a removal that never happened.
+      const partition = JSON.stringify(details.partitionKey || null);
+      const at = cookieJar.findIndex((cookie) =>
+        cookie.name === details.name
+        && JSON.stringify(cookie.partitionKey || null) === partition);
+      if (at === -1) return null;
+      const [gone] = cookieJar.splice(at, 1);
+      return { name: gone.name };
     },
   },
   declarativeNetRequest: {
@@ -2827,6 +2845,29 @@ async function runUnblockZero() {
   };
 }
 
+async function runClearPartitioned() {
+  cookieJar.push(
+    { name: 'ordinary', domain: 'example.test', path: '/', secure: false },
+    { name: 'chips', domain: 'example.test', path: '/', secure: false,
+      partitionKey: { topLevelSite: 'http://example.test' } });
+  context.clearCommand = {
+    id: 'clear-partitioned',
+    type: 'clear-cookies',
+    url: 'http://example.test/',
+    _did: 'did-clear-partitioned',
+  };
+  await vm.runInContext('dispatchCommand(clearCommand)', context);
+  return {
+    remaining: cookieJar.map((cookie) => cookie.name),
+    posted: resultPayloads.map((item) => ({
+      result: item.result, error: item.error,
+    })),
+    removeCalls: removeCalls.map((details) => ({
+      name: details.name, partitionKey: details.partitionKey || null,
+    })),
+  };
+}
+
 async function run() {
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
   await vm.runInContext('loadConfig()', context);
@@ -2838,6 +2879,7 @@ async function run() {
   if (scenario === 'hotfix-race') return runHotfixRace();
   if (scenario === 'block-rule-restart') return runBlockRuleRestart();
   if (scenario === 'unblock-zero') return runUnblockZero();
+  if (scenario === 'clear-partitioned') return runClearPartitioned();
   throw new Error('unknown scenario: ' + scenario);
 }
 
@@ -2997,6 +3039,27 @@ def test_concurrent_hotfix_stores_both_survive(tmp):
         ],
         'storedIds': ['fix-a', 'fix-b'],
     }, actual
+
+
+def test_clearing_cookies_removes_the_partitioned_ones_too(tmp):
+    """A cookie the browser refused to remove must not be counted as removed.
+
+    `chrome.cookies.remove` matches a partitioned cookie only when the
+    partition is named, and the call dropped `partitionKey` — so a CHIPS
+    cookie stayed readable while the count said it had gone. The count was
+    incremented per iteration rather than per removal, which is what let the
+    two disagree in the first place.
+    """
+    del tmp
+    actual = _run_extension_result_boundary('clear-partitioned')
+    assert actual['remaining'] == [], actual
+    assert len(actual['posted']) == 1, actual
+    assert actual['posted'][0]['error'] is None, actual
+    assert actual['posted'][0]['result']['removed'] == 2, actual
+    assert actual['posted'][0]['result']['failed'] == [], actual
+    partitioned = [call for call in actual['removeCalls']
+                   if call['partitionKey']]
+    assert len(partitioned) == 1, actual['removeCalls']
 
 
 def test_rule_id_zero_is_refused_rather_than_removing_everything(tmp):
