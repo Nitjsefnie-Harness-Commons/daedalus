@@ -164,6 +164,37 @@ def _unsafe_component(value):
     return device_stem in _WINDOWS_DEVICE_NAMES
 
 
+def _under(root, *parts):
+    """Join `parts` under `root` and refuse a result that lands outside it.
+
+    This asks a different question from `_unsafe_component`. That one is a
+    shape check on one string — does this component look dangerous. This one
+    is about the result: did the path I built end up where I meant. A
+    component blacklist cannot answer that, because a symlink inside the root
+    pointing out of it is made of components that are individually harmless,
+    and neither can a caller that validated its parts and then joined them
+    somewhere else.
+
+    Both are kept. The component check is what turns a bad request into a
+    specific 400 naming the field; this is the backstop that makes the answer
+    true regardless of which components were involved.
+
+    The path returned is the one that was checked, resolved. Returning the
+    unresolved join would mean the check was performed on a different object
+    from the one used, which is the gap the check exists to close.
+
+    Raises ValueError, which is what the routes taking these values already
+    answer 400 for.
+    """
+    resolved_root = os.path.realpath(root)
+    candidate = os.path.realpath(
+        os.path.join(resolved_root, *(str(part) for part in parts)))
+    if (candidate != resolved_root
+            and not candidate.startswith(resolved_root + os.sep)):
+        raise ValueError(f'path escapes its root: {parts!r}')
+    return pathlib.Path(candidate)
+
+
 def _bad_token(token):
     """True when `token` is unusable as a directory name.
 
@@ -192,7 +223,7 @@ def _stored_uploads(token_dir, upload_id):
     meaningful if the sequence it slices is stable between requests.
     """
     if upload_id:
-        id_dirs = [token_dir / upload_id]
+        id_dirs = [_under(token_dir, upload_id)]
     else:
         with os.scandir(token_dir) as entries:
             dirs = [entry for entry in entries if entry.is_dir()]
@@ -1457,25 +1488,31 @@ class Handler(BaseHTTPRequestHandler):
         # deleted every upload the token had, and answered that as success.
         if filename and not upload_id:
             return self._json(400, {'error': 'filename requires id'})
+        # _under rather than a join: this branch removes trees, so the
+        # question that matters is where the path ended up, not how each
+        # component looked. A ValueError here is the same refusal the shape
+        # check above gives, reached by the other route.
         try:
             if filename and upload_id:
-                target = UPLOAD_DIR / token / upload_id / filename
+                target = _under(UPLOAD_DIR, token, upload_id, filename)
                 if not target.is_file():
                     return self._json(404, {'error': 'file not found'})
                 target.unlink()
                 print(f'[DELETE] {token}/{upload_id}/{filename}', flush=True)
             elif upload_id:
-                target = UPLOAD_DIR / token / upload_id
+                target = _under(UPLOAD_DIR, token, upload_id)
                 if not target.is_dir():
                     return self._json(404, {'error': 'id not found'})
                 shutil.rmtree(target)
                 print(f'[DELETE] {token}/{upload_id}/', flush=True)
             else:
-                target = UPLOAD_DIR / token
+                target = _under(UPLOAD_DIR, token)
                 if not target.is_dir():
                     return self._json(404, {'error': 'token not found'})
                 shutil.rmtree(target)
                 print(f'[DELETE] {token}/', flush=True)
+        except ValueError:
+            return self._json(400, {'error': 'invalid path component'})
         except OSError:
             return self._json(500, {'error': 'upload delete failure'})
         return self._json(200, {'ok': True})
@@ -1600,7 +1637,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {'error': 'invalid limit/offset'})
             lim = max(1, min(lim, 1000))
             off = max(0, off)
-        token_dir = UPLOAD_DIR / token
+        try:
+            token_dir = _under(UPLOAD_DIR, token)
+        except ValueError:
+            return self._json(400, {'error': 'invalid path component'})
         if not token_dir.is_dir():
             if paged:
                 return self._json(200, {'items': [], 'total': 0,
@@ -1613,19 +1653,25 @@ class Handler(BaseHTTPRequestHandler):
         window = range(off, off + lim) if paged else None
         results = []
         total = 0
-        for index, (id_name, entry) in enumerate(
-                _stored_uploads(token_dir, upload_id)):
-            total += 1
-            if window is not None and index not in window:
-                continue
-            info = os.stat(entry.path)
-            results.append({
-                'id': id_name,
-                'filename': entry.name,
-                'size': info.st_size,
-                'mtime': int(info.st_mtime),
-                'path': f'{token}/{id_name}/{entry.name}',
-            })
+        # The walk is inside the guard because _stored_uploads re-roots the
+        # named id under the token directory, and a listing must refuse an
+        # escape the same way a delete does rather than dying mid-response.
+        try:
+            for index, (id_name, entry) in enumerate(
+                    _stored_uploads(token_dir, upload_id)):
+                total += 1
+                if window is not None and index not in window:
+                    continue
+                info = os.stat(entry.path)
+                results.append({
+                    'id': id_name,
+                    'filename': entry.name,
+                    'size': info.st_size,
+                    'mtime': int(info.st_mtime),
+                    'path': f'{token}/{id_name}/{entry.name}',
+                })
+        except ValueError:
+            return self._json(400, {'error': 'invalid path component'})
         if paged:
             return self._json(200, {'items': results, 'total': total,
                                     'limit': lim, 'offset': off})
@@ -1962,12 +2008,15 @@ class Handler(BaseHTTPRequestHandler):
             raw = base64.b64decode(data_b64, validate=True)
         except Exception:
             return self._json(400, {'error': 'invalid base64'})
-        dest_dir = UPLOAD_DIR / token / upload_id
-        if filename:
-            dest = dest_dir / filename
-        else:
-            ts = int(time.time() * 1000)
-            dest = dest_dir / f'{ts}.{fmt}'
+        try:
+            dest_dir = _under(UPLOAD_DIR, token, upload_id)
+            if filename:
+                dest = _under(dest_dir, filename)
+            else:
+                ts = int(time.time() * 1000)
+                dest = _under(dest_dir, f'{ts}.{fmt}')
+        except ValueError:
+            return self._json(400, {'error': 'invalid path component'})
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(raw)
@@ -2017,7 +2066,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_named_upload(token, named)
         if upload_id and _unsafe_component(upload_id):
             return self._json(400, {'error': 'invalid path component'})
-        token_dir = UPLOAD_DIR / token
+        try:
+            token_dir = _under(UPLOAD_DIR, token)
+        except ValueError:
+            return self._json(400, {'error': 'invalid path component'})
         if not token_dir.is_dir():
             return self._json(404, {'error': 'no uploads'})
         # If id specified, look in that subdir; otherwise search all subdirs

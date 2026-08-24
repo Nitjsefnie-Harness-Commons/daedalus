@@ -1180,6 +1180,52 @@ def test_a_filename_without_an_id_deletes_nothing(tmp):
         assert (root / 'beta' / 'two.txt').is_file(), sorted(root.rglob('*'))
 
 
+def test_an_upload_path_that_escapes_through_a_symlink_is_refused(tmp):
+    """Component validation cannot answer where a path ended up.
+
+    `_unsafe_component` is a shape check on one string: `escape` passes it,
+    because there is nothing wrong with the name. If `escape` is a symlink out
+    of the token's directory, every component is harmless and the path still
+    leaves the namespace — which is the one thing the check exists to prevent.
+
+    The containment check asks the other question, about the result rather
+    than the parts, so the delete is refused and the file outside survives.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        status, _ = _util.post_json(base + '/upload', {
+            'token': TOK, 'id': 'real', 'filename': 'keep.txt',
+            'data': base64.b64encode(b'inside').decode()})
+        assert status == 200, status
+
+        outside = Path(docroot) / 'outside'
+        outside.mkdir()
+        secret = outside / 'secret.txt'
+        secret.write_text('do not delete me', encoding='utf-8')
+        token_dir = Path(docroot) / 'uploads' / TOK
+        try:
+            (token_dir / 'escape').symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as why:
+            _util.skip(f'this filesystem will not hold a symlink: {why}')
+
+        status, raw = _util.request(
+            base + '/upload', 'DELETE',
+            body=json.dumps({'token': TOK, 'id': 'escape',
+                             'filename': 'secret.txt'}).encode(),
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (
+            400, 'invalid path component'), (status, raw)
+        assert secret.is_file(), 'the file outside the namespace was removed'
+        assert secret.read_text(encoding='utf-8') == 'do not delete me'
+
+        # The ordinary path still works, so the guard is not simply refusing.
+        status, raw = _util.request(
+            base + '/upload', 'DELETE',
+            body=json.dumps({'token': TOK, 'id': 'real',
+                             'filename': 'keep.txt'}).encode(),
+            headers={'Content-Type': 'application/json'})
+        assert status == 200, (status, raw)
+
+
 def test_upload_pagination_bounds_the_work_not_only_the_answer(tmp):
     """A page of one must not cost a stat of every file in the namespace.
 
