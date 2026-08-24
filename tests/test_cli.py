@@ -90,7 +90,7 @@ def test_help_exits_zero(tmp):
 def test_result_printer_labels_eval_world_as_a_channel(tmp):
     del tmp
     code = (
-        'from daedalus_cli.cli import print_result\n'
+        'from daedalus_cli.output import print_result\n'
         'base = {"id":"channel", "result":4, "error":None, "ts":1, '
         '"token":"tok"}\n'
         'print_result({**base, "world":"cdp"})\n'
@@ -122,7 +122,7 @@ def test_the_printer_survives_a_console_that_cannot_encode_it(tmp):
     """
     del tmp
     code = (
-        'from daedalus_cli.cli import print_result\n'
+        'from daedalus_cli.output import print_result\n'
         'print_result({"id":"job7", "result":"caf\\u00e9 \\u4e16\\u754c", '
         '"error":None, "ts":1, "token":"tok", "world":"cdp"})\n')
     # Parent and child agree on the code page, the way a real console and the
@@ -214,7 +214,7 @@ def test_set_permanent_refuses_a_value_it_cannot_read(tmp):
 def test_set_permanent_reads_every_documented_spelling(tmp):
     """Both halves of the documented set parse, in any case."""
     del tmp
-    code = ('from daedalus_cli.cli import _boolean_argument as b\n'
+    code = ('from daedalus_cli.commands_content import _boolean_argument as b\n'
             'print([b(v) for v in ("true", "1", "yes", "y", "on", "TRUE")])\n'
             'print([b(v) for v in ("false", "0", "no", "n", "off", "OFF")])\n')
     r = run_python(code, cli_env())
@@ -232,7 +232,7 @@ def test_missing_token_is_an_error(tmp):
 
 
 def test_url_default_and_override(tmp):
-    code = 'from daedalus_cli.cli import URL; print(URL)'
+    code = 'from daedalus_cli.transport import URL; print(URL)'
     r = run_python(code, cli_env())
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == 'http://127.0.0.1:8081', r.stdout
@@ -396,7 +396,7 @@ def test_waiter_leaves_a_foreign_result_in_place(tmp):
 
 _WAIT_HARNESS = (
     'import time\n'
-    'from daedalus_cli import cli\n'
+    'from daedalus_cli import transport\n'
     'calls = []\n'
     'calls_timeout = []\n'
     'PENDING = %s\n'
@@ -409,9 +409,9 @@ _WAIT_HARNESS = (
     '        return {"consumed": True, "resultGeneration": "g1"}\n'
     '    return {"id": "c1", "deliveryId": "d1", "resultGeneration": "g1",\n'
     '            "result": 7, "error": None}\n'
-    'cli.api = fake_api\n'
+    'transport.api = fake_api\n'
     'start = time.monotonic()\n'
-    'res = cli.wait_for_result("c1", "extension", "d1", %s)\n'
+    'res = transport.wait_for_result("c1", "extension", "d1", %s)\n'
     'print("ELAPSED", round(time.monotonic() - start, 3))\n'
     'print("POLLS", len(calls))\n'
     'print("BOUNDED", all(t is not None and t > 0 for t in calls_timeout[:1]))\n'
@@ -457,15 +457,15 @@ def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
     del tmp
     code = (
         'import time\n'
-        'from daedalus_cli import cli\n'
+        'from daedalus_cli import transport\n'
         'seen = []\n'
         'def fake_api(method, path, body=None, timeout=None):\n'
         '    seen.append(timeout)\n'
         '    time.sleep(0.3)\n'       # the stall
         '    return {"pending": True}\n'
-        'cli.api = fake_api\n'
+        'transport.api = fake_api\n'
         'start = time.monotonic()\n'
-        'res = cli.wait_for_result("c1", "extension", "d1", 0.5)\n'
+        'res = transport.wait_for_result("c1", "extension", "d1", 0.5)\n'
         'print("ELAPSED", round(time.monotonic() - start, 3))\n'
         'print("RESULT", res)\n'
         'print("FIRST_TIMEOUT", seen[0] if seen else None)\n')

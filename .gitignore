@@ -81,6 +81,14 @@
 !/daedalus_cli/
 !/daedalus_cli/__init__.py
 !/daedalus_cli/cli.py
+!/daedalus_cli/commands_browser.py
+!/daedalus_cli/commands_content.py
+!/daedalus_cli/commands_eval.py
+!/daedalus_cli/commands_media.py
+!/daedalus_cli/invoke.py
+!/daedalus_cli/output.py
+!/daedalus_cli/parser.py
+!/daedalus_cli/transport.py
 
 # ─── dashboard ───
 !/dashboard/
