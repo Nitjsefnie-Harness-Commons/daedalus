@@ -812,10 +812,13 @@ def _write_segment_usage(job, count, stored):
         tmp.write_text(json.dumps(record), encoding='utf-8')
         os.replace(tmp, path)
     except OSError:
+        # The segment itself is already stored, so a usage update that cannot
+        # be written leaves the record at its previous totals rather than
+        # failing the write that succeeded; the next one corrects it.
         try:
             tmp.unlink()
         except OSError:
-            pass
+            pass  # the next write of this record reuses the same temp name
 
 
 # ─── Health / observability ───
