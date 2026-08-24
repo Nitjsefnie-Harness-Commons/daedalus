@@ -188,9 +188,31 @@ async function handleScreenshot(cmd) {
     }
     const tab = await chrome.tabs.get(typeof chromeTabId === 'number' ? chromeTabId : parseInt(chromeTabId));
     const fmt = cmd.format || 'png';
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: fmt,
-      quality: cmd.quality || 80,
+    // captureVisibleTab photographs whatever is ACTIVE in the window it is
+    // given, so a tab that is merely named is not the tab that gets captured:
+    // a screenshot aimed at an inactive tab returned the active sibling's
+    // pixels under the requested tab's url and title. Bring the target
+    // forward, capture, and put the window back as it was found.
+    //
+    // Serialized, because two captures interleaving would each restore the
+    // other's tab and both would photograph the wrong page.
+    const dataUrl = await _captureQueue(async () => {
+      let restore = null;
+      if (!tab.active) {
+        const [previous] = await chrome.tabs.query({
+          active: true, windowId: tab.windowId,
+        });
+        if (previous && previous.id !== tab.id) restore = previous.id;
+        await chrome.tabs.update(tab.id, { active: true });
+      }
+      try {
+        return await chrome.tabs.captureVisibleTab(tab.windowId, {
+          format: fmt,
+          quality: cmd.quality || 80,
+        });
+      } finally {
+        if (restore !== null) await chrome.tabs.update(restore, { active: true });
+      }
     });
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
     const uploadResp = await fetch(cmd._execution.resultRoute.serverUrl + '/upload', {
@@ -303,6 +325,9 @@ function _serializer() {
     return run;
   };
 }
+
+// Captures activate the tab they photograph, so they cannot overlap.
+const _captureQueue = _serializer();
 
 // ─── Request blocking via declarativeNetRequest ───
 

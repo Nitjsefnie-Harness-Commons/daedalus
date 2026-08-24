@@ -2390,6 +2390,12 @@ const requests = [];
 const resultPayloads = [];
 const rules = [];
 const createdTabs = [];
+const uploadedData = [];
+const windowTabs = [
+  { id: 7, windowId: 3, active: true, url: 'about:blank#active' },
+  { id: 8, windowId: 3, active: false, url: 'about:blank#target' },
+];
+const activations = [];
 const cookieJar = [];
 const removeCalls = [];
 const storageStore = {
@@ -2478,6 +2484,13 @@ const chrome = {
       return { id: 100 + createdTabs.length, windowId: 1, url: details.url };
     },
     query: async (query) => {
+      if (scenario === 'screenshot-target') {
+        return windowTabs
+          .filter((tab) =>
+            (query.active === undefined || tab.active === query.active)
+            && (query.windowId === undefined || tab.windowId === query.windowId))
+          .map((tab) => ({ ...tab }));
+      }
       if (scenario === 'route' && Object.keys(query).length === 0) {
         return new Promise((resolve) => {
           tabQueryResolver = resolve;
@@ -2485,16 +2498,34 @@ const chrome = {
       }
       return [{ id: 7, url: 'https://page.example.com' }];
     },
-    get: async (tabId) => ({
-      id: tabId,
-      windowId: 3,
-      url: 'https://page.example.com',
-      title: 'Page',
-    }),
+    get: async (tabId) => {
+      const known = windowTabs.find((tab) => tab.id === tabId);
+      if (known) return { ...known, title: 'Page' };
+      return {
+        id: tabId,
+        windowId: 3,
+        url: 'https://page.example.com',
+        title: 'Page',
+      };
+    },
+    update: async (tabId, changes) => {
+      if (changes && changes.active) {
+        activations.push(tabId);
+        for (const tab of windowTabs) tab.active = tab.id === tabId;
+      }
+      const updated = windowTabs.find((tab) => tab.id === tabId);
+      return updated ? { ...updated } : { id: tabId, windowId: 3 };
+    },
     sendMessage: async (_tabId, message) => {
       sentMessages.push(message);
     },
     captureVisibleTab: async () => {
+      if (scenario === 'screenshot-target') {
+        // A capture returns whatever is ACTIVE in the window, which is the
+        // whole point: naming a tab does not select it.
+        const active = windowTabs.find((tab) => tab.active);
+        return 'data:image/png;base64,' + btoa('captured:' + (active && active.id));
+      }
       if (scenario !== 'route') return 'data:image/png;base64,AA==';
       return new Promise((resolve) => {
         captureResolver = resolve;
@@ -2580,6 +2611,7 @@ async function bridgeFetch(target, init = {}) {
     requests.push({
       kind: 'upload', url, token: payload.token, id: payload.id,
     });
+    uploadedData.push(payload.data);
     if (scenario === 'screenshot-reject') {
       return response(400, { error: 'invalid path component' });
     }
@@ -2721,6 +2753,25 @@ async function runRouteSnapshot() {
     excludedRequestDomains: rules[0]
       ? rules[0].condition.excludedRequestDomains
       : null,
+  };
+}
+
+async function runScreenshotTarget() {
+  context.screenshotCommand = {
+    id: 'targeted',
+    type: 'screenshot',
+    tabId: 8,
+    _did: 'did-targeted',
+  };
+  await vm.runInContext('dispatchCommand(screenshotCommand)', context);
+  return {
+    captured: uploadedData.length
+      ? Buffer.from(uploadedData[0], 'base64').toString() : null,
+    activeAfter: (windowTabs.find((tab) => tab.active) || {}).id,
+    activations,
+    posted: resultPayloads.map((item) => ({
+      tabUrl: item.result && item.result.tabUrl, error: item.error,
+    })),
   };
 }
 
@@ -2910,6 +2961,7 @@ async function run() {
   if (scenario === 'expiry') return runExpiry();
   if (scenario === 'route') return runRouteSnapshot();
   if (scenario === 'screenshot-reject') return runScreenshotReject();
+  if (scenario === 'screenshot-target') return runScreenshotTarget();
   if (scenario === 'net-capture') return runNetCapture();
   if (scenario === 'hotfix-race') return runHotfixRace();
   if (scenario === 'block-rule-restart') return runBlockRuleRestart();
@@ -3009,6 +3061,24 @@ def test_result_route_snapshot_covers_retries_and_side_operations(tmp):
         ],
         'excludedRequestDomains': ['initial.example.com'],
     }, actual
+
+
+def test_a_targeted_screenshot_captures_the_tab_it_names(tmp):
+    """Naming a tab has to select it, because capture does not.
+
+    captureVisibleTab captures whatever is active in the WINDOW it is given,
+    so a screenshot aimed at an inactive tab returned the active sibling's
+    pixels under the requested tab's url and title. Nothing in the answer said
+    the image was of a different page.
+    """
+    del tmp
+    actual = _run_extension_result_boundary('screenshot-target')
+    assert actual['captured'] == 'captured:8', actual
+    assert actual['posted'] == [
+        {'tabUrl': 'about:blank#target', 'error': None}], actual
+    # And the window is left as it was found.
+    assert actual['activeAfter'] == 7, actual
+    assert actual['activations'] == [8, 7], actual
 
 
 def test_rejected_screenshot_upload_is_reported_as_an_error(tmp):
