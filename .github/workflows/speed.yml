@@ -128,7 +128,7 @@ jobs:
             python -m venv "venv-$side"
             "venv-$side/bin/python" -m pip install --quiet --upgrade pip
             "venv-$side/bin/python" -m pip install --quiet \
-              "./$side" "./$side[mcp]"
+              "./${side}" "./${side}[mcp]"
           done
           echo "base mcp:"; "venv-base/bin/python" -m pip show mcp | head -2
           echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | head -2
