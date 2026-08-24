@@ -398,6 +398,16 @@ invocation in another tab. Those properties protect routing and browser
 authority; they do not turn the relay marker or its returned JavaScript value
 into a trust signal.
 
+**Repository secret scanning.** Secret scanning and push protection are enabled
+on this repository, so a provider-recognised credential is detected in the
+history and refused at push time. Two adjacent controls are not enabled and
+cannot be here: non-provider pattern scanning and validity checks require
+GitHub Advanced Security, which this plan does not include — the REST API
+accepts a request to turn them on and reports them disabled afterwards. So a
+generic secret, an ad-hoc token or a password left in a config example, is
+unscanned in this repository. Keep one out of the tree rather than relying on
+detection to catch it.
+
 ## Deployment
 
 The bridge speaks plain HTTP on loopback. Bridge-control and storage routes
