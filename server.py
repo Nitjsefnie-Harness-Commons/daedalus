@@ -2,6 +2,7 @@
 """Daedalus debug server — SSE command bridge + tab registry."""
 import hmac, itertools, json, math, os, pathlib, secrets, shutil, threading, time, uuid
 import ctypes, ctypes.util
+import zlib
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
@@ -117,6 +118,7 @@ def _env_positive_float(name, default):
 BASE = pathlib.Path(os.environ['DAEDALUS_DIR'])
 CMD_DIR = BASE / 'commands'
 RES_DIR = BASE / 'results'
+DELIVERY_DIR = RES_DIR / 'deliveries'
 UPLOAD_DIR = BASE / 'uploads'
 SEG_DIR = BASE / 'segments'
 DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent / 'dashboard'
@@ -393,10 +395,21 @@ _stream_lock = threading.Lock()
 # conditional GET consumption share this lock so a newer result cannot land
 # between the consumer's generation check and unlink.
 _result_lock = threading.Lock()
+_DELIVERY_LOCK_STRIPES = 64
+_delivery_locks = tuple(
+    threading.Lock() for _ in range(_DELIVERY_LOCK_STRIPES))
+
+
+def _delivery_lock_for(delivery_dir):
+    """Return the lock that serializes one target's delivery files."""
+    key = os.fsencode(os.fspath(delivery_dir))
+    index = zlib.crc32(key) & (_DELIVERY_LOCK_STRIPES - 1)
+    return _delivery_locks[index]
 
 
 _REPLACE_ATTEMPTS = 5
 _REPLACE_RETRY_DELAY = 0.02
+_COMPAT_CONSUME_RETRY_ATTEMPTS = 8
 
 
 def _replace_atomically(src, dst):
@@ -441,6 +454,142 @@ def _atomic_result_write(path, data):
         raise
 
 
+def _result_key(token, tab=''):
+    """The checked target component used by result slots and deliveries."""
+    return f'{token}_{tab}' if tab else token
+
+
+def _delivery_result_paths(token, tab, did):
+    """Return the per-target delivery directory and one checked result file."""
+    if not isinstance(did, str) or not did or _unsafe_component(did):
+        raise ValueError('invalid delivery id')
+    key = _derived_component(_result_key(token, tab))
+    delivery_dir = _under(DELIVERY_DIR, key)
+    delivery_file = _under(
+        delivery_dir, _derived_component(f'{did}.json'))
+    return delivery_dir, delivery_file
+
+
+def _find_delivery_result(token, tab, did):
+    """Find a delivery file and the tab component that owns its slot."""
+    delivery_dir, delivery_file = _delivery_result_paths(token, tab, did)
+    if tab or delivery_file.exists():
+        return delivery_dir, delivery_file, tab
+    prefix = f'{token}_'
+    try:
+        with os.scandir(DELIVERY_DIR) as entries:
+            names = sorted(
+                entry.name for entry in entries
+                if entry.name.startswith(prefix)
+                and entry.is_dir(follow_symlinks=False))
+    except OSError:
+        names = []
+    for name in names:
+        try:
+            candidate_dir = _under(DELIVERY_DIR, _derived_component(name))
+            candidate_file = _under(
+                candidate_dir, _derived_component(f'{did}.json'))
+        except ValueError:
+            continue
+        if candidate_file.exists():
+            return candidate_dir, candidate_file, name[len(prefix):]
+    return delivery_dir, delivery_file, ''
+
+
+_delivery_order = {'stamp': 0}
+_delivery_order_lock = threading.Lock()
+
+
+def _scan_delivery_results(delivery_dir):
+    """Read the acceptance stamps for one target's delivery files."""
+    entries = []
+    try:
+        with os.scandir(delivery_dir) as directory:
+            for entry in directory:
+                if not entry.name.endswith('.json'):
+                    continue
+                try:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    stamp = entry.stat(follow_symlinks=False).st_mtime_ns
+                except OSError:
+                    continue
+                entries.append((stamp, entry.name))
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    except OSError:
+        return None
+    return entries
+
+
+def _mark_delivery_result(path, entries):
+    """Stamp a delivery after incorporating persisted acceptance order."""
+    highest = (max((stamp for stamp, _name in entries), default=0)
+               if entries is not None else 0)
+    with _delivery_order_lock:
+        stamp = max(time.time_ns(), _delivery_order['stamp'] + 1,
+                    highest + 1)
+        try:
+            os.utime(path, ns=(stamp, stamp))
+        except OSError:
+            return None
+        _delivery_order['stamp'] = stamp
+    return stamp
+
+
+def _evict_delivery_results(delivery_dir, entries):
+    """Drop files older than the configured stamp boundary."""
+    if not MAX_DELIVERY_RESULTS or len(entries) <= MAX_DELIVERY_RESULTS:
+        return
+    ordered = sorted(entries, key=lambda item: item[0])
+    boundary = ordered[-MAX_DELIVERY_RESULTS][0]
+    names = [name for stamp, name in entries if stamp < boundary]
+    for name in names:
+        try:
+            (delivery_dir / name).unlink()
+        except FileNotFoundError:
+            # A consumer took this delivery between the scan and here.
+            # Eviction wanted it gone and it is gone, so there is nothing to
+            # report and nothing to retry.
+            pass
+
+
+def _read_result_file(path, consume, expected):
+    """Read one slot with the shared peek/conditional-consume semantics."""
+    if not path.exists():
+        return {'pending': True}, ''
+    data = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(data, dict):
+        raise ValueError('result slot is not a JSON object')
+    generation = data.get('resultGeneration', '')
+    if consume and expected and generation != expected:
+        return {'consumed': False}, ''
+    if consume:
+        path.unlink()
+        response = ({'consumed': True, 'resultGeneration': generation}
+                    if expected else data)
+        return response, data.get('deliveryId', '')
+    return data, ''
+
+
+def _remove_matching_result_file(path, generation):
+    """Remove a result file only when it still names this generation."""
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
+        return
+    if isinstance(data, dict) and data.get('resultGeneration') == generation:
+        try:
+            path.unlink()
+        except OSError:
+            # Removing the mirrored copy is best effort on both paths: the
+            # response is already determined by the copy that was consumed, so
+            # a failure here must not turn that success into a reported error.
+            # FileNotFoundError is the ordinary case — the other path's consume
+            # or an eviction already reached the state this call wanted.
+            pass
+
+
 # Delivery ids of results already accepted, newest last. background.js retries
 # a result POST whose response it never saw, and that retry carries the same
 # delivery id as the accepted original — so without this the retry would
@@ -471,6 +620,12 @@ STREAM_MAX_AGE = _env_positive_float('DAEDALUS_STREAM_MAX_AGE', 3600)
 STREAM_KEEPALIVE = _env_positive_float('DAEDALUS_STREAM_KEEPALIVE', 15)
 # Maximum bytes read from any HTTP request body; override for larger relays.
 MAX_BODY_SIZE = _env_int('DAEDALUS_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
+
+# Per-target delivery results are retained until consumed or evicted. This is
+# separate from the in-memory retry-dedup bound: a delivery may be evicted
+# from disk while its id remains remembered as accepted.
+MAX_DELIVERY_RESULTS = _env_int(
+    'DAEDALUS_MAX_DELIVERY_RESULTS', 1024, 0)
 
 # How deeply a JSON request body may nest containers. Without this the depth
 # actually enforced was whatever the running interpreter's recursion limit
@@ -1752,6 +1907,11 @@ class Handler(BaseHTTPRequestHandler):
             # dedup record can hold, and pushing it in there would raise.
             if not isinstance(did, str):
                 did = ''
+            try:
+                delivery_dir, delivery_file = _delivery_result_paths(
+                    token, tab_id, did) if did else (None, None)
+            except ValueError:
+                return self._json(400, {'error': 'invalid path component'})
             body.pop('deliveryId', None)
             body['resultGeneration'] = uuid.uuid4().hex
             if did:
@@ -1771,16 +1931,49 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {'error': 'result is not encodable'})
             duplicate = False
             try:
-                with _result_lock:
-                    duplicate = bool(did) and did in _accepted_deliveries
-                    if not duplicate:
-                        # Per-tab result file
+                if delivery_dir is not None:
+                    assert delivery_file is not None
+                    with _delivery_lock_for(delivery_dir):
+                        with _result_lock:
+                            duplicate = did in _accepted_deliveries
+                        if not duplicate:
+                            delivery_dir.mkdir(parents=True, exist_ok=True)
+                            entries = _scan_delivery_results(delivery_dir)
+                            with _result_lock:
+                                duplicate = did in _accepted_deliveries
+                                if not duplicate:
+                                    if tab_result_slot is not None:
+                                        _atomic_result_write(
+                                            tab_result_slot, serialized)
+                                    _atomic_result_write(
+                                        token_result_slot, serialized)
+                            if not duplicate:
+                                _atomic_result_write(delivery_file, serialized)
+                                stamp = _mark_delivery_result(
+                                    delivery_file, entries)
+                                with _result_lock:
+                                    _record_delivery(did)
+                                if stamp is not None and entries is not None:
+                                    entries = [
+                                        (old_stamp, name)
+                                        for old_stamp, name in entries
+                                        if name != delivery_file.name]
+                                    entries.append((stamp, delivery_file.name))
+                                    try:
+                                        _evict_delivery_results(
+                                            delivery_dir, entries)
+                                    except OSError:
+                                        # The result is stored and its caller
+                                        # can read it. Failing to trim
+                                        # retention must not drop that answer,
+                                        # and the next write to this target
+                                        # evicts what this one could not.
+                                        pass
+                else:
+                    with _result_lock:
                         if tab_result_slot is not None:
                             _atomic_result_write(tab_result_slot, serialized)
-                        # Backward compat: also write to token-only file
                         _atomic_result_write(token_result_slot, serialized)
-                        if did:
-                            _record_delivery(did)
             except OSError:
                 return self._json(500, {'error': 'result storage failure'})
             if duplicate:
@@ -1922,39 +2115,119 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {'ok': True, 'target': target, 'did': did})
 
     def _handle_get_result(self, params):
-        """Fetch a result, optionally consuming one expected generation."""
+        """Fetch a slot or delivery result, optionally consuming it."""
         token = self._bridge_token(params)
         tab = params.get('tab', [''])[0]
+        delivery = params.get('delivery', [''])[0]
         consume = params.get('consume', [''])[0] == '1'
         expected = params.get('expected', [''])[0]
         if token is None:
             return None
         if tab and _unsafe_component(tab):
             return self._json(400, {'error': 'invalid path component'})
-        # A requested tab selects its own slot; otherwise use the token slot.
+        delivery_tab = ''
+        delivery_dir = None
         try:
-            res_file = _under(RES_DIR, _derived_component(
-                f'{token}_{tab}.json' if tab else f'{token}.json'))
+            if delivery:
+                delivery_dir, res_file, delivery_tab = _find_delivery_result(
+                    token, tab, delivery)
+            else:
+                # A requested tab selects its own slot; otherwise use the token slot.
+                res_file = _under(RES_DIR, _derived_component(
+                    f'{_result_key(token, tab)}.json'))
         except ValueError:
             return self._json(400, {'error': 'invalid path component'})
         try:
-            with _result_lock:
-                if not res_file.exists():
-                    response = {'pending': True}
+            if delivery:
+                assert delivery_dir is not None
+                with _delivery_lock_for(delivery_dir):
+                    with _result_lock:
+                        response, _result_delivery = _read_result_file(
+                            res_file, consume, expected)
+                        if consume:
+                            consumed = (response.get('consumed') is True
+                                        if expected
+                                        else 'resultGeneration' in response)
+                            if consumed:
+                                generation = response.get('resultGeneration', '')
+                                slot_names = [f'{token}.json']
+                                if delivery_tab:
+                                    slot_names.append(
+                                        f'{token}_{delivery_tab}.json')
+                                for slot_name in slot_names:
+                                    slot = _under(
+                                        RES_DIR, _derived_component(slot_name))
+                                    _remove_matching_result_file(
+                                        slot, generation)
+            elif consume:
+                for _attempt in range(_COMPAT_CONSUME_RETRY_ATTEMPTS):
+                    with _result_lock:
+                        preview, _preview_delivery = _read_result_file(
+                            res_file, False, '')
+                    preview_delivery = (preview.get('deliveryId', '')
+                                        if isinstance(preview, dict) else '')
+                    if (not isinstance(preview_delivery, str)
+                            or not preview_delivery
+                            or _unsafe_component(preview_delivery)):
+                        with _result_lock:
+                            current, _current_delivery = _read_result_file(
+                                res_file, False, '')
+                            current_delivery = (current.get('deliveryId', '')
+                                                if isinstance(current, dict)
+                                                else '')
+                            if current_delivery != preview_delivery:
+                                continue
+                            response, _result_delivery = _read_result_file(
+                                res_file, True, expected)
+                        break
+                    try:
+                        candidate_dir, candidate_file, _candidate_tab = (
+                            _find_delivery_result(
+                                token, tab, preview_delivery))
+                    except ValueError:
+                        candidate_dir = None
+                    if candidate_dir is None:
+                        with _result_lock:
+                            response, _result_delivery = _read_result_file(
+                                res_file, True, expected)
+                        break
+                    changed = False
+                    with _delivery_lock_for(candidate_dir):
+                        with _result_lock:
+                            current, _current_delivery = _read_result_file(
+                                res_file, False, '')
+                            current_delivery = (current.get('deliveryId', '')
+                                                if isinstance(current, dict)
+                                                else '')
+                            if current_delivery != preview_delivery:
+                                changed = True
+                            else:
+                                response, _result_delivery = (
+                                    _read_result_file(
+                                        res_file, True, expected))
+                                consumed = (
+                                    response.get('consumed') is True
+                                    if expected
+                                    else 'resultGeneration' in response)
+                                if consumed:
+                                    generation = response.get(
+                                        'resultGeneration', '')
+                                    _remove_matching_result_file(
+                                        candidate_file, generation)
+                    if not changed:
+                        break
                 else:
-                    data = json.loads(res_file.read_text(encoding='utf-8'))
-                    if not isinstance(data, dict):
-                        raise ValueError('result slot is not a JSON object')
-                    generation = data.get('resultGeneration', '')
-                    if consume and expected and generation != expected:
-                        response = {'consumed': False}
-                    elif consume:
-                        res_file.unlink()
-                        response = ({'consumed': True,
-                                     'resultGeneration': generation}
-                                    if expected else data)
-                    else:
-                        response = data
+                    # The slot's delivery id kept changing under us. Consume on
+                    # the caller's own terms and leave the mirrored copy for
+                    # eviction: cross-copy cleanup is best effort, but the
+                    # caller's generation precondition is not.
+                    with _result_lock:
+                        response, _result_delivery = _read_result_file(
+                            res_file, True, expected)
+            else:
+                with _result_lock:
+                    response, _result_delivery = _read_result_file(
+                        res_file, consume, expected)
         except (OSError, json.JSONDecodeError, ValueError):
             return self._json(500, {'error': 'result storage failure'})
         return self._json(200, response)

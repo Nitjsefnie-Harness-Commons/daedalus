@@ -911,6 +911,70 @@ def test_ping_tool_round_trip(tmp):
         assert list(qdir.glob('*.json'))
 
 
+def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
+    """MCP waiters stay correlated when both results land before either consumes."""
+    _need_deps()
+    owners = ('owner-a', 'owner-b')
+    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+        mod = _load_mcp(base)
+        qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+        release_waiters = threading.Event()
+        original_poll = mod._poll_result
+
+        async def gated_poll(*args, **kwargs):
+            while not release_waiters.is_set():
+                await asyncio.sleep(0.01)
+            return await original_poll(*args, **kwargs)
+
+        mod._poll_result = gated_poll
+        box = {}
+
+        def run_callers():
+            mod._token.set(TOK)
+
+            async def callers():
+                return await asyncio.gather(*(
+                    mod._ext_cmd('_cookies', 'cookies', timeout=30,
+                                 domain=owner)
+                    for owner in owners))
+
+            try:
+                box['values'] = asyncio.run(callers())
+            except Exception as exc:  # pylint: disable=broad-except
+                box['error'] = exc
+
+        worker = threading.Thread(target=run_callers)
+        worker.start()
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+            if len(files) == len(owners):
+                break
+            if not worker.is_alive():
+                break
+            time.sleep(0.05)
+        files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+        assert len(files) == len(owners), (files, box)
+        commands = [json.loads(path.read_text(encoding='utf-8'))
+                    for path in files]
+        by_owner = {command['domain']: command for command in commands}
+        assert set(by_owner) == set(owners), commands
+
+        for owner in owners:
+            command = by_owner[owner]
+            status, body = _util.post_json(base + '/result', {
+                'token': TOK, 'tabId': 'extension', 'id': command['id'],
+                'result': [{'domain': owner}], 'error': None, 'ts': 1,
+                '_did': command['_did']})
+            assert status == 200 and body == {'ok': True}, (status, body)
+        release_waiters.set()
+        worker.join(timeout=60)
+        assert not worker.is_alive(), box
+        if 'error' in box:
+            raise box['error']
+        assert box['values'] == [[{'domain': owner}] for owner in owners], box
+
+
 def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
     """segment_status obtains the job capability itself; a job owned by another
     token used to surface as a bare httpx 409 through raise_for_status."""
