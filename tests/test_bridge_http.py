@@ -941,6 +941,47 @@ def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
                 conn.close()
 
 
+def test_queue_publication_never_deletes_an_in_progress_write(tmp):
+    """A queue scan must not unlink the pathname from under its writer."""
+    served = []
+    with _util.bridge(tmp, output=served) as (base, docroot):
+        queue = Path(docroot) / 'commands' / TOK
+        queue.mkdir(parents=True)
+        partial = queue / '0000000000001_000001.json'
+        ready = queue / '0000000000002_000002.json'
+        writer = open(partial, 'w', encoding='utf-8')
+        conn = response = None
+        try:
+            writer.write('{"id":"held-open"')
+            writer.flush()
+            os.fsync(writer.fileno())
+            ready.write_text(
+                '{"id":"scan-witness","code":"first"}', encoding='utf-8')
+
+            conn, response = _stream_response(base, TOK, tab='extension')
+            assert response.status == 200, response.status
+            frame = _framer(response, served)
+            witness = frame('the complete file behind the partial one')
+            assert witness.get('id') == 'scan-witness', witness
+            assert partial.exists(), (
+                'the queue scan unlinked a visible file while its writer '
+                'was open')
+
+            writer.write(',"code":"second"}')
+            writer.flush()
+            os.fsync(writer.fileno())
+            writer.close()
+            delivered = frame('the completed formerly-partial file', timeout=5)
+            assert delivered.get('id') == 'held-open', delivered
+        finally:
+            if not writer.closed:
+                writer.close()
+            if response is not None:
+                response.close()
+            if conn is not None:
+                conn.close()
+
+
 def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
     """A raw-dropped NAME with an undecodable byte must not kill the stream.
 
