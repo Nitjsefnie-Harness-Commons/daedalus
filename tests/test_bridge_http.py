@@ -1010,6 +1010,35 @@ def test_result_partial_temp_write_preserves_the_existing_slot(tmp):
             health_status, health)
 
 
+def test_upload_pagination_is_validated_before_the_directory_is_looked_at(tmp):
+    """The same query must get the same answer whether or not files exist.
+
+    The missing-directory shortcut returned before limit and offset were
+    parsed, so a malformed `limit` answered 200 on an empty data root and 400
+    once any upload had created the directory — the validity of a request
+    depended on unrelated filesystem state. The empty page also reported
+    limit 0 and offset 0 rather than what was asked for.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        malformed = base + '/upload?' + urllib.parse.urlencode(
+            {'token': TOK, 'limit': 'not-an-int'})
+        status, body = _util.get_json(malformed)
+        assert status == 400, (status, body)
+
+        status, body = _util.get_json(base + '/upload?' + urllib.parse.urlencode(
+            {'token': TOK, 'limit': 17, 'offset': 9, 'id': 'absent'}))
+        assert status == 200, (status, body)
+        assert body == {'items': [], 'total': 0, 'limit': 17, 'offset': 9}, body
+
+        # The same two answers once the directory exists.
+        status, _ = _util.post_json(base + '/upload', {
+            'token': TOK, 'id': 'up1',
+            'data': base64.b64encode(PNG).decode()})
+        assert status == 200, status
+        status, body = _util.get_json(malformed)
+        assert status == 400, (status, body)
+
+
 def test_every_accepted_screenshot_format_can_be_served_back(tmp):
     """A format the upload route accepts must be one /screenshot can return.
 

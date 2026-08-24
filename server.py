@@ -1272,10 +1272,26 @@ class Handler(BaseHTTPRequestHandler):
             return
         if upload_id and _unsafe_component(upload_id):
             return self._json(400, {'error': 'invalid path component'})
+        # Before the directory is looked at, so that whether a query is well
+        # formed does not depend on whether anything has been uploaded yet:
+        # the shortcut below used to answer 200 for a malformed limit on an
+        # empty data root and 400 for the same query once the directory
+        # existed.
+        paged = limit_p is not None or offset_p is not None
+        lim, off = 200, 0
+        if paged:
+            try:
+                lim = int(limit_p) if limit_p is not None else 200
+                off = int(offset_p) if offset_p is not None else 0
+            except ValueError:
+                return self._json(400, {'error': 'invalid limit/offset'})
+            lim = max(1, min(lim, 1000))
+            off = max(0, off)
         token_dir = UPLOAD_DIR / token
         if not token_dir.is_dir():
-            if limit_p is not None or offset_p is not None:
-                return self._json(200, {'items': [], 'total': 0, 'limit': 0, 'offset': 0})
+            if paged:
+                return self._json(200, {'items': [], 'total': 0,
+                                        'limit': lim, 'offset': off})
             return self._json(200, [])
         results = []
         if upload_id:
@@ -1304,14 +1320,7 @@ class Handler(BaseHTTPRequestHandler):
                             'mtime': int(f.stat().st_mtime),
                             'path': f'{token}/{id_dir.name}/{f.name}',
                         })
-        if limit_p is not None or offset_p is not None:
-            try:
-                lim = int(limit_p) if limit_p is not None else 200
-                off = int(offset_p) if offset_p is not None else 0
-            except ValueError:
-                return self._json(400, {'error': 'invalid limit/offset'})
-            lim = max(1, min(lim, 1000))
-            off = max(0, off)
+        if paged:
             total = len(results)
             return self._json(200, {'items': results[off:off + lim], 'total': total, 'limit': lim, 'offset': off})
         return self._json(200, results)
