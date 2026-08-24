@@ -11,6 +11,7 @@
     "storage",
     "debugger",
     "notifications",
+    "clipboardWrite",
     "downloads",
     "alarms",
     "declarativeNetRequest"

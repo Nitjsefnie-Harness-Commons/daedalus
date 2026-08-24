@@ -59,8 +59,12 @@
       if (msg.event === 'load' && cb.onload) cb.onload();
       if (msg.event === 'error' && cb.onerror) cb.onerror({ error: msg.error });
       delete _pending[msg.reqId];
+    } else if (msg.handler === 'setClipboard') {
+      if (msg.error && cb.reject) cb.reject(new Error(msg.error));
+      else if (cb.resolve) cb.resolve();
+      delete _pending[msg.reqId];
     } else {
-      // notification, setClipboard, addStyle — fire and forget
+      // notification, addStyle — fire and forget
       if (cb.resolve) cb.resolve();
       delete _pending[msg.reqId];
     }
@@ -294,7 +298,12 @@
     },
 
     setClipboard: function(text, type) {
-      gmPost('setClipboard', { text, type: type || 'text/plain' });
+      // A promise, because the write can be refused and the caller has no
+      // other way to find out.
+      return new Promise((resolve, reject) => {
+        const reqId = gmPost('setClipboard', { text, type: type || 'text/plain' });
+        _pending[reqId] = { resolve, reject };
+      });
     },
 
     notification: function(opts) {

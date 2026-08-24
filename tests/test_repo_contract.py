@@ -5092,6 +5092,151 @@ process.stdout.write(JSON.stringify({
 """
 
 
+_CLIPBOARD_RELAY_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+
+const [contentPath, pagePath, mode] = process.argv.slice(1);
+const listeners = {};
+const messages = [];
+const posted = [];
+const writes = [];
+
+const windowObject = {
+  addEventListener(type, listener) {
+    (listeners[type] ||= []).push(listener);
+  },
+  postMessage(message) {
+    posted.push(message);
+    messages.push(message);
+  },
+};
+
+const navigatorObject = {
+  clipboard: {
+    writeText(text) {
+      writes.push(text);
+      return mode === 'reject'
+        ? Promise.reject(new Error('NotAllowedError'))
+        : Promise.resolve();
+    },
+  },
+};
+
+const chrome = {
+  runtime: {
+    lastError: null,
+    onMessage: { addListener() {} },
+    sendMessage(payload, callback) {
+      if (typeof callback === 'function') callback({});
+    },
+    getManifest() { return { version: '0.0.0' }; },
+    connect() {
+      return {
+        disconnect() {}, postMessage() {},
+        onDisconnect: { addListener() {} },
+      };
+    },
+  },
+  storage: { local: {
+    get(keys, cb) { cb({}); }, set(v, cb) { cb(); }, remove(k, cb) { cb(); },
+  } },
+};
+
+const context = {
+  window: windowObject,
+  document: { documentElement: {}, addEventListener() {} },
+  navigator: navigatorObject,
+  chrome,
+  location: { hostname: 'page.invalid', href: 'about:blank' },
+  setTimeout, clearTimeout, setInterval, clearInterval,
+  performance,
+  console: { log() {}, error() {} },
+};
+context.globalThis = context;
+vm.runInNewContext(fs.readFileSync(contentPath, 'utf8'), context);
+vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), context);
+
+function flushMessages() {
+  let guard = 0;
+  while (messages.length && guard++ < 100) {
+    const data = messages.shift();
+    for (const listener of listeners.message || []) {
+      listener({ source: windowObject, data });
+    }
+  }
+}
+
+(async () => {
+  let settled = 'pending';
+  let reported = null;
+  const returned = windowObject.GM.setClipboard('replacement');
+  const isPromise = !!(returned && typeof returned.then === 'function');
+  if (isPromise) {
+    returned.then(() => { settled = 'resolved'; },
+      (error) => { settled = 'rejected'; reported = String(error && error.message); });
+  }
+  // Let the clipboard promise settle, then deliver whatever the content
+  // script posted back in response to it.
+  for (let turn = 0; turn < 10; turn++) {
+    await Promise.resolve();
+    flushMessages();
+  }
+  await Promise.resolve();
+
+  process.stdout.write(JSON.stringify({
+    isPromise, settled, reported, writes,
+    acknowledged: posted
+      .filter((m) => m.direction === 'daedalus-bg-to-page'
+        && m.handler === 'setClipboard')
+      .map((m) => ({ error: m.error || null })),
+  }), () => process.exit(0));
+})();
+"""
+
+
+def _run_clipboard_relay_harness(mode):
+    """Drive GM.setClipboard through content.js and page.js under Node."""
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension clipboard relay'
+    result = subprocess.run(
+        [node, '-e', _CLIPBOARD_RELAY_HARNESS,
+         str(ROOT / 'extension' / 'content.js'),
+         str(ROOT / 'extension' / 'page.js'), mode],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def test_a_refused_clipboard_write_reaches_the_caller(tmp):
+    """A clipboard write that the browser refuses must not report success.
+
+    The content script called writeText, swallowed the rejection with an empty
+    catch, and posted its acknowledgement without waiting for the promise at
+    all — so a page without user activation, where Chromium rejects the write
+    with NotAllowedError, was told the clipboard had been set.
+    """
+    del tmp
+    refused = _run_clipboard_relay_harness('reject')
+    assert refused['writes'] == ['replacement'], refused
+    assert refused['isPromise'] is True, refused
+    assert refused['settled'] == 'rejected', refused
+    assert refused['acknowledged'] == [{'error': 'NotAllowedError'}], refused
+
+    accepted = _run_clipboard_relay_harness('resolve')
+    assert accepted['settled'] == 'resolved', accepted
+    assert accepted['acknowledged'] == [{'error': None}], accepted
+
+
+def test_the_extension_declares_the_permission_its_clipboard_write_needs(tmp):
+    """A documented operation must ship the permission it depends on."""
+    del tmp
+    manifest = json.loads(
+        (EXTENSION_ROOT / 'manifest.json').read_text(encoding='utf-8'))
+    assert 'clipboardWrite' in manifest.get('permissions', []), manifest
+
+
 def _run_fetch_relay_harness(background_response):
     """Drive GM.xmlhttpRequest through content.js and page.js under Node."""
     node = shutil.which('node')

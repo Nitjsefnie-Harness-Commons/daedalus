@@ -86,8 +86,16 @@ window.addEventListener('message', (e) => {
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'listValues', keys }, '*');
     });
   } else if (msg.handler === 'setClipboard') {
-    navigator.clipboard.writeText(msg.text).catch(() => {});
-    window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setClipboard' }, '*');
+    // Acknowledged only once the write has actually settled. The empty catch
+    // here used to swallow the rejection while the acknowledgement went out
+    // immediately, so a page without user activation -- where Chromium
+    // refuses the write -- was told the clipboard had been set.
+    navigator.clipboard.writeText(msg.text).then(() => {
+      window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setClipboard' }, '*');
+    }, (e) => {
+      window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setClipboard',
+        error: (e && e.message) || 'clipboard write refused' }, '*');
+    });
   } else if (msg.handler === 'notification') {
     chrome.runtime.sendMessage({ type: 'notification', title: msg.title, text: msg.text });
     window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'notification' }, '*');

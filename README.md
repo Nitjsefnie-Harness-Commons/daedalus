@@ -234,7 +234,7 @@ The background service worker accepts typed commands (issued via MCP tools or by
 | `GM.listValues()` | List non-reserved storage keys |
 | `GM.xmlhttpRequest(opts)` | Background-relayed HTTP request (CSP-immune) |
 | `GM.addStyle(css)` | Inject CSS |
-| `GM.setClipboard(text, type)` | Write to clipboard |
+| `GM.setClipboard(text, type)` | Write to clipboard; returns a promise that rejects if the browser refuses the write |
 | `GM.notification(opts)` | Desktop notification |
 | `GM.openInTab(url, opts)` | Open new tab |
 | `GM.download(opts)` | Trigger download |
