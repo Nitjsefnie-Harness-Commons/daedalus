@@ -21,6 +21,7 @@ from starlette.responses import JSONResponse
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
+from mcp_transport import BridgeTransport
 
 # Same reason as the bridge: this process prints crash lines carrying values
 # it did not choose. See server.py.
@@ -30,7 +31,6 @@ configure_stdio()
 # The in-process server passes the bridge's actual bound URL to start_in_thread,
 # which matters when DAEDALUS_PORT=0. DAEDALUS_LOCAL_URL remains the explicit
 # override for a standalone MCP deployment fronting a bridge that runs elsewhere.
-_LOCAL_URL_OVERRIDE = os.environ.get('DAEDALUS_LOCAL_URL')
 LOCAL_URL = os.environ.get(
     'DAEDALUS_LOCAL_URL',
     f'http://127.0.0.1:{os.environ.get("DAEDALUS_PORT", "8081")}')
@@ -727,23 +727,41 @@ def _ambiguous_json_carrier(raw):
     return None
 
 
-_http: httpx.AsyncClient | None = None
-_http_lock = threading.Lock()
+_started_local_url: str | None = None
+# A cell rather than a rebound global: this flag is read and written only
+# inside start_in_thread, and a module global written there reads as dead.
+_start_state = {'started': False}
+
+
+def _resolved_local_url(local_url: str | None = None) -> str:
+    """Resolve the bridge URL for this client lookup.
+
+    The caller's bridge URL is resolved before its transport facade is bound.
+    The URL supplied after the bridge binds wins over the port-derived
+    fallback, while the explicit standalone override remains strongest.
+    ``LOCAL_URL`` is the import-time fallback retained for callers that load
+    this module by path and restore the environment afterwards.
+    """
+    override = os.environ.get('DAEDALUS_LOCAL_URL')
+    if override:
+        return override
+    if local_url:
+        return local_url
+    if _started_local_url:
+        return _started_local_url
+    if 'DAEDALUS_PORT' in os.environ:
+        return f'http://127.0.0.1:{os.environ["DAEDALUS_PORT"]}'
+    return LOCAL_URL
+
+
+_transport = BridgeTransport(_resolved_local_url())
 
 
 def _http_client(local_url: str | None = None) -> httpx.AsyncClient:
-    """Return the one bridge client, creating it only after its URL is known.
-
-    `server.py` binds first and supplies `local_url`; an explicit
-    DAEDALUS_LOCAL_URL captured at import still wins. Direct/standalone callers
-    fall back to LOCAL_URL, which derives from their configured bridge port.
-    """
-    global _http
-    with _http_lock:
-        if _http is None:
-            base_url = _LOCAL_URL_OVERRIDE or local_url or LOCAL_URL
-            _http = httpx.AsyncClient(base_url=base_url, timeout=30.0)
-        return _http
+    """Return this caller's client, or a compatibility client for a URL."""
+    if local_url is not None:
+        return BridgeTransport(_resolved_local_url(local_url)).client()
+    return _transport.client()
 
 
 def _tok() -> str:
@@ -934,7 +952,14 @@ def _serve():
 
 
 def start_in_thread(local_url: str | None = None) -> threading.Thread:
-    _http_client(local_url)
+    global _started_local_url, _transport
+    if _start_state['started']:
+        raise RuntimeError(
+            'start_in_thread called more than once for this module')
+    _start_state['started'] = True
+    if local_url is not None:
+        _started_local_url = local_url
+    _transport = BridgeTransport(_resolved_local_url())
     t = threading.Thread(target=_serve, daemon=True, name='mcp-server')
     t.start()
     return t
