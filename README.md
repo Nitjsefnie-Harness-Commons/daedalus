@@ -249,7 +249,7 @@ The background service worker accepts typed commands (issued via MCP tools or by
 | `GM.setValue(key, value)` | Write a non-reserved string key to extension-wide storage |
 | `GM.deleteValue(key)` | Delete a non-reserved string key from extension-wide storage |
 | `GM.listValues()` | List non-reserved storage keys |
-| `GM.xmlhttpRequest(opts)` | Background-relayed HTTP request (CSP-immune). Returns a handle whose `abort()` cancels the in-flight fetch in the service worker; it is idempotent, it is terminal (a later load or error is dropped), and it calls `opts.onabort` if one was given |
+| `GM.xmlhttpRequest(opts)` | Background-relayed HTTP request (CSP-immune). The response body is read through a byte counter and abandoned above 8 MiB, answering `onerror` with a `tooLarge` outcome rather than buffering it; `opts.maxResponseBytes` raises or lowers that per request and is itself clamped to a 64 MiB ceiling. Returns a handle whose `abort()` cancels the in-flight fetch in the service worker; it is idempotent, it is terminal (a later load or error is dropped), and it calls `opts.onabort` if one was given |
 | `GM.addStyle(css)` | Inject CSS |
 | `GM.setClipboard(text, type)` | Write to clipboard; returns a promise that rejects if the browser refuses the write |
 | `GM.notification(opts)` | Desktop notification |

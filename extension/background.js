@@ -22,6 +22,59 @@ function bytesToBase64(bytes) {
   return btoa(parts.join(''));
 }
 
+// GM.xmlhttpRequest response ceiling. The shim is injected into every
+// matching top-level page, so any site a user visits can invoke this relay;
+// with no ceiling it could name a response of any size and the worker would
+// hold all of it. An 8 MiB response measured 11,184,812 base64 characters on
+// top of the 8,388,608 bytes it already held.
+//
+// A caller that genuinely needs more says so per request, and is still bound
+// by the ceiling: the opt-in raises a conservative default, it does not
+// remove the limit, because the page asking is not necessarily one the
+// operator trusts.
+const GM_FETCH_MAX_RESPONSE = 8 * 1024 * 1024;
+const GM_FETCH_RESPONSE_CEILING = 64 * 1024 * 1024;
+
+function gmResponseLimit(requested) {
+  const asked = typeof requested === 'number' && Number.isFinite(requested)
+    ? Math.floor(requested) : 0;
+  if (asked <= 0) return GM_FETCH_MAX_RESPONSE;
+  return Math.min(asked, GM_FETCH_RESPONSE_CEILING);
+}
+
+// Read a response body, counting as it streams and abandoning it at the
+// limit. Counting after the fact — resp.text() or resp.arrayBuffer() — is
+// what made the ceiling unenforceable: by the time the size is known the
+// worker is already holding every byte of it.
+async function readBoundedBody(resp, limit) {
+  if (!resp.body) return new Uint8Array(0);
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      // Cancelling the body stream terminates the fetch, so an oversized
+      // response stops arriving rather than merely stopping being read.
+      try { await reader.cancel(); } catch { /* the read is over regardless */ }
+      const tooLarge = new Error(
+        `response exceeded the ${limit}-byte relay limit`);
+      tooLarge.gmTooLarge = true;
+      throw tooLarge;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return bytes;
+}
+
 // Timing ring buffer for diagnostics (last 500 fetch relay entries)
 const _fetchTimings = [];
 const _FETCH_TIMINGS_MAX = 500;
@@ -1696,17 +1749,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         tBodyDecoded = performance.now();
         const resp = await fetch(msg.url, opts);
         let data;
-        let bodySize = 0;
+        const bytes = await readBoundedBody(resp, gmResponseLimit(msg.maxResponseBytes));
+        tFetchDone = performance.now();
+        // The raw byte count, for both response types. The text path used to
+        // record its character count, which is not the size that matters to
+        // a limit measured in bytes.
+        const bodySize = bytes.byteLength;
         if (msg.responseType === 'arraybuffer') {
-          const buf = await resp.arrayBuffer();
-          tFetchDone = performance.now();
-          bodySize = buf.byteLength;
-          data = bytesToBase64(new Uint8Array(buf));
+          data = bytesToBase64(bytes);
           tEncoded = performance.now();
         } else {
-          data = await resp.text();
-          tFetchDone = performance.now();
-          bodySize = data.length;
+          // Response.text() is a UTF-8 decode whatever charset the response
+          // declares, so decoding the bytes here answers identically.
+          data = new TextDecoder().decode(bytes);
           tEncoded = tFetchDone;
         }
         const headers = {};
@@ -1735,6 +1790,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         clearTimeout(timeoutId);
         if (fetchId) _fetchControllers.delete(fetchId);
         const isAbort = e.name === 'AbortError';
+        const isTooLarge = e.gmTooLarge === true;
         // A cancellation and a timeout are the same exception; only the entry
         // says which happened. Reporting a cancelled request as a timeout
         // would tell the caller the endpoint was slow when the caller is the
@@ -1743,18 +1799,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         _recordTiming({
           url: msg.url.substring(0, 120),
           method: msg.method || 'GET',
-          error: isCancel ? 'aborted' : (isAbort ? 'timeout' : (e.message || 'error')),
+          error: isCancel ? 'aborted'
+            : (isAbort ? 'timeout'
+              : (isTooLarge ? 'too-large' : (e.message || 'error'))),
           ms_total: +(performance.now() - t0).toFixed(1),
           ts: Date.now(),
         });
         // `timedOut` travels beside the message because a timeout is its own
         // event to the caller: flattening it into an error string left
         // page.js's ontimeout branch unreachable.
+        // `tooLarge` travels beside the message for the same reason
+        // `timedOut` does: a refused size is a different answer from a
+        // failed request, and a caller that wants to retry smaller can only
+        // tell them apart if the relay says which happened.
         sendResponse({
           error: isCancel ? 'aborted by the caller'
             : (isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message),
           timedOut: isAbort && !isCancel,
           aborted: isCancel,
+          tooLarge: isTooLarge,
         });
       }
     })();

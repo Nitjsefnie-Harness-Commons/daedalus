@@ -2493,6 +2493,7 @@ const windowTabs = [
   { id: 8, windowId: 3, active: false, url: 'about:blank#target' },
 ];
 const activations = [];
+const messageListeners = [];
 const cookieJar = [];
 const removeCalls = [];
 const storageStore = {
@@ -2690,7 +2691,7 @@ const chrome = {
     },
   },
   runtime: {
-    onMessage: eventTarget(),
+    onMessage: eventTarget(messageListeners),
     onConnect: eventTarget(),
     getPlatformInfo() {},
     getManifest: () => ({ version: '0.18.0' }),
@@ -2701,8 +2702,43 @@ const chrome = {
   },
 };
 
+// A body handed out one chunk at a time, so the harness can see how much of
+// it the relay actually pulled before deciding. A response that reports its
+// size only at the end cannot tell a bounded read apart from a full read
+// followed by a size check.
+const CHUNK_BYTES = 1024 * 1024;
+let streamPlan = null;
+
+function streamingResponse(chunkCount) {
+  let handed = 0;
+  streamPlan = { chunkCount, handed: 0, cancelled: false };
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    url: 'https://big.example.com/blob',
+    headers: { forEach() {} },
+    body: {
+      getReader() {
+        return {
+          async read() {
+            if (handed >= chunkCount) return { done: true, value: undefined };
+            handed += 1;
+            streamPlan.handed = handed;
+            return { done: false, value: new Uint8Array(CHUNK_BYTES) };
+          },
+          async cancel() { streamPlan.cancelled = true; },
+        };
+      },
+    },
+  };
+}
+
 async function bridgeFetch(target, init = {}) {
   const url = String(target);
+  if (url.startsWith('https://big.example.com/')) {
+    return streamingResponse(Number(new URL(url).searchParams.get('chunks')));
+  }
   if (url.endsWith('/upload') && init.method === 'POST') {
     const payload = JSON.parse(init.body);
     requests.push({
@@ -3051,6 +3087,62 @@ async function runClearPartitioned() {
   };
 }
 
+function relayFetch(request) {
+  return new Promise((resolve) => {
+    const message = Object.assign({
+      type: 'fetch',
+      fetchId: 'bounded-' + (++relaySequence),
+      method: 'GET',
+      responseType: 'text',
+    }, request);
+    for (const listener of messageListeners) listener(message, {}, resolve);
+  });
+}
+
+async function runFetchBound() {
+  const steps = [];
+  const cases = [
+    // Exactly the 8 MiB default: a ceiling, not a threshold the last
+    // permitted byte trips.
+    { name: 'at the default', chunks: 8 },
+    { name: 'over the default', chunks: 9 },
+    // The opt-in raises the default for a caller that asks for more.
+    { name: 'raised by opt-in', chunks: 12, maxResponseBytes: 16 * 1024 * 1024 },
+    { name: 'binary under the default', chunks: 1, responseType: 'arraybuffer' },
+  ];
+  for (const item of cases) {
+    const request = Object.assign({}, item);
+    delete request.name;
+    delete request.chunks;
+    request.url = 'https://big.example.com/blob?chunks=' + item.chunks;
+    const answer = await relayFetch(request);
+    steps.push({
+      name: item.name,
+      error: answer.error || null,
+      tooLarge: answer.tooLarge === true,
+      dataLength: typeof answer.data === 'string' ? answer.data.length : null,
+      chunksRead: streamPlan.handed,
+      chunksOffered: streamPlan.chunkCount,
+      cancelled: streamPlan.cancelled,
+    });
+  }
+  // Showing the clamp by streaming would mean allocating past the ceiling,
+  // so it is asked directly instead.
+  const limits = {};
+  for (const [label, asked] of [
+      ['omitted', 'undefined'], ['zero', '0'], ['negative', '-1'],
+      ['fractional', '1.5'], ['text', '"8000000"'],
+      ['below the default', '1024'],
+      ['above the ceiling', String(1024 * 1024 * 1024 * 1024)]]) {
+    limits[label] = vm.runInContext('gmResponseLimit(' + asked + ')', context);
+  }
+  const timings = JSON.parse(vm.runInContext(
+    'JSON.stringify(_fetchTimings.map((t) =>'
+    + ' ({ bodySize: t.bodySize === undefined ? null : t.bodySize,'
+    + ' error: t.error || null })))', context));
+  return { steps, limits, timings };
+}
+
 async function run() {
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
   await vm.runInContext('loadConfig()', context);
@@ -3065,6 +3157,7 @@ async function run() {
   if (scenario === 'unblock-zero') return runUnblockZero();
   if (scenario === 'clear-partitioned') return runClearPartitioned();
   if (scenario === 'dedup-restart') return runDedupAcrossRestart();
+  if (scenario === 'fetch-bound') return runFetchBound();
   throw new Error('unknown scenario: ' + scenario);
 }
 
@@ -3307,6 +3400,90 @@ def test_block_rule_ids_survive_a_worker_restart(tmp):
         ],
         'installedIds': [9001, 9002, 9003, 9004],
     }, actual
+
+
+def test_the_gm_fetch_relay_bounds_the_response_while_it_reads(tmp):
+    """An oversized response is abandoned at the limit, not measured after it.
+
+    The shim is injected into every matching top-level page, so any visited
+    site can invoke this relay. It had no ceiling at all: an 8 MiB response
+    was materialized whole and then copied again into 11,184,812 base64
+    characters. Reading through a counter is the part that matters — a size
+    check after `arrayBuffer()` learns the size only once the worker is
+    already holding every byte.
+    """
+    del tmp
+    actual = _run_extension_result_boundary('fetch-bound')
+    steps = {step['name']: step for step in actual['steps']}
+    assert len(steps) == 4, actual
+
+    mib = 1024 * 1024
+    # Exactly the default is allowed: the limit is a ceiling, not a threshold
+    # the last permitted byte trips.
+    at_default = steps['at the default']
+    assert at_default['error'] is None, at_default
+    assert at_default['dataLength'] == 8 * mib, at_default
+    assert at_default['cancelled'] is False, at_default
+
+    over = steps['over the default']
+    assert over['tooLarge'] is True, over
+    assert '8388608' in (over['error'] or ''), over
+    assert over['dataLength'] is None, over
+    # The read stopped at the chunk that crossed the limit and cancelled the
+    # body, rather than draining the response and rejecting it afterwards.
+    assert over['chunksRead'] == 9, over
+    assert over['cancelled'] is True, over
+
+    raised = steps['raised by opt-in']
+    assert raised['error'] is None, raised
+    assert raised['dataLength'] == 12 * mib, raised
+
+    # The binary path still base64s, because chrome.runtime.sendMessage is
+    # JSON-serialized and an ArrayBuffer does not survive it.
+    binary = steps['binary under the default']
+    assert binary['error'] is None, binary
+    assert binary['dataLength'] > mib, binary
+
+    assert actual['limits'] == {
+        # Anything that is not a usable positive number means "no preference".
+        'omitted': 8 * mib,
+        'zero': 8 * mib,
+        'negative': 8 * mib,
+        'text': 8 * mib,
+        # A caller may ask for LESS, which is a safer request, not a weaker
+        # one — including the floor of a fractional value.
+        'fractional': 1,
+        'below the default': 1024,
+        # And may not ask its way past the ceiling.
+        'above the ceiling': 64 * mib,
+    }, actual['limits']
+
+    # The diagnostic ring records the refusal as its own outcome and the raw
+    # byte count for the rest; the text path used to record characters.
+    assert [entry['error'] for entry in actual['timings']] == [
+        None, 'too-large', None, None], actual['timings']
+    assert [entry['bodySize'] for entry in actual['timings']] == [
+        8 * mib, None, 12 * mib, mib], actual['timings']
+
+
+def test_the_relay_ceiling_is_declared_once_and_bounds_the_default(tmp):
+    """Both limits live in the worker, and the ceiling is the larger one."""
+    del tmp
+    source = (EXTENSION_ROOT / 'background.js').read_text(encoding='utf-8')
+    found = dict(re.findall(
+        r'const (GM_FETCH_MAX_RESPONSE|GM_FETCH_RESPONSE_CEILING) = '
+        r'([0-9 *]+);', source))
+    assert set(found) == {'GM_FETCH_MAX_RESPONSE',
+                          'GM_FETCH_RESPONSE_CEILING'}, found
+    values = {}
+    for name, expression in found.items():
+        product = 1
+        for factor in expression.split('*'):
+            product *= int(factor.strip())
+        values[name] = product
+    assert values['GM_FETCH_MAX_RESPONSE'] > 0, values
+    assert (values['GM_FETCH_RESPONSE_CEILING']
+            >= values['GM_FETCH_MAX_RESPONSE']), values
 
 
 _CONTENT_KEEPALIVE_HARNESS = r"""

@@ -83,6 +83,7 @@ window.addEventListener('message', (e) => {
       bodyIsBase64: msg.bodyIsBase64 || false,
       responseType: msg.responseType === 'arraybuffer' ? 'arraybuffer' : 'text',
       timeout: msg.timeout,
+      maxResponseBytes: msg.maxResponseBytes,
     }, (resp) => {
       delete _fetchIds[reqId];
       const err = chrome.runtime.lastError && chrome.runtime.lastError.message;

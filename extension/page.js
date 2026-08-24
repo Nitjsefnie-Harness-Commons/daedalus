@@ -252,6 +252,9 @@
         bodyIsBase64: bodyIsBase64,
         responseType: opts.responseType || 'text',
         timeout: opts.timeout || 0,
+        // Opt-in only: omitted, the relay applies its conservative default.
+        // A value above the relay's ceiling is clamped there, not honoured.
+        maxResponseBytes: opts.maxResponseBytes || 0,
       });
       opts._responseType = opts.responseType;
       _pending[reqId] = opts;
