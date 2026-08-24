@@ -4682,6 +4682,44 @@ def test_no_workflow_gates_one_commit_twice(tmp):
     assert checked, 'no workflow declares both triggers; has one been renamed?'
 
 
+def test_the_speed_gate_throws_away_its_first_round(tmp):
+    """The first suite a job runs is not one of the measured ones.
+
+    A cold page cache is paid by whichever side goes first, and interleaving
+    does not share it: across eight runs the baseline's first round exceeded
+    its second by 19.14s on average and was the largest of the four totals
+    every time, while the head's first round exceeded its second by 0.96s. In
+    the same direction every run, so rounds do not average it out — it made
+    every verdict about 3% optimistic, which is a gate reading low on exactly
+    the regressions it exists to catch.
+
+    Discarding is only discarding if the comparison cannot see it, so this
+    pins both halves: a warm-up runs before the measured loop, and it writes
+    outside the globs the comparison reads.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
+        encoding='utf-8')
+    _, marker, after = workflow.partition('- name: Run both suites, interleaved')
+    assert marker, 'the timing step is not named the way this test finds it'
+    step, _, rest = after.partition('- name: Compare')
+    warmup = step.index('reports/warmup/')
+    measured = step.index('reports/$side-$round')
+    assert warmup < measured, 'the warm-up does not run before the measurement'
+
+    # The comparison reads reports/base-* and reports/head-*; a warm-up
+    # written as reports/base-0 would be picked up as a round.
+    for glob in re.findall(r'ls -d (reports/\S+)', rest):
+        assert not fnmatch.fnmatch('reports/warmup', glob), glob
+        assert not fnmatch.fnmatch('reports/warmup/base', glob), glob
+
+    # A ceiling that does not cover the extra runs kills the job for doing
+    # them, which is the failure the warm-up would introduce.
+    rounds = int(re.search(r'ROUNDS: "(\d+)"', workflow).group(1))
+    ceiling = int(re.search(r'timeout-minutes: (\d+)', workflow).group(1))
+    assert ceiling >= 15 * (rounds * 2 + 2), (ceiling, rounds)
+
+
 def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     """Before merge, and against the base SHA rather than the last release.
 

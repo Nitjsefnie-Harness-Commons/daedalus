@@ -8,6 +8,19 @@ name: speed
 # the runners, not the code. This job checks out the last release AND this
 # commit, runs both on the same machine, and reports the ratio.
 #
+# ONE ROUND IS DISCARDED BEFORE ANY MEASUREMENT, and it is not ceremony. The
+# first suite a job runs pays for a cold page cache, and interleaving does not
+# share that cost — it lands entirely on whichever side goes first, which was
+# always the baseline. Measured over the eight successful runs that kept their
+# duration artifacts, the baseline's first round exceeded its second by 19.14s
+# on average and was the largest of the four totals in 8 of 8 runs, while the
+# head's first round exceeded its second by 0.96s. On a ~290s suite that is a
+# 6.5% bias in the first pair, in the same direction every time, so no number
+# of rounds averages it away: it made every verdict roughly 3% optimistic.
+# (Not bytecode — PYTHONDONTWRITEBYTECODE is set below, so every round
+# recompiles. The previous shape, a minimum across rounds, hid this by
+# discarding the inflated value rather than by not producing it.)
+#
 # Rounds are INTERLEAVED — base, head, base, head — and compared IN PAIRS:
 # round 1 of the baseline against round 1 of this commit, and so on. Pairing
 # is what keeps every reported total one that a complete run achieved;
@@ -75,8 +88,8 @@ concurrency:
 jobs:
   speed:
     runs-on: ubuntu-latest
-    # Four full runs of a suite that drives a real browser, plus two installs.
-    timeout-minutes: 60
+    # Two discarded warm-up runs, four measured ones, and two installs.
+    timeout-minutes: 90
 
     env:
       # Fractional slowdown that fails the job.
@@ -189,6 +202,20 @@ jobs:
         # them explicitly rather than trusting an exit code it ignores.
         run: |
           mkdir -p reports
+          # Round 0 is thrown away. It is written outside the reports/base-*
+          # and reports/head-* globs the comparison reads, so nothing has to
+          # remember to exclude it, and it is uploaded with the rest because
+          # the size of what it absorbs is the evidence for doing it at all.
+          for side in base head; do
+            echo "::group::$side warm-up (discarded)"
+            python3 head/scripts/ci/time_tests.py \
+              --tree "$side" \
+              --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
+              --out "$GITHUB_WORKSPACE/reports/warmup/$side" \
+              || echo "$side warm-up: timing reported a problem"
+            echo "::endgroup::"
+          done
+
           for round in $(seq 1 "$ROUNDS"); do
             for side in base head; do
               echo "::group::$side round $round"
