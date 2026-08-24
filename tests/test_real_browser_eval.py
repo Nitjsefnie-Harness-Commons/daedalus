@@ -20,7 +20,7 @@ from _realbrowser import (browser_requirements, cdp_call,  # noqa: E402
                           real_eval, real_ext_command, real_extension_page)
 from _repo import EXTENSION_ROOT  # noqa: E402
 sys.path.insert(0, str(_util.ROOT))
-import daedalus_cli.cli as CLI_MODULE  # noqa: E402
+import daedalus_cli.output as CLI_OUTPUT  # noqa: E402
 
 
 def test_hostile_page_eval_matrix_has_descriptive_channels_only(tmp):
@@ -38,7 +38,7 @@ def test_hostile_page_eval_matrix_has_descriptive_channels_only(tmp):
         assert 'result' in actual, (label, actual)
         world = actual.get('world')
         assert isinstance(world, str) and world, (label, actual)
-        rendered = CLI_MODULE._format_eval_world(world)
+        rendered = CLI_OUTPUT._format_eval_world(world)
         assert rendered == f'channel={world}', (label, actual, rendered)
         assert 'privileged' not in rendered, (label, actual, rendered)
         assert 'untrusted' not in rendered, (label, actual, rendered)
