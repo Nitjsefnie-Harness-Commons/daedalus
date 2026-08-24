@@ -35,7 +35,7 @@ That is fine in both directions.
 
 ### If you are an agent reading this
 
-Read [`CLAUDE.md`](CLAUDE.md) first — it is the architecture and endpoint
+Read [`AGENTS.md`](AGENTS.md) first — it is the architecture and endpoint
 brief, and its field names (`id`, `code`, `type`, `tab`, `token`, `_did`) are
 exact. It says, and means:
 

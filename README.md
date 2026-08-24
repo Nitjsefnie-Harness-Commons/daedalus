@@ -80,7 +80,7 @@ The bridge token is the one the extension generates on install — visible in th
 
 That example fronts the MCP server with a public hostname, but the transport's default allowed hosts are loopback-only (`127.0.0.1:*,localhost:*`): name the public hostname in `DAEDALUS_MCP_ALLOWED_HOSTS` or the proxied requests are rejected. See "Server" below for all three MCP settings.
 
-40 tools in 7 groups — tabs, eval/debug, media, cookies, CSS/blocking, hotfixes, network/CDP. See `CLAUDE.md` `<mcp>` section for the full list, or call `tools/list` on the MCP endpoint.
+40 tools in 7 groups — tabs, eval/debug, media, cookies, CSS/blocking, hotfixes, network/CDP. See `AGENTS.md` `<mcp>` section for the full list, or call `tools/list` on the MCP endpoint.
 
 Manual verification helper (no MCP client needed):
 
@@ -303,7 +303,7 @@ Authenticated `GET` routes take the same header, and every in-repo client sends 
 
 The in-process MCP front end takes three optional settings, documented together because they describe one listener: `DAEDALUS_MCP_PORT` (default `8086`) is the loopback port it binds; its tool handlers use the bridge's actual bound loopback URL, including when `DAEDALUS_PORT=0`; `DAEDALUS_LOCAL_URL` explicitly overrides that URL for a standalone MCP deployment fronting a bridge that runs elsewhere; and `DAEDALUS_MCP_ALLOWED_HOSTS` (default `127.0.0.1:*,localhost:*`) is the comma-separated host allowlist its DNS-rebinding protection accepts, so fronting `/mcp` with a public hostname means naming that hostname there.
 
-Endpoints: `GET /stream`, `GET /tabs`, `GET /health`, `GET /dashboard[/<asset>]`, `POST /register`, `POST /sync-tabs`, `POST /unregister`, `POST /poll`, `POST /result`, `PUT /command`, `GET /result`, `POST/GET/DELETE /upload`, `GET /screenshot`, `POST /segment-job` (mint) + `GET /segment-job` (look up without minting), `POST /segment` + `GET /segment-status`. `POST /segment-job` requires the configured bridge token; only `POST /segment` and `GET /segment-status` take the job-scoped `sig`, in the `X-Daedalus-Segment-Sig` header or the `sig` query parameter. See `CLAUDE.md` for payload and endpoint notes.
+Endpoints: `GET /stream`, `GET /tabs`, `GET /health`, `GET /dashboard[/<asset>]`, `POST /register`, `POST /sync-tabs`, `POST /unregister`, `POST /poll`, `POST /result`, `PUT /command`, `GET /result`, `POST/GET/DELETE /upload`, `GET /screenshot`, `POST /segment-job` (mint) + `GET /segment-job` (look up without minting), `POST /segment` + `GET /segment-status`. `POST /segment-job` requires the configured bridge token; only `POST /segment` and `GET /segment-status` take the job-scoped `sig`, in the `X-Daedalus-Segment-Sig` header or the `sig` query parameter. See `AGENTS.md` for payload and endpoint notes.
 
 `POST /poll` consumes and deletes the legacy broadcast command file when one is present.
 
