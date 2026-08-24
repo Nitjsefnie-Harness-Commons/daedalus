@@ -386,12 +386,40 @@ _stream_lock = threading.Lock()
 _result_lock = threading.Lock()
 
 
+_REPLACE_ATTEMPTS = 5
+_REPLACE_RETRY_DELAY = 0.02
+
+
+def _replace_atomically(src, dst):
+    """Publish `src` over `dst`, retrying a transient sharing violation.
+
+    Windows refuses a replace while any handle is open on the target, and that
+    handle need not be the bridge's -- a scanner that opens a file the moment
+    it appears is enough. It clears on its own within milliseconds, so without
+    a retry the bridge answers 500 for a write that was about to succeed and
+    discards data a caller already produced.
+
+    Only PermissionError is retried. A replace refused because the volume is
+    read-only or the disk is full is not going to start working, and waiting
+    on it would delay the error that explains what happened instead of fixing
+    anything.
+    """
+    for remaining in range(_REPLACE_ATTEMPTS - 1, -1, -1):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if not remaining:
+                raise
+            time.sleep(_REPLACE_RETRY_DELAY)
+
+
 def _atomic_result_write(path, data):
     """Replace one result slot only after its temp file is fully written."""
     tmp = path.parent / f'.result-{uuid.uuid4().hex}.tmp'
     try:
         tmp.write_bytes(data)
-        os.replace(tmp, path)
+        _replace_atomically(tmp, path)
     except OSError:
         try:
             tmp.unlink()
@@ -606,7 +634,7 @@ def _enqueue_command(token, tab, cmd):
         tmp = qdir / f'.{seq}.tmp'
         try:
             tmp.write_text(json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
-            os.replace(str(tmp), str(qdir / f'{seq}.json'))
+            _replace_atomically(str(tmp), str(qdir / f'{seq}.json'))
         except (OSError, UnicodeEncodeError):
             # A refused enqueue must not leave its hidden temp behind: the
             # zero-byte artifact would sit in the queue until the background
@@ -810,7 +838,7 @@ def _write_segment_usage(job, count, stored):
     tmp = path.with_name(f'.{path.name}.tmp')
     try:
         tmp.write_text(json.dumps(record), encoding='utf-8')
-        os.replace(tmp, path)
+        _replace_atomically(tmp, path)
     except OSError:
         # The segment itself is already stored, so a usage update that cannot
         # be written leaves the record at its previous totals rather than
@@ -2110,7 +2138,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(413, {'error': 'job byte limit exceeded'})
                 try:
                     tmp.write_bytes(raw)
-                    os.replace(tmp, final)
+                    _replace_atomically(tmp, final)
                 finally:
                     try:
                         tmp.unlink()
@@ -2312,7 +2340,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 try:
                     tmp.write_text(json.dumps(record), encoding='utf-8')
-                    os.replace(tmp, record_path)
+                    _replace_atomically(tmp, record_path)
                 except OSError:
                     try:
                         tmp.unlink()
@@ -2344,7 +2372,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
                 tmp.write_text(json.dumps(record), encoding='utf-8')
-                os.replace(tmp, record_path)  # atomic publish
+                _replace_atomically(tmp, record_path)  # atomic publish
             except OSError:
                 # Job names may contain dots, so the flat namespace collides
                 # in EITHER minting order: with job 'a' taken, this mkdir for

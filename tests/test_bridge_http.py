@@ -3912,5 +3912,64 @@ def test_a_query_sig_still_authorizes_a_segment_route(tmp):
             status, payload)
 
 
+def _replace_fault(tmp, name, failures):
+    """A bridge whose os.replace refuses result-slot publishes `failures` times.
+
+    Windows refuses a replace while any handle is open on the target, and the
+    handle need not belong to the bridge. That cannot be produced on demand on
+    a POSIX runner, so the sharing violation it raises is injected instead:
+    what is under test is what the bridge does about it, not the platform.
+    """
+    fault_dir = Path(tmp) / name
+    fault_dir.mkdir()
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import os\n'
+        '_real_replace = os.replace\n'
+        '_left = [' + str(failures) + ']\n'
+        'def _sharing_violation(src, dst, **kw):\n'
+        '    if os.path.basename(str(dst)).startswith("' + TOK + '"):\n'
+        '        if _left[0]:\n'
+        '            _left[0] -= 1\n'
+        '            raise PermissionError(32, "injected sharing violation")\n'
+        '    return _real_replace(src, dst, **kw)\n'
+        'os.replace = _sharing_violation\n',
+        encoding='utf-8')
+    return {'PYTHONPATH': str(fault_dir)}
+
+
+def test_a_result_write_survives_a_transient_replace_failure(tmp):
+    """A replace that fails once and then works must not lose the result.
+
+    The slot is published by replacing it, and on Windows that replace fails
+    for as long as anything else holds the target open. Answering 500 for a
+    write that was about to succeed discards a result the extension already
+    computed and reported.
+    """
+    env = _replace_fault(tmp, 'transient-replace-fault', 1)
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        status, payload = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': 'retried', 'id': 'kept', 'result': 'value'})
+        assert status == 200 and payload == {'ok': True}, (status, payload)
+        slot = Path(docroot) / 'results' / f'{TOK}_retried.json'
+        assert slot.is_file(), sorted((Path(docroot) / 'results').iterdir())
+        stored = json.loads(slot.read_text(encoding='utf-8'))
+        assert stored['result'] == 'value', stored
+
+
+def test_a_replace_that_never_clears_is_still_answered(tmp):
+    """The retry is bounded: a violation that never clears is not waited on.
+
+    A refusal that is permanent - a read-only volume, a full disk - is not
+    going to start working, and a bridge that kept retrying would hold the
+    result lock instead of answering.
+    """
+    env = _replace_fault(tmp, 'permanent-replace-fault', 1000)
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        status, payload = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': 'refused', 'id': 'lost', 'result': 'value'})
+        assert status == 500, (status, payload)
+        assert payload == {'error': 'result storage failure'}, payload
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
