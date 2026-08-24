@@ -30,6 +30,13 @@ const KEYED_STORAGE_HANDLERS = new Set(['getValue', 'setValue', 'deleteValue']);
 // the request settles and when it is cancelled, so an abort arriving after
 // either finds nothing and does nothing.
 const _fetchIds = {};
+// A per-frame prefix and a counter, from JS builtins rather than a host API:
+// the id only has to be unique among the fetches this frame has in flight.
+// It is not a capability — an abort can only name an id this frame's own map
+// still holds, so another frame's request is unreachable however guessable
+// the string is.
+const _fetchIdPrefix = Math.random().toString(36).slice(2);
+let _fetchSeq = 0;
 
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data || e.data.direction !== 'daedalus-page-to-bg') return;
@@ -64,7 +71,7 @@ window.addEventListener('message', (e) => {
   }
 
   if (msg.handler === 'xmlhttpRequest') {
-    const fetchId = crypto.randomUUID();
+    const fetchId = `${_fetchIdPrefix}-${++_fetchSeq}`;
     _fetchIds[reqId] = fetchId;
     chrome.runtime.sendMessage({
       type: 'fetch',

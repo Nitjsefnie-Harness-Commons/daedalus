@@ -1705,7 +1705,6 @@ const relayContext = vm.createContext({
   location: { hostname: relayHostname },
   performance,
   evalResolvers,
-  crypto: { randomUUID: () => 'fetch-' + (++relaySequence) },
   Blob,
   URL,
   Uint8Array,
