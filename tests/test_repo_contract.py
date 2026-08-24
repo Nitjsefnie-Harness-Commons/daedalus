@@ -4432,6 +4432,42 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
+def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
+    """Before merge, and against the base SHA rather than the last release.
+
+    The gate ran on push alone, so a regression was measured only after it had
+    landed. Two details make the pull-request half mean anything: the baseline
+    is the exact base SHA — the last release would fold every commit merged
+    since into the number and attribute all of it to whoever opened the pull
+    request — and the candidate is the pull request's own head rather than the
+    merge commit `actions/checkout` defaults to, which is a tree nobody
+    authored and no reviewer can point at.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
+        encoding='utf-8')
+    triggers, _, jobs = workflow.partition('permissions:')
+    assert '\n  pull_request:' in triggers, triggers
+    # pull_request_target would run the proposed code with a writable token
+    # and the base repository's secrets in reach. Checked against the trigger
+    # block alone: the workflow's own comment says why it is not used, and a
+    # whole-file search would match that comment.
+    assert '\n  pull_request_target:' not in triggers, triggers
+    assert 'contents: read' in workflow, workflow
+    assert 'github.event.pull_request.base.sha' in jobs, jobs
+    assert 'github.event.pull_request.head.sha' in jobs, jobs
+    # Two open pull requests must not cancel each other.
+    assert 'group: speed-${{ github.event.pull_request.number' in workflow
+
+    # The base SHA is payload; it must travel by environment rather than be
+    # expanded inside the script that consumes it.
+    _, marker, after = workflow.partition('PR_BASE: ${{')
+    assert marker, 'the base SHA does not reach the script by environment'
+    script, _, _ = after.partition('- name: Check out this commit')
+    _, _, body = script.partition('run: |')
+    assert '${{' not in body, 'an expression is interpolated into the script'
+
+
 def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     """Each dependency manifest in the tree has an ecosystem watching it.
 

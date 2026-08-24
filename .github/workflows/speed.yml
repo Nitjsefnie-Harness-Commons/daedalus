@@ -18,6 +18,14 @@ name: speed
 # release that got slower because a bumped library got slower is a real
 # regression that holding dependencies fixed would hide.
 #
+# TWO BASELINES, chosen by what the run is answering. On a push to a branch
+# the question is "is this line slower than what we shipped", so the baseline
+# is the last release. On a pull request the question is "did THIS branch make
+# it slower", so the baseline is the exact base SHA the branch would merge
+# into — comparing a branch against the last release instead would fold every
+# commit merged since that release into the number and attribute all of it to
+# whoever opened the pull request. Both go through the same machinery below.
+#
 # The comparison — intersect on test name, so adding or removing a test cannot
 # move the number — lives in scripts/ci/compare_durations.py, which has its own
 # tests. Its module docstring explains why total wall time is the wrong metric.
@@ -37,13 +45,24 @@ on:
       - '**/*.md'
       - 'LICENSE'
       - '.gitignore'
+  # `pull_request`, never `pull_request_target`: this job checks out and RUNS
+  # the proposed code, and pull_request_target would run it with a writable
+  # token and the base repository's secrets in reach.
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: speed-${{ github.ref }}
+  # Keyed by pull request where there is one, so two open pull requests do not
+  # cancel each other — on a pull_request event github.ref is the same
+  # refs/pull/N/merge shape but the number is what identifies the work.
+  group: speed-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -59,33 +78,41 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
-      - name: Find the baseline release
+      - name: Find the baseline
         id: baseline
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        # Values reach this script through the environment rather than through
+        # `${{ }}` inside it, so nothing a payload carries is ever expanded as
+        # shell.
+        #
         # `gh api` on a 404 prints its JSON error body to STDOUT and exits
         # nonzero. Ending this in `|| true` would discard the exit code and
-        # assign that blob to $tag — so the "no release yet" guard would see a
+        # assign that blob to $ref — so the "no release yet" guard would see a
         # non-empty string, fall through, and hand actions/checkout a refspec
         # made of JSON. Hence both belts: branch on the EXIT CODE, then
         # validate the SHAPE, so no payload can reach a git command as a ref.
         run: |
-          tag=""
-          if out="$(gh api -H "Cache-Control: no-cache" \
-                    "repos/$REPO/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
-            tag="$out"
+          ref=""
+          if [ "$EVENT" = pull_request ]; then
+            ref="$PR_BASE"
+          elif out="$(gh api -H "Cache-Control: no-cache" \
+                      "repos/$REPO/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
+            ref="$out"
           fi
-          case "$tag" in
-            null) tag="" ;;
+          case "$ref" in
+            null) ref="" ;;
             *[!A-Za-z0-9._-]*)
-              echo "Unexpected payload where a tag was expected; treating" >&2
+              echo "Unexpected payload where a ref was expected; treating" >&2
               echo "as 'no baseline' rather than passing it to git." >&2
-              tag=""
+              ref=""
               ;;
           esac
-          if [ -z "$tag" ]; then
-            echo "tag=" >> "$GITHUB_OUTPUT"
+          if [ -z "$ref" ]; then
+            echo "ref=" >> "$GITHUB_OUTPUT"
             echo "No release exists yet, so there is no baseline to compare"
             echo "against. This becomes a real gate once release.yml cuts one."
             {
@@ -94,33 +121,39 @@ jobs:
               echo "Skipped: no release exists yet to use as a baseline."
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "tag=$tag" >> "$GITHUB_OUTPUT"
-            echo "Baseline: $tag"
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+            echo "Baseline: $ref"
           fi
 
       - name: Check out this commit
-        if: steps.baseline.outputs.tag != ''
+        if: steps.baseline.outputs.ref != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          # The exact head of the pull request, not the merge commit checkout
+          # defaults to on that event: the merge commit is a tree nobody
+          # authored, and a duration measured on it belongs to no reviewable
+          # SHA. On a push there is no pull request and github.sha is the
+          # pushed commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: head
           persist-credentials: false
 
-      - name: Check out the baseline release
-        if: steps.baseline.outputs.tag != ''
+      - name: Check out the baseline
+        if: steps.baseline.outputs.ref != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ steps.baseline.outputs.tag }}
+          ref: ${{ steps.baseline.outputs.ref }}
           path: base
           persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
-        if: steps.baseline.outputs.tag != ''
+        if: steps.baseline.outputs.ref != ''
         with:
           python-version: "3.13"
           cache: pip
 
       - name: Build one virtualenv per side
-        if: steps.baseline.outputs.tag != ''
+        if: steps.baseline.outputs.ref != ''
         # Separate environments because the two sides pin different versions,
         # and a shared one would silently benchmark whichever resolved last
         # against both trees.
@@ -141,7 +174,7 @@ jobs:
           echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
 
       - name: Run both suites, interleaved
-        if: steps.baseline.outputs.tag != ''
+        if: steps.baseline.outputs.ref != ''
         # A failing test does NOT fail this job: tests.yml owns that verdict,
         # and a non-passing test is simply absent from the side's durations and
         # drops out of the intersection. What this step must guarantee is that
@@ -178,9 +211,9 @@ jobs:
           ls -la reports/*/
 
       - name: Compare
-        if: steps.baseline.outputs.tag != ''
+        if: steps.baseline.outputs.ref != ''
         env:
-          BASE_TAG: ${{ steps.baseline.outputs.tag }}
+          BASE_LABEL: ${{ steps.baseline.outputs.ref }}
         # The comparator comes from the HEAD checkout, so an improvement to the
         # comparison itself takes effect on the commit that makes it rather
         # than one release later.
@@ -190,12 +223,12 @@ jobs:
             --base $(ls -d reports/base-*) \
             --head $(ls -d reports/head-*) \
             --max-regression "$MAX_REGRESSION" \
-            --base-label "$BASE_TAG" \
+            --base-label "$BASE_LABEL" \
             --require-measurements \
             --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the duration summaries
-        if: ${{ !cancelled() && steps.baseline.outputs.tag != '' }}
+        if: ${{ !cancelled() && steps.baseline.outputs.ref != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: speed-durations
