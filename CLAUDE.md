@@ -64,7 +64,7 @@ Filesystem-backed caller values share `_unsafe_component`: reject `..`, C0/C1 co
 
 Every newly minted segment job records fixed values from `DAEDALUS_MAX_SEGMENT_INDEX` (default `99999`), `DAEDALUS_MAX_SEGMENTS_PER_JOB` (default `10000`), and `DAEDALUS_MAX_SEGMENT_JOB_SIZE` (default `4 * 1024 * 1024 * 1024` bytes). Existing jobs with valid quota fields continue to use their recorded values; the request-body limit separately caps each segment POST.
 
-`GET /upload` accepts optional `&limit=N&offset=M` (default limit 200 when either is set); when paged, returns `{items, total, limit, offset}` instead of a bare array.
+`GET /upload` accepts optional `&limit=N&offset=M` (default limit 200 when either is set); when paged, returns `{items, total, limit, offset}` instead of a bare array. A page bounds the work as well as the answer: every stored file is counted, because `total` says how many pages there are, but only the page's own files are statted for size and mtime.
 
 The dashboard subscribes to `/stream?tab=dashboard`. Events (not commands) are enqueued into `commands/{token}_dashboard/<ts>_<uuid>.json` by `_notify_dashboard` in server.py; the SSE loop drains that directory per tick. Emitted from: `/register` (`tab-updated`), `/sync-tabs` (`tabs-synced`), `/unregister` (`tab-unregistered`), `/result` (`result`). Dashboard frames carry `kind: 'event'`; broadcast eval frames that also reach the dashboard stream are ignored client-side.
 </endpoints>

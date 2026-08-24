@@ -1180,6 +1180,61 @@ def test_a_filename_without_an_id_deletes_nothing(tmp):
         assert (root / 'beta' / 'two.txt').is_file(), sorted(root.rglob('*'))
 
 
+def test_upload_pagination_bounds_the_work_not_only_the_answer(tmp):
+    """A page of one must not cost a stat of every file in the namespace.
+
+    Pagination bounded the response and nothing else: every upload directory
+    was enumerated, every file statted twice to build a record, the whole list
+    materialized, and only then sliced. The count still has to visit every
+    entry — `total` says how many pages there are — but counting an entry is
+    what the kernel already told us, and describing one is a syscall.
+
+    Measured rather than asserted about the code: sitecustomize counts every
+    os.stat under the uploads root, so the number is what the handler actually
+    did.
+    """
+    fault_dir = Path(tmp) / 'stat-counter'
+    fault_dir.mkdir()
+    counts = Path(tmp) / 'stat-calls'
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import os\n'
+        '_real = os.stat\n'
+        '_log = open(os.environ["STAT_LOG"], "ab", buffering=0)\n'
+        'def _counted(path, *args, **kwargs):\n'
+        '    try:\n'
+        '        if "uploads" in os.fspath(path):\n'
+        '            _log.write(b".")\n'
+        '    except TypeError:\n'
+        '        pass\n'
+        '    return _real(path, *args, **kwargs)\n'
+        'os.stat = _counted\n',
+        encoding='utf-8')
+    env = {'PYTHONPATH': str(fault_dir), 'STAT_LOG': str(counts)}
+    ids, per_id = 4, 15
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        for id_index in range(ids):
+            for file_index in range(per_id):
+                status, _ = _util.post_json(base + '/upload', {
+                    'token': TOK, 'id': f'batch{id_index}',
+                    'filename': f'file{file_index}.txt',
+                    'data': base64.b64encode(b'x').decode()})
+                assert status == 200, status
+
+        before = counts.stat().st_size
+        query = urllib.parse.urlencode({'token': TOK, 'limit': 1, 'offset': 0})
+        status, body = _util.get_json(f'{base}/upload?{query}')
+        after = counts.stat().st_size
+    assert status == 200, (status, body)
+    assert body['total'] == ids * per_id, body
+    assert len(body['items']) == 1, body
+
+    stats = after - before
+    # One per id directory to order them, one for the file being described.
+    # The old shape was two per file across the whole namespace.
+    assert stats <= ids + 4, (
+        f'listing one upload cost {stats} stats over {ids * per_id} files')
+
+
 def test_upload_pagination_is_validated_before_the_directory_is_looked_at(tmp):
     """The same query must get the same answer whether or not files exist.
 

@@ -176,6 +176,36 @@ def _bad_token(token):
             or '.' in token or '_' in token)
 
 
+def _stored_uploads(token_dir, upload_id):
+    """Every stored file, newest id first and by name within an id.
+
+    os.scandir rather than iterdir: the kernel already said whether an entry
+    is a file or a directory, and asking pathlib the same question is a stat
+    per entry. Deciding WHICH entries exist is separated here from describing
+    them, so a caller can count everything while statting only what it is
+    about to return.
+
+    The order is the one the listing has always had, because a page is only
+    meaningful if the sequence it slices is stable between requests.
+    """
+    if upload_id:
+        id_dirs = [token_dir / upload_id]
+    else:
+        with os.scandir(token_dir) as entries:
+            dirs = [entry for entry in entries if entry.is_dir()]
+        dirs.sort(key=lambda entry: os.stat(entry.path).st_mtime, reverse=True)
+        id_dirs = [pathlib.Path(entry.path) for entry in dirs]
+    for id_dir in id_dirs:
+        try:
+            with os.scandir(id_dir) as entries:
+                files = [entry for entry in entries if entry.is_file()]
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        files.sort(key=lambda entry: entry.name)
+        for entry in files:
+            yield id_dir.name, entry
+
+
 def _json_nests_deeper_than(raw, limit):
     """True when `raw` opens more than `limit` unclosed containers at once.
 
@@ -1502,36 +1532,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {'items': [], 'total': 0,
                                         'limit': lim, 'offset': off})
             return self._json(200, [])
+        # Counting is not describing. Every stored file is counted, because
+        # `total` says how many pages there are; only the page's own files are
+        # statted, because size and mtime are a syscall each. `limit=1` used
+        # to stat every file in the namespace twice to describe one of them.
+        window = range(off, off + lim) if paged else None
         results = []
-        if upload_id:
-            id_dir = token_dir / upload_id
-            if id_dir.is_dir():
-                for f in sorted(id_dir.iterdir()):
-                    if f.is_file():
-                        results.append({
-                            'id': upload_id,
-                            'filename': f.name,
-                            'size': f.stat().st_size,
-                            'mtime': int(f.stat().st_mtime),
-                            'path': f'{token}/{upload_id}/{f.name}',
-                        })
-        else:
-            # Sort id_dirs by mtime desc so newest uploads appear first
-            id_dirs = [d for d in token_dir.iterdir() if d.is_dir()]
-            id_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
-            for id_dir in id_dirs:
-                for f in sorted(id_dir.iterdir()):
-                    if f.is_file():
-                        results.append({
-                            'id': id_dir.name,
-                            'filename': f.name,
-                            'size': f.stat().st_size,
-                            'mtime': int(f.stat().st_mtime),
-                            'path': f'{token}/{id_dir.name}/{f.name}',
-                        })
+        total = 0
+        for index, (id_name, entry) in enumerate(
+                _stored_uploads(token_dir, upload_id)):
+            total += 1
+            if window is not None and index not in window:
+                continue
+            info = os.stat(entry.path)
+            results.append({
+                'id': id_name,
+                'filename': entry.name,
+                'size': info.st_size,
+                'mtime': int(info.st_mtime),
+                'path': f'{token}/{id_name}/{entry.name}',
+            })
         if paged:
-            total = len(results)
-            return self._json(200, {'items': results[off:off + lim], 'total': total, 'limit': lim, 'offset': off})
+            return self._json(200, {'items': results, 'total': total,
+                                    'limit': lim, 'offset': off})
         return self._json(200, results)
 
     def _segment_admission(self, parsed):
