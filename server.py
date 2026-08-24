@@ -233,7 +233,14 @@ _tab_registry = {}  # {token: {tabId: {url, title, ts}}}
 _tab_lock = threading.Lock()
 
 # ─── Stream dedup: kill old SSE when same tab reconnects ───
-_active_streams = {}  # {(token, tab): threading.Event}  — set() means "die"
+# {stream id: {'key', 'tab', 'killed'}}. Keyed by a per-connection id rather
+# than by (token, tab), because a stream named no tab got no key at all: it
+# served commands and held a worker while being invisible to health and to
+# replacement. `key` is what reconnect-replacement matches on and is None for
+# a tabless stream, which has no identity another connection could claim.
+# `killed` set() means "die".
+_active_streams = {}
+_stream_ids = itertools.count(1)
 _stream_lock = threading.Lock()
 
 # Result files are single-value delivery slots. POST replacement and
@@ -735,17 +742,21 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             print('[STREAM] REJECTED unsafe derived target', flush=True)
             return self._json(400, {'error': 'invalid path component'})
-        # Kill old stream for same tab, register new one
+        # Kill old stream for the same tab, register this one. Every stream is
+        # registered, tabless ones included: one that is not is a worker and a
+        # command consumer that /health cannot see.
         stream_key = (token, tab) if tab else None
-        killed_event = None
-        if stream_key:
-            with _stream_lock:
-                old = _active_streams.get(stream_key)
-                if old:
-                    old.set()  # signal old thread to die
-                    print(f'[STREAM] REPLACED tab={tab[:8]}', flush=True)
-                killed_event = threading.Event()
-                _active_streams[stream_key] = killed_event
+        killed_event = threading.Event()
+        with _stream_lock:
+            if stream_key:
+                for old_id, old in list(_active_streams.items()):
+                    if old['key'] == stream_key:
+                        old['killed'].set()  # signal old thread to die
+                        del _active_streams[old_id]
+                        print(f'[STREAM] REPLACED tab={tab[:8]}', flush=True)
+            stream_id = next(_stream_ids)
+            _active_streams[stream_id] = {
+                'key': stream_key, 'tab': tab, 'killed': killed_event}
         print(f'[STREAM] CONNECT token={token[:8]} tab={tab[:8] if tab else "none"} from={self.client_address[0]}', flush=True)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
@@ -823,10 +834,10 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionError, OSError) as e:
             print(f'[STREAM] DISCONNECT tab={tab[:8] if tab else "none"} err={type(e).__name__}', flush=True)
         finally:
-            if stream_key:
-                with _stream_lock:
-                    if _active_streams.get(stream_key) is killed_event:
-                        del _active_streams[stream_key]
+            with _stream_lock:
+                entry = _active_streams.get(stream_id)
+                if entry is not None and entry['killed'] is killed_event:
+                    del _active_streams[stream_id]
 
     def _write_frame(self, data):
         """Serialize + write+flush one SSE command frame. Raises on socket error."""
@@ -1539,14 +1550,19 @@ class Handler(BaseHTTPRequestHandler):
         """GET /health — bridge liveness for detecting a silently-dead stream."""
         now = time.time()
         with _stream_lock:
-            stream_tabs = sorted({k[1] for k in _active_streams})
+            # One entry per live stream. active_streams used to be the number
+            # of DISTINCT tab names, so two tokens streaming the same tab name
+            # counted once and a tabless stream counted not at all.
+            live_streams = len(_active_streams)
+            stream_tabs = sorted(
+                {entry['tab'] for entry in _active_streams.values()})
         with _tab_lock:
             tokens = len(_tab_registry)
             tabs = sum(len(v) for v in _tab_registry.values())
         return self._json(200, {
             'ok': True,
             'uptime_s': round(now - _server_start_ts, 1),
-            'active_streams': len(stream_tabs),
+            'active_streams': live_streams,
             'stream_tabs': stream_tabs,
             'registry': {'tokens': tokens, 'tabs': tabs},
             'last_delivery_s_ago': round(now - _last_delivery_ts, 1) if _last_delivery_ts else None,

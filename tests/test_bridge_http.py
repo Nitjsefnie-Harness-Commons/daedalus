@@ -235,6 +235,45 @@ def _assert_oversize_stream_matches_enqueue(base):
     assert health_body['ok'] is True, health_body
 
 
+def test_health_counts_a_stream_that_named_no_tab(tmp):
+    """A stream with no tab selector is still a stream.
+
+    It got no entry at all, so it served commands and held a request worker
+    while /health reported zero — and the count it reported was the number of
+    distinct tab NAMES, so two streams sharing a name counted once.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['active_streams'] == 0, health
+
+        tabless_conn, tabless = _stream_response(base, TOK)
+        try:
+            assert tabless.status == 200, tabless.status
+            _util.request(base + '/command', 'PUT',
+                          body={'token': TOK, 'id': 'wake', 'code': '1'})
+            assert _next_stream_data(tabless).get('id') == 'wake'
+            status, health = _util.get_json(base + '/health')
+            assert status == 200 and health['active_streams'] == 1, health
+            assert health['stream_tabs'] == [''], health
+
+            named_conn, named = _stream_response(base, TOK, tab='extension')
+            try:
+                assert named.status == 200, named.status
+                deadline = time.time() + 10
+                while True:
+                    status, health = _util.get_json(base + '/health')
+                    if health['active_streams'] == 2:
+                        break
+                    assert time.time() < deadline, health
+                assert health['stream_tabs'] == ['', 'extension'], health
+            finally:
+                named.close()
+                named_conn.close()
+        finally:
+            tabless.close()
+            tabless_conn.close()
+
+
 def test_health_payload(tmp):
     with _util.bridge(tmp) as (base, _docroot):
         status, body = _util.get_json(base + '/health')
