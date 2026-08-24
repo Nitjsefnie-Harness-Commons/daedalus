@@ -58,12 +58,6 @@ export const api = {
   del: (path, body) => req('DELETE', path, body),
 };
 
-export async function getBinary(path) {
-  const r = await fetch(url(path));
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.blob();
-}
-
 // ─── Command execution (PUT /command + poll /result) ───
 //
 // Mirrors mcp_server.py's _ext_cmd / _send_eval flow: write a command, then
