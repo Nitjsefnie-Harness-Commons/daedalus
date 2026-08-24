@@ -1341,6 +1341,31 @@ def test_an_unhashable_upload_format_is_refused_not_dropped(tmp):
         assert status == 200 and body['ok'] is True, (status, body)
 
 
+def test_register_says_whether_it_actually_updated_a_tab(tmp):
+    """Update-only means a tab the registry never had is a no-op, and says so.
+
+    The route answered {'ok': True} either way, so a client whose tab had
+    fallen out of the registry was told its entry had been refreshed. Nothing
+    in the answer let it notice it should re-sync.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        status, body = _util.post_json(base + '/register', {
+            'token': TOK, 'tabId': '404', 'url': 'http://a', 'title': 'a'})
+        assert status == 200, (status, body)
+        assert body == {'ok': True, 'updated': False}, body
+
+        status, _ = _util.post_json(base + '/sync-tabs', {
+            'token': TOK, 'tabs': [{'tabId': '404', 'url': 'http://a',
+                                    'title': 'a'}]})
+        assert status == 200, status
+        status, body = _util.post_json(base + '/register', {
+            'token': TOK, 'tabId': '404', 'url': 'http://b', 'title': 'b'})
+        assert status == 200, (status, body)
+        assert body == {'ok': True, 'updated': True}, body
+        status, tabs = _util.get_json(base + f'/tabs?token={TOK}')
+        assert [t['url'] for t in tabs] == ['http://b'], tabs
+
+
 def test_upload_validation_and_traversal(tmp):
     with _util.bridge(tmp) as (base, docroot):
         docroot = Path(docroot)
@@ -1957,16 +1982,19 @@ def test_tabs_registry(tmp):
             base + '/register',
             {'token': TOK, 'tabId': '11', 'url': 'https://example.com/c',
              'title': 'C'})
-        assert status == 200 and body == {'ok': True}, (status, body)
+        assert status == 200 and body == {'ok': True, 'updated': True}, (
+            status, body)
         status, body = _util.get_json(base + f'/tabs?token={TOK}')
         by_id = {t['tabId']: t for t in body}
         assert by_id['11']['title'] == 'C' and len(body) == 2
 
-        # ...but never creates one (sync-tabs is authoritative).
-        status, _ = _util.post_json(
+        # ...but never creates one (sync-tabs is authoritative), and says so
+        # rather than reporting the no-op as a refresh.
+        status, body = _util.post_json(
             base + '/register',
             {'token': TOK, 'tabId': '33', 'url': 'https://example.com/d'})
-        assert status == 200, status
+        assert status == 200 and body == {'ok': True, 'updated': False}, (
+            status, body)
         status, body = _util.get_json(base + f'/tabs?token={TOK}')
         assert len(body) == 2, body
 

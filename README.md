@@ -286,7 +286,7 @@ Endpoints: `GET /stream`, `GET /tabs`, `GET /health`, `GET /dashboard[/<asset>]`
 
 `POST /poll` consumes and deletes the legacy broadcast command file when one is present.
 
-`PUT /command` enqueues into a per-target FIFO directory queue (back-to-back commands to one tab no longer overwrite), stamps each with a delivery id (`_did`) so the extension can dedup a redelivered frame, and TTL-drops commands unclaimed after `DAEDALUS_CMD_TTL` seconds (default 90). A background collector applies that TTL and removes empty queue directories even when no SSE consumer ever connects. `GET /health` reports stream/registry/last-delivery liveness for detecting a silently-dead bridge.
+`PUT /command` enqueues into a per-target FIFO directory queue (back-to-back commands to one tab no longer overwrite), stamps each with a delivery id (`_did`) so the extension can dedup a redelivered frame, and TTL-drops commands unclaimed after `DAEDALUS_CMD_TTL` seconds (default 90). A background collector applies that TTL and removes empty queue directories even when no SSE consumer ever connects. `GET /health` reports stream/registry/last-delivery liveness for detecting a silently-dead bridge. `POST /register` is update-only and answers `{ok, updated}`; `updated: false` means the registry held no such tab, so the client should re-sync through `POST /sync-tabs` instead of treating the call as a refresh.
 
 The bridge rejects repeated authority carriers instead of selecting one value:
 this includes `token` in query strings or JSON bodies and `job` / `sig` on the

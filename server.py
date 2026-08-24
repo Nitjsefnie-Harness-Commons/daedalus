@@ -1108,7 +1108,13 @@ class Handler(BaseHTTPRequestHandler):
                     updated = True
             if updated:
                 _notify_dashboard(token, {'type': 'tab-updated', 'tabId': tab_id, 'url': url, 'title': title})
-            return self._json(200, {'ok': True})
+            # This route is update-only, so a tab the registry has never seen
+            # is a no-op — and answering it {'ok': True} told the caller its
+            # state had been refreshed when nothing had. `updated` is what
+            # separates the two, so a client whose tab has fallen out of the
+            # registry can notice and re-sync instead of reporting stale
+            # entries forever.
+            return self._json(200, {'ok': True, 'updated': updated})
 
         elif self.path == '/sync-tabs':
             # Replace entire tab registry for this token with provided list
