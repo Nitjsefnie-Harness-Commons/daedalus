@@ -4201,6 +4201,7 @@ def test_check_versions_detects_drift(tmp):
     assert n == 1, text
     init_copy.write_text(new_text, encoding='utf-8')
     r = subprocess.run([sys.executable, str(copy_root / 'scripts' / 'check_versions.py')],
+                       cwd=str(copy_root),
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
     assert 'FAIL' in r.stderr, r.stderr
@@ -4213,11 +4214,155 @@ def test_check_versions_sites_all_present_in_copy(tmp):
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     r = subprocess.run([sys.executable, str(copy_root / 'scripts' / 'check_versions.py')],
+                       cwd=str(copy_root),
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     expected = len({(p, d) for p, d, _ in checker.SITES})
     m = re.search(r'consistent across (\d+) sites', r.stdout)
     assert m and int(m.group(1)) == expected, r.stdout
+
+
+def _versioned_git_tree(tmp):
+    """A copied versioned tree that is also a git repository with one commit.
+
+    `read_source` reaches the index and a revision through `git show`, so the
+    only way to exercise those two branches is against a real repository.
+    """
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    for argv in (['git', 'init', '-q'],
+                 ['git', 'config', 'user.email', 'tests@example.invalid'],
+                 ['git', 'config', 'user.name', 'Tests'],
+                 ['git', 'add', '-A'],
+                 ['git', 'commit', '-qm', 'versioned tree']):
+        subprocess.run(argv, cwd=str(copy_root), capture_output=True,
+                       text=True, timeout=60, check=True)
+    return copy_root, checker
+
+
+def _break_one_site(copy_root, replacement='0.0.0-drift'):
+    """Rewrite the package version in the COPY, never the real file."""
+    init_copy = copy_root / 'daedalus_cli' / '__init__.py'
+    text = init_copy.read_text(encoding='utf-8')
+    new_text, n = re.subn(r'__version__\s*=\s*"[^"]+"',
+                          f'__version__ = "{replacement}"', text)
+    assert n == 1, text
+    init_copy.write_text(new_text, encoding='utf-8')
+
+
+def _run_checker(copy_root, *args):
+    """Run the copied checker from inside the copy.
+
+    `cwd` is what decides whether the run is measured at all: coverage
+    resolves its relative `source` against the process's own directory, so a
+    copy driven from the repository root is outside the measured tree and its
+    lines are silently absent from the report. The checker itself is
+    indifferent — it derives its own root from `__file__`.
+    """
+    return subprocess.run(
+        [sys.executable, str(copy_root / 'scripts' / 'check_versions.py'),
+         *args],
+        cwd=str(copy_root), capture_output=True, text=True, timeout=60)
+
+
+def test_check_versions_set_rewrites_every_site(tmp):
+    """--set is the whole point of the script: one pass, every site."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    r = _run_checker(copy_root, '--set', '9.9.9')
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    for path, desc, pattern in checker.SITES:
+        text = (copy_root / path).read_text(encoding='utf-8')
+        m = re.search(pattern, text)
+        assert m, (path, desc)
+        assert m.group('v') == '9.9.9', (path, desc, m.group('v'))
+
+
+def test_check_versions_set_spells_a_suffix_the_way_chrome_accepts_it(tmp):
+    """Chrome refuses a letter suffix, so the manifest carries it as a fourth
+    numeric segment. Every other site keeps the suffix verbatim."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    r = _run_checker(copy_root, '--set', '9.9.9a')
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    for path, desc, pattern in checker.SITES:
+        text = (copy_root / path).read_text(encoding='utf-8')
+        m = re.search(pattern, text)
+        assert m, (path, desc)
+        expected = '9.9.9.1' if path == checker.MANIFEST[0] else '9.9.9a'
+        assert m.group('v') == expected, (path, desc, m.group('v'))
+
+
+def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
+    """--set writes the working tree, so naming another source is a mistake
+    the script must refuse rather than half-honour."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    for source in (['--staged'], ['--rev', 'HEAD']):
+        r = _run_checker(copy_root, '--set', '9.9.9', *source)
+        assert r.returncode != 0, (source, r.returncode, r.stdout, r.stderr)
+        assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
+
+
+def test_check_versions_reads_the_index_and_a_revision(tmp):
+    """--staged and --rev read through git show, not the working tree, so a
+    dirty file must not change what either one reports."""
+    copy_root, _checker = _versioned_git_tree(tmp)
+    _break_one_site(copy_root)
+    committed = _run_checker(copy_root, '--rev', 'HEAD')
+    assert committed.returncode == 0, (committed.stdout, committed.stderr)
+    staged = _run_checker(copy_root, '--staged')
+    assert staged.returncode == 0, (staged.stdout, staged.stderr)
+    # The working tree is the one that disagrees.
+    worktree = _run_checker(copy_root)
+    assert worktree.returncode == 1, (worktree.stdout, worktree.stderr)
+
+
+def test_check_versions_reports_a_revision_it_cannot_read(tmp):
+    """A revision that does not exist is named, not reported as drift."""
+    copy_root, _checker = _versioned_git_tree(tmp)
+    r = _run_checker(copy_root, '--rev', 'no-such-revision')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'cannot read' in r.stderr, r.stderr
+
+
+def test_check_versions_reports_a_site_that_changed_shape(tmp):
+    """A site whose line no longer matches is a stale SITES entry, and saying
+    so is the difference between fixing the script and hunting a version."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, _pattern = checker.SITES[0]
+    target = copy_root / path
+    target.write_text('{"nothing": "here"}\n', encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'no version found' in r.stderr, r.stderr
+    assert desc in r.stderr, (desc, r.stderr)
+
+
+def test_check_versions_set_reports_a_site_it_cannot_rewrite(tmp):
+    """--set refuses a site whose line no longer matches rather than writing
+    some files and abandoning the rest at the old version."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, _pattern = checker.SITES[0]
+    (copy_root / path).write_text('{"nothing": "here"}\n', encoding='utf-8')
+    r = _run_checker(copy_root, '--set', '9.9.9')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'no version found' in r.stderr, r.stderr
+    assert desc in r.stderr, (desc, r.stderr)
+
+
+def test_check_versions_print_refuses_a_tree_that_disagrees(tmp):
+    """--print feeds another program. Handing it a version from a tree whose
+    sites disagree is worse than failing, so stdout stays empty."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    _break_one_site(copy_root)
+    r = _run_checker(copy_root, '--print')
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert r.stdout.strip() == '', r.stdout
+    assert 'FAIL' in r.stderr, r.stderr
 
 
 # GM.info is metadata about the shim, not a capability it grants, so the
