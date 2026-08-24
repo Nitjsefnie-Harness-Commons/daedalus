@@ -96,5 +96,7 @@ arguments are read by the CLI process and sent as inline content.
 - **Hotfixes**: `store_hotfix`, `clear_hotfix`, `clear_hotfixes`, `list_hotfixes`, `set_permanent`
 - **Network / CDP**: `net_capture`, `net_capture_stop`, `net_capture_get`, `cdp`, `fetch_timings`
 
+`net_capture`'s `max_requests` is an integer from 1 to 20000 (`NET_CAPTURE_MAX`, the same ceiling the CLI's `--max` and the extension both enforce); the buffer lives in the service worker and grows to hold headers and bodies, so the bound is a memory budget rather than a preference.
+
 Manual verification helper: `TOKEN=<tok> python3 scripts/mcp_probe.py list|call <tool> [json-args]`.
 </mcp>

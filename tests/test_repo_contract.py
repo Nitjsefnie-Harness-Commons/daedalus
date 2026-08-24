@@ -3852,6 +3852,39 @@ def test_the_security_warning_names_every_capability_the_shim_grants(tmp):
     assert not missing, f'not named in the install-time warning: {missing}'
 
 
+def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
+    """One documented maximum, enforced at each place the value can enter.
+
+    The buffer lives in the service worker and grows to hold headers and
+    response bodies, so its size is a memory budget. `cmd.maxRequests || 1000`
+    kept whatever arrived: -1 evicted the only event on arrival, leaving an
+    empty capture, and 1e9 buffered everything.
+    """
+    del tmp
+    background = (_util.ROOT / 'extension' / 'background.js').read_text(
+        encoding='utf-8')
+    cli = (_util.ROOT / 'daedalus_cli' / 'cli.py').read_text(encoding='utf-8')
+    mcp = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
+
+    ceilings = {
+        'background.js': re.search(r'NET_CAPTURE_MAX = (\d+)', background),
+        'cli.py': re.search(r'NET_CAPTURE_MAX = (\d+)', cli),
+        'mcp_server.py': re.search(r'NET_CAPTURE_MAX = (\d+)', mcp),
+    }
+    missing = sorted(name for name, m in ceilings.items() if m is None)
+    assert not missing, f'no capture ceiling declared in: {missing}'
+    values = {name: int(m.group(1)) for name, m in ceilings.items()}
+    assert len(set(values.values())) == 1, values
+
+    # And the buffer is bounded by the validated value rather than by an
+    # inline default that accepts whatever it is handed. Comments are blanked
+    # first: the ones explaining this change quote the expression it replaced.
+    code = _blank_js_comments(background)
+    assert 'maxRequests || 1000' not in code, 'an unvalidated fallback remains'
+    assert '_netCaptureLimit(cmd.maxRequests)' in code, \
+        'the capture allocation does not validate its limit'
+
+
 def test_every_registry_call_checks_its_http_status(tmp):
     """A refusal is not a success, and fetch does not say so on its own.
 

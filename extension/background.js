@@ -675,6 +675,23 @@ async function handleRemoveCss(cmd) {
 
 const _netCaptures = {}; // tabId → { requests: [], maxRequests }
 
+// A capture buffer lives in the service worker and grows to hold headers and
+// response bodies, so its size is a memory budget rather than a preference.
+// `cmd.maxRequests || 1000` accepted anything a caller sent: -1 was kept and
+// evicted the only event on arrival, leaving an empty capture, and 1e9 was
+// kept and buffered everything.
+const NET_CAPTURE_DEFAULT = 1000;
+const NET_CAPTURE_MAX = 20000;
+
+function _netCaptureLimit(value) {
+  if (value === undefined || value === null || value === '') return NET_CAPTURE_DEFAULT;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error(`maxRequests must be an integer from 1 to ${NET_CAPTURE_MAX}`);
+  }
+  return Math.min(limit, NET_CAPTURE_MAX);
+}
+
 function _netEventHandler(source, method, params) {
   const tabId = source.tabId;
   const cap = _netCaptures[tabId];
@@ -712,7 +729,7 @@ function _netEventHandler(source, method, params) {
   }
 
   // Evict oldest if over limit
-  if (cap.requests.length > (cap.maxRequests || 1000)) {
+  if (cap.requests.length > cap.maxRequests) {
     cap.requests.shift();
   }
 }
@@ -726,6 +743,10 @@ async function handleNetCapture(cmd) {
       chromeTabId = active.id;
     }
     chromeTabId = typeof chromeTabId === 'number' ? chromeTabId : parseInt(chromeTabId);
+    // Before the attach: a limit this worker will not honour is not a reason
+    // to attach a debugger to someone's tab. Throws, and the catch below
+    // reports it to the caller.
+    const limit = _netCaptureLimit(cmd.maxRequests);
 
     if (_netCaptures[chromeTabId]) {
       return postResult(cmd._execution, { already: true, tabId: chromeTabId, buffered: _netCaptures[chromeTabId].requests.length }, null, 'extension');
@@ -746,7 +767,7 @@ async function handleNetCapture(cmd) {
       }
       return postResult(cmd._execution, null, e.message, 'extension');
     }
-    _netCaptures[chromeTabId] = { requests: [], maxRequests: cmd.maxRequests || 1000 };
+    _netCaptures[chromeTabId] = { requests: [], maxRequests: limit };
     await postResult(cmd._execution, { capturing: true, tabId: chromeTabId }, null, 'extension');
   } catch (e) {
     await postResult(cmd._execution, null, e.message, 'extension');

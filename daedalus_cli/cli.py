@@ -49,6 +49,30 @@ def tab():
 
 # ─── HTTP helpers ───
 
+NET_CAPTURE_MAX = 20000
+
+
+def capture_limit(value):
+    """argparse type for --max: a capture buffer is a memory budget.
+
+    It lives in the service worker and grows to hold headers and response
+    bodies, so a nonpositive value produced a buffer that evicts its only
+    event and an enormous one produced no bound at all. The ceiling matches
+    NET_CAPTURE_MAX in extension/background.js, which enforces it again on
+    arrival — a caller is not the only thing that can send this field.
+    """
+    try:
+        limit = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'--max must be an integer from 1 to {NET_CAPTURE_MAX}; '
+            f'got {value!r}') from None
+    if limit < 1 or limit > NET_CAPTURE_MAX:
+        raise argparse.ArgumentTypeError(
+            f'--max must be an integer from 1 to {NET_CAPTURE_MAX}; got {limit}')
+    return limit
+
+
 def positive_timeout(value):
     """argparse type for a result wait.
 
@@ -1190,7 +1214,8 @@ def main():
     # net-capture (extension)
     s = sub.add_parser('net-capture', help='Start CDP network capture on a tab')
     s.add_argument('--chrome-tab', help='Chrome tab ID (default: active)')
-    s.add_argument('--max', type=int, default=1000, help='Max requests to buffer (default: 1000)')
+    s.add_argument('--max', type=capture_limit, default=1000,
+                   help=f'Max requests to buffer, 1-{NET_CAPTURE_MAX} (default: 1000)')
 
     # net-capture-stop (extension)
     s = sub.add_parser('net-capture-stop', help='Stop network capture and dump results')
