@@ -1,75 +1,91 @@
 [MASTER]
 
-# Every disable below names a pattern this tree actually uses. That is not a
-# claim to take on faith: the list was rebuilt by emptying it, running pylint
-# over the repository, and keeping only classes that fired, with the count
-# beside each. Inheriting a longer list from another project makes the file
-# read as a considered audit trail when most of it suppresses nothing here.
-# The counts were re-derived with the pinned pylint from requirements-dev.txt;
-# a count from a different version is the same false trail in a subtler form.
+# Every disable below names a pattern this tree actually uses. Inheriting a
+# longer list from another project makes the file read as a considered audit
+# trail when most of it suppresses nothing here, so the property that matters
+# is that no entry is dead.
+#
+# THE COUNTS THAT USED TO SIT BESIDE EACH ENTRY ARE GONE. They were meant as
+# the proof and became the opposite: nothing re-derived them as the tree grew,
+# and by the time they were checked fifteen of the nineteen were wrong —
+# subprocess-run-check said 8 against 41, protected-access 2 against 26,
+# inconsistent-return-statements 2 against 12. A number in a comment that
+# nothing verifies is a false audit trail, which is the thing this list was
+# shaped to avoid. What is durable is the reason each entry exists, which is
+# what remains below, plus the recipe for re-deriving the rest:
+#
+#   sed 's/^disable=.*//' .pylintrc > /tmp/rc &&
+#     git ls-files '*.py' | xargs pylint --rcfile=/tmp/rc |
+#     grep -oE '\(([a-z-]+)\)$' | tr -d '()' | sort | uniq -c | sort -rn
+#
+# Run it against the pinned pylint from requirements-dev.txt; a result from
+# another version answers a different question. Every entry below fired at
+# least once when that was last run, on 2026-08-24.
+#
+# One entry was removed rather than recounted. inconsistent-return-statements
+# was suppressing twelve handlers where a bare `return` sat beside
+# `return self._json(...)`, and GitHub's Code Quality scanner reported the same
+# twelve independently. Those returns are explicit now and the check is on.
 [MESSAGES CONTROL]
 disable=
 # Docstrings. Handlers and subcommands are named for what they do and read in
 # sequence; a docstring per one-line dispatcher is noise, and the ones that
-# earn an explanation have it. (87 + 2)
+# earn an explanation have it.
     missing-function-docstring,
     missing-class-docstring,
 # Line length is governed by setup.cfg, where it is set wide on purpose: the
-# tables and the wire payloads read worse wrapped. (42)
+# tables and the wire payloads read worse wrapped.
     line-too-long,
 # Handler signatures are fixed by the framework or by the command dispatch
-# table, so a handler that ignores an argument still has to accept it. (24)
+# table, so a handler that ignores an argument still has to accept it.
     unused-argument,
 # The compact idiom this codebase is written in: one grouped import line per
 # module, and `if <guard>: return ...` early exits in the request path.
 # pycodestyle's E401/E701 are the same two patterns from the other side.
-# (20 + 6)
+#
     multiple-statements,
     multiple-imports,
 # A bridge handler must not die on one bad request: it catches broadly, answers,
-# and keeps serving the other tabs. (9)
+# and keeps serving the other tabs.
     broad-exception-caught,
 # Tests inspect returncode themselves; check=True would raise before the
-# assertion that explains what actually went wrong. (8)
+# assertion that explains what actually went wrong.
     subprocess-run-check,
 # The suites put their own directory on sys.path and then import `_util`, which
-# cannot happen before that line runs. (7)
+# cannot happen before that line runs.
     wrong-import-position,
-# Short names in this file are wire field names and loop indices. (6)
+# Short names in this file are wire field names and loop indices.
     invalid-name,
 # Heavy or optional modules are imported inside the function that needs them,
-# so an invocation that never touches them does not pay for them. (5)
+# so an invocation that never touches them does not pay for them.
     import-outside-toplevel,
 # `format` and `id` are field names on this protocol; renaming the local to
-# avoid shadowing a builtin would stop the code matching the JSON it parses. (3)
+# avoid shadowing a builtin would stop the code matching the JSON it parses.
     redefined-builtin,
     redefined-outer-name,
 # Size and branch metrics. The request dispatch is one function on purpose:
 # every endpoint's guard order is visible in one place, and splitting it to
-# satisfy a counter would hide the ordering that matters. (3 + 3 + 3 + 2 + 1)
+# satisfy a counter would hide the ordering that matters.
     too-many-statements,
     too-many-return-statements,
     too-many-branches,
     too-many-locals,
     too-many-lines,
-# Handlers return `self._json(...)` to mean "answer and stop", alongside bare
-# returns. (2)
-    inconsistent-return-statements,
 # The stream registry and the sequence counter are module state the handlers
-# share by design. (2)
+# share by design.
     global-statement,
 # `x == []` asserts the value is an empty LIST, not merely falsy; `not x` would
-# also accept None, 0 and "". (2)
+# also accept None, 0 and "".
     use-implicit-booleaness-not-comparison,
 # The suites reach into module internals deliberately -- that is what lets them
-# test a helper without standing up the whole server. (2)
+# test a helper without standing up the whole server.
     protected-access,
 # The bridge fixture holds a Popen across a context manager it manages itself,
-# with an explicit terminate/kill in `finally`. (1)
+# with an explicit terminate/kill in `finally`.
     consider-using-with,
-# `_BearerAuth` has one public `dispatch` method because that is the middleware protocol. (1)
+# `_BearerAuth` has one public `dispatch` method because that is the middleware protocol.
     too-few-public-methods,
-# Layout preference on a branch that reads as a table of cases. (1)
+# Layout preference on a branch that reads as a table of cases.
     no-else-return
 max-attributes=30
 max-args=10

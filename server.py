@@ -798,10 +798,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = self._request_target()
         if parsed is None:
-            return
+            return None
         params = self._parse_query(parsed.query)
         if params is None:
-            return
+            return None
 
         if parsed.path == '/result':
             return self._handle_get_result(params)
@@ -815,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == '/tabs':
             token = self._query_bridge_token(params)
             if not self._require_bridge_token(token):
-                return
+                return None
             with _tab_lock:
                 tabs = _tab_registry.get(token, {})
                 result = [
@@ -842,7 +842,7 @@ class Handler(BaseHTTPRequestHandler):
         tab = params.get('tab', [''])[0]
         if not self._require_bridge_token(token):
             print('[STREAM] REJECTED unauthorized token', flush=True)
-            return
+            return None
         if tab and _unsafe_component(tab):
             print(f'[STREAM] REJECTED unsafe tab: {tab!r}', flush=True)
             return self._json(400, {'error': 'invalid path component'})
@@ -950,6 +950,7 @@ class Handler(BaseHTTPRequestHandler):
                 entry = _active_streams.get(stream_id)
                 if entry is not None and entry['killed'] is killed_event:
                     del _active_streams[stream_id]
+        return None
 
     def _write_frame(self, data):
         """Serialize + write+flush one SSE command frame. Raises on socket error."""
@@ -1060,7 +1061,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         clen = self._declared_body_length()
         if clen is None:
-            return
+            return None
         try:
             return self._dispatch_post(clen)
         finally:
@@ -1229,10 +1230,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_segment(raw, *admitted)
         body = self._load_json_object(clen)
         if body is None:
-            return
+            return None
         token = body.get('token', '')
         if not self._require_bridge_token(token):
-            return
+            return None
 
         if self.path == '/register':
             raw_tab_id = body.get('tabId', '')
@@ -1388,13 +1389,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         clen = self._declared_body_length()
         if clen is None:
-            return
+            return None
         body = self._load_json_object(clen)
         if body is None:
-            return
+            return None
         token = body.get('token', '')
         if not self._require_bridge_token(token):
-            return
+            return None
         if self.path == '/upload':
             return self._handle_delete_upload(body)
         return self._json(404, {'error': 'not found'})
@@ -1443,7 +1444,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         clen = self._declared_body_length()
         if clen is None:
-            return
+            return None
         parsed = self._request_target()
         if parsed is None:
             # The 400 is written; its body was never read.
@@ -1461,14 +1462,14 @@ class Handler(BaseHTTPRequestHandler):
         """PUT /command — write a command for delivery via SSE."""
         body = self._load_json_object(clen)
         if body is None:
-            return
+            return None
         token = body.get('token', '')
         tab = str(body.get('tab', ''))
         cmd_id = body.get('id', '')
         code = body.get('code', '')
         cmd_type = body.get('type', '')
         if not self._require_bridge_token(token):
-            return
+            return None
         if tab and _unsafe_component(tab):
             return self._json(400, {'error': 'invalid path component'})
         if not cmd_id or (not code and not cmd_type):
@@ -1501,7 +1502,7 @@ class Handler(BaseHTTPRequestHandler):
         consume = params.get('consume', [''])[0] == '1'
         expected = params.get('expected', [''])[0]
         if not self._require_bridge_token(token):
-            return
+            return None
         if tab and _unsafe_component(tab):
             return self._json(400, {'error': 'invalid path component'})
         # A requested tab selects its own slot; otherwise use the token slot.
@@ -1542,7 +1543,7 @@ class Handler(BaseHTTPRequestHandler):
         limit_p = params.get('limit', [None])[0]
         offset_p = params.get('offset', [None])[0]
         if not self._require_bridge_token(token):
-            return
+            return None
         if upload_id and _unsafe_component(upload_id):
             return self._json(400, {'error': 'invalid path component'})
         # Before the directory is looked at, so that whether a query is well
@@ -1749,7 +1750,7 @@ class Handler(BaseHTTPRequestHandler):
         token = self._query_bridge_token(params)
         job = params.get('job', [''])[0]
         if not self._require_bridge_token(token):
-            return
+            return None
         if not job or _unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
         with _seg_lock:
@@ -1963,7 +1964,7 @@ class Handler(BaseHTTPRequestHandler):
         upload_id = params.get('id', [''])[0]
         named = params.get('path', [''])[0]
         if not self._require_bridge_token(token):
-            return
+            return None
         if named:
             return self._serve_named_upload(token, named)
         if upload_id and _unsafe_component(upload_id):
@@ -2032,6 +2033,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Frame-Options', 'DENY')
         self.end_headers()
         self.wfile.write(data)
+        return None
 
     def _serve_file(self, path, fmt):
         """Serve a binary file, streamed so large files aren't fully buffered in RAM."""

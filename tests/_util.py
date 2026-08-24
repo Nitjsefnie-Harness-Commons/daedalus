@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import traceback
+import typing
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -323,8 +324,13 @@ class Skipped(Exception):
     """Raised by a test that cannot hold on this platform or install."""
 
 
-def skip(reason):
-    """End the running test as skipped, with a reason the log will show."""
+def skip(reason) -> typing.NoReturn:
+    """End the running test as skipped, with a reason the log will show.
+
+    Annotated NoReturn because it is: a caller that ends in `skip(...)` has
+    no fall-through path, and without the annotation every such caller reads
+    as one function that sometimes returns a value and sometimes None.
+    """
     raise Skipped(reason)
 
 
