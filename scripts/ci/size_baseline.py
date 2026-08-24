@@ -44,9 +44,9 @@ TEST_CEILING = 700
 BASELINE = {
     'server.py': 2633,
     'extension/background.js': 1943,
-    'tests/test_mcp_server.py': 1507,
+    'tests/test_mcp_server.py': 1626,
     'tests/test_cli.py': 1335,
-    'mcp_server.py': 944,
+    'mcp_server.py': 969,
 }
 
 _ENTRY = re.compile(r"^(?P<indent>\s*)'(?P<path>[^']+)': (?P<size>\d+),\s*$")

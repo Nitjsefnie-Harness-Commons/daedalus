@@ -11,6 +11,7 @@ import asyncio
 import base64
 import contextlib
 import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
 import os
@@ -333,6 +334,125 @@ def test_local_url_derives_from_the_bridge_port(tmp):
                 os.environ[key] = value
 
 
+def _module_list_tabs(mod):
+    async def fetch():
+        response = await mod._http_client().get(
+            '/tabs', headers={'Authorization': f'Bearer {TOK}'})
+        response.raise_for_status()
+        return response.json()
+    return asyncio.run(fetch())
+
+
+def test_fresh_mcp_modules_keep_distinct_bound_transports(tmp):
+    """Fresh callers share the transport class but retain their own bridges."""
+    _need_deps()
+    with _util.bridge(Path(tmp) / 'first') as (first_base, _first_docroot):
+        _util.post_json(first_base + '/sync-tabs', {'token': TOK, 'tabs': [
+            {'tabId': 'first', 'url': 'https://first.example.com',
+             'title': 'first'}]})
+        with _util.bridge(Path(tmp) / 'second') as (second_base, _second_docroot):
+            _util.post_json(second_base + '/sync-tabs', {'token': TOK, 'tabs': [
+                {'tabId': 'second', 'url': 'https://second.example.com',
+                 'title': 'second'}]})
+            first_mod = _load_mcp(first_base)
+            second_mod = _load_mcp(second_base)
+            assert first_mod.BridgeTransport is second_mod.BridgeTransport
+            assert first_mod._transport is not second_mod._transport
+            first_tabs = _module_list_tabs(first_mod)
+            second_tabs = _module_list_tabs(second_mod)
+            assert first_tabs[0]['title'] == 'first', first_tabs
+            assert second_tabs[0]['title'] == 'second', second_tabs
+
+
+def test_two_module_routing_regression_is_sensitive_to_url_blind_singleton(tmp):
+    """The observed second marker proves the URL-blind mutant is active."""
+    _need_deps()
+    with _util.bridge(Path(tmp) / 'first') as (first_base, _first_docroot):
+        _util.post_json(first_base + '/sync-tabs', {'token': TOK, 'tabs': [
+            {'tabId': 'first', 'url': 'https://first.example.com',
+             'title': 'first'}]})
+        with _util.bridge(Path(tmp) / 'second') as (second_base, _second_docroot):
+            _util.post_json(second_base + '/sync-tabs', {'token': TOK, 'tabs': [
+                {'tabId': 'second', 'url': 'https://second.example.com',
+                 'title': 'second'}]})
+            first_mod = _load_mcp(first_base)
+            second_mod = _load_mcp(second_base)
+            old_client = {'value': None}
+
+            def url_blind_client(_local_url=None):
+                if old_client['value'] is None:
+                    old_client['value'] = second_mod.BridgeTransport(
+                        second_base).client()
+                return old_client['value']
+
+            original = first_mod._http_client
+            first_mod._http_client = url_blind_client
+            try:
+                tabs = _module_list_tabs(first_mod)
+            finally:
+                first_mod._http_client = original
+            assert tabs[0]['title'] == 'second', tabs
+
+
+def test_transport_clients_are_isolated_by_event_loop(tmp):
+    """A keep-alive client from one loop is not reused by another loop."""
+    del tmp
+    _need_deps()
+
+    class MarkerHandler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def do_GET(self):  # pylint: disable=invalid-name
+            body = b'{"marker":"keepalive"}'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), MarkerHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f'http://127.0.0.1:{server.server_port}'
+        mod = _load_mcp(base)
+        first = mod.BridgeTransport(base)
+        second = mod.BridgeTransport(base)
+
+        async def fetch(transport):
+            try:
+                response = await transport.client().get('/marker')
+                response.raise_for_status()
+                return response.json()
+            finally:
+                await mod.BridgeTransport.close_current_loop_clients()
+
+        assert asyncio.run(fetch(first)) == {'marker': 'keepalive'}
+        assert asyncio.run(fetch(second)) == {'marker': 'keepalive'}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_start_in_thread_rejects_a_second_start(tmp):
+    """A module-owned listener cannot be rebound to a second bridge."""
+    del tmp
+    _need_deps()
+    mod = _load_mcp('http://127.0.0.1:1')
+    mod._serve = lambda: None
+    thread = mod.start_in_thread('http://127.0.0.1:1111')
+    thread.join(timeout=5)
+    assert mod._transport._base_url == 'http://127.0.0.1:1111'
+    try:
+        mod.start_in_thread('http://127.0.0.1:2222')
+    except RuntimeError as exc:
+        assert 'start_in_thread' in str(exc)
+        assert 'more than once' in str(exc)
+    else:
+        raise AssertionError('a second start_in_thread call was accepted')
+
+
 def _serve_crash_line(mod, failure):
     """Run _serve with its app factory raising `failure`, capturing the crash
     line through a strict-encoding stderr — the condition that used to turn
@@ -635,7 +755,7 @@ def test_live_mcp_has_no_server_path_authority(tmp):
     symlink_escape = _relative_or_synthetic(link)
     attempted_paths = (str(absolute_secret), traversal, symlink_escape)
     with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
-        mod, port = _start_mcp_in_process(base)
+        _, port = _start_mcp_in_process(base)
         session_id = _open_mcp_session(port)
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
         handled = set()
@@ -703,7 +823,6 @@ def test_live_mcp_has_no_server_path_authority(tmp):
         finally:
             stop.set()
             simulator.join(timeout=5)
-            asyncio.run(mod._http.aclose())
 
         path_tools = {'put': 'code', 'inject_css': 'css',
                       'remove_css': 'css', 'store_hotfix': 'code'}
