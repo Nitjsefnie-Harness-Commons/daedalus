@@ -7,6 +7,7 @@ POSIX-only assumption here would surface as a test failure rather than as the
 platform difference it actually is.
 """
 import contextlib
+import http.client
 import importlib.util
 import json
 import os
@@ -542,6 +543,17 @@ def get_json(url, **kw):
 def post_json(url, body, **kw):
     status, raw = request(url, 'POST', body=body, **kw)
     return status, json.loads(raw or b'null')
+
+
+def header_stream(base, target, headers):
+    """Open a stream whose credential travels in headers, not the target."""
+    port = int(base.rsplit(':', 1)[1])
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+    conn.putrequest('GET', target)
+    for name, value in headers:
+        conn.putheader(name, value)
+    conn.endheaders()
+    return conn, conn.getresponse()
 
 
 def _assertion_site(exc):

@@ -142,6 +142,7 @@
 
 # ─── tests ───
 !/tests/
+!/tests/_segments.py
 !/tests/_util.py
 !/tests/test_bridge_http.py
 !/tests/test_cli.py
@@ -149,4 +150,7 @@
 !/tests/test_mcp_server.py
 !/tests/test_path_safety.py
 !/tests/test_repo_contract.py
+!/tests/test_segment_capability.py
+!/tests/test_segment_jobs.py
+!/tests/test_segment_storage.py
 !/tests/test_stream_lifecycle.py
