@@ -138,7 +138,7 @@ printf '%s\n' '{"id":"test1","code":"document.title"}' > "$tmp" &&
 The reader ignores sibling `.tmp` names. If an older writer exposes malformed
 JSON at the final name, the reader leaves it untouched and retries instead of
 deleting a possibly in-progress write. After the atomic rename, the SSE stream
-delivers and consumes the command. Result lands in `$DAEDALUS_DIR/results/<token>_<tabId>.json` (per-tab) and `$DAEDALUS_DIR/results/<token>.json` (last-writer-wins). `page-main` injection and page-relay eval completions can carry an `exec_ms` field — the page-context execution time in milliseconds. A page can falsify or omit this page-timed field on either channel. CDP completions carry no `exec_ms`. Results associated with a queued delivery also carry `roundtrip_ms` — the full server-observed roundtrip in milliseconds, from command enqueue (`PUT /command`) to result arrival (`POST /result`); it spans queue wait + SSE delivery + client relay + execution + return trip, so `roundtrip_ms − exec_ms` approximates transport/queue overhead when both fields are present. These measurements use different clocks: `exec_ms` uses the page's `performance.now()`, while `roundtrip_ms` uses server wall-clock milliseconds, so their difference is an approximation rather than an exact subtraction. A legacy frame without `_did` has no `roundtrip_ms`. The extension retries a result POST whose response it never saw; the bridge remembers the delivery ids it has stored, so a retry is answered `{ok, duplicate: true}` and cannot republish a finished result over whatever landed after it.
+delivers and consumes the command. Result lands in `$DAEDALUS_DIR/results/<token>_<tabId>.json` (per-tab) and `$DAEDALUS_DIR/results/<token>.json` (last-writer-wins); a result with a delivery id is also retained at `$DAEDALUS_DIR/results/deliveries/<token>_<tabId>/<deliveryId>.json` (or `$DAEDALUS_DIR/results/deliveries/<token>/<deliveryId>.json` for broadcast). The fixed `deliveries/` namespace keeps delivery directories separate from compatibility slots even when a tab name contains dots. `page-main` injection and page-relay eval completions can carry an `exec_ms` field — the page-context execution time in milliseconds. A page can falsify or omit this page-timed field on either channel. CDP completions carry no `exec_ms`. Results associated with a queued delivery also carry `roundtrip_ms` — the full server-observed roundtrip in milliseconds, from command enqueue (`PUT /command`) to result arrival (`POST /result`); it spans queue wait + SSE delivery + client relay + execution + return trip, so `roundtrip_ms − exec_ms` approximates transport/queue overhead when both fields are present. These measurements use different clocks: `exec_ms` uses the page's `performance.now()`, while `roundtrip_ms` uses server wall-clock milliseconds, so their difference is an approximation rather than an exact subtraction. A legacy frame without `_did` has no `roundtrip_ms`. The extension retries a result POST whose response it never saw; the bridge remembers the delivery ids it has stored, so a retry is answered `{ok, duplicate: true}` and cannot republish a finished result over whatever landed after it. Unconsumed per-delivery files are normally capped per target by `DAEDALUS_MAX_DELIVERY_RESULTS` (default 1024) and evicted by persisted acceptance stamps; equal or unknown stamps and failed filesystem operations may temporarily leave retention above the cap until a later successful write.
 
 ### Async Support
 
@@ -319,13 +319,18 @@ tools.
 
 When the extension posts a result, the server exposes the command's `_did` as
 `deliveryId` and assigns a fresh `resultGeneration`. CLI and MCP waiters first
-peek at the shared result slot, match both command id and `deliveryId`, then
-conditionally consume that generation with
-`GET /result?...&consume=1&expected=<resultGeneration>`. If another result
-replaces the slot between those requests, the conditional consume leaves the
-new result in place and reports that it was not consumed. A bare `consume=1`
-without `expected` remains a destructive compatibility read of the current
-slot.
+peek at their own delivery with `GET /result?...&delivery=<deliveryId>`, match
+both command id and `deliveryId`, then conditionally consume that generation
+with `GET /result?...&delivery=<deliveryId>&consume=1&expected=<resultGeneration>`.
+If another result replaces the selected result between those requests, the
+conditional consume leaves it in place and reports that it was not consumed. A
+wait with no delivery id keeps using the shared slot, and a bare `consume=1`
+without `expected` remains a destructive compatibility read of the selected
+result. Either consume path normally removes a matching copy in the other path
+while preserving a newer slot generation. A compatibility consume that
+exhausts its bounded retry under continuous delivery-id replacement consumes
+the current slot under the result lock without mirrored cleanup; that delivery
+copy remains for later eviction.
 
 `GET /stream` holds the SSE connection open indefinitely, proving liveness with a keepalive comment every `DAEDALUS_STREAM_KEEPALIVE` seconds (default 15) rather than cycling the connection on a timer; `DAEDALUS_STREAM_MAX_AGE` (default 3600) is a last-resort ceiling only. The close path is pinned by `tests/test_stream_lifecycle.py`.
 
@@ -334,6 +339,8 @@ slot.
 `DAEDALUS_MAX_JSON_DEPTH` (default `100`, range 1-500) bounds how deeply a JSON request body may nest arrays and objects. The raw bytes are scanned before parsing, so a body past the bound receives `400 JSON body too deeply nested` on every supported interpreter — previously the depth actually enforced was whichever recursion limit the running Python had, and one body could be refused on 3.13 and parsed on 3.14.
 
 `DAEDALUS_REQUEST_TIMEOUT` (default 60 seconds) bounds each socket operation of a request — request line, headers and body. It renews on every operation that makes progress, so a large upload that keeps arriving is never cut short, while a peer that declares a body and then stops sending receives `408` and gives its worker back instead of holding it for as long as it keeps the socket open. `DAEDALUS_MAX_REQUEST_WORKERS` (default 256, range 1-4096) caps how many connections are served at once: past the cap a new connection is closed without an answer rather than given a thread. An open `GET /stream` holds one of those slots for its lifetime, so raise the cap rather than lower it if many streams share one bridge.
+
+`DAEDALUS_MAX_DELIVERY_RESULTS` (default `1024`) normally caps unconsumed per-delivery result files retained for each target. When a target exceeds the ceiling, entries older than the persisted acceptance-stamp boundary are evicted; equal or unknown stamps and failed filesystem operations may temporarily leave retention above the cap until a later successful write. A result consumed by its delivery id is removed independently of the compatibility slots.
 
 Filesystem-backed caller values use one path-component policy: it rejects
 `..`, C0/C1 control and surrogate characters, Windows-invalid path characters
