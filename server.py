@@ -1093,10 +1093,21 @@ class Handler(BaseHTTPRequestHandler):
         if (parsed.path == '/segment'
                 and ('octet-stream' in content_type
                      or 'application/json' not in content_type)):
+            # Everything this route authorizes on rides in the query string,
+            # so the answer never depends on a byte of the body. Deciding
+            # first is what keeps a refusal cheap: reading the body and then
+            # answering 403 charged the process for a request it was always
+            # going to reject.
+            admitted = self._segment_admission(parsed)
+            if admitted is None:
+                # The refusal is written; the body is drained rather than
+                # read, because closing on unread bytes sends RST and the
+                # answer would be discarded with them.
+                return self._drain_refused_body(clen)
             raw = self._read_body(clen)
             if raw is None:
                 return None
-            return self._handle_segment(raw)
+            return self._handle_segment(raw, *admitted)
         body = self._load_json_object(clen)
         if body is None:
             return
@@ -1468,51 +1479,73 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {'items': results[off:off + lim], 'total': total, 'limit': lim, 'offset': off})
         return self._json(200, results)
 
-    def _handle_segment(self, raw):
-        """POST /segment?job=X&seg=N&total=T&sig=S — store raw binary HLS segment."""
-        # The documented poster is page JavaScript running in a hostile page's
-        # MAIN world, so it must never hold the bridge token. It carries the
-        # job-scoped capability minted by POST /segment-job instead. A stolen
-        # sig authorizes status reads and segment writes only for that job. The
-        # finalized .ts set stays inside the record's index, count, and byte
-        # quotas; stale temp writes are removed before the next admission.
-        parsed = self._request_target()
-        if parsed is None:
-            return
+    def _segment_admission(self, parsed):
+        """Settle POST /segment?job=X&seg=N&total=T&sig=S before its body.
+
+        The documented poster is page JavaScript running in a hostile page's
+        MAIN world, so it must never hold the bridge token. It carries the
+        job-scoped capability minted by POST /segment-job instead. A stolen
+        sig authorizes status reads and segment writes only for that job. The
+        finalized .ts set stays inside the record's index, count, and byte
+        quotas; stale temp writes are removed before the next admission.
+
+        Returns (job, segment index, quota) for a request that may proceed,
+        or None once the refusal has been written. The quota travels with the
+        admission rather than being read again under the write lock: a
+        record's recorded limits are fixed at mint and never rewritten, so
+        re-reading them would cost a second file read per segment and settle
+        nothing the first read did not.
+        """
         params = self._parse_query(parsed.query)
         if params is None:
-            return
+            return None
         job = params.get('job', [''])[0]
         seg = params.get('seg', [''])[0]
         total = params.get('total', [''])[0]
         sig = params.get('sig', [''])[0]
         if not job or not seg:
-            return self._json(400, {'error': 'missing job or seg'})
+            self._json(400, {'error': 'missing job or seg'})
+            return None
         if (seg.isascii() and seg.isdecimal()
                 and len(seg) > _SEGMENT_DECIMAL_MAX_DIGITS):
-            return self._json(
-                400, {'error': 'seg must be a bounded ASCII decimal'})
+            self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
+            return None
         for val in (job, seg, total):
             if _unsafe_component(val):
-                return self._json(400, {'error': 'invalid param'})
+                self._json(400, {'error': 'invalid param'})
+                return None
         if not seg.isascii() or not seg.isdecimal():
-            return self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
+            self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
+            return None
         try:
             segment_index = int(seg)
         except (ValueError, OverflowError):
-            return self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
+            self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
+            return None
 
         # `total` is untrusted progress metadata supplied by the page on every
-        # request. Only the server-minted record below controls storage.
+        # request. Only the server-minted record controls storage.
         with _seg_lock:
             record = _segment_record_for_sig(job, sig)
             quota = _segment_quota(record) if record is not None else None
-            if quota is None:
-                return self._json(403, {'error': 'bad sig'})
-            max_index, max_count, max_bytes = quota
-            if segment_index > max_index:
-                return self._json(400, {'error': 'seg out of range'})
+        if quota is None:
+            self._json(403, {'error': 'bad sig'})
+            return None
+        if segment_index > quota[0]:
+            self._json(400, {'error': 'seg out of range'})
+            return None
+        return job, segment_index, quota
 
+    def _handle_segment(self, raw, job, segment_index, quota):
+        """Store one admitted segment body under the job's remaining budget.
+
+        The capability, the parameter shapes and the quota were settled by
+        _segment_admission. What is left has to be atomic: the file listing,
+        the byte sum and the write happen under one hold of _seg_lock, so two
+        segments arriving together cannot both spend the same remaining bytes.
+        """
+        _, max_count, max_bytes = quota
+        with _seg_lock:
             seg_dir = SEG_DIR / job
             filename = f'{segment_index:06d}.ts'
             tmp = seg_dir / f'.{filename}.tmp'

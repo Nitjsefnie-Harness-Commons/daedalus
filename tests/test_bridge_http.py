@@ -2449,6 +2449,46 @@ def test_segment_post_and_status_require_capability(tmp):
         assert status == 403, status
 
 
+def test_a_bad_segment_capability_is_refused_before_the_body_arrives(tmp):
+    """The sig is in the query string, so the body never has to be read.
+
+    A 24 MiB post with a bad sig was buffered in full and then answered 403,
+    moving the process high-water mark by the size of a body the bridge was
+    always going to reject. Nothing about the answer depends on those bytes.
+
+    The proof is the answer arriving while most of the declared body has not
+    been sent: only the drain bound is written, and the refusal comes back
+    without the remaining megabytes. Before the fix this request produced no
+    answer at all until the socket deadline expired.
+    """
+    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        job = _seg_job()
+        _, minted = _mint_job(base, TOK, job)
+        declared = 8 * 1024 * 1024
+        port = int(base.rsplit(':', 1)[1])
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+        try:
+            conn.putrequest(
+                'POST', f'/segment?job={job}&seg=0&total=1&sig=notthesig')
+            conn.putheader('Content-Type', 'application/octet-stream')
+            conn.putheader('Content-Length', str(declared))
+            conn.endheaders()
+            # Exactly the bound the refusal drains, so the server reaches its
+            # close without waiting on bytes this test deliberately withholds.
+            conn.send(b'\x47' * 65536)
+            response = conn.getresponse()
+            status, payload = response.status, response.read()
+        finally:
+            conn.close()
+        assert status == 403, (status, payload)
+        assert json.loads(payload) == {'error': 'bad sig'}, payload
+        seg_dir = Path(docroot) / 'segments' / job
+        stored = sorted(seg_dir.glob('*.ts')) if seg_dir.is_dir() else []
+        assert not stored, stored
+        assert minted['sig'] != 'notthesig'
+
+
 def test_a_segment_body_without_a_declared_length_is_refused(tmp):
     """An undeclared body is not an empty one.
 
