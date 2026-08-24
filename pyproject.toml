@@ -32,7 +32,7 @@ dependencies = []
 # module. httptools is what uvicorn serves on when it is importable; without it
 # uvicorn falls back to h11, which rejects a repeated Host header at parse time
 # — before _BearerAuth can return the rejection the MCP suite asserts.
-mcp = ["httpx>=0.27", "mcp>=2", "starlette>=0.37", "httptools>=0.8.0"]
+mcp = ["httpx>=0.28.1", "mcp>=2", "starlette>=0.37", "httptools>=0.8.0"]
 
 [project.urls]
 Homepage = "https://github.com/Nitjsefnie-Harness-Commons/daedalus"
