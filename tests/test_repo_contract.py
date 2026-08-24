@@ -3749,18 +3749,63 @@ def _time_tests():
     return _util.load(ROOT / 'scripts' / 'ci' / 'time_tests.py')
 
 
-def test_speed_comparison_takes_each_test_s_minimum_across_rounds(tmp):
-    """The floor is what moves when code gets slower, so rounds take a min.
+def test_speed_comparison_pairs_whole_rounds_rather_than_per_test_minima(tmp):
+    """Every total reported has to be one a complete round actually achieved.
 
-    A single test can move by multiples between two runs of identical code.
-    Averaging carries that noise into the verdict; the minimum estimates the
-    quantity that actually changes.
+    Summing each test's independent minimum builds a side total no run ever
+    produced, and it takes different amounts of noise off each side: on a
+    recorded artifact it removed 2.4s from the baseline and 22.4s from the
+    head, reporting 0.999 where every complete pair of rounds was at least
+    1.07.
+
+    Here each side is noisy on a different test in each round, so per-test
+    minima would report 2.00s for a side whose every round took 11.00s.
     """
     compare = _compare_durations()
-    base = _durations_tree(tmp, 'base', [{'a': 9.0}, {'a': 1.0}])
-    head = _durations_tree(tmp, 'head', [{'a': 8.0}, {'a': 1.0}])
-    assert compare.side_durations(base) == {'a': 1.0}
+    base = _durations_tree(tmp, 'base', [{'slow': 10.0, 'fast': 1.0},
+                                         {'slow': 1.0, 'fast': 10.0}])
+    head = _durations_tree(tmp, 'head', [{'slow': 11.0, 'fast': 1.0},
+                                         {'slow': 1.0, 'fast': 11.0}])
+    shared, pairs, _moves = compare.compare(compare.side_rounds(base),
+                                            compare.side_rounds(head))
+    assert shared == ['fast', 'slow'], shared
+    assert [(base_total, head_total) for base_total, head_total, _r in pairs] \
+        == [(11.0, 12.0), (11.0, 12.0)], pairs
     assert compare.main(['--base', *base, '--head', *head]) == 0
+
+
+def test_speed_comparison_gates_on_the_median_of_the_pairs(tmp):
+    """One spoiled pair must not decide the verdict, and a majority must.
+
+    A paired ratio can be ruined outright by a noisy neighbour landing on one
+    round, so gating on any single pair would be a coin toss. The median only
+    moves once most of the pairs agree.
+    """
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'a': 1.0}, {'a': 1.0}, {'a': 1.0}])
+    spoiled = _durations_tree(tmp, 'spoiled',
+                              [{'a': 1.0}, {'a': 5.0}, {'a': 1.0}])
+    assert compare.main(['--base', *base, '--head', *spoiled,
+                         '--max-regression', '0.30']) == 0
+    real = _durations_tree(tmp, 'real', [{'a': 1.4}, {'a': 5.0}, {'a': 1.4}])
+    assert compare.main(['--base', *base, '--head', *real,
+                         '--max-regression', '0.30']) == 1
+
+
+def test_speed_comparison_refuses_to_pair_unequal_round_counts(tmp):
+    """A side that lost a round cannot be paired against one that did not.
+
+    Pairing the first N and dropping the rest would answer with a comparison
+    narrower than the one that was asked for, and say nothing about it.
+    """
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'a': 1.0}, {'a': 1.0}])
+    head = _durations_tree(tmp, 'head', [{'a': 1.0}])
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', *base, '--head', *head, '--summary-file', str(summary)]
+    assert compare.main(argv) == 0
+    assert compare.main(argv + ['--require-measurements']) == 1
+    assert 'cannot be paired' in summary.read_text(encoding='utf-8')
 
 
 def test_speed_comparison_ignores_a_test_only_one_side_ran(tmp):
@@ -3773,10 +3818,10 @@ def test_speed_comparison_ignores_a_test_only_one_side_ran(tmp):
     compare = _compare_durations()
     base = _durations_tree(tmp, 'base', [{'shared': 1.0, 'gone': 50.0}])
     head = _durations_tree(tmp, 'head', [{'shared': 1.0, 'added': 50.0}])
-    shared, base_total, head_total, _moves = compare.compare(
-        compare.side_durations(base), compare.side_durations(head))
+    shared, pairs, _moves = compare.compare(compare.side_rounds(base),
+                                            compare.side_rounds(head))
     assert shared == ['shared'], shared
-    assert (base_total, head_total) == (1.0, 1.0), (base_total, head_total)
+    assert pairs == [(1.0, 1.0, 1.0)], pairs
     assert compare.main(['--base', *base, '--head', *head]) == 0
 
 

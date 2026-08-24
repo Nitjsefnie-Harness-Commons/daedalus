@@ -8,9 +8,23 @@ would read as an improvement. What is compared here is the set of tests
 present and passing on BOTH sides, summed — adding or removing a test cannot
 move that number at all.
 
-Each side is measured over several rounds and a test's duration is the
-MINIMUM across them. A minimum estimates the floor, which is the quantity that
-changes when code gets slower; a mean mostly reports how noisy the runner was.
+Every number reported here comes from a run that actually happened. Each
+side is measured over several rounds, and the rounds are compared IN PAIRS:
+round 1 of the baseline against round 1 of the head, round 2 against round 2.
+The workflow interleaves them — base, head, base, head — so a paired ratio
+divides two totals measured minutes apart on one machine, and whatever the
+runner was doing at the time is in both halves of it.
+
+Taking each test's minimum across rounds and summing those minima was the
+previous shape, and it constructs a total no complete run ever achieved: the
+minima come from different rounds for different tests, so the two sides have
+different amounts of noise removed. On one recorded artifact it took 2.4s off
+the baseline and 22.4s off the head, and reported 0.999 where every complete
+pair of rounds was at least 1.07.
+
+The verdict is the MEDIAN of the paired ratios rather than one of them. A
+single pair can be spoiled outright by a noisy neighbour; the median needs
+most of the pairs to agree before it moves.
 
 Durations come from `scripts/ci/time_tests.py`, which times a checkout from
 the outside and records only passing tests -- so a test that failed on one side
@@ -20,6 +34,7 @@ either tree, which is what lets a release predating it be measured at all.
 """
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -43,46 +58,73 @@ def round_durations(directory):
     return merged
 
 
-def side_durations(directories):
-    """One duration per test for a side: the minimum across its rounds."""
-    best = {}
-    for directory in directories:
-        for name, seconds in round_durations(directory).items():
-            if name not in best or seconds < best[name]:
-                best[name] = seconds
-    return best
+def side_rounds(directories):
+    """One dict of durations per round, in the order the rounds are given."""
+    return [round_durations(directory) for directory in directories]
 
 
-def compare(base, head):
-    """Totals over the tests both sides ran, and the per-test movements."""
-    shared = sorted(set(base) & set(head))
-    base_total = sum(base[name] for name in shared)
-    head_total = sum(head[name] for name in shared)
-    movements = [
-        (name, base[name], head[name], head[name] - base[name])
-        for name in shared
-    ]
+def shared_tests(rounds):
+    """Tests present in EVERY round given, on either side.
+
+    The set is fixed once, across all rounds of both sides, because a set
+    recomputed per round would let a test that dropped out of one round change
+    what that round's total even covers — and the point of a paired ratio is
+    that the two totals it divides cover the same work.
+    """
+    everywhere = None
+    for durations in rounds:
+        names = set(durations)
+        everywhere = names if everywhere is None else everywhere & names
+    return sorted(everywhere or ())
+
+
+def compare(base_rounds, head_rounds):
+    """Paired round totals over one fixed shared set, and the movements."""
+    shared = shared_tests([*base_rounds, *head_rounds])
+    pairs = []
+    for base, head in zip(base_rounds, head_rounds):
+        base_total = sum(base[name] for name in shared)
+        head_total = sum(head[name] for name in shared)
+        pairs.append((base_total, head_total,
+                      head_total / base_total if base_total else 1.0))
+    movements = []
+    for name in shared:
+        was = statistics.median([durations[name] for durations in base_rounds])
+        now = statistics.median([durations[name] for durations in head_rounds])
+        movements.append((name, was, now, now - was))
     movements.sort(key=lambda row: row[3], reverse=True)
-    return shared, base_total, head_total, movements
+    return shared, pairs, movements
 
 
-def render(lines, base_label, shared, base_total, head_total, movements, limit=10):
+def render(lines, base_label, shared, pairs, movements, limit=10):
     """The step summary: the verdict first, then what moved most."""
-    ratio = head_total / base_total if base_total else 1.0
+    ratio = statistics.median([pair[2] for pair in pairs])
     lines.append('### Test speed')
     lines.append('')
     lines.append(f'Baseline `{base_label}`, over {len(shared)} tests present '
-                 'and passing on both sides.')
+                 'and passing in every round on both sides.')
     lines.append('')
-    lines.append(f'- baseline total: {base_total:.2f}s')
-    lines.append(f'- this commit: {head_total:.2f}s')
-    lines.append(f'- ratio: {ratio:.3f}')
+    lines.append('Each row is one interleaved pair of rounds, so every total '
+                 'below is a run that happened:')
+    lines.append('')
+    lines.append('| round | baseline | this commit | ratio |')
+    lines.append('|---|---:|---:|---:|')
+    for index, (base_total, head_total, pair_ratio) in enumerate(pairs, 1):
+        lines.append(f'| {index} | {base_total:.2f}s | {head_total:.2f}s '
+                     f'| {pair_ratio:.3f} |')
+    lines.append('')
+    lines.append(f'- median paired ratio: {ratio:.3f}')
+    if len(pairs) > 1:
+        spread = [pair[2] for pair in pairs]
+        lines.append(f'- spread across pairs: {min(spread):.3f} to '
+                     f'{max(spread):.3f}')
     lines.append('')
     # Individual numbers are not trustworthy enough to gate on -- a single
     # test can move by multiples between two runs of identical code -- but
     # they are what tells a reader WHERE the total went, so they are shown
     # and never asserted on.
-    lines.append('Largest individual movements (indicative only):')
+    lines.append('Largest individual movements '
+                 '(median across rounds, indicative only):')
     lines.append('')
     lines.append('| test | baseline | head | delta |')
     lines.append('|---|---:|---:|---:|')
@@ -108,15 +150,15 @@ def main(argv=None):
              'a step broke rather than that there is nothing to compare')
     args = parser.parse_args(argv)
 
-    base = side_durations(args.base)
-    head = side_durations(args.head)
+    base_rounds = side_rounds(args.base)
+    head_rounds = side_rounds(args.head)
     lines = []
     # A baseline with no durations is a measurement that did not happen, not
     # a fast baseline. The timing instrument belongs to the head checkout and
     # asks nothing of the tree it measures, so an empty side means the timing
     # step failed rather than that the release was too old -- say so instead of
     # dividing by it.
-    if not base:
+    if not any(base_rounds):
         lines.append('### Test speed')
         lines.append('')
         lines.append(f'Skipped: the baseline `{args.base_label}` produced no '
@@ -125,17 +167,28 @@ def main(argv=None):
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
-    shared, base_total, head_total, movements = compare(base, head)
-    if not shared:
+    # Rounds are compared in pairs, so an unequal count means one side lost a
+    # round — there is no honest way to pair what is left, and pairing the
+    # first N would silently drop the rest.
+    if len(base_rounds) != len(head_rounds):
         lines.append('### Test speed')
         lines.append('')
-        lines.append('Skipped: no test passed on both sides, so the '
-                     'comparison has no shared set to sum.')
+        lines.append(f'Skipped: the baseline ran {len(base_rounds)} rounds and '
+                     f'this commit ran {len(head_rounds)}, so the rounds '
+                     'cannot be paired.')
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
-    ratio = render(lines, args.base_label, shared, base_total, head_total,
-                   movements)
+    shared, pairs, movements = compare(base_rounds, head_rounds)
+    if not shared:
+        lines.append('### Test speed')
+        lines.append('')
+        lines.append('Skipped: no test passed in every round on both sides, '
+                     'so the comparison has no shared set to sum.')
+        _emit(lines, args.summary_file)
+        return 1 if args.require_measurements else 0
+
+    ratio = render(lines, args.base_label, shared, pairs, movements)
     budget = 1.0 + args.max_regression
     if ratio > budget:
         lines.append('')
