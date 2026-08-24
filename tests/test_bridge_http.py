@@ -613,6 +613,66 @@ def test_result_did_becomes_roundtrip_ms(tmp):
         assert isinstance(stored['roundtrip_ms'], int) and stored['roundtrip_ms'] >= 0
 
 
+def test_a_retried_result_never_replaces_a_newer_one(tmp):
+    """A lost 200 makes the extension re-POST; that must not undo the next result.
+
+    background.js retries a result POST up to three times on a transient
+    failure, and a response lost after the server stored it looks exactly like
+    one that never arrived. The retry carries the same delivery id, so the
+    bridge can tell a repeat from a fresh result and leave both slots alone.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        first = {'token': TOK, 'tabId': 'extension', 'id': 'a',
+                 'result': 'first', 'error': None, 'ts': 1,
+                 '_did': '1700000000000_000001'}
+        status, _ = _util.post_json(base + '/result', first)
+        assert status == 200, status
+        status, peeked = _util.get_json(
+            base + f'/result?token={TOK}&tab=extension')
+        assert status == 200 and peeked['id'] == 'a', (status, peeked)
+        first_generation = peeked['resultGeneration']
+
+        # The same delivery id twice is one result, whatever else has landed.
+        status, body = _util.post_json(base + '/result', first)
+        assert status == 200 and body == {'ok': True, 'duplicate': True}, (
+            status, body)
+        status, peeked = _util.get_json(
+            base + f'/result?token={TOK}&tab=extension')
+        assert peeked['resultGeneration'] == first_generation, peeked
+
+        status, _ = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': 'extension', 'id': 'b',
+            'result': 'second', 'error': None, 'ts': 2,
+            '_did': '1700000000001_000002'})
+        assert status == 200, status
+
+        status, body = _util.post_json(base + '/result', first)
+        assert status == 200 and body == {'ok': True, 'duplicate': True}, (
+            status, body)
+        # Both slots still hold B: its waiter is still able to read it.
+        status, owner = _util.get_json(
+            base + f'/result?token={TOK}&tab=extension')
+        assert status == 200 and owner['id'] == 'b', (status, owner)
+        status, shared = _util.get_json(base + f'/result?token={TOK}')
+        assert status == 200 and shared['id'] == 'b', (status, shared)
+        stored = json.loads((docroot / 'results' / f'{TOK}_extension.json')
+                            .read_text(encoding='utf-8'))
+        assert stored['deliveryId'] == '1700000000001_000002', stored
+
+
+def test_a_result_without_a_delivery_id_still_replaces_the_slot(tmp):
+    """Dedup keys on the delivery id, so a result that has none is never one."""
+    with _util.bridge(tmp) as (base, _docroot):
+        for value in ('first', 'second'):
+            status, body = _util.post_json(base + '/result', {
+                'token': TOK, 'tabId': 'extension', 'id': 'no-did',
+                'result': value, 'error': None, 'ts': 1})
+            assert status == 200 and body == {'ok': True}, (status, body)
+        status, latest = _util.get_json(
+            base + f'/result?token={TOK}&tab=extension')
+        assert status == 200 and latest['result'] == 'second', latest
+
+
 def test_unencodable_result_is_refused_without_poisoning_the_existing_slot(tmp):
     """A result that cannot become UTF-8 must not truncate the current slot."""
     with _util.bridge(tmp) as (base, docroot):

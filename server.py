@@ -256,6 +256,29 @@ def _atomic_result_write(path, data):
         raise
 
 
+# Delivery ids of results already accepted, newest last. background.js retries
+# a result POST whose response it never saw, and that retry carries the same
+# delivery id as the accepted original — so without this the retry would
+# republish a finished result over whatever landed after it. Bounded because
+# the bridge runs for weeks: past the bound the oldest delivery is forgotten,
+# which is safe as its retries are long over.
+_accepted_deliveries = {}
+_ACCEPTED_DELIVERY_LIMIT = 4096
+
+
+def _record_delivery(did):
+    """Remember `did` as stored, dropping the oldest once past the bound.
+
+    Recorded only after both slots are written, and under _result_lock with
+    the membership test that guards them — so a delivery is never treated as
+    stored on the strength of a write that failed, and two retries racing
+    each other cannot both find it absent.
+    """
+    _accepted_deliveries[did] = None
+    while len(_accepted_deliveries) > _ACCEPTED_DELIVERY_LIMIT:
+        del _accepted_deliveries[next(iter(_accepted_deliveries))]
+
+
 # Stream lifetime ceiling. A stream's liveness is policed by the keepalive write
 # (a dead peer raises on the next one) and by replacement-on-reconnect, so this
 # is only a last-resort ceiling on a wedged connection — not a rollover timer.
@@ -1081,11 +1104,15 @@ class Handler(BaseHTTPRequestHandler):
             # _did remains internal on the extension wire. Surface its value as
             # deliveryId so waiters can correlate a result with this invocation.
             did = body.pop('_did', '')
+            # Only a string delivery id is one: anything else is not a key the
+            # dedup record can hold, and pushing it in there would raise.
+            if not isinstance(did, str):
+                did = ''
             body.pop('deliveryId', None)
             body['resultGeneration'] = uuid.uuid4().hex
-            if isinstance(did, str) and did:
+            if did:
                 body['deliveryId'] = did
-            if isinstance(did, str) and '_' in did:
+            if '_' in did:
                 try:
                     body['roundtrip_ms'] = int(time.time() * 1000) - int(did.split('_')[0])
                 except ValueError:
@@ -1095,17 +1122,28 @@ class Handler(BaseHTTPRequestHandler):
                     body, ensure_ascii=False).encode('utf-8')
             except (TypeError, ValueError, RecursionError):
                 return self._json(400, {'error': 'result is not encodable'})
+            duplicate = False
             try:
                 with _result_lock:
-                    # Per-tab result file
-                    if tab_id:
+                    duplicate = bool(did) and did in _accepted_deliveries
+                    if not duplicate:
+                        # Per-tab result file
+                        if tab_id:
+                            _atomic_result_write(
+                                RES_DIR / tab_result_name, serialized)
+                        # Backward compat: also write to token-only file
                         _atomic_result_write(
-                            RES_DIR / tab_result_name, serialized)
-                    # Backward compat: also write to token-only file
-                    _atomic_result_write(
-                        RES_DIR / token_result_name, serialized)
+                            RES_DIR / token_result_name, serialized)
+                        if did:
+                            _record_delivery(did)
             except OSError:
                 return self._json(500, {'error': 'result storage failure'})
+            if duplicate:
+                # A retry of a delivery already stored. Answering 200 is what
+                # stops the extension retrying again; rewriting the slots is
+                # what would lose a newer result, so this does the first and
+                # not the second, and publishes no second dashboard event.
+                return self._json(200, {'ok': True, 'duplicate': True})
             _notify_dashboard(token, {
                 'type': 'result',
                 'tabId': str(tab_id) if tab_id else '',
