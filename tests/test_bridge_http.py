@@ -95,9 +95,17 @@ def _stalled_request(base, body_bytes=b'{'):
     """
     port = int(base.rsplit(':', 1)[1])
     sock = socket.create_connection(('127.0.0.1', port), timeout=30)
-    sock.sendall(b'POST /result HTTP/1.0\r\n'
-                 b'Content-Type: application/json\r\n'
-                 b'Content-Length: 1000000\r\n\r\n' + body_bytes)
+    try:
+        sock.sendall(b'POST /result HTTP/1.0\r\n'
+                     b'Content-Type: application/json\r\n'
+                     b'Content-Length: 1000000\r\n\r\n' + body_bytes)
+    except OSError:
+        # A connection the bridge refuses is closed with these bytes still
+        # unread, which is a reset rather than an EOF — and Windows delivers
+        # it during the send rather than during the read that follows. The
+        # refusal is what the caller measures, so hand the socket back and
+        # let the read report it, the same way _raw_request does.
+        pass
     return sock
 
 
@@ -106,7 +114,8 @@ def _read_answer(sock, timeout):
     nothing arrived inside `timeout`, i.e. the request is still being held.
 
     A close after unread request bytes arrives as a reset rather than an EOF,
-    so both spellings of "closed on me" report the same b''.
+    and Windows spells that abort differently again, so every "closed on me"
+    reports the same b''.
     """
     sock.settimeout(timeout)
     chunks = []
@@ -115,7 +124,7 @@ def _read_answer(sock, timeout):
             chunk = sock.recv(65536)
         except socket.timeout:
             return b''.join(chunks) if chunks else None
-        except ConnectionResetError:
+        except ConnectionError:
             break
         if not chunk:
             break
