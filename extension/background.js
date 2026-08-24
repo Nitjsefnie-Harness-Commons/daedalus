@@ -1,7 +1,7 @@
 // Daedalus Extension — background service worker
-// @version 0.18.2
+// @version 0.19.0
 
-const VERSION = '0.18.2';
+const VERSION = '0.19.0';
 // No default server. A bridge URL is deployment-specific, and a build that
 // ships someone's hostname would have every install of it call home to that
 // host. The extension stays idle until a URL is set in its options page.
