@@ -135,6 +135,7 @@
 !/scripts/
 !/scripts/ci/
 !/scripts/ci/compare_durations.py
+!/scripts/ci/ratchet.py
 !/scripts/ci/time_tests.py
 
 # ─── tests ───

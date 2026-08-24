@@ -227,14 +227,99 @@ jobs:
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
         # A RATCHET, not a target. The floor sits just under what this job
         # actually measures, so ordinary churn stays green and a real
-        # regression goes red. Raise it by hand as coverage climbs — never
-        # lower it to make a red build green.
+        # regression goes red. The step below raises it from what this run
+        # measured — never lower it to make a red build green.
         #
         # The two numbers below are checked against each other and against the
         # flag by test_the_coverage_ratchet_records_what_it_was_calibrated_to.
         # The buffer absorbs measurement variation — which suites reach a
         # subprocess before it exits, and which optional dependency set the
         # runner resolved — not a licence to regress into it.
-        # measured: 73.3
-        # floor: 72
-        run: python -m coverage report --fail-under=72 --precision=1
+        # measured: 76.2
+        # floor: 74.7
+        run: python -m coverage report --fail-under=74.7 --precision=1
+
+      - name: Work out the raise this run justifies
+        # The floor was raised by hand, so the measurement recorded beside it
+        # went stale silently: it read 73.3 while the job measured 75, and the
+        # test pinning the two numbers cannot tell a current measurement from
+        # one taken fifteen commits ago. This closes that by making the run
+        # that takes the measurement also record it.
+        #
+        # Only from a push to main. A pull request measures a tree that is not
+        # main, and a fork's token cannot push at all. ratchet.py only ever
+        # raises, so a run that reached fewer subprocesses writes nothing —
+        # and that is also what makes this terminate: the run triggered by the
+        # commit below measures the same coverage and justifies no second one.
+        id: ratchet
+        if: ${{ !cancelled() && steps.measure.conclusion == 'success'
+                && github.event_name == 'push'
+                && github.ref == 'refs/heads/main' }}
+        run: |
+          measured="$(python -m coverage report --format=total --precision=1)"
+          python scripts/ci/ratchet.py --measured "$measured"
+          # git decides whether anything moved, so the script stays a rewriter
+          # and this stays a publisher; neither has to report to the other.
+          if git diff --quiet -- .github/workflows/tests.yml; then
+            echo "raised=false" >> "$GITHUB_OUTPUT"
+            echo "Coverage ${measured}% justified no raise." \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "raised=true" >> "$GITHUB_OUTPUT"
+            echo "measured=${measured}" >> "$GITHUB_OUTPUT"
+            {
+              echo '### Coverage ratchet'
+              echo
+              echo "This run measured ${measured}%, which raises the floor:"
+              echo
+              echo '```diff'
+              git diff -- .github/workflows/tests.yml
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit the raise
+        # A deploy key, not the built-in token, and the difference is not a
+        # preference. `main requires green checks` lists `coverage` among its
+        # required contexts — this job — so a commit pushed from here has no
+        # green checks yet and the ruleset refuses it. GitHub Actions cannot be
+        # added as a bypass actor either: the API answers "must be part of the
+        # ruleset source or owner organization". A deploy key can, it is scoped
+        # to this one repository rather than to an account, and revoking it is
+        # deleting one key.
+        #
+        # Unlike the built-in token, a deploy-key push DOES start the workflows
+        # again — which is what makes the raise-only rule load-bearing rather
+        # than tidy: the run this triggers measures the same coverage,
+        # ratchet.py declines to raise a second time, and the chain stops.
+        #
+        # Without the secret nothing is pushed and the summary above still
+        # carries the number, so a fork or an unprovisioned repository gets a
+        # visible raise to make by hand rather than a red build.
+        if: ${{ !cancelled() && steps.ratchet.outputs.raised == 'true'
+                && env.RATCHET_SSH_KEY != '' }}
+        env:
+          RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
+          REPO: ${{ github.repository }}
+          MEASURED: ${{ steps.ratchet.outputs.measured }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$RATCHET_SSH_KEY" > ~/.ssh/ratchet
+          chmod 600 ~/.ssh/ratchet
+          # Pinned, not scanned: ssh-keyscan would trust whatever answers, and
+          # this is the one step in the workflow holding a write credential.
+          # The value is github.com's published ed25519 host key (GET /meta).
+          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/tests.yml
+          # No co-author trailer: no model authored this commit.
+          git commit -m "ci: raise the coverage ratchet to ${MEASURED}% measured" \
+            -m 'Raised by .github/workflows/tests.yml from the coverage this run took.'
+          # HEAD:main, never a force: a rejected push means main moved while
+          # this ran, and the next push measures again and raises then. Losing
+          # a raise costs nothing; overwriting someone's commit does.
+          GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts' \
+            git push "git@github.com:${REPO}.git" HEAD:main

@@ -4551,7 +4551,7 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
 
 
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
-    """The scanner input is the non-empty set of 78 tracked release paths."""
+    """The scanner input is the non-empty set of 79 tracked release paths."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
@@ -4562,7 +4562,7 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(_iter_tree_files())
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 78, f'expected 78 tracked paths, found {len(tracked)}'
+    assert len(tracked) == 79, f'expected 79 tracked paths, found {len(tracked)}'
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (
@@ -5247,6 +5247,115 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     assert required, 'the repository tracks no dependency manifest at all'
     for ecosystem in sorted(required):
         assert f'package-ecosystem: {ecosystem}' in config, ecosystem
+
+
+_RATCHET_WORKFLOW = """        # measured: 73.3
+        # floor: 72
+        run: python -m coverage report --fail-under=72 --precision=1
+"""
+
+
+def _ratchet():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py', 'ratchet_mod')
+
+
+def test_the_ratchet_raises_the_floor_to_what_a_run_measured(tmp):
+    """The recorded measurement is what goes stale, so it is rewritten too."""
+    del tmp
+    ratchet = _ratchet()
+    raised = ratchet.update(_RATCHET_WORKFLOW, 80.0)
+    assert raised is not None, 'a measurement 8 points up justified no raise'
+    measured, floor = ratchet.read_calibration(raised)
+    assert measured == 80.0, raised
+    assert floor == 78.5, raised
+    assert '--fail-under=78.5' in raised, raised
+
+
+def test_the_ratchet_never_lowers_the_floor(tmp):
+    """A ratchet only turns one way: a run that reached fewer subprocesses is
+    not evidence that the code lost coverage."""
+    del tmp
+    ratchet = _ratchet()
+    for measured in (73.3, 72.0, 60.0, 73.4):
+        assert ratchet.update(_RATCHET_WORKFLOW, measured) is None, measured
+
+
+def test_the_ratchet_leaves_a_raise_the_pinning_rule_accepts(tmp):
+    """Whatever it writes must satisfy the test that pins these numbers, or
+    the next run goes red on a file this script wrote."""
+    del tmp
+    ratchet = _ratchet()
+    for measured in (80.0, 91.7, 100.0):
+        raised = ratchet.update(_RATCHET_WORKFLOW, measured)
+        assert raised is not None, measured
+        recorded, floor = ratchet.read_calibration(raised)
+        assert floor < recorded, (floor, recorded)
+        assert recorded - floor <= 2.0, (recorded, floor)
+
+
+def test_the_ratchet_refuses_a_gate_that_already_disagrees(tmp):
+    """A flag that has drifted from its own comment is a hand fix, not
+    something to bake in under a fresh number."""
+    del tmp
+    ratchet = _ratchet()
+    disagreeing = _RATCHET_WORKFLOW.replace('--fail-under=72', '--fail-under=70')
+    try:
+        ratchet.update(disagreeing, 90.0)
+    except SystemExit as why:
+        assert 'fix that by hand' in str(why), why
+    else:
+        raise AssertionError('a disagreeing gate was rewritten anyway')
+
+
+def test_the_ratchet_refuses_a_file_carrying_no_calibration(tmp):
+    """Silently doing nothing would read as 'no raise justified'."""
+    del tmp
+    ratchet = _ratchet()
+    try:
+        ratchet.update('run: python -m coverage report\n', 90.0)
+    except SystemExit as why:
+        assert 'records no calibration' in str(why), why
+    else:
+        raise AssertionError('a file with no calibration was accepted')
+
+
+def test_the_ratchet_rewrites_the_file_it_is_pointed_at(tmp):
+    """The entry point writes only when it raises, and says which it did."""
+    workflow = Path(tmp) / 'tests.yml'
+    workflow.write_text(_RATCHET_WORKFLOW, encoding='utf-8')
+    script = str(ROOT / 'scripts' / 'ci' / 'ratchet.py')
+
+    quiet = subprocess.run(
+        [sys.executable, script, '--measured', '73.0',
+         '--workflow', str(workflow)],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+    assert quiet.returncode == 0, (quiet.stdout, quiet.stderr)
+    assert 'justifies no raise' in quiet.stdout, quiet.stdout
+    assert workflow.read_text(encoding='utf-8') == _RATCHET_WORKFLOW
+
+    raised = subprocess.run(
+        [sys.executable, script, '--measured', '80.0',
+         '--workflow', str(workflow)],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+    assert raised.returncode == 0, (raised.stdout, raised.stderr)
+    assert 'raised the coverage floor 72.0 -> 78.5' in raised.stdout, raised.stdout
+    assert '--fail-under=78.5' in workflow.read_text(encoding='utf-8')
+
+
+def test_the_ratchet_can_raise_the_real_workflow(tmp):
+    """The regexes are pinned against the file they actually run on, not only
+    against the fixture above."""
+    del tmp
+    ratchet = _ratchet()
+    text = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    recorded, floor = ratchet.read_calibration(text)
+    assert floor < recorded, (floor, recorded)
+    raised = ratchet.update(text, recorded + 5.0)
+    assert raised is not None, 'the real workflow refused a five-point raise'
+    new_measured, new_floor = ratchet.read_calibration(raised)
+    assert new_measured == recorded + 5.0, new_measured
+    assert new_floor > floor, (new_floor, floor)
 
 
 def test_the_coverage_ratchet_records_what_it_was_calibrated_to(tmp):
