@@ -144,6 +144,8 @@
 !/tests/
 !/tests/_bridge.py
 !/tests/_jsread.py
+!/tests/_jsroute.py
+!/tests/_pyroute.py
 !/tests/_repo.py
 !/tests/_segments.py
 !/tests/_util.py
@@ -162,6 +164,8 @@
 !/tests/test_extension_policy.py
 !/tests/test_file_sizes.py
 !/tests/test_gitignore_generator.py
+!/tests/test_gm_storage.py
+!/tests/test_gm_transfers.py
 !/tests/test_mcp_server.py
 !/tests/test_path_safety.py
 !/tests/test_release_scan.py
@@ -172,4 +176,5 @@
 !/tests/test_speed_measurement.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_suite_runner.py
+!/tests/test_tab_routing.py
 !/tests/test_version_contract.py
