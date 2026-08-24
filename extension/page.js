@@ -255,7 +255,23 @@
       });
       opts._responseType = opts.responseType;
       _pending[reqId] = opts;
-      return { abort: function() {} };
+      let aborted = false;
+      return {
+        // Terminal on this side the moment it is called: the pending entry is
+        // dropped, so a load or error already in flight finds no callback and
+        // is ignored, and the relay cancels the fetch itself so the request
+        // stops rather than merely stopping being listened to. Idempotent —
+        // a second call, or one after the request already settled, has
+        // nothing left to cancel and says nothing to the relay.
+        abort: function() {
+          if (aborted || !_pending[reqId]) return;
+          aborted = true;
+          const handlers = _pending[reqId];
+          delete _pending[reqId];
+          gmPost('abortRequest', { target: reqId });
+          if (handlers.onabort) handlers.onabort({});
+        },
+      };
     },
 
     openInTab: function(url, opts) {

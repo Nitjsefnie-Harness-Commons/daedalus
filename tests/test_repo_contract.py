@@ -1477,6 +1477,7 @@ const windowListeners = [];
 const windowMessages = [];
 const postedResults = [];
 const evalResolvers = {};
+const slowSignals = [];
 let relaySequence = 0;
 
 function response(status, data) {
@@ -1609,6 +1610,19 @@ const backgroundContext = vm.createContext({
   chrome: backgroundChrome,
   fetch: async (target, init = {}) => {
     const url = String(target);
+    if (url.includes('/slow')) {
+      // Never settles on its own. The only way out is the AbortSignal, which
+      // is the whole question: a relay whose abort reaches nothing leaves this
+      // request running until its timeout.
+      slowSignals.push(init.signal);
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    }
     if (url.endsWith('/result') && init.method === 'POST') {
       postedResults.push(JSON.parse(init.body));
       return response(200, { ok: true });
@@ -1691,6 +1705,7 @@ const relayContext = vm.createContext({
   location: { hostname: relayHostname },
   performance,
   evalResolvers,
+  crypto: { randomUUID: () => 'fetch-' + (++relaySequence) },
   Blob,
   URL,
   Uint8Array,
@@ -1822,6 +1837,36 @@ async function run() {
       result: postedResults[0].result,
       world: postedResults[0].world,
       deliveryId: postedResults[0]._did || null,
+    };
+  }
+
+  if (mode === 'gm-abort') {
+    relayContext.abortProbe = {};
+    vm.runInContext(
+      'abortProbe.handle = window.GM.xmlhttpRequest({'
+      + ' url: "https://example.com/slow",'
+      + ' onload: function() { abortProbe.load = true; },'
+      + ' onerror: function() { abortProbe.error = true; },'
+      + ' ontimeout: function() { abortProbe.timeout = true; },'
+      + ' onabort: function() { abortProbe.abort = true; },'
+      + '})', relayContext);
+    await waitFor(() => slowSignals.length === 1, 'the relayed fetch to start');
+    const inFlight = vm.runInContext('_fetchControllers.size', backgroundContext);
+    vm.runInContext('abortProbe.handle.abort()', relayContext);
+    vm.runInContext('abortProbe.handle.abort()', relayContext);
+    await waitFor(() => slowSignals[0].aborted, 'the fetch to be cancelled');
+    await delay();
+    await delay();
+    return {
+      inFlight,
+      aborted: slowSignals[0].aborted,
+      onabort: Boolean(relayContext.abortProbe.abort),
+      onload: Boolean(relayContext.abortProbe.load),
+      onerror: Boolean(relayContext.abortProbe.error),
+      ontimeout: Boolean(relayContext.abortProbe.timeout),
+      abortMessages: windowMessages.filter(
+        (message) => message.handler === 'abortRequest').length,
+      controllers: vm.runInContext('_fetchControllers.size', backgroundContext),
     };
   }
 
@@ -2170,6 +2215,52 @@ def _run_eval_same_tab_preemption():
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
+
+
+def _run_gm_abort():
+    node = shutil.which('node')
+    assert node, 'node is required to execute the GM relay'
+    result = subprocess.run(
+        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
+         str(EXTENSION_ROOT / 'background.js'),
+         str(EXTENSION_ROOT / 'content.js'),
+         str(EXTENSION_ROOT / 'page.js'), '[]', 'gm-abort'],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def test_a_gm_request_handle_can_actually_cancel_its_fetch(tmp):
+    """`abort()` cancelled nothing: it was an empty function.
+
+    The handle GM.xmlhttpRequest returns was `{ abort: function() {} }`, so a
+    caller that stopped caring about a slow request had no way to say so. The
+    fetch ran to completion or to its timeout in the service worker, holding
+    the relay entry and the connection, and the page's callbacks fired for a
+    response nobody was waiting for.
+
+    All three scripts run here — page, content script and service worker —
+    because the cancellation has to cross both hops to reach the
+    AbortController, and a relay that drops it at either one looks identical
+    from the page.
+    """
+    del tmp
+    outcome = _run_gm_abort()
+    assert outcome['inFlight'] == 1, outcome
+    assert outcome['aborted'] is True, outcome
+    # Exactly one terminal callback, and it is the abort one: a load or error
+    # arriving afterwards must find nothing to call.
+    assert outcome['onabort'] is True, outcome
+    assert outcome['onload'] is False, outcome
+    assert outcome['onerror'] is False, outcome
+    assert outcome['ontimeout'] is False, outcome
+    # Two abort() calls, one message: idempotent, and the second finds the
+    # request already gone rather than telling the worker about a fetch it is
+    # no longer running.
+    assert outcome['abortMessages'] == 1, outcome
+    # The worker keeps no controller for a request that is over.
+    assert outcome['controllers'] == 0, outcome
 
 
 def _run_eval_relay_marker(hostname):

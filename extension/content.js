@@ -25,6 +25,11 @@ function storageError() {
   return (chrome.runtime.lastError && chrome.runtime.lastError.message) || '';
 }
 const KEYED_STORAGE_HANDLERS = new Set(['getValue', 'setValue', 'deleteValue']);
+// One entry per in-flight GM.xmlhttpRequest: the page's request id to
+// the id the service worker files its AbortController under. Deleted when
+// the request settles and when it is cancelled, so an abort arriving after
+// either finds nothing and does nothing.
+const _fetchIds = {};
 
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data || e.data.direction !== 'daedalus-page-to-bg') return;
@@ -44,9 +49,26 @@ window.addEventListener('message', (e) => {
     }
   }
 
+  if (msg.handler === 'abortRequest') {
+    // The page names its own request id; the background knows the fetch by
+    // the id minted here, so the mapping is what makes cancellation reach the
+    // AbortController. A request that already settled has no mapping left,
+    // which is what makes a late or repeated abort a no-op rather than a
+    // message about a fetch nobody is running.
+    const fetchId = _fetchIds[msg.target];
+    if (fetchId) {
+      delete _fetchIds[msg.target];
+      chrome.runtime.sendMessage({ type: 'abortFetch', fetchId });
+    }
+    return;
+  }
+
   if (msg.handler === 'xmlhttpRequest') {
+    const fetchId = crypto.randomUUID();
+    _fetchIds[reqId] = fetchId;
     chrome.runtime.sendMessage({
       type: 'fetch',
+      fetchId,
       url: msg.url,
       method: msg.method,
       headers: msg.headers,
@@ -55,6 +77,7 @@ window.addEventListener('message', (e) => {
       responseType: msg.responseType === 'arraybuffer' ? 'arraybuffer' : 'text',
       timeout: msg.timeout,
     }, (resp) => {
+      delete _fetchIds[reqId];
       const err = chrome.runtime.lastError && chrome.runtime.lastError.message;
       if (err || !resp) {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'error',
