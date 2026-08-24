@@ -413,6 +413,32 @@ def test_serve_crash_line_survives_a_hostile_decode_return(tmp):
     assert '[MCP] serve crashed: <unprintable value>' in line, line
 
 
+def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
+    """The refusal has to land before the PUT, not after it.
+
+    _poll_result evaluates the deadline only after the command has been
+    submitted, so a non-positive timeout polled zero times, raised a timeout
+    for a command the browser had already been handed, and left the caller
+    believing nothing ran.
+    """
+    _need_deps()
+    with _util.bridge(tmp) as (base, docroot):
+        mod = _load_mcp(base)
+        mod._token.set(TOK)
+        for timeout in (0, -1.0, float('nan'), float('inf')):
+            try:
+                asyncio.run(getattr(mod, 'exec')(
+                    cmd_id='_timeout', code='1', timeout=timeout))
+            except ValueError as error:
+                assert 'finite positive' in str(error), (timeout, error)
+            else:
+                raise AssertionError(f'timeout {timeout!r} was accepted')
+        for name in (f'{TOK}_extension', TOK):
+            qdir = Path(docroot) / 'commands' / name
+            queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+            assert queued == [], (name, queued)
+
+
 def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
     """A bad MCP setting names itself instead of raising a bare ValueError.
 

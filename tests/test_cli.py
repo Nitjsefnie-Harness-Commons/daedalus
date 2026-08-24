@@ -459,6 +459,30 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
     assert 4 <= polls <= 12, r.stdout
 
 
+def test_a_negative_timeout_is_refused_before_the_command_is_sent(tmp):
+    """Refusing the wait is only useful if nothing was admitted first.
+
+    The command was PUT before the deadline was evaluated, so a negative
+    timeout polled zero times, told the caller it had timed out, and left a
+    command the browser was still free to execute. Retrying after that
+    report runs the side effect twice.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        r = run_cli(['screenshot', '--timeout', '-1'], env)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert 'timeout must not be negative' in r.stderr, r.stderr
+        # Nothing reached the bridge: no queue directory, or an empty one.
+        qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+        queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+        assert queued == [], queued
+
+        # Zero keeps the meaning it already had — "unset", so the
+        # subcommand's own default applies — and is not refused.
+        r = run_cli(['screenshot', '--timeout', '0', '--help'], env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+
+
 def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
     """A foreign result seen mid-wait is neither returned as ours nor fatal:
     the waiter keeps polling and completes when its own result arrives."""

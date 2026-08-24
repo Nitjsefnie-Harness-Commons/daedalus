@@ -9,6 +9,7 @@ The Bearer token is compared with the bridge token resolved by the CLI's
 existing configuration path before it enters the _token ContextVar and is
 forwarded to the local bridge. Missing configuration fails closed.
 """
+import math
 import hmac, json, os, socket, sys, threading
 from contextvars import ContextVar
 from typing import Any
@@ -161,11 +162,26 @@ def _flatten_eval(body: dict | None) -> dict | None:
     return body
 
 
+def _checked_timeout(timeout: float) -> float:
+    """Refuse a wait that cannot wait, BEFORE the command is submitted.
+
+    The command is PUT first and the deadline evaluated afterwards, so a
+    non-positive or non-finite timeout polls zero times and raises a timeout
+    for a command the browser has already been handed. The caller is told
+    nothing ran; retrying then runs the side effect a second time.
+    """
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError(f'timeout must be a finite positive number of seconds; got {timeout!r}')
+    return timeout
+
+
 async def _send_eval(cmd_id: str, code: str, tab_id: str, wait: bool, timeout: float) -> dict | None:
     if not cmd_id:
         raise ValueError('cmd_id is required')
     if not code:
         raise ValueError('code is empty')
+    if wait:
+        _checked_timeout(timeout)
     payload: dict = {'id': cmd_id, 'code': code}
     if tab_id:
         payload['tab'] = tab_id
@@ -791,6 +807,7 @@ async def _ext_cmd(cmd_id: str, cmd_type: str, timeout: float = 10.0,
     `result` in the body, so returning result.result alone drops it.
     include_roundtrip merges it back in, for tools where how long the extension
     took is part of the answer."""
+    _checked_timeout(timeout)
     payload = {'id': cmd_id, 'type': cmd_type, 'tab': 'extension', **fields}
     sent = await _put('/command', payload)
     res = await _poll_result(

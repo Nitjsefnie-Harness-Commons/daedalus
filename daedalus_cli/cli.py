@@ -49,6 +49,30 @@ def tab():
 
 # ─── HTTP helpers ───
 
+def positive_timeout(value):
+    """argparse type for a result wait.
+
+    A negative wait is worse than a rejected one: the command is PUT to the
+    bridge first and the deadline is only checked afterwards, so the poll
+    loop runs zero times, the caller is told it timed out, and the browser
+    goes on to execute the command anyway. Retrying after that report runs
+    the side effect twice. Rejecting the value at parse time means nothing
+    has been admitted yet.
+
+    Zero is accepted and keeps the meaning it already has at every call
+    site: `args.timeout or <default>` reads it as "unset".
+    """
+    try:
+        seconds = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'timeout must be a whole number of seconds; got {value!r}') from None
+    if seconds < 0:
+        raise argparse.ArgumentTypeError(
+            f'timeout must not be negative; got {seconds}')
+    return seconds
+
+
 def _query_path(path, params):
     """Build one bridge path with every query value percent-encoded."""
     query = urllib.parse.urlencode(params)
@@ -990,7 +1014,7 @@ def main():
     s.add_argument('file', help='JS file path (or - for stdin)')
     s.add_argument('--no-result', action='store_true', help="Don't wait for result")
     s.add_argument('-b', '--broadcast', action='store_true', help='Send to all tabs (ignore ID)')
-    s.add_argument('-t', '--timeout', type=int, default=15, help='Result timeout seconds (default 15)')
+    s.add_argument('-t', '--timeout', type=positive_timeout, default=15, help='Result timeout seconds (default 15)')
 
     # exec
     s = sub.add_parser('exec', help='Send inline JS code')
@@ -998,7 +1022,7 @@ def main():
     s.add_argument('code', help='JS code string')
     s.add_argument('--no-result', action='store_true', help="Don't wait for result")
     s.add_argument('-b', '--broadcast', action='store_true', help='Send to all tabs (ignore ID)')
-    s.add_argument('-t', '--timeout', type=int, default=15, help='Result timeout seconds (default 15)')
+    s.add_argument('-t', '--timeout', type=positive_timeout, default=15, help='Result timeout seconds (default 15)')
 
     # result
     s = sub.add_parser('result', help='Fetch latest result')
@@ -1036,14 +1060,14 @@ def main():
     s.add_argument('-f', '--format', choices=['png', 'jpeg'], help='Image format (default png)')
     s.add_argument('-q', '--quality', type=int, help='JPEG quality (1-100)')
     s.add_argument('--chrome-tab', help='Chrome tab ID (default: active tab)')
-    s.add_argument('-t', '--timeout', type=int, default=15, help='Timeout seconds')
+    s.add_argument('-t', '--timeout', type=positive_timeout, default=15, help='Timeout seconds')
 
     # cookies (extension)
     s = sub.add_parser('cookies', help='Get cookies via extension')
     s.add_argument('-d', '--domain', help='Filter by domain')
     s.add_argument('-u', '--url', help='Filter by URL')
     s.add_argument('--raw', action='store_true', help='Print full JSON (no truncation)')
-    s.add_argument('-t', '--timeout', type=int, default=0,
+    s.add_argument('-t', '--timeout', type=positive_timeout, default=0,
                    help='Result timeout seconds (default 10)')
 
     # set-cookie (extension)
@@ -1067,7 +1091,7 @@ def main():
     s = sub.add_parser('clear-cookies', help='Clear all cookies for a domain')
     s.add_argument('-d', '--domain', help='Domain to clear')
     s.add_argument('-u', '--url', help='URL to clear')
-    s.add_argument('-t', '--timeout', type=int, default=0,
+    s.add_argument('-t', '--timeout', type=positive_timeout, default=0,
                    help='Result timeout seconds (default 10)')
 
     # cdp (extension)
