@@ -1385,5 +1385,123 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
         globals()['_load_mcp_at_port'] = real_loader
 
 
+def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
+    """Run one MCP tool that sends a command, and answer what it sends.
+
+    The tool awaits a result that only an extension would post, and there is
+    none here, so the answer comes from this thread once the command lands in
+    the queue. Returns (what the tool returned, the payload the bridge got).
+    """
+    qdir = Path(docroot) / 'commands' / f'{TOK}_{tab}'
+    if qdir.is_dir():
+        for stale in qdir.glob('*.json'):
+            stale.unlink()
+    box = {}
+
+    def run():
+        # The token is a ContextVar, and a thread starts with a fresh context:
+        # setting it on the caller's thread leaves the tool answering "no token
+        # in context". _BearerAuth sets it per request for the same reason.
+        mod._token.set(TOK)
+        try:
+            box['value'] = asyncio.run(call())
+        except Exception as exc:  # pylint: disable=broad-except
+            box['error'] = exc
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    try:
+        deadline = time.time() + 20
+        queued = None
+        while time.time() < deadline:
+            files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+            if files:
+                queued = json.loads(files[0].read_text(encoding='utf-8'))
+                break
+            if not worker.is_alive():
+                break  # it failed before enqueuing; its own error explains it
+            time.sleep(0.05)
+        if queued is None:
+            worker.join(timeout=5)
+            if 'error' in box:
+                raise box['error']
+            raise AssertionError('the tool enqueued no command')
+        status, _ = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': tab, 'id': queued['id'], 'result': result,
+            'error': None, 'ts': 1, '_did': queued['_did']})
+        assert status == 200, status
+    finally:
+        worker.join(timeout=60)
+    if 'error' in box:
+        raise box['error']
+    return box.get('value'), queued
+
+
+def test_every_mcp_command_tool_sends_its_documented_command(tmp):
+    """Each MCP tool reaches the extension as the command it claims.
+
+    The MCP surface is a second sender of the same wire protocol the CLI
+    speaks, written separately, so the two can disagree about a `type` or a
+    field name without anything noticing. This pins what the tools put on the
+    wire, read back out of the queue the bridge routed it into.
+    """
+    _need_deps()
+    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+        mod = _load_mcp(base)
+        mod._token.set(TOK)  # what _BearerAuth does per request
+        cases = (
+            (lambda: mod.open_tab('https://example.com'), 'open-tab',
+             {'url': 'https://example.com'}),
+            (lambda: mod.open_tabs(['https://example.com/a']), 'open-tabs',
+             {'urls': ['https://example.com/a']}),
+            (lambda: mod.focus_tab(7), 'focus-tab', {'tabId': 7}),
+            (lambda: mod.close_tab([5]), 'close-tab', {'tabId': 5}),
+            (lambda: mod.ext_navigate('https://example.com'), 'navigate',
+             {'url': 'https://example.com'}),
+            (mod.ext_reload, 'reload', {}),
+            (lambda: mod.get_cookies(domain='example.com'), 'cookies',
+             {'domain': 'example.com'}),
+            (lambda: mod.set_cookie('https://example.com', 'sid', 'abc'),
+             'set-cookie',
+             {'url': 'https://example.com', 'name': 'sid', 'value': 'abc'}),
+            (lambda: mod.remove_cookie('https://example.com', 'sid'),
+             'remove-cookie', {'url': 'https://example.com', 'name': 'sid'}),
+            (lambda: mod.clear_cookies(domain='example.com'), 'clear-cookies',
+             {'domain': 'example.com'}),
+            (lambda: mod.inject_css('a{color:red}'), 'inject-css',
+             {'css': 'a{color:red}'}),
+            (lambda: mod.remove_css('a{color:red}'), 'remove-css',
+             {'css': 'a{color:red}'}),
+            (lambda: mod.block_requests('*.example/*'), 'block-requests',
+             {'pattern': '*.example/*'}),
+            (mod.unblock_requests, 'unblock-requests', {}),
+            (mod.list_block_rules, 'list-block-rules', {}),
+            (lambda: mod.store_hotfix('fix1', 'console.log(1)'),
+             'store-hotfix', {'fixId': 'fix1', 'code': 'console.log(1)'}),
+            (lambda: mod.clear_hotfix('fix1'), 'clear-hotfix',
+             {'fixId': 'fix1'}),
+            (mod.clear_hotfixes, 'clear-all-hotfixes', {}),
+            (mod.list_hotfixes, 'list-hotfixes', {}),
+            (lambda: mod.set_permanent('fix1', True), 'set-permanent',
+             {'fixId': 'fix1', 'permanent': True}),
+            (mod.net_capture, 'net-capture', {}),
+            (mod.net_capture_stop, 'net-capture-stop', {}),
+            (mod.net_capture_get, 'net-capture-get', {}),
+            (lambda: mod.cdp('Page.enable'), 'cdp',
+             {'method': 'Page.enable', 'params': {}}),
+            (mod.fetch_timings, 'fetch-timings', {}),
+            (mod.ext_self_reload, 'ext-reload', {}),
+        )
+        for call, cmd_type, fields in cases:
+            _value, queued = _answer_mcp_command(base, docroot, mod, call, {})
+            assert queued.get('type') == cmd_type, (cmd_type, queued)
+            # Routing is consumed by the bridge when it enqueues, so what
+            # proves the command addressed the extension worker is the queue
+            # it was read from.
+            assert 'tab' not in queued, (cmd_type, queued)
+            for key, value in fields.items():
+                assert queued.get(key) == value, (cmd_type, key, queued)
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
