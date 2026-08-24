@@ -416,17 +416,19 @@ def do_segment_job(args):
 
 def do_segment_status(args):
     # /segment-status takes the job-scoped capability, not the bridge token.
-    # The capability is only handed out by POST /segment-job, which MINTS the
-    # job when it does not exist yet (idempotent for the owning token) — so a
-    # status query for a mistyped name creates that job as a side effect.
+    # Look the capability up rather than POSTing for it: POST /segment-job
+    # MINTS a job that does not exist yet, so asking the status of a mistyped
+    # name used to create it and then report zero segments as though the name
+    # had been right.
     req = urllib.request.Request(
-        f'{URL}/segment-job',
-        data=json.dumps({'token': token(), 'job': args.job}).encode(),
-        headers={'Content-Type': 'application/json'}, method='POST')
+        _query_path(f'{URL}/segment-job', {'token': token(), 'job': args.job}),
+        method='GET')
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             sig = json.loads(r.read())['sig']
     except urllib.error.HTTPError as e:
+        if e.code == 404:
+            sys.exit(f'segment-status: no job named "{args.job}"')
         if e.code == 409:
             sys.exit(f'segment-status: job "{args.job}" is owned by a different token')
         sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')

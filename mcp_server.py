@@ -323,19 +323,22 @@ async def segment_job(job: str) -> dict:
 async def segment_status(job: str) -> dict:
     """HLS segment relay status for `job`. Returns {count, done, gaps}.
 
-    Side effect: the capability /segment-status requires is only handed out
-    by POST /segment-job, which MINTS the job when it does not exist yet
-    (idempotent for the owning token) — so querying a mistyped name creates
-    that job. Querying a job owned by a different token raises an error.
+    Creates nothing: the capability is looked up, not minted. A job that does
+    not exist raises rather than being brought into being by the question, and
+    one owned by a different token raises too.
     """
-    # /segment-status takes the job's minted capability, not the bridge token.
+    # /segment-status takes the job's minted capability, not the bridge token,
+    # and GET /segment-job is the lookup that hands it over without creating
+    # the job when the name has never been used.
     client = _http_client()
-    mint = await client.post(
-        '/segment-job', json={'token': _tok(), 'job': job})
-    if mint.status_code == 409:
+    found = await client.get(
+        '/segment-job', params={'token': _tok(), 'job': job})
+    if found.status_code == 404:
+        raise RuntimeError(f'segment_status: no job named {job!r}')
+    if found.status_code == 409:
         raise RuntimeError(f'segment_status: job {job!r} is owned by a different token')
-    mint.raise_for_status()
-    sig = mint.json()['sig']
+    found.raise_for_status()
+    sig = found.json()['sig']
     r = await client.get(
         '/segment-status', params={'job': job, 'sig': sig})
     r.raise_for_status()

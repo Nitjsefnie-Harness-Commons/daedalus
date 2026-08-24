@@ -705,6 +705,9 @@ class Handler(BaseHTTPRequestHandler):
                 ]
             return self._json(200, result)
 
+        if parsed.path == '/segment-job':
+            return self._handle_segment_job_lookup(params)
+
         if parsed.path == '/segment-status':
             return self._handle_segment_status(params)
 
@@ -1568,6 +1571,40 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._json(500, {'error': 'segment storage failure'})
         return self._json(200, {'done': done, 'count': len(done)})
+
+    def _handle_segment_job_lookup(self, params):
+        """GET /segment-job?token=X&job=Y — the capability, without minting.
+
+        POST mints a job that does not exist yet, which is what a producer
+        wants and the opposite of what a status query wants: asking about a
+        name that was never used created it, so a typo left a permanent
+        record behind and answered as though the job were real.
+
+        Unlike GET /segment-status this route takes the bridge token, so an
+        absent job can be reported as absent — the capability route has to
+        conflate "no such job" with "wrong sig" to avoid being an existence
+        oracle, and a caller holding the bridge token is owed neither.
+        """
+        token = self._query_bridge_token(params)
+        job = params.get('job', [''])[0]
+        if not self._require_bridge_token(token):
+            return
+        if not job or _unsafe_component(job):
+            return self._json(400, {'error': 'bad job'})
+        with _seg_lock:
+            try:
+                record = _load_segment_record(job)
+            except _SegmentRecordError:
+                return self._json(500, {'error': 'segment storage failure'})
+            if record is None:
+                return self._json(404, {'error': 'no such job'})
+            if record.get('token') != token:
+                return self._json(
+                    409, {'error': 'job owned by a different token'})
+            sig = record.get('sig', '')
+            if not isinstance(sig, str) or not sig or not sig.isascii():
+                return self._json(409, {'error': 'job record cannot resume'})
+        return self._json(200, {'ok': True, 'sig': sig})
 
     def _handle_segment_job(self, body):
         """POST /segment-job — mint (or re-fetch) the capability for an HLS job.

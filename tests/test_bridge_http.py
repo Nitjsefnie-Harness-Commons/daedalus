@@ -2067,6 +2067,45 @@ def _post_segment(base, job, sig, segment, payload=b'bytes', total='1'):
         headers={'Content-Type': 'application/octet-stream'})
 
 
+def test_looking_up_a_segment_job_creates_nothing(tmp):
+    """Asking about a job must not be what brings it into existence.
+
+    The capability /segment-status needs was only handed out by POST
+    /segment-job, which mints on a name it has not seen — so a status query
+    for a mistyped job created that job, left a permanent record beside the
+    segments directory, and answered zero segments as though the name had
+    been right.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        job = _seg_job()
+        record = docroot / 'segments' / f'{job}.json'
+        query = urllib.parse.urlencode({'token': TOK, 'job': job})
+        status, body = _util.get_json(f'{base}/segment-job?{query}')
+        assert status == 404 and body == {'error': 'no such job'}, (status, body)
+        assert not record.exists(), 'the lookup created the job'
+
+        status, minted = _mint_job(base, TOK, job)
+        assert status == 200 and record.is_file(), (status, minted)
+        status, body = _util.get_json(f'{base}/segment-job?{query}')
+        assert status == 200 and body == {
+            'ok': True, 'sig': minted['sig']}, (status, body)
+
+        # A job someone else owns is a 409, not a silent re-mint.
+        record.write_text(json.dumps({
+            'token': 'someoneelse', 'sig': 'their-capability',
+            'max_segment_index': 10, 'max_segment_count': 10,
+            'max_bytes': 100}), encoding='utf-8')
+        status, body = _util.get_json(f'{base}/segment-job?{query}')
+        assert status == 409, (status, body)
+
+    # The lookup is token-gated, so it answers a wrong token before it
+    # answers anything about the job.
+    with _util.bridge(tmp) as (base, _docroot):
+        query = urllib.parse.urlencode({'token': 'wrong', 'job': 'anything'})
+        status, body = _util.get_json(f'{base}/segment-job?{query}')
+        assert status == 401 and body == {'error': 'unauthorized'}, (status, body)
+
+
 def test_segment_job_mint_idempotent_and_owned(tmp):
     with _util.bridge(tmp) as (base, docroot):
         job = _seg_job()
