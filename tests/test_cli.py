@@ -664,7 +664,7 @@ def _run_same_id_client_overlap(tmp, completion_order):
                 _util.run_background_overlap(
                     _util.ROOT / 'extension' / 'background.js', commands,
                     completion_order, result_base=base, token=TOK,
-                    wait_between=True)
+                    wait_between=False)
             except AssertionError as failure:
                 raise AssertionError(
                     f'{failure}; clients: {_client_states(processes)}'

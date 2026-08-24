@@ -836,6 +836,8 @@ async def _poll_result(tab: str, timeout: float, interval: float = 0.5,
     peek = {}
     if tab:
         peek['tab'] = tab
+    if expect_delivery:
+        peek['delivery'] = expect_delivery
     auth = _bridge_auth()
     deadline = time.time() + timeout
     wait = 0.02

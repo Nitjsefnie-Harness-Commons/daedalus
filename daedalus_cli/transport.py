@@ -190,6 +190,8 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     params = {}
     if target_tab:
         params['tab'] = target_tab
+    if delivery_id:
+        params['delivery'] = delivery_id
     # One monotonic deadline for the whole wait, and every blocking step is
     # capped by what is left of it. The loop used to check the clock only
     # before each iteration and then give each HTTP call its own fixed 30s,
