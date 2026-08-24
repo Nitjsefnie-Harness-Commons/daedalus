@@ -748,6 +748,16 @@ def _tok() -> str:
     return t
 
 
+def _bridge_auth() -> dict[str, str]:
+    """The bridge's pre-body credential carrier.
+
+    The bridge settles credentials before it reads a request body, so a body
+    token alone caps what this client may send at the unauthenticated window.
+    Same header, same value the MCP listener itself required to get here.
+    """
+    return {'Authorization': f'Bearer {_tok()}'}
+
+
 async def _get(path: str, **params) -> Any:
     params['token'] = _tok()
     r = await _http_client().get(path, params=params)
@@ -757,21 +767,22 @@ async def _get(path: str, **params) -> Any:
 
 async def _put(path: str, body: dict) -> dict:
     body = {**body, 'token': _tok()}
-    r = await _http_client().put(path, json=body)
+    r = await _http_client().put(path, json=body, headers=_bridge_auth())
     r.raise_for_status()
     return r.json()
 
 
 async def _post(path: str, body: dict) -> dict:
     body = {**body, 'token': _tok()}
-    r = await _http_client().post(path, json=body)
+    r = await _http_client().post(path, json=body, headers=_bridge_auth())
     r.raise_for_status()
     return r.json()
 
 
 async def _delete(path: str, body: dict) -> dict:
     body = {**body, 'token': _tok()}
-    r = await _http_client().request('DELETE', path, json=body)
+    r = await _http_client().request(
+        'DELETE', path, json=body, headers=_bridge_auth())
     r.raise_for_status()
     return r.json()
 

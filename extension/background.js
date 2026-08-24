@@ -75,6 +75,17 @@ async function readBoundedBody(resp, limit) {
   return bytes;
 }
 
+// The bridge settles credentials before it reads a request body, so the token
+// rides in a header as well as in the payload. A screenshot upload or a large
+// eval result carrying only a body token is refused unread, because a body
+// token cannot be checked without reading the body.
+function bridgeHeaders(token) {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + token,
+  };
+}
+
 // Timing ring buffer for diagnostics (last 500 fetch relay entries)
 const _fetchTimings = [];
 const _FETCH_TIMINGS_MAX = 500;
@@ -171,7 +182,7 @@ async function postResult(execution, result, error, tabId, extra = {}) {
     try {
       const resp = await fetch(execution.resultRoute.serverUrl + '/result', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: bridgeHeaders(execution.resultRoute.token),
         body,
       });
       if (resp.ok) return;
@@ -203,7 +214,7 @@ async function registryPost(path, payload) {
   try {
     const resp = await fetch(config.serverUrl + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: bridgeHeaders(config.token),
       body: JSON.stringify(payload),
     });
     if (!resp.ok) {
@@ -300,7 +311,7 @@ async function handleScreenshot(cmd) {
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
     const uploadResp = await fetch(cmd._execution.resultRoute.serverUrl + '/upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: bridgeHeaders(cmd._execution.resultRoute.token),
       body: JSON.stringify({
         token: cmd._execution.resultRoute.token,
         id: cmd.id,

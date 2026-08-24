@@ -444,6 +444,16 @@ MAX_BODY_SIZE = _env_int('DAEDALUS_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
 # interpreter's recursion limit; nothing this bridge accepts nests near it.
 MAX_JSON_DEPTH = _env_int('DAEDALUS_MAX_JSON_DEPTH', 100, 1, 500)
 
+# How large a body the bridge will read from a request that has not
+# authenticated before sending it. A body token cannot be checked without
+# reading the body, so every JSON route used to materialize and parse whatever
+# was declared -- up to MAX_BODY_SIZE -- on its way to answering 401, and
+# concurrent workers multiplied that. The Bearer header decides first; this is
+# the window in which the older body-token form still works, sized so that a
+# request nobody has authenticated is never the expensive one.
+MAX_UNAUTHENTICATED_BODY = _env_int(
+    'DAEDALUS_MAX_UNAUTHENTICATED_BODY', 64 * 1024, 0)
+
 # Per-operation socket deadline for a request. A peer that declares a body and
 # then stops sending held its worker for as long as it kept the socket open,
 # so opening connections was enough to grow the thread count without ever
@@ -881,6 +891,62 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {'error': 'unauthorized'})
             return False
         return True
+
+    def _authenticate_before_body(self, clen):
+        """Settle credentials before a byte of the body is read.
+
+        Returns the header-authenticated token, `''` when there is no header
+        and the body is small enough to still decide it, or None once the
+        request has been answered.
+
+        A body token cannot be checked without reading the body, which is the
+        cost this exists to avoid: a 24 MiB request with an invalid token was
+        received and parsed in full on its way to a 401, and every concurrent
+        worker could be made to do the same. The Bearer header is the carrier
+        that makes the decision reachable first. It is the same header, and
+        the same comparison, the MCP listener already requires.
+
+        The older body-token form still works below MAX_UNAUTHENTICATED_BODY,
+        because a body that small is not the problem this is about.
+        """
+        duplicate = ambiguous_request_carrier(
+            name.encode('latin-1', 'replace')
+            for name in self.headers.keys() if name.lower() == 'authorization')
+        if duplicate is not None:
+            self._json(400, {'error': 'duplicate Authorization header'})
+            return None
+        header = self.headers.get('Authorization', '')
+        if not header:
+            if clen > MAX_UNAUTHENTICATED_BODY:
+                # Answered without reading: naming the size would tell an
+                # unauthenticated caller what the bound is, and 401 is the
+                # true answer either way.
+                self._json(401, {'error': 'unauthorized'})
+                return None
+            return ''
+        if not header.lower().startswith('bearer '):
+            self._json(401, {'error': 'missing Bearer token'})
+            return None
+        token = header[7:].strip()
+        return token if self._require_bridge_token(token) else None
+
+    def _body_token(self, body, authenticated):
+        """The token a parsed body is acting under, or None once answered.
+
+        A request that authenticated by header need not repeat itself, so the
+        token is put back into the body for the handlers that route on it.
+        One that repeats it must agree: two different tokens in one request
+        is an ambiguous carrier, which this bridge refuses rather than
+        picking a side.
+        """
+        token = body.get('token', '')
+        if authenticated:
+            if token and token != authenticated:
+                self._json(400, {'error': 'conflicting token'})
+                return None
+            body['token'] = authenticated
+            return authenticated
+        return token if self._require_bridge_token(token) else None
 
     def do_GET(self):
         parsed = self._request_target()
@@ -1338,11 +1404,14 @@ class Handler(BaseHTTPRequestHandler):
             if raw is None:
                 return None
             return self._handle_segment(raw, *admitted)
+        authenticated = self._authenticate_before_body(clen)
+        if authenticated is None:
+            return self._drain_refused_body(clen)
         body = self._load_json_object(clen)
         if body is None:
             return None
-        token = body.get('token', '')
-        if not self._require_bridge_token(token):
+        token = self._body_token(body, authenticated)
+        if token is None:
             return None
 
         if self.path == '/register':
@@ -1512,11 +1581,13 @@ class Handler(BaseHTTPRequestHandler):
         clen = self._declared_body_length()
         if clen is None:
             return None
+        authenticated = self._authenticate_before_body(clen)
+        if authenticated is None:
+            return self._drain_refused_body(clen)
         body = self._load_json_object(clen)
         if body is None:
             return None
-        token = body.get('token', '')
-        if not self._require_bridge_token(token):
+        if self._body_token(body, authenticated) is None:
             return None
         if self.path == '/upload':
             return self._handle_delete_upload(body)
@@ -1588,16 +1659,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_put_command(self, clen):
         """PUT /command — write a command for delivery via SSE."""
+        authenticated = self._authenticate_before_body(clen)
+        if authenticated is None:
+            return self._drain_refused_body(clen)
         body = self._load_json_object(clen)
         if body is None:
             return None
-        token = body.get('token', '')
+        token = self._body_token(body, authenticated)
+        if token is None:
+            return None
         tab = str(body.get('tab', ''))
         cmd_id = body.get('id', '')
         code = body.get('code', '')
         cmd_type = body.get('type', '')
-        if not self._require_bridge_token(token):
-            return None
         if tab and _unsafe_component(tab):
             return self._json(400, {'error': 'invalid path component'})
         if not cmd_id or (not code and not cmd_type):

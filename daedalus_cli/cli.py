@@ -121,7 +121,12 @@ def _http_error_detail(e):
 def api(method, path, body=None, timeout=30):
     url = URL + path
     data = json.dumps(body).encode() if body else None
-    headers = {'Content-Type': 'application/json'} if data else {}
+    # The bridge decides credentials before it reads a body, so the token goes
+    # in a header too. Without it a request larger than the bridge's
+    # unauthenticated window is refused before its body is read at all.
+    headers = {'Authorization': f'Bearer {token()}'}
+    if data:
+        headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -149,7 +154,10 @@ def api_delete(path, body):
     """Send DELETE request with JSON body."""
     url = URL + path
     data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='DELETE')
+    req = urllib.request.Request(
+        url, data=data, method='DELETE',
+        headers={'Content-Type': 'application/json',
+                 'Authorization': f'Bearer {token()}'})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())

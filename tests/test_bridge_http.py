@@ -92,12 +92,19 @@ def _stalled_request(base, body_bytes=b'{'):
     Returns the connected socket, which the caller closes. Nothing is read
     here: what these tests measure is whether the bridge answers a body that
     stops mid-flight, so the read belongs in the test, with its own bound.
+
+    The request authenticates in its header, because the property under test
+    is what a stalled body does to a worker — and credentials are now settled
+    before the body is read, so an unauthenticated request this size is
+    refused without ever reaching the read that stalls. That refusal is its
+    own test; this helper has to get past it to measure anything.
     """
     port = int(base.rsplit(':', 1)[1])
     sock = socket.create_connection(('127.0.0.1', port), timeout=30)
     try:
         sock.sendall(b'POST /result HTTP/1.0\r\n'
                      b'Content-Type: application/json\r\n'
+                     b'Authorization: Bearer ' + TOK.encode('ascii') + b'\r\n'
                      b'Content-Length: 1000000\r\n\r\n' + body_bytes)
     except OSError:
         # A connection the bridge refuses is closed with these bytes still
@@ -2711,8 +2718,10 @@ def test_an_incomplete_body_never_holds_a_request_worker(tmp):
     """A declared body that stops mid-flight is answered, not waited on.
 
     One client per stalled body used to hold one request thread for as long
-    as it kept the socket open, so an unauthenticated peer could grow the
-    bridge's thread count by opening connections and sending a single byte.
+    as it kept the socket open, so a peer could grow the bridge's thread
+    count by opening connections and sending a single byte. The peer here
+    authenticates: an unauthenticated one no longer reaches the body read at
+    all, so this deadline is what still bounds the case that does.
     """
     with _util.bridge(
             tmp, env={'DAEDALUS_REQUEST_TIMEOUT': '2'}) as (base, _docroot):
@@ -3396,6 +3405,135 @@ def test_a_browser_target_survives_routing_but_the_routing_fields_do_not(tmp):
         assert cmd.get('tabId') == 42, f'the browser target was lost: {cmd}'
         assert 'tab' not in cmd, f'the routing tab leaked into the command: {cmd}'
         assert 'token' not in cmd, f'the token leaked into the command: {cmd}'
+
+
+def _declared_post(base, path, declared, sent, headers):
+    """Declare a large body, send only `sent`, and read whatever comes back.
+
+    The proof that a refusal happened before the body did: the answer arrives
+    while most of the declared body has not been sent. A bridge that read
+    first would still be waiting on bytes this deliberately withholds.
+    """
+    port = int(base.rsplit(':', 1)[1])
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+    try:
+        conn.putrequest('POST', path)
+        conn.putheader('Content-Type', 'application/json')
+        conn.putheader('Content-Length', str(declared))
+        for name, value in headers:
+            conn.putheader(name, value)
+        conn.endheaders()
+        conn.send(sent)
+        response = conn.getresponse()
+        return response.status, response.read()
+    finally:
+        conn.close()
+
+
+def test_an_unauthenticated_body_is_refused_before_it_arrives(tmp):
+    """A body token cannot be checked without reading the body.
+
+    Every JSON route parsed the whole declared body and only then compared
+    the token inside it, so an unauthenticated 24 MiB request moved the
+    process high-water mark by 72,904 KiB on its way to a 401 — and every
+    concurrent worker could be made to do the same. The Bearer header is
+    what makes the decision reachable first.
+    """
+    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        status, payload = _declared_post(
+            base, '/result', 8 * 1024 * 1024, b'{' + b' ' * 65535, ())
+    assert status == 401, (status, payload)
+    assert json.loads(payload) == {'error': 'unauthorized'}, payload
+
+
+def test_a_bearer_header_admits_a_body_past_that_window(tmp):
+    """The header is the carrier that lets a large body be authenticated."""
+    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        big = 'x' * (256 * 1024)
+        status, payload = _util.post_json(
+            base + '/result', {'id': 'big', 'result': big},
+            headers={'Authorization': f'Bearer {TOK}'})
+        assert status == 200, (status, payload)
+        slot = Path(docroot) / 'results' / f'{TOK}.json'
+        assert slot.is_file(), sorted((Path(docroot) / 'results').iterdir())
+        stored = json.loads(slot.read_text(encoding='utf-8'))
+        assert stored['result'] == big, stored['id']
+        # And the same body without the header is refused unread.
+        status, payload = _declared_post(
+            base, '/result', 8 * 1024 * 1024, b'{' + b' ' * 65535, ())
+        assert status == 401, (status, payload)
+
+
+def test_a_small_body_still_authenticates_from_its_own_token(tmp):
+    """The older form keeps working where its size was never the problem."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _util.post_json(
+            base + '/result', {'token': TOK, 'id': 'small', 'result': 'ok'})
+        assert status == 200, (status, payload)
+        status, payload = _util.post_json(
+            base + '/result', {'token': 'wrong', 'id': 'no', 'result': 'no'})
+        assert status == 401, (status, payload)
+
+
+def test_a_header_and_a_body_token_must_agree(tmp):
+    """Two different tokens in one request is an ambiguous carrier."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _util.post_json(
+            base + '/result', {'token': 'other', 'id': 'x', 'result': 'y'},
+            headers={'Authorization': f'Bearer {TOK}'})
+        assert status == 400, (status, payload)
+        assert payload == {'error': 'conflicting token'}, payload
+        # Repeating the same one is not a disagreement.
+        status, payload = _util.post_json(
+            base + '/result', {'token': TOK, 'id': 'x', 'result': 'y'},
+            headers={'Authorization': f'Bearer {TOK}'})
+        assert status == 200, (status, payload)
+
+
+def test_an_ambiguous_authorization_header_is_refused(tmp):
+    """Two Authorization headers are refused before either is selected."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _declared_post(
+            base, '/result', 2, b'{}',
+            (('Authorization', f'Bearer {TOK}'),
+             ('Authorization', f'Bearer {TOK}')))
+        assert status == 400, (status, payload)
+        assert json.loads(payload) == {
+            'error': 'duplicate Authorization header'}, payload
+
+
+def test_an_authorization_that_is_not_bearer_is_refused(tmp):
+    """A header that carries something else is not a fallback to the body."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, payload = _util.post_json(
+            base + '/result', {'token': TOK, 'id': 'x', 'result': 'y'},
+            headers={'Authorization': f'Basic {TOK}'})
+        assert status == 401, (status, payload)
+        assert payload == {'error': 'missing Bearer token'}, payload
+
+
+def test_every_body_verb_settles_credentials_before_the_body(tmp):
+    """PUT and DELETE take the same route as POST, not a private one."""
+    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        port = int(base.rsplit(':', 1)[1])
+        for method, path in (('PUT', '/command'), ('DELETE', '/upload')):
+            conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+            try:
+                conn.putrequest(method, path)
+                conn.putheader('Content-Type', 'application/json')
+                conn.putheader('Content-Length', str(8 * 1024 * 1024))
+                conn.endheaders()
+                conn.send(b'{' + b' ' * 65535)
+                response = conn.getresponse()
+                status, payload = response.status, response.read()
+            finally:
+                conn.close()
+            assert status == 401, (method, status, payload)
+            assert json.loads(payload) == {'error': 'unauthorized'}, (
+                method, payload)
 
 
 if __name__ == '__main__':
