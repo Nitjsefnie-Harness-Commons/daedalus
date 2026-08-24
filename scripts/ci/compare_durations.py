@@ -12,10 +12,11 @@ Each side is measured over several rounds and a test's duration is the
 MINIMUM across them. A minimum estimates the floor, which is the quantity that
 changes when code gets slower; a mean mostly reports how noisy the runner was.
 
-Durations come from the per-suite summaries `run_tests.py` writes when
-DAEDALUS_TEST_SUMMARY_DIR names a directory. Only passing tests are recorded
-there, so a test that failed on one side is simply absent and drops out of the
-intersection rather than contributing the time it took to give up.
+Durations come from `scripts/ci/time_tests.py`, which times a checkout from
+the outside and records only passing tests -- so a test that failed on one side
+is simply absent and drops out of the intersection rather than contributing the
+time it took to give up. That instrument belongs to the comparison, not to
+either tree, which is what lets a release predating it be measured at all.
 """
 import argparse
 import json
@@ -105,15 +106,17 @@ def main(argv=None):
     base = side_durations(args.base)
     head = side_durations(args.head)
     lines = []
-    # A baseline that recorded no durations is not a fast baseline -- it is a
-    # release from before the runner reported them. Saying so and passing is
-    # the same answer this gate gives before the first release exists.
+    # A baseline with no durations is a measurement that did not happen, not
+    # a fast baseline. The timing instrument belongs to the head checkout and
+    # asks nothing of the tree it measures, so an empty side means the timing
+    # step failed rather than that the release was too old -- say so instead of
+    # dividing by it.
     if not base:
         lines.append('### Test speed')
         lines.append('')
-        lines.append(f'Skipped: the baseline `{args.base_label}` reports no '
-                     'per-test durations, so there is nothing to compare '
-                     'against. This becomes a real gate at the next release.')
+        lines.append(f'Skipped: the baseline `{args.base_label}` produced no '
+                     'per-test durations, so nothing was measured to compare '
+                     'against.')
         _emit(lines, args.summary_file)
         return 0
 

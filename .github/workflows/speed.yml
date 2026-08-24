@@ -22,11 +22,12 @@ name: speed
 # move the number — lives in scripts/ci/compare_durations.py, which has its own
 # tests. Its module docstring explains why total wall time is the wrong metric.
 #
-# Until a release exists that RECORDS per-test durations there is nothing to
-# compare against. The baseline's run_tests.py ignores the environment variable
-# below and writes its summaries to a temp directory it discards, so its report
-# directories come out empty and the comparator says so and exits green. This
-# becomes a real gate at the next release.
+# The timing is done BY THIS COMMIT'S instrument, for both sides. Durations
+# that a checkout had to report about itself would only ever exist on the side
+# that already carried the feature — which is the side whose speed was never in
+# question. scripts/ci/time_tests.py asks nothing of the tree it measures: it
+# runs each suite with -u and reads the wall clock as each result line arrives,
+# so any release, however old, is measurable.
 
 on:
   push:
@@ -138,35 +139,34 @@ jobs:
         # A failing test does NOT fail this job: tests.yml owns that verdict,
         # and a non-passing test is simply absent from the side's durations and
         # drops out of the intersection. What this step must guarantee is that
-        # THIS COMMIT produced usable reports, so it checks for those
-        # explicitly rather than trusting an exit code it deliberately ignores.
-        # The baseline's directories are allowed to be empty — a release from
-        # before run_tests.py recorded durations cannot fill them.
+        # every round produced usable reports on BOTH sides, so it checks for
+        # them explicitly rather than trusting an exit code it ignores.
         run: |
           mkdir -p reports
           for round in $(seq 1 "$ROUNDS"); do
             for side in base head; do
               echo "::group::$side round $round"
-              out="$GITHUB_WORKSPACE/reports/$side-$round"
-              mkdir -p "$out"
-              ( cd "$side" && DAEDALUS_TEST_SUMMARY_DIR="$out" \
-                  "$GITHUB_WORKSPACE/venv-$side/bin/python" run_tests.py ) \
-                && echo "$side round $round: all passed" \
-                || echo "$side round $round: some tests did not pass (excluded)"
+              python3 head/scripts/ci/time_tests.py \
+                --tree "$side" \
+                --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
+                --out "$GITHUB_WORKSPACE/reports/$side-$round" \
+                || echo "$side round $round: timing reported a problem"
               echo "::endgroup::"
             done
           done
 
           missing=0
           for round in $(seq 1 "$ROUNDS"); do
-            if ! ls "reports/head-$round"/*.json >/dev/null 2>&1; then
-              echo "MISSING: reports/head-$round has no summaries" >&2
-              missing=1
-            fi
+            for side in base head; do
+              if ! ls "reports/$side-$round"/*.json >/dev/null 2>&1; then
+                echo "MISSING: reports/$side-$round has no durations" >&2
+                missing=1
+              fi
+            done
           done
           if [ "$missing" -ne 0 ]; then
-            echo "This commit's suite produced no summaries — it did not run" >&2
-            echo "at all, which is a setup failure, not a speed result." >&2
+            echo "A side produced no durations at all, which is a setup" >&2
+            echo "failure rather than a speed result." >&2
             exit 1
           fi
           ls -la reports/*/
