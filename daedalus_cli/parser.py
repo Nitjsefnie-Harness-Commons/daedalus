@@ -59,7 +59,8 @@ def build_parser():
     s.add_argument('url', help='Target URL')
 
     # reload
-    sub.add_parser('reload', help='Reload tab page')
+    s = sub.add_parser('reload', help='Reload tab page')
+    s.add_argument('-b', '--broadcast', action='store_true', help='Send to all tabs (ignore ID)')
 
     # title
     sub.add_parser('title', help='Get tab document.title')
