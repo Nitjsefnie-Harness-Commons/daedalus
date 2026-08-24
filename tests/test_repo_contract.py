@@ -3480,6 +3480,131 @@ _CONSTANT_MARKUP = re.compile(
     r'|`(?:[^`\\$]|\\.|\$(?!\{))*`)$')
 
 
+_TAB_SELECTOR_HARNESS = r"""
+// Enough DOM for `h` and `clear`; the controller under test is real.
+class El {
+  constructor(tag) {
+    this.tag = tag;
+    this.children = [];
+    this.text = '';
+    this._value = '';
+    this.style = {};
+    this.dataset = {};
+  }
+  get firstChild() { return this.children[0] || null; }
+  get options() { return this.children.filter((c) => c.tag === 'option'); }
+  get value() { return this._value; }
+  set value(v) { this._value = String(v); }
+  get label() { return this.children.map((c) => c.text || c.label).join(''); }
+  appendChild(child) { this.children.push(child); return child; }
+  removeChild(child) {
+    this.children.splice(this.children.indexOf(child), 1);
+    // A real select drops its value when the selected option goes away.
+    if (child.tag === 'option' && child.value === this._value) this._value = '';
+    return child;
+  }
+  setAttribute(name, v) { if (name === 'value') this._value = String(v); }
+  addEventListener() {}
+}
+globalThis.document = {
+  createElement: (tag) => new El(tag),
+  createTextNode: (t) => ({ tag: '#text', text: String(t), children: [] }),
+};
+
+const { bindTabSelector } = await import(process.argv[1]);
+
+let tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'second' }];
+const listeners = [];
+const select = new El('select');
+const api = { get: async () => tabs };
+const bus = { on: (fn) => listeners.push(fn) };
+
+function emit(type) {
+  for (const fn of listeners) fn({ type });
+}
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+bindTabSelector(select, {
+  getToken: () => 'tok', api, bus, placeholder: '(active tab)',
+});
+await settle();
+const initial = select.options.map((o) => o.value);
+
+select.value = '22';
+tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'RETITLED' }];
+emit('tab-updated');
+await settle();
+const afterUpdate = {
+  labels: select.options.map((o) => o.label),
+  selected: select.value,
+};
+
+tabs = [{ tabId: '11', title: 'first' }];
+emit('tab-unregistered');
+await settle();
+const afterUnregister = {
+  offered: select.options.map((o) => o.value),
+  selected: select.value,
+};
+
+tabs = [{ tabId: '11', title: 'first' }, { tabId: '33', title: 'third' }];
+emit('tabs-synced');
+await settle();
+const afterSync = select.options.map((o) => o.value);
+
+process.stdout.write(JSON.stringify({
+  initial, afterUpdate, afterUnregister, afterSync,
+}));
+"""
+
+
+def _run_tab_selector_harness():
+    node = shutil.which('node')
+    assert node, 'node is required to execute the dashboard tab selector'
+    result = subprocess.run(
+        [node, '--input-type=module', '--eval', _TAB_SELECTOR_HARNESS,
+         str(ROOT / 'dashboard' / 'sections' / '_util.js')],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def test_a_tab_selector_follows_every_lifecycle_event(tmp):
+    """One selector, refreshed by all three events, offering only live tabs.
+
+    Four sections refreshed on `tabs-synced` alone, so a tab that had been
+    retitled or unregistered stayed offered — and selectable — until a full
+    sync happened to arrive. A selection also survived unconditionally, which
+    is how a command ended up aimed at a tab that no longer existed.
+    """
+    del tmp
+    seen = _run_tab_selector_harness()
+    assert seen['initial'] == ['', '11', '22'], seen
+
+    # tab-updated refreshes, and a selection that is still on offer survives.
+    assert '11  RETITLED' not in seen['afterUpdate']['labels'], seen
+    assert any('RETITLED' in label for label in seen['afterUpdate']['labels']), seen
+    assert seen['afterUpdate']['selected'] == '22', seen
+
+    # tab-unregistered refreshes, and the selection does NOT survive its tab.
+    assert seen['afterUnregister']['offered'] == ['', '11'], seen
+    assert seen['afterUnregister']['selected'] != '22', seen
+
+    # tabs-synced still refreshes, which is the one that always worked.
+    assert seen['afterSync'] == ['', '11', '33'], seen
+
+
+def test_every_tab_selector_uses_the_shared_controller(tmp):
+    """No section keeps a private copy to drift out of step again."""
+    del tmp
+    private = []
+    for path in sorted((ROOT / 'dashboard' / 'sections').glob('*.js')):
+        text = path.read_text(encoding='utf-8')
+        if 'populateTabs' in text and 'bindTabSelector' not in text:
+            private.append(path.relative_to(ROOT).as_posix())
+    assert not private, private
+
+
 def test_dashboard_never_builds_markup_from_a_value(tmp):
     """innerHTML in the dashboard is only ever a constant.
 

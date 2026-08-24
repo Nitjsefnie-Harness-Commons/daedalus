@@ -1,6 +1,6 @@
 // §09 CDP — raw Chrome DevTools Protocol method invocation.
 
-import { h, clear, truncate, errMsg, pretty, toast } from './_util.js';
+import { h, errMsg, pretty, toast, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken } from '../api.js';
 
 const COMMON = [
@@ -49,22 +49,9 @@ export function mount(container, bus) {
   const paramsEl = root.querySelector('[data-role=params]');
   const resultEl = root.querySelector('[data-role=result]');
 
-  async function populateTabs() {
-    const token = getToken();
-    if (!token) return;
-    try {
-      const tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
-      const current = tabSel.value;
-      clear(tabSel);
-      tabSel.appendChild(h('option', { value: '' }, '(active tab)'));
-      for (const t of tabs) {
-        tabSel.appendChild(h('option', { value: t.tabId }, `${t.tabId}  ${truncate(t.title || t.url || '', 60)}`));
-      }
-      if (current) tabSel.value = current;
-    } catch {}
-  }
-  populateTabs();
-  bus.on((ev) => { if (!ev.__internal && ev.type === 'tabs-synced') populateTabs(); });
+  bindTabSelector(tabSel, {
+    getToken, api, bus, placeholder: '(active tab)',
+  });
 
   root.querySelector('[data-role=run]').addEventListener('click', async () => {
     const method = (methodEl.value || '').trim();

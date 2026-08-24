@@ -1,6 +1,6 @@
 // §07 NET CAPTURE — CDP-backed request/response capture.
 
-import { h, clear, fmtSize, truncate, errMsg, toast, pretty } from './_util.js';
+import { h, clear, fmtSize, truncate, errMsg, toast, pretty, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken } from '../api.js';
 
 export function mount(container, bus) {
@@ -41,22 +41,9 @@ export function mount(container, bus) {
   const statusEl = root.querySelector('[data-role=status]');
   const listEl = root.querySelector('[data-role=list]');
 
-  async function populateTabs() {
-    const token = getToken();
-    if (!token) return;
-    try {
-      const tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
-      const current = tabSel.value;
-      clear(tabSel);
-      tabSel.appendChild(h('option', { value: '' }, '(active tab)'));
-      for (const t of tabs) {
-        tabSel.appendChild(h('option', { value: t.tabId }, `${t.tabId}  ${truncate(t.title || t.url || '', 60)}`));
-      }
-      if (current) tabSel.value = current;
-    } catch {}
-  }
-  populateTabs();
-  bus.on((ev) => { if (!ev.__internal && ev.type === 'tabs-synced') populateTabs(); });
+  bindTabSelector(tabSel, {
+    getToken, api, bus, placeholder: '(active tab)',
+  });
 
   function fields(withMax) {
     const f = {};

@@ -1,6 +1,6 @@
 // §02 EVAL — run JS in a target tab, see results. History in localStorage.
 
-import { h, clear, fmtTime, truncate, errMsg, toast, pretty, formatEvalWorld } from './_util.js';
+import { h, clear, fmtTime, truncate, errMsg, toast, pretty, formatEvalWorld, bindTabSelector } from './_util.js';
 import { api, runCommand, getToken } from '../api.js';
 
 const HISTORY_KEY = 'daedalus-dash-eval-history';
@@ -55,30 +55,11 @@ export function mount(container, bus) {
   bcastBtn.addEventListener('click', () => run({ broadcast: true }));
   clearHBtn.addEventListener('click', () => { history = []; saveHistory(); renderHistory(); });
 
-  async function populateTabs() {
-    const token = getToken();
-    if (!token) { sel.innerHTML = '<option value="">(no token)</option>'; return; }
-    try {
-      const tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
-      const current = sel.value;
-      clear(sel);
-      if (tabs.length === 0) {
-        sel.appendChild(h('option', { value: '' }, '(no tabs)'));
-      } else {
-        for (const t of tabs) {
-          sel.appendChild(h('option', { value: t.tabId }, `${t.tabId}  ${truncate(t.title || t.url || '', 60)}`));
-        }
-      }
-      if (current && Array.from(sel.options).some(o => o.value === current)) sel.value = current;
-    } catch (e) {
-      clear(sel);
-      sel.appendChild(h('option', { value: '' }, `(err: ${errMsg(e)})`));
-    }
-  }
-  populateTabs();
-  setInterval(populateTabs, 12000);
-  bus.on((ev) => {
-    if (!ev.__internal && (ev.type === 'tabs-synced' || ev.type === 'tab-unregistered')) populateTabs();
+  // The 12s poll stays: this selector is the one an operator types into, and
+  // it is the only one that must not be wrong between events.
+  bindTabSelector(sel, {
+    getToken, api, bus, emptyLabel: '(no tabs)', interval: 12000,
+    errorLabel: (e) => `(err: ${errMsg(e)})`,
   });
 
   async function run({ broadcast = false } = {}) {

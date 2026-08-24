@@ -27,6 +27,75 @@ function appendAll(target, items) {
   }
 }
 
+// One tab-<select> controller for every section that offers a tab target.
+//
+// Five near-copies existed, and four of them refreshed on `tabs-synced`
+// alone. The dashboard also emits `tab-updated` and `tab-unregistered`, so a
+// tab that had been retitled or had gone away stayed offered — and selectable
+// — until the next full sync happened to arrive.
+//
+// A selection survives a refresh only while its tab is still listed. Keeping
+// a value that has gone is what turns a stale picker into a command aimed at
+// a target that no longer exists.
+//
+// `placeholder` is the empty-value option's label, for sections where "no tab
+// named" means the active one. Sections without a placeholder say so when the
+// list is empty instead, because there an empty select offers nothing at all.
+export function bindTabSelector(select, options) {
+  const { getToken, api, bus, placeholder = null,
+          emptyLabel = null, errorLabel = null, interval = 0 } = options;
+
+  function only(label) {
+    clear(select);
+    select.appendChild(h('option', { value: '' }, label));
+  }
+
+  async function populate() {
+    const token = getToken();
+    if (!token) {
+      if (emptyLabel !== null) only('(no token)');
+      return;
+    }
+    let tabs;
+    try {
+      tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
+    } catch (e) {
+      if (errorLabel) only(errorLabel(e));
+      return;
+    }
+    const current = select.value;
+    clear(select);
+    if (placeholder !== null) {
+      select.appendChild(h('option', { value: '' }, placeholder));
+    }
+    for (const t of tabs) {
+      select.appendChild(h('option', { value: t.tabId },
+        `${t.tabId}  ${truncate(t.title || t.url || '', 60)}`));
+    }
+    if (tabs.length === 0 && placeholder === null && emptyLabel !== null) {
+      select.appendChild(h('option', { value: '' }, emptyLabel));
+    }
+    // Only if it is still on offer. Clearing it otherwise is the point:
+    // a value naming a tab that has gone is what aims the next command at a
+    // target that no longer exists. A browser resets a select whose selected
+    // option is removed, but saying so here does not depend on that.
+    if (current && Array.from(select.options).some((o) => o.value === current)) {
+      select.value = current;
+    } else if (current) {
+      select.value = '';
+    }
+  }
+
+  populate();
+  bus.on((ev) => {
+    if (ev.__internal) return;
+    if (ev.type === 'tabs-synced' || ev.type === 'tab-updated'
+        || ev.type === 'tab-unregistered') populate();
+  });
+  if (interval) setInterval(populate, interval);
+  return populate;
+}
+
 export function clear(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }

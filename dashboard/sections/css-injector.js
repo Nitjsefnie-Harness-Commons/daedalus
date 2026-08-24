@@ -1,6 +1,6 @@
 // §10 CSS INJECT — inject + remove CSS per tab via chrome.scripting.
 
-import { h, clear, truncate, errMsg, toast } from './_util.js';
+import { h, clear, truncate, errMsg, toast, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken } from '../api.js';
 
 const STORE_KEY = 'daedalus-dash-css-sessions';
@@ -31,22 +31,9 @@ export function mount(container, bus) {
   const allEl = root.querySelector('[data-role=all]');
   const sessionsEl = root.querySelector('[data-role=sessions]');
 
-  async function populateTabs() {
-    const token = getToken();
-    if (!token) return;
-    try {
-      const tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
-      const current = tabSel.value;
-      clear(tabSel);
-      tabSel.appendChild(h('option', { value: '' }, '(active tab)'));
-      for (const t of tabs) {
-        tabSel.appendChild(h('option', { value: t.tabId }, `${t.tabId}  ${truncate(t.title || t.url || '', 60)}`));
-      }
-      if (current) tabSel.value = current;
-    } catch {}
-  }
-  populateTabs();
-  bus.on((ev) => { if (!ev.__internal && ev.type === 'tabs-synced') populateTabs(); });
+  bindTabSelector(tabSel, {
+    getToken, api, bus, placeholder: '(active tab)',
+  });
 
   function load() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; }

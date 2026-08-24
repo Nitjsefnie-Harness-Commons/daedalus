@@ -1,6 +1,6 @@
 // §03 SCREENSHOT — capture + latest image viewer per tab.
 
-import { h, clear, fmtSize, fmtDateTime, truncate, errMsg, toast } from './_util.js';
+import { h, clear, fmtSize, fmtDateTime, truncate, errMsg, toast, bindTabSelector } from './_util.js';
 import { api, extCmd, getToken, nextId, getServer } from '../api.js';
 
 export function mount(container, bus) {
@@ -44,22 +44,9 @@ export function mount(container, bus) {
   const imgHost = root.querySelector('[data-role=image]');
   const recent = root.querySelector('[data-role=recent]');
 
-  async function populateTabs() {
-    const token = getToken();
-    if (!token) return;
-    try {
-      const tabs = await api.get('/tabs?token=' + encodeURIComponent(token));
-      const current = tabSel.value;
-      clear(tabSel);
-      tabSel.appendChild(h('option', { value: '' }, '(active tab)'));
-      for (const t of tabs) {
-        tabSel.appendChild(h('option', { value: t.tabId }, `${t.tabId}  ${truncate(t.title || t.url || '', 60)}`));
-      }
-      if (current) tabSel.value = current;
-    } catch {}
-  }
-  populateTabs();
-  bus.on((ev) => { if (!ev.__internal && ev.type === 'tabs-synced') populateTabs(); });
+  bindTabSelector(tabSel, {
+    getToken, api, bus, placeholder: '(active tab)',
+  });
 
   captureBtn.addEventListener('click', async () => {
     captureBtn.disabled = true;
