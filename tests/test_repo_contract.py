@@ -3511,7 +3511,11 @@ globalThis.document = {
   createTextNode: (t) => ({ tag: '#text', text: String(t), children: [] }),
 };
 
-const { bindTabSelector } = await import(process.argv[1]);
+// pathToFileURL, not the bare path: Node's ESM loader accepts only file://
+// URLs, and on Windows an absolute path starts with a drive letter it reads
+// as an unsupported URL scheme ('d:').
+const { pathToFileURL } = await import('node:url');
+const { bindTabSelector } = await import(pathToFileURL(process.argv[1]).href);
 
 let tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'second' }];
 const listeners = [];
