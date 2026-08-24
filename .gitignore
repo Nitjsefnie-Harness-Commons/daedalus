@@ -157,6 +157,8 @@
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_workflows.py
 !/tests/test_cli.py
+!/tests/test_dashboard_accessibility.py
+!/tests/test_dashboard_behaviour.py
 !/tests/test_extension_policy.py
 !/tests/test_file_sizes.py
 !/tests/test_gitignore_generator.py
