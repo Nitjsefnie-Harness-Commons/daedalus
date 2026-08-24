@@ -2916,20 +2916,59 @@ def test_a_malformed_absolute_form_target_is_refused_not_dropped(tmp):
             health_status, health)
 
 
+def test_the_json_depth_bound_is_the_bridges_and_is_configurable(tmp):
+    """The limit is a setting, and a body at it is still accepted.
+
+    A bound nothing can be measured against is not a bound: this drives one
+    body to exactly the configured depth and one past it, so the refusal is
+    shown to be the number's doing rather than the interpreter's.
+    """
+    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '4'}) as (base, _d):
+        # depth 4 counting the object itself: {"token": [[[0]]]}
+        at_limit = b'{"token":"wrongtoken","value":' + b'[' * 3 + b'0' + b']' * 3 + b'}'
+        status, raw = _util.request(
+            base + '/result', 'POST', body=at_limit,
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (401, 'unauthorized'), (
+            status, raw)
+
+        past_limit = b'{"token":"wrongtoken","value":' + b'[' * 4 + b'0' + b']' * 4 + b'}'
+        status, raw = _util.request(
+            base + '/result', 'POST', body=past_limit,
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (
+            400, 'JSON body too deeply nested'), (status, raw)
+
+
+def test_a_brace_inside_a_json_string_opens_nothing(tmp):
+    """Structure is counted, not characters.
+
+    A scan that treated every `[` as a container would refuse a body whose
+    only nesting is inside a string literal — and an escaped quote inside one
+    would end the string early, so the rest of a hostile value would be read
+    as structure.
+    """
+    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '3'}) as (base, _d):
+        literal = json.dumps({'token': 'wrongtoken',
+                              'value': '[' * 50 + '\\"' + '{' * 50}).encode()
+        status, raw = _util.request(
+            base + '/result', 'POST', body=literal,
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (401, 'unauthorized'), (
+            status, raw)
+
+
 def test_recursive_json_is_refused_on_every_body_verb_before_authentication(tmp):
-    """A deeply nested body is answered, never dropped, with no token in hand.
+    """A deeply nested body is refused, before the token is looked at.
 
-    Which answer depends on the interpreter, because the depth bound is the
-    interpreter's rather than the bridge's: through 3.13 this nesting exceeds
-    the C recursion limit, json.loads raises, and _load_json_object turns that
-    into the 400 before the token is ever looked at. 3.14 parses the same
-    payload without raising, so there is nothing to refuse and the ordinary
-    unauthorized answer comes back instead.
+    The answer used to depend on the interpreter, because the depth bound was
+    the interpreter's rather than the bridge's: through 3.13 this nesting
+    exceeded the C recursion limit and json.loads raised, which
+    _load_json_object turned into the 400; 3.14 parsed the same payload and
+    answered the ordinary unauthorized instead. Both were safe and neither
+    was a crash, but one body had two answers.
 
-    Both are correct and neither is a crash, which is what this pins: every
-    route answers, the answer is one of those two, and the bridge is still
-    healthy afterwards. That the bridge has no explicit depth bound of its
-    own is filed separately; this test does not assert one exists.
+    The bound is now the bridge's, so the answer is the same everywhere.
     """
     payload = (b'{"token":"wrongtoken","value":'
                + b'[' * 10000 + b'0' + b']' * 10000 + b'}')
@@ -2951,15 +2990,9 @@ def test_recursive_json_is_refused_on_every_body_verb_before_authentication(tmp)
             assert health_status == 200 and health['ok'] is True, (
                 method, path, health_status, health)
 
-        accepted = {(400, 'JSON body too deeply nested'),
-                    (401, 'unauthorized')}
-        assert all((status, error) in accepted
+        expected = (400, 'JSON body too deeply nested')
+        assert all((status, error) == expected
                    for _method, _path, status, error in replies), replies
-        # Whichever it is, it is the SAME one on every route: a bridge that
-        # refused one verb and dropped another would satisfy a per-reply
-        # check and still be inconsistent.
-        assert len({(status, error)
-                    for _method, _path, status, error in replies}) == 1, replies
 
 
 def test_json_scalars_arrays_and_null_are_refused_on_every_body_verb(tmp):

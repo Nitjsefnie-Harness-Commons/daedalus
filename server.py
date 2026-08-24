@@ -176,6 +176,45 @@ def _bad_token(token):
             or '.' in token or '_' in token)
 
 
+def _json_nests_deeper_than(raw, limit):
+    """True when `raw` opens more than `limit` unclosed containers at once.
+
+    A scan of the bytes rather than a parse: the answer has to be settled
+    before json.loads builds anything, and before the interpreter's own
+    recursion limit gets to decide it — which it did, differently per version.
+
+    Bytes rather than text, so a hostile body is never decoded to be measured.
+    Only ASCII structure counts, and a UTF-8 continuation byte is never an
+    ASCII byte, so a multi-byte character cannot be mistaken for a brace. The
+    string state matters for the same reason: a `{` inside a string literal
+    opens nothing, and a `\\"` inside one does not close it.
+
+    Malformed input is not this function's problem — a body with more closers
+    than openers drives the count negative and json.loads rejects it on its
+    own terms. This answers one question only.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:      # backslash
+                escaped = True
+            elif byte == 0x22:      # quote
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x7B, 0x5B):  # { [
+            depth += 1
+            if depth > limit:
+                return True
+        elif byte in (0x7D, 0x5D):  # } ]
+            depth -= 1
+    return False
+
+
 def _normalized_tab_id(value):
     """Normalize string or integer tab-id JSON values; return None otherwise."""
     if isinstance(value, str):
@@ -293,6 +332,15 @@ STREAM_MAX_AGE = _env_positive_float('DAEDALUS_STREAM_MAX_AGE', 3600)
 STREAM_KEEPALIVE = _env_positive_float('DAEDALUS_STREAM_KEEPALIVE', 15)
 # Maximum bytes read from any HTTP request body; override for larger relays.
 MAX_BODY_SIZE = _env_int('DAEDALUS_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
+
+# How deeply a JSON request body may nest containers. Without this the depth
+# actually enforced was whatever the running interpreter's recursion limit
+# happened to be, so one body got two answers: refused as too deeply nested on
+# 3.11 through 3.13, parsed on 3.14. The bound is checked against the raw bytes
+# before json.loads is asked to build anything, so the answer is this
+# repository's and the same everywhere. The ceiling is far below any
+# interpreter's recursion limit; nothing this bridge accepts nests near it.
+MAX_JSON_DEPTH = _env_int('DAEDALUS_MAX_JSON_DEPTH', 100, 1, 500)
 
 # Per-operation socket deadline for a request. A peer that declares a body and
 # then stops sending held its worker for as long as it kept the socket open,
@@ -1066,9 +1114,16 @@ class Handler(BaseHTTPRequestHandler):
         raw = self._read_body(clen)
         if raw is None:
             return None
+        if _json_nests_deeper_than(raw, MAX_JSON_DEPTH):
+            self._json(400, {'error': 'JSON body too deeply nested'})
+            return None
         try:
             body = json.loads(raw, object_pairs_hook=_JSONObject)
         except RecursionError:
+            # Unreachable through nesting now that the bound above decides it,
+            # and kept for the case it never covered: an interpreter whose
+            # recursion limit is lower than MAX_JSON_DEPTH, where json.loads
+            # still runs out of stack on a body this bridge considers shallow.
             self._json(400, {'error': 'JSON body too deeply nested'})
             return None
         except (json.JSONDecodeError, ValueError):
