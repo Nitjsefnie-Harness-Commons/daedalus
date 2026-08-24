@@ -951,11 +951,13 @@ def do_net_capture_get(args):
 
 def do_store_hotfix(args):
     """Store a hotfix in the extension."""
-    if args.file and os.path.isfile(args.file):
+    if args.file is not None:
+        if not os.path.isfile(args.file):
+            sys.exit(f'File not found: {args.file}')
         with open(args.file, encoding='utf-8') as f:
             code = f.read()
     else:
-        code = args.file  # treat as inline code
+        code = args.code
     result = ext_cmd('_store_hf', 'store-hotfix', fixId=args.fix_id, code=code, permanent=args.permanent)
     perm = ' [PERM]' if result.get('permanent') else ''
     print(f'Stored hotfix "{result.get("stored", "?")}"{perm} ({result.get("total", "?")} total)')
@@ -1233,7 +1235,14 @@ def main():
     # store-hotfix (extension)
     s = sub.add_parser('store-hotfix', help='Store a persistent hotfix in the extension')
     s.add_argument('fix_id', help='Hotfix identifier')
-    s.add_argument('file', help='JS file path or inline code')
+    # Two named modes rather than one positional the filesystem disambiguates.
+    # The old form asked whether the string was a path that existed, so a
+    # mistyped path became persistent page code instead of an error, and
+    # inline source that happened to name a file was replaced by that file's
+    # contents. Neither miss was visible in the output.
+    source = s.add_mutually_exclusive_group(required=True)
+    source.add_argument('--file', help='Read the hotfix source from this path')
+    source.add_argument('--code', help='Use this string as the hotfix source')
     s.add_argument('--permanent', action='store_true', help='Mark fix as permanent (survives extension version bumps)')
 
     # clear-hotfix (extension)

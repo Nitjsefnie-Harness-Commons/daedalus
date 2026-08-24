@@ -2,7 +2,7 @@
 //
 // Install it once and it survives extension version bumps:
 //
-//   daedalus store-hotfix request-log examples/request-log-hotfix.js --permanent
+//   daedalus store-hotfix request-log --file examples/request-log-hotfix.js --permanent
 //
 // then read what it collected from any tab:
 //

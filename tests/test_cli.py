@@ -725,6 +725,82 @@ def test_put_reads_code_from_file(tmp):
         assert data['id'] == 'pid1' and data['code'] == '1 + 2;', data
 
 
+def _queued_extension_command(base, docroot, argv, what):
+    """Run one CLI invocation and return the extension command it enqueued.
+
+    The invocation waits for a result no extension is going to post, so it is
+    started rather than run: what these tests ask about is what went onto the
+    queue, which is decided before the wait begins.
+    """
+    proc = subprocess.Popen(
+        CLI + argv, cwd=str(_util.ROOT),
+        env=cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding='utf-8')
+    try:
+        qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+        _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')), what=what)
+        return json.loads(
+            sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+    finally:
+        proc.kill()
+        proc.communicate()
+
+
+def test_store_hotfix_refuses_a_file_that_is_not_there(tmp):
+    """A mistyped path is an error, not a hotfix whose source is that path.
+
+    The single positional this replaced decided between a path and inline
+    source by asking whether the path existed, so a typo stored the literal
+    string as persistent page code and reported success.
+    """
+    missing = Path(tmp) / 'not-here.js'
+    with _util.bridge(tmp) as (base, docroot):
+        r = run_cli(['store-hotfix', 'typo', '--file', str(missing)],
+                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (r.returncode, r.stdout)
+        assert 'File not found' in r.stderr, r.stderr
+        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
+        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
+        assert queued == [], queued
+
+
+def test_store_hotfix_refuses_the_positional_that_meant_either(tmp):
+    """The ambiguous form fails loudly rather than picking a meaning."""
+    with _util.bridge(tmp) as (base, docroot):
+        r = run_cli(['store-hotfix', 'legacy', 'console.log(1)'],
+                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (r.returncode, r.stdout)
+        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
+        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
+        assert queued == [], queued
+
+
+def test_store_hotfix_sends_a_code_value_verbatim(tmp):
+    """`--code` is source even when the string names a file that exists."""
+    decoy = Path(tmp) / 'decoy.js'
+    decoy.write_text('/* FROM THE FILE */\n', encoding='utf-8')
+    with _util.bridge(tmp) as (base, docroot):
+        queued = _queued_extension_command(
+            base, docroot,
+            ['store-hotfix', 'ambiguous', '--code', str(decoy)],
+            'the store-hotfix command')
+    assert queued['code'] == str(decoy), queued
+    assert queued['fixId'] == 'ambiguous', queued
+
+
+def test_store_hotfix_reads_the_file_it_was_given(tmp):
+    """`--file` sends the contents, not the path."""
+    src = Path(tmp) / 'fix.js'
+    src.write_text('/* real hotfix */\n', encoding='utf-8')
+    with _util.bridge(tmp) as (base, docroot):
+        queued = _queued_extension_command(
+            base, docroot, ['store-hotfix', 'realfix', '--file', str(src)],
+            'the store-hotfix command')
+    assert queued['code'] == '/* real hotfix */\n', queued
+    assert queued['fixId'] == 'realfix', queued
+
+
 def test_navigate_constructs_location_href(tmp):
     with _util.bridge(tmp) as (base, docroot):
         r = run_cli(['navigate', 'https://example.com/x?a="b"'],
