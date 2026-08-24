@@ -94,13 +94,13 @@ def _http_error_detail(e):
         return raw.decode(errors='replace')
 
 
-def api(method, path, body=None):
+def api(method, path, body=None, timeout=30):
     url = URL + path
     data = json.dumps(body).encode() if body else None
     headers = {'Content-Type': 'application/json'} if data else {}
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
@@ -152,12 +152,24 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     params = {'token': token()}
     if target_tab:
         params['tab'] = target_tab
-    t0 = time.time()
+    # One monotonic deadline for the whole wait, and every blocking step is
+    # capped by what is left of it. The loop used to check the clock only
+    # before each iteration and then give each HTTP call its own fixed 30s,
+    # so a single stalled poll ran far past the timeout the caller asked for
+    # — a 50ms wait returned after 320ms against one 300ms stall. Wall-clock
+    # time.time() also went backwards under an NTP step; monotonic does not.
+    deadline = time.monotonic() + timeout
     wait = 0.02
-    while time.time() - t0 < timeout:
-        time.sleep(wait)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(wait, remaining))
         wait = min(wait * 2, interval)
-        res = api('GET', _query_path('/result', params))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        res = api('GET', _query_path('/result', params), timeout=remaining)
         if res.get('pending'):
             continue
         if (res.get('id') != cmd_id
@@ -166,13 +178,15 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
         generation = res.get('resultGeneration')
         if not generation:
             continue
+        # The consume is what actually claims the result, so it is allowed to
+        # finish: giving up here would leave a result nobody takes. It is
+        # still bounded, by the ordinary request timeout.
         consumed = api('GET', _query_path('/result', {
             **params, 'consume': '1', 'expected': generation}))
         if (consumed.get('consumed') is not True
                 or consumed.get('resultGeneration') != generation):
             continue
         return res
-    return None
 
 
 # ─── Result display ───

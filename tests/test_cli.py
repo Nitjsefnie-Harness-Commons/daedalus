@@ -398,8 +398,10 @@ _WAIT_HARNESS = (
     'import time\n'
     'from daedalus_cli import cli\n'
     'calls = []\n'
+    'calls_timeout = []\n'
     'PENDING = %s\n'
-    'def fake_api(method, path, body=None):\n'
+    'def fake_api(method, path, body=None, timeout=None):\n'
+    '    calls_timeout.append(timeout)\n'
     '    calls.append(path)\n'
     '    if PENDING:\n'
     '        return {"pending": True}\n'
@@ -412,6 +414,7 @@ _WAIT_HARNESS = (
     'res = cli.wait_for_result("c1", "extension", "d1", %s)\n'
     'print("ELAPSED", round(time.monotonic() - start, 3))\n'
     'print("POLLS", len(calls))\n'
+    'print("BOUNDED", all(t is not None and t > 0 for t in calls_timeout[:1]))\n'
     'print("RESULT", res if res is None else res["result"])\n')
 
 
@@ -441,6 +444,42 @@ def test_the_result_wait_polls_before_it_sleeps_the_full_interval(tmp):
     # One peek and one conditional consume, and neither waited on a timer.
     assert polls == 2, r.stdout
     assert elapsed < 0.25, (elapsed, r.stdout)
+
+
+def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
+    """The timeout bounds the whole wait, not just the top of each lap.
+
+    The loop checked the clock before each iteration and then handed every
+    HTTP call its own fixed 30s, so one stalled poll ran far past what the
+    caller asked for — a 50ms wait returned after 320ms against a single
+    300ms stall.
+    """
+    del tmp
+    code = (
+        'import time\n'
+        'from daedalus_cli import cli\n'
+        'seen = []\n'
+        'def fake_api(method, path, body=None, timeout=None):\n'
+        '    seen.append(timeout)\n'
+        '    time.sleep(0.3)\n'       # the stall
+        '    return {"pending": True}\n'
+        'cli.api = fake_api\n'
+        'start = time.monotonic()\n'
+        'res = cli.wait_for_result("c1", "extension", "d1", 0.05)\n'
+        'print("ELAPSED", round(time.monotonic() - start, 3))\n'
+        'print("RESULT", res)\n'
+        'print("FIRST_TIMEOUT", seen[0] if seen else None)\n')
+    r = run_python(code, cli_env(DAEDALUS_TOKEN=TOK))
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    fields = dict(
+        line.split(' ', 1) for line in r.stdout.splitlines() if ' ' in line)
+    assert fields['RESULT'] == 'None', r.stdout
+    # The poll itself was handed the remaining budget rather than 30s, so a
+    # real urlopen would have been cut off; the fake ignores it and stalls
+    # anyway, which is why the wait ends after ONE poll and not several.
+    first = float(fields['FIRST_TIMEOUT'])
+    assert 0 < first <= 0.05, r.stdout
+    assert float(fields['ELAPSED']) < 0.6, r.stdout
 
 
 def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
