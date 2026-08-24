@@ -8,6 +8,7 @@ machinery, so a failure here is a failure on every route at once.
 """
 import http.client
 import json
+import select
 import sys
 import time
 import uuid
@@ -181,22 +182,56 @@ def test_an_incomplete_body_never_holds_a_request_worker(tmp):
         assert status == 200 and body['ok'] is True, (status, body)
 
 
+def _settled(socks, timeout, grace=1.0):
+    """`socks` split into the closed, the answered and the still-held.
+
+    A connection the bridge refused is readable at once, so `timeout` is what
+    the first settlement gets and the rest get `grace` after it: "still being
+    held" can only ever be measured as "nothing arrived in a while", and
+    measuring it per socket would cost that wait once per connection.
+    """
+    pending, closed, answered = list(socks), [], []
+    deadline = time.time() + timeout
+    while pending:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        ready, _, _ = select.select(pending, [], [], remaining)
+        if not ready:
+            break
+        for sock in ready:
+            pending.remove(sock)
+            try:
+                data = sock.recv(65536)
+            except ConnectionError:
+                data = b''
+            (answered if data else closed).append(sock)
+        deadline = min(deadline, time.time() + grace)
+    return closed, answered, pending
+
+
 def test_request_workers_are_capped_rather_than_grown_per_connection(tmp):
-    """Past the cap a connection is closed instead of given a thread."""
+    """Past the cap a connection is closed instead of given a thread.
+
+    Which of these connections is the one past the cap is not fixed. The
+    fixture starts the bridge by asking it for /health, and that request's
+    worker releases its slot only after the handler returns — so a slot can
+    still be spent when the first of these arrives, and it is the second that
+    is refused. The property is that the cap refuses somebody and holds the
+    rest; reading it per connection rather than per position is what keeps an
+    unrelated worker's lifetime from deciding the verdict.
+    """
     with _util.bridge(tmp, env={'DAEDALUS_MAX_REQUEST_WORKERS': '2',
                                 'DAEDALUS_REQUEST_TIMEOUT': '30'}) as (
                                     base, _docroot):
-        held = [stalled_request(base), stalled_request(base)]
-        refused = stalled_request(base)
+        opened = [stalled_request(base) for _ in range(3)]
         try:
-            # The cap is spent on the two held bodies, so this one is closed
-            # without an answer rather than given a worker of its own.
-            assert read_answer(refused, 10) == b'', 'over-cap connection was served'
-            # ... and the two under the cap are still being waited on.
-            for sock in held:
-                assert read_answer(sock, 1) is None, 'a held body was answered early'
+            closed, answered, held = _settled(opened, 10)
+            assert not answered, 'a stalled body was answered, not held'
+            assert closed, 'no connection was refused at the worker cap'
+            assert held, 'the cap refused every connection'
         finally:
-            for sock in held + [refused]:
+            for sock in opened:
                 sock.close()
         # Closing them frees the workers, so the bridge answers again.
         deadline = time.time() + 10
