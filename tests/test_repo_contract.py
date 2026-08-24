@@ -4551,7 +4551,7 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
 
 
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
-    """The scanner input is the non-empty set of 79 tracked release paths."""
+    """The scanner input is the non-empty set of 81 tracked release paths."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
@@ -4562,7 +4562,7 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(_iter_tree_files())
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 79, f'expected 79 tracked paths, found {len(tracked)}'
+    assert len(tracked) == 81, f'expected 81 tracked paths, found {len(tracked)}'
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (

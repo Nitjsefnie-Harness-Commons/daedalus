@@ -258,22 +258,36 @@ jobs:
         run: |
           measured="$(python -m coverage report --format=total --precision=1)"
           python scripts/ci/ratchet.py --measured "$measured"
-          # git decides whether anything moved, so the script stays a rewriter
+          # The size baseline ratchets the other way: it follows a file down
+          # when it shrinks, so the lines cannot come back for free. Growth is
+          # never written here — that stays a decision a reviewer sees.
+          python scripts/ci/size_baseline.py --tighten
+          # git decides whether anything moved, so the scripts stay rewriters
           # and this stays a publisher; neither has to report to the other.
-          if git diff --quiet -- .github/workflows/tests.yml; then
+          paths='.github/workflows/tests.yml scripts/ci/size_baseline.py'
+          # shellcheck disable=SC2086  # two known paths, deliberately split
+          if git diff --quiet -- $paths; then
             echo "raised=false" >> "$GITHUB_OUTPUT"
-            echo "Coverage ${measured}% justified no raise." \
+            echo "Coverage ${measured}% justified no raise, and no module shrank." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             echo "raised=true" >> "$GITHUB_OUTPUT"
             echo "measured=${measured}" >> "$GITHUB_OUTPUT"
+            if git diff --quiet -- scripts/ci/size_baseline.py; then
+              echo "subject=raise the coverage ratchet to ${measured}% measured" \
+                >> "$GITHUB_OUTPUT"
+            elif git diff --quiet -- .github/workflows/tests.yml; then
+              echo 'subject=tighten the module size baseline' >> "$GITHUB_OUTPUT"
+            else
+              echo "subject=raise the coverage ratchet to ${measured}% and tighten module sizes" \
+                >> "$GITHUB_OUTPUT"
+            fi
             {
-              echo '### Coverage ratchet'
-              echo
-              echo "This run measured ${measured}%, which raises the floor:"
+              echo '### Recorded by this run'
               echo
               echo '```diff'
-              git diff -- .github/workflows/tests.yml
+              # shellcheck disable=SC2086
+              git diff -- $paths
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -301,7 +315,7 @@ jobs:
         env:
           RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
           REPO: ${{ github.repository }}
-          MEASURED: ${{ steps.ratchet.outputs.measured }}
+          SUBJECT: ${{ steps.ratchet.outputs.subject }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$RATCHET_SSH_KEY" > ~/.ssh/ratchet
@@ -314,10 +328,10 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/tests.yml
+          git add .github/workflows/tests.yml scripts/ci/size_baseline.py
           # No co-author trailer: no model authored this commit.
-          git commit -m "ci: raise the coverage ratchet to ${MEASURED}% measured" \
-            -m 'Raised by .github/workflows/tests.yml from the coverage this run took.'
+          git commit -m "ci: ${SUBJECT}" \
+            -m 'Recorded by .github/workflows/tests.yml from what this run measured.'
           # HEAD:main, never a force: overwriting someone's commit to record a
           # coverage number is never the right trade.
           export GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts'

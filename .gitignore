@@ -136,6 +136,7 @@
 !/scripts/ci/
 !/scripts/ci/compare_durations.py
 !/scripts/ci/ratchet.py
+!/scripts/ci/size_baseline.py
 !/scripts/ci/time_tests.py
 
 # ─── tests ───
@@ -143,6 +144,7 @@
 !/tests/_util.py
 !/tests/test_bridge_http.py
 !/tests/test_cli.py
+!/tests/test_file_sizes.py
 !/tests/test_mcp_server.py
 !/tests/test_path_safety.py
 !/tests/test_repo_contract.py
