@@ -64,6 +64,11 @@ concurrency:
 jobs:
   pip-audit:
     runs-on: ubuntu-latest
+    # Every other workflow bounds its jobs; this one inherited GitHub's
+    # 360-minute default. It also runs on a daily schedule, so a package index
+    # that stops responding mid-request could hold a runner for up to six hours
+    # rather than failing in minutes.
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
