@@ -1010,6 +1010,31 @@ def test_result_partial_temp_write_preserves_the_existing_slot(tmp):
             health_status, health)
 
 
+def test_a_filename_without_an_id_deletes_nothing(tmp):
+    """The narrowest delete must not fall through to the widest one.
+
+    `{token, filename}` matched neither the file branch nor the id branch and
+    landed in the one that removes the token's entire upload namespace, so
+    naming a single file deleted every upload the token had — and answered
+    that as a success.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        for upload_id, name in (('alpha', 'one.txt'), ('beta', 'two.txt')):
+            status, body = _util.post_json(base + '/upload', {
+                'token': TOK, 'id': upload_id, 'filename': name,
+                'data': base64.b64encode(b'keep me').decode()})
+            assert status == 200, (status, body)
+
+        status, body = _util.request(
+            base + '/upload', 'DELETE',
+            body={'token': TOK, 'filename': 'one.txt'})
+        assert status == 400, (status, body)
+
+        root = Path(docroot) / 'uploads' / TOK
+        assert (root / 'alpha' / 'one.txt').is_file(), sorted(root.rglob('*'))
+        assert (root / 'beta' / 'two.txt').is_file(), sorted(root.rglob('*'))
+
+
 def test_upload_pagination_is_validated_before_the_directory_is_looked_at(tmp):
     """The same query must get the same answer whether or not files exist.
 

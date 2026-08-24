@@ -1144,6 +1144,12 @@ class Handler(BaseHTTPRequestHandler):
         for val in (upload_id, filename):
             if _unsafe_component(val):
                 return self._json(400, {'error': 'invalid path component'})
+        # A filename names a file inside an id, so without one it matches
+        # neither the file branch nor the id branch below and used to reach the
+        # branch that removes the token's whole namespace: naming one file
+        # deleted every upload the token had, and answered that as success.
+        if filename and not upload_id:
+            return self._json(400, {'error': 'filename requires id'})
         try:
             if filename and upload_id:
                 target = UPLOAD_DIR / token / upload_id / filename

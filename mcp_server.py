@@ -312,6 +312,10 @@ async def uploads(upload_id: str = '', limit: int | None = None,
 async def delete_upload(upload_id: str = '', filename: str = '') -> dict:
     """Delete uploads. No args → all for token; id only → all files under that id;
     id+filename → single file. Returns the server response."""
+    # A filename alone has no narrower target than the whole token, so it
+    # would delete every upload rather than the one file it names.
+    if filename and not upload_id:
+        return {'error': 'filename requires upload_id'}
     body: dict = {}
     if upload_id:
         body['id'] = upload_id

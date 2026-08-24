@@ -164,6 +164,20 @@ def test_the_entry_point_leaves_an_explicit_encoding_alone(tmp):
         assert b'caf\xc3\xa9' not in result.stdout, result.stdout
 
 
+def test_uploads_delete_refuses_a_filename_without_an_id(tmp):
+    """Naming one file must not become deleting the token's whole namespace."""
+    with _util.bridge(tmp) as (base, docroot):
+        status, _ = _util.post_json(base + '/upload', {
+            'token': TOK, 'id': 'alpha', 'filename': 'one.txt',
+            'data': base64.b64encode(b'keep me').decode()})
+        assert status == 200, status
+        r = run_cli(['uploads', '--delete', '--filename', 'one.txt'],
+                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (r.returncode, r.stdout)
+        assert '--id' in r.stderr, r.stderr
+        assert (Path(docroot) / 'uploads' / TOK / 'alpha' / 'one.txt').is_file()
+
+
 def test_unblock_refuses_rule_id_zero_before_sending_it(tmp):
     """Zero is not a rule id, and it must not reach the extension as one.
 

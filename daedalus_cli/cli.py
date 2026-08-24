@@ -777,6 +777,12 @@ def do_list_block_rules(args):
 def do_uploads(args):
     """List or delete uploads."""
     if args.delete:
+        # A filename names a file inside an id. Without one the bridge has no
+        # narrower target than the whole token, which is not what naming a
+        # single file asks for.
+        if args.filename and not args.id:
+            sys.exit('--filename needs --id: '
+                     'a filename alone would delete every upload')
         body = {'token': token()}
         if args.id:
             body['id'] = args.id
