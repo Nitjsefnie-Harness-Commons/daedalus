@@ -17,6 +17,7 @@ import os
 import importlib.util
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -410,6 +411,88 @@ def test_serve_crash_line_survives_a_hostile_decode_return(tmp):
 
     line = _serve_crash_line(mod, ChainError('x'))
     assert '[MCP] serve crashed: <unprintable value>' in line, line
+
+
+def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
+    """A bad MCP setting names itself instead of raising a bare ValueError.
+
+    Both were parsed with bare int(), so a malformed value arrived as an
+    import-time traceback and a negative body size was accepted — which made
+    every non-negative Content-Length exceed the configured maximum and
+    refused every request the front end received.
+    """
+    _need_deps()
+    cases = (
+        ('DAEDALUS_MCP_PORT', 'not-an-integer', 'integer from 0 to 65535'),
+        ('DAEDALUS_MCP_PORT', '70000', 'integer from 0 to 65535'),
+        ('DAEDALUS_MCP_MAX_BODY_SIZE', 'bad', 'non-negative integer'),
+        ('DAEDALUS_MCP_MAX_BODY_SIZE', '-1', 'non-negative integer'),
+    )
+    failures = []
+    for name, value, requirement in cases:
+        env = dict(os.environ)
+        env.update({
+            'DAEDALUS_DIR': str(Path(tmp) / name.lower()),
+            'DAEDALUS_PORT': '0',
+            'PYTHONDONTWRITEBYTECODE': '1',
+            name: value,
+        })
+        Path(env['DAEDALUS_DIR']).mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            [sys.executable, '-c', 'import mcp_server'], cwd=_util.ROOT,
+            env=env, capture_output=True, text=True, timeout=120)
+        output = (proc.stdout + proc.stderr).strip()
+        if (proc.returncode == 0 or 'Traceback' in output
+                or name not in output or requirement not in output):
+            failures.append(
+                f'{name}={value!r}: exit={proc.returncode}, output={output!r}')
+    assert not failures, '\n'.join(failures)
+
+
+def test_the_mcp_env_parser_matches_the_bridges(tmp):
+    """The copy and the original answer the same way, or they have drifted.
+
+    mcp_server cannot import server.py — server.py requires its environment,
+    runs module-level configuration, and imports mcp_server itself — so the
+    parser is duplicated and this is the drift control.
+    """
+    _need_deps()
+    mod = _load_mcp('http://127.0.0.1:1')
+    # server.py reads its data root and port at import; give it a throwaway
+    # one rather than the ambient environment, which may have neither.
+    previous_dir = os.environ.get('DAEDALUS_DIR')
+    previous_port = os.environ.get('DAEDALUS_PORT')
+    os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
+    os.environ['DAEDALUS_PORT'] = '0'
+    Path(os.environ['DAEDALUS_DIR']).mkdir(parents=True, exist_ok=True)
+    try:
+        server = _util.load(_util.ROOT / 'server.py', 'server_for_env_contract')
+    finally:
+        for key, value in (('DAEDALUS_DIR', previous_dir),
+                           ('DAEDALUS_PORT', previous_port)):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    for name, default, minimum, maximum in (
+            ('DAEDALUS_CONTRACT_A', 5, 0, None),
+            ('DAEDALUS_CONTRACT_B', 8086, 0, 65535)):
+        for value in (None, '7', 'nonsense', '-1', '70000'):
+            previous = os.environ.pop(name, None)
+            if value is not None:
+                os.environ[name] = value
+            try:
+                results = []
+                for parser in (server._env_int, mod._env_int):
+                    try:
+                        results.append(('ok', parser(name, default, minimum, maximum)))
+                    except SystemExit as exit_error:
+                        results.append(('exit', str(exit_error)))
+                assert results[0] == results[1], (name, value, results)
+            finally:
+                os.environ.pop(name, None)
+                if previous is not None:
+                    os.environ[name] = previous
 
 
 def test_mcp_log_safe_copy_satisfies_the_shared_contract(tmp):
