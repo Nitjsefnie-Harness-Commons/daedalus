@@ -64,6 +64,9 @@ def _malloc_trim():
         try:
             _LIBC.malloc_trim(0)
         except Exception:
+            # Returning freed heap is an optimisation with no fallback to
+            # attempt. A libc without the symbol, or one that refuses the
+            # call, leaves the heap where it is and the bridge keeps serving.
             pass
 
 
@@ -328,6 +331,10 @@ def _atomic_result_write(path, data):
         try:
             tmp.unlink()
         except OSError:
+            # The write already failed and is re-raised below. A temp that
+            # will not unlink is part of the same partial state the caller is
+            # about to be told about, and raising it here would replace the
+            # error that explains what happened.
             pass
         raise
 
@@ -437,6 +444,9 @@ def _remove_expired_command_file(path, now, legacy=False):
                 return
         path.unlink()
     except (OSError, json.JSONDecodeError, RecursionError, ValueError):
+        # Expiry is opportunistic. A file that vanished under the sweep, or
+        # that cannot be read or removed right now, is reconsidered on the
+        # next pass; nothing downstream depends on this call having acted.
         pass
 
 
@@ -463,6 +473,9 @@ def _collect_expired_commands():
             try:
                 entry.rmdir()
             except OSError:
+                # Not empty, or a producer wrote into it between the scan and
+                # this call — either way the namespace is not expired after
+                # all, and the next sweep will look again.
                 pass
 
 
@@ -520,6 +533,9 @@ def _enqueue_command(token, tab, cmd):
             try:
                 tmp.unlink()
             except OSError:
+                # Best effort, and the enqueue failure re-raised below is the
+                # error the caller needs. A temp left behind is collected by
+                # the TTL sweep.
                 pass
             raise
     _cmd_event(token).set()
@@ -982,25 +998,33 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 continue  # vanished or became unavailable during the scan
             if age > CMD_TTL:
+                # Already gone, or gone by the next sweep: an expired command
+                # is not delivered either way.
                 try: f.unlink()
-                except OSError: pass
+                except OSError: pass  # expired either way
                 print(f'[STREAM] TTL-DROP {_log_safe(qdir.name)}/{_log_safe(name)}', flush=True)
                 continue
             try:
                 data = json.loads(f.read_text(encoding='utf-8'))
             except (OSError, json.JSONDecodeError, ValueError):
-                try: f.unlink()  # malformed/vanished — attempt removal
-                except OSError: pass
+                # Malformed or vanished. Removal is attempted so it stops
+                # being rescanned; failing that, the TTL sweep takes it.
+                try: f.unlink()
+                except OSError: pass  # the TTL sweep takes it
                 continue
             if not isinstance(data, dict):
+                # Same: readable JSON that is not a command object.
                 try: f.unlink()
-                except OSError: pass
+                except OSError: pass  # the TTL sweep takes it
                 continue
             if chrome_tab is not None:
                 data['chromeTab'] = chrome_tab
             self._write_frame(data)  # BEFORE unlink
+            # The frame is already on the wire. A file that will not unlink is
+            # redelivered on the next tick and deduplicated by the `_did` the
+            # frame carries, which is why delivery does not depend on this.
             try: f.unlink()
-            except OSError: pass
+            except OSError: pass  # a redelivery is deduplicated by _did
             _last_delivery_ts = time.time()
             count += 1
             print(f'[STREAM] DELIVERED q={_log_safe(qdir.name)} id={_log_safe(data.get("id", ""))} did={_log_safe(data.get("_did", ""))}', flush=True)
@@ -1027,14 +1051,16 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return 0
         if age > CMD_TTL:
+            # Already gone, or gone by the next sweep.
             try: path.unlink()
-            except OSError: pass
+            except OSError: pass  # expired either way
             return 0
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
         self._write_frame(data)  # BEFORE unlink
+        # Delivered already; a redelivery is deduplicated by `_did`.
         try: path.unlink()
-        except OSError: pass
+        except OSError: pass  # a redelivery is deduplicated by _did
         _last_delivery_ts = time.time()
         print(f'[STREAM] DELIVERED legacy={_log_safe(path.name)} id={_log_safe(data.get("id", ""))}', flush=True)
         return 1
@@ -1091,6 +1117,9 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 remaining -= len(chunk)
         except OSError:
+            # The drain is a courtesy to the refusal already written: it
+            # exists so the close is a FIN rather than an RST. A socket that
+            # errors here has nothing left to receive that answer anyway.
             pass
 
     def _drain_undeclared_body(self):
@@ -1110,11 +1139,15 @@ class Handler(BaseHTTPRequestHandler):
             self.connection.settimeout(_UNDECLARED_BODY_DRAIN_SECONDS)
             self.rfile.read(_REFUSED_BODY_DRAIN)
         except (OSError, ValueError):
+            # Same courtesy as _drain_refused_body, and the same reason it
+            # cannot matter: nothing is read out of this body.
             pass
         finally:
             try:
                 self.connection.settimeout(original)
             except OSError:
+                # The connection is closing either way, so a socket that will
+                # not take its timeout back is one nothing else will use.
                 pass
 
     def _declared_body_length(self):
@@ -1309,6 +1342,9 @@ class Handler(BaseHTTPRequestHandler):
                             cmd_file.unlink()
                     except (OSError, json.JSONDecodeError,
                             RecursionError, ValueError):
+                        # A legacy drop that cannot be read is not a command.
+                        # The empty answer below is the same one an absent
+                        # file gives, and the file is left to the TTL sweep.
                         pass
             return self._json(200, data)
 
@@ -1346,6 +1382,9 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     body['roundtrip_ms'] = int(time.time() * 1000) - int(did.split('_')[0])
                 except ValueError:
+                    # A delivery id is not required to carry a millisecond
+                    # prefix. When it does not, the reading is absent from the
+                    # result rather than the result being refused.
                     pass
             try:
                 serialized = json.dumps(
@@ -1686,6 +1725,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         tmp.unlink()
                     except FileNotFoundError:
+                        # os.replace consumed it, which is the success path.
                         pass
             except OSError:
                 return self._json(500, {'error': 'segment storage failure'})
@@ -1845,6 +1885,9 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         tmp.unlink()
                     except OSError:
+                        # The record write already failed and the 500 below is
+                        # the answer; a leftover temp is overwritten by the
+                        # next write to this job's name.
                         pass
                     return self._json(
                         500, {'error': 'segment storage failure'})
@@ -1876,11 +1919,16 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     tmp.unlink()
                 except OSError:
+                    # Best effort: the 409 below is the answer either way, and
+                    # the next mint on this name overwrites the temp.
                     pass
                 if made_dir:
                     try:
                         job_dir.rmdir()
                     except OSError:
+                        # Only this call's own directory is removed, and only
+                        # while empty. One that is not empty belongs to
+                        # whatever filled it.
                         pass
                 return self._json(409, {'error': 'job name unavailable'})
         return self._json(200, {'ok': True, 'sig': sig})

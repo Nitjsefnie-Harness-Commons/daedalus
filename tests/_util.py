@@ -634,6 +634,9 @@ def _write_summary(total, passed, skipped, failed):
             json.dump({'total': total, 'passed': passed,
                        'skipped': skipped, 'failed': failed}, handle)
     except OSError:
+        # Not swallowed so much as reported elsewhere: run_tests.py reads this
+        # file to aggregate counts and treats a suite that produced none as a
+        # failure, so a write that fails turns up there rather than here.
         pass
 
 

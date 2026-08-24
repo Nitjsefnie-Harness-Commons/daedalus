@@ -209,6 +209,9 @@ def _emit(lines, summary_file):
             with open(summary_file, 'a', encoding='utf-8') as handle:
                 handle.write(text + '\n')
         except OSError:
+            # The summary is the step's rendered note, not its verdict: the
+            # exit status is what gates, and it has already been decided. A
+            # run that cannot write the note still gates correctly.
             pass
 
 
