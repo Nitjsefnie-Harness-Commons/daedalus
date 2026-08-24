@@ -131,8 +131,14 @@ jobs:
             "venv-$side/bin/python" -m pip install --quiet \
               "./${side}" "./${side}[mcp]"
           done
-          echo "base mcp:"; "venv-base/bin/python" -m pip show mcp | head -2
-          echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | head -2
+          # grep rather than `head -2`: head closes the pipe after two lines,
+          # pip takes the broken pipe, prints "ERROR: Pipe to stdout was
+          # broken" and exits 120 — a nonzero producer hidden behind a
+          # successful truncation. grep reads the whole stream, so there is
+          # no early close to report, and under pipefail a pip that genuinely
+          # failed still fails the step.
+          echo "base mcp:"; "venv-base/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
+          echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
 
       - name: Run both suites, interleaved
         if: steps.baseline.outputs.tag != ''
