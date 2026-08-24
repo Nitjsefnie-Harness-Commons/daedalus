@@ -139,6 +139,61 @@ def test_the_printer_survives_a_console_that_cannot_encode_it(tmp):
     assert '@channel=cdp' in result.stdout, result.stdout
 
 
+def test_the_entry_point_leaves_an_explicit_encoding_alone(tmp):
+    """An operator's PYTHONIOENCODING survives the command being run.
+
+    The module's own stdio policy treats an explicit PYTHONIOENCODING as an
+    operator decision and leaves it alone, and a test already covers that at
+    import. The entry point then reconfigured both streams to UTF-8 a second
+    time, unconditionally, so the policy held for anything that imported the
+    module and not for anyone who actually ran the command — the bytes a
+    caller received were UTF-8 whatever they asked for. Raw bytes, because
+    decoding them here with the encoding under test would pass either way.
+    """
+    with _util.bridge(tmp) as (base, _docroot):
+        _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
+            {'tabId': '11', 'url': 'https://example.com/a',
+             'title': 'caf\u00e9'}]})
+        result = subprocess.run(
+            CLI + ['tabs'], cwd=str(_util.ROOT),
+            env=cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                        PYTHONIOENCODING='cp1252'),
+            capture_output=True, timeout=60)
+        assert result.returncode == 0, (result.returncode, result.stderr)
+        assert b'caf\xe9' in result.stdout, result.stdout
+        assert b'caf\xc3\xa9' not in result.stdout, result.stdout
+
+
+def test_set_permanent_refuses_a_value_it_cannot_read(tmp):
+    """A misspelling must not read as false and clear the flag it was setting.
+
+    Every value outside the true list was taken as false, so `ture` turned a
+    permanent hotfix version-gated and reported success while doing it. The
+    refusal has to come before the mutation is sent, not after.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        r = run_cli(['set-permanent', 'critical-fix', 'ture'],
+                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (r.returncode, r.stdout)
+        assert 'ture' in r.stderr, r.stderr
+        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
+        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
+        assert queued == [], queued
+
+
+def test_set_permanent_reads_every_documented_spelling(tmp):
+    """Both halves of the documented set parse, in any case."""
+    del tmp
+    code = ('from daedalus_cli.cli import _boolean_argument as b\n'
+            'print([b(v) for v in ("true", "1", "yes", "y", "on", "TRUE")])\n'
+            'print([b(v) for v in ("false", "0", "no", "n", "off", "OFF")])\n')
+    r = run_python(code, cli_env())
+    assert r.returncode == 0, (r.returncode, r.stderr)
+    lines = r.stdout.strip().splitlines()
+    assert lines[0] == str([True] * 6), lines
+    assert lines[1] == str([False] * 6), lines
+
+
 def test_missing_token_is_an_error(tmp):
     # No TOKEN and no DAEDALUS_TOKEN: required() must refuse before any HTTP.
     r = run_cli(['tabs'], cli_env(DAEDALUS_URL='http://127.0.0.1:1'))

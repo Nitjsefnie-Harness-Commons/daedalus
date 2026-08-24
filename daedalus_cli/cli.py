@@ -888,9 +888,31 @@ def do_list_hotfixes(args):
     print(f'{len(fixes)} hotfix(es)')
 
 
+_TRUE_SPELLINGS = ('true', '1', 'yes', 'y', 'on')
+_FALSE_SPELLINGS = ('false', '0', 'no', 'n', 'off')
+
+
+def _boolean_argument(value):
+    """One of the documented spellings, or an argument error.
+
+    Anything outside the true list used to read as false, so a misspelling
+    sent the opposite of what was asked and the command reported success --
+    `set-permanent <id> ture` quietly made a permanent hotfix version-gated.
+    Refusing here means argparse rejects it before any mutation is sent.
+    """
+    lowered = value.lower()
+    if lowered in _TRUE_SPELLINGS:
+        return True
+    if lowered in _FALSE_SPELLINGS:
+        return False
+    accepted = ', '.join(_TRUE_SPELLINGS + _FALSE_SPELLINGS)
+    raise argparse.ArgumentTypeError(
+        f'{value!r} is not one of {accepted}')
+
+
 def do_set_permanent(args):
     """Toggle the permanent flag on an existing hotfix."""
-    val = args.permanent.lower() in ('true', '1', 'yes', 'y', 'on')
+    val = args.permanent
     result = ext_cmd('_set_perm', 'set-permanent', fixId=args.fix_id, permanent=val)
     found = result.get('found', False)
     if not found:
@@ -901,15 +923,9 @@ def do_set_permanent(args):
 # ─── Argument parser ───
 
 def main():
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            # TextIO has no reconfigure in the stub; the real stdout usually
-            # does, and the except below is what handles the case where the
-            # stream is a pipe that does not.
-            _stream.reconfigure(  # pyright: ignore[reportAttributeAccessIssue]
-                encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError, OSError):
-            pass  # not a reconfigurable stream (redirected/piped)
+    # Stdio is configured once, at import, by _configure_stdio. Repeating it
+    # here pinned UTF-8 unconditionally and so overrode the one case that
+    # function exists to respect: an explicit PYTHONIOENCODING.
     p = argparse.ArgumentParser(
         prog='daedalus',
         description='Daedalus bridge CLI',
@@ -1121,7 +1137,8 @@ def main():
     # set-permanent (extension)
     s = sub.add_parser('set-permanent', help='Toggle the permanent flag on an existing hotfix')
     s.add_argument('fix_id', help='Hotfix identifier')
-    s.add_argument('permanent', help='true|false (or 1|0, yes|no)')
+    s.add_argument('permanent', type=_boolean_argument,
+                   help='true|1|yes|y|on or false|0|no|n|off')
 
     # uploads
     s = sub.add_parser('uploads', help='List or delete uploads')
