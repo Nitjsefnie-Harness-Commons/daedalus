@@ -18,6 +18,16 @@ updates:
     open-pull-requests-limit: 4
     commit-message:
       prefix: ci
+    # `github/codeql-action/init` and `github/codeql-action/analyze` are two
+    # dependencies to Dependabot and one component to CodeQL, which refuses to
+    # run when the two `uses:` lines name different versions. Ungrouped, the
+    # bump arrived as two pull requests that could each only be red, and
+    # merging either one left main red until the other landed. The group makes
+    # the pair one proposal.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   # The Python surface: the `mcp` extra in pyproject.toml, which is the only
   # third-party code that runs in production, and the lint/type/coverage pins

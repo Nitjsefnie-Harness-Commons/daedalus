@@ -9,6 +9,7 @@ and deployment-specific strings in shipped files.
 """
 import ast
 import contextlib
+import fnmatch
 import http.server
 import importlib
 import io
@@ -4580,6 +4581,66 @@ def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     script, _, _ = after.partition('- name: Check out this commit')
     _, _, body = script.partition('run: |')
     assert '${{' not in body, 'an expression is interpolated into the script'
+
+
+def _pinned_actions():
+    """{action path: {sha: [workflow names]}} over every `uses:` in the tree."""
+    used = {}
+    pattern = re.compile(r'uses:\s*([\w.-]+/[\w./-]+)@([0-9a-f]{40})')
+    for path in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
+        for action, sha in pattern.findall(path.read_text(encoding='utf-8')):
+            used.setdefault(action, {}).setdefault(sha, []).append(path.name)
+    return used
+
+
+def test_one_action_family_is_pinned_to_one_version(tmp):
+    """Two `uses:` lines from the same action must name the same commit.
+
+    CodeQL refuses to run when `init` and `analyze` name different versions,
+    and Dependabot treats them as two dependencies — so a bump arrived as two
+    pull requests, each of which could only be red, and merging either one
+    would have left main red until the other landed. The rule is wider than
+    CodeQL: an action split across sub-paths is one component, whatever its
+    package manager thinks.
+    """
+    del tmp
+    families = {}
+    for action, by_sha in _pinned_actions().items():
+        owner, _, rest = action.partition('/')
+        repo = rest.partition('/')[0]
+        for sha, workflows in by_sha.items():
+            families.setdefault(f'{owner}/{repo}', {}).setdefault(
+                sha, []).extend(f'{name}:{action}' for name in workflows)
+    assert families, 'no hash-pinned action found; has the pin convention moved?'
+    for family, by_sha in sorted(families.items()):
+        assert len(by_sha) == 1, (
+            f'{family} is pinned to {len(by_sha)} different commits: '
+            + '; '.join(f'{sha[:12]} in {sorted(set(where))}'
+                        for sha, where in sorted(by_sha.items())))
+
+
+def test_dependabot_groups_an_action_used_under_more_than_one_path(tmp):
+    """A component Dependabot sees as several dependencies moves as one.
+
+    Grouping is what makes the proposal a state CI can pass: ungrouped, each
+    half of `github/codeql-action` arrives alone and neither can be green.
+    """
+    del tmp
+    config = (ROOT / '.github' / 'dependabot.yml').read_text(encoding='utf-8')
+    patterns = re.findall(r'^\s*-\s*"([^"]+)"\s*$', config, re.MULTILINE)
+    families = {}
+    for action in _pinned_actions():
+        owner, _, rest = action.partition('/')
+        repo = rest.partition('/')[0]
+        families.setdefault(f'{owner}/{repo}', set()).add(action)
+    split = {family for family, paths in families.items() if len(paths) > 1}
+    assert split, 'no action is used under more than one path any more'
+    for family in sorted(split):
+        assert any(fnmatch.fnmatch(family + '/x', pattern)
+                   or fnmatch.fnmatch(family, pattern)
+                   for pattern in patterns), (
+            f'{family} is used under several paths, so Dependabot will open '
+            f'one pull request per path; no group in dependabot.yml covers it')
 
 
 def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
