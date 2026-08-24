@@ -332,12 +332,29 @@ Read this before installing the extension.
 **It injects a `window.GM` shim into every matching top-level page**
 (`<all_urls>`, MAIN world),
 which is what lets a script sent with `put` make cross-origin requests. The
-consequence is the part to be deliberate about: any matching site you visit
-can call that shim, so **that site can issue cross-origin requests through the
-extension's privileges**, exactly as a userscript manager with a wildcard
-`@match` would. If that is not acceptable for your browsing, narrow the
-`matches` in `extension/manifest.json` to the hosts you actually drive, and
-accept that the bridge then does nothing on other pages.
+consequence is the part to be deliberate about: **any matching site you visit
+can call that shim**, and what it reaches is not only the network. Under the
+default match a hostile or compromised origin can:
+
+- **issue cross-origin HTTP requests** with the extension's privileges, reading
+  responses its own `fetch` could not — `GM.xmlhttpRequest`;
+- **open tabs** at URLs of its choosing — `GM.openInTab`;
+- **start downloads** — `GM.download`;
+- **raise desktop notifications** — `GM.notification`;
+- **write your clipboard** — `GM.setClipboard`;
+- **read, write, enumerate and delete extension-wide storage** — every
+  non-reserved key, shared by every site the shim runs in, so one origin reads
+  what another left behind — `GM.getValue`, `GM.setValue`, `GM.listValues`,
+  `GM.deleteValue`;
+- **inject CSS into its own page** — `GM.addStyle`.
+
+That is the authority a userscript manager with a wildcard `@match` hands out,
+and it is granted to every origin rather than to a script you chose. Two things
+are deliberately outside it, both covered below: the bridge token and server
+URL, which the reserved-key rule keeps out of page reach, and cookies, which
+stay an operator capability. If that surface is not acceptable for your
+browsing, narrow the `matches` in `extension/manifest.json` to the origins you
+actually drive, and accept that the bridge then does nothing on other pages.
 
 **The bridge token and server URL are not reachable through the page's GM
 storage methods.** They live in `chrome.storage.local` under the `daedalus-`

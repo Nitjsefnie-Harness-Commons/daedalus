@@ -3695,6 +3695,34 @@ def test_check_versions_sites_all_present_in_copy(tmp):
     assert m and int(m.group(1)) == expected, r.stdout
 
 
+# GM.info is metadata about the shim, not a capability it grants, so the
+# install-time warning has nothing to say about it.
+_GM_NON_CAPABILITIES = frozenset({'GM.info'})
+
+
+def test_the_security_warning_names_every_capability_the_shim_grants(tmp):
+    """The warning has to keep up with the surface it is warning about.
+
+    It described the consequence as cross-origin requests, while the same
+    page-facing relay also opened tabs, started downloads, raised
+    notifications, wrote the clipboard and shared extension-wide storage
+    between origins. Those were all in the API table and none of them in the
+    warning, which is the half a reader makes an install decision from.
+    """
+    del tmp
+    readme = (_util.ROOT / 'README.md').read_text(encoding='utf-8')
+    _, _, after = readme.partition('## GM Bridge')
+    table, _, _ = after.partition('## Architecture')
+    granted = {f'GM.{name}' for name in re.findall(r'`GM\.([a-zA-Z]+)', table)}
+    granted -= _GM_NON_CAPABILITIES
+    assert len(granted) > 5, granted  # the table was found and parsed
+
+    _, _, after = readme.partition('## Security')
+    warning, _, _ = after.partition('**The bridge token and server URL')
+    missing = sorted(name for name in granted if name not in warning)
+    assert not missing, f'not named in the install-time warning: {missing}'
+
+
 def test_the_extension_never_logs_the_bridge_token(tmp):
     """The token is a reusable browser-control credential, not a diagnostic.
 
