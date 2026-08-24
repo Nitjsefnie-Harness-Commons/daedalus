@@ -360,9 +360,17 @@ async function handleBlockRequests(cmd) {
 
 async function handleUnblockRequests(cmd) {
   try {
-    if (cmd.ruleId) {
-      // Remove specific rule
-      const ids = Array.isArray(cmd.ruleId) ? cmd.ruleId.map(Number) : [Number(cmd.ruleId)];
+    if (cmd.ruleId !== undefined && cmd.ruleId !== null) {
+      // Remove specific rule. A PRESENT id is never a request to remove
+      // everything, however malformed it is: `if (cmd.ruleId)` was false for
+      // 0, so the narrowest request fell through to the branch below and
+      // destroyed every session rule while reporting them as removed.
+      const ids = (Array.isArray(cmd.ruleId) ? cmd.ruleId : [cmd.ruleId]).map(Number);
+      if (!ids.length || ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+        await postResult(cmd._execution, null,
+          'ruleId must be a positive integer', 'extension');
+        return;
+      }
       await chrome.declarativeNetRequest.updateSessionRules({
         removeRuleIds: ids,
         addRules: [],

@@ -164,6 +164,22 @@ def test_the_entry_point_leaves_an_explicit_encoding_alone(tmp):
         assert b'caf\xc3\xa9' not in result.stdout, result.stdout
 
 
+def test_unblock_refuses_rule_id_zero_before_sending_it(tmp):
+    """Zero is not a rule id, and it must not reach the extension as one.
+
+    The extension read a present-but-false ruleId as absent and removed every
+    session rule, so the CLI refusing it here is the outer half of that fix.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        r = run_cli(['unblock-requests', '--rule-id', '0'],
+                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (r.returncode, r.stdout)
+        assert 'positive' in r.stderr, r.stderr
+        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
+        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
+        assert queued == [], queued
+
+
 def test_set_permanent_refuses_a_value_it_cannot_read(tmp):
     """A misspelling must not read as false and clear the flag it was setting.
 

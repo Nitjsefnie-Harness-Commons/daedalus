@@ -722,11 +722,28 @@ def do_block_requests(args):
     print(f'Blocked: {result.get("pattern", "")}  ruleId={result.get("ruleId", "")}  tabs={result.get("tabIds", [])}')
 
 
+def _positive_rule_id(value):
+    """A block rule's id, which is always a positive integer.
+
+    Zero reached the extension as a present-but-invalid id, where it read as
+    absent and widened into removing every rule.
+    """
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'{value!r} is not an integer') from None
+    if number <= 0:
+        raise argparse.ArgumentTypeError(
+            f'rule ids are positive; got {number}')
+    return number
+
+
 def do_unblock_requests(args):
     """Remove block rules via extension."""
     cmd: dict = {'id': '_unblock', 'type': 'unblock-requests', 'token': token(), 'tab': 'extension'}
-    if args.rule_id:
-        cmd['ruleId'] = int(args.rule_id)
+    if args.rule_id is not None:
+        cmd['ruleId'] = args.rule_id
     sent = api('PUT', '/command', cmd)
     res = wait_for_result('_unblock', 'extension', sent.get('did'), 10)
     if res is None:
@@ -1094,7 +1111,8 @@ def main():
 
     # unblock-requests (extension)
     s = sub.add_parser('unblock-requests', help='Remove block rules')
-    s.add_argument('--rule-id', help='Specific rule ID to remove (default: all)')
+    s.add_argument('--rule-id', type=_positive_rule_id,
+                   help='Specific rule ID to remove (default: all)')
 
     # list-block-rules (extension)
     sub.add_parser('list-block-rules', help='List active block rules')

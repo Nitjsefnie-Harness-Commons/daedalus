@@ -2529,6 +2529,12 @@ const chrome = {
           throw new Error('Duplicate rule ID ' + rule.id);
         }
       }
+      // Removal is honoured, not ignored: what the unblock scenario asserts
+      // is which rules are STILL installed afterwards.
+      for (const id of change.removeRuleIds || []) {
+        const at = rules.findIndex((existing) => existing.id === id);
+        if (at !== -1) rules.splice(at, 1);
+      }
       rules.push(...change.addRules);
     },
   },
@@ -2803,6 +2809,24 @@ async function runBlockRuleRestart() {
   };
 }
 
+async function runUnblockZero() {
+  // Three rules already installed, as an operator would have.
+  rules.push({ id: 9001 }, { id: 9002 }, { id: 9003 });
+  context.unblockCommand = {
+    id: 'unblock-zero',
+    type: 'unblock-requests',
+    ruleId: 0,
+    _did: 'did-unblock-zero',
+  };
+  await vm.runInContext('dispatchCommand(unblockCommand)', context);
+  return {
+    installedIds: rules.map((rule) => rule.id),
+    posted: resultPayloads.map((item) => ({
+      removed: item.result && item.result.removed, error: item.error,
+    })),
+  };
+}
+
 async function run() {
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
   await vm.runInContext('loadConfig()', context);
@@ -2813,6 +2837,7 @@ async function run() {
   if (scenario === 'net-capture') return runNetCapture();
   if (scenario === 'hotfix-race') return runHotfixRace();
   if (scenario === 'block-rule-restart') return runBlockRuleRestart();
+  if (scenario === 'unblock-zero') return runUnblockZero();
   throw new Error('unknown scenario: ' + scenario);
 }
 
@@ -2972,6 +2997,21 @@ def test_concurrent_hotfix_stores_both_survive(tmp):
         ],
         'storedIds': ['fix-a', 'fix-b'],
     }, actual
+
+
+def test_rule_id_zero_is_refused_rather_than_removing_everything(tmp):
+    """A specific id that is invalid must not widen into remove-all.
+
+    `if (cmd.ruleId)` is false for 0, so `unblock-requests` with ruleId 0 fell
+    through to the branch that removes every session rule and reported them as
+    removed. The narrowest possible request destroyed the most.
+    """
+    del tmp
+    actual = _run_extension_result_boundary('unblock-zero')
+    assert actual['installedIds'] == [9001, 9002, 9003], actual
+    assert len(actual['posted']) == 1, actual
+    assert actual['posted'][0]['error'], actual
+    assert actual['posted'][0]['removed'] is None, actual
 
 
 def test_block_rule_ids_survive_a_worker_restart(tmp):

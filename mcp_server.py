@@ -411,6 +411,10 @@ async def unblock_requests(rule_id: int | None = None) -> dict:
     """Remove a block rule by id, or all rules if `rule_id` is None."""
     fields: dict = {}
     if rule_id is not None:
+        # Zero is not "no id": it reached the extension as a present-but-false
+        # value and widened into removing every rule.
+        if int(rule_id) <= 0:
+            return {'error': 'rule_id must be a positive integer'}
         fields['ruleId'] = int(rule_id)
     return await _ext_cmd('_unblock', 'unblock-requests', **fields)
 
