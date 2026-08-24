@@ -65,7 +65,7 @@ git add -f path/to/new_file.py          # force past the ignore
 python3 scripts/gen_gitignore.py .      # regenerate the allow-list
 ```
 
-`tests/test_repo_contract.py::test_release_scanner_enumeration_matches_tracked_files`
+`tests/test_release_scan.py::test_release_scanner_enumeration_matches_tracked_files`
 pins the tracked-path count, so adding a file also means bumping that number in
 the same commit. That is deliberate: it makes "I added a file and CI never ran
 it" impossible.
@@ -152,7 +152,7 @@ the history were visible on exactly one leg.
   with the bug reintroduced is not worth adding. Where a contract can only be
   checked by reading the source — a workflow, a header, a value that must
   appear in two files — there are contract tests in
-  `tests/test_repo_contract.py` that do exactly that, and they say why in the
+  `tests/test_release_scan.py` that do exactly that, and they say why in the
   docstring.
 
 ## Issues

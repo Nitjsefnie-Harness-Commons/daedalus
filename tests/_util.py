@@ -250,8 +250,8 @@ def log_safe_cases():
 
     The helper ships as three behavior-identical copies (server.py,
     scripts/gen_gitignore.py, mcp_server.py) that cannot import one another,
-    so each copy's suite — test_bridge_startup, test_repo_contract and
-    test_mcp_server — runs this one table against it, and a meta-test in the
+    so each copy's suite — test_bridge_startup, test_gitignore_generator
+    and test_mcp_server — runs this one table against it, and a meta-test in the
     MCP suite proves a deliberately divergent copy fails it: values that must
     pass through in full, values that must be backslash-escaped, and values
     whose rendering must hit the fixed fallback rather than raise or escape

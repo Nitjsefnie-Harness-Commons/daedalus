@@ -394,7 +394,7 @@ storage methods.** They live in `chrome.storage.local` under the `daedalus-`
 prefix, and the relay refuses to read, write or enumerate that namespace for
 page scripts. Without that rule any visited site could read your bridge token
 with `GM.getValue('daedalus-token')` or repoint the bridge with
-`GM.setValue('daedalus-server', ...)`, silently. `tests/test_repo_contract.py`
+`GM.setValue('daedalus-server', ...)`, silently. `tests/test_extension_policy.py`
 pins the rule.
 
 Hotfix source is deliberately page-observable state, not confidential

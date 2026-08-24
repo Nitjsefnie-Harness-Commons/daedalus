@@ -39,10 +39,9 @@ SELF = Path(__file__).resolve()
 PRODUCTION_CEILING = 500
 TEST_CEILING = 700
 
-# Every file over its ceiling, at the size it was measured. Issues #97, #101,
+# Every file over its ceiling, at the size it was measured. Issues #97,
 # #127, #128 and #129 are the standing work to empty this table.
 BASELINE = {
-    'tests/test_repo_contract.py': 6524,
     'server.py': 2624,
     'extension/background.js': 1943,
     'tests/test_mcp_server.py': 1507,

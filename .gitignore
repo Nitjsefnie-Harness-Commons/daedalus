@@ -142,10 +142,16 @@
 
 # ─── tests ───
 !/tests/
+!/tests/_boundary.py
+!/tests/_boundary_env.py
 !/tests/_bridge.py
+!/tests/_cdpharness.py
+!/tests/_evalpages.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_pyroute.py
+!/tests/_realbrowser.py
+!/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_segments.py
 !/tests/_util.py
@@ -161,6 +167,8 @@
 !/tests/test_cli.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
+!/tests/test_eval_relay.py
+!/tests/test_extension_boundary.py
 !/tests/test_extension_policy.py
 !/tests/test_file_sizes.py
 !/tests/test_gitignore_generator.py
@@ -168,8 +176,8 @@
 !/tests/test_gm_transfers.py
 !/tests/test_mcp_server.py
 !/tests/test_path_safety.py
+!/tests/test_real_browser_eval.py
 !/tests/test_release_scan.py
-!/tests/test_repo_contract.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
 !/tests/test_segment_storage.py
