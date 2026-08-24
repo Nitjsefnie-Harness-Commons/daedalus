@@ -73,13 +73,26 @@ def main(argv=None):
     if not suites:
         print(f'no suites found under {tree}', file=sys.stderr)
         return 1
+    timed = 0
     for suite in suites:
         print(f'=== {suite.name} ===', flush=True)
         durations = time_suite(args.python, suite, tree)
+        timed += len(durations)
         (out / f'{suite.stem}.json').write_text(
             json.dumps({'tests': durations}), encoding='utf-8')
         print(f'--- timed {len(durations)} passing tests in {suite.name}',
               flush=True)
+    # Every suite running and none of them yielding a single passing test is
+    # not a fast tree, it is a measurement that did not happen — and it used
+    # to be written out as an empty map and reported as success, which the
+    # comparison then read as "nothing to compare" and also called success.
+    # One suite contributing nothing is allowed: a suite can skip entirely on
+    # a platform. All of them contributing nothing cannot be.
+    if timed == 0:
+        print(f'timed no passing tests across {len(suites)} suites; '
+              'refusing to report a measurement that did not happen',
+              file=sys.stderr)
+        return 1
     return 0
 
 

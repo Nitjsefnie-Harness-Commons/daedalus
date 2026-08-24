@@ -3715,6 +3715,10 @@ def _compare_durations():
     return _util.load(ROOT / 'scripts' / 'ci' / 'compare_durations.py')
 
 
+def _time_tests():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'time_tests.py')
+
+
 def test_speed_comparison_takes_each_test_s_minimum_across_rounds(tmp):
     """The floor is what moves when code gets slower, so rounds take a min.
 
@@ -3756,6 +3760,50 @@ def test_speed_comparison_fails_only_past_its_budget(tmp):
                          '--max-regression', '0.30']) == 0
     assert compare.main(['--base', *base, '--head', *past,
                          '--max-regression', '0.30']) == 1
+
+
+def test_speed_comparison_can_refuse_an_unmeasurable_run(tmp):
+    """CI must not read "no data" as "no regression".
+
+    Both no-data paths returned 0, so a speed job whose timing step produced
+    nothing rendered a Skipped note and went green — the shape that reports
+    clean forever. The lenient exit is still available for a hand run against
+    a baseline that predates the durations format; --require-measurements is
+    what the workflow passes.
+    """
+    empty_base = Path(tmp) / 'base'
+    empty_head = Path(tmp) / 'head'
+    for side in (empty_base, empty_head):
+        side.mkdir(parents=True)
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', str(empty_base), '--head', str(empty_head),
+            '--base-label', 'baseline', '--summary-file', str(summary)]
+    assert _compare_durations().main(argv) == 0
+    assert _compare_durations().main(argv + ['--require-measurements']) == 1
+
+    # A baseline that measured something, against a head that shares nothing
+    # with it, is the second no-data path and answers the same way.
+    (empty_base / 'suite.json').write_text(
+        json.dumps({'tests': {'only_on_base': 1.0}}), encoding='utf-8')
+    (empty_head / 'suite.json').write_text(
+        json.dumps({'tests': {'only_on_head': 1.0}}), encoding='utf-8')
+    assert _compare_durations().main(argv) == 0
+    assert _compare_durations().main(argv + ['--require-measurements']) == 1
+
+
+def test_timing_a_tree_that_yields_nothing_is_a_failure(tmp):
+    """A tree whose every suite fails measured nothing; it is not fast."""
+    tree = Path(tmp) / 'tree'
+    (tree / 'tests').mkdir(parents=True)
+    (tree / 'tests' / 'test_nothing.py').write_text(
+        'import sys\n'
+        'print("  FAIL  test_a: deliberate")\n'
+        'print("0/1 passed")\n'
+        'sys.exit(1)\n', encoding='utf-8')
+    out = Path(tmp) / 'out'
+    code = _time_tests().main(
+        ['--tree', str(tree), '--python', sys.executable, '--out', str(out)])
+    assert code == 1, code
 
 
 def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):

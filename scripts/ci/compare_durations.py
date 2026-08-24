@@ -101,6 +101,11 @@ def main(argv=None):
                         help='fractional slowdown that fails the comparison')
     parser.add_argument('--base-label', default='baseline')
     parser.add_argument('--summary-file')
+    parser.add_argument(
+        '--require-measurements', action='store_true',
+        help='treat an unmeasurable comparison as a failure rather than a '
+             'skip; CI passes this, because there the absence of data means '
+             'a step broke rather than that there is nothing to compare')
     args = parser.parse_args(argv)
 
     base = side_durations(args.base)
@@ -118,7 +123,7 @@ def main(argv=None):
                      'per-test durations, so nothing was measured to compare '
                      'against.')
         _emit(lines, args.summary_file)
-        return 0
+        return 1 if args.require_measurements else 0
 
     shared, base_total, head_total, movements = compare(base, head)
     if not shared:
@@ -127,7 +132,7 @@ def main(argv=None):
         lines.append('Skipped: no test passed on both sides, so the '
                      'comparison has no shared set to sum.')
         _emit(lines, args.summary_file)
-        return 0
+        return 1 if args.require_measurements else 0
 
     ratio = render(lines, args.base_label, shared, base_total, head_total,
                    movements)

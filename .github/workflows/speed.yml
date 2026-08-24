@@ -185,6 +185,7 @@ jobs:
             --head $(ls -d reports/head-*) \
             --max-regression "$MAX_REGRESSION" \
             --base-label "$BASE_TAG" \
+            --require-measurements \
             --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the duration summaries
