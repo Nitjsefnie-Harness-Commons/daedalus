@@ -38,6 +38,7 @@
 !/LICENSE
 !/README.md
 !/SECURITY.md
+!/command_queue.py
 !/delivery_stripes.py
 !/mcp_server.py
 !/mcp_transport.py
@@ -181,6 +182,7 @@
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_workflows.py
 !/tests/test_cli.py
+!/tests/test_command_queue.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
 !/tests/test_delivery_stripes.py
