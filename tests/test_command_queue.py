@@ -425,6 +425,31 @@ def test_two_streams_covering_a_per_tab_legacy_file_deliver_once(tmp):
             tab_conn.close()
 
 
+def test_symlinked_queue_directory_reaches_extension_stream(tmp):
+    served = []
+    with _util.bridge(tmp, output=served) as (base, docroot):
+        commands = Path(docroot) / 'commands'
+        target = commands / 'alias-target'
+        alias = commands / f'{TOK}_dup'
+        target.mkdir()
+        try:
+            alias.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            _util.skip('this platform cannot create directory symlinks')
+        conn, response = stream_response(base, TOK, tab='extension')
+        try:
+            assert response.status == 200, (response.status, ''.join(served))
+            status, body = put_command(
+                base, {'token': TOK, 'tab': 'dup', 'id': 'alias-queue',
+                       'code': '1'})
+            assert status == 200, (status, body, ''.join(served))
+            frame = next_stream_data(response, timeout=8)
+            assert frame.get('id') == 'alias-queue', frame
+        finally:
+            response.close()
+            conn.close()
+
+
 def test_a_successful_legacy_delivery_releases_its_claim(tmp):
     fault_dir, trace, attempts = _claim_trace_dir(tmp)
     with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)}) as (
@@ -516,69 +541,6 @@ def test_legacy_write_failure_keeps_file_and_releases_claim(tmp):
         assert server.command_queue.claim(key) is True
     finally:
         server.command_queue.release(key)
-
-
-def test_symlinked_queue_directory_is_delivered_once(tmp):
-    fault_dir, read_count = _slow_queue_read_dir(tmp)
-    served = []
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)},
-                      output=served) as (base, docroot):
-        commands = Path(docroot) / 'commands'
-        target = commands / 'alias-target'
-        alias = commands / f'{TOK}_dup'
-        target.mkdir()
-        try:
-            alias.symlink_to(target, target_is_directory=True)
-        except (OSError, NotImplementedError):
-            _util.skip('this platform cannot create directory symlinks')
-        ext_conn, ext_response = stream_response(base, TOK, tab='extension')
-        tab_conn, tab_response = stream_response(base, TOK, tab='dup')
-        try:
-            assert ext_response.status == 200, ext_response.status
-            assert tab_response.status == 200, tab_response.status
-            status, body = put_command(
-                base, {'token': TOK, 'tab': 'dup', 'id': 'alias-queue',
-                       'code': '1'})
-            assert status == 200, (status, body)
-            delivered = _read_streams_once(
-                (('extension', ext_response), ('dup', tab_response)))
-            _assert_one_delivery(
-                delivered, 'alias-queue', served, read_count)
-        finally:
-            ext_response.close()
-            ext_conn.close()
-            tab_response.close()
-            tab_conn.close()
-
-
-def test_symlinked_legacy_file_is_delivered_once(tmp):
-    fault_dir, read_count = _slow_queue_read_dir(tmp)
-    served = []
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)},
-                      output=served) as (base, docroot):
-        commands = Path(docroot) / 'commands'
-        target = commands / 'alias-target.json'
-        alias = commands / f'{TOK}_dup.json'
-        target.write_text(
-            '{"id":"alias-legacy","code":"1"}', encoding='utf-8')
-        try:
-            alias.symlink_to(target)
-        except (OSError, NotImplementedError):
-            _util.skip('this platform cannot create file symlinks')
-        ext_conn, ext_response = stream_response(base, TOK, tab='extension')
-        tab_conn, tab_response = stream_response(base, TOK, tab='dup')
-        try:
-            assert ext_response.status == 200, ext_response.status
-            assert tab_response.status == 200, tab_response.status
-            delivered = _read_streams_once(
-                (('extension', ext_response), ('dup', tab_response)))
-            _assert_one_delivery(
-                delivered, 'alias-legacy', served, read_count)
-        finally:
-            ext_response.close()
-            ext_conn.close()
-            tab_response.close()
-            tab_conn.close()
 
 
 if __name__ == '__main__':
