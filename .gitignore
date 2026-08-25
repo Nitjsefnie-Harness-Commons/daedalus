@@ -165,6 +165,7 @@
 !/tests/_repo.py
 !/tests/_segments.py
 !/tests/_util.py
+!/tests/_workflows.py
 !/tests/_yamlread.py
 !/tests/test_bridge_credentials.py
 !/tests/test_bridge_requests.py
@@ -198,3 +199,4 @@
 !/tests/test_suite_runner.py
 !/tests/test_tab_routing.py
 !/tests/test_version_contract.py
+!/tests/test_workflow_parsing.py
