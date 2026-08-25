@@ -264,6 +264,33 @@ def test_checkout_reader_skips_unwalked_flow_values(tmp):
     assert _wfcheckout.checkout_refs(workflow) == []
 
 
+def test_checkout_reader_never_omits_indented_jobs_for_a_quoted_decoy(tmp):
+    """An unsupported root shape must not make a real checkout disappear."""
+    del tmp
+    workflow = (
+        '  jobs:\n'
+        '    real:\n'
+        '      runs-on: ubuntu-latest\n'
+        '      steps:\n'
+        '        - uses: actions/checkout@'
+        '3d3c42e5aac5ba805825da76410c181273ba90b1\n'
+        '          with:\n'
+        '            ref: hidden\n'
+        '  on: push\n'
+        '  name: "decoy\n'
+        'jobs:\n'
+        '  decoy:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - run: echo decoy"\n')
+    try:
+        refs = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError:
+        refs = None
+    assert refs != [], 'a valid checkout cannot be silently omitted'
+    assert refs is None or refs == [('real', 'hidden')], refs
+
+
 def _assert_yaml_refusal(workflow, wording):
     try:
         _wfcheckout.checkout_refs(workflow)
@@ -273,6 +300,40 @@ def _assert_yaml_refusal(workflow, wording):
         assert 'line ' in message, message
     else:
         raise AssertionError(f'expected refusal mentioning {wording!r}')
+
+
+def test_checkout_reader_refuses_a_nonzero_root_mapping_indent(tmp):
+    """Classify the root indent before skipping nested-looking lines."""
+    del tmp
+    workflow = (
+        '  jobs:\n'
+        '    real:\n'
+        '      runs-on: ubuntu-latest\n'
+        '      steps:\n'
+        '        - uses: actions/checkout@v4\n'
+        '          with:\n'
+        '            ref: hidden\n'
+        '  on: push\n')
+    _assert_yaml_refusal(workflow, 'nonzero root mapping indentation')
+
+
+def test_checkout_reader_refuses_a_multiline_quoted_root_value(tmp):
+    """Physical lines in a quoted scalar cannot become root mapping keys."""
+    del tmp
+    suffix = (
+        'jobs:\n'
+        '  decoy:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - run: echo decoy"\n')
+    cases = (
+        ('name: "decoy\n', 'unterminated double-quoted scalar'),
+        ('name:\n  "decoy\n', 'unterminated double-quoted scalar'),
+        ('name: !!str "decoy\n', 'explicit tag'),
+        ('name: &label "decoy\n', 'anchor'),
+    )
+    for prefix, wording in cases:
+        _assert_yaml_refusal('on: push\n' + prefix + suffix, wording)
 
 
 def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
