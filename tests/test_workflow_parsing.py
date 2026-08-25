@@ -130,7 +130,7 @@ def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
     values = (
         'false', 'YES', 'n', 'NULL', '~',
         '0', '+12', '-07', '0x2a', '0o52', '0b1010', '1_000',
-        '.5', '1.', '1e3', '1.0e+3', '.inf', '-.NaN', '1:20',
+        '.5', '1.', '1e3', '1e1_0', '1.0e+3', '.inf', '-.NaN', '1:20',
         '2024-01-02', '2024-01-02T03:04:05Z',
     )
     for value in values:
@@ -143,6 +143,25 @@ def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
         else:
             raise AssertionError(
                 f'implicit non-string scalar accepted: {value}')
+
+
+def test_empty_plain_path_value_is_refused_and_is_yaml_unequal(tmp):
+    """A bare path key is YAML null, not an empty filter sequence."""
+    del tmp
+    yaml_push = {'paths-ignore': [None]}
+    yaml_pull_request = {'paths-ignore': []}
+    assert yaml_push != yaml_pull_request
+    try:
+        _workflow_path_filters(
+            ['    paths-ignore:'], 'empty-push.yml')
+    except AssertionError as failure:
+        assert 'empty-push.yml' in str(failure), failure
+        assert "''" in str(failure), failure
+    else:
+        raise AssertionError('an empty plain path value was accepted')
+    assert _workflow_path_filters(
+        ['    paths-ignore: []'], 'empty-pull-request.yml') == (
+            yaml_pull_request)
 
 
 def test_path_filters_ignore_deeper_nested_mappings(tmp):
