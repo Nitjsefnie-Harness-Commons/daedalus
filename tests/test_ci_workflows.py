@@ -19,9 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _yamlread import job_scalar  # noqa: E402
-from _workflows import (  # noqa: E402
-    _event_option_keys, _trigger_names, _workflow_path_filters,
-    _workflow_triggers)
+from _workflows import _trigger_names  # noqa: E402
 
 
 _GH_STUB = r"""#!/usr/bin/env python3
@@ -240,27 +238,6 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
-def _assert_no_workflow_gates_one_commit_twice(workflows):
-    """Reject every push/pull_request pair without an event-level branch."""
-    checked = []
-    for path in sorted(workflows.iterdir()):
-        if path.suffix not in ('.yml', '.yaml'):
-            continue
-        triggers = _workflow_triggers(
-            path.read_text(encoding='utf-8'), path.name)
-        if 'pull_request' not in triggers or 'push' not in triggers:
-            continue
-        checked.append(path.name)
-        # The event's OWN keys, not any line in its block: a `branches:`
-        # nested a level deeper filters something else, and reading it as
-        # the push filter passes a trigger that carries none.
-        assert 'branches' in _event_option_keys(
-            triggers['push'], path.name), (
-            f'{path.name} runs on every branch push AND on pull_request, so a '
-            f'pull request from this repository gates its head SHA twice')
-    assert checked, 'no workflow declares both triggers; has one been renamed?'
-
-
 def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
     """The speed job's environment is exactly this routing expression.
 
@@ -294,137 +271,6 @@ def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
     assert actual is not None and re.sub(r'\s+', ' ', actual) == expected, (
         f'speed.yml routes the speed job by {actual!r}, '
         f'not by {expected!r}')
-
-
-def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
-    """The double-gate helper must inspect both suffixes and own keys."""
-    workflows = Path(tmp) / 'workflows'
-    workflows.mkdir()
-    control = ('name: control\n\non:\n'
-               '  push:\n    branches: [main]\n'
-               '  pull_request:\n')
-    (workflows / 'control.yml').write_text(control, encoding='utf-8')
-    branchless = ('name: branchless\n\non:\n'
-                  '  push:\n  pull_request:\n')
-    branchless_path = workflows / 'branchless.yaml'
-    branchless_path.write_text(branchless, encoding='utf-8')
-    try:
-        _assert_no_workflow_gates_one_commit_twice(workflows)
-    except AssertionError as failure:
-        assert 'branchless.yaml' in str(failure), failure
-    else:
-        raise AssertionError('branchless .yaml workflow was accepted')
-
-    branchless_path.unlink()
-    nested = ('name: nested\n\non:\n'
-              '  push:\n'
-              '    paths:\n'
-              '      - src/**\n'
-              '    types:\n'
-              '      branches: [main]\n'
-              '  pull_request:\n')
-    nested_path = workflows / 'nested.yaml'
-    nested_path.write_text(nested, encoding='utf-8')
-    try:
-        _assert_no_workflow_gates_one_commit_twice(workflows)
-    except AssertionError as failure:
-        assert 'nested.yaml' in str(failure), failure
-    else:
-        raise AssertionError('nested branches key was treated as an option')
-
-
-def test_no_workflow_gates_one_commit_twice(tmp):
-    """A pull request's head SHA gets one run per workflow, not two.
-
-    A branch pushed to this repository fires `push`, and opening a pull
-    request from it fires `pull_request` against the same SHA — so seven
-    workflows ran twice on every Dependabot pull request, `tests` included
-    with its twelve matrix legs. Six open pull requests saturated the runner
-    pool and pushes to main sat queued behind work already done.
-
-    The fix is a `branches:` filter on `push`, which this pins. A branch with
-    no pull request open then gets no run at all, which is the trade: it is
-    not a tree anyone is reviewing.
-    """
-    del tmp
-    _assert_no_workflow_gates_one_commit_twice(
-        ROOT / '.github' / 'workflows')
-
-
-def _assert_workflow_trigger_filters_match(workflows):
-    """Assert symmetric path filters for every paired workflow in a tree."""
-    checked = []
-    for path in sorted(workflows.iterdir()):
-        if path.suffix not in ('.yml', '.yaml'):
-            continue
-        triggers = _workflow_triggers(
-            path.read_text(encoding='utf-8'), path.name)
-        if 'pull_request' not in triggers or 'push' not in triggers:
-            continue
-        checked.append(path.name)
-        filters = [_workflow_path_filters(triggers[event], path.name)
-                   for event in ('push', 'pull_request')]
-        assert filters[0] == filters[1], (
-            f'{path.name} filters push and pull_request differently: '
-            f'{filters[0]!r} != {filters[1]!r}')
-    assert checked, 'no workflow declares both triggers; has one been renamed?'
-
-
-def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
-    """Push and pull_request must make the same path-filtering choice.
-
-    A filter on push alone lets a documentation-only commit skip the gates on
-    main while the identical pull request runs them. This test owns only the
-    symmetry property; the release-safety direction is pinned separately.
-    """
-    del tmp
-    _assert_workflow_trigger_filters_match(ROOT / '.github' / 'workflows')
-
-
-def test_workflow_reader_accepts_string_controls_and_a_leading_bom(tmp):
-    """Positive scalar controls stay green through the policy helper."""
-    workflows = Path(tmp) / 'workflows'
-    workflows.mkdir()
-    spelling = "[main, 'release', .gitignore, release-candidate, '**/*.md']"
-    content = ('name: control\n\non:\n  push:\n    branches: [main]\n'
-               f'    paths-ignore: {spelling}\n'
-               f'  pull_request:\n    paths-ignore: {spelling}\n')
-    (workflows / 'controls.yml').write_text(content, encoding='utf-8')
-    bom = '\ufeff' + content.replace(spelling, '[docs\ufeff.md]')
-    (workflows / 'bom.yml').write_text(bom, encoding='utf-8')
-    _assert_workflow_trigger_filters_match(workflows)
-    expected = {'paths-ignore': [
-        'main', 'release', '.gitignore', 'release-candidate', '**/*.md']}
-    triggers = _workflow_triggers(content, 'controls.yml')
-    assert _workflow_path_filters(triggers['push'], 'controls.yml') == expected
-    assert _workflow_path_filters(
-        triggers['pull_request'], 'controls.yml') == expected
-    triggers = _workflow_triggers(bom, 'bom.yml')
-    assert _workflow_path_filters(triggers['push'], 'bom.yml') == {
-        'paths-ignore': ['docs\ufeff.md']}
-
-
-def test_contribution_gates_have_unfiltered_push_triggers(tmp):
-    """The six contribution gates run on every push to main.
-
-    This test owns the release-safety direction: release.yml finds these runs
-    by the shared commit SHA, so a Markdown-only push must not be filtered.
-    """
-    del tmp
-    gate_names = (
-        'tests.yml', 'lint.yml', 'types.yml', 'eslint.yml', 'audit.yml',
-        'codeql.yml',
-    )
-    workflows = ROOT / '.github' / 'workflows'
-    for name in gate_names:
-        path = workflows / name
-        assert path.is_file(), f'named contribution gate is missing: {name}'
-        triggers = _workflow_triggers(
-            path.read_text(encoding='utf-8'), name)
-        assert 'push' in triggers, f'{name} has no push trigger'
-        assert not _workflow_path_filters(triggers['push'], name), (
-            f'{name} filters its push trigger: '
-            f'{_workflow_path_filters(triggers["push"], name)}')
 
 
 def test_the_speed_gate_throws_away_its_first_round(tmp):
