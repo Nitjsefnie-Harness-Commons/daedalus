@@ -417,10 +417,9 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
     """A held target stripe blocks that target's delivery, nothing else.
 
     The stripe is held inside the bridge process; the test only observes what
-    that does to real requests. It deliberately does not compute which stripe a
-    target lands on, nor compare lock paths: both depend on how the platform
-    spells a path, and a delivery POST that blocks while unrelated result
-    traffic keeps flowing is the property either way.
+    that does to real requests. The injected patch records the lock selected by
+    the holder and every caller, so a failure can distinguish a holder error
+    from a request that took a different lock.
     """
     held_tab = 'stripe-held'
     other_tab = 'stripe-other'
@@ -434,19 +433,42 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         'import pathlib\n'
         'import threading\n'
         'import time\n'
+        'import traceback\n'
         'gate = pathlib.Path(os.environ["STRIPE_GATE_DIR"])\n'
         'held_tab = os.environ["STRIPE_HELD_TAB"]\n'
+        'lock_calls_lock = threading.Lock()\n'
+        'def record_lock_call(delivery_dir, lock):\n'
+        '    with lock_calls_lock:\n'
+        '        with (gate / "lock-calls").open("a", encoding="utf-8") as handle:\n'
+        '            handle.write(f"{os.fspath(delivery_dir)}\\t{id(lock)}\\n")\n'
         'def install():\n'
-        '    while not all(hasattr(__main__, name) for name in (\n'
-        '            "_delivery_lock_for", "_delivery_result_paths")):\n'
-        '        time.sleep(0.001)\n'
-        '    delivery_dir, _ = __main__._delivery_result_paths(\n'
-        '        os.environ["DAEDALUS_TOKEN"], held_tab, "stripe-did")\n'
-        '    target_lock = __main__._delivery_lock_for(delivery_dir)\n'
-        '    with target_lock:\n'
-        '        (gate / "held").write_text("held", encoding="utf-8")\n'
-        '        while not (gate / "release").exists():\n'
-        '            time.sleep(0.01)\n'
+        '    try:\n'
+        '        while not all(hasattr(__main__, name) for name in (\n'
+        '                "_delivery_lock_for", "_delivery_result_paths")):\n'
+        '            time.sleep(0.001)\n'
+        '        real_lock_for = __main__._delivery_lock_for\n'
+        '        def recording_lock_for(delivery_dir):\n'
+        '            lock = real_lock_for(delivery_dir)\n'
+        '            record_lock_call(delivery_dir, lock)\n'
+        '            return lock\n'
+        '        __main__._delivery_lock_for = recording_lock_for\n'
+        '        delivery_dir, _ = __main__._delivery_result_paths(\n'
+        '            os.environ["DAEDALUS_TOKEN"], held_tab, "stripe-did")\n'
+        '        target_lock = __main__._delivery_lock_for(delivery_dir)\n'
+        '        (gate / "holder-lock").write_text(\n'
+        '            f"{os.fspath(delivery_dir)}\\t{id(target_lock)}\\n",\n'
+        '            encoding="utf-8")\n'
+        '        with target_lock:\n'
+        '            (gate / "holding").write_text("y", encoding="utf-8")\n'
+        '            try:\n'
+        '                (gate / "held").write_text("held", encoding="utf-8")\n'
+        '                while not (gate / "release").exists():\n'
+        '                    time.sleep(0.01)\n'
+        '            finally:\n'
+        '                (gate / "holding").unlink()\n'
+        '    except BaseException:\n'
+        '        (gate / "holder-error").write_text(\n'
+        '            traceback.format_exc(), encoding="utf-8")\n'
         'threading.Thread(target=install, daemon=True).start()\n',
         encoding='utf-8')
     env = {
@@ -454,7 +476,55 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         'STRIPE_GATE_DIR': str(gate_dir),
         'STRIPE_HELD_TAB': held_tab,
     }
-    with _util.bridge(tmp, env=env) as (base, _docroot):
+
+    def same_delivery_dir(recorded, expected):
+        try:
+            return os.path.samefile(os.path.normcase(recorded),
+                                    os.path.normcase(expected))
+        except (OSError, ValueError):
+            return False
+
+    def lock_calls():
+        path = gate_dir / 'lock-calls'
+        if not path.is_file():
+            return []
+        return [tuple(line.split('\t', 1))
+                for line in path.read_text(encoding='utf-8').splitlines()
+                if line]
+
+    def holder_lock():
+        path = gate_dir / 'holder-lock'
+        if not path.is_file():
+            return None
+        return tuple(path.read_text(encoding='utf-8').strip().split('\t', 1))
+
+    def failure_message():
+        calls = lock_calls()
+        target_calls = [entry for entry in calls
+                        if len(entry) == 2
+                        and same_delivery_dir(entry[0], target_delivery_dir)]
+        held = holder_lock()
+        error_path = gate_dir / 'holder-error'
+        if error_path.is_file():
+            return (
+                'target POST completed before release; cause: holder failed '
+                'and released the stripe\n'
+                f'holder traceback:\n{error_path.read_text(encoding="utf-8")}\n'
+                f'holder-lock: {held!r}\n'
+                f'held target lock calls: {target_calls!r}\n'
+                f'lock-calls: {calls!r}')
+        holder_id = held[1] if held and len(held) == 2 else '<missing>'
+        target_ids = [entry[1] for entry in target_calls]
+        return (
+            'target POST completed before release; cause: request used a '
+            'different lock object\n'
+            f'held target lock id: {target_ids!r}; holder lock id: {holder_id}\n'
+            f'holder-lock: {held!r}\n'
+            f'lock-calls: {calls!r}')
+
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        target_delivery_dir = (docroot / 'results' / 'deliveries'
+                               / f'{TOK}_{held_tab}')
         deadline = time.time() + 20
         while not (gate_dir / 'held').exists():
             assert time.time() < deadline, 'target stripe was not held'
@@ -480,13 +550,57 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
             'token': TOK, 'tabId': other_tab, 'id': 'other',
             'result': 'other', 'error': None, 'ts': 1})
         assert status == 200 and body == {'ok': True}, (status, body)
-        assert target_thread.is_alive(), target_box
+        # `holder-error` outranks the marker. The marker is removed by the
+        # holder's own `finally`, and that unlink is itself fallible: a holder
+        # that died AND failed to clean up leaves the marker behind, and
+        # trusting it would call a run that held nothing a passing one.
+        holder_failed = (gate_dir / 'holder-error').is_file()
+        still_holding = (gate_dir / 'holding').exists() and not holder_failed
+        if not still_holding:
+            # The holder let the stripe go before the request reached it, so
+            # nothing was serialized and this run never exercised the
+            # property. Passing here would be a false green — the assertion
+            # below would be satisfied by a request nothing was blocking.
+            _util.skip(
+                'the injected holder released the target stripe before the '
+                'request reached it, so the property was never exercised: '
+                + ((gate_dir / 'holder-error').read_text(encoding='utf-8')
+                   if (gate_dir / 'holder-error').is_file()
+                   else 'the holder exited without recording an error'))
+        if not target_thread.is_alive():
+            # The stripe was still held a moment ago and the request finished
+            # anyway. That is the real defect this test exists to catch, so it
+            # is a failure rather than a skip, and the message names which of
+            # the two mechanisms produced it.
+            raise AssertionError(failure_message())
 
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         target_thread.join(timeout=20)
         assert not target_thread.is_alive(), target_box
         assert target_box.get('error') is None, target_box
         assert target_box.get('value') == (200, {'ok': True}), target_box
+
+        # Re-checked after the wait: the holder can die during the window
+        # between the sample above and the release below, and a run whose
+        # stripe owner disappeared partway proves nothing either way.
+        if (gate_dir / 'holder-error').is_file():
+            _util.skip(
+                'the injected holder failed while the request was waiting, so '
+                'the property was never exercised end to end: '
+                + (gate_dir / 'holder-error').read_text(encoding='utf-8'))
+        held = holder_lock()
+        calls = lock_calls()
+        assert held and len(held) == 2, (held, calls)
+        held_dir, held_lock_id = held
+        target_calls = [entry for entry in calls
+                        if len(entry) == 2
+                        and same_delivery_dir(entry[0], target_delivery_dir)]
+        assert same_delivery_dir(held_dir, target_delivery_dir), (
+            held, target_delivery_dir, calls)
+        assert len(target_calls) >= 2, (held, calls)
+        assert all(lock_id == held_lock_id
+                   for _delivery_dir, lock_id in target_calls), (
+                       held, target_calls, calls)
 
 
 def test_delivery_stamp_survives_restart_with_an_earlier_wall_clock(tmp):
