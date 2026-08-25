@@ -1452,7 +1452,7 @@ class Handler(BaseHTTPRequestHandler):
                     # Per-tab eval queues for every other tab (tag chromeTab so bg can route)
                     prefix = f'{token}_'
                     for entry in sorted(CMD_DIR.iterdir()):
-                        if not entry.is_dir() or not entry.name.startswith(prefix):
+                        if entry.is_symlink() or not entry.is_dir() or not entry.name.startswith(prefix):
                             continue
                         sub = entry.name[len(prefix):]
                         if sub in ('extension', 'dashboard'):
@@ -1613,7 +1613,7 @@ class Handler(BaseHTTPRequestHandler):
             if killed_event and killed_event.is_set():
                 break
             name = f.name
-            if not f.is_file() or not name.startswith(prefix) or not name.endswith('.json'):
+            if f.is_symlink() or not f.is_file() or not name.startswith(prefix) or not name.endswith('.json'):
                 continue
             if name == extension_legacy_name:
                 continue  # handled separately (no chromeTab tag)
