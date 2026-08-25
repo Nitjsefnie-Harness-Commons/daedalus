@@ -1,13 +1,22 @@
 """Side-effect-free constant resolution for the CLI argument audit.
 
-Frame routes are resolved through in-function imports, global names, module
-attributes, exact-class attributes (including ``staticmethod`` and
-``classmethod``), constant list/tuple/dict subscripts, constant-key ``.get``
-on an exact dict or module ``__dict__``, and constant-name ``getattr``/``vars``
-calls. Unresolved ``_getframe`` and ``currentframe`` spellings are refused
-outright. Every other route is outside this audit, including other container
-types, the iterator protocol, comprehension results, instance attribute
-reads, ``operator.attrgetter``, and names built at runtime.
+The resolver follows supplied in-function imports and unshadowed handler
+globals by object identity. It decides module attributes, module ``__dict__``,
+exact-class attributes read directly from MRO dictionaries, signed-integer
+list/tuple subscripts, constant-key dict subscripts and
+``.get(key[, default])``, and constant-name ``getattr``. Single-argument
+``vars`` is resolved on exact modules and classes; a class yields a mapping
+proxy, whose downstream reads remain outside the exact-dict rules.
+Exact ``staticmethod`` and ``classmethod`` wrappers are unwrapped; every other
+descriptor stays raw, so its ``__get__`` is never invoked. The caller refuses
+unresolved canonical ``_getframe`` and ``currentframe`` spellings.
+
+The resolver never runs handler-defined code. Descriptors other than the two
+exact wrappers, ``functools.partial``, exception traceback frames, other
+container types, the iterator protocol, comprehension results, instance
+attributes, ``operator.attrgetter`` and runtime-built names stay outside
+frame-route resolution. Frame acquisition in another function is
+categorically outside because the audit inspects only the handler's own body.
 """
 import ast
 import sys

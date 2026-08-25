@@ -1,25 +1,39 @@
 #!/usr/bin/env python3
-"""The CLI namespace-escape audit's machinery and its focused cases.
+"""Static proof that CLI handlers name only parser-declared attributes.
 
-The repository-wide check is ``test_cli_handlers_read_only_declared_args``
-below; the rest is the visitor it drives and the small synthetic handlers
-each rule is pinned with, so a change that weakens or over-tightens the
-audit fails one of these cheap tests instead of hiding inside the
-39-handler scan.
+``test_cli_handlers_read_only_declared_args`` scans every dispatched handler.
+The visitor and focused controls below make each whitelist rule and resolver
+boundary executable instead of hiding a regression in the repository-wide
+scan.
 
-The audit refuses reads through the namespace parameter's own name outside
-four permitted shapes: direct attributes, constant-name ``getattr``,
-constant-name ``hasattr``, and constant mapping reads through ``vars(args)``
-or ``args.__dict__``. It also refuses the named reflective calls ``locals()``,
-``globals()``, ``eval``, ``exec`` and no-argument ``vars()``. Frame routes are
-resolved through in-function imports, global names, module attributes,
-exact-class attributes (including ``staticmethod`` and ``classmethod``),
-constant list/tuple/dict subscripts, constant-key ``.get`` on an exact dict or
-module ``__dict__``, and constant-name ``getattr``/``vars`` calls. Unresolved
-``_getframe`` and ``currentframe`` spellings are refused outright. Every other
-route is outside what this audit checks, including other container types, the
-iterator protocol, comprehension results, instance attribute reads,
-``operator.attrgetter``, and any name built at runtime.
+The namespace parameter may be read as a direct attribute, by constant-name
+``getattr`` or ``hasattr``, or through the exact mappings ``vars(args)`` and
+``args.__dict__``. Those mappings permit a constant string subscript or
+constant-key ``.get(key[, default])``. Every other mention of the parameter is
+a namespace escape. Named reflective calls through ``locals()``,
+``globals()``, ``eval``, ``exec`` and no-argument ``vars()`` are also escapes.
+The contract is deliberately stricter than preventing ``AttributeError``:
+runtime-safe ``hasattr`` and defaulted ``getattr`` are refused when their
+constant name is not declared for that handler by the top-level parser or its
+subparser.
+
+Frame routes are decided through in-function imports, unshadowed handler
+globals, module attributes and module ``__dict__`, exact-class MRO attributes,
+signed-integer list/tuple subscripts, constant-key dict subscripts and
+``.get(key[, default])``, and constant-name ``getattr``. Single-argument
+``vars`` is resolved on exact modules and classes; a class yields a mapping
+proxy, whose downstream reads remain outside the exact-dict rules.
+Exact ``staticmethod`` and ``classmethod`` wrappers are unwrapped. Unresolved
+canonical ``_getframe`` and ``currentframe`` spellings are refused.
+
+Resolution never invokes handler-defined code or descriptor binding. A class
+descriptor other than exact ``staticmethod`` or ``classmethod`` stays outside,
+as do ``functools.partial``, exception traceback frames, other container
+types, the iterator protocol, comprehension results, instance attributes,
+``operator.attrgetter`` and runtime-built names. Any route whose frame is
+acquired in another function is categorically outside because only the
+handler's own body is inspected. Every outside family has a known-gap control
+below.
 """
 import argparse
 import ast
@@ -475,11 +489,24 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
          "vars(args).get('undeclared_probe')"),
         ("args.__dict__.get('json')",
          "args.__dict__.get('undeclared_probe')"),
+        ("vars(args).get('json', False)",
+         "vars(args).get('undeclared_probe', None)"),
+        ("args.__dict__.get('json', False)",
+         "args.__dict__.get('undeclared_probe', None)"),
         ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')"),
     ]
     for declared, undeclared in cases:
         assert _audit_fake_handler(declared) == [], declared
         assert _audit_fake_handler(undeclared) == [undeclared], undeclared
+
+
+def test_cli_audit_refuses_safe_undeclared_probes(tmp):
+    probes = [
+        "getattr(args, 'undeclared_probe', None)",
+        "hasattr(args, 'undeclared_probe')",
+    ]
+    for probe in probes:
+        assert _audit_fake_handler(probe) == [probe], probe
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
@@ -604,6 +631,20 @@ def test_cli_audit_resolver_resolves_dict_get_default(tmp):
     literal_call = literal_function.body[0].value
     assert _frame_value(
         literal_call, literal_function, {'ROUTES': {}}, {}) is None
+
+
+def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
+    class FrameRoutes:
+        active = sys._getframe
+
+    function = ast.parse(
+        "def do_tabs(args):\n"
+        "    return vars(FrameRoutes)\n").body[0]
+    call = function.body[0].value
+    value = _frame_value(
+        call, function, {'FrameRoutes': FrameRoutes}, {})
+    assert type(value) is type(FrameRoutes.__dict__)
+    assert value['active'] is sys._getframe
 
 
 def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
