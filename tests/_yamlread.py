@@ -267,14 +267,16 @@ def _mapping_entry(
         if indent <= parent_indent:
             continue
         text, _ended = line
-        if text[indent:].startswith('- '):
+        field = text[indent:]
+        if field.startswith('- '):
             continue
         if child_indent is None:
             child_indent = indent
         if indent != child_indent:
             continue
-        _line_indent, rest = _entry(line)
-        key = text[indent:].partition(':')[0]
+        _entry(line)
+        raw_key, rest = _split_mapping_field(field, 'mapping')
+        key = _decode_inline_scalar(raw_key, 'mapping key')
         if key != name:
             continue
         matches.append(_Entry(index, indent, rest))
@@ -408,12 +410,9 @@ def _sequence_entry(
 
         step_name = None
         for field in fields:
-            key, colon, rest = field.partition(':')
-            if not colon:
-                continue
             _entry((field, False))
-            if key in ("'name'", '"name"'):
-                key = 'name'
+            raw_key, rest = _split_mapping_field(field, 'step')
+            key = _decode_inline_scalar(raw_key, 'step key')
             if key != 'name':
                 continue
             if step_name is not None:
@@ -440,11 +439,12 @@ def _sequence_entry(
 
 def _sequence_item_scalar(lines, item, start, end, name):
     """Read a scalar from either field spelling in one sequence mapping."""
-    text, ended = lines[item.index]
+    text, _ended = lines[item.index]
     field = text[item.indent + 2:]
-    _line_indent, rest = _entry((field, ended))
+    raw_key, rest = _split_mapping_field(field, 'step')
+    key = _decode_inline_scalar(raw_key, 'step key')
     inline = None
-    if field.partition(':')[0] == name:
+    if key == name:
         inline = _Entry(item.index, item.indent + 2, rest)
     nested = _mapping_entry(
         lines, start, end, item.indent, name, item.indent + 2)
