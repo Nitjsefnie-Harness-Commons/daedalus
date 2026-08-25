@@ -292,29 +292,37 @@ class _ScalarReaderMixin:
             parts.append(raw[content_indent:])
         if not parts:
             return ''
+        has_terminal_break = (body_end < len(self.lines)
+                              or self.source_ends_with_line_break)
         if style == '|':
-            text = '\n'.join(parts) + '\n'
+            text = '\n'.join(parts)
         else:
             text = ''
             line = 0
             while line < len(parts):
                 if parts[line]:
                     if line and parts[line - 1]:
-                        text += ('\n' if parts[line - 1].startswith(' ')
-                                 or parts[line].startswith(' ') else ' ')
+                        text += ('\n' if parts[line - 1][0] in ' \t'
+                                 or parts[line][0] in ' \t' else ' ')
                     text += parts[line]
                     line += 1
                     continue
                 blank = line
                 while line < len(parts) and not parts[line]:
                     line += 1
-                text += '\n' * (line - blank)
+                break_count = line - blank
+                if blank and line < len(parts) and (
+                        parts[blank - 1][0] in ' \t'
+                        or parts[line][0] in ' \t'):
+                    break_count += 1
+                text += '\n' * break_count
+        if has_terminal_break:
             text += '\n'
         if chomping == '-':
             return text.rstrip('\n')
         if chomping == '+':
             return text
-        return text.rstrip('\n') + '\n'
+        return text.rstrip('\n') + ('\n' if text.endswith('\n') else '')
 
     def _plain_scalar(self, value, index, key_indent, value_end, context):
         text = self._decode_scalar(value, index, context)

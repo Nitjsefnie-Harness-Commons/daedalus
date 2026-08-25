@@ -195,6 +195,56 @@ def test_checkout_reader_keeps_tabs_after_block_scalar_indent(tmp):
     assert failures == [], failures
 
 
+def test_checkout_reader_folds_block_scalars_exactly(tmp):
+    """Folded breaks and EOF chomping match YAML scalar values."""
+    del tmp
+    prefix = (
+        'name: folding oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n')
+    cases = (
+        (
+            'tab content',
+            '          ref: >-\n'
+            '            alpha\n'
+            '            \tbeta\n',
+            'alpha\n\tbeta',
+        ),
+        (
+            'blank after more-indented content',
+            '          ref: >-\n'
+            '            alpha\n'
+            '              code\n'
+            '\n'
+            '            beta\n',
+            'alpha\n  code\n\nbeta',
+        ),
+        (
+            'literal EOF without a break',
+            '          ref: |\n'
+            '            feature',
+            'feature',
+        ),
+        (
+            'folded EOF without a break',
+            '          ref: >\n'
+            '            feature',
+            'feature',
+        ),
+    )
+    failures = []
+    for name, scalar, expected in cases:
+        actual = _wfcheckout.checkout_refs(prefix + scalar)
+        if actual != [('build', expected)]:
+            failures.append((name, actual, expected))
+    assert failures == [], failures
+
+
 def test_checkout_reader_folds_plain_scalar_blank_line_to_newline(tmp):
     """A physical blank line in a plain scalar folds to a newline."""
     del tmp
