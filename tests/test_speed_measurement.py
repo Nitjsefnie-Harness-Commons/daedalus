@@ -334,6 +334,25 @@ def test_checkout_reader_never_omits_jobs_before_an_nbsp_decoy(tmp):
     assert refs is None or refs == [('real', 'hidden')], refs
 
 
+def test_checkout_reader_never_omits_jobs_from_a_root_merge(tmp):
+    """A nested quoted decoy cannot hide jobs supplied by a root merge."""
+    del tmp
+    workflow = (
+        'holder:\n  defaults: &defaults\n    jobs:\n'
+        '      real:\n        runs-on: ubuntu-latest\n'
+        '        steps:\n          - uses: actions/checkout@v4\n'
+        '            with:\n              ref: hidden\n'
+        '<<: *defaults\nname:\n  - "decoy\njobs:\n'
+        '  decoy:\n    runs-on: ubuntu-latest\n'
+        '    steps:\n      - run: echo decoy"\n')
+    try:
+        refs = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError:
+        refs = None
+    assert refs != [], 'a real checkout cannot be silently omitted'
+    assert refs is None or refs == [('real', 'hidden')], refs
+
+
 def test_checkout_reader_refuses_a_multiline_quoted_root_value(tmp):
     """Physical lines in a quoted scalar cannot become root mapping keys."""
     del tmp
