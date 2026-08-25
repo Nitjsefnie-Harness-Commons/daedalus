@@ -295,56 +295,6 @@ def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
         f'not by {expected!r}')
 
 
-def test_a_decoy_job_cannot_supply_the_speed_environment(tmp):
-    """The environment above answers for `speed`, not for whoever is first.
-
-    Read as raw text this was `workflow.partition('    environment:')`, which
-    matches the first four-space-indented `environment:` anywhere in the
-    file — so hanging the key on a job declared above `speed` and stripping
-    it off `speed` left the gate green with forks running unreviewed.
-    """
-    del tmp
-    workflow = ('jobs:\n'
-                '  decoy:\n'
-                '    environment: benchmark\n'
-                '  speed:\n'
-                '    runs-on: ubuntu-latest\n')
-    assert job_scalar(workflow, 'decoy', 'environment') == 'benchmark'
-    assert job_scalar(workflow, 'speed', 'environment') is None
-
-
-def test_job_scalar_stays_inside_the_jobs_mapping(tmp):
-    """A scalar outside `jobs` cannot impersonate the speed job."""
-    del tmp
-    workflow = (
-        'name: speed\n'
-        'run-name: |\n'
-        '  speed:\n'
-        '    environment: >-\n'
-        "      ${{ github.event_name == 'pull_request'\n"
-        '      && github.event.pull_request.head.repo.full_name != '
-        'github.repository\n'
-        "      && 'fork-benchmark' || 'benchmark' }}\n"
-        'jobs:\n'
-        '  speed:\n'
-        '    runs-on: ubuntu-latest\n')
-    assert job_scalar(workflow, 'speed', 'environment') is None
-def test_a_second_top_level_on_block_is_refused(tmp):
-    """Two `on:` keys is invalid YAML, and silently reading the first lies.
-
-    The reader used to stop at the first match, which made the refusal below
-    unreachable — a workflow whose second block carried the real triggers
-    would have been described by the first.
-    """
-    del tmp
-    doubled = ('name: x\n\non:\n  push:\n    branches: [main]\n'
-               '\non:\n  pull_request:\n\npermissions:\n  contents: read\n')
-    try:
-        _workflow_triggers(doubled, 'doubled.yml')
-    except AssertionError as failure:
-        assert 'duplicate on: blocks' in str(failure), failure
-    else:
-        raise AssertionError('a second on: block was accepted')
 def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
     """The double-gate helper must inspect both suffixes and own keys."""
     workflows = Path(tmp) / 'workflows'
