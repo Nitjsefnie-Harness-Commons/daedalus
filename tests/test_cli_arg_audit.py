@@ -10,14 +10,18 @@ audit fails one of these cheap tests instead of hiding inside the
 The audit is a whitelist, not a proof of the inverse. It sees reads made
 through the namespace parameter's own name and refuses the reflective
 routes it names: ``locals()``, ``globals()``, ``eval``, ``exec``, a
-no-argument ``vars()``, and calls through ``sys._getframe`` or
-``inspect.currentframe`` (including aliases an import binds to them).
+no-argument ``vars()``, and any named access to ``sys._getframe`` or
+``inspect.currentframe`` (including aliases imported at module scope or
+inside the handler).
 A handler that reaches its namespace without naming the parameter or one
 of those routes is outside what this audit checks.
 """
 import argparse
 import ast
+import importlib
 import inspect
+import shutil
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -144,55 +148,96 @@ def _comprehension_shadows(comprehension, name):
 
 
 _FRAME_ROUTE_ATTRS = {'sys': '_getframe', 'inspect': 'currentframe'}
+_FRAME_ROUTE_MODULES = {'sys': sys, 'inspect': inspect}
+_FRAME_ROUTE_OBJECTS = (sys._getframe, inspect.currentframe)
+_UNRESOLVED = object()
 
 
-def _frame_routes(function):
-    """Return the (bare names, module aliases) a handler's imports bind.
+def _is_frame_route(value):
+    """Return True only for the two frame-route objects by identity."""
+    return any(value is route for route in _FRAME_ROUTE_OBJECTS)
 
-    ``sys._getframe`` and ``inspect.currentframe`` hand back the calling
-    frame, whose ``f_locals`` reaches the namespace without naming its
-    parameter, so calls through them are refused like ``locals()``. An
-    in-handler import can rename either route (``from sys import
-    _getframe as get_frame``), and the canonical names are refused even
-    with no import in sight, because a module-level import does not
-    appear in the handler's own source.
-    """
-    bare = set(_FRAME_ROUTE_ATTRS.values())
-    modules = dict(_FRAME_ROUTE_ATTRS)
+
+def _frame_imports(function):
+    """Return frame modules and routes imported inside ``function``."""
+    bindings = {}
     for node in ast.walk(function):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name in modules:
-                    modules[alias.asname or alias.name] = modules[alias.name]
-        elif isinstance(node, ast.ImportFrom) and node.module in modules:
+                if alias.name in _FRAME_ROUTE_MODULES:
+                    bindings[alias.asname or alias.name] = \
+                        _FRAME_ROUTE_MODULES[alias.name]
+        elif isinstance(node, ast.ImportFrom):
+            route = _FRAME_ROUTE_ATTRS.get(node.module)
+            if route is None:
+                continue
             for alias in node.names:
-                if alias.name == modules[node.module]:
-                    bare.add(alias.asname or alias.name)
-    return bare, modules
+                if alias.name == route:
+                    bindings[alias.asname or alias.name] = getattr(
+                        _FRAME_ROUTE_MODULES[node.module], route)
+    return bindings
 
 
-def _reflective_call(node, frame_bare, frame_modules):
-    """Return True for a call that reaches the local frame by name.
+def _frame_value(node, function, handler_globals, imports):
+    """Resolve a simple name/attribute chain without executing source."""
+    if isinstance(node, ast.Name):
+        if node.id in imports:
+            return imports[node.id]
+        if _scope_binds(function, node.id):
+            return _UNRESOLVED
+        return handler_globals.get(node.id, _UNRESOLVED)
+    if isinstance(node, ast.Attribute):
+        base = _frame_value(node.value, function, handler_globals, imports)
+        for module_name, attr in _FRAME_ROUTE_ATTRS.items():
+            if base is _FRAME_ROUTE_MODULES[module_name] and node.attr == attr:
+                return getattr(base, attr)
+    return _UNRESOLVED
 
-    ``locals()``, ``globals()``, ``eval``, ``exec`` and a no-argument
-    ``vars()`` read or execute the frame's own names, which no static rule
-    can resolve, and ``sys._getframe()``/``inspect.currentframe()`` return
-    the frame itself; inside a handler all of them are namespace escapes
-    outright, under the canonical names or any alias _frame_routes found.
-    """
-    if not isinstance(node, ast.Call):
+
+def _unknown_frame_route(node, function, handler_globals, imports):
+    """Refuse an unresolved canonical frame-route spelling."""
+    if isinstance(node, ast.Name):
+        return (node.id in _FRAME_ROUTE_ATTRS.values()
+                and _frame_value(node, function, handler_globals, imports)
+                is _UNRESOLVED)
+    return (isinstance(node, ast.Attribute)
+            and node.attr in _FRAME_ROUTE_ATTRS.values()
+            and _frame_value(node.value, function, handler_globals, imports)
+            is _UNRESOLVED)
+
+
+def _frame_route_access(node, function, handler_globals, imports):
+    """Return True when ``node`` names or accesses a frame route."""
+    if isinstance(node, ast.Call):
+        if _is_frame_route(_frame_value(
+                node.func, function, handler_globals, imports)):
+            return True
+        if (isinstance(node.func, ast.Attribute)
+                and _is_frame_route(_frame_value(
+                    node.func.value, function, handler_globals, imports))):
+            return True
+        return _unknown_frame_route(
+            node.func, function, handler_globals, imports)
+    if not isinstance(node, (ast.Name, ast.Attribute)):
         return False
-    if isinstance(node.func, ast.Attribute):
-        base = node.func.value
-        return (isinstance(base, ast.Name)
-                and frame_modules.get(base.id) == node.func.attr)
-    if not isinstance(node.func, ast.Name):
-        return False
-    if node.func.id in ('locals', 'globals', 'eval', 'exec'):
+    if _is_frame_route(_frame_value(
+            node, function, handler_globals, imports)):
         return True
-    if node.func.id in frame_bare:
+    if (isinstance(node, ast.Attribute)
+            and _is_frame_route(_frame_value(
+                node.value, function, handler_globals, imports))):
         return True
-    return node.func.id == 'vars' and not node.args
+    return _unknown_frame_route(node, function, handler_globals, imports)
+
+
+def _reflective_call(node, function, handler_globals, imports):
+    """Return True for a reflective or frame-route access."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id in ('locals', 'globals', 'eval', 'exec'):
+            return True
+        if node.func.id == 'vars' and not node.args:
+            return True
+    return _frame_route_access(node, function, handler_globals, imports)
 
 
 def _constant_dict_subscript(node):
@@ -240,7 +285,8 @@ def _permitted_namespace_read(name):
     return attribute, parent
 
 
-def _handler_arg_violations(function, args_name, allowed):
+def _handler_arg_violations(function, args_name, allowed,
+                            handler_globals=None):
     """Return (reads, violations) for one handler's namespace use.
 
     Permitted reads are checked against ``allowed``; every other mention
@@ -255,7 +301,9 @@ def _handler_arg_violations(function, args_name, allowed):
     for node in ast.walk(function):
         for child in ast.iter_child_nodes(node):
             child._parent = node
-    frame_bare, frame_modules = _frame_routes(function)
+    if handler_globals is None:
+        handler_globals = globals()
+    frame_imports = _frame_imports(function)
     reads = {}
     violations = []
 
@@ -271,7 +319,8 @@ def _handler_arg_violations(function, args_name, allowed):
                 and _comprehension_shadows(node, args_name)):
             check(node.generators[0].iter)
             return
-        if _reflective_call(node, frame_bare, frame_modules):
+        if _reflective_call(
+                node, function, handler_globals, frame_imports):
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
@@ -323,6 +372,53 @@ def _audit_fake_handler(body, allowed=('cmd', 'json')):
         'def fake(args):\n' + textwrap.indent(body, '    ')).body[0]
     _, violations = _handler_arg_violations(function, 'args', set(allowed))
     return violations
+
+
+def _mutated_cli_tabs(tmp, package_name, module_import, body):
+    """Copy the CLI package and insert one real ``do_tabs`` mutation."""
+    package = Path(tmp) / package_name
+    shutil.copytree(_util.ROOT / 'daedalus_cli', package)
+    module = package / 'commands_eval.py'
+    source = module.read_text(encoding='utf-8')
+    if module_import:
+        source = source.replace(
+            'import sys\n', f'import sys\n{module_import}\n', 1)
+    source = source.replace(
+        'def do_tabs(args):\n', f'def do_tabs(args):\n    {body}\n', 1)
+    module.write_text(source, encoding='utf-8')
+    sys.path.insert(0, str(tmp))
+    return importlib.import_module(f'{package_name}.cli')
+
+
+def _audit_real_tabs_handler(cli_module):
+    """Audit the copied package's actual dispatched ``do_tabs`` handler."""
+    from daedalus_cli.parser import build_parser
+
+    parser = build_parser()
+    subparsers = next(
+        action for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction))
+    allowed = _namespace_dests(parser._actions) | _namespace_dests(
+        subparsers.choices['tabs']._actions)
+    handler = cli_module.DISPATCH['tabs']
+    tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
+    function = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    args_name = (function.args.posonlyargs + function.args.args)[0].arg
+    _, violations = _handler_arg_violations(
+        function, args_name, allowed, handler.__globals__)
+    return violations
+
+
+def _assert_real_tabs_dispatch_crashes(tmp, package_name):
+    """The same mutation must fail real dispatch, not just the audit."""
+    result = subprocess.run(
+        [sys.executable, '-m', f'{package_name}.cli', 'tabs'],
+        cwd=tmp, capture_output=True, text=True, check=False)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "AttributeError: 'Namespace' object has no attribute " \
+        "'undeclared_probe'" in result.stderr, result.stderr
 
 
 def test_cli_audit_reports_suppressed_destination(tmp):
@@ -415,7 +511,7 @@ def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
 
 
 def test_cli_audit_refuses_reflective_namespace_access(tmp):
-    """Every named frame-reaching call is an escape, aliases included."""
+    """Every named frame-route access is an escape, aliases included."""
     del tmp
     cases = [
         ("_ = locals()['args'].undeclared_probe", 'locals()'),
@@ -437,10 +533,40 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
         ("import inspect as insp\n"
          "_ = insp.currentframe().f_locals['args'].x",
          'insp.currentframe()'),
+        ('_ = sys._getframe', 'sys._getframe'),
+        ('_ = sys._getframe.__call__()', 'sys._getframe.__call__()'),
+        ('helper(sys._getframe)', 'sys._getframe'),
+        ('helper(inspect.currentframe)', 'inspect.currentframe'),
+        ('_ = _getframe()', '_getframe()'),
     ]
     for body, construct in cases:
         assert _audit_fake_handler(body) == [
             f'namespace escape: {construct}'], body
+
+
+def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
+    """Real ``do_tabs`` mutations fail audit and real dispatch alike.
+
+    Each copied package keeps the handler in its module, so these controls
+    prove the refusal is about an actual dispatch hazard rather than a style
+    rule applied only to synthetic source snippets.
+    """
+    cases = [
+        ('from sys import _getframe as get_frame',
+         "_ = get_frame().f_locals['args'].undeclared_probe", 'get_frame()'),
+        ('', "_ = sys._getframe.__call__().f_locals['args'].undeclared_probe",
+         'sys._getframe.__call__()'),
+        ('from inspect import currentframe as cf',
+         "_ = cf().f_locals['args'].undeclared_probe", 'cf()'),
+    ]
+    for index, (module_import, body, construct) in enumerate(cases):
+        package_name = f'mutated_cli_{index}'
+        cli_module = _mutated_cli_tabs(
+            tmp, package_name, module_import, body)
+        violations = _audit_real_tabs_handler(cli_module)
+        assert any(construct in violation for violation in violations), \
+            (module_import, body, violations)
+        _assert_real_tabs_dispatch_crashes(tmp, package_name)
 
 
 def test_cli_audit_respects_comprehension_shadowing(tmp):
@@ -475,8 +601,9 @@ def test_cli_handlers_read_only_declared_args(tmp):
     The audit sees reads made through the namespace parameter's own name
     and refuses the reflective routes it names: ``locals()``,
     ``globals()``, ``eval``, ``exec``, a no-argument ``vars()``, and
-    calls through ``sys._getframe`` or ``inspect.currentframe``
-    (including import-bound aliases); a handler that reaches its
+    any named access to ``sys._getframe`` or ``inspect.currentframe``
+    (including aliases imported at module scope or inside the handler);
+    a handler that reaches its
     namespace without naming the parameter or one of those routes is
     outside what this audit checks.
     """
@@ -506,7 +633,7 @@ def test_cli_handlers_read_only_declared_args(tmp):
         positional = function.args.posonlyargs + function.args.args
         args_name = positional[0].arg
         reads, handler_violations = _handler_arg_violations(
-            function, args_name, allowed)
+            function, args_name, allowed, handler.__globals__)
         handler_details[name] = {'handler': handler.__qualname__,
                                  'allowed': allowed, 'reads': reads}
         violations.extend(
