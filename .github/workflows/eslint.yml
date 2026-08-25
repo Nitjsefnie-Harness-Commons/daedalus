@@ -28,12 +28,9 @@ on:
     # this a second time against the same SHA, and a branch with no pull
     # request open is not a tree anyone is reviewing.
     branches: [main]
-    # Deny-list rather than an allow-list: a new top-level code directory
-    # would silently stop being linted under an allow-list.
-    paths-ignore:
-      - '**/*.md'
-      - 'LICENSE'
-      - '.gitignore'
+    # The filter was dropped rather than mirrored: release.yml counts runs
+    # recorded against a release SHA and treats zero as a failure, so a
+    # documentation-only tag must still run this gate.
   pull_request:
   workflow_dispatch:
 
