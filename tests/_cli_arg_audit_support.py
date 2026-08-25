@@ -213,6 +213,18 @@ KNOWN_GAP_FRAME_ROUTE_CASES = (
      'def caller_namespace():\n'
      "    return sys._getframe(1).f_locals['args']",
      '_ = caller_namespace().undeclared_probe'),
+    ('frame acquisition in nested helper', '',
+     'def caller_namespace():\n'
+     "        return sys._getframe(1).f_locals['args']\n"
+     '    _ = caller_namespace().undeclared_probe'),
+    ('class vars mapping-proxy get',
+     'class FrameRoutes:\n    active = sys._getframe',
+     "_ = vars(FrameRoutes).get('active')()"
+     ".f_locals['args'].undeclared_probe"),
+    ('class vars mapping-proxy subscript',
+     'class FrameRoutes:\n    active = sys._getframe',
+     "_ = vars(FrameRoutes)['active']()"
+     ".f_locals['args'].undeclared_probe"),
     ('other container type',
      'import collections\n'
      'FRAME_ROUTES = collections.deque((sys._getframe,))',
