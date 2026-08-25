@@ -516,7 +516,8 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
             return (
                 'target POST completed before release; cause: holder failed '
                 'and released the stripe\n'
-                f'holder traceback:\n{error_path.read_text(encoding="utf-8")}\n'
+                'holder traceback:\n'
+                f'{error_path.read_text(encoding="utf-8")}\n'
                 f'holder-lock: {held!r}\n'
                 f'held target lock calls: {target_calls!r}\n'
                 f'lock-calls: {calls!r}')
@@ -525,7 +526,8 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         return (
             'target POST completed before release; cause: request used a '
             'different lock object\n'
-            f'held target lock id: {target_ids!r}; holder lock id: {holder_id}\n'
+            f'held target lock id: {target_ids!r}; '
+            f'holder lock id: {holder_id}\n'
             f'holder-lock: {held!r}\n'
             f'lock-calls: {calls!r}')
 
@@ -624,10 +626,52 @@ def _wait_for_stripe_request(gate_dir, thread):
             'request never selected a delivery stripe: '
             f'{_stripe_lock_calls(gate_dir)!r}')
         time.sleep(0.01)
-    assert (gate_dir / 'holding').exists(), 'holder released the target stripe'
+    holder_failed = (gate_dir / 'holder-error').is_file()
+    still_holding = (gate_dir / 'holding').exists() and not holder_failed
+    if not still_holding:
+        _util.skip(
+            'the injected holder released the target stripe before the '
+            'request reached it, so the property was never exercised: '
+            + ((gate_dir / 'holder-error').read_text(encoding='utf-8')
+               if (gate_dir / 'holder-error').is_file()
+               else 'the holder exited without recording an error'))
     assert thread.is_alive(), (
         'request completed while the discovered-owner stripe was held: '
         f'{_stripe_lock_calls(gate_dir)!r}')
+
+
+def test_a_stale_holding_marker_with_a_failed_holder_skips(tmp):
+    """A failed holder makes a stale marker an environment skip."""
+    gate_dir = Path(tmp) / 'stale-stripe-gate'
+    gate_dir.mkdir()
+    (gate_dir / 'lock-calls').write_text(
+        'target\tlock-a\nother\tlock-b\n', encoding='utf-8')
+    (gate_dir / 'holding').write_text('holding', encoding='utf-8')
+    error_text = 'Traceback: injected holder failed'
+    (gate_dir / 'holder-error').write_text(error_text, encoding='utf-8')
+    stop = threading.Event()
+    thread = threading.Thread(target=stop.wait)
+    thread.start()
+    try:
+        try:
+            _wait_for_stripe_request(gate_dir, thread)
+        except _util.Skipped as exc:
+            assert error_text in str(exc), exc
+        else:
+            raise AssertionError('stale holder marker was trusted')
+    finally:
+        stop.set()
+        thread.join(timeout=10)
+    assert not thread.is_alive()
+
+
+def _require_holder_survived(gate_dir):
+    """Require the injected holder to survive the request wait."""
+    if (gate_dir / 'holder-error').is_file():
+        _util.skip(
+            'the injected holder failed while the request was waiting, so '
+            'the property was never exercised end to end: '
+            + (gate_dir / 'holder-error').read_text(encoding='utf-8'))
 
 
 def _assert_discovered_owner_lock(gate_dir, owner):
@@ -675,6 +719,7 @@ def test_delivery_lookup_without_tab_waits_for_discovered_owner_stripe(tmp):
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         lookup_thread.join(timeout=20)
         assert not lookup_thread.is_alive(), result_box
+        _require_holder_survived(gate_dir)
         status, result = result_box.get('value', (None, {}))
         assert status == 200 and result['id'] == 'seed', result_box
         assert result['deliveryId'] == did, result
@@ -714,6 +759,7 @@ def test_compatibility_consume_without_tab_waits_for_discovered_owner_stripe(
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         consume_thread.join(timeout=20)
         assert not consume_thread.is_alive(), result_box
+        _require_holder_survived(gate_dir)
         assert result_box.get('value', (None, {}))[0] == 200, result_box
         _assert_discovered_owner_lock(gate_dir, owner)
 
