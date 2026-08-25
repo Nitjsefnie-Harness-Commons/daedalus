@@ -432,12 +432,11 @@ class _ScalarReaderMixin:
         if value:
             self._reject_scalar_shape(value, index, context)
             self._reject_prefix(value, index, context)
-            if value.startswith("'"):
-                return self._quoted_scalar(
+            if value.startswith(("'", '"')):
+                quoted_end = self._quoted_scalar_end(
                     value, index, value_end, context)
-            if value.startswith('"'):
                 return self._quoted_scalar(
-                    value, index, value_end, context)
+                    value, index, quoted_end, context)
             return self._plain_scalar(value, index, key_indent, value_end,
                                       context)
         nested = self._next_nonblank(index + 1, value_end, context)
@@ -453,7 +452,9 @@ class _ScalarReaderMixin:
         if self._looks_like_mapping(nested_value):
             self._refuse('mapping where scalar was required', nested, context)
         if nested_value.startswith(("'", '"')):
-            return self._quoted_scalar(
+            quoted_end = self._quoted_scalar_end(
                 nested_value, nested, value_end, context)
+            return self._quoted_scalar(
+                nested_value, nested, quoted_end, context)
         return self._plain_scalar(nested_value, nested, indent, value_end,
                                   context)
