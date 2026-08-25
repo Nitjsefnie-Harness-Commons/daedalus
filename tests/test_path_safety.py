@@ -323,6 +323,41 @@ def test_one_token_cannot_read_another_tokens_results(tmp):
         assert b'SECRET' not in body, 'one token read another token\'s result'
 
 
+def test_delivery_alias_is_refused_but_a_missing_target_is_accepted(tmp):
+    """One logical delivery name must not resolve to another directory."""
+    docroot = Path(tmp) / 'docroot'
+    delivery_root = docroot / 'results' / 'deliveries'
+    real_target = delivery_root / f'{TOKEN}_real'
+    alias_target = delivery_root / f'{TOKEN}_alias'
+    real_target.mkdir(parents=True)
+    try:
+        alias_target.symlink_to(real_target, target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+
+    with _util.bridge(tmp) as (base, _docroot):
+        status, body = _util.post_json(base + '/result', {
+            'token': TOKEN, 'tabId': 'alias', 'id': 'alias-result',
+            'result': 'must-refuse', 'error': None, 'ts': 1,
+            '_did': 'alias-delivery'})
+        assert status == 400 and body == {
+            'error': 'invalid path component'}, (status, body)
+        assert not (real_target / 'alias-delivery.json').exists()
+        status, body = _util.get(
+            base + '/result?' + (
+                f'token={TOKEN}&tab=alias&delivery=alias-delivery'))
+        assert status == 400 and json.loads(body) == {
+            'error': 'invalid path component'}, (status, body)
+
+        status, body = _util.post_json(base + '/result', {
+            'token': TOKEN, 'tabId': 'missing', 'id': 'missing-result',
+            'result': 'accepted', 'error': None, 'ts': 2,
+            '_did': 'missing-delivery'})
+        assert status == 200 and body == {'ok': True}, (status, body)
+        assert (delivery_root / f'{TOKEN}_missing'
+                / 'missing-delivery.json').is_file()
+
+
 _STRIPE_PROBE = r"""
 import json
 import os
