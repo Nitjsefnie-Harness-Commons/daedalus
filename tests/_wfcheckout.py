@@ -340,6 +340,20 @@ class _WorkflowReader:
             return False
         return True
 
+    def _reject_root_quoted_scalar(self, value, index):
+        value = self._strip_comment(value).strip()
+        scalar = value
+        while scalar.startswith(('&', '!')):
+            parts = scalar.split(None, 1)
+            if len(parts) == 1:
+                return
+            scalar = parts[1].lstrip()
+            if scalar.startswith(("'", '"')):
+                self._reject_prefix(value, index, 'workflow value')
+        if scalar.startswith(("'", '"')) \
+                and not self._looks_like_mapping(scalar):
+            self._decode_scalar(scalar, index, 'workflow value')
+
     def _find_jobs(self):
         if self.jobs_line is None:
             self._refuse('top-level jobs mapping not found', 0, 'workflow')
@@ -586,6 +600,7 @@ class _WorkflowReader:
     def _scan_document(self):
         started = False
         ended = False
+        root_indent = None
         for index, line in enumerate(self.lines):
             stripped = line.strip()
             if not stripped or line.lstrip(' ').startswith('#'):
@@ -606,6 +621,11 @@ class _WorkflowReader:
             if ended and not prefix:
                 self._refuse('multiple YAML documents', index, 'workflow')
             started = True
+            if root_indent is None:
+                root_indent = len(prefix)
+                if root_indent:
+                    self._refuse('nonzero root mapping indentation', index,
+                                 'workflow')
             if prefix:
                 continue
             body = self._strip_comment(stripped)
@@ -617,6 +637,15 @@ class _WorkflowReader:
                     self._refuse('explicit key', index, 'jobs mapping')
                 continue
             key, rest = self._mapping_parts(index, 'workflow', body)
+            self._reject_root_quoted_scalar(rest, index)
+            if not rest:
+                nested = self._next_nonblank(
+                    index + 1, len(self.lines), 'workflow value')
+                if nested is not None:
+                    indent = self._indent(nested, 'workflow value')
+                    if indent > root_indent:
+                        self._reject_root_quoted_scalar(
+                            self.lines[nested][indent:], nested)
             if key != 'jobs':
                 continue
             if self.jobs_line is not None:
