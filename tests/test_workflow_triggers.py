@@ -212,7 +212,8 @@ def test_workflow_trigger_filters_accept_string_pairs_and_opposite_quotes(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='workflowtriggers_')
+    return _util.runner(
+        _util.collect(globals()), tmp_prefix='workflowtriggers_')
 
 
 if __name__ == '__main__':
