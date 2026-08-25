@@ -165,19 +165,37 @@ def _uncommented(value):
     A trailing comment belongs to nobody: keeping it made `- LICENSE  # not
     code` a different path from `- LICENSE`, so two filters YAML calls
     identical compared unequal. A `#` inside quotes, or one not preceded by
-    whitespace, is part of the value and survives.
+    whitespace, is part of the value and survives. A quote opens only at the
+    first non-space character of a scalar, including one after a flow comma.
     """
     quote = ''
+    scalar_start = True
+    flow_depth = 0
     for index, char in enumerate(value):
         if quote:
             if char == quote:
                 quote = ''
             continue
-        if char in '\'"':
+        if char.isspace():
+            continue
+        if char == '[' and scalar_start:
+            flow_depth += 1
+            scalar_start = True
+            continue
+        if char == ']' and flow_depth:
+            flow_depth -= 1
+            scalar_start = False
+            continue
+        if char == ',' and flow_depth:
+            scalar_start = True
+            continue
+        if char in '\'"' and scalar_start:
             quote = char
+            scalar_start = False
             continue
         if char == '#' and index and value[index - 1].isspace():
             return value[:index]
+        scalar_start = False
     return value
 
 
@@ -228,19 +246,26 @@ def _flow_sequence(value, key, filename='workflow'):
     items = []
     start = 0
     quote = ''
+    scalar_start = True
     for index, char in enumerate(content):
         if quote:
             if char == quote:
                 quote = ''
             continue
-        if char in "'\"":
+        if char.isspace() and scalar_start:
+            continue
+        if char in "'\"" and scalar_start:
             quote = char
+            scalar_start = False
         elif char == ',':
             item = content[start:index].strip()
             if not item:
                 raise AssertionError(unsupported)
             items.append(item)
             start = index + 1
+            scalar_start = True
+        else:
+            scalar_start = False
     if quote:
         raise AssertionError(unsupported)
     item = content[start:].strip()
@@ -254,6 +279,8 @@ def _flow_sequence(value, key, filename='workflow'):
             result.append(_scalar(item, filename, unsupported))
             continue
         if item[0] in '!&*':
+            raise AssertionError(unsupported)
+        if any(char in item for char in "'\""):
             raise AssertionError(unsupported)
         # `[{a: b}, c]` and `[a: b]` are mappings, not scalars — YAML makes
         # a colon-plus-space a key even without the braces.

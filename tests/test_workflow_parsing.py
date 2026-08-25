@@ -321,6 +321,49 @@ def test_path_filters_normalize_block_and_flow_sequences(tmp):
         assert _workflow_path_filters(flow) == {'paths-ignore': expected}
 
 
+def test_flow_quote_context_refuses_plain_quotes_and_keeps_comments(tmp):
+    """Flow quotes open only for a quoted item, and comments stay scoped."""
+    del tmp
+    accepted = (
+        ('["don\'t.md, isn\'t.md"]', ["don't.md, isn't.md"]),
+        ('''['a"b, c"d']''', ['a"b, c"d']),
+        ('["**/what\'s-new.md"]', ["**/what's-new.md"]),
+        ("['a # b']", ['a # b']),
+    )
+    for spelling, expected in accepted:
+        assert _workflow_path_filters(
+            [f'    paths-ignore: {spelling}']) == {
+                'paths-ignore': expected}
+
+    for spelling in ("[don't.md, isn't.md]", '[a"b, c"d]',
+                     "[what's-new.md]"):
+        try:
+            _workflow_path_filters([f'    paths-ignore: {spelling}'])
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f'plain flow quote was accepted: {spelling}')
+
+
+def test_block_quote_context_keeps_plain_apostrophes_and_quoted_hashes(tmp):
+    """Block comments strip after plain apostrophes, not inside quotes."""
+    del tmp
+    assert _workflow_path_filters([
+        '    paths-ignore:',
+        "      - don't.md  # docs",
+        '      - "don\'t.md  # docs"',
+    ]) == {'paths-ignore': ["don't.md", "don't.md  # docs"]}
+
+
+def test_block_plain_brackets_do_not_start_flow_quote_context(tmp):
+    """A bracket inside a block scalar does not make its quote special."""
+    del tmp
+    assert _workflow_path_filters([
+        '    paths-ignore:',
+        '      - foo[bar, "baz # docs',
+    ]) == {'paths-ignore': ['foo[bar, "baz']}
+
+
 def test_path_filters_keep_paths_keys_separate(tmp):
     """Both filter keys are returned independently for one event."""
     del tmp
