@@ -322,6 +322,38 @@ def test_checkout_reader_refuses_a_multiline_quoted_root_value(tmp):
         _assert_yaml_refusal('on: push\n' + prefix + suffix, wording)
 
 
+def test_checkout_reader_refuses_schema_typed_plain_refs(tmp):
+    """A plain checkout ref must be provably a YAML string."""
+    del tmp
+    prefix = (
+        'name: schema oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n')
+    spellings = (
+        'true', 'FALSE', 'yes', 'No', 'on', 'OFF', 'y', 'N',
+        'null', '~', '0', '-17', '+1_000', '0b10', '0o17',
+        '0xFF', '077', '1:20', '1.5', '.5', '1e3', '1:20.5',
+        '.inf', '-.Inf', '.nan', '2026-08-26',
+        '2026-08-26 12:30:00Z', '',
+    )
+    failures = []
+    for spelling in spellings:
+        workflow = prefix + f'          ref: {spelling}\n'
+        try:
+            actual = _wfcheckout.checkout_refs(workflow)
+        except _wfcheckout.YAMLReadError as error:
+            if 'plain scalar is not provably a string' not in str(error):
+                failures.append((spelling, str(error)))
+        else:
+            failures.append((spelling, actual))
+    assert failures == [], failures
+
+
 def test_checkout_reader_decodes_an_escaped_top_level_jobs_key(tmp):
     """A quoted escape is decoded before selecting the jobs mapping."""
     del tmp
