@@ -342,7 +342,7 @@ class _WorkflowReader:
 
     def _find_jobs(self):
         if self.jobs_line is None:
-            return []
+            self._refuse('top-level jobs mapping not found', 0, 'workflow')
         rest = self.jobs_rest
         if rest:
             self._reject_prefix(rest, self.jobs_line, 'jobs mapping')
@@ -350,9 +350,13 @@ class _WorkflowReader:
                          self.jobs_line, 'jobs mapping')
         first = self._next_nonblank(self.jobs_line + 1, len(self.lines),
                                     'jobs mapping')
-        if first is None or self._indent(first, 'jobs mapping') == 0:
-            return []
+        if first is None:
+            self._refuse('jobs value is not a block mapping',
+                         self.jobs_line, 'jobs mapping')
         job_indent = self._indent(first, 'jobs mapping')
+        if job_indent == 0:
+            self._refuse('jobs value is not a block mapping',
+                         self.jobs_line, 'jobs mapping')
         results = []
         index = self.jobs_line + 1
         while index < len(self.lines):
@@ -386,7 +390,8 @@ class _WorkflowReader:
     def _job_steps(self, job, start, end, job_indent):
         first = self._next_nonblank(start, end, f'job {job}')
         if first is None:
-            return []
+            self._refuse('job value is not a block mapping', start,
+                         f'job {job}')
         key_indent = self._indent(first, f'job {job}')
         results = []
         seen_steps = False
@@ -412,6 +417,17 @@ class _WorkflowReader:
                 if seen_steps:
                     self._refuse('duplicate steps key', index, f'job {job}')
                 seen_steps = True
+                if not rest and value_end == index + 1:
+                    next_key = self._next_nonblank(
+                        value_end, end, f'job {job}')
+                    if next_key is not None \
+                            and self._indent(next_key, f'job {job}') \
+                            == key_indent:
+                        next_name, _ = self._mapping_parts(
+                            next_key, f'job {job}')
+                        if next_name == 'steps':
+                            index = value_end
+                            continue
                 results.extend(self._steps(job, index, rest, value_end,
                                            key_indent))
             index = value_end
@@ -426,10 +442,12 @@ class _WorkflowReader:
                          context)
         first = self._next_nonblank(index + 1, end, context)
         if first is None:
-            return []
+            self._refuse('steps value is not a block sequence', index,
+                         context)
         step_indent = self._indent(first, context)
         if step_indent <= key_indent:
-            return []
+            self._refuse('steps value is not a block sequence', first,
+                         context)
         if self.lines[first][step_indent:].startswith('['):
             self._refuse('flow sequence', first, context)
         if not self.lines[first][step_indent:].startswith('-'):
@@ -499,6 +517,9 @@ class _WorkflowReader:
                 self._refuse('merge key', index, context)
             entries.append((key, rest, index, key_indent, value_end))
             index = value_end
+        if not entries:
+            self._refuse('step is not a mapping sequence item', start,
+                         context)
         uses = None
         with_entry = None
         seen = set()
@@ -569,9 +590,9 @@ class _WorkflowReader:
             stripped = line.strip()
             if not stripped or line.lstrip(' ').startswith('#'):
                 continue
-            prefix = line[:len(line) - len(line.lstrip(' '))]
+            prefix = line[:len(line) - len(line.lstrip(' \t'))]
             if '\t' in prefix:
-                continue
+                self._refuse('tab in indentation', index, 'workflow')
             marker = self._strip_comment(stripped)
             if not prefix and marker == '---':
                 if started:
@@ -588,6 +609,13 @@ class _WorkflowReader:
             if prefix:
                 continue
             body = self._strip_comment(stripped)
+            if body.startswith('?') and (len(body) == 1
+                                         or body[1].isspace()):
+                explicit_key = self._decode_scalar(
+                    body[1:].strip(), index, 'jobs mapping explicit key')
+                if explicit_key == 'jobs':
+                    self._refuse('explicit key', index, 'jobs mapping')
+                continue
             if not body.startswith(('jobs', "'jobs'", '"jobs"')):
                 continue
             if not re.match(r"(?:jobs|'jobs'|\"jobs\")\s*:", body):
