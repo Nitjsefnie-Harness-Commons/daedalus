@@ -59,6 +59,20 @@ _HALF_COVERED_OUTPUT = """### Coverage of this change
 | `b.py` | 0 | 1 | 1 |
 """
 
+_UPPERCASE_UNMEASURED_OUTPUT = """### Coverage of this change
+
+**100.0%** of measured added lines covered (1/1).
+
+| File | Covered | Added | Missed lines |
+| --- | ---: | ---: | --- |
+| `present.py` | 1 | 1 | — |
+
+The coverage report did not measure these changed Python files:
+- `silent.PY`
+
+Every measured added line was reached; the files above were not measured.
+"""
+
 
 def _write(tmp, name, text):
     """Write one fixture file under tmp and return its path."""
@@ -347,6 +361,61 @@ def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
     assert done.stdout == _HALF_COVERED_OUTPUT, done.stdout
+
+
+def test_the_cli_names_an_unmeasured_uppercase_python_file(tmp):
+    """Python source suffix matching is case-insensitive."""
+    coverage_xml = _write(
+        tmp, 'coverage.xml',
+        '<coverage><class filename="present.py"><lines>'
+        '<line number="1" hits="1"/>'
+        '</lines></class></coverage>\n')
+    diff = _write(
+        tmp, 'uppercase.diff',
+        'diff --git a/present.py b/present.py\n'
+        '--- /dev/null\n'
+        '+++ b/present.py\n'
+        '@@ -0,0 +1 @@\n'
+        '+reached = 1\n'
+        'diff --git a/silent.PY b/silent.PY\n'
+        '--- /dev/null\n'
+        '+++ b/silent.PY\n'
+        '@@ -0,0 +1 @@\n'
+        '+never_reached = 2\n')
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', str(diff)],
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert done.stderr == '', done.stderr
+    assert done.stdout == _UPPERCASE_UNMEASURED_OUTPUT, done.stdout
+
+
+def test_the_cli_refuses_a_non_integer_coverage_hit_count(tmp):
+    """A malformed hit count cannot remove an uncovered line."""
+    coverage_xml = _write(
+        tmp, 'coverage.xml',
+        '<coverage><class filename="malformed.py"><lines>'
+        '<line number="1" hits="1"/>'
+        '<line number="2" hits="not-an-integer"/>'
+        '</lines></class></coverage>\n')
+    diff = _write(
+        tmp, 'malformed.diff',
+        'diff --git a/malformed.py b/malformed.py\n'
+        '--- /dev/null\n'
+        '+++ b/malformed.py\n'
+        '@@ -0,0 +1,2 @@\n'
+        '+reached = 1\n'
+        '+never_reached = 2\n')
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', str(diff)],
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
+    assert done.stdout == '', done.stdout
+    assert done.stderr == (
+        "coverage report invalid: invalid hits for malformed.py:2: "
+        "'not-an-integer'\n"), done.stderr
 
 
 def test_the_cli_does_not_round_a_miss_up_to_perfect(tmp):

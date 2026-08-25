@@ -87,9 +87,14 @@ def executable_lines(coverage_xml):
                 continue
             try:
                 number_value = int(number)
-                hits_value = int(hits)
             except ValueError:
                 continue
+            try:
+                hits_value = int(hits)
+            except ValueError as error:
+                raise ValueError(
+                    f'invalid hits for {filename}:{number_value}: '
+                    f'{hits!r}') from error
             # A file can appear as more than one <class>; take the best hit
             # count so a line reached by any of them counts as covered.
             lines[number_value] = max(lines.get(number_value, 0), hits_value)
@@ -189,7 +194,7 @@ def unmeasured_sources(measured, added):
     """
     return {
         path for path in added
-        if path.endswith('.py')
+        if path.lower().endswith('.py')
         and not path.startswith('tests/')
         and path not in measured
     }
