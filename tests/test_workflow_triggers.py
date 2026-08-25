@@ -166,6 +166,51 @@ def test_contribution_gates_have_unfiltered_push_triggers(tmp):
             f'{_workflow_path_filters(triggers["push"], name)}')
 
 
+def test_workflow_trigger_filters_accept_string_pairs_and_opposite_quotes(tmp):
+    """Equal strings survive plain/quoted and opposite-quote spellings."""
+    workflows = Path(tmp) / 'workflows'
+    workflows.mkdir()
+    cases = (
+        ('exponent', '1e1_0', "'1e1_0'", ['1e1_0']),
+        ('nan', '-.NaN', "'-.NaN'", ['-.NaN']),
+        ('apostrophe', '"**/what\'s-new.md"',
+         '"**/what\'s-new.md"', ["**/what's-new.md"]),
+        ('double-quote', "'say \"hi\".md'", "'say \"hi\".md'",
+         ['say "hi".md']),
+    )
+    for name, push_value, pull_value, expected in cases:
+        content = ('name: control\n\non:\n'
+                   f'  push:\n    paths-ignore: [{push_value}]\n'
+                   f'  pull_request:\n    paths-ignore: [{pull_value}]\n')
+        path = workflows / f'{name}.yml'
+        path.write_text(content, encoding='utf-8')
+        _assert_workflow_trigger_filters_match(workflows)
+        triggers = _workflow_triggers(content, path.name)
+        for event in ('push', 'pull_request'):
+            assert _workflow_path_filters(
+                triggers[event], path.name) == {'paths-ignore': expected}
+
+    refusals = (
+        ('surrounding-single', "['a''b']"),
+        ('surrounding-double', r'["a\"b"]'),
+        ('backslash', r'["a\\b"]'),
+    )
+    for name, value in refusals:
+        refusal_dir = Path(tmp) / name
+        refusal_dir.mkdir()
+        content = ('name: refusal\n\non:\n'
+                   f'  push:\n    paths-ignore: {value}\n'
+                   f'  pull_request:\n    paths-ignore: {value}\n')
+        (refusal_dir / 'control.yml').write_text(
+            content, encoding='utf-8')
+        try:
+            _assert_workflow_trigger_filters_match(refusal_dir)
+        except AssertionError as failure:
+            assert 'control.yml' in str(failure), failure
+        else:
+            raise AssertionError(f'{name}: unsupported quote was accepted')
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='workflowtriggers_')
 
