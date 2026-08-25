@@ -14,6 +14,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+import _yamlread  # noqa: E402
+
+
+_FORBIDDEN_CHECKOUT_NAMES = ('head', 'branch', 'ref', 'sha', 'commit')
 
 
 def _durations_tree(tmp, side, rounds):
@@ -190,6 +194,309 @@ def test_timing_a_tree_that_yields_nothing_is_a_failure(tmp):
     assert code == 1, code
 
 
+def test_checkout_reader_returns_structured_checkout_refs(tmp):
+    """The reader exposes checkout refs from the workflow structure."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: ${{ github.sha }}\n'
+        '  test:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n')
+    assert _yamlread.checkout_refs(workflow) == [
+        ('build', '${{ github.sha }}')]
+
+
+def test_checkout_reader_decodes_supported_scalar_styles(tmp):
+    """Checkout refs use runner values, not source-line spellings."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '    plain:\n'
+        '      steps:\n'
+        '        - uses: "actions/checkout@v4"\n'
+        '          with:\n'
+        "            ref: 'one''two'\n"
+        '    folded:\n'
+        '      steps:\n'
+        '        - uses: actions/checkout@v4\n'
+        '          with:\n'
+        '            ref: >-\n'
+        '              first\n'
+        '              second\n'
+        '    literal:\n'
+        '      steps:\n'
+        '        - uses: actions/checkout@v4\n'
+        '          with:\n'
+        '            ref: |+\n'
+        '              first\n'
+        '              second\n'
+        '    double:\n'
+        '      steps:\n'
+        '        - uses: actions/checkout@v4\n'
+        '          with:\n'
+        '            ref: "line\\nnext"\n')
+    assert _yamlread.checkout_refs(workflow) == [
+        ('plain', "one'two"),
+        ('folded', 'first second'),
+        ('literal', 'first\nsecond\n'),
+        ('double', 'line\nnext'),
+    ]
+
+
+def test_checkout_reader_skips_unwalked_flow_values(tmp):
+    """Flow syntax outside a checkout path is not inspected."""
+    del tmp
+    workflow = (
+        'name: [main]\n'
+        'on:\n'
+        '  branches: [main]\n'
+        'jobs:\n'
+        '  build:\n'
+        '    env: {BROKEN: [still, irrelevant]}\n'
+        '    steps:\n'
+        '      - uses: actions/setup-python@v4\n'
+        '        with: {ref: [not, a, checkout]}\n')
+    assert _yamlread.checkout_refs(workflow) == []
+
+
+def _assert_yaml_refusal(workflow, wording):
+    try:
+        _yamlread.checkout_refs(workflow)
+    except _yamlread.YAMLReadError as error:
+        message = str(error)
+        assert wording in message, message
+        assert 'line ' in message, message
+    else:
+        raise AssertionError(f'expected refusal mentioning {wording!r}')
+
+
+def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
+    """Unsupported syntax on the walked path fails closed with its location."""
+    del tmp
+    cases = (
+        ('jobs: {build: {steps: []}}\n', 'flow mapping'),
+        ('jobs:\n  build:\n    steps: []\n', 'flow sequence'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - {uses: actions/checkout@v4}\n', 'flow mapping'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with: {ref: point}\n', 'flow mapping'),
+        ('jobs:\n  build:\n    steps: &saved\n', 'anchor'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: *saved\n', 'alias'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: !str point\n', 'explicit tag'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - ? uses\n'
+         '        : actions/checkout@v4\n', 'explicit key'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          <<: *defaults\n', 'merge key'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: "\\q"\n', 'unknown double-quote escape'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: "\\UFFFFFFFF"\n',
+         'invalid double-quoted escape'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: {point: value}\n', 'flow mapping'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: [point]\n', 'flow sequence'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: |0\n', 'unsupported block scalar header'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: |2\n'
+         '           point\n', 'inconsistent block scalar indentation'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         "          ref: 'point' tail\n",
+         'trailing text after single-quoted scalar'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: "point\n', 'unterminated double-quoted scalar'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref:\n'
+         '            path: value\n', 'mapping where scalar was required'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref:\n'
+         '            - point\n', 'sequence where scalar was required'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        uses: actions/checkout@v4\n', 'duplicate uses key'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: one\n'
+         '        with:\n', 'duplicate with key'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: one\n'
+         '          ref: two\n', 'duplicate ref key'),
+        ('jobs:\n  build:\n    steps:\n'
+         '    steps:\n', 'duplicate steps key'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - <<: *defaults\n', 'merge key'),
+        ('jobs:\n  build:\n    steps:\n'
+         '\t  - uses: actions/checkout@v4\n', 'tab in indentation'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: point\n'
+         '---\njobs:\n', 'multiple YAML documents'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: point\n'
+         'jobs:\n', 'second top-level jobs mapping'),
+    )
+    for workflow, wording in cases:
+        _assert_yaml_refusal(workflow, wording)
+
+
+def test_checkout_reader_refuses_a_duplicate_top_level_jobs_with_location(tmp):
+    """A duplicate jobs mapping cannot be resolved by choosing one."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  first:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        'jobs:\n'
+        '  second:\n')
+    _assert_yaml_refusal(workflow, 'second top-level jobs mapping')
+
+
+def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
+    """Apply the pin's conservative expression contract to one workflow."""
+    offenders = []
+    expressions = re.compile(r'\$\{\{(.*?)\}\}', re.DOTALL)
+    try:
+        refs = _yamlread.checkout_refs(workflow)
+    except _yamlread.YAMLReadError as error:
+        raise AssertionError(f'{workflow_name}: {error}') from error
+    for job, ref in refs:
+        matches = list(expressions.finditer(ref))
+        if ref.count('${{') != len(matches):
+            raise AssertionError(
+                f'{workflow_name}, job {job}: unterminated expression in '
+                f'{ref!r}')
+        for match in matches:
+            expression = match.group(1).strip()
+            leading = re.match(r'[A-Za-z_][A-Za-z0-9_-]*', expression)
+            if leading and leading.group(0) == 'github':
+                continue
+            if not re.fullmatch(
+                    r'[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*',
+                    expression):
+                raise AssertionError(
+                    f'{workflow_name}, job {job}: cannot decompose '
+                    f'expression {expression!r}')
+            segments = expression.split('.')
+            if len(segments) < 2:
+                raise AssertionError(
+                    f'{workflow_name}, job {job}: cannot decompose '
+                    f'expression {expression!r}')
+            for segment in segments[1:]:
+                if segment == 'outputs':
+                    continue
+                if any(word in spelling
+                       for spelling in (segment, segment.lower())
+                       for word in _FORBIDDEN_CHECKOUT_NAMES):
+                    offenders.append(
+                        f'{workflow_name}, job {job}: {segment}')
+    assert not offenders, (
+        'a checkout takes its ref from a non-github expression named '
+        f'{offenders}, which an analyser reads as an untrusted head')
+
+
+def test_checkout_pin_checks_all_contexts_and_identifier_segments(tmp):
+    """The pin checks step/job ids and every non-github context uniformly."""
+    del tmp
+    expressions = (
+        '${{ steps.find_base_ref.outputs.point }}',
+        '${{ needs.release_commit.outputs.point }}',
+        '${{ jobs.build_branch.outputs.point }}',
+        '${{ env.base_ref }}',
+        '${{ secrets.base_ref }}',
+        '${{ inputs.base_ref }}',
+        '${{ matrix.base_ref }}',
+        '${{ vars.base_ref }}',
+    )
+    for expression in expressions:
+        workflow = (
+            'jobs:\n'
+            '  release_commit:\n'
+            '    steps:\n'
+            '      - run: echo release\n'
+            '  build:\n'
+            '    steps:\n'
+            '      - uses: actions/checkout@v4\n'
+            '        with:\n'
+            f'          ref: {expression}\n')
+        try:
+            _assert_checkout_refs_safe(workflow)
+        except AssertionError as error:
+            assert any(word in str(error)
+                       for word in _FORBIDDEN_CHECKOUT_NAMES), str(error)
+            assert 'job build' in str(error), str(error)
+        else:
+            raise AssertionError(f'expected refusal for {expression}')
+
+
+def test_checkout_pin_skips_github_and_rejects_non_reference_expressions(tmp):
+    """GitHub refs are excluded; expressions the pin cannot decompose fail."""
+    del tmp
+    github = (
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: ${{ github.event.pull_request.base.sha }}\n')
+    _assert_checkout_refs_safe(github)
+
+    for expression in (
+            "${{ format('{0}', steps.baseline.outputs.point) }}",
+            '${{ steps.baseline.outputs.point || github.sha }}',
+            '${{ steps.baseline.outputs.point[0] }}',
+            '${{ true }}'):
+        workflow = github.replace(
+            '${{ github.event.pull_request.base.sha }}', expression)
+        try:
+            _assert_checkout_refs_safe(workflow)
+        except AssertionError as error:
+            assert expression[3:-3].strip() in str(error), str(error)
+            assert 'job build' in str(error), str(error)
+        else:
+            raise AssertionError(f'expected refusal for {expression}')
+
+
 def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     """No checkout's `ref:` may come from a name that reads like a head.
 
@@ -202,39 +509,19 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     the alert. This pins the name class, so a rename back goes red here
     rather than in the next default-branch analysis.
 
-    The heuristic tests the field name of ANY reference expression that
-    is not a `github.*` one, so the pin mirrors it over every workflow in
-    `.github/workflows/`: `(steps|needs|jobs).<id>.outputs.<name>` and
-    `env.<name>` in a checkout's `ref:` are all checked. The query's
-    regexpMatch is case-sensitive, so `BASE_REF` would evade the analyser
-    itself; the check still tests each name as written and its lowercase
-    form both, because a spelling that reads as `ref` to a human stays
-    one lowercase rename away from the alert.
+    The pin promises a safe superset of the query: every identifier segment
+    in every non-`github` dotted expression is checked, including step and
+    needed-job ids and `secrets`, `inputs`, `matrix` and `vars` contexts.
+    `vars` is intentionally over-approximated because CodeQL does not model
+    it. The query's regexpMatch is case-sensitive, so `BASE_REF` would evade
+    the analyser itself; the check tests each name as written and lowercased
+    because a human-readable spelling stays one rename away from the alert.
     """
-    forbidden = ('head', 'branch', 'ref', 'sha', 'commit')
-    reference = re.compile(
-        r'(?m)^\s*ref:\s*\$\{\{\s*'
-        r'(?:'
-        r'(?:steps|needs|jobs)\.[\w-]+\.outputs\.([\w-]+)'
-        r'|env\.([A-Za-z0-9_]+)'
-        r')\s*}}')
-    offenders = []
     workflows = sorted((ROOT / '.github' / 'workflows').glob('*.yml'))
     workflows += sorted((ROOT / '.github' / 'workflows').glob('*.yaml'))
     for path in workflows:
         text = path.read_text(encoding='utf-8')
-        for block in re.split(r'(?m)^      - ', text):
-            if 'uses: actions/checkout@' not in block:
-                continue
-            for match in reference.finditer(block):
-                name = match.group(1) or match.group(2)
-                if any(word in spelling
-                       for spelling in (name, name.lower())
-                       for word in forbidden):
-                    offenders.append(f'{path.name}: {name}')
-    assert not offenders, (
-        'a checkout takes its ref from a non-github expression named '
-        f'{offenders}, which an analyser reads as an untrusted head')
+        _assert_checkout_refs_safe(text, path.name)
 
 
 def main():
