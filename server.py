@@ -9,6 +9,7 @@ from urllib.parse import urlparse, parse_qs
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
+import command_queue
 from delivery_stripes import stripe_index
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
@@ -728,33 +729,6 @@ _COMMAND_GC_INTERVAL = max(0.05, min(30.0, CMD_TTL))
 _seq_counter = itertools.count(1)
 
 
-def _remove_expired_command_file(path, now, legacy=False):
-    """Remove one expired, complete command artifact without following symlinks.
-
-    Queue entries are published by this process with rename, so their `.json`
-    and stale `.tmp` names are safe to collect. A top-level legacy file is
-    caller-published: malformed content may still have an open writer and is
-    left untouched until it becomes a complete JSON object.
-    """
-    if not path.name.endswith(('.json', '.tmp')):
-        return
-    try:
-        if now - path.lstat().st_mtime <= CMD_TTL:
-            return
-        if legacy:
-            if path.name.startswith('.') or not path.name.endswith('.json'):
-                return
-            data = json.loads(path.read_text(encoding='utf-8'))
-            if not isinstance(data, dict):
-                return
-        path.unlink()
-    except (OSError, json.JSONDecodeError, RecursionError, ValueError):
-        # Expiry is opportunistic. A file that vanished under the sweep, or
-        # that cannot be read or removed right now, is reconsidered on the
-        # next pass; nothing downstream depends on this call having acted.
-        pass
-
-
 def _collect_expired_commands():
     """Expire command files and empty queue directories without an SSE reader."""
     now = time.time()
@@ -767,14 +741,14 @@ def _collect_expired_commands():
             if entry.is_symlink():
                 continue
             if not entry.is_dir():
-                _remove_expired_command_file(entry, now, legacy=True)
+                command_queue.remove_expired(entry, now, CMD_TTL, legacy=True)
                 continue
             try:
                 children = list(entry.iterdir())
             except OSError:
                 continue
             for child in children:
-                _remove_expired_command_file(child, now)
+                command_queue.remove_expired(child, now, CMD_TTL)
             try:
                 entry.rmdir()
             except OSError:
