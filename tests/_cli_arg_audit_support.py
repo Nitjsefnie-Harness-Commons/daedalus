@@ -1,33 +1,33 @@
 """Side-effect-free static analysis for the CLI argument audit.
 
-Parser destinations split into DECLARED and GUARANTEED PRESENT. A suppressed-
-default action contributes only to DECLARED; a same-destination non-suppressed
-action still contributes to GUARANTEED PRESENT. Every ``set_defaults`` key
-is in both. Help/version actions and ``argparse.SUPPRESS`` destinations
-contribute to neither. Direct attributes and exact-dict subscripts need
-GUARANTEED PRESENT. Bare ``getattr`` does too; ``hasattr`` and defaulted
-``getattr`` and exact-dict ``.get`` need DECLARED.
+DECLARED contains each non-help/version action whose destination is not
+``argparse.SUPPRESS``, plus every ``set_defaults`` key. GUARANTEED PRESENT
+contains a destination when an action has a non-suppressed default, is required
+on every successful parse, or is a positional ``REMAINDER``; every parser
+default is also guaranteed. Same-destination actions combine those properties.
+Direct attributes, exact-dict subscripts, and bare ``getattr`` need GUARANTEED;
+``hasattr``, defaulted ``getattr``, and exact-dict ``.get`` need DECLARED.
 
-The resolver follows supplied in-function imports and unshadowed handler
-globals by object identity. It decides module attributes, module ``__dict__``,
-exact-class MRO attributes, exact list/tuple subscripts, and constant-key dict
-reads. Unary signed-integer evaluation recurses through arbitrary stacks.
-Constant slices recursively resolve bounds, preserve omissions, and keep exact
-sliced sequences eligible for another subscript. Constant-name ``getattr`` and
-single-argument ``vars`` resolve exact modules and classes; a class yields a
-proxy, whose downstream reads remain outside the exact-dict rules.
-Exact ``staticmethod`` and ``classmethod`` wrappers are unwrapped; every other
-descriptor stays raw, so its ``__get__`` is never invoked. The caller refuses
-unresolved canonical ``_getframe`` and ``currentframe`` spellings.
+``getattr``, ``hasattr``, and ``vars`` receive builtin semantics only by exact
+identity. A bare name must be unbound by callable/comprehension scopes
+and absent from module globals or bound there to that builtin. Attribute bases
+must be the exact ``builtins`` module. Callable headers use outer scope. Bare
+``locals``/``globals``/``eval``/``exec`` and no-argument ``vars`` are refused
+by spelling even when shadowed (fail-closed); exact ``builtins`` forms are too.
 
-The resolver never runs handler-defined code. Descriptors other than the two
-exact wrappers, ``functools.partial``, exception traceback frames, other
-container types, the iterator protocol, comprehension results, instance
-attributes, ``operator.attrgetter``, runtime-built names, and computed or
-call-produced subscript components stay outside. Frame acquisition elsewhere is
-categorically outside because the audit inspects only the handler's own body.
-The case tables enumerate permitted reads, refused escapes, decided and
-resolver-only routes, and one known-gap control for every named outside family.
+The resolver follows supplied imports and unshadowed globals by identity. It
+decides module/class attributes, module ``__dict__``, exact list/tuple
+subscripts/slices and constant-key dict reads. Indices and bounds pass
+``isinstance(value, int)``; ``bool`` counts, and unary ``+True`` is ``1``.
+Bare constant-name ``getattr`` and one-argument ``vars`` resolve exact modules
+and classes. Exact static/class methods unwrap; other descriptors stay raw.
+Unresolved canonical ``_getframe``/``currentframe`` spellings are refused.
+
+Resolution never runs handler code. Non-exact descriptors, ``partial``,
+traceback frames, other containers, iterators, comprehension results, instance
+attributes, ``attrgetter``, runtime names, class mapping-proxy reads, binary or
+call-produced indices, and frame acquisition in another function stay outside.
+The tables include a known-gap control for every named outside family.
 """
 import argparse
 import ast
