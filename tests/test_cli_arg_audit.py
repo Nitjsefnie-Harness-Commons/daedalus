@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """Static proof that CLI handlers name only parser-declared attributes.
 
-``test_cli_handlers_read_only_declared_args`` scans every dispatched handler.
-The visitor and focused controls below make each whitelist rule and resolver
-boundary executable instead of hiding a regression in the repository-wide
-scan.
+``test_cli_handlers_read_only_declared_args`` scans every dispatched handler;
+the focused controls make each whitelist rule and resolver boundary executable.
 
-The namespace parameter may be read as a direct attribute, by constant-name
-``getattr`` or ``hasattr``, or through the exact mappings ``vars(args)`` and
-``args.__dict__``. Those mappings permit a constant string subscript or
-constant-key ``.get(key[, default])``. Every other mention of the parameter is
-a namespace escape. Named reflective calls through ``locals()``,
-``globals()``, ``eval``, ``exec`` and no-argument ``vars()`` are also escapes.
-The contract is deliberately stricter than preventing ``AttributeError``:
-runtime-safe ``hasattr`` and defaulted ``getattr`` are refused when their
-constant name is not declared for that handler by the top-level parser or its
-subparser.
+Parser destinations have two properties. DECLARED includes every action
+destination, including suppressed-default actions, plus every ``set_defaults``
+key. GUARANTEED PRESENT includes destinations contributed by a non-suppressed
+action plus each ``set_defaults`` key. Help/version actions and an action whose
+destination is ``argparse.SUPPRESS`` contribute to neither.
+
+Direct attributes, exact ``vars(args)``/``args.__dict__`` subscripts, and
+constant-name ``getattr`` without a default require GUARANTEED PRESENT.
+``hasattr``, defaulted ``getattr``, and constant-key mapping ``.get`` require
+only DECLARED. An undeclared name is therefore refused even when its read is
+runtime-safe. Every other mention of the parameter is a namespace escape, as
+are named ``locals``, ``globals``, ``eval``, ``exec`` and no-argument ``vars``.
 
 Frame routes are decided through in-function imports, unshadowed handler
 globals, module attributes and module ``__dict__`, exact-class MRO attributes,
@@ -26,14 +26,19 @@ proxy, whose downstream reads remain outside the exact-dict rules.
 Exact ``staticmethod`` and ``classmethod`` wrappers are unwrapped. Unresolved
 canonical ``_getframe`` and ``currentframe`` spellings are refused.
 
+Unary ``+``/``-`` evaluation recurses through arbitrary stacks. Constant
+slices recursively resolve bounds and preserve omissions; exact list/tuple
+results can be sliced again.
+
 Resolution never invokes handler-defined code or descriptor binding. A class
 descriptor other than exact ``staticmethod`` or ``classmethod`` stays outside,
 as do ``functools.partial``, exception traceback frames, other container
 types, the iterator protocol, comprehension results, instance attributes,
-``operator.attrgetter`` and runtime-built names. Any route whose frame is
+``operator.attrgetter``, runtime-built names, mapping-proxy reads, and computed
+or call-produced subscript components. Any route whose frame is
 acquired in another function is categorically outside because only the
-handler's own body is inspected. Every outside family has a known-gap control
-below.
+handler's own body is inspected. Every named outside family has a known-gap
+control below.
 """
 import argparse
 import ast
