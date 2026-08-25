@@ -68,6 +68,33 @@ def test_same_key_is_stable_and_server_reuses_lock(tmp):
             is server._delivery_lock_for(target_key))
 
 
+def test_server_wiring_rejects_crc_collisions(tmp):
+    server = _load_server(tmp)
+    token = 'stripe-token'
+    target = zlib.crc32(b'crc-collision-seed') & 63
+    tabs = []
+    for number in itertools.count():
+        tab = f'crc-collision-{number:06d}'
+        key = server._result_key(token, tab)
+        if zlib.crc32(key.encode()) & 63 == target:
+            tabs.append(tab)
+            if len(tabs) == 128:
+                break
+
+    crc_stripes = {
+        zlib.crc32(server._result_key(token, tab).encode()) & 63
+        for tab in tabs
+    }
+    assert len(crc_stripes) == 1
+    locks = [
+        server._delivery_lock_for(server._result_key(token, tab))
+        for tab in tabs
+    ]
+    # With 64 stripes and 128 names, an accidental one-stripe result is
+    # impossible in practice; the server must use the keyed mapping.
+    assert any(lock is not locks[0] for lock in locks[1:])
+
+
 def test_crc_collisions_do_not_collide_under_keyed_mapping(tmp):
     del tmp
     stripes = _load_stripes('delivery_stripes_crc_bucket')
