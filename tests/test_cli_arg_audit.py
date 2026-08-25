@@ -573,6 +573,22 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
         finally:
             sys.modules.pop(handler_module.__dict__['__name__'], None)
 
+    composite_routes = (
+        'COMPOSITE_ROUTES = '
+        '(sys._getframe, sys._getframe, sys._getframe)')
+    for index, expression in enumerate(
+            audit_support.COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES):
+        body = f"_ = {expression}().f_locals['args'].undeclared_probe"
+        handler_module = _mutated_cli_tabs(
+            f'composite_subscript_cli_{index}', composite_routes, body)
+        try:
+            violations = _audit_real_tabs_handler(handler_module)
+            assert any(f'{expression}()' in item for item in violations), \
+                (expression, violations)
+            _assert_real_tabs_dispatch_crashes(handler_module)
+        finally:
+            sys.modules.pop(handler_module.__dict__['__name__'], None)
+
     for index, (case_name, module_prelude, body, construct) in enumerate(
             audit_support.RESOLVER_ONLY_FRAME_ROUTE_CASES):
         handler_module = _mutated_cli_tabs(
