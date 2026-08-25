@@ -45,15 +45,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _cli_arg_audit_support import resolve_frame_value  # noqa: E402
+import _cli_arg_audit_support as audit_support  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
-
-# `do_tabs` reads args.json through getattr(); keep that access documented
-# even though the audit now resolves constant indirect reads itself.
-KNOWN_INDIRECT_ARG_READS = (
-    ('tabs', 'json', 'do_tabs'),
-)
 
 
 def _namespace_dests(parser):
@@ -69,13 +63,6 @@ def _namespace_dests(parser):
         and action.default is not argparse.SUPPRESS
         and not isinstance(action, never_store)}
     return action_dests | set(parser._defaults)
-
-
-def _constant_string(node):
-    """Return the string of a constant node, or None for anything else."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
 
 
 def _binding_names(target):
@@ -164,13 +151,7 @@ def _comprehension_shadows(comprehension, name):
 
 _FRAME_ROUTE_ATTRS = {'sys': '_getframe', 'inspect': 'currentframe'}
 _FRAME_ROUTE_MODULES = {'sys': sys, 'inspect': inspect}
-_FRAME_ROUTE_OBJECTS = (sys._getframe, inspect.currentframe)
 _UNRESOLVED = object()
-
-
-def _is_frame_route(value):
-    """Return True only for the two frame-route objects by identity."""
-    return any(value is route for route in _FRAME_ROUTE_OBJECTS)
 
 
 def _frame_imports(function):
@@ -195,9 +176,9 @@ def _frame_imports(function):
 
 def _frame_value(node, function, handler_globals, imports):
     """Resolve constant access without executing handler source."""
-    return resolve_frame_value(
+    return audit_support.resolve_frame_value(
         node, function, handler_globals, imports, _UNRESOLVED,
-        _scope_binds, _constant_string)
+        _scope_binds, audit_support.constant_string)
 
 
 def _unknown_frame_route(node, function, handler_globals, imports):
@@ -214,26 +195,26 @@ def _unknown_frame_route(node, function, handler_globals, imports):
 
 def _frame_route_access(node, function, handler_globals, imports):
     """Return True when ``node`` names or accesses a frame route."""
-    if _is_frame_route(_frame_value(
+    if audit_support.is_frame_route(_frame_value(
             node, function, handler_globals, imports)):
         return True
     if isinstance(node, ast.Call):
-        if _is_frame_route(_frame_value(
+        if audit_support.is_frame_route(_frame_value(
                 node.func, function, handler_globals, imports)):
             return True
         if (isinstance(node.func, ast.Attribute)
-                and _is_frame_route(_frame_value(
+                and audit_support.is_frame_route(_frame_value(
                     node.func.value, function, handler_globals, imports))):
             return True
         return _unknown_frame_route(
             node.func, function, handler_globals, imports)
     if not isinstance(node, (ast.Name, ast.Attribute)):
         return False
-    if _is_frame_route(_frame_value(
+    if audit_support.is_frame_route(_frame_value(
             node, function, handler_globals, imports)):
         return True
     if (isinstance(node, ast.Attribute)
-            and _is_frame_route(_frame_value(
+            and audit_support.is_frame_route(_frame_value(
                 node.value, function, handler_globals, imports))):
         return True
     return _unknown_frame_route(node, function, handler_globals, imports)
@@ -254,7 +235,7 @@ def _constant_mapping_read(node):
     parent = node._parent
     if (isinstance(parent, ast.Subscript) and parent.value is node
             and isinstance(parent.ctx, ast.Load)):
-        attribute = _constant_string(parent.slice)
+        attribute = audit_support.constant_string(parent.slice)
         if attribute is not None:
             return attribute, parent
     if (not isinstance(parent, ast.Attribute)
@@ -269,7 +250,7 @@ def _constant_mapping_read(node):
             or any(isinstance(argument, ast.Starred)
                    for argument in call.args)):
         return None
-    attribute = _constant_string(call.args[0])
+    attribute = audit_support.constant_string(call.args[0])
     if attribute is not None:
         return attribute, call
     return None
@@ -296,7 +277,7 @@ def _permitted_namespace_read(name):
             and not any(isinstance(argument, ast.Starred)
                         for argument in parent.args)):
         return None
-    attribute = _constant_string(parent.args[1])
+    attribute = audit_support.constant_string(parent.args[1])
     if attribute is None:
         return None
     return attribute, parent
@@ -478,52 +459,18 @@ def test_cli_audit_includes_parser_set_defaults(tmp):
 
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
-    cases = [
-        ('args.json', 'args.undeclared_probe'),
-        ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')"),
-        ("getattr(args, 'json', False)",
-         "getattr(args, 'undeclared_probe', None)"),
-        ("vars(args)['json']", "vars(args)['undeclared_probe']"),
-        ("args.__dict__['json']", "args.__dict__['undeclared_probe']"),
-        ("vars(args).get('json')",
-         "vars(args).get('undeclared_probe')"),
-        ("args.__dict__.get('json')",
-         "args.__dict__.get('undeclared_probe')"),
-        ("vars(args).get('json', False)",
-         "vars(args).get('undeclared_probe', None)"),
-        ("args.__dict__.get('json', False)",
-         "args.__dict__.get('undeclared_probe', None)"),
-        ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')"),
-    ]
-    for declared, undeclared in cases:
+    for declared, undeclared in audit_support.PERMITTED_NAMESPACE_READ_CASES:
         assert _audit_fake_handler(declared) == [], declared
         assert _audit_fake_handler(undeclared) == [undeclared], undeclared
 
 
 def test_cli_audit_refuses_safe_undeclared_probes(tmp):
-    probes = [
-        "getattr(args, 'undeclared_probe', None)",
-        "hasattr(args, 'undeclared_probe')",
-    ]
-    for probe in probes:
+    for probe in audit_support.SAFE_UNDECLARED_PROBES:
         assert _audit_fake_handler(probe) == [probe], probe
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
-    cases = [
-        ('other = args', 'other = args'),
-        ('other = args\nthird = other\nthird.x', 'other = args'),
-        ('other, = (args,)', '(args,)'),
-        ("getattr(*(args, 'x'))", "(args, 'x')"),
-        ('helper(args)', 'helper(args)'),
-        ('helper([args])', '[args]'),
-        ('helper(*[args])', '[args]'),
-        ('getattr(args, some_variable)', 'getattr(args, some_variable)'),
-        ('hasattr(args, some_variable)', 'hasattr(args, some_variable)'),
-        ('helper(vars(args))', 'vars(args)'),
-        ('args.__dict__', 'args.__dict__'),
-    ]
-    for body, construct in cases:
+    for body, construct in audit_support.NAMESPACE_ESCAPE_CASES:
         assert _audit_fake_handler(body) == [
             f'namespace escape: {construct}'], (body, construct)
 
@@ -541,11 +488,7 @@ def test_cli_audit_respects_inner_scope_bindings(tmp):
 
 
 def test_cli_audit_sees_shadowing_callable_defaults(tmp):
-    cases = [
-        'def inner(args=args):\n    return args.undeclared_probe\ninner()',
-        'f = lambda args=args: args.undeclared_probe\nf()',
-    ]
-    for body in cases:
+    for body in audit_support.SHADOWING_DEFAULT_CASES:
         assert _audit_fake_handler(body) == [
             'namespace escape: args=args'], body
 
@@ -559,34 +502,7 @@ def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
 
 
 def test_cli_audit_refuses_reflective_namespace_access(tmp):
-    cases = [
-        ("_ = locals()['args'].undeclared_probe", 'locals()'),
-        ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
-        ('_ = vars()', 'vars()'),
-        ('_ = globals()', 'globals()'),
-        ("exec('args.undeclared_probe')", "exec('args.undeclared_probe')"),
-        ("_ = sys._getframe().f_locals['args'].x", 'sys._getframe()'),
-        ("_ = inspect.currentframe().f_locals['args'].x",
-         'inspect.currentframe()'),
-        ("from sys import _getframe\n"
-         "_ = _getframe().f_locals['args'].x", '_getframe()'),
-        ("from sys import _getframe as get_frame\n"
-         "_ = get_frame().f_locals['args'].x", 'get_frame()'),
-        ("from inspect import currentframe as cf\n"
-         "_ = cf().f_locals['args'].x", 'cf()'),
-        ("import sys as system\n"
-         "_ = system._getframe().f_locals['args'].x", 'system._getframe()'),
-        ("import inspect as insp\n"
-         "_ = insp.currentframe().f_locals['args'].x",
-         'insp.currentframe()'),
-        ('_ = sys._getframe', 'sys._getframe'),
-        ('_ = sys._getframe.__call__()', 'sys._getframe.__call__()'),
-        ('helper(sys._getframe)', 'sys._getframe'),
-        ('helper(inspect.currentframe)', 'inspect.currentframe'),
-        ('_ = _getframe()', '_getframe()'),
-        ('_ = currentframe()', 'currentframe()'),
-    ]
-    for body, construct in cases:
+    for body, construct in audit_support.REFLECTIVE_ESCAPE_CASES:
         assert _audit_fake_handler(body) == [
             f'namespace escape: {construct}'], body
 
@@ -649,59 +565,8 @@ def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
 
 def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
     """Real ``do_tabs`` mutations prove audit refusal and dispatch hazards."""
-    cases = [
-        ('from sys import _getframe as get_frame',
-         "_ = get_frame().f_locals['args'].undeclared_probe", 'get_frame()'),
-        ('', "_ = sys._getframe.__call__().f_locals['args'].undeclared_probe",
-         'sys._getframe.__call__()'),
-        ('from inspect import currentframe as cf',
-         "_ = cf().f_locals['args'].undeclared_probe", 'cf()'),
-        ('', "_ = getattr(sys, '_getframe')().f_locals['args']"
-         ".undeclared_probe", "getattr(sys, '_getframe')()"),
-        ('FRAME_ROUTES = [sys._getframe]',
-         "_ = FRAME_ROUTES[0]().f_locals['args'].undeclared_probe",
-         'FRAME_ROUTES[0]()'),
-        ('TAB_FRAME_ROUTES = (sys._getframe,)',
-         "_ = TAB_FRAME_ROUTES[0]().f_locals['args'].undeclared_probe",
-         'TAB_FRAME_ROUTES[0]()'),
-        ("FRAME_ROUTES = {'active': sys._getframe}",
-         "_ = FRAME_ROUTES['active']().f_locals['args'].undeclared_probe",
-         "FRAME_ROUTES['active']()"),
-        ("FRAME_ROUTES = {'active': sys._getframe}",
-         "_ = FRAME_ROUTES.get('active')()"
-         ".f_locals['args'].undeclared_probe",
-         "FRAME_ROUTES.get('active')()"),
-        ("FRAME_ROUTES = {'active': sys._getframe}",
-         "_ = FRAME_ROUTES.get('active', None)()"
-         ".f_locals['args'].undeclared_probe",
-         "FRAME_ROUTES.get('active', None)()"),
-        ('FRAME_ROUTES = [sys._getframe]',
-         "_ = FRAME_ROUTES[-1]().f_locals['args'].undeclared_probe",
-         'FRAME_ROUTES[-1]()'),
-        ('FRAME_ROUTES = (sys._getframe,)',
-         "_ = FRAME_ROUTES[-1]().f_locals['args'].undeclared_probe",
-         'FRAME_ROUTES[-1]()'),
-        ('FRAME_ROUTES = (sys._getframe,)',
-         "_ = FRAME_ROUTES[+0]().f_locals['args'].undeclared_probe",
-         'FRAME_ROUTES[+0]()'),
-        ("FRAME_ROUTES = {-1: sys._getframe}",
-         "_ = FRAME_ROUTES[-1]().f_locals['args'].undeclared_probe",
-         'FRAME_ROUTES[-1]()'),
-        ('class FrameRoutes:\n    active = sys._getframe',
-         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
-         'FrameRoutes.active()'),
-        ('class FrameRoutes:\n    active = staticmethod(sys._getframe)',
-         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
-         'FrameRoutes.active()'),
-        ('', "_ = sys.__dict__['_getframe']()"
-         ".f_locals['args'].undeclared_probe", "sys.__dict__['_getframe']()"),
-        ('', "_ = sys.__dict__.get('_getframe')()"
-         ".f_locals['args'].undeclared_probe",
-         "sys.__dict__.get('_getframe')()"),
-        ('', "_ = vars(sys)['_getframe']()"
-         ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),
-    ]
-    for index, (module_prelude, body, construct) in enumerate(cases):
+    for index, (module_prelude, body, construct) in enumerate(
+            audit_support.DECIDED_FRAME_ROUTE_CASES):
         package_name = f'mutated_cli_{index}'
         handler_module = _mutated_cli_tabs(
             package_name, module_prelude, body)
@@ -713,18 +578,8 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
         finally:
             sys.modules.pop(handler_module.__dict__['__name__'], None)
 
-    resolver_only_cases = [
-        ('exact classmethod route (resolver only)',
-         'class FrameRoutes:\n'
-         '    active = classmethod(sys._getframe)',
-         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
-         'FrameRoutes.active()'),
-        ('unresolved currentframe spelling (resolver only)', '',
-         "_ = currentframe().f_locals['args'].undeclared_probe",
-         'currentframe()'),
-    ]
     for index, (case_name, module_prelude, body, construct) in enumerate(
-            resolver_only_cases):
+            audit_support.RESOLVER_ONLY_FRAME_ROUTE_CASES):
         handler_module = _mutated_cli_tabs(
             f'resolver_only_cli_{index}', module_prelude, body)
         try:
@@ -735,71 +590,8 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
             sys.modules.pop(handler_module.__dict__['__name__'], None)
 
     # Documented gaps, not oversights: these routes stay unresolved.
-    gaps = [
-        ('comprehension result',
-         'FRAME_ROUTES = [sys._getframe]',
-         "_ = [route for route in FRAME_ROUTES][0]()"
-         ".f_locals['args'].undeclared_probe"),
-        ('instance attribute',
-         'class FrameRoutes:\n    active = sys._getframe',
-         "_ = FrameRoutes().active().f_locals['args'].undeclared_probe"),
-        ('custom descriptor class attribute',
-         'class RouteDescriptor:\n'
-         '    def __get__(self, obj, objtype=None):\n'
-         '        return sys._getframe\n'
-         'class FrameRoutes:\n'
-         '    active = RouteDescriptor()',
-         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe"),
-        ('property descriptor',
-         'class FrameRoutes:\n'
-         '    @property\n'
-         '    def active(self):\n'
-         '        return sys._getframe',
-         "_ = FrameRoutes().active().f_locals['args'].undeclared_probe"),
-        ('cached-property descriptor',
-         'import functools\n'
-         'class FrameRoutes:\n'
-         '    @functools.cached_property\n'
-         '    def active(self):\n'
-         '        return sys._getframe',
-         "_ = FrameRoutes().active().f_locals['args'].undeclared_probe"),
-        ('staticmethod subclass descriptor',
-         'class RouteStaticmethod(staticmethod):\n'
-         '    pass\n'
-         'class FrameRoutes:\n'
-         '    active = RouteStaticmethod(sys._getframe)',
-         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe"),
-        ('functools.partial',
-         'import functools\n'
-         'FRAME_ROUTE = functools.partial(sys._getframe)',
-         "_ = FRAME_ROUTE().f_locals['args'].undeclared_probe"),
-        ('exception traceback frame', '',
-         "try:\n"
-         "        raise RuntimeError('probe')\n"
-         "    except RuntimeError as err:\n"
-         "        _ = err.__traceback__.tb_frame.f_locals['args']"
-         ".undeclared_probe"),
-        ('frame acquisition in another function',
-         'def caller_namespace():\n'
-         "    return sys._getframe(1).f_locals['args']",
-         '_ = caller_namespace().undeclared_probe'),
-        ('other container type',
-         'import collections\n'
-         'FRAME_ROUTES = collections.deque((sys._getframe,))',
-         "_ = FRAME_ROUTES[0]().f_locals['args'].undeclared_probe"),
-        ('iterator protocol',
-         'FRAME_ROUTES = (sys._getframe,)',
-         "_ = next(iter(FRAME_ROUTES))()"
-         ".f_locals['args'].undeclared_probe"),
-        ('operator.attrgetter',
-         'import operator',
-         "_ = operator.attrgetter('_getframe')(sys)()"
-         ".f_locals['args'].undeclared_probe"),
-        ('runtime-built name', '',
-         "_ = getattr(sys, '_get' + 'frame')()"
-         ".f_locals['args'].undeclared_probe"),
-    ]
-    for index, (case_name, module_prelude, body) in enumerate(gaps):
+    for index, (case_name, module_prelude, body) in enumerate(
+            audit_support.KNOWN_GAP_FRAME_ROUTE_CASES):
         handler_module = _mutated_cli_tabs(
             f'known_gap_cli_{index}', module_prelude, body)
         try:
@@ -864,7 +656,8 @@ def test_cli_handlers_read_only_declared_args(tmp):
             for construct in handler_violations)
 
     stale_reads = []
-    for command, attribute, handler_name in KNOWN_INDIRECT_ARG_READS:
+    for command, attribute, handler_name in \
+            audit_support.KNOWN_INDIRECT_ARG_READS:
         detail = handler_details.get(command)
         if detail is None or detail['handler'] != handler_name:
             stale_reads.append(
