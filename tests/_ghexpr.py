@@ -45,6 +45,20 @@ _STATUS_FUNCTIONS = frozenset(('always', 'success', 'failure', 'cancelled'))
 
 def evaluate(expression, context):
     """Evaluate one expression to its Actions-style admitted value."""
+    value, _has_status_check = _evaluate(expression, context)
+    return value
+
+
+def evaluate_if(expression, context):
+    """Evaluate an ``if`` condition with Actions' default status check."""
+    value, has_status_check = _evaluate(expression, context)
+    if not has_status_check and not _status_value(context, 'success'):
+        return False
+    return _truthy(value)
+
+
+def _evaluate(expression, context):
+    """Return an admitted value and whether its parse called a status check."""
     if not isinstance(expression, str):
         raise ExpressionError('expression must be a string')
     if len(expression) > MAX_SOURCE_LENGTH:
@@ -57,7 +71,7 @@ def evaluate(expression, context):
     if not isinstance(context, Mapping):
         raise ExpressionError('context must be a mapping')
     parser = _Parser(_tokenize(source), context)
-    return parser.parse()
+    return parser.parse(), parser.has_status_check
 
 
 def _unwrap(expression):
@@ -171,6 +185,12 @@ class _Parser:
         self._context = context
         self._index = 0
         self._depth = 0
+        self._has_status_check = False
+
+    @property
+    def has_status_check(self):
+        """Whether the completed parse called any status-check function."""
+        return self._has_status_check
 
     def parse(self):
         value = self._parse_or()
@@ -245,6 +265,7 @@ class _Parser:
                 raise ExpressionError('status functions take no arguments')
             if name not in _STATUS_FUNCTIONS:
                 raise ExpressionError(f'unsupported function: {name}')
+            self._has_status_check = True
             return self._status_value(name)
         path = [name]
         while self._accept('.'):
@@ -252,18 +273,7 @@ class _Parser:
         return self._lookup(path)
 
     def _status_value(self, name):
-        if name == 'always':
-            return True
-        status = self._context.get('status')
-        if not isinstance(status, Mapping):
-            raise ExpressionError('context.status must be a mapping')
-        if name not in status:
-            raise ExpressionError(f'missing status value: {name}')
-        value = status[name]
-        if not isinstance(value, bool):
-            raise ExpressionError(
-                f'{name}() status value must be a boolean, got {value!r}')
-        return value
+        return _status_value(self._context, name)
 
     def _lookup(self, path):
         value = self._context
@@ -306,6 +316,22 @@ class _Parser:
                 f'expected {kind}, found {token.value or token.kind}')
         self._index += 1
         return token
+
+
+def _status_value(context, name):
+    """Return one validated status-check value from the caller context."""
+    if name == 'always':
+        return True
+    status = context.get('status')
+    if not isinstance(status, Mapping):
+        raise ExpressionError('context.status must be a mapping')
+    if name not in status:
+        raise ExpressionError(f'missing status value: {name}')
+    value = status[name]
+    if not isinstance(value, bool):
+        raise ExpressionError(
+            f'{name}() status value must be a boolean, got {value!r}')
+    return value
 
 
 def _admit(value, reason):

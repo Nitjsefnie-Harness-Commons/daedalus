@@ -11,6 +11,7 @@ from _ghexpr import (  # noqa: E402
     MAX_TOKEN_COUNT,
     ExpressionError,
     evaluate,
+    evaluate_if,
 )
 
 
@@ -79,6 +80,32 @@ def test_run_state_status_functions_come_from_the_context(tmp):
     assert evaluate('failure() && !cancelled()', context) is True
     assert evaluate('success()', context) is False
     assert evaluate('cancelled()', context) is False
+
+
+def test_if_applies_success_unless_a_status_check_is_parsed(tmp):
+    """Step conditions inherit success only without a status function."""
+    del tmp
+    states = {
+        'success': {'success': True, 'failure': False, 'cancelled': False},
+        'failure': {'success': False, 'failure': True, 'cancelled': False},
+        'cancelled': {'success': False, 'failure': False, 'cancelled': True},
+    }
+    for label, expected in (
+            ('success', True), ('failure', False), ('cancelled', False)):
+        actual = evaluate_if('ready', {
+            'ready': True,
+            'status': states[label],
+        })
+        assert actual is expected, (label, actual)
+    assert evaluate_if('false || failure()', {
+        'status': states['failure'],
+    }) is True
+    assert evaluate_if('false || cancelled()', {
+        'status': states['cancelled'],
+    }) is True
+    assert evaluate_if('false || always()', {
+        'status': states['cancelled'],
+    }) is True
 
 
 def test_success_requires_a_boolean_status_value(tmp):
