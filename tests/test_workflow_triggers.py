@@ -153,6 +153,12 @@ def test_workflow_trigger_gate_rejects_quote_collisions_and_accepts_comments(
         ('block-quote-collision',
          "    paths-ignore:\n      - don't.md  # docs\n",
          '    paths-ignore:\n      - "don\'t.md  # docs"\n', False),
+        ('flow-trailing-comment',
+         "    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']  # "
+         "docs and metadata\n",
+         "    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']  # "
+         "docs and metadata\n",
+         True),
     )
     for name, push_value, pull_value, accepted in cases:
         workflows = Path(tmp) / name

@@ -364,6 +364,20 @@ def test_block_plain_brackets_do_not_start_flow_quote_context(tmp):
     ]) == {'paths-ignore': ['foo[bar, "baz']}
 
 
+def test_flow_sequence_drops_trailing_comments_outside_quotes(tmp):
+    """A flow comment is dropped without touching a quoted hash."""
+    del tmp
+    cases = (
+        ("['**/*.md', 'LICENSE', '.gitignore']  # docs and metadata",
+         ['**/*.md', 'LICENSE', '.gitignore']),
+        ('["a # b", \'c\']  # trailing', ['a # b', 'c']),
+    )
+    for spelling, expected in cases:
+        assert _workflow_path_filters(
+            [f'    paths-ignore: {spelling}']) == {
+                'paths-ignore': expected}
+
+
 def test_path_filters_keep_paths_keys_separate(tmp):
     """Both filter keys are returned independently for one event."""
     del tmp
