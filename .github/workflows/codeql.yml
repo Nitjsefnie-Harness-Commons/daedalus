@@ -52,16 +52,23 @@ jobs:
       contents: read
 
     strategy:
-      # Both shipped languages. The extension service worker, the page relay
-      # and the dashboard modules are the half of this repository that runs
-      # in someone else's browser, so leaving them unanalysed would exempt
-      # exactly the code with the widest exposure.
+      # Both shipped languages, plus the workflows themselves. The extension
+      # service worker, the page relay and the dashboard modules are the half
+      # of this repository that runs in someone else's browser, so leaving
+      # them unanalysed would exempt exactly the code with the widest
+      # exposure. `actions` covers the other privileged half: a release that
+      # attests provenance, a ratchet that pushes to `main` with a deploy
+      # key, and a `/claim` command driven by issue comments. actionlint and
+      # zizmor already read those files for known-wrong shapes; CodeQL asks a
+      # dataflow question of them instead, and the two find different things.
       fail-fast: false
       matrix:
         include:
           - language: python
             build-mode: none
           - language: javascript-typescript
+            build-mode: none
+          - language: actions
             build-mode: none
 
     steps:
