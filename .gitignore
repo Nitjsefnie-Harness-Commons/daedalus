@@ -158,6 +158,7 @@
 !/tests/_boundary_env.py
 !/tests/_bridge.py
 !/tests/_cdpharness.py
+!/tests/_cli_arg_audit_support.py
 !/tests/_evalpages.py
 !/tests/_jsread.py
 !/tests/_jsroute.py

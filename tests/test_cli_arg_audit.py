@@ -7,28 +7,27 @@ each rule is pinned with, so a change that weakens or over-tightens the
 audit fails one of these cheap tests instead of hiding inside the
 39-handler scan.
 
-The audit is a whitelist, not a proof of the inverse. It sees reads made
-through the namespace parameter's own name and refuses the reflective
-routes it names: ``locals()``, ``globals()``, ``eval``, ``exec``, a
-no-argument ``vars()``, and any named access to ``sys._getframe`` or
-``inspect.currentframe`` (including aliases imported at module scope or
-inside the handler).
-A handler that reaches its namespace without naming the parameter or one
-of those routes is outside what this audit checks; other dynamic routes
-remain undecidable.
+The audit refuses reads through the namespace parameter's own name outside
+four permitted shapes: direct attributes, constant-name ``getattr``,
+constant-name ``hasattr``, and constant mapping reads through ``vars(args)``
+or ``args.__dict__``. It also refuses the named reflective calls ``locals()``,
+``globals()``, ``eval``, ``exec`` and no-argument ``vars()``, plus routes to
+``sys._getframe`` and ``inspect.currentframe`` when statically constant
+access from the handler's globals resolves to those routes. A route
+constructed dynamically is outside what this audit checks; this is a bounded
+check, not a completeness claim.
 """
 import argparse
 import ast
-import importlib
 import inspect
-import shutil
-import subprocess
 import sys
 import textwrap
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _cli_arg_audit_support import resolve_frame_value  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
@@ -180,19 +179,10 @@ def _frame_imports(function):
 
 
 def _frame_value(node, function, handler_globals, imports):
-    """Resolve a simple name/attribute chain without executing source."""
-    if isinstance(node, ast.Name):
-        if node.id in imports:
-            return imports[node.id]
-        if _scope_binds(function, node.id):
-            return _UNRESOLVED
-        return handler_globals.get(node.id, _UNRESOLVED)
-    if isinstance(node, ast.Attribute):
-        base = _frame_value(node.value, function, handler_globals, imports)
-        for module_name, attr in _FRAME_ROUTE_ATTRS.items():
-            if base is _FRAME_ROUTE_MODULES[module_name] and node.attr == attr:
-                return getattr(base, attr)
-    return _UNRESOLVED
+    """Resolve constant access without executing handler source."""
+    return resolve_frame_value(
+        node, function, handler_globals, imports, _UNRESOLVED,
+        _scope_binds, _constant_string)
 
 
 def _unknown_frame_route(node, function, handler_globals, imports):
@@ -209,6 +199,9 @@ def _unknown_frame_route(node, function, handler_globals, imports):
 
 def _frame_route_access(node, function, handler_globals, imports):
     """Return True when ``node`` names or accesses a frame route."""
+    if _is_frame_route(_frame_value(
+            node, function, handler_globals, imports)):
+        return True
     if isinstance(node, ast.Call):
         if _is_frame_route(_frame_value(
                 node.func, function, handler_globals, imports)):
@@ -255,11 +248,10 @@ def _constant_dict_subscript(node):
 def _permitted_namespace_read(name):
     """Resolve a use of the namespace parameter, or None for an escape.
 
-    Only five direct reads are permitted: ``args.attr``,
-    ``getattr(args, 'attr'[, default])``, ``hasattr(args, 'attr')``,
-    ``vars(args)['attr']`` and ``args.__dict__['attr']``. Every other
-    mention of the parameter is an escape: aliasing, containers, calls,
-    returns, stores.
+    Four read shapes are permitted: ``args.attr``, constant-name
+    ``getattr``/``hasattr``, and constant mapping reads through ``vars(args)``
+    or ``args.__dict__``. Every other mention of the parameter is an escape:
+    aliasing, containers, calls, returns, stores.
     """
     parent = name._parent
     if isinstance(parent, ast.Attribute) and parent.value is name:
@@ -291,8 +283,9 @@ def _handler_arg_violations(function, args_name, allowed,
     """Return (reads, violations) for one handler's namespace use.
 
     Permitted reads are checked against ``allowed``; every other mention
-    of the parameter is a namespace escape, and reflective calls are
-    refused by name. A nested callable whose own scope binds the name has
+    of the parameter is a namespace escape, and reflective calls or
+    statically resolved frame routes are refused. A nested callable whose own
+    scope binds the name has
     only its body skipped: its decorators, defaults and annotations are
     evaluated in the enclosing scope — the handler's — and stay audited.
     A comprehension whose target binds the name shadows it for the whole
@@ -375,24 +368,28 @@ def _audit_fake_handler(body, allowed=('cmd', 'json')):
     return violations
 
 
-def _mutated_cli_tabs(tmp, package_name, module_import, body):
-    """Copy the CLI package and insert one real ``do_tabs`` mutation."""
-    package = Path(tmp) / package_name
-    shutil.copytree(_util.ROOT / 'daedalus_cli', package)
-    module = package / 'commands_eval.py'
-    source = module.read_text(encoding='utf-8')
-    if module_import:
-        source = source.replace(
-            'import sys\n', f'import sys\n{module_import}\n', 1)
+def _mutated_cli_tabs(package_name, module_prelude, body):
+    """Compile one real handler module in memory with a mutation."""
+    source = (_util.ROOT / 'daedalus_cli' / 'commands_eval.py').read_text(
+        encoding='utf-8')
+    source = source.replace(
+        'import sys\n', f'import sys\n{module_prelude}\n', 1)
     source = source.replace(
         'def do_tabs(args):\n', f'def do_tabs(args):\n    {body}\n', 1)
-    module.write_text(source, encoding='utf-8')
-    sys.path.insert(0, str(tmp))
-    return importlib.import_module(f'{package_name}.cli')
+    filename = f'<mutated daedalus cli handler {package_name}>'
+    module_name = f'{package_name}.commands_eval'
+    module = types.ModuleType(module_name)
+    module.__file__ = filename
+    module.__package__ = 'daedalus_cli'
+    module.__source__ = source
+    sys.modules[module_name] = module
+    # pylint: disable=exec-used
+    exec(compile(source, filename, 'exec'), module.__dict__)
+    return module
 
 
-def _audit_real_tabs_handler(cli_module):
-    """Audit the copied package's actual dispatched ``do_tabs`` handler."""
+def _audit_real_tabs_handler(handler_module):
+    """Audit an in-memory module's actual dispatched ``do_tabs`` handler."""
     from daedalus_cli.parser import build_parser
 
     parser = build_parser()
@@ -401,8 +398,8 @@ def _audit_real_tabs_handler(cli_module):
         if isinstance(action, argparse._SubParsersAction))
     allowed = _namespace_dests(parser._actions) | _namespace_dests(
         subparsers.choices['tabs']._actions)
-    handler = cli_module.DISPATCH['tabs']
-    tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
+    handler = handler_module.do_tabs
+    tree = ast.parse(handler_module.__source__)
     function = next(
         node for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
@@ -412,19 +409,28 @@ def _audit_real_tabs_handler(cli_module):
     return violations
 
 
-def _assert_real_tabs_dispatch_crashes(tmp, package_name):
+def _assert_real_tabs_dispatch_crashes(handler_module):
     """The same mutation must fail real dispatch, not just the audit."""
-    result = subprocess.run(
-        [sys.executable, '-m', f'{package_name}.cli', 'tabs'],
-        cwd=tmp, capture_output=True, text=True, check=False)
-    assert result.returncode != 0, result.stdout + result.stderr
-    assert "AttributeError: 'Namespace' object has no attribute " \
-        "'undeclared_probe'" in result.stderr, result.stderr
+    from daedalus_cli import cli
+
+    original_handler = cli.DISPATCH['tabs']
+    original_argv = sys.argv
+    cli.DISPATCH['tabs'] = handler_module.do_tabs
+    sys.argv = ['daedalus', 'tabs']
+    try:
+        cli.main()
+    except AttributeError as error:
+        assert str(error) == \
+            "'Namespace' object has no attribute 'undeclared_probe'", error
+    else:
+        assert False, 'real dispatch did not read undeclared_probe'
+    finally:
+        cli.DISPATCH['tabs'] = original_handler
+        sys.argv = original_argv
 
 
 def test_cli_audit_reports_suppressed_destination(tmp):
     """A handler read of argparse's absent ``version`` is reported."""
-    del tmp
     from daedalus_cli.parser import build_parser
 
     parser = build_parser()
@@ -439,7 +445,6 @@ def test_cli_audit_reports_suppressed_destination(tmp):
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
     """Each permitted read passes when declared and is reported when not."""
-    del tmp
     cases = [
         ('args.json', 'args.undeclared_probe'),
         ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')"),
@@ -456,7 +461,6 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
 
 def test_cli_audit_reports_namespace_escapes(tmp):
     """Every other mention of the namespace parameter is an escape."""
-    del tmp
     cases = [
         ('other = args', 'other = args'),
         ('other = args\nthird = other\nthird.x', 'other = args'),
@@ -477,7 +481,6 @@ def test_cli_audit_reports_namespace_escapes(tmp):
 
 def test_cli_audit_respects_inner_scope_bindings(tmp):
     """An inner ``args`` parameter shadows; a closure over it is audited."""
-    del tmp
     shadowed = (
         'def inner(args):\n'
         '    args.undeclared_probe\n'
@@ -491,7 +494,6 @@ def test_cli_audit_respects_inner_scope_bindings(tmp):
 
 def test_cli_audit_sees_shadowing_callable_defaults(tmp):
     """A nested callable's defaults are evaluated in the handler's scope."""
-    del tmp
     cases = [
         'def inner(args=args):\n    return args.undeclared_probe\ninner()',
         'f = lambda args=args: args.undeclared_probe\nf()',
@@ -503,7 +505,6 @@ def test_cli_audit_sees_shadowing_callable_defaults(tmp):
 
 def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
     """A shadowing def's decorators and annotations are audited too."""
-    del tmp
     decorated = '@consume(args)\ndef inner(args):\n    pass'
     assert _audit_fake_handler(decorated) == [
         'namespace escape: consume(args)']
@@ -512,8 +513,7 @@ def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
 
 
 def test_cli_audit_refuses_reflective_namespace_access(tmp):
-    """Every named frame-route access is an escape, aliases included."""
-    del tmp
+    """Named reflective calls and resolved frame routes are escapes."""
     cases = [
         ("_ = locals()['args'].undeclared_probe", 'locals()'),
         ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
@@ -548,9 +548,8 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
 def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
     """Real ``do_tabs`` mutations fail audit and real dispatch alike.
 
-    Each copied package keeps the handler in its module, so these controls
-    prove the refusal is about an actual dispatch hazard rather than a style
-    rule applied only to synthetic source snippets.
+    Each in-memory module keeps the handler in its real module globals, so
+    these controls prove refusal is about an actual dispatch hazard.
     """
     cases = [
         ('from sys import _getframe as get_frame',
@@ -559,20 +558,37 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
          'sys._getframe.__call__()'),
         ('from inspect import currentframe as cf',
          "_ = cf().f_locals['args'].undeclared_probe", 'cf()'),
+        ('', "_ = getattr(sys, '_getframe')().f_locals['args']"
+         ".undeclared_probe", "getattr(sys, '_getframe')()"),
+        ('FRAME_ROUTES = [sys._getframe]',
+         "_ = FRAME_ROUTES[0]().f_locals['args'].undeclared_probe",
+         'FRAME_ROUTES[0]()'),
+        ("FRAME_ROUTES = {'active': sys._getframe}",
+         "_ = FRAME_ROUTES['active']().f_locals['args'].undeclared_probe",
+         "FRAME_ROUTES['active']()"),
+        ('class FrameRoutes:\n    active = sys._getframe',
+         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
+         'FrameRoutes.active()'),
+        ('', "_ = sys.__dict__['_getframe']()"
+         ".f_locals['args'].undeclared_probe", "sys.__dict__['_getframe']()"),
+        ('', "_ = vars(sys)['_getframe']()"
+         ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),
     ]
-    for index, (module_import, body, construct) in enumerate(cases):
+    for index, (module_prelude, body, construct) in enumerate(cases):
         package_name = f'mutated_cli_{index}'
-        cli_module = _mutated_cli_tabs(
-            tmp, package_name, module_import, body)
-        violations = _audit_real_tabs_handler(cli_module)
-        assert any(construct in violation for violation in violations), \
-            (module_import, body, violations)
-        _assert_real_tabs_dispatch_crashes(tmp, package_name)
+        handler_module = _mutated_cli_tabs(
+            package_name, module_prelude, body)
+        try:
+            violations = _audit_real_tabs_handler(handler_module)
+            assert any(construct in violation for violation in violations), \
+                (module_prelude, body, violations)
+            _assert_real_tabs_dispatch_crashes(handler_module)
+        finally:
+            sys.modules.pop(handler_module.__dict__['__name__'], None)
 
 
 def test_cli_audit_respects_comprehension_shadowing(tmp):
     """A comprehension target that binds the name shadows it there."""
-    del tmp
     assert _audit_fake_handler('_ = [args.json for args in values]') == []
     assert _audit_fake_handler('[args.json for value in values]') == []
     assert _audit_fake_handler("vars(args)['json']") == []
@@ -580,7 +596,6 @@ def test_cli_audit_respects_comprehension_shadowing(tmp):
 
 def test_cli_audit_sees_a_shadowing_comprehensions_iterable(tmp):
     """The outermost iterable runs in the handler and stays audited."""
-    del tmp
     assert _audit_fake_handler(
         '_ = [args.value for args in args.undeclared_probe]') == [
         'args.undeclared_probe']
@@ -588,7 +603,6 @@ def test_cli_audit_sees_a_shadowing_comprehensions_iterable(tmp):
 
 def test_cli_audit_respects_nested_local_bindings(tmp):
     """A nested function that assigns the name binds its own local."""
-    del tmp
     shadowed = (
         'def inner():\n'
         "    args = type('T', (), {'json': True})()\n"
@@ -599,17 +613,15 @@ def test_cli_audit_respects_nested_local_bindings(tmp):
 def test_cli_handlers_read_only_declared_args(tmp):
     """Dispatched handlers read only their parser's declared arguments.
 
-    The audit sees reads made through the namespace parameter's own name
-    and refuses the reflective routes it names: ``locals()``,
-    ``globals()``, ``eval``, ``exec``, a no-argument ``vars()``, and
-    any named access to ``sys._getframe`` or ``inspect.currentframe``
-    (including aliases imported at module scope or inside the handler);
-    a handler that reaches its
-    namespace without naming the parameter or one of those routes is
-    outside what this audit checks; other dynamic routes remain
-    undecidable.
+    The audit refuses reads through the namespace parameter's own name outside
+    four permitted shapes: direct attributes, constant-name ``getattr``,
+    constant-name ``hasattr``, and constant mapping reads through
+    ``vars(args)`` or ``args.__dict__``. It also refuses named reflective calls
+    and routes to ``sys._getframe`` or ``inspect.currentframe`` when statically
+    constant access from the handler's globals resolves to those routes. A
+    route constructed dynamically is outside what this audit checks; this is a
+    bounded check, not a completeness claim.
     """
-    del tmp
     from daedalus_cli.cli import DISPATCH
     from daedalus_cli.parser import build_parser
 
@@ -665,7 +677,6 @@ def test_cli_handlers_read_only_declared_args(tmp):
 
 def test_cli_dispatch_matches_parser_subcommands(tmp):
     """Dispatch and the parser expose exactly the same subcommand names."""
-    del tmp
     from daedalus_cli.cli import DISPATCH
     from daedalus_cli.parser import build_parser
 
