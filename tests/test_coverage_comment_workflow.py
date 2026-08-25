@@ -293,6 +293,11 @@ def test_workflow_scalar_reader_distinguishes_missing_and_unsafe_shapes(tmp):
     _yaml_raises(lambda: job_scalar(
         'jobs:\n  sample:\n    if: "true"\n', 'sample', 'if'),
         'quoted scalar')
+    _yaml_raises(lambda: job_scalar(
+        'jobs:\n  sample:\n    if: >-\n'
+        '      first\n'
+        '    && false\n', 'sample', 'if'),
+        'unsupported YAML mapping line')
     _yaml_raises(lambda: step_scalar(
         'jobs:\n  sample:\n    steps:\n      name: Download\n',
         'sample', 'Download', 'if'), 'not a sequence')
