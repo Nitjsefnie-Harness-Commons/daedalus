@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _yamlread import (  # noqa: E402
-    YAMLReadError, _comment, job_scalar, step_scalar,
+    YAMLReadError, _comment, job_scalar, step_scalar, step_scalars,
 )
 
 
@@ -144,6 +144,80 @@ def test_non_ascii_structural_whitespace_is_refused(tmp):
         'jobs:\n sample:\n  steps:\n'
         '   - name: target\n     \u00a0# comment\n     if: z',
         'unsupported YAML mapping line')
+
+
+def _coverage_workflow():
+    """Read the privileged workflow whose steps must remain trusted."""
+    path = _util.ROOT / '.github/workflows/coverage-comment.yml'
+    return path.read_text(encoding='utf-8')
+
+
+def _assert_no_privileged_checkout(workflow):
+    """Refuse checkout by the decoded identity of every step action."""
+    uses = step_scalars(workflow, 'comment', 'uses')
+    assert uses is not None, 'privileged workflow steps were not decoded'
+    for value in uses:
+        identity = value.split('@', 1)[0].casefold()
+        assert identity != 'actions/checkout', (
+            f'privileged workflow decodes checkout action: {value}')
+
+
+def _assert_checkout_mutation_refused(workflow):
+    """Require one real-workflow checkout mutation to fail the contract."""
+    try:
+        _assert_no_privileged_checkout(workflow)
+    except AssertionError as error:
+        assert 'decodes checkout action' in str(error), str(error)
+        return
+    raise AssertionError('decoded checkout mutation was accepted')
+
+
+def test_step_scalar_list_decodes_each_uses_spelling(tmp):
+    """Plain, quoted, and escaped fields return decoded action values."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - uses: owner/one@abc\n'
+        "      - 'uses': 'owner/two@def'\n"
+        '      - "u\\x73es": "actions\\x2fcheckout@123"\n'
+        '      - run: echo harmless\n')
+    assert step_scalars(source, 'sample', 'uses') == [
+        'owner/one@abc', 'owner/two@def', 'actions/checkout@123']
+
+
+def test_privileged_workflow_has_no_decoded_checkout(tmp):
+    """Every action in the trusted workflow is decoded before policy."""
+    del tmp
+    _assert_no_privileged_checkout(_coverage_workflow())
+
+
+def test_escaped_checkout_value_mutation_is_refused(tmp):
+    """The review's escaped checkout value cannot evade decoded policy."""
+    del tmp
+    workflow = _coverage_workflow()
+    step = (
+        '      - name: Check out pull-request code\n'
+        '        uses: "actions\\x2fcheckout@'
+        '3d3c42e5aac5ba805825da76410c181273ba90b1"\n'
+        '        with:\n'
+        '          ref: ${{ github.event.workflow_run.head_sha }}\n'
+        '          persist-credentials: false\n\n')
+    mutated = workflow.replace('    steps:\n', '    steps:\n' + step, 1)
+    assert mutated != workflow, 'real privileged steps were not mutated'
+    _assert_checkout_mutation_refused(mutated)
+
+
+def test_quoted_and_escaped_uses_keys_are_refused(tmp):
+    """Equivalent decoded uses keys cannot hide a checkout action."""
+    del tmp
+    workflow = _coverage_workflow()
+    fields = ("        'uses': ", '        "u\\x73es": ')
+    action = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+    for field in fields:
+        step = '      - name: Checkout spelling\n' + field + action + '\n'
+        mutated = workflow.replace('    steps:\n', '    steps:\n' + step, 1)
+        assert mutated != workflow, field
+        _assert_checkout_mutation_refused(mutated)
 
 
 if __name__ == '__main__':

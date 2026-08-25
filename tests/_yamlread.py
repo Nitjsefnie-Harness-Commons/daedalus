@@ -132,6 +132,35 @@ def step_scalar(workflow, job, step, key):
     return _scalar_entry(lines, *step_body, step_indent, key)
 
 
+def step_scalars(workflow, job, key):
+    """Return decoded values of `key` from every step in a named job."""
+    lines = _lines(workflow)
+    jobs = _decoded_mapping_entry(lines, 0, len(lines), -1, 'jobs')
+    if jobs is None:
+        return None
+    if jobs.rest.strip(' '):
+        raise YAMLReadError('jobs is not a mapping')
+    jobs_body = _section(lines, jobs.index, jobs.indent)
+    job_entry = _decoded_mapping_entry(
+        lines, *jobs_body, jobs.indent, job)
+    if job_entry is None:
+        return None
+    if job_entry.rest.strip(' '):
+        raise YAMLReadError(f'job {job!r} is not a mapping')
+    job_body = _section(lines, job_entry.index, job_entry.indent)
+    steps = _decoded_mapping_entry(
+        lines, *job_body, job_entry.indent, 'steps')
+    if steps is None:
+        return None
+    if steps.rest.strip(' '):
+        raise YAMLReadError(f'job {job!r} steps are not a sequence')
+    steps_body = _section(lines, steps.index, steps.indent)
+    _require_sequence_body(
+        lines, *steps_body, steps.indent, f'job {job!r} steps')
+    return _sequence_scalar_values(
+        lines, *steps_body, steps.indent, key)
+
+
 def _lines(workflow):
     """Split source while retaining whether each physical line ended."""
     if not isinstance(workflow, str):
@@ -450,6 +479,36 @@ def _scalar_mapping(lines, start, end, parent_indent, owner):
             raise YAMLReadError(f'duplicate mapping key: {key}')
         values[key] = _decode_inline_scalar(
             raw_value, f'{owner} value for {key!r}')
+    return values
+
+
+def _sequence_scalar_values(lines, start, end, parent_indent, key):
+    """Decode one scalar field wherever it occurs in a sequence mapping."""
+    first = _first_child(lines, start, end, parent_indent)
+    item_indent = _indent(lines[first])
+    values = []
+    seen = False
+    for index in range(start, end):
+        if not _meaningful(lines[index]):
+            continue
+        indent = _indent(lines[index])
+        text, _ended = lines[index]
+        field = text[indent:]
+        if indent == item_indent and field.startswith('- '):
+            seen = False
+            field = field[2:]
+        elif indent != item_indent + 2:
+            continue
+        raw_key, raw_value = _split_mapping_field(field, 'step')
+        field_key = _decode_inline_scalar(raw_key, 'step key')
+        if field_key != key:
+            if raw_value.strip(' ').startswith(("'", '"')):
+                _decode_inline_scalar(raw_value, f'step value for {field_key}')
+            continue
+        if seen:
+            raise YAMLReadError(f'duplicate mapping key: {key}')
+        values.append(_decode_inline_scalar(raw_value, f'step {key}'))
+        seen = True
     return values
 
 
