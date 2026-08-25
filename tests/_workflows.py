@@ -329,7 +329,7 @@ def _workflow_triggers(workflow, filename='workflow'):
     for index, line in enumerate(lines):
         if _indent(line):
             continue
-        entry = _mapping_key(line.strip(), filename)
+        entry = _mapping_key(line, filename)
         if entry is None or entry[0] != 'on':
             continue
         if on_index is not None:
