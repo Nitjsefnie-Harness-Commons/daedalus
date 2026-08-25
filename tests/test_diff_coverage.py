@@ -110,7 +110,7 @@ def test_added_lines_decode_git_quoted_paths(tmp):
 
 
 def test_a_deleted_file_adds_nothing(tmp):
-    """`+++ /dev/null` must not become a path, nor eat the next file.
+    """A deletion adds nothing, and the next file is still measured.
 
     The deletion is followed by a real addition, because a deletion hunk on
     its own carries no `+` record and would hold however it was parsed.
@@ -220,8 +220,8 @@ def test_a_report_naming_no_changed_path_says_so(tmp):
     added = {'pkg/mod.py': {1, 2}}
     rows, covered, total = diff_coverage.measure(measured, added)
     body = diff_coverage.render(rows, covered, total,
-                                diff_coverage.unmeasured_source(measured,
-                                                                added))
+                                diff_coverage.unmeasured_sources(measured,
+                                                                 added))
     assert 'names none of the changed paths' in body, body
     assert 'no patch coverage to report' not in body, body
 
@@ -233,9 +233,24 @@ def test_a_change_confined_to_tests_still_reads_as_benign(tmp):
     added = {'tests/test_mod.py': {1}}
     rows, covered, total = diff_coverage.measure(measured, added)
     body = diff_coverage.render(rows, covered, total,
-                                diff_coverage.unmeasured_source(measured,
-                                                                added))
+                                diff_coverage.unmeasured_sources(measured,
+                                                                 added))
     assert 'no patch coverage to report' in body, body
+
+
+def test_a_measured_file_cannot_hide_an_unmeasured_source(tmp):
+    """A partial path mismatch is named and cannot claim perfect coverage."""
+    del tmp
+    measured = {'pkg/a.py': {1: 1}}
+    added = {'pkg/a.py': {1}, 'pkg/b.py': {1}}
+    rows, covered, total = diff_coverage.measure(measured, added)
+    missing = diff_coverage.unmeasured_sources(measured, added)
+    body = diff_coverage.render(rows, covered, total, missing)
+    assert missing == {'pkg/b.py'}, missing
+    assert '`pkg/b.py`' in body, body
+    assert '**100.0%** of added lines covered' not in body, body
+    assert 'of measured added lines' in body, body
+    assert 'Every measured added line was reached' in body, body
 
 
 def test_missed_lines_are_collapsed_into_spans(tmp):

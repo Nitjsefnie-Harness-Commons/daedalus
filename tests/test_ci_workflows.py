@@ -539,7 +539,7 @@ def test_the_coverage_commenter_guards_its_privileged_shell(tmp):
     # Actions' default shell is `bash -e` without pipefail, so in
     # `x="$(gh api | jq ...)"` a failed API call reads as an empty answer.
     guarded = re.findall(r'run: \|\n\s+set -euo pipefail\n', workflow)
-    assert len(guarded) == workflow.count('run: |') == 3, workflow
+    assert len(guarded) == workflow.count('run: |') == 4, workflow
     assert 'cancel-in-progress: true' in workflow, workflow
     # The destination comes from the event; the artifact's copy is compared.
     assert 'repos/$REPO/commits/$HEAD_SHA/pulls' in workflow, workflow

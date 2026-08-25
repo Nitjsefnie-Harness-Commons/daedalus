@@ -1,6 +1,6 @@
 name: coverage comment
 
-# Post the patch-coverage comment after the tests workflow succeeds.
+# Post or invalidate the patch-coverage comment after the tests workflow.
 #
 # WHY THIS IS A SEPARATE WORKFLOW. `tests` checks out and executes the
 # proposed tree, so that job must not also hold the token that can write pull
@@ -52,14 +52,12 @@ concurrency:
 
 jobs:
   comment:
-    # Only a successful run. A red suite means the coverage run may have
-    # measured a partial pass — a failing suite contributes no hits — so a
-    # percentage derived from it would understate what the change actually
-    # covers, and a wrong number is worse than no number on the one comment
-    # whose entire job is to state one.
+    # Every completed, non-cancelled run gets a chance to replace an old
+    # percentage with a plainly labelled "not measured" marker. Otherwise a
+    # red run leaves the previous commit's number looking current.
     if: >-
       github.event.workflow_run.event == 'pull_request'
-      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -79,7 +77,7 @@ jobs:
           # comment silently never appears and nothing goes red.
           if ! gh api -H 'Cache-Control: no-cache' --paginate \
             "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
-            --jq '.[]' > artifacts.json
+            --jq '.artifacts[]' > artifacts.json
           then
             echo "listing the artifacts of run $RUN_ID failed" >&2
             exit 1
@@ -100,7 +98,6 @@ jobs:
 
       - name: Resolve the target pull request from the event
         id: pr
-        if: steps.artifact.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -138,10 +135,75 @@ jobs:
               exit 1
               ;;
           esac
+          if ! current_sha="$(gh api -H 'Cache-Control: no-cache' \
+            "repos/$REPO/pulls/$numbers" --jq '.head.sha')"
+          then
+            echo "reading the current head of pull request $numbers failed" \
+              >&2
+            exit 1
+          fi
+          if [ -z "$current_sha" ]; then
+            echo "pull request $numbers has no current head SHA" >&2
+            exit 1
+          fi
+          echo "current_sha=$current_sha" >> "$GITHUB_OUTPUT"
+          if [ "$current_sha" != "$HEAD_SHA" ]; then
+            echo "run $HEAD_SHA is stale; current pull request head is " \
+              "$current_sha"
+            echo 'stale=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "number=$numbers" >> "$GITHUB_OUTPUT"
+          echo 'stale=false' >> "$GITHUB_OUTPUT"
+
+      - name: Mark missing patch coverage
+        if: >-
+          steps.artifact.outputs.present != 'true'
+          && steps.pr.outputs.stale != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+
+          marker='<!-- daedalus-diff-coverage -->'
+          {
+            printf '%s\n\n' "$marker"
+            printf 'Patch coverage was not measured for commit %s.\n' \
+              "$HEAD_SHA"
+          } > comment.md
+          if ! gh api -H 'Cache-Control: no-cache' --paginate \
+            "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '.[]' > comments.json
+          then
+            echo "listing the comments on $PR_NUMBER failed" >&2
+            exit 1
+          fi
+          existing="$(
+            jq -s 'map(select(.user.login == "github-actions[bot]" and
+              ((.body // "") | startswith(
+                "<!-- daedalus-diff-coverage -->")))) |
+              .[0].id // empty' comments.json
+          )"
+          case "$existing" in
+            '') echo 'no patch-coverage marker to update' ;;
+            *[!0-9]*)
+              echo "comment id is not only digits: $existing" >&2
+              exit 1
+              ;;
+            *)
+              gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
+                -F body=@comment.md >/dev/null
+              echo "marked patch coverage as unavailable for $HEAD_SHA"
+              ;;
+          esac
 
       - name: Download the comment artifact
-        if: steps.artifact.outputs.present == 'true'
+        if: >-
+          steps.artifact.outputs.present == 'true'
+          && steps.pr.outputs.stale != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: diff-coverage-comment
@@ -149,7 +211,9 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Post or update the pull request comment
-        if: steps.artifact.outputs.present == 'true'
+        if: >-
+          steps.artifact.outputs.present == 'true'
+          && steps.pr.outputs.stale != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
