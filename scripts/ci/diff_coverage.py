@@ -27,15 +27,53 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 # `+++ b/path`, with git's optional quoting and the /dev/null of a deletion.
-_TARGET = re.compile(r'^\+\+\+ (?:b/)?(.*)$')
+_TARGET = re.compile(r'^\+\+\+ (.*)$')
 # `@@ -old,count +new,count @@`; the counts are optional and mean 1.
 _HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
+
+
+def _decode_git_path(value):
+    """Decode a quoted Git path and remove its diff-side prefix."""
+    if not value.startswith('"'):
+        return value[2:] if value.startswith('b/') else value
+    escaped = value[1:-1] if value.endswith('"') else value[1:]
+    escapes = {
+        '\\': b'\\', '"': b'"', 'a': b'\a', 'b': b'\b',
+        'f': b'\f', 'n': b'\n', 'r': b'\r', 't': b'\t',
+        'v': b'\v',
+    }
+    decoded = bytearray()
+    index = 0
+    while index < len(escaped):
+        char = escaped[index]
+        if char != '\\':
+            decoded.extend(char.encode('utf-8'))
+            index += 1
+            continue
+        octal = escaped[index + 1:index + 4]
+        if len(octal) == 3 and all(item in '01234567' for item in octal):
+            decoded.append(int(octal, 8))
+            index += 4
+            continue
+        if index + 1 == len(escaped):
+            decoded.extend(b'\\')
+            index += 1
+            continue
+        escaped_char = escaped[index + 1]
+        decoded.extend(escapes.get(escaped_char,
+                                   escaped_char.encode('utf-8')))
+        index += 2
+    value = decoded.decode('utf-8')
+    return value[2:] if value.startswith('b/') else value
 
 
 def executable_lines(coverage_xml):
     """Return {path: {line number: times hit}} from a Cobertura report."""
     root = ET.parse(coverage_xml).getroot()
+    if root.tag != 'coverage':
+        raise ValueError('root is not <coverage>')
     measured = {}
+    usable = False
     for class_node in root.iter('class'):
         filename = class_node.get('filename')
         if not filename:
@@ -46,9 +84,17 @@ def executable_lines(coverage_xml):
             hits = line_node.get('hits')
             if number is None or hits is None:
                 continue
+            try:
+                number_value = int(number)
+                hits_value = int(hits)
+            except ValueError:
+                continue
             # A file can appear as more than one <class>; take the best hit
             # count so a line reached by any of them counts as covered.
-            lines[int(number)] = max(lines.get(int(number), 0), int(hits))
+            lines[number_value] = max(lines.get(number_value, 0), hits_value)
+            usable = True
+    if not usable:
+        raise ValueError('no usable line entries')
     return measured
 
 
@@ -57,19 +103,24 @@ def added_lines(diff_text):
     added = {}
     path = None
     line_number = 0
+    in_hunk = False
     for line in diff_text.splitlines():
-        target = _TARGET.match(line)
+        if line.startswith('diff --git ') or line.startswith('--- '):
+            path = None
+            in_hunk = False
+            continue
+        target = _TARGET.match(line) if not in_hunk else None
         if target is not None:
-            name = target.group(1).strip()
+            name = _decode_git_path(target.group(1))
             path = None if name == '/dev/null' else name
             continue
         hunk = _HUNK.match(line)
         if hunk is not None:
             line_number = int(hunk.group(1))
+            in_hunk = True
             continue
-        if path is None:
+        if path is None or not in_hunk:
             continue
-        # `+++` is consumed above, so a leading `+` here is real content.
         if line.startswith('+'):
             added.setdefault(path, set()).add(line_number)
             line_number += 1
@@ -124,6 +175,8 @@ def render(rows, covered, total):
                    'to report — that is not the same as none of it running.')
         return '\n'.join(out) + '\n'
     percent = 100.0 * covered / total
+    if covered < total:
+        percent = min(percent, 99.9)
     out.append(f'**{percent:.1f}%** of added lines covered '
                f'({covered}/{total}).')
     out.append('')
@@ -149,7 +202,11 @@ def main():
 
     diff_text = (sys.stdin.read() if args.diff == '-'
                  else Path(args.diff).read_text(encoding='utf-8'))
-    measured = executable_lines(args.coverage)
+    try:
+        measured = executable_lines(args.coverage)
+    except (ET.ParseError, ValueError) as error:
+        print(f'coverage report invalid: {error}', file=sys.stderr)
+        return 1
     if not measured:
         # An empty report means the measurement did not happen, and printing
         # "no lines added" for it would read as good news.

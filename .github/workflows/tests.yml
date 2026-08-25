@@ -366,20 +366,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # The one job here that may write. It runs no test suite and executes no
-    # dependency — it reads a diff, an XML report and the API — so the widest
-    # thing this token can do is post the comment it exists to post.
+    # This job reads the proposed tree, so it must not carry a token that can
+    # write conversation. The trusted workflow_run commenter owns that token.
     permissions:
       contents: read
-      pull-requests: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # The pull request's own head, not the merge commit: the lines this
-          # reports on have to be the lines someone can review. Full history
-          # because the diff is taken against the base SHA.
-          ref: ${{ github.event.pull_request.head.sha }}
+          # No ref: here is deliberate. The default pull-request checkout is
+          # the merge commit, which is the tree the suites ran on and the tree
+          # that will exist after merge. Any other tree gives the coverage
+          # report line numbers a diff that describes code it never measured.
           fetch-depth: 0
           persist-credentials: false
 
@@ -392,41 +390,28 @@ jobs:
           # Through the environment rather than `${{ }}` inside the script:
           # everything a payload carries is text, never shell.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # Three dots: what this branch added since it diverged, not every
-        # change that has landed on the base since.
+        # HEAD is the merge tree checked out above, so compare that exact tree
+        # with the base rather than numbering lines in the PR head.
         run: |
-          git diff --unified=0 "$BASE_SHA...$HEAD_SHA" > patch.diff
+          git diff --unified=0 "$BASE_SHA" HEAD > patch.diff
           python3 scripts/ci/diff_coverage.py \
             --coverage coverage.xml --diff patch.diff > body.md
           cat body.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Say so on the pull request
-        # A fork's token is read-only whatever this block asks for, so the
-        # step summary above is the whole report there rather than a red job.
-        if: ${{ github.event.pull_request.head.repo.full_name
-                == github.repository }}
+      - name: Package the comment for the trusted commenter
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          NUMBER: ${{ github.event.pull_request.number }}
-        # One comment that gets edited, not one per push: the marker below is
-        # how the next run finds the one it already wrote.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          marker='<!-- daedalus-diff-coverage -->'
-          { echo "$marker"; cat body.md; } > comment.md
-          existing="$(gh api -H 'Cache-Control: no-cache' --paginate \
-            "repos/$REPO/issues/$NUMBER/comments" \
-            --jq "map(select(.body | startswith(\"$marker\")))[0].id // empty")"
-          if [ -n "$existing" ]; then
-            gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
-              -F body=@comment.md >/dev/null
-            echo "updated comment $existing"
-          else
-            gh api -X POST "repos/$REPO/issues/$NUMBER/comments" \
-              -F body=@comment.md >/dev/null
-            echo "posted a new comment"
-          fi
+          printf '%s\n' "$PR_NUMBER" > pr-number.txt
+
+      - name: Upload the comment for the trusted commenter
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: diff-coverage-comment
+          path: |
+            body.md
+            pr-number.txt
+          if-no-files-found: error
 
   aggregate:
     name: Aggregate workflow checks

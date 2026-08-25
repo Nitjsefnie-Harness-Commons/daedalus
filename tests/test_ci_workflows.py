@@ -478,6 +478,45 @@ def test_one_action_family_is_pinned_to_one_version(tmp):
                         for sha, where in sorted(by_sha.items())))
 
 
+def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
+    """The producer and trusted commenter must agree on one artifact each."""
+    del tmp
+    tests_workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    comment_workflow = (
+        ROOT / '.github' / 'workflows' / 'coverage-comment.yml').read_text(
+            encoding='utf-8')
+    _, marker, coverage = tests_workflow.partition('\n  coverage:\n')
+    assert marker, tests_workflow
+    coverage, marker, _ = coverage.partition('\n  diff-coverage:\n')
+    assert marker, tests_workflow
+    _, marker, diff = tests_workflow.partition('\n  diff-coverage:\n')
+    assert marker, tests_workflow
+    diff, marker, aggregate = diff.partition('\n  aggregate:\n')
+    assert marker, tests_workflow
+    assert re.search(r'uses: actions/upload-artifact@.*\n\s+with:\n'
+                     r'\s+name: coverage-xml', coverage), coverage
+    assert re.search(r'uses: actions/download-artifact@.*\n\s+with:\n'
+                     r'\s+name: coverage-xml', diff), diff
+    upload = diff.partition('uses: actions/upload-artifact@')[2]
+    assert re.search(r'with:\n\s+name: diff-coverage-comment', upload), diff
+    download = comment_workflow.partition(
+        'uses: actions/download-artifact@')[2]
+    assert re.search(r'with:\n\s+name: diff-coverage-comment', download), (
+        comment_workflow)
+    assert 'run-id: ${{ github.event.workflow_run.id }}' in download, download
+    assert 'github-token: ${{ github.token }}' in download, download
+    assert 'pull-requests: write' not in diff, diff
+    assert 'actions/checkout' not in comment_workflow, comment_workflow
+    needs = aggregate.partition('needs:')[2].partition('runs-on:')[0]
+    assert 'diff-coverage' not in needs, needs
+    triggers = _workflow_triggers(comment_workflow)
+    assert triggers.get('workflow_run') == [
+        'workflows: [tests]', 'types: [completed]'], triggers
+    assert 'pull-requests: write' in comment_workflow, comment_workflow
+    assert 'actions: read' in comment_workflow, comment_workflow
+
+
 def test_dependabot_groups_an_action_used_under_more_than_one_path(tmp):
     """A component Dependabot sees as several dependencies moves as one.
 
