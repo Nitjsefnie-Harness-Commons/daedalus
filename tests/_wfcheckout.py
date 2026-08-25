@@ -12,6 +12,7 @@ class _WorkflowReader(_ScalarReaderMixin):
 
     def __init__(self, workflow):
         self.lines = workflow.splitlines()
+        self.source_ends_with_line_break = workflow.endswith(('\r', '\n'))
         self.jobs_line = None
         self.jobs_rest = ''
         self._scan_document()
