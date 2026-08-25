@@ -87,9 +87,6 @@ def step_scalar(workflow, job, step, key):
         return None
     step_index = step_entry.index
     step_indent = step_entry.indent
-    step_rest = step_entry.rest
-    if step_rest.strip():
-        raise YAMLReadError(f'step {step!r} is not a mapping')
     step_body = _section(lines, step_index, step_indent)
     _require_mapping_body(lines, *step_body, step_indent, f'step {step!r}')
     return _scalar_entry(lines, *step_body, step_indent, key)
@@ -109,8 +106,6 @@ def _entry(line):
     """Return a mapping line's indent and text after its first colon."""
     text, _ended = line
     indent = len(text) - len(text.lstrip(' '))
-    if '\t' in text[:indent]:
-        raise YAMLReadError('tabs in YAML indentation are unsupported')
     body = text[indent:]
     name, colon, rest = body.partition(':')
     if not colon or not name or name != name.strip():
