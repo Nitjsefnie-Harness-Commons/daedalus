@@ -116,19 +116,28 @@ def _uncommented(value):
     return value
 
 
-def _scalar(value):
+def _scalar(value, filename='workflow', unsupported=None):
     """One path value, past its trailing comment and its quotes."""
     value = _uncommented(value).strip()
-    if (len(value) >= 2 and value[0] in "'\""
-            and value[-1] == value[0]):
-        return value[1:-1]
+    failure = unsupported or (
+        f'{filename}: unsupported scalar value: {value!r}')
+    if value and value[0] in '!&*':
+        raise AssertionError(failure)
+    quoted = value and value[0] in "'\""
+    if quoted or (value and value[-1] in "'\""):
+        if not (quoted and len(value) >= 2 and value[-1] == value[0]):
+            raise AssertionError(failure)
+        body = value[1:-1]
+        if value[0] * 2 in body or (value[0] == '"' and '\\' in body):
+            raise AssertionError(failure)
+        return body
     return value
 
 
-def _flow_sequence(value, key):
+def _flow_sequence(value, key, filename='workflow'):
     """Parse the bounded flow-sequence subset used by these workflows."""
     value = value.strip()
-    unsupported = f'{key} has an unsupported value: {value!r}'
+    unsupported = f'{filename}: {key} has an unsupported value: {value!r}'
     if not (value.startswith('[') and value.endswith(']')):
         raise AssertionError(unsupported)
     content = value[1:-1].strip()
@@ -161,25 +170,20 @@ def _flow_sequence(value, key):
     result = []
     for item in items:
         if item[0] in "'\"":
-            body = item[1:-1]
-            # An escape or a doubled quote is a value this reader would
-            # hand back without having decoded it: `["a\\", b]` is `a\`
-            # and `['a''b']` is `a'b`, neither of which it produces.
-            if (len(item) < 2 or item[-1] != item[0]
-                    or '\\' in body or item[0] * 2 in body):
-                raise AssertionError(unsupported)
-            result.append(body)
+            result.append(_scalar(item, filename, unsupported))
             continue
+        if item[0] in '!&*':
+            raise AssertionError(unsupported)
         # `[{a: b}, c]` and `[a: b]` are mappings, not scalars — YAML makes
         # a colon-plus-space a key even without the braces.
         if (item[-1] in "'\"[]{}:" or '[' in item or '{' in item
                 or ': ' in item):
             raise AssertionError(unsupported)
-        result.append(item)
+        result.append(_scalar(item, filename, unsupported))
     return result
 
 
-def _workflow_path_filters(lines):
+def _workflow_path_filters(lines, filename='workflow'):
     """Return normalized `paths` and `paths-ignore` entries for an event."""
     filters = {}
     option_indent = _option_indent(lines)
@@ -204,7 +208,7 @@ def _workflow_path_filters(lines):
             # explanations exactly there.
             value = ''
         if value:
-            filters[key] = _flow_sequence(value, key)
+            filters[key] = _flow_sequence(value, key, filename)
             continue
 
         values = []
@@ -216,7 +220,7 @@ def _workflow_path_filters(lines):
             if not stripped or stripped.startswith('#'):
                 continue
             if stripped.startswith('-'):
-                values.append(_scalar(stripped[1:]))
+                values.append(_scalar(stripped[1:], filename))
         filters[key] = values
     return filters
 
