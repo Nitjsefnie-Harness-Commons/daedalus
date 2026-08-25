@@ -83,12 +83,16 @@ def executable_lines(coverage_xml):
         for line_node in class_node.iter('line'):
             number = line_node.get('number')
             hits = line_node.get('hits')
-            if number is None or hits is None:
-                continue
+            if number is None:
+                raise ValueError(f'missing line number for {filename}')
             try:
                 number_value = int(number)
-            except ValueError:
-                continue
+            except ValueError as error:
+                raise ValueError(
+                    f'invalid line number for {filename}: {number!r}') from error
+            if hits is None:
+                raise ValueError(
+                    f'missing hits for {filename}:{number_value}')
             try:
                 hits_value = int(hits)
             except ValueError as error:
