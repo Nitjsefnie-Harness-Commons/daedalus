@@ -171,6 +171,47 @@ class _ScalarReaderMixin:
         self._refuse('unterminated double-quoted scalar', index, context)
         return None
 
+    def _quoted_scalar_end(self, value, index, end, context):
+        value = self._strip_comment(value).strip(' \t')
+        if not value.startswith(("'", '"')):
+            return None
+        quote = value[0]
+        kind = 'single' if quote == "'" else 'double'
+        start = index
+        line = index
+        position = 1
+        while True:
+            while position < len(value):
+                char = value[position]
+                if quote == '"' and char == '\\':
+                    position += 2
+                    continue
+                if char != quote:
+                    position += 1
+                    continue
+                if quote == "'" and position + 1 < len(value) \
+                        and value[position + 1] == "'":
+                    position += 2
+                    continue
+                tail = self._strip_comment(
+                    value[position + 1:]).strip(' \t')
+                if tail:
+                    self._refuse(f'trailing text after {kind}-quoted scalar',
+                                 line, context)
+                return line + 1
+            line += 1
+            if line >= end:
+                self._refuse(f'unterminated {kind}-quoted scalar', start,
+                             context)
+            value = self.lines[line]
+            position = 0
+
+    def _mapping_value_end(self, value, index, end, key_indent, context,
+                           check_tabs=False):
+        quoted_end = self._quoted_scalar_end(value, index, end, context)
+        start = index + 1 if quoted_end is None else quoted_end
+        return self._value_end(start, end, key_indent, context, check_tabs)
+
     def _block_scalar(self, header, index, parent_indent, context):
         header = self._strip_comment(header).strip(' \t')
         match = re.fullmatch(r'([|>])([1-9]?)([+-]?)([1-9]?)', header)

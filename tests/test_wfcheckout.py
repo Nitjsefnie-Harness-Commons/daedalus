@@ -144,6 +144,48 @@ def test_checkout_reader_consumes_doubled_quote_before_key_colon(tmp):
     assert refs == [('build', 'safe')]
 
 
+def test_checkout_reader_skips_multiline_quoted_mapping_content(tmp):
+    """Quoted continuation lines never become walked mapping entries."""
+    del tmp
+    failures = []
+    expression = '${{ steps.baseline.outputs.ref }}'
+    for quote in ('"', "'"):
+        workflows = (
+            (
+                'jobs:\n'
+                '  build:\n'
+                f'    name: {quote}harmless\n'
+                '    steps:\n'
+                '      - uses: actions/checkout@v4\n'
+                '        with:\n'
+                f'          ref: {expression}{quote}\n'
+            ),
+            (
+                'jobs:\n'
+                '  build:\n'
+                '    steps:\n'
+                f'      - run: {quote}echo harmless\n'
+                '        uses: actions/checkout@v4\n'
+                '        with:\n'
+                f'          ref: {expression}{quote}\n'
+            ),
+            (
+                'jobs:\n'
+                '  build:\n'
+                '    steps:\n'
+                '      - uses: actions/checkout@v4\n'
+                '        with:\n'
+                f'          path: {quote}harmless\n'
+                f'          ref: {expression}{quote}\n'
+            ),
+        )
+        for level, workflow in zip(('job', 'step', 'with'), workflows):
+            refs = _wfcheckout.checkout_refs(workflow)
+            if refs:
+                failures.append((quote, level, refs))
+    assert failures == [], failures
+
+
 def test_checkout_reader_skips_unwalked_flow_values(tmp):
     """Flow syntax outside a checkout path is not inspected."""
     del tmp
