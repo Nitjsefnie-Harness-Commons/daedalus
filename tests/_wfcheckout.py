@@ -602,6 +602,10 @@ class _WorkflowReader:
         ended = False
         root_indent = None
         for index, line in enumerate(self.lines):
+            if line and (line[0] == '\ufeff' or
+                         (line[0].isspace() and line[0] not in ' \t')):
+                self._refuse('unsupported structural character', index,
+                             'workflow')
             stripped = line.strip()
             if not stripped or line.lstrip(' ').startswith('#'):
                 continue
