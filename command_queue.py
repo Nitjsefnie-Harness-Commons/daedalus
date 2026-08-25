@@ -1,5 +1,39 @@
 """Shared lifecycle helpers for files waiting in the command queue."""
+import contextlib
 import json
+import threading
+
+
+_lock = threading.Lock()
+_claimed = set()
+
+
+def claim(key):
+    """Claim one logical queue key without holding a lock during delivery."""
+    if not isinstance(key, str) or not key:
+        raise TypeError('claim key must be a non-empty string')
+    with _lock:
+        if key in _claimed:
+            return False
+        _claimed.add(key)
+        return True
+
+
+def release(key):
+    """Release a key so a later consumer can retry its queued command."""
+    with _lock:
+        _claimed.discard(key)
+
+
+@contextlib.contextmanager
+def claimed(key):
+    """Yield ownership and release it even when delivery raises."""
+    owner = claim(key)
+    try:
+        yield owner
+    finally:
+        if owner:
+            release(key)
 
 
 def remove_expired(path, now, ttl, legacy=False):
