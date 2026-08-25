@@ -393,10 +393,14 @@ class _WorkflowReader(_ScalarReaderMixin):
                 explicit = body[1:].strip(' \t')
                 indicators = ("'", '"', '[', '{', '&', '*', '!', '|', '>',
                               ',', ']', '}', '#', '%', '@', '`')
-                if not explicit or explicit.startswith(indicators) \
-                        or (explicit[0] in '-?:' and (
-                            len(explicit) == 1 or explicit[1] in ' \t')) \
-                        or self._looks_like_mapping(explicit):
+                if not explicit:
+                    self._refuse('explicit key', index, 'workflow')
+                if explicit.startswith(indicators):
+                    self._refuse('explicit key', index, 'workflow')
+                if explicit[0] in '-?:' and (
+                        len(explicit) == 1 or explicit[1] in ' \t'):
+                    self._refuse('explicit key', index, 'workflow')
+                if self._looks_like_mapping(explicit):
                     self._refuse('explicit key', index, 'workflow')
                 explicit_key = self._decode_scalar(
                     explicit, index, 'jobs mapping explicit key')
