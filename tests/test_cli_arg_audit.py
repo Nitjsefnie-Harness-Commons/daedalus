@@ -439,11 +439,11 @@ def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
 
     try:
         assert _audit_real_tabs_handler(handler_module, parser) == []
-        cli.DISPATCH['tabs'] = handler_module.do_tabs
+        cli.DISPATCH['tabs'] = handler_module.__dict__['do_tabs']
         cli.build_parser = build_suppressed_parser
         sys.argv = ['daedalus', 'tabs']
         cli.main()
-        assert handler_module.GUARDED_READS == [None]
+        assert handler_module.__dict__['GUARDED_READS'] == [None]
     finally:
         cli.DISPATCH['tabs'] = original_handler
         cli.build_parser = original_build_parser
