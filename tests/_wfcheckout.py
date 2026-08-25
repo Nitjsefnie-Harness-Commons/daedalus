@@ -42,7 +42,7 @@ class _WorkflowReader:
 
     def _blank(self, index):
         line = self.lines[index]
-        return not line.strip() or line.lstrip(' \t').startswith('#')
+        return not line.strip(' \t') or line.lstrip(' \t').startswith('#')
 
     def _reject_prefix(self, value, index, context):
         for prefix, what in (('{', 'flow mapping'), ('[', 'flow sequence'),
@@ -77,9 +77,9 @@ class _WorkflowReader:
                     quote = None
                 continue
             if char == '#' and quote is None \
-                    and (index == 0 or text[index - 1].isspace()):
-                return text[:index].rstrip()
-        return text.rstrip()
+                    and (index == 0 or text[index - 1] in ' \t'):
+                return text[:index].rstrip(' \t')
+        return text.rstrip(' \t')
 
     def _mapping_colon(self, body, index, context):
         quote = None
@@ -102,7 +102,7 @@ class _WorkflowReader:
                     quote = None
                 continue
             if (char == ':' and (position + 1 == len(body)
-                                 or body[position + 1].isspace())):
+                                 or body[position + 1] in ' \t')):
                 return position
         self._refuse('mapping entry without a colon', index, context)
         return None
@@ -110,18 +110,18 @@ class _WorkflowReader:
     def _mapping_parts(self, index, context, body=None):
         if body is None:
             body = self.lines[index].lstrip(' ')
-        body = self._strip_comment(body).strip()
-        if body.startswith('?') and (len(body) == 1 or body[1].isspace()):
+        body = self._strip_comment(body).strip(' \t')
+        if body.startswith('?') and (len(body) == 1 or body[1] in ' \t'):
             self._refuse('explicit key', index, context)
         position = self._mapping_colon(body, index, context)
-        key = body[:position].strip()
+        key = body[:position].strip(' \t')
         if not key:
             self._refuse('empty mapping key', index, context)
-        value = body[position + 1:].strip()
+        value = body[position + 1:].strip(' \t')
         return self._decode_scalar(key, index, f'{context} key'), value
 
     def _decode_scalar(self, text, index, context):
-        value = self._strip_comment(text).strip()
+        value = self._strip_comment(text).strip(' \t')
         if not value:
             return ''
         self._reject_prefix(value, index, context)
@@ -148,7 +148,7 @@ class _WorkflowReader:
                 result.append("'")
                 position += 2
                 continue
-            tail = self._strip_comment(value[position + 1:]).strip()
+            tail = self._strip_comment(value[position + 1:]).strip(' \t')
             if tail:
                 self._refuse('trailing text after single-quoted scalar',
                              index, context)
@@ -162,7 +162,7 @@ class _WorkflowReader:
         while position < len(value):
             char = value[position]
             if char == '"':
-                tail = self._strip_comment(value[position + 1:]).strip()
+                tail = self._strip_comment(value[position + 1:]).strip(' \t')
                 if tail:
                     self._refuse('trailing text after double-quoted scalar',
                                  index, context)
@@ -227,7 +227,7 @@ class _WorkflowReader:
         return end
 
     def _block_scalar(self, header, index, parent_indent, context):
-        header = self._strip_comment(header).strip()
+        header = self._strip_comment(header).strip(' \t')
         match = re.fullmatch(r'([|>])([1-9]?)([+-]?)([1-9]?)', header)
         if not match or (match.group(2) and match.group(4)):
             self._refuse('unsupported block scalar header', index, context)
@@ -259,7 +259,7 @@ class _WorkflowReader:
         parts = []
         for line in range(body_start, body_end):
             raw = self.lines[line]
-            if not raw.strip():
+            if not raw.strip(' \t'):
                 parts.append('')
                 continue
             parts.append(raw[content_indent:])
@@ -300,14 +300,14 @@ class _WorkflowReader:
             indent = self._indent(line, context)
             if indent <= key_indent:
                 break
-            continuation = self._strip_comment(self.lines[line].strip())
+            continuation = self._strip_comment(self.lines[line].strip(' \t'))
             if continuation:
                 pieces.append(continuation)
             line += 1
         return ' '.join(pieces)
 
     def _scalar_value(self, value, index, key_indent, value_end, context):
-        value = self._strip_comment(value).strip()
+        value = self._strip_comment(value).strip(' \t')
         if value.startswith('|') or value.startswith('>'):
             return self._block_scalar(value, index, key_indent, context)
         if value:
@@ -323,7 +323,8 @@ class _WorkflowReader:
         if nested is None:
             return ''
         indent = self._indent(nested, context)
-        nested_value = self._strip_comment(self.lines[nested][indent:]).strip()
+        nested_value = self._strip_comment(
+            self.lines[nested][indent:]).strip(' \t')
         if nested_value.startswith('|') or nested_value.startswith('>'):
             return self._block_scalar(nested_value, nested, indent, context)
         self._reject_scalar_shape(nested_value, nested, context)
@@ -341,13 +342,13 @@ class _WorkflowReader:
         return True
 
     def _reject_root_quoted_scalar(self, value, index):
-        value = self._strip_comment(value).strip()
+        value = self._strip_comment(value).strip(' \t')
         scalar = value
         while scalar.startswith(('&', '!')):
             parts = scalar.split(None, 1)
             if len(parts) == 1:
                 return
-            scalar = parts[1].lstrip()
+            scalar = parts[1].lstrip(' \t')
             if scalar.startswith(("'", '"')):
                 self._reject_prefix(value, index, 'workflow value')
         if scalar.startswith(("'", '"')) \
@@ -449,7 +450,7 @@ class _WorkflowReader:
 
     def _steps(self, job, index, rest, end, key_indent):
         context = f'job {job} steps'
-        rest = self._strip_comment(rest).strip()
+        rest = self._strip_comment(rest).strip(' \t')
         if rest:
             self._reject_prefix(rest, index, context)
             self._refuse('steps value is not a block sequence', index,
@@ -493,7 +494,7 @@ class _WorkflowReader:
     def _step(self, job, start, end, step_indent):
         context = f'job {job} checkout step'
         body = self.lines[start][step_indent:]
-        first = body[1:].strip() if body.startswith('-') else body
+        first = body[1:].strip(' \t') if body.startswith('-') else body
         if first.startswith('{'):
             self._refuse('flow mapping', start, context)
         if first.startswith('['):
@@ -557,7 +558,7 @@ class _WorkflowReader:
     def _with_ref(self, job, entry):
         rest, index, key_indent, end = entry
         context = f'job {job} checkout with'
-        rest = self._strip_comment(rest).strip()
+        rest = self._strip_comment(rest).strip(' \t')
         if rest:
             self._reject_prefix(rest, index, context)
             self._refuse('with value is not a block mapping', index, context)
@@ -606,7 +607,7 @@ class _WorkflowReader:
                     line[0].isspace() and line[0] not in ' \t')):
                 self._refuse('unsupported structural character', index,
                              'workflow')
-            stripped = line.strip()
+            stripped = line.strip(' \t')
             if not stripped or line.lstrip(' ').startswith('#'):
                 continue
             prefix = line[:len(line) - len(line.lstrip(' \t'))]
@@ -634,9 +635,9 @@ class _WorkflowReader:
                 continue
             body = self._strip_comment(stripped)
             if body.startswith('?') and (len(body) == 1
-                                         or body[1].isspace()):
+                                         or body[1] in ' \t'):
                 explicit_key = self._decode_scalar(
-                    body[1:].strip(), index, 'jobs mapping explicit key')
+                    body[1:].strip(' \t'), index, 'jobs mapping explicit key')
                 if explicit_key == 'jobs':
                     self._refuse('explicit key', index, 'jobs mapping')
                 continue
