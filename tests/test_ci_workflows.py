@@ -290,9 +290,18 @@ def _workflow_path_filters(lines):
             return value[1:-1]
         return value
 
+    # Only a key at the event's OWN option indent is one of its filters. A
+    # deeper `paths-ignore:` belongs to something nested, and reading it as
+    # the event's would report an asymmetry this workflow does not have.
+    entry_indents = [entry[0] for entry in map(_entry, lines)
+                     if entry is not None]
+    option_indent = min(entry_indents) if entry_indents else None
+
     for index, line in enumerate(lines):
         current = _entry(line)
         if current is None or current[1] not in ('paths', 'paths-ignore'):
+            continue
+        if current[0] != option_indent:
             continue
         indent, key, value = current
         value = value.strip()
@@ -344,7 +353,8 @@ def _workflow_triggers(workflow, filename='workflow'):
             raise AssertionError(
                 f'{filename}: inline on: block is not understood: {line!r}')
         on_index = index
-        break
+        # No `break`: the scan continues so a second top-level `on:` is seen
+        # and refused above. Stopping here would make that check unreachable.
 
     assert on_index is not None, (
         f'{filename}: no understood top-level on: block')
@@ -472,6 +482,24 @@ def test_job_scalar_stays_inside_the_jobs_mapping(tmp):
         '  speed:\n'
         '    runs-on: ubuntu-latest\n')
     assert job_scalar(workflow, 'speed', 'environment') is None
+def test_a_second_top_level_on_block_is_refused(tmp):
+    """Two `on:` keys is invalid YAML, and silently reading the first lies.
+
+    The reader used to stop at the first match, which made the refusal below
+    unreachable — a workflow whose second block carried the real triggers
+    would have been described by the first.
+    """
+    del tmp
+    doubled = ('name: x\n\non:\n  push:\n    branches: [main]\n'
+               '\non:\n  pull_request:\n\npermissions:\n  contents: read\n')
+    try:
+        _workflow_triggers(doubled, 'doubled.yml')
+    except AssertionError as failure:
+        assert 'duplicate on: blocks' in str(failure), failure
+    else:
+        raise AssertionError('a second on: block was accepted')
+
+
 def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
     """Push and pull_request must make the same path-filtering choice.
 
