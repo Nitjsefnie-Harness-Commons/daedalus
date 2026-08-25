@@ -38,6 +38,27 @@ _COVERAGE_XML = """<?xml version="1.0" ?>
 </coverage>
 """
 
+_TWO_FILE_COVERAGE_XML = """<?xml version="1.0" ?>
+<coverage><packages><package><classes>
+  <class filename="a.py"><lines>
+    <line number="1" hits="1"/>
+  </lines></class>
+  <class filename="b.py"><lines>
+    <line number="1" hits="0"/>
+  </lines></class>
+</classes></package></packages></coverage>
+"""
+
+_HALF_COVERED_OUTPUT = """### Coverage of this change
+
+**50.0%** of added lines covered (1/2).
+
+| File | Covered | Added | Missed lines |
+| --- | ---: | ---: | --- |
+| `a.py` | 1 | 1 | — |
+| `b.py` | 0 | 1 | 1 |
+"""
+
 
 def _write(tmp, name, text):
     """Write one fixture file under tmp and return its path."""
@@ -280,6 +301,52 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
     assert '**33.3%** of added lines covered (1/3).' in done.stdout, (
         done.stdout)
     assert '2-3' in done.stdout, done.stdout
+
+
+def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
+    """Hunk counts end one file before the next plain file header."""
+    coverage_xml = _write(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
+    diff = _write(
+        tmp, 'plain.diff',
+        '--- a/a.py\n'
+        '+++ b/a.py\n'
+        '@@ -0,0 +1 @@\n'
+        '+covered_a = 1\n'
+        '--- a/b.py\n'
+        '+++ b/b.py\n'
+        '@@ -0,0 +1 @@\n'
+        '+untested_b = 1\n')
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', str(diff)],
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert done.stderr == '', done.stderr
+    assert done.stdout == _HALF_COVERED_OUTPUT, done.stdout
+
+
+def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
+    """A tab-delimited header timestamp is metadata, not the path."""
+    coverage_xml = _write(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
+    diff = _write(
+        tmp, 'timestamp.diff',
+        'diff --git a/a.py b/a.py\n'
+        '--- a/a.py\n'
+        '+++ b/a.py\n'
+        '@@ -0,0 +1 @@\n'
+        '+covered_a = 1\n'
+        'diff --git a/b.py b/b.py\n'
+        '--- a/b.py\t2026-08-25 10:00:00.000000000 +0000\n'
+        '+++ b/b.py\t2026-08-25 10:00:00.000000000 +0000\n'
+        '@@ -0,0 +1 @@\n'
+        '+untested_b = 1\n')
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', str(diff)],
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert done.stderr == '', done.stderr
+    assert done.stdout == _HALF_COVERED_OUTPUT, done.stdout
 
 
 def test_the_cli_does_not_round_a_miss_up_to_perfect(tmp):
