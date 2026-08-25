@@ -11,8 +11,8 @@ _claimed = set()
 def claim(key):
     """Claim one logical queue key without holding a lock during delivery.
 
-    The key is a logical name, so callers must never hand it an aliased entry;
-    drain enumeration refuses aliases rather than normalising their spellings.
+    The key is the logical target name; two spellings cannot take two claims.
+    Hard links and symlinks leave distinct names as two keys; see issue #186.
     """
     if not isinstance(key, str) or not key:
         raise TypeError('claim key must be a non-empty string')
