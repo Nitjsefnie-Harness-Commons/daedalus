@@ -200,3 +200,4 @@
 !/tests/test_tab_routing.py
 !/tests/test_version_contract.py
 !/tests/test_workflow_parsing.py
+!/tests/test_yamlread.py
