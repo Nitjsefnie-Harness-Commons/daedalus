@@ -206,9 +206,15 @@ def test_checkout_reader_returns_structured_checkout_refs(tmp):
         '          ref: ${{ github.sha }}\n'
         '  test:\n'
         '    steps:\n'
-        '      - uses: actions/checkout@v4\n')
+        '      - uses: actions/checkout@v4\n'
+        '  aligned:\n'
+        '    steps:\n'
+        '      -    uses: actions/checkout@v4\n'
+        '           with:\n'
+        '             ref: ${{ steps.baseline.outputs.ref }}\n')
     assert _wfcheckout.checkout_refs(workflow) == [
-        ('build', '${{ github.sha }}')]
+        ('build', '${{ github.sha }}'),
+        ('aligned', '${{ steps.baseline.outputs.ref }}')]
 
 
 def test_checkout_reader_decodes_supported_scalar_styles(tmp):
