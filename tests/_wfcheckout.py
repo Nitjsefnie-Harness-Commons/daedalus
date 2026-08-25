@@ -163,9 +163,9 @@ class _WorkflowReader(_ScalarReaderMixin):
                 self._refuse('inconsistent job mapping indentation', index,
                              f'job {job}')
             key, rest = self._mapping_parts(index, f'job {job}')
-            value_end = self._value_end(
-                index + 1, end, key_indent, f'job {job}',
-                check_tabs=key == 'steps')
+            value_end = self._mapping_value_end(
+                rest, index, end, key_indent, f'job {job}',
+                key == 'steps')
             if key == '<<':
                 self._refuse('merge key', index, f'job {job}')
             if key == 'steps':
@@ -241,13 +241,16 @@ class _WorkflowReader(_ScalarReaderMixin):
             self._refuse('flow sequence', start, context)
         entries = []
         key_indent = None
+        index = start + 1
         if first and not first.startswith('#'):
             key_indent = step_indent + body.index(first)
             key, rest = self._mapping_parts(start, context, first)
+            value_end = self._mapping_value_end(
+                rest, start, end, key_indent, context)
             if key == '<<':
                 self._refuse('merge key', start, context)
-            entries.append((key, rest, start, key_indent, end))
-        index = start + 1
+            entries.append((key, rest, start, key_indent, value_end))
+            index = value_end
         while index < end:
             if self._blank(index):
                 self._indent(index, context)
@@ -266,8 +269,8 @@ class _WorkflowReader(_ScalarReaderMixin):
                 self._refuse('inconsistent step mapping indentation', index,
                              context)
             key, rest = self._mapping_parts(index, context)
-            value_end = self._value_end(
-                index + 1, end, key_indent, context, check_tabs=False)
+            value_end = self._mapping_value_end(
+                rest, index, end, key_indent, context)
             if key == '<<':
                 self._refuse('merge key', index, context)
             entries.append((key, rest, index, key_indent, value_end))
@@ -325,8 +328,8 @@ class _WorkflowReader(_ScalarReaderMixin):
                     current, end, map_indent, context, check_tabs=False)
                 continue
             key, value = self._mapping_parts(current, context)
-            value_end = self._value_end(
-                current + 1, end, map_indent, context, check_tabs=False)
+            value_end = self._mapping_value_end(
+                value, current, end, map_indent, context)
             if key == '<<':
                 self._refuse('merge key', current, context)
             if key == 'ref':
