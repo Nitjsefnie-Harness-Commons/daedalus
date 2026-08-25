@@ -249,7 +249,7 @@ def _flow_sequence(value, key, filename='workflow'):
         # `[{a: b}, c]` and `[a: b]` are mappings, not scalars — YAML makes
         # a colon-plus-space a key even without the braces.
         if (item[-1] in "'\"[]{}:" or '[' in item or '{' in item
-                or ': ' in item):
+                or ']' in item or '}' in item or ': ' in item):
             raise AssertionError(unsupported)
         result.append(_scalar(item, filename, unsupported))
     return result
