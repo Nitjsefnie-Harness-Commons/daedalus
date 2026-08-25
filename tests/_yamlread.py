@@ -341,17 +341,24 @@ def _decode_block(lines, parent_indent, style, chomp, explicit, name):
         value = '\n'.join(parts)
     else:
         value = parts[0]
+        seen_content = bool(parts[0])
+        last_content_more = more_indented[0] if parts[0] else False
         for index in range(1, len(parts)):
             previous = parts[index - 1]
             current = parts[index]
             if not previous:
-                separator = '' if not more_indented[index] else '\n'
+                separator = '\n' if (
+                    not current or not seen_content
+                    or last_content_more or more_indented[index]) else ''
             elif (not current or more_indented[index - 1]
                   or more_indented[index]):
                 separator = '\n'
             else:
                 separator = ' '
             value += separator + current
+            if current:
+                seen_content = True
+                last_content_more = more_indented[index]
     if lines[-1][1]:
         value += '\n'
     if chomp == '-':
