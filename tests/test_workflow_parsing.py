@@ -53,6 +53,8 @@ def test_trigger_names_survive_every_spelling_of_a_key(tmp):
         '  workflow_dispatch :\n',
         '  workflow_dispatch: # manual benchmark\n',
         '  workflow_dispatch: {}\n',
+        '  workflow_dispatch: null\n',
+        '  workflow_dispatch: ~\n',
         '  workflow_dispatch:\n    inputs:\n      x:\n        type: string\n',
     )
     for block in declared:
@@ -149,7 +151,9 @@ def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
 def test_invalid_plain_scalar_indicators_and_tabs_are_refused(tmp):
     """Invalid YAML indicators and tabs never pass as path strings."""
     del tmp
-    for value in ('@foo', '`foo', 'foo\tbar', 'foo:'):
+    for value in (
+            '@foo', '`foo', '%foo', ']foo', '}foo', '|foo', '>foo',
+            ',foo', 'foo\tbar', 'foo:'):
         try:
             _workflow_path_filters(
                 [f'    paths-ignore: [{value}]'], 'invalid-scalar.yml')
@@ -159,6 +163,21 @@ def test_invalid_plain_scalar_indicators_and_tabs_are_refused(tmp):
                 value, failure)
         else:
             raise AssertionError(f'invalid plain scalar accepted: {value}')
+
+
+def test_tabs_in_mapping_entries_are_refused(tmp):
+    """Tabs adjacent to a key cannot be normalized into valid YAML."""
+    del tmp
+    for line in ('    paths-ignore\t: [foo]',
+                 '    paths-ignore: [foo]\t'):
+        try:
+            _workflow_path_filters([line], 'tab-key.yml')
+        except AssertionError as failure:
+            assert 'tab-key.yml' in str(failure), failure
+            assert 'tab' in str(failure), failure
+        else:
+            raise AssertionError(
+                f'tabbed mapping entry was accepted: {line!r}')
 
 
 def test_empty_plain_path_value_is_refused_and_is_yaml_unequal(tmp):
