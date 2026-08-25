@@ -9,14 +9,44 @@ path filters each one carries. Both answers have to survive the spellings
 YAML allows for the same thing, which is why this is a module rather than
 a substring check at each call site.
 
-Correct or refusing, never plausible: a construct this reader does not
-parse raises rather than returning an answer that reads like one, because
-a policy test cannot tell a wrong answer from a right one.
+The bounded grammar is an allow-list. Mapping keys are only unquoted plain
+keys made from lowercase letters, digits, `_`, and `-`; every quoted or other
+key is refused. Path values are either unquoted scalars that YAML's core
+schema resolves as strings, or single- or double-quoted scalars with no
+backslash and no embedded quote of either kind. Implicit booleans in every
+case (`true`, `false`, `yes`, `no`, `on`, `off`, `y`, and `n`), nulls (`null`,
+`~`, and empty), every core integer and float form (signs, underscores,
+bases, sexagesimals, `.inf`, and `.nan`), and timestamps are refused, as are
+tags, anchors, aliases, block scalars, continuations, flow mappings, tabs,
+duplicates, and inline values. Correct or refusing, never plausible: a
+construct this reader does not parse raises rather than returning an answer
+that reads like one, because a policy test cannot tell a wrong answer from a
+right one.
 """
 import re
 
-_ENTRY_PATTERN = re.compile(
-    r'''(?:(['"])([^'"]+)\1|([A-Za-z0-9_-]+))\s*:\s*(.*)$''')
+_PLAIN_KEY = re.compile(r'[a-z0-9_-]+')
+_PLAIN_MAPPING = re.compile(r':[ \t]')
+_NON_STRING_SCALARS = (
+    re.compile(r'^(?:y|yes|n|no|true|false|on|off)$', re.IGNORECASE),
+    re.compile(r'^(?:null|~)$', re.IGNORECASE),
+    re.compile(
+        r'^(?:[-+]?0[bB][0-1_]+|[-+]?0[oO][0-7_]+'
+        r'|[-+]?0[xX][0-9a-fA-F_]+|[-+]?0[0-7_]+'
+        r'|[-+]?(?:0|[1-9][0-9_]*)'
+        r'|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$'),
+    re.compile(
+        r'^(?:[-+]?(?:[0-9][0-9_]*\.[0-9_]*|'
+        r'\.[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)?'
+        r'|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+'
+        r'|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*'
+        r'|[-+]?\.(?:inf|nan))$', re.IGNORECASE),
+    re.compile(
+        r'^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}'
+        r'(?:$|[Tt ][0-9]{1,2}:[0-9]{2}:[0-9]{2}'
+        r'(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}'
+        r'(?::[0-9]{2})?))?)$'),
+)
 
 
 def _indent(line):
@@ -33,64 +63,79 @@ def _indent(line):
     return width
 
 
-def _mapping_key(stripped):
-    """The (key, remainder) of a `key:` entry, or None if it is not one.
-
-    A trigger is not always written bare. `workflow_dispatch: # manual` and
-    `workflow_dispatch: {}` are the same key with a comment and with an empty
-    map, and a reader that only accepts a line ENDING in a colon records
-    neither — so a test asking which triggers exist would answer that one it
-    was looking for is absent while the workflow declares it.
-
-    The remainder after the colon is returned rather than dropped: it is
-    what says whether the entry's whole value is written on this line.
-    """
+def _mapping_key(stripped, filename='workflow'):
+    """Return a positively understood plain mapping key and its value."""
+    if not stripped or stripped.startswith('#'):
+        return None
+    if stripped == '-' or stripped.startswith(('- ', '-\t')):
+        return None
     quote = ''
+    escaped = False
+    colon = None
     for index, char in enumerate(stripped):
         if quote:
+            if escaped:
+                escaped = False
+                continue
+            if quote == '"' and char == '\\':
+                escaped = True
+                continue
             if char == quote:
+                if (quote == "'" and index + 1 < len(stripped)
+                        and stripped[index + 1] == quote):
+                    escaped = True
+                    continue
                 quote = ''
             continue
         if char in '"\'':
             quote = char
             continue
-        if char == '#':
-            # A comment reached before any colon: the line is not an entry.
+        if char == '#' and (index == 0 or stripped[index - 1].isspace()):
             return None
-        if char == ':':
-            rest = stripped[index + 1:]
-            if rest and not rest[0].isspace():
-                # `a:b` is one scalar; YAML needs the space to make it a map.
-                return None
-            key = stripped[:index].strip().strip('\'"').strip()
-            return key, rest.strip()
-    return None
+        if char == ':' and (
+                index + 1 == len(stripped)
+                or stripped[index + 1].isspace()):
+            colon = index
+            break
+    if colon is None:
+        if stripped[0] in '"\'' and ':' in stripped:
+            raise AssertionError(
+                f'{filename}: unsupported mapping key: {stripped!r}')
+        return None
+    key = stripped[:colon].strip()
+    if not _PLAIN_KEY.fullmatch(key):
+        raise AssertionError(
+            f'{filename}: unsupported mapping key: {key!r}')
+    return key, stripped[colon + 1:].strip()
 
 
-def _entry(line):
+def _entry(line, filename='workflow'):
     """Return (indent, key, value) for one mapping line, or None."""
     indent = _indent(line)
-    match = _ENTRY_PATTERN.fullmatch(line.strip())
-    if not match:
+    entry = _mapping_key(line.strip(), filename)
+    if entry is None:
         return None
-    return indent, match.group(2) or match.group(3), match.group(4)
+    return indent, entry[0], entry[1]
 
 
-def _option_indent(lines):
+def _option_indent(lines, filename='workflow'):
     """The indent of an event's OWN options, or None when it has none.
 
     Only a key at that indent is one of the event's options. A deeper
     `paths-ignore:` belongs to something nested, and reading it as the
     event's would report an asymmetry this workflow does not have.
     """
-    indents = [entry[0] for entry in map(_entry, lines) if entry is not None]
+    indents = [entry[0] for entry in
+               (_entry(line, filename) for line in lines)
+               if entry is not None]
     return min(indents) if indents else None
 
 
-def _event_option_keys(lines):
+def _event_option_keys(lines, filename='workflow'):
     """The keys an event declares at its own option indent."""
-    option_indent = _option_indent(lines)
-    return [entry[1] for entry in map(_entry, lines)
+    option_indent = _option_indent(lines, filename)
+    return [entry[1] for entry in
+            (_entry(line, filename) for line in lines)
             if entry is not None and entry[0] == option_indent]
 
 
@@ -123,16 +168,23 @@ def _scalar(value, filename='workflow', unsupported=None):
         f'{filename}: unsupported scalar value: {value!r}')
     if re.fullmatch(r'[|>][0-9+-]*', value):
         raise AssertionError(failure)
-    if value and value[0] in '!&*':
+    if not value or value[0] in '!&*':
         raise AssertionError(failure)
     quoted = value and value[0] in "'\""
     if quoted or (value and value[-1] in "'\""):
         if not (quoted and len(value) >= 2 and value[-1] == value[0]):
             raise AssertionError(failure)
         body = value[1:-1]
-        if value[0] * 2 in body or (value[0] == '"' and '\\' in body):
+        if '\\' in body or "'" in body or '"' in body:
             raise AssertionError(failure)
         return body
+    if (value.startswith(('#', '[', '{'))
+            or value in ('-', '?', ':')
+            or value.startswith(('- ', '? ', ': '))
+            or _PLAIN_MAPPING.search(value)
+            or any(pattern.fullmatch(value)
+                   for pattern in _NON_STRING_SCALARS)):
+        raise AssertionError(failure)
     return value
 
 
@@ -188,10 +240,10 @@ def _flow_sequence(value, key, filename='workflow'):
 def _workflow_path_filters(lines, filename='workflow'):
     """Return normalized `paths` and `paths-ignore` entries for an event."""
     filters = {}
-    option_indent = _option_indent(lines)
+    option_indent = _option_indent(lines, filename)
 
     for index, line in enumerate(lines):
-        current = _entry(line)
+        current = _entry(line, filename)
         if current is None or current[1] not in ('paths', 'paths-ignore'):
             continue
         if current[0] != option_indent:
@@ -216,7 +268,7 @@ def _workflow_path_filters(lines, filename='workflow'):
         values = []
         item_indent = None
         for following in lines[index + 1:]:
-            next_entry = _entry(following)
+            next_entry = _entry(following, filename)
             if next_entry is not None and next_entry[0] <= indent:
                 break
             stripped = following.strip()
@@ -247,16 +299,15 @@ def _workflow_triggers(workflow, filename='workflow'):
     """
     lines = workflow.splitlines()
     on_index = None
-    on_pattern = re.compile(r'''(?:(['"])on\1|on)\s*:(.*)$''')
     for index, line in enumerate(lines):
-        if line.startswith(' '):
+        if _indent(line):
             continue
-        match = on_pattern.fullmatch(line)
-        if not match:
+        entry = _mapping_key(line.strip(), filename)
+        if entry is None or entry[0] != 'on':
             continue
         if on_index is not None:
             raise AssertionError(f'{filename}: duplicate on: blocks')
-        value = match.group(2).strip()
+        value = entry[1]
         if value and not value.startswith('#'):
             raise AssertionError(
                 f'{filename}: inline on: block is not understood: {line!r}')
@@ -283,7 +334,7 @@ def _workflow_triggers(workflow, filename='workflow'):
             # written `workflow_dispatch: {}` or with a trailing comment is
             # still that trigger, and a reader that missed it would report
             # the one it was looking for as absent.
-            entry = _mapping_key(stripped)
+            entry = _mapping_key(stripped, filename)
             if entry is not None:
                 name, rest = entry
                 # Options written on the key's own line are options this
@@ -307,6 +358,5 @@ def _workflow_triggers(workflow, filename='workflow'):
 
 
 def _trigger_names(workflow):
-    """Trigger keys of an `on:` block, past YAML quoting and stray spacing."""
-    return {key.strip().strip('\'"').strip()
-            for key in _workflow_triggers(workflow)}
+    """Trigger keys of an `on:` block in the accepted key grammar."""
+    return set(_workflow_triggers(workflow))
