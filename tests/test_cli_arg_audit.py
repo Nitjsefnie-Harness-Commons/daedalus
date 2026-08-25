@@ -11,11 +11,15 @@ The audit refuses reads through the namespace parameter's own name outside
 four permitted shapes: direct attributes, constant-name ``getattr``,
 constant-name ``hasattr``, and constant mapping reads through ``vars(args)``
 or ``args.__dict__``. It also refuses the named reflective calls ``locals()``,
-``globals()``, ``eval``, ``exec`` and no-argument ``vars()``, plus routes to
-``sys._getframe`` and ``inspect.currentframe`` when statically constant
-access from the handler's globals resolves to those routes. A route
-constructed dynamically is outside what this audit checks; this is a bounded
-check, not a completeness claim.
+``globals()``, ``eval``, ``exec`` and no-argument ``vars()``. Frame routes are
+resolved through in-function imports, global names, module attributes,
+exact-class attributes (including ``staticmethod`` and ``classmethod``),
+constant list/tuple/dict subscripts, constant-key ``.get`` on an exact dict or
+module ``__dict__``, and constant-name ``getattr``/``vars`` calls. Unresolved
+``_getframe`` and ``currentframe`` spellings are refused outright. Every other
+route is outside what this audit checks, including other container types, the
+iterator protocol, comprehension results, instance attribute reads,
+``operator.attrgetter``, and any name built at runtime.
 """
 import argparse
 import ast
@@ -81,14 +85,7 @@ def _rebinds(function, name):
 
 
 def _scope_binds(function, name):
-    """Return True when a nested callable's own scope binds ``name``.
-
-    Parameters count, and so does anything Python gives function scope:
-    assignments, loop and ``with`` targets, ``except`` names, imports and
-    the names of nested ``def`` and ``class`` statements. Bindings made in
-    a deeper nested scope or as a comprehension target do not, and a
-    ``nonlocal`` declaration means the name still reaches the handler.
-    """
+    """Return True when a nested callable's own scope binds ``name``."""
     if _rebinds(function, name):
         return True
     body = function.body
@@ -246,13 +243,7 @@ def _constant_dict_subscript(node):
 
 
 def _permitted_namespace_read(name):
-    """Resolve a use of the namespace parameter, or None for an escape.
-
-    Four read shapes are permitted: ``args.attr``, constant-name
-    ``getattr``/``hasattr``, and constant mapping reads through ``vars(args)``
-    or ``args.__dict__``. Every other mention of the parameter is an escape:
-    aliasing, containers, calls, returns, stores.
-    """
+    """Resolve a permitted namespace read, or None for an escape."""
     parent = name._parent
     if isinstance(parent, ast.Attribute) and parent.value is name:
         if not isinstance(parent.ctx, ast.Load):
@@ -280,18 +271,7 @@ def _permitted_namespace_read(name):
 
 def _handler_arg_violations(function, args_name, allowed,
                             handler_globals=None):
-    """Return (reads, violations) for one handler's namespace use.
-
-    Permitted reads are checked against ``allowed``; every other mention
-    of the parameter is a namespace escape, and reflective calls or
-    statically resolved frame routes are refused. A nested callable whose own
-    scope binds the name has
-    only its body skipped: its decorators, defaults and annotations are
-    evaluated in the enclosing scope — the handler's — and stay audited.
-    A comprehension whose target binds the name shadows it for the whole
-    comprehension except the outermost iterable, which is evaluated in the
-    enclosing scope too.
-    """
+    """Return (reads, violations) for one handler's namespace use."""
     for node in ast.walk(function):
         for child in ast.iter_child_nodes(node):
             child._parent = node
@@ -431,7 +411,6 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
 
 
 def test_cli_audit_reports_suppressed_destination(tmp):
-    """A handler read of argparse's absent ``version`` is reported."""
     from daedalus_cli.parser import build_parser
 
     parser = build_parser()
@@ -445,7 +424,6 @@ def test_cli_audit_reports_suppressed_destination(tmp):
 
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
-    """Each permitted read passes when declared and is reported when not."""
     cases = [
         ('args.json', 'args.undeclared_probe'),
         ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')"),
@@ -461,7 +439,6 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
-    """Every other mention of the namespace parameter is an escape."""
     cases = [
         ('other = args', 'other = args'),
         ('other = args\nthird = other\nthird.x', 'other = args'),
@@ -481,7 +458,6 @@ def test_cli_audit_reports_namespace_escapes(tmp):
 
 
 def test_cli_audit_respects_inner_scope_bindings(tmp):
-    """An inner ``args`` parameter shadows; a closure over it is audited."""
     shadowed = (
         'def inner(args):\n'
         '    args.undeclared_probe\n'
@@ -494,7 +470,6 @@ def test_cli_audit_respects_inner_scope_bindings(tmp):
 
 
 def test_cli_audit_sees_shadowing_callable_defaults(tmp):
-    """A nested callable's defaults are evaluated in the handler's scope."""
     cases = [
         'def inner(args=args):\n    return args.undeclared_probe\ninner()',
         'f = lambda args=args: args.undeclared_probe\nf()',
@@ -505,7 +480,6 @@ def test_cli_audit_sees_shadowing_callable_defaults(tmp):
 
 
 def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
-    """A shadowing def's decorators and annotations are audited too."""
     decorated = '@consume(args)\ndef inner(args):\n    pass'
     assert _audit_fake_handler(decorated) == [
         'namespace escape: consume(args)']
@@ -514,7 +488,6 @@ def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
 
 
 def test_cli_audit_refuses_reflective_namespace_access(tmp):
-    """Named reflective calls and resolved frame routes are escapes."""
     cases = [
         ("_ = locals()['args'].undeclared_probe", 'locals()'),
         ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
@@ -545,13 +518,27 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
         assert _audit_fake_handler(body) == [
             f'namespace escape: {construct}'], body
 
+    calls = []
+
+    class Descriptor:
+        def __get__(self, obj, objtype=None):
+            calls.append('descriptor __get__ invoked')
+            return sys._getframe
+
+    class FrameRoutes:
+        active = Descriptor()
+
+    function = ast.parse(
+        "def do_tabs(args):\n    FrameRoutes.active()\n").body[0]
+    attr_node = function.body[0].value.func
+    value = _frame_value(
+        attr_node, function, {'FrameRoutes': FrameRoutes}, {})
+    assert value is FrameRoutes.__dict__['active']
+    assert calls == []
+
 
 def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
-    """Real ``do_tabs`` mutations fail audit and real dispatch alike.
-
-    Each in-memory module keeps the handler in its real module globals, so
-    these controls prove refusal is about an actual dispatch hazard.
-    """
+    """Real ``do_tabs`` mutations prove audit refusal and dispatch hazards."""
     cases = [
         ('from sys import _getframe as get_frame',
          "_ = get_frame().f_locals['args'].undeclared_probe", 'get_frame()'),
@@ -564,9 +551,16 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
         ('FRAME_ROUTES = [sys._getframe]',
          "_ = FRAME_ROUTES[0]().f_locals['args'].undeclared_probe",
          'FRAME_ROUTES[0]()'),
+        ('TAB_FRAME_ROUTES = (sys._getframe,)',
+         "_ = TAB_FRAME_ROUTES[0]().f_locals['args'].undeclared_probe",
+         'TAB_FRAME_ROUTES[0]()'),
         ("FRAME_ROUTES = {'active': sys._getframe}",
          "_ = FRAME_ROUTES['active']().f_locals['args'].undeclared_probe",
          "FRAME_ROUTES['active']()"),
+        ("FRAME_ROUTES = {'active': sys._getframe}",
+         "_ = FRAME_ROUTES.get('active')()"
+         ".f_locals['args'].undeclared_probe",
+         "FRAME_ROUTES.get('active')()"),
         ('class FrameRoutes:\n    active = sys._getframe',
          "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
          'FrameRoutes.active()'),
@@ -578,6 +572,9 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
          'FrameRoutes.active()'),
         ('', "_ = sys.__dict__['_getframe']()"
          ".f_locals['args'].undeclared_probe", "sys.__dict__['_getframe']()"),
+        ('', "_ = sys.__dict__.get('_getframe')()"
+         ".f_locals['args'].undeclared_probe",
+         "sys.__dict__.get('_getframe')()"),
         ('', "_ = vars(sys)['_getframe']()"
          ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),
     ]
@@ -593,23 +590,37 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
         finally:
             sys.modules.pop(handler_module.__dict__['__name__'], None)
 
+    # Documented gaps, not oversights: neither route is resolved.
+    gaps = [
+        ('FRAME_ROUTES = [sys._getframe]',
+         "_ = [route for route in FRAME_ROUTES][0]()"
+         ".f_locals['args'].undeclared_probe"),
+        ('class FrameRoutes:\n    active = sys._getframe',
+         "_ = FrameRoutes().active().f_locals['args'].undeclared_probe"),
+    ]
+    for index, (module_prelude, body) in enumerate(gaps):
+        handler_module = _mutated_cli_tabs(
+            f'known_gap_cli_{index}', module_prelude, body)
+        try:
+            assert _audit_real_tabs_handler(handler_module) == []
+            _assert_real_tabs_dispatch_crashes(handler_module)
+        finally:
+            sys.modules.pop(handler_module.__dict__['__name__'], None)
+
 
 def test_cli_audit_respects_comprehension_shadowing(tmp):
-    """A comprehension target that binds the name shadows it there."""
     assert _audit_fake_handler('_ = [args.json for args in values]') == []
     assert _audit_fake_handler('[args.json for value in values]') == []
     assert _audit_fake_handler("vars(args)['json']") == []
 
 
 def test_cli_audit_sees_a_shadowing_comprehensions_iterable(tmp):
-    """The outermost iterable runs in the handler and stays audited."""
     assert _audit_fake_handler(
         '_ = [args.value for args in args.undeclared_probe]') == [
         'args.undeclared_probe']
 
 
 def test_cli_audit_respects_nested_local_bindings(tmp):
-    """A nested function that assigns the name binds its own local."""
     shadowed = (
         'def inner():\n'
         "    args = type('T', (), {'json': True})()\n"
@@ -618,17 +629,6 @@ def test_cli_audit_respects_nested_local_bindings(tmp):
 
 
 def test_cli_handlers_read_only_declared_args(tmp):
-    """Dispatched handlers read only their parser's declared arguments.
-
-    The audit refuses reads through the namespace parameter's own name outside
-    four permitted shapes: direct attributes, constant-name ``getattr``,
-    constant-name ``hasattr``, and constant mapping reads through
-    ``vars(args)`` or ``args.__dict__``. It also refuses named reflective calls
-    and routes to ``sys._getframe`` or ``inspect.currentframe`` when statically
-    constant access from the handler's globals resolves to those routes. A
-    route constructed dynamically is outside what this audit checks; this is a
-    bounded check, not a completeness claim.
-    """
     from daedalus_cli.cli import DISPATCH
     from daedalus_cli.parser import build_parser
 
@@ -683,7 +683,6 @@ def test_cli_handlers_read_only_declared_args(tmp):
 
 
 def test_cli_dispatch_matches_parser_subcommands(tmp):
-    """Dispatch and the parser expose exactly the same subcommand names."""
     from daedalus_cli.cli import DISPATCH
     from daedalus_cli.parser import build_parser
 
