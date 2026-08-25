@@ -21,7 +21,11 @@ class _ScalarReaderMixin:
     def _strip_comment(self, text):
         quote = None
         escaped = False
+        doubled_quote = False
         for index, char in enumerate(text):
+            if doubled_quote:
+                doubled_quote = False
+                continue
             if quote == '"' and escaped:
                 escaped = False
                 continue
@@ -34,6 +38,7 @@ class _ScalarReaderMixin:
                 elif quote == char:
                     if quote == "'" and index + 1 < len(text) \
                             and text[index + 1] == "'":
+                        doubled_quote = True
                         continue
                     quote = None
                 continue
@@ -45,7 +50,11 @@ class _ScalarReaderMixin:
     def _mapping_colon(self, body, index, context):
         quote = None
         escaped = False
+        doubled_quote = False
         for position, char in enumerate(body):
+            if doubled_quote:
+                doubled_quote = False
+                continue
             if quote == '"' and escaped:
                 escaped = False
                 continue
@@ -59,6 +68,7 @@ class _ScalarReaderMixin:
                 if char == quote:
                     if quote == "'" and position + 1 < len(body) \
                             and body[position + 1] == "'":
+                        doubled_quote = True
                         continue
                     quote = None
                 continue
