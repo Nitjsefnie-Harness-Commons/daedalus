@@ -13,6 +13,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _ghexpr import evaluate  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
+from _yamlread import YAMLReadError, job_scalar, step_scalar  # noqa: E402
 
 
 _GH_ARTIFACT_STUB = r"""#!/usr/bin/env python3
@@ -198,60 +199,18 @@ def _job_section(workflow, job, next_job):
     return section
 
 
-def _step_section(workflow, step_name):
-    """Return one named step without neighboring steps or jobs."""
-    marker = f'      - name: {step_name}\n'
-    _, found, after = workflow.partition(marker)
-    assert found, f'missing workflow step: {step_name}'
-    boundary = re.search(
-        r'\n      - (?:name|uses):|\n  [A-Za-z0-9_-]+:', after)
-    if boundary:
-        after = after[:boundary.start()]
-    return after
-
-
 def _step_condition(workflow, step_name):
     """Return a named step's complete Actions condition."""
-    section = _step_section(workflow, step_name)
-    match = re.search(
-        r'^        if:.*(?:\n          [^\n]*)*', section, re.MULTILINE)
-    assert match, f'missing condition for workflow step: {step_name}'
-    return match.group(0)
-
-
-def _condition_expression(block, indent=''):
-    """Turn one YAML `if` scalar into the expression it evaluates."""
-    lines = block.splitlines()
-    for index, line in enumerate(lines):
-        marker = indent + 'if:'
-        if not line.startswith(marker):
-            continue
-        value = line[len(marker):].strip()
-        parts = [] if value in ('>-', '>', '|-', '|') else [value]
-        index += 1
-        while index < len(lines):
-            continuation = lines[index]
-            if continuation and continuation.startswith(indent + ' '):
-                parts.append(continuation.strip())
-                index += 1
-                continue
-            break
-        expression = ' '.join(part for part in parts if part)
-        assert expression, block
-        return expression
-    raise AssertionError(f'missing condition with indent {indent!r}')
+    condition = step_scalar(workflow, 'comment', step_name, 'if')
+    assert condition is not None, f'missing condition for step: {step_name}'
+    return condition
 
 
 def _job_condition(workflow, job):
-    """Extract one job's condition without interpreting neighboring YAML."""
-    jobs = workflow.partition('\njobs:\n')[2]
-    marker = f'  {job}:\n'
-    _, found, section = jobs.partition(marker)
-    assert found, jobs
-    boundary = re.search(r'\n  [A-Za-z0-9_-]+:\n', section)
-    if boundary:
-        section = section[:boundary.start()]
-    return _condition_expression(section, '    ')
+    """Read one job condition through the complete-scalar reader."""
+    condition = job_scalar(workflow, job, 'if')
+    assert condition is not None, f'missing condition for job: {job}'
+    return condition
 
 
 def _step_context(present, stale):
@@ -268,6 +227,75 @@ def _step_context(present, stale):
             'cancelled': False,
         },
     }
+
+
+def _yaml_raises(call, detail=None):
+    """Require the bounded workflow reader to refuse an unsafe shape."""
+    try:
+        call()
+    except YAMLReadError as error:
+        if detail is not None:
+            assert detail in str(error), str(error)
+        return
+    raise AssertionError('ambiguous YAML shape was accepted')
+
+
+def test_workflow_scalar_reader_preserves_block_values_and_chomping(tmp):
+    """Job scalars retain folded blanks and literal chomping markers."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  sample:\n'
+        '    folded: >-\n'
+        '      first\n'
+        '\n'
+        '      second\n'
+        '    literal: |+\n'
+        '      line\n'
+        '\n'
+        '\n'
+        '    plain: value\n')
+    assert job_scalar(workflow, 'sample', 'folded') == 'first\nsecond'
+    assert job_scalar(workflow, 'sample', 'literal') == 'line\n\n\n'
+    assert job_scalar(workflow, 'sample', 'plain') == 'value'
+
+
+def test_workflow_scalar_reader_reaches_complete_step_values(tmp):
+    """Step conditions are read without dropping continuation lines."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  comment:\n'
+        '    steps:\n'
+        '      - name: Download\n'
+        '        if: >-\n'
+        "          steps.artifact.outputs.present == 'true'\n"
+        '\n'
+        "          && steps.pr.outputs.stale != 'true'\n"
+        '      - name: Other\n'
+        '        if: false\n')
+    assert step_scalar(workflow, 'comment', 'Download', 'if') == (
+        "steps.artifact.outputs.present == 'true'\n"
+        "&& steps.pr.outputs.stale != 'true'")
+    assert step_scalar(workflow, 'comment', 'Other', 'if') == 'false'
+
+
+def test_workflow_scalar_reader_distinguishes_missing_and_unsafe_shapes(tmp):
+    """Missing values return None while unsupported scalar shapes refuse."""
+    del tmp
+    workflow = 'jobs:\n  sample:\n    runs-on: ubuntu-latest\n'
+    assert job_scalar(workflow, 'missing', 'if') is None
+    assert job_scalar(workflow, 'sample', 'if') is None
+    assert step_scalar(workflow, 'sample', 'missing', 'if') is None
+    _yaml_raises(lambda: job_scalar(
+        'jobs:\n  sample:\n    if: >- broken\n', 'sample', 'if'),
+        'unsupported block scalar header')
+    _yaml_raises(lambda: job_scalar(
+        'jobs:\n  sample:\n    if: "true"\n', 'sample', 'if'),
+        'quoted scalar')
+    _yaml_raises(lambda: step_scalar(
+        'jobs:\n  sample:\n    steps:\n      name: Download\n',
+        'sample', 'Download', 'if'), 'not a sequence')
 
 
 def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
@@ -457,8 +485,7 @@ def test_commenter_runs_every_completed_run_and_orders_stale_gate(
     stale = _step_context('true', 'true')
     for step_name in ('Download the comment artifact',
                       'Post or update the pull request comment'):
-        condition = _step_condition(workflow, step_name)
-        expression = _condition_expression(condition, '        ')
+        expression = _step_condition(workflow, step_name)
         assert evaluate(expression, current) is True, expression
         assert evaluate(expression, stale) is False, expression
 
@@ -466,12 +493,42 @@ def test_commenter_runs_every_completed_run_and_orders_stale_gate(
 def test_missing_marker_step_owns_its_artifact_and_stale_conditions(tmp):
     """Invalidation is enabled only for a current run missing its artifact."""
     del tmp
-    expression = _condition_expression(
-        _step_condition(_workflow(), 'Mark missing patch coverage'),
-        '        ')
+    expression = _step_condition(_workflow(), 'Mark missing patch coverage')
     assert evaluate(expression, _step_context('false', 'false')) is True
     assert evaluate(expression, _step_context('true', 'false')) is False
     assert evaluate(expression, _step_context('false', 'true')) is False
+
+
+def test_blank_lines_cannot_hide_condition_terms(tmp):
+    """The complete mutation remains visible to every condition check."""
+    del tmp
+    workflow = _workflow()
+    workflow = workflow.replace(
+        "      github.event.workflow_run.event == 'pull_request'\n",
+        "      github.event.workflow_run.event == 'pull_request'\n\n"
+        "      && false\n", 1)
+    stale_term = "          && steps.pr.outputs.stale != 'true'\n"
+    mark_term = stale_term + "\n          && false\n"
+    workflow = workflow.replace(stale_term, mark_term, 1)
+    before_mark, marker, after_mark = workflow.partition(mark_term)
+    assert marker, workflow
+    stale_guard = stale_term + "\n          || always()\n"
+    after_mark = after_mark.replace(stale_term, stale_guard, 2)
+    workflow = before_mark + marker + after_mark
+
+    job_context = {
+        'github': {'event': {'workflow_run': {
+            'event': 'pull_request',
+        }}},
+    }
+    assert evaluate(_job_condition(workflow, 'comment'), job_context) is False
+    assert evaluate(
+        _step_condition(workflow, 'Mark missing patch coverage'),
+        _step_context('false', 'false')) is False
+    stale = _step_context('true', 'true')
+    for step_name in ('Download the comment artifact',
+                      'Post or update the pull request comment'):
+        assert evaluate(_step_condition(workflow, step_name), stale) is True
 
 
 def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
