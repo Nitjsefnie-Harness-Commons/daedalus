@@ -173,29 +173,31 @@ def _git(repo, *args):
 
 
 def _git_input(repo, value, *args):
-    """Run one git command whose standard input builds an object."""
-    return subprocess.run(
+    """Run one git command with exact UTF-8 bytes on standard input."""
+    done = subprocess.run(
         ('git', '-C', str(repo)) + args,
-        input=value, check=True, capture_output=True, text=True, timeout=60)
+        input=value.encode('utf-8'), check=True, capture_output=True,
+        timeout=60)
+    return done.stdout.decode('utf-8')
 
 
 def _source_tree(repo, source, attributes=None):
     """Build a tree containing the real diff coverage module as a blob."""
     source_blob = _git_input(
-        repo, source, 'hash-object', '-w', '--stdin').stdout.strip()
+        repo, source, 'hash-object', '-w', '--stdin').strip()
     ci_tree = _git_input(
         repo,
         f'100644 blob {source_blob}\tdiff_coverage.py\n',
-        'mktree').stdout.strip()
+        'mktree').strip()
     scripts_tree = _git_input(
-        repo, f'040000 tree {ci_tree}\tci\n', 'mktree').stdout.strip()
+        repo, f'040000 tree {ci_tree}\tci\n', 'mktree').strip()
     entries = f'040000 tree {scripts_tree}\tscripts\n'
     if attributes is not None:
         attributes_blob = _git_input(
             repo, attributes,
-            'hash-object', '-w', '--stdin').stdout.strip()
+            'hash-object', '-w', '--stdin').strip()
         entries += f'100644 blob {attributes_blob}\t.gitattributes\n'
-    return _git_input(repo, entries, 'mktree').stdout.strip()
+    return _git_input(repo, entries, 'mktree').strip()
 
 
 def test_real_workflow_diffs_binary_attributed_python_as_text(tmp):
@@ -215,7 +217,12 @@ def test_real_workflow_diffs_binary_attributed_python_as_text(tmp):
     command_lines = [run_lines[start]]
     while command_lines[-1].endswith('\\'):
         command_lines.append(run_lines[start + len(command_lines)])
-    command = '\n'.join(command_lines)
+    command = [
+        word for line in command_lines
+        for word in line.removesuffix('\\').split()
+    ]
+    assert command[:2] == ['git', 'diff'], command
+    assert command[-2:] == ['>', 'patch.diff'], command
 
     repo = Path(tmp) / 'binary-attribute'
     repo.mkdir()
@@ -226,18 +233,18 @@ def test_real_workflow_diffs_binary_attributed_python_as_text(tmp):
     added = 'BINARY_ATTRIBUTE_PROBE = 1\n'
     attributes = 'scripts/ci/diff_coverage.py binary\n'
     base_tree = _source_tree(repo, module)
-    base = _git_input(repo, 'base\n', 'commit-tree', base_tree).stdout.strip()
+    base = _git_input(repo, 'base\n', 'commit-tree', base_tree).strip()
     head_tree = _source_tree(repo, module + added, attributes)
     head = _git_input(
-        repo, 'head\n', 'commit-tree', head_tree, '-p', base).stdout.strip()
+        repo, 'head\n', 'commit-tree', head_tree, '-p', base).strip()
     _git(repo, 'update-ref', 'HEAD', head)
     (repo / '.gitattributes').write_text(attributes, encoding='utf-8')
 
     done = subprocess.run(
-        ['bash', '-c', command], cwd=repo,
+        command[:-2], cwd=repo,
         capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.stdout, done.stderr)
-    patch = (repo / 'patch.diff').read_text(encoding='utf-8')
+    patch = done.stdout
     assert 'Binary files ' not in patch, patch
     assert f'+{added}' in patch, patch
     line = len(module.splitlines()) + 1
