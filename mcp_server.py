@@ -9,6 +9,7 @@ The Bearer token is compared with the bridge token resolved by the CLI's
 existing configuration path before it enters the _token ContextVar and is
 forwarded to the local bridge. Missing configuration fails closed.
 """
+import contextlib
 import math
 import hmac, json, os, socket, sys, threading
 from contextvars import ContextVar
@@ -934,6 +935,18 @@ def _serve():
             ),
         )
         app.add_middleware(_BearerAuth)
+
+        inner_lifespan = app.router.lifespan_context
+
+        @contextlib.asynccontextmanager
+        async def lifespan_context(_app):
+            try:
+                async with inner_lifespan(_app):
+                    yield
+            finally:
+                await BridgeTransport.close_current_loop_clients()
+
+        app.router.lifespan_context = lifespan_context
         import uvicorn
         # Bind ourselves and hand the socket over: the actual port is known
         # synchronously (0 included), and a collision raises here — where the

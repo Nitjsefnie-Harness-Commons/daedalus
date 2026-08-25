@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -433,6 +434,59 @@ def test_transport_clients_are_isolated_by_event_loop(tmp):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_mcp_lifespan_closes_loop_clients(tmp):
+    """The MCP app closes bridge clients when its own lifespan shuts down."""
+    del tmp
+    _need_deps()
+    mod = _load_mcp_at_port('http://127.0.0.1:1', 0)
+    app_box = {}
+    original_factory = mod.mcp.streamable_http_app
+
+    def capture_app(**settings):
+        app_box['value'] = original_factory(**settings)
+        return app_box['value']
+
+    mod.mcp.streamable_http_app = capture_app
+
+    class FakeConfig:
+        def __init__(self, app, **_settings):
+            self.app = app
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+
+        def run(self, sockets=None):
+            for server_socket in sockets or ():
+                server_socket.close()
+
+    fake_uvicorn = types.ModuleType('uvicorn')
+    fake_uvicorn.Config = FakeConfig
+    fake_uvicorn.Server = FakeServer
+    previous_uvicorn = sys.modules.get('uvicorn')
+    sys.modules['uvicorn'] = fake_uvicorn
+    try:
+        mod._serve()
+    finally:
+        mod.mcp.streamable_http_app = original_factory
+        if previous_uvicorn is None:
+            sys.modules.pop('uvicorn', None)
+        else:
+            sys.modules['uvicorn'] = previous_uvicorn
+
+    assert not mod.startup_error, mod.startup_error
+    app = app_box['value']
+
+    async def drive_lifespan():
+        loop = asyncio.get_running_loop()
+        async with app.router.lifespan_context(app):
+            mod.BridgeTransport('http://127.0.0.1:1').client()
+            assert len(mod.BridgeTransport.clients[loop]) == 1
+        return not mod.BridgeTransport.clients.get(loop)
+
+    assert asyncio.run(drive_lifespan())
 
 
 def test_start_in_thread_rejects_a_second_start(tmp):
