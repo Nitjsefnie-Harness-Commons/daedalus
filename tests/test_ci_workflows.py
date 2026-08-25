@@ -507,7 +507,14 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
     assert 'run-id: ${{ github.event.workflow_run.id }}' in download, download
     assert 'github-token: ${{ github.token }}' in download, download
     assert 'pull-requests: write' not in diff, diff
-    assert 'actions/checkout' not in comment_workflow, comment_workflow
+    # Only the YAML decides what runs. The file's own prose explains that
+    # it checks nothing out, so naming the action in a comment is not a
+    # checkout step and must not read as one.
+    yaml_only = '\n'.join(
+        line for line in comment_workflow.splitlines()
+        if not line.lstrip().startswith('#'))
+    assert 'actions/checkout' not in yaml_only, (
+        f'the commenting workflow checks something out:\n{yaml_only}')
     needs = aggregate.partition('needs:')[2].partition('runs-on:')[0]
     assert 'diff-coverage' not in needs, needs
     triggers = _workflow_triggers(comment_workflow)
