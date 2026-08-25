@@ -303,6 +303,27 @@ def test_executable_lines_keeps_the_best_hit_count(tmp):
             'pkg/mod.py': {1: 4}}
 
 
+def test_executable_lines_refuses_incomplete_or_malformed_records(tmp):
+    """Every line record must carry an integer number and hit count."""
+    cases = (
+        ('missing-number', '<line hits="0"/>'),
+        ('missing-hits', '<line number="2"/>'),
+        ('malformed-number', '<line number="second" hits="0"/>'),
+    )
+    for label, record in cases:
+        xml = _write(
+            tmp, f'{label}.xml',
+            '<coverage><class filename="pkg/mod.py"><lines>'
+            '<line number="1" hits="1"/>' + record +
+            '</lines></class></coverage>\n')
+        try:
+            diff_coverage.executable_lines(xml)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f'{label} line record was accepted')
+
+
 def test_only_measured_statements_count(tmp):
     """Added lines absent from the report are excluded, not counted missed."""
     del tmp
@@ -532,8 +553,7 @@ def test_coverage_without_usable_lines_is_an_error(tmp):
     """A named file without numeric line data must fail the measurement."""
     coverage_xml = _write(
         tmp, 'unusable.xml',
-        '<coverage><class filename="x.py"><line hits="1"/></class>'
-        '</coverage>\n')
+        '<coverage><class filename="x.py"><lines/></class></coverage>\n')
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', '-'],
