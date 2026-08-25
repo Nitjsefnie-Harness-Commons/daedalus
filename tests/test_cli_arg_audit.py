@@ -235,14 +235,29 @@ def _reflective_call(node, function, handler_globals, imports):
     return _frame_route_access(node, function, handler_globals, imports)
 
 
-def _constant_dict_subscript(node):
-    """Return (attribute, node) for a constant ``node[...]`` read."""
+def _constant_mapping_read(node):
+    """Return (attribute, node) for a constant exact-dict read."""
     parent = node._parent
     if (isinstance(parent, ast.Subscript) and parent.value is node
             and isinstance(parent.ctx, ast.Load)):
         attribute = _constant_string(parent.slice)
         if attribute is not None:
             return attribute, parent
+    if (not isinstance(parent, ast.Attribute)
+            or parent.value is not node
+            or parent.attr != 'get'):
+        return None
+    call = parent._parent
+    if (not isinstance(call, ast.Call)
+            or call.func is not parent
+            or len(call.args) not in (1, 2)
+            or call.keywords
+            or any(isinstance(argument, ast.Starred)
+                   for argument in call.args)):
+        return None
+    attribute = _constant_string(call.args[0])
+    if attribute is not None:
+        return attribute, call
     return None
 
 
@@ -254,14 +269,14 @@ def _permitted_namespace_read(name):
             return None
         if parent.attr != '__dict__':
             return parent.attr, parent
-        return _constant_dict_subscript(parent)
+        return _constant_mapping_read(parent)
     if not (isinstance(parent, ast.Call)
             and isinstance(parent.func, ast.Name)
             and parent.args and parent.args[0] is name
             and not parent.keywords):
         return None
     if parent.func.id == 'vars' and len(parent.args) == 1:
-        return _constant_dict_subscript(parent)
+        return _constant_mapping_read(parent)
     arities = {'getattr': (2, 3), 'hasattr': (2,)}.get(parent.func.id)
     if not (arities and len(parent.args) in arities
             and not any(isinstance(argument, ast.Starred)
@@ -456,6 +471,10 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
          "getattr(args, 'undeclared_probe', None)"),
         ("vars(args)['json']", "vars(args)['undeclared_probe']"),
         ("args.__dict__['json']", "args.__dict__['undeclared_probe']"),
+        ("vars(args).get('json')",
+         "vars(args).get('undeclared_probe')"),
+        ("args.__dict__.get('json')",
+         "args.__dict__.get('undeclared_probe')"),
         ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')"),
     ]
     for declared, undeclared in cases:
@@ -562,6 +581,30 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
     assert calls == []
 
 
+def test_cli_audit_resolver_resolves_dict_get_default(tmp):
+    function = ast.parse(
+        "def do_tabs(args):\n"
+        "    return ROUTES.get('active', DEFAULT_ROUTE)\n").body[0]
+    call = function.body[0].value
+    handler_globals = {
+        'ROUTES': {'active': sys._getframe},
+        'DEFAULT_ROUTE': inspect.currentframe,
+    }
+
+    assert _frame_value(
+        call, function, handler_globals, {}) is sys._getframe
+    handler_globals['ROUTES'] = {}
+    assert _frame_value(
+        call, function, handler_globals, {}) is inspect.currentframe
+
+    literal_function = ast.parse(
+        "def do_tabs(args):\n"
+        "    return ROUTES.get('active', None)\n").body[0]
+    literal_call = literal_function.body[0].value
+    assert _frame_value(
+        literal_call, literal_function, {'ROUTES': {}}, {}) is None
+
+
 def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
     """Real ``do_tabs`` mutations prove audit refusal and dispatch hazards."""
     cases = [
@@ -586,6 +629,22 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
          "_ = FRAME_ROUTES.get('active')()"
          ".f_locals['args'].undeclared_probe",
          "FRAME_ROUTES.get('active')()"),
+        ("FRAME_ROUTES = {'active': sys._getframe}",
+         "_ = FRAME_ROUTES.get('active', None)()"
+         ".f_locals['args'].undeclared_probe",
+         "FRAME_ROUTES.get('active', None)()"),
+        ('FRAME_ROUTES = [sys._getframe]',
+         "_ = FRAME_ROUTES[-1]().f_locals['args'].undeclared_probe",
+         'FRAME_ROUTES[-1]()'),
+        ('FRAME_ROUTES = (sys._getframe,)',
+         "_ = FRAME_ROUTES[-1]().f_locals['args'].undeclared_probe",
+         'FRAME_ROUTES[-1]()'),
+        ('FRAME_ROUTES = (sys._getframe,)',
+         "_ = FRAME_ROUTES[+0]().f_locals['args'].undeclared_probe",
+         'FRAME_ROUTES[+0]()'),
+        ("FRAME_ROUTES = {-1: sys._getframe}",
+         "_ = FRAME_ROUTES[-1]().f_locals['args'].undeclared_probe",
+         'FRAME_ROUTES[-1]()'),
         ('class FrameRoutes:\n    active = sys._getframe',
          "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
          'FrameRoutes.active()'),
