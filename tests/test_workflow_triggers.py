@@ -143,6 +143,35 @@ def test_workflow_reader_accepts_string_controls_and_a_leading_bom(tmp):
         'paths-ignore': ['docs\ufeff.md']}
 
 
+def test_workflow_trigger_gate_rejects_quote_collisions_and_accepts_comments(
+        tmp):
+    """The gate refuses unequal quote spellings and accepts equal comments."""
+    cases = (
+        ('flow-quote-collision',
+         "    paths-ignore: [don't.md, isn't.md]\n",
+         '    paths-ignore: ["don\'t.md, isn\'t.md"]\n', False),
+        ('block-quote-collision',
+         "    paths-ignore:\n      - don't.md  # docs\n",
+         '    paths-ignore:\n      - "don\'t.md  # docs"\n', False),
+    )
+    for name, push_value, pull_value, accepted in cases:
+        workflows = Path(tmp) / name
+        workflows.mkdir()
+        content = ('name: control\n\non:\n'
+                   f'  push:\n{push_value}'
+                   f'  pull_request:\n{pull_value}')
+        (workflows / 'control.yml').write_text(content, encoding='utf-8')
+        if accepted:
+            _assert_workflow_trigger_filters_match(workflows)
+            continue
+        try:
+            _assert_workflow_trigger_filters_match(workflows)
+        except AssertionError as failure:
+            assert 'control.yml' in str(failure), failure
+        else:
+            raise AssertionError(f'{name}: unequal filters were accepted')
+
+
 def test_contribution_gates_have_unfiltered_push_triggers(tmp):
     """The six contribution gates run on every push to main.
 
