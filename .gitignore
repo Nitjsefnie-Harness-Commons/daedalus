@@ -167,6 +167,7 @@
 !/tests/_segments.py
 !/tests/_util.py
 !/tests/_wfcheckout.py
+!/tests/_wfscalars.py
 !/tests/_workflows.py
 !/tests/_yamlread.py
 !/tests/test_bridge_credentials.py
