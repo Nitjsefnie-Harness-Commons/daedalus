@@ -317,8 +317,6 @@ def _decode_block(lines, parent_indent, style, chomp, explicit, name):
     nonempty = [line for line in lines if line[0].strip()]
     if explicit:
         content_indent = parent_indent + explicit
-        if any(_indent(line) < content_indent for line in nonempty):
-            raise YAMLReadError(f'{name} block indentation is incomplete')
     elif nonempty:
         content_indent = min(_indent(line) for line in nonempty)
     else:
