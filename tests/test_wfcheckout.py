@@ -108,6 +108,8 @@ def test_checkout_reader_ends_block_scalar_at_outdented_comment(tmp):
         '            safe\n'
         '           # ${{ steps.baseline.outputs.ref }}\n')
     assert _wfcheckout.checkout_refs(workflow) == [('build', 'safe')]
+    _assert_yaml_refusal(workflow + '            more\n',
+                         'content after block scalar')
 
 
 def test_checkout_reader_consumes_doubled_quote_before_hash(tmp):

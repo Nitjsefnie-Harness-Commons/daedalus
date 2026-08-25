@@ -241,6 +241,12 @@ class _ScalarReaderMixin:
                 break
             if content_indent is not None and indent < content_indent:
                 if self.lines[body_end][indent:].startswith('#'):
+                    follower = self._next_nonblank(
+                        body_end + 1, end, context)
+                    if follower is not None and self._indent(
+                            follower, context) > parent_indent:
+                        self._refuse('content after block scalar', follower,
+                                     context)
                     break
                 self._refuse('inconsistent block scalar indentation', index,
                              context)
