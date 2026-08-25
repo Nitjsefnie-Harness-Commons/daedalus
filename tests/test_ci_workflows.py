@@ -240,22 +240,10 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
-def test_no_workflow_gates_one_commit_twice(tmp):
-    """A pull request's head SHA gets one run per workflow, not two.
-
-    A branch pushed to this repository fires `push`, and opening a pull
-    request from it fires `pull_request` against the same SHA — so seven
-    workflows ran twice on every Dependabot pull request, `tests` included
-    with its twelve matrix legs. Six open pull requests saturated the runner
-    pool and pushes to main sat queued behind work already done.
-
-    The fix is a `branches:` filter on `push`, which this pins. A branch with
-    no pull request open then gets no run at all, which is the trade: it is
-    not a tree anyone is reviewing.
-    """
-    del tmp
+def _assert_no_workflow_gates_one_commit_twice(workflows):
+    """Reject every push/pull_request pair without an event-level branch."""
     checked = []
-    for path in sorted((ROOT / '.github' / 'workflows').iterdir()):
+    for path in sorted(workflows.iterdir()):
         if path.suffix not in ('.yml', '.yaml'):
             continue
         triggers = _workflow_triggers(
@@ -357,6 +345,59 @@ def test_a_second_top_level_on_block_is_refused(tmp):
         assert 'duplicate on: blocks' in str(failure), failure
     else:
         raise AssertionError('a second on: block was accepted')
+def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
+    """The double-gate helper must inspect both suffixes and own keys."""
+    workflows = Path(tmp) / 'workflows'
+    workflows.mkdir()
+    control = ('name: control\n\non:\n'
+               '  push:\n    branches: [main]\n'
+               '  pull_request:\n')
+    (workflows / 'control.yml').write_text(control, encoding='utf-8')
+    branchless = ('name: branchless\n\non:\n'
+                  '  push:\n  pull_request:\n')
+    branchless_path = workflows / 'branchless.yaml'
+    branchless_path.write_text(branchless, encoding='utf-8')
+    try:
+        _assert_no_workflow_gates_one_commit_twice(workflows)
+    except AssertionError as failure:
+        assert 'branchless.yaml' in str(failure), failure
+    else:
+        raise AssertionError('branchless .yaml workflow was accepted')
+
+    branchless_path.unlink()
+    nested = ('name: nested\n\non:\n'
+              '  push:\n'
+              '    paths:\n'
+              '      - src/**\n'
+              '    types:\n'
+              '      branches: [main]\n'
+              '  pull_request:\n')
+    nested_path = workflows / 'nested.yaml'
+    nested_path.write_text(nested, encoding='utf-8')
+    try:
+        _assert_no_workflow_gates_one_commit_twice(workflows)
+    except AssertionError as failure:
+        assert 'nested.yaml' in str(failure), failure
+    else:
+        raise AssertionError('nested branches key was treated as an option')
+
+
+def test_no_workflow_gates_one_commit_twice(tmp):
+    """A pull request's head SHA gets one run per workflow, not two.
+
+    A branch pushed to this repository fires `push`, and opening a pull
+    request from it fires `pull_request` against the same SHA — so seven
+    workflows ran twice on every Dependabot pull request, `tests` included
+    with its twelve matrix legs. Six open pull requests saturated the runner
+    pool and pushes to main sat queued behind work already done.
+
+    The fix is a `branches:` filter on `push`, which this pins. A branch with
+    no pull request open then gets no run at all, which is the trade: it is
+    not a tree anyone is reviewing.
+    """
+    del tmp
+    _assert_no_workflow_gates_one_commit_twice(
+        ROOT / '.github' / 'workflows')
 
 
 def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
@@ -376,9 +417,9 @@ def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
         if 'pull_request' not in triggers or 'push' not in triggers:
             continue
         checked.append(path.name)
-        push_filter = _workflow_path_filters(triggers['push'])
+        push_filter = _workflow_path_filters(triggers['push'], path.name)
         pull_request_filter = _workflow_path_filters(
-            triggers['pull_request'])
+            triggers['pull_request'], path.name)
         assert push_filter == pull_request_filter, (
             f'{path.name} filters push and pull_request differently: '
             f'{push_filter!r} != {pull_request_filter!r}')
@@ -403,9 +444,9 @@ def test_contribution_gates_have_unfiltered_push_triggers(tmp):
         triggers = _workflow_triggers(
             path.read_text(encoding='utf-8'), name)
         assert 'push' in triggers, f'{name} has no push trigger'
-        assert not _workflow_path_filters(triggers['push']), (
+        assert not _workflow_path_filters(triggers['push'], name), (
             f'{name} filters its push trigger: '
-            f'{_workflow_path_filters(triggers["push"])}')
+            f'{_workflow_path_filters(triggers["push"], name)}')
 
 
 def test_the_speed_gate_throws_away_its_first_round(tmp):
