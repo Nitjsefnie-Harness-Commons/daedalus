@@ -78,18 +78,43 @@ def test_actions_truthiness_and_comparison(tmp):
     assert evaluate('left != right', {
         'left': True, 'right': False,
     }) is True
-    assert evaluate('value == true', {'value': 'TRUE'}) is True
     assert evaluate("value == 'It''s open source!'", {
         'value': "It's open source!",
-    }) is True
-    assert evaluate('value != empty', {
-        'value': None, 'empty': '',
     }) is True
     assert evaluate("value != 'bar'", {'value': 'foo'}) is True
     _raises('zero', {'zero': 0}, 'numeric context value')
     _raises('value == zero', {
         'value': None, 'zero': 0,
     }, 'numeric context value')
+
+
+def test_cross_type_equality_refuses_numeric_coercion(tmp):
+    """Mixed scalar kinds refuse instead of comparing text spellings."""
+    del tmp
+    message = (
+        'cross-type comparisons are refused; numeric coercion is not '
+        'admitted')
+    expressions = (
+        "'false' == false",
+        "'false' != false",
+        'false == null',
+        'null != false',
+        "'' == null",
+        "null != ''",
+        "true == '1'",
+        "'1' != true",
+        "false == '0'",
+        "'0' != false",
+        "true == 'true'",
+        "'true' != true",
+    )
+    for expression in expressions:
+        try:
+            evaluate(expression, {})
+        except ExpressionError as error:
+            assert str(error) == message, (expression, str(error))
+        else:
+            raise AssertionError(f'expression was accepted: {expression!r}')
 
 
 def test_non_ascii_identifiers_and_comparisons_refuse(tmp):
