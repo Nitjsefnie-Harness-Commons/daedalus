@@ -298,6 +298,75 @@ def test_path_filters_refuse_undecoded_block_quote_syntax(tmp):
             raise AssertionError(f'undecoded quote syntax accepted: {value}')
 
 
+def test_path_filters_refuse_block_scalars_and_pin_yaml_values(tmp):
+    """A block-scalar header is not a path value this reader decodes."""
+    del tmp
+    yaml_push = {'paths-ignore': ['foo']}
+    yaml_pull_request = {'paths-ignore': ['|-']}
+    assert yaml_push != yaml_pull_request
+    push_lines = [
+        '    paths-ignore:',
+        '      - |-',
+        '        foo',
+    ]
+    pull_request_lines = [
+        '    paths-ignore:',
+        "      - '|-'",
+    ]
+    assert _workflow_path_filters(
+        pull_request_lines, 'block-pull-request.yml') == yaml_pull_request
+    empty_block = [
+        '    paths-ignore:',
+        '      - |-',
+    ]
+    yaml_empty_block = {'paths-ignore': ['']}
+    assert yaml_empty_block != yaml_pull_request
+    try:
+        actual = _workflow_path_filters(empty_block, 'empty-block.yml')
+    except AssertionError as failure:
+        assert 'empty-block.yml' in str(failure), failure
+        assert "'|-'" in str(failure), failure
+    else:
+        assert actual == yaml_empty_block, (actual, yaml_empty_block)
+        raise AssertionError('empty block scalar was accepted')
+    try:
+        actual = _workflow_path_filters(push_lines, 'block-push.yml')
+    except AssertionError as failure:
+        assert 'block-push.yml' in str(failure), failure
+        assert "'|-'" in str(failure), failure
+    else:
+        assert actual == yaml_push, (actual, yaml_push)
+        raise AssertionError('block scalar was accepted')
+
+
+def test_path_filters_refuse_undecoded_continuations_and_pin_yaml_values(tmp):
+    """An indented plain-scalar continuation is not silently discarded."""
+    del tmp
+    yaml_push = {'paths-ignore': ['foo bar']}
+    yaml_pull_request = {'paths-ignore': ['foo']}
+    assert yaml_push != yaml_pull_request
+    push_lines = [
+        '    paths-ignore:',
+        '      - foo',
+        '        bar',
+    ]
+    pull_request_lines = [
+        '    paths-ignore:',
+        '      - foo',
+    ]
+    assert _workflow_path_filters(
+        pull_request_lines, 'continuation-pull-request.yml') == (
+            yaml_pull_request)
+    try:
+        actual = _workflow_path_filters(push_lines, 'continuation-push.yml')
+    except AssertionError as failure:
+        assert 'continuation-push.yml' in str(failure), failure
+        assert 'bar' in str(failure), failure
+    else:
+        assert actual == yaml_push, (actual, yaml_push)
+        raise AssertionError('undecoded continuation was accepted')
+
+
 def test_a_duplicate_option_key_in_one_event_is_refused(tmp):
     """Last-wins describes a document the workflow does not contain."""
     del tmp
