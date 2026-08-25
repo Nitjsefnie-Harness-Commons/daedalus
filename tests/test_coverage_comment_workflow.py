@@ -22,6 +22,11 @@ import sys
 response = json.loads(os.environ['STUB_RESPONSE'])
 args = sys.argv[1:]
 expression = args[args.index('--jq') + 1]
+if os.environ.get('ASSERT_NO_COVERAGE_ENV'):
+    leaked = sorted(
+        name for name in os.environ if name.startswith('COVERAGE_'))
+    if leaked:
+        raise SystemExit('coverage environment leaked: ' + ','.join(leaked))
 if expression == '.artifacts[]':
     for item in response.get('artifacts', []):
         print(json.dumps(item))
@@ -115,7 +120,20 @@ def _write_executable(path, content):
     path.chmod(0o755)
 
 
-def _run_artifact_check(tmp, response):
+def _run_shell_block(workdir, script, env):
+    """Run a workflow shell block with coverage disabled in its children."""
+    # The stubs are Python subprocesses in deleted temp dirs; scrub CI's
+    # collector so coverage combine in the coverage job cannot chase them.
+    child_env = {
+        name: value for name, value in env.items()
+        if not name.startswith('COVERAGE_')
+    }
+    return subprocess.run(
+        [shutil.which('bash'), '-c', script], cwd=workdir, env=child_env,
+        capture_output=True, text=True, timeout=60)
+
+
+def _run_artifact_check(tmp, response, extra_env=None):
     """Run artifact-presence shell against one endpoint-shaped fixture."""
     bash = shutil.which('bash')
     assert bash, 'bash is required to execute the workflow shell'
@@ -133,10 +151,11 @@ def _run_artifact_check(tmp, response):
         'GITHUB_OUTPUT': str(output),
         'STUB_RESPONSE': json.dumps(response),
     }
-    result = subprocess.run(
-        [bash, '-c', _run_block(
-            _workflow(), 'Check for the comment artifact')],
-        cwd=workdir, env=env, capture_output=True, text=True, timeout=60)
+    if extra_env:
+        env.update(extra_env)
+    result = _run_shell_block(
+        workdir,
+        _run_block(_workflow(), 'Check for the comment artifact'), env)
     return result, output.read_text(encoding='utf-8')
 
 
@@ -157,6 +176,19 @@ def test_artifact_selection_executes_against_both_endpoint_shapes(tmp):
     assert 'present=true' in output, output
 
 
+def test_workflow_harness_scrubs_coverage_environment(tmp):
+    """Python workflow stubs never start a collector of their own."""
+    result, output = _run_artifact_check(
+        tmp, {'total_count': 0, 'artifacts': []}, extra_env={
+            'ASSERT_NO_COVERAGE_ENV': '1',
+            'COVERAGE_FILE': '/tmp/stub.coverage',
+            'COVERAGE_PROCESS_START': '/tmp/stub.toml',
+            'COVERAGE_CONTEXT': 'workflow-contract',
+        })
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert 'present=true' not in output, output
+
+
 def _job_section(workflow, job, next_job):
     """Return one top-level jobs section without neighboring jobs."""
     _, marker, section = workflow.partition(f'\n  {job}:\n')
@@ -166,6 +198,27 @@ def _job_section(workflow, job, next_job):
     return section
 
 
+def _step_section(workflow, step_name):
+    """Return one named step without neighboring steps or jobs."""
+    marker = f'      - name: {step_name}\n'
+    _, found, after = workflow.partition(marker)
+    assert found, f'missing workflow step: {step_name}'
+    boundary = re.search(
+        r'\n      - (?:name|uses):|\n  [A-Za-z0-9_-]+:', after)
+    if boundary:
+        after = after[:boundary.start()]
+    return after
+
+
+def _step_condition(workflow, step_name):
+    """Return a named step's complete Actions condition."""
+    section = _step_section(workflow, step_name)
+    match = re.search(
+        r'^        if:.*(?:\n          [^\n]*)*', section, re.MULTILINE)
+    assert match, f'missing condition for workflow step: {step_name}'
+    return match.group(0)
+
+
 def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
     """Both producers use the event SHA and the diff has HEAD^1 available."""
     del tmp
@@ -173,19 +226,21 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
         encoding='utf-8')
     coverage = _job_section(workflow, 'coverage', 'diff-coverage')
     diff = _job_section(workflow, 'diff-coverage', 'aggregate')
-    checkout = re.search(
+    checkouts = re.findall(
         r'actions/checkout@.*?\n(?P<body>.*?)(?=\n      - |\Z)',
         coverage, re.DOTALL)
-    assert checkout, coverage
-    assert re.search(r'^\s+ref: \$\{\{ github\.sha \}\}\s*$',
-                     checkout.group('body'), re.MULTILINE), checkout.group(0)
-    checkout = re.search(
+    assert checkouts, coverage
+    for checkout in checkouts:
+        assert re.search(r'^\s+ref: \$\{\{ github\.sha \}\}\s*$',
+                         checkout, re.MULTILINE), checkout
+    checkouts = re.findall(
         r'actions/checkout@.*?\n(?P<body>.*?)(?=\n      - |\Z)',
         diff, re.DOTALL)
-    assert checkout, diff
-    body = checkout.group('body')
-    assert re.search(r'^\s+ref: \$\{\{ github\.sha \}\}\s*$',
-                     body, re.MULTILINE), body
+    assert checkouts, diff
+    for checkout in checkouts:
+        assert re.search(r'^\s+ref: \$\{\{ github\.sha \}\}\s*$',
+                         checkout, re.MULTILINE), checkout
+    body = checkouts[0]
     depth = re.search(r'^\s+fetch-depth: (\d+)\s*$', body, re.MULTILINE)
     assert depth and (depth.group(1) == '0' or int(depth.group(1)) >= 2), body
     assert 'git diff --unified=0 HEAD^1 HEAD' in diff, diff
@@ -222,9 +277,8 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls),
     }
-    result = subprocess.run(
-        [bash, '-c', _run_block(_workflow(), block_name)], cwd=workdir,
-        env=env, capture_output=True, text=True, timeout=60)
+    result = _run_shell_block(
+        workdir, _run_block(_workflow(), block_name), env)
     return (result, json.loads(state_path.read_text(encoding='utf-8')), calls,
             output)
 
@@ -277,6 +331,32 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
     assert '**100.0%**' not in state[0]['body'], state
 
 
+def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
+    """A current cancelled run marks the old percentage unavailable."""
+    posted, state, calls, _output = _run_comment_block(
+        tmp, 'Post or update the pull request comment', state=[],
+        head_sha='A', current_head='A', body='**100.0%**')
+    assert posted.returncode == 0, (posted.stdout, posted.stderr)
+    assert len(_writes(calls)) == 1, calls.read_text(encoding='utf-8')
+
+    artifact, output = _run_artifact_check(
+        tmp, {'total_count': 0, 'artifacts': []})
+    assert artifact.returncode == 0, (artifact.stdout, artifact.stderr)
+    assert 'present=true' not in output, output
+    marked, state, calls, _output = _run_comment_block(
+        tmp, 'Mark missing patch coverage', state=state,
+        head_sha='B', current_head='B')
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert len(_writes(calls)) == 1, calls.read_text(encoding='utf-8')
+    assert 'Patch coverage was not measured for commit B.' in \
+        state[0]['body'], state
+    assert '**100.0%**' not in state[0]['body'], state
+
+    jobs = _workflow().partition('\njobs:\n')[2]
+    assert "github.event.workflow_run.event == 'pull_request'" in jobs, jobs
+    assert 'github.event.workflow_run.conclusion' not in jobs, jobs
+
+
 def test_a_rerun_of_a_cannot_overwrite_newer_b(tmp):
     """A stale rerun exits before any comment write."""
     posted, state, calls, _output = _run_comment_block(
@@ -289,17 +369,19 @@ def test_a_rerun_of_a_cannot_overwrite_newer_b(tmp):
     assert stale.returncode == 0, (stale.stdout, stale.stderr)
     assert 'stale=true' in output.read_text(encoding='utf-8'), \
         output.read_text(encoding='utf-8')
+    assert 'number=' not in output.read_text(encoding='utf-8'), \
+        output.read_text(encoding='utf-8')
     assert len(_writes(calls)) == 0, calls.read_text(encoding='utf-8')
 
 
-def test_commenter_runs_completed_non_cancelled_runs_and_orders_stale_gate(
+def test_commenter_runs_every_completed_run_and_orders_stale_gate(
         tmp):
-    """Failure runs can mark stale, while older heads never reach posting."""
+    """Every completed run can mark stale, while older heads never post."""
     del tmp
     workflow = _workflow()
     jobs = workflow.partition('\njobs:\n')[2]
-    assert "conclusion != 'cancelled'" in jobs, jobs
-    assert "conclusion == 'success'" not in jobs, jobs
+    assert "github.event.workflow_run.event == 'pull_request'" in jobs, jobs
+    assert 'github.event.workflow_run.conclusion' not in jobs, jobs
     resolve = workflow.index('- name: Resolve the target pull request')
     download = workflow.index('- name: Download the comment artifact')
     post = workflow.index('- name: Post or update the pull request comment')
@@ -310,7 +392,19 @@ def test_commenter_runs_completed_non_cancelled_runs_and_orders_stale_gate(
         workflow, 'Resolve the target pull request from the event')
     assert 'HEAD_SHA' in resolve_script
     assert 'current_sha' in resolve_script
-    assert "steps.pr.outputs.stale != 'true'" in workflow, workflow
+    for step_name in ('Mark missing patch coverage',
+                      'Download the comment artifact',
+                      'Post or update the pull request comment'):
+        condition = _step_condition(workflow, step_name)
+        assert "steps.pr.outputs.stale != 'true'" in condition, condition
+
+
+def test_missing_marker_step_owns_its_artifact_and_stale_conditions(tmp):
+    """Invalidation is enabled only for a current run missing its artifact."""
+    del tmp
+    condition = _step_condition(_workflow(), 'Mark missing patch coverage')
+    assert "steps.artifact.outputs.present != 'true'" in condition, condition
+    assert "steps.pr.outputs.stale != 'true'" in condition, condition
 
 
 def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
