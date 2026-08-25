@@ -45,6 +45,16 @@ def test_step_name_anchor_is_refused(tmp):
     _raises(source, 'anchor')
 
 
+def test_aliased_step_name_is_refused(tmp):
+    """A YAML alias on a name is outside the admitted step subset."""
+    del tmp
+    source = (
+        "target-name: &target-name target\n"
+        "jobs:\n sample:\n  steps:\n"
+        "   - name: *target-name\n     if: z")
+    _raises(source, 'alias')
+
+
 def test_step_name_tag_is_refused(tmp):
     """A YAML tag on a name is outside the admitted step subset."""
     del tmp
