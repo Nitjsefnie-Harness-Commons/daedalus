@@ -178,6 +178,16 @@ def test_tabs_in_mapping_entries_are_refused(tmp):
         else:
             raise AssertionError(
                 f'tabbed mapping entry was accepted: {line!r}')
+    for line in ('on\t:', 'on:\t'):
+        workflow = f'name: x\n\n{line}\n  push:\n'
+        try:
+            _workflow_triggers(workflow, 'tab-trigger.yml')
+        except AssertionError as failure:
+            assert 'tab-trigger.yml' in str(failure), failure
+            assert 'tab' in str(failure), failure
+        else:
+            raise AssertionError(
+                f'tabbed trigger entry was accepted: {line!r}')
 
 
 def test_empty_plain_path_value_is_refused_and_is_yaml_unequal(tmp):
