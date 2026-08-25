@@ -65,6 +65,7 @@ def test_added_lines_reads_every_hunk_of_every_file(tmp):
     """A second hunk restarts the counter from its own header."""
     del tmp
     diff = (
+        'diff --git a/one.py b/one.py\n'
         '--- a/one.py\n'
         '+++ b/one.py\n'
         '@@ -1 +1,2 @@\n'
@@ -74,6 +75,7 @@ def test_added_lines_reads_every_hunk_of_every_file(tmp):
         ' c\n'
         '+d\n'
         ' e\n'
+        'diff --git a/two.py b/two.py\n'
         '--- a/two.py\n'
         '+++ b/two.py\n'
         '@@ -0,0 +1 @@\n'
@@ -108,15 +110,58 @@ def test_added_lines_decode_git_quoted_paths(tmp):
 
 
 def test_a_deleted_file_adds_nothing(tmp):
-    """`+++ /dev/null` must not become a path named after the deletion."""
+    """`+++ /dev/null` must not become a path, nor eat the next file.
+
+    The deletion is followed by a real addition, because a deletion hunk on
+    its own carries no `+` record and would hold however it was parsed.
+    """
     del tmp
     diff = (
+        'diff --git a/gone.py b/gone.py\n'
         '--- a/gone.py\n'
         '+++ /dev/null\n'
         '@@ -1,2 +0,0 @@\n'
         '-a\n'
-        '-b\n')
-    assert diff_coverage.added_lines(diff) == {}
+        '-b\n'
+        'diff --git a/kept.py b/kept.py\n'
+        '--- a/kept.py\n'
+        '+++ b/kept.py\n'
+        '@@ -1,0 +2 @@\n'
+        '+added\n')
+    assert diff_coverage.added_lines(diff) == {'kept.py': {2}}
+
+
+def _git(repo, *args):
+    """Run one git command inside a fixture repository."""
+    return subprocess.run(('git', '-C', str(repo)) + args, check=True,
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_a_removed_line_of_dashes_keeps_the_rest_of_the_file(tmp):
+    """Git renders a removed `-- ...` line as `--- ...`, not as a header.
+
+    Built from a real `git diff` rather than a written-out string: a
+    hand-written fixture is exactly what let this through, because it only
+    ever contains the shapes its author already thought of.
+    """
+    repo = Path(tmp) / 'dashes'
+    repo.mkdir()
+    _git(repo, 'init', '-q')
+    _git(repo, 'config', 'user.email', 'tests@example.invalid')
+    _git(repo, 'config', 'user.name', 'Tests')
+    source = repo / 'mod.py'
+    source.write_text('a = 1\n-- legacy note\nb = 2\nc = 3\n',
+                      encoding='utf-8')
+    _git(repo, 'add', '-f', 'mod.py')
+    _git(repo, 'commit', '-qm', 'base')
+    source.write_text('a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n',
+                      encoding='utf-8')
+    _git(repo, 'add', '-f', 'mod.py')
+    _git(repo, 'commit', '-qm', 'drop the note and append')
+    diff = _git(repo, 'diff', '--unified=0', 'HEAD~1', 'HEAD').stdout
+    # The record this is about, as git really spells it.
+    assert '\n--- legacy note\n' in diff, diff
+    assert diff_coverage.added_lines(diff) == {'mod.py': {4, 5}}, diff
 
 
 def test_executable_lines_keeps_the_best_hit_count(tmp):
@@ -166,6 +211,31 @@ def test_nothing_measurable_added_is_said_plainly(tmp):
     # lands here and a bare "nothing added" would read as a broken tool.
     assert 'tests/*' in body, body
     assert '0.0%' not in body, body
+
+
+def test_a_report_naming_no_changed_path_says_so(tmp):
+    """A path-spelling mismatch must not read like a test-only change."""
+    del tmp
+    measured = {'src/pkg/mod.py': {1: 1}}
+    added = {'pkg/mod.py': {1, 2}}
+    rows, covered, total = diff_coverage.measure(measured, added)
+    body = diff_coverage.render(rows, covered, total,
+                                diff_coverage.unmeasured_source(measured,
+                                                                added))
+    assert 'names none of the changed paths' in body, body
+    assert 'no patch coverage to report' not in body, body
+
+
+def test_a_change_confined_to_tests_still_reads_as_benign(tmp):
+    """The mismatch warning must not fire on the case it looks like."""
+    del tmp
+    measured = {'pkg/mod.py': {1: 1}}
+    added = {'tests/test_mod.py': {1}}
+    rows, covered, total = diff_coverage.measure(measured, added)
+    body = diff_coverage.render(rows, covered, total,
+                                diff_coverage.unmeasured_source(measured,
+                                                                added))
+    assert 'no patch coverage to report' in body, body
 
 
 def test_missed_lines_are_collapsed_into_spans(tmp):
@@ -244,6 +314,19 @@ def test_an_empty_report_is_an_error_not_a_clean_result(tmp):
         input='', capture_output=True, text=True, timeout=60)
     assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
     assert 'no usable line entries' in done.stderr, done.stderr
+
+
+def test_an_undecodable_path_is_reported_not_a_traceback(tmp):
+    """A git-quoted path that is not UTF-8 gets the clean error treatment."""
+    coverage_xml = _write(tmp, 'coverage.xml', _COVERAGE_XML)
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', '-'],
+        input='+++ "b/\\377.py"\n@@ -0,0 +1 @@\n+x\n',
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
+    assert 'Traceback' not in done.stderr, done.stderr
+    assert 'coverage report invalid' in done.stderr, done.stderr
 
 
 if __name__ == '__main__':
