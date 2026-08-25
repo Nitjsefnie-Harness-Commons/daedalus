@@ -105,7 +105,12 @@ def added_lines(diff_text):
     line_number = 0
     in_hunk = False
     for line in diff_text.splitlines():
-        if line.startswith('diff --git ') or line.startswith('--- '):
+        # `--- ` counts as a file header only outside a hunk. Git renders a
+        # REMOVED line whose content begins `-- ` as `--- ...`, and taking
+        # that for a header clears the path and silently drops every later
+        # hunk of the file. The `+++` match below is guarded the same way.
+        if line.startswith('diff --git ') or (
+                not in_hunk and line.startswith('--- ')):
             path = None
             in_hunk = False
             continue
@@ -162,9 +167,29 @@ def measure(measured, added):
     return rows, covered, total
 
 
-def render(rows, covered, total):
+def unmeasured_source(measured, added):
+    """True when the report names none of the source paths the diff added.
+
+    A systematic path-spelling mismatch — the report naming
+    `src/pkg/mod.py` where the diff says `pkg/mod.py` — is otherwise
+    indistinguishable from a change confined to `tests/`: both measure
+    nothing and both render the reassuring paragraph.
+    """
+    source = [path for path in added
+              if path.endswith('.py') and not path.startswith('tests/')]
+    return bool(source) and not any(path in measured for path in added)
+
+
+def render(rows, covered, total, unmeasured=False):
     """Render the markdown comment body for one run."""
     out = ['### Coverage of this change', '']
+    if total == 0 and unmeasured:
+        out.append('This change added lines to Python files outside '
+                   '`tests/`, but the coverage report names none of the '
+                   'changed paths. Nothing here was measured, which is not '
+                   'the same as nothing needing to be: the report most '
+                   'likely spells paths differently than the diff does.')
+        return '\n'.join(out) + '\n'
     if total == 0:
         # Said in full rather than as "0 lines": the common case here is a
         # change that only touches `tests/`, which the run omits, and a bare
@@ -203,7 +228,11 @@ def main():
     diff_text = (sys.stdin.read() if args.diff == '-'
                  else Path(args.diff).read_text(encoding='utf-8'))
     try:
+        # Inside the guard with its sibling: a git-quoted path whose bytes
+        # are not UTF-8 raises UnicodeDecodeError, a ValueError subclass,
+        # and outside it that died as a traceback.
         measured = executable_lines(args.coverage)
+        added = added_lines(diff_text)
     except (ET.ParseError, ValueError) as error:
         print(f'coverage report invalid: {error}', file=sys.stderr)
         return 1
@@ -212,8 +241,9 @@ def main():
         # "no lines added" for it would read as good news.
         print('coverage report names no measured file', file=sys.stderr)
         return 1
-    rows, covered, total = measure(measured, added_lines(diff_text))
-    sys.stdout.write(render(rows, covered, total))
+    rows, covered, total = measure(measured, added)
+    sys.stdout.write(render(rows, covered, total,
+                            unmeasured_source(measured, added)))
     return 0
 
 
