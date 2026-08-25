@@ -400,9 +400,26 @@ _delivery_locks = tuple(
     threading.Lock() for _ in range(_DELIVERY_LOCK_STRIPES))
 
 
-def _delivery_lock_for(delivery_dir):
-    """Return the lock that serializes one target's delivery files."""
-    key = os.fsencode(os.fspath(delivery_dir))
+def _delivery_lock_for(target_key):
+    r"""Return the lock that serializes one target's delivery files.
+
+    Keyed on the logical target -- the `<token>_<tab>` component that names the
+    directory -- and never on a filesystem spelling. Two `realpath` results for
+    one directory are not obliged to agree: on Windows the `\\?\` prefix
+    survives exactly when a concurrent writer makes the stripping check fail,
+    and a non-strict resolution can leave an 8.3 name, a junction or a mapped
+    drive unresolved where a later call returns the canonical spelling.
+    Normalising the spelling only closes the cases somebody enumerated; the
+    logical key has no spellings to enumerate. A stripe chosen from a spelling
+    puts two callers for the same target on two different locks, which is
+    silently no serialization at all.
+    """
+    # A path-like key is the exact mistake this function was written with, and
+    # it failed silently: two spellings of one directory chose two stripes and
+    # the serialization simply was not there. Refusing it makes that loud.
+    if not isinstance(target_key, str):
+        raise TypeError('delivery stripe key must be the logical target')
+    key = os.fsencode(target_key)
     index = zlib.crc32(key) & (_DELIVERY_LOCK_STRIPES - 1)
     return _delivery_locks[index]
 
@@ -1933,7 +1950,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if delivery_dir is not None:
                     assert delivery_file is not None
-                    with _delivery_lock_for(delivery_dir):
+                    with _delivery_lock_for(_result_key(token, tab_id)):
                         with _result_lock:
                             duplicate = did in _accepted_deliveries
                         if not duplicate:
@@ -2140,7 +2157,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if delivery:
                 assert delivery_dir is not None
-                with _delivery_lock_for(delivery_dir):
+                with _delivery_lock_for(_result_key(token, delivery_tab)):
                     with _result_lock:
                         response, _result_delivery = _read_result_file(
                             res_file, consume, expected)
@@ -2181,7 +2198,7 @@ class Handler(BaseHTTPRequestHandler):
                                 res_file, True, expected)
                         break
                     try:
-                        candidate_dir, candidate_file, _candidate_tab = (
+                        candidate_dir, candidate_file, candidate_tab = (
                             _find_delivery_result(
                                 token, tab, preview_delivery))
                     except ValueError:
@@ -2192,7 +2209,8 @@ class Handler(BaseHTTPRequestHandler):
                                 res_file, True, expected)
                         break
                     changed = False
-                    with _delivery_lock_for(candidate_dir):
+                    with _delivery_lock_for(
+                            _result_key(token, candidate_tab)):
                         with _result_lock:
                             current, _current_delivery = _read_result_file(
                                 res_file, False, '')
