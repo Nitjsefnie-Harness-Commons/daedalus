@@ -78,6 +78,7 @@
 !/.github/workflows/audit.yml
 !/.github/workflows/claim.yml
 !/.github/workflows/codeql.yml
+!/.github/workflows/coverage-comment.yml
 !/.github/workflows/eslint.yml
 !/.github/workflows/lint.yml
 !/.github/workflows/release.yml

@@ -1,0 +1,117 @@
+name: coverage comment
+
+# Post the patch-coverage comment after the tests workflow succeeds.
+#
+# WHY THIS IS A SEPARATE WORKFLOW. `tests` checks out and executes the
+# proposed tree, so that job must not also hold the token that can write pull
+# request conversation. Only the rendered comment and its pull request number
+# cross this boundary; this workflow checks out nothing and runs no code from
+# the pull request.
+#
+# `pull_request_target` is not the answer. As `speed.yml` explains, that
+# trigger would give a run of proposed code the base repository's token and
+# secrets. The workflow_run split keeps the write-capable job on this trusted
+# file while the untrusted job stays read-only.
+
+# zizmor calls `workflow_run` fundamentally insecure, and it is right about
+# the usual shape: a run that checks out the pull request, or runs something
+# the pull request produced, while holding a write token. This one does
+# neither. It has no `actions/checkout` at all, it executes nothing from the
+# artifact, and the only thing crossing from the pull request is the TEXT of
+# a comment. The alternative zizmor would leave standing is the job that runs
+# proposed code holding `pull-requests: write` itself, which is worse.
+on:
+  workflow_run:  # zizmor: ignore[dangerous-triggers]
+    workflows: [tests]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  actions: read
+
+jobs:
+  comment:
+    if: >-
+      github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check for the comment artifact
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          present="$(
+            # Collect every paginated object into one array before selecting.
+            gh api -H 'Cache-Control: no-cache' --paginate \
+              "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+              --jq '.[]' |
+            jq -s 'any(.[]; .name == "diff-coverage-comment" and
+              .expired == false)'
+          )"
+          case "$present" in
+            true) echo 'present=true' >> "$GITHUB_OUTPUT" ;;
+            false)
+              echo 'diff-coverage-comment is absent; nothing to post.'
+              ;;
+            *)
+              echo "unexpected artifact lookup result: $present" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Download the comment artifact
+        if: steps.artifact.outputs.present == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: diff-coverage-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Post or update the pull request comment
+        if: steps.artifact.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          test -f body.md
+          test -f pr-number.txt
+          number="$(cat pr-number.txt)"
+          case "$number" in
+            ''|*[!0-9]*)
+              echo 'pull request number is not only digits' >&2
+              exit 1
+              ;;
+          esac
+
+          marker='<!-- daedalus-diff-coverage -->'
+          { printf '%s\n' "$marker"; cat body.md; } > comment.md
+          existing="$(
+            gh api -H 'Cache-Control: no-cache' --paginate \
+              "repos/$REPO/issues/$number/comments" \
+              --jq '.[]' |
+            jq -s 'map(select(.user.login == "github-actions[bot]" and
+              (.body | startswith(
+                "<!-- daedalus-diff-coverage -->")))) |
+              .[0].id // empty'
+          )"
+          case "$existing" in
+            '')
+              gh api -X POST "repos/$REPO/issues/$number/comments" \
+                -F body=@comment.md >/dev/null
+              echo 'posted a new comment'
+              ;;
+            *[!0-9]*)
+              echo "comment id is not only digits: $existing" >&2
+              exit 1
+              ;;
+            *)
+              gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
+                -F body=@comment.md >/dev/null
+              echo "updated comment $existing"
+              ;;
+          esac

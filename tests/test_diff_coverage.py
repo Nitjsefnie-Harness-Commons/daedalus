@@ -82,6 +82,31 @@ def test_added_lines_reads_every_hunk_of_every_file(tmp):
         'one.py': {2, 12}, 'two.py': {1}}
 
 
+def test_added_triple_plus_content_stays_in_the_current_file(tmp):
+    """A source line beginning `+++ ` is not a later file header."""
+    del tmp
+    diff = (
+        'diff --git a/x.py b/x.py\n'
+        '--- a/x.py\n'
+        '+++ b/x.py\n'
+        '@@ -1,0 +2,2 @@\n'
+        '+++ value\n'
+        '+print(value)\n')
+    assert diff_coverage.added_lines(diff) == {'x.py': {2, 3}}
+
+
+def test_added_lines_decode_git_quoted_paths(tmp):
+    """Git C-quoted UTF-8 paths join the coverage report spelling."""
+    del tmp
+    diff = (
+        '--- "a/caf\\303\\251.py"\n'
+        '+++ "b/caf\\303\\251.py"\n'
+        '@@ -1 +1,2 @@\n'
+        ' old\n'
+        '+new\n')
+    assert diff_coverage.added_lines(diff) == {'café.py': {2}}
+
+
 def test_a_deleted_file_adds_nothing(tmp):
     """`+++ /dev/null` must not become a path named after the deletion."""
     del tmp
@@ -95,18 +120,20 @@ def test_a_deleted_file_adds_nothing(tmp):
 
 
 def test_executable_lines_keeps_the_best_hit_count(tmp):
-    """One file split across two <class> nodes is merged, not overwritten."""
-    xml = _write(tmp, 'split.xml', """<?xml version="1.0" ?>
+    """One file split across classes keeps the hit count in either order."""
+    for index, lines in enumerate(((0, 4), (4, 0))):
+        xml = _write(tmp, f'split-{index}.xml', f"""<?xml version="1.0" ?>
 <coverage><packages><package name="p"><classes>
   <class filename="pkg/mod.py"><lines>
-    <line number="1" hits="0"/>
+    <line number="1" hits="{lines[0]}"/>
   </lines></class>
   <class filename="pkg/mod.py"><lines>
-    <line number="1" hits="4"/>
+    <line number="1" hits="{lines[1]}"/>
   </lines></class>
 </classes></package></packages></coverage>
 """)
-    assert diff_coverage.executable_lines(xml) == {'pkg/mod.py': {1: 4}}
+        assert diff_coverage.executable_lines(xml) == {
+            'pkg/mod.py': {1: 4}}
 
 
 def test_only_measured_statements_count(tmp):
@@ -170,6 +197,43 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
     assert '2-3' in done.stdout, done.stdout
 
 
+def test_the_cli_does_not_round_a_miss_up_to_perfect(tmp):
+    """A non-perfect result must never headline as 100.0 percent."""
+    del tmp
+    body = diff_coverage.render(
+        [('pkg/mod.py', 1999, 2000, [2000])], 1999, 2000)
+    assert '**100.0%**' not in body, body
+
+
+def test_non_cobertura_xml_is_an_error_not_clean_coverage(tmp):
+    """A well-formed XML document with the wrong root must fail."""
+    coverage_xml = _write(
+        tmp, 'wrong-root.xml',
+        '<html><class filename="evil.py"><line number="9" hits="12"/>'
+        '</class></html>\n')
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', '-'],
+        input=('+++ b/evil.py\n@@ -0,0 +9 @@\n+evil\n'),
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
+    assert 'root is not <coverage>' in done.stderr, done.stderr
+
+
+def test_coverage_without_usable_lines_is_an_error(tmp):
+    """A named file without numeric line data must fail the measurement."""
+    coverage_xml = _write(
+        tmp, 'unusable.xml',
+        '<coverage><class filename="x.py"><line hits="1"/></class>'
+        '</coverage>\n')
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', '-'],
+        input='', capture_output=True, text=True, timeout=60)
+    assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
+    assert 'no usable line entries' in done.stderr, done.stderr
+
+
 def test_an_empty_report_is_an_error_not_a_clean_result(tmp):
     """A measurement that did not happen must not read as nothing to cover."""
     coverage_xml = _write(tmp, 'empty.xml',
@@ -179,7 +243,7 @@ def test_an_empty_report_is_an_error_not_a_clean_result(tmp):
          '--diff', '-'],
         input='', capture_output=True, text=True, timeout=60)
     assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
-    assert 'names no measured file' in done.stderr, done.stderr
+    assert 'no usable line entries' in done.stderr, done.stderr
 
 
 if __name__ == '__main__':
