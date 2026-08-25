@@ -402,6 +402,43 @@ def test_checkout_reader_refuses_a_duplicate_top_level_jobs_with_location(tmp):
     _assert_yaml_refusal(workflow, 'second top-level jobs mapping')
 
 
+def test_checkout_reader_decodes_an_escaped_top_level_jobs_key(tmp):
+    """A quoted escape is decoded before selecting the jobs mapping."""
+    del tmp
+    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    workflow = path.read_text(encoding='utf-8')
+    mutated = workflow.replace('jobs:\n', '"jo\\x62s":\n', 1)
+    assert mutated != workflow
+    assert _wfcheckout.checkout_refs(mutated) == [
+        ('speed', '${{ github.event.pull_request.head.sha || github.sha }}'),
+        ('speed', '${{ steps.baseline.outputs.point }}'),
+    ]
+
+
+def test_checkout_reader_refuses_a_hex_escaped_duplicate_jobs_key(tmp):
+    """A hex-escaped jobs sibling cannot hide the real mapping."""
+    del tmp
+    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    workflow = path.read_text(encoding='utf-8')
+    decoy = ('jobs:\n  decoy:\n    runs-on: ubuntu-latest\n'
+             '    steps:\n      - run: echo decoy\n')
+    mutated = workflow.replace('jobs:\n', decoy + '"jo\\x62s":\n', 1)
+    assert mutated != workflow
+    _assert_yaml_refusal(mutated, 'second top-level jobs mapping')
+
+
+def test_checkout_reader_refuses_a_unicode_escaped_duplicate_jobs_key(tmp):
+    """A Unicode-escaped jobs sibling cannot hide the real mapping."""
+    del tmp
+    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    workflow = path.read_text(encoding='utf-8')
+    decoy = ('jobs:\n  decoy:\n    runs-on: ubuntu-latest\n'
+             '    steps:\n      - run: echo decoy\n')
+    mutated = workflow.replace('jobs:\n', decoy + '"jo\\u0062s":\n', 1)
+    assert mutated != workflow
+    _assert_yaml_refusal(mutated, 'second top-level jobs mapping')
+
+
 def test_checkout_reader_refuses_an_explicit_top_level_jobs_key(tmp):
     """An explicit top-level jobs key cannot silently hide checkout steps."""
     del tmp
