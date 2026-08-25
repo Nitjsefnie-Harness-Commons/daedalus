@@ -132,6 +132,9 @@ DECIDED_FRAME_ROUTE_CASES = (
     ('FRAME_ROUTES = (sys._getframe,)',
      "_ = FRAME_ROUTES[+0]().f_locals['args'].undeclared_probe",
      'FRAME_ROUTES[+0]()'),
+    ('FRAME_ROUTES = [None, sys._getframe]',
+     "_ = FRAME_ROUTES[:][-1]().f_locals['args'].undeclared_probe",
+     'FRAME_ROUTES[:][-1]()'),
     ("FRAME_ROUTES = {-1: sys._getframe}",
      "_ = FRAME_ROUTES[-1]().f_locals['args'].undeclared_probe",
      'FRAME_ROUTES[-1]()'),
@@ -148,6 +151,18 @@ DECIDED_FRAME_ROUTE_CASES = (
      "sys.__dict__.get('_getframe')()"),
     ('', "_ = vars(sys)['_getframe']()"
      ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),
+)
+
+COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
+    'COMPOSITE_ROUTES[--1]',
+    'COMPOSITE_ROUTES[---1]',
+    'COMPOSITE_ROUTES[+-1]',
+    'COMPOSITE_ROUTES[0:2][-1]',
+    'COMPOSITE_ROUTES[::2][-1]',
+    'COMPOSITE_ROUTES[::-1][-1]',
+    'COMPOSITE_ROUTES[:][-1]',
+    'COMPOSITE_ROUTES[0:3][1:][-1]',
+    'COMPOSITE_ROUTES[-3:--1][-1]',
 )
 
 RESOLVER_ONLY_FRAME_ROUTE_CASES = (
@@ -235,6 +250,13 @@ KNOWN_GAP_FRAME_ROUTE_CASES = (
      ".f_locals['args'].undeclared_probe"),
     ('runtime-built name', '',
      "_ = getattr(sys, '_get' + 'frame')()"
+     ".f_locals['args'].undeclared_probe"),
+    ('constant binary index',
+     'FRAME_ROUTES = (None, None, sys._getframe)',
+     "_ = FRAME_ROUTES[1 + 1]().f_locals['args'].undeclared_probe"),
+    ('call-produced index',
+     'FRAME_ROUTES = (None, sys._getframe)',
+     "_ = FRAME_ROUTES[len((None,))]()"
      ".f_locals['args'].undeclared_probe"),
 )
 
@@ -329,13 +351,23 @@ def is_frame_route(value):
 def _constant_value(node, unresolved):
     if isinstance(node, ast.Constant):
         return node.value
+    if isinstance(node, ast.Slice):
+        bounds = []
+        for bound in (node.lower, node.upper, node.step):
+            value = None if bound is None else _constant_value(
+                bound, unresolved)
+            if value is unresolved:
+                return unresolved
+            bounds.append(value)
+        return slice(*bounds)
     if (isinstance(node, ast.UnaryOp)
-            and isinstance(node.op, (ast.UAdd, ast.USub))
-            and isinstance(node.operand, ast.Constant)
-            and type(node.operand.value) is int):
+            and isinstance(node.op, (ast.UAdd, ast.USub))):
+        value = _constant_value(node.operand, unresolved)
+        if type(value) is not int:
+            return unresolved
         if isinstance(node.op, ast.USub):
-            return -node.operand.value
-        return node.operand.value
+            return -value
+        return value
     return unresolved
 
 
@@ -360,18 +392,17 @@ def _static_attribute(base, attribute, unresolved):
 
 
 def _static_subscript(base, key, unresolved):
-    if type(base) is list and isinstance(key, int):
+    if (type(base) in (list, tuple)
+            and (isinstance(key, int) or type(key) is slice)):
         try:
             return base[key]
-        except IndexError:
-            return unresolved
-    if type(base) is tuple and isinstance(key, int):
-        try:
-            return base[key]
-        except IndexError:
+        except (IndexError, TypeError, ValueError):
             return unresolved
     if type(base) is dict:
-        return base.get(key, unresolved)
+        try:
+            return base.get(key, unresolved)
+        except TypeError:
+            return unresolved
     return unresolved
 
 
