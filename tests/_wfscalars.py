@@ -15,6 +15,9 @@ _DOUBLE_ESCAPES = {
 class _ScalarReaderMixin:
     """Decode scalar values for the structural workflow reader."""
 
+    def _scalar_blank(self, index):
+        return not self.lines[index].strip(' \t')
+
     def _strip_comment(self, text):
         quote = None
         escaped = False
@@ -168,7 +171,7 @@ class _ScalarReaderMixin:
         body_start = index + 1
         body_end = body_start
         while body_end < len(self.lines):
-            if self._blank(body_end):
+            if self._scalar_blank(body_end):
                 self._indent(body_end, context)
                 body_end += 1
                 continue
@@ -180,7 +183,7 @@ class _ScalarReaderMixin:
         nonblank = [
             self._indent(line, context)
             for line in range(body_start, body_end)
-            if not self._blank(line)
+            if not self._scalar_blank(line)
         ]
         content_indent = (parent_indent + int(indent_indicator)
                           if indent_indicator else
