@@ -254,7 +254,8 @@ def _assert_no_workflow_gates_one_commit_twice(workflows):
         # The event's OWN keys, not any line in its block: a `branches:`
         # nested a level deeper filters something else, and reading it as
         # the push filter passes a trigger that carries none.
-        assert 'branches' in _event_option_keys(triggers['push']), (
+        assert 'branches' in _event_option_keys(
+            triggers['push'], path.name), (
             f'{path.name} runs on every branch push AND on pull_request, so a '
             f'pull request from this repository gates its head SHA twice')
     assert checked, 'no workflow declares both triggers; has one been renamed?'
