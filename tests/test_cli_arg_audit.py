@@ -220,14 +220,16 @@ def _frame_route_access(node, function, handler_globals, imports):
     return _unknown_frame_route(node, function, handler_globals, imports)
 
 
-def _reflective_call(node, function, handler_globals, imports):
+def _reflective_call(node, function, handler_globals, imports,
+                     inspect_frame_routes=True):
     """Return True for a reflective or frame-route access."""
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         if node.func.id in ('locals', 'globals', 'eval', 'exec'):
             return True
         if node.func.id == 'vars' and not node.args:
             return True
-    return _frame_route_access(node, function, handler_globals, imports)
+    return inspect_frame_routes and _frame_route_access(
+        node, function, handler_globals, imports)
 
 
 def _constant_mapping_read(node):
@@ -295,20 +297,25 @@ def _handler_arg_violations(function, args_name, allowed,
     reads = {}
     violations = []
 
-    def check(node):
+    def check(node, inspect_frame_routes=True):
         # One node evaluated where the parameter name is live.
-        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                              ast.Lambda))
-                and _scope_binds(node, args_name)):
-            visit_header(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.Lambda)):
+            visit_header(node, inspect_frame_routes)
+            if not _scope_binds(node, args_name):
+                body = (node.body if isinstance(node.body, list)
+                        else [node.body])
+                for statement in body:
+                    check(statement, False)
             return
         if (isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
                               ast.GeneratorExp))
                 and _comprehension_shadows(node, args_name)):
-            check(node.generators[0].iter)
+            check(node.generators[0].iter, inspect_frame_routes)
             return
         if _reflective_call(
-                node, function, handler_globals, frame_imports):
+                node, function, handler_globals, frame_imports,
+                inspect_frame_routes):
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
@@ -320,32 +327,32 @@ def _handler_arg_violations(function, args_name, allowed,
                 attribute, construct = permitted
                 reads.setdefault(attribute, set()).add(
                     ast.unparse(construct))
-        visit(node)
+        visit(node, inspect_frame_routes)
 
-    def visit(node):
+    def visit(node, inspect_frame_routes=True):
         for child in ast.iter_child_nodes(node):
-            check(child)
+            check(child, inspect_frame_routes)
 
-    def visit_header(nested):
+    def visit_header(nested, inspect_frame_routes):
         # Decorators, defaults, annotations and the return annotation are
         # evaluated where the callable is defined, not where its body runs.
         for decorator in getattr(nested, 'decorator_list', []):
-            check(decorator)
+            check(decorator, inspect_frame_routes)
         arguments = nested.args
         for default in arguments.defaults:
-            check(default)
+            check(default, inspect_frame_routes)
         for kw_default in arguments.kw_defaults:
             if kw_default is not None:
-                check(kw_default)
+                check(kw_default, inspect_frame_routes)
         parameters = (arguments.posonlyargs + arguments.args
                       + arguments.kwonlyargs
                       + [arguments.vararg, arguments.kwarg])
         for parameter in parameters:
             if parameter is not None and parameter.annotation is not None:
-                check(parameter.annotation)
+                check(parameter.annotation, inspect_frame_routes)
         returns = getattr(nested, 'returns', None)
         if returns is not None:
-            check(returns)
+            check(returns, inspect_frame_routes)
 
     visit(function)
     for attribute, constructs in sorted(reads.items()):
