@@ -20,7 +20,8 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _yamlread import job_scalar  # noqa: E402
 from _workflows import (  # noqa: E402
-    _trigger_names, _workflow_path_filters, _workflow_triggers)
+    _event_option_keys, _trigger_names, _workflow_path_filters,
+    _workflow_triggers)
 
 
 _GH_STUB = r"""#!/usr/bin/env python3
@@ -254,14 +255,18 @@ def test_no_workflow_gates_one_commit_twice(tmp):
     """
     del tmp
     checked = []
-    for path in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
+    for path in sorted((ROOT / '.github' / 'workflows').iterdir()):
+        if path.suffix not in ('.yml', '.yaml'):
+            continue
         triggers = _workflow_triggers(
             path.read_text(encoding='utf-8'), path.name)
         if 'pull_request' not in triggers or 'push' not in triggers:
             continue
         checked.append(path.name)
-        assert any(line.strip().startswith('branches:')
-                   for line in triggers['push']), (
+        # The event's OWN keys, not any line in its block: a `branches:`
+        # nested a level deeper filters something else, and reading it as
+        # the push filter passes a trigger that carries none.
+        assert 'branches' in _event_option_keys(triggers['push']), (
             f'{path.name} runs on every branch push AND on pull_request, so a '
             f'pull request from this repository gates its head SHA twice')
     assert checked, 'no workflow declares both triggers; has one been renamed?'
