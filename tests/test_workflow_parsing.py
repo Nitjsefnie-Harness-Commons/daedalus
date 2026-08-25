@@ -153,7 +153,7 @@ def test_invalid_plain_scalar_indicators_and_tabs_are_refused(tmp):
     del tmp
     for value in (
             '@foo', '`foo', '%foo', ']foo', '}foo', '|foo', '>foo',
-            ',foo', 'foo\tbar', 'foo:'):
+            ',foo', 'foo]bar', 'foo}bar', 'foo\tbar', 'foo:'):
         try:
             _workflow_path_filters(
                 [f'    paths-ignore: [{value}]'], 'invalid-scalar.yml')
