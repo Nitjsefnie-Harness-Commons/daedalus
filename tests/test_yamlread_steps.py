@@ -218,6 +218,21 @@ def test_step_scalar_list_decodes_each_uses_spelling(tmp):
         'owner/one@abc', 'owner/two@def', 'actions/checkout@123']
 
 
+def test_step_scalar_list_decodes_folded_values(tmp):
+    """A wrapped action pin remains visible to decoded step policy."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - uses: >-\n'
+        '          owner/action@0123456789abcdef\n')
+    try:
+        values = step_scalars(source, 'sample', 'uses')
+    except YAMLReadError as error:
+        raise AssertionError(
+            f'folded step scalar was not decoded: {error}') from error
+    assert values == ['owner/action@0123456789abcdef'], values
+
+
 def test_privileged_workflow_has_no_decoded_checkout(tmp):
     """Every action in the trusted workflow is decoded before policy."""
     del tmp

@@ -314,7 +314,7 @@ def test_executable_lines_refuses_incomplete_or_malformed_records(tmp):
         xml = _write(
             tmp, f'{label}.xml',
             '<coverage><class filename="pkg/mod.py"><lines>'
-            '<line number="1" hits="1"/>' + record +
+            f'<line number="1" hits="1"/>{record}'
             '</lines></class></coverage>\n')
         try:
             diff_coverage.executable_lines(xml)

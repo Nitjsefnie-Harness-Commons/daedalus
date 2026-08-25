@@ -646,14 +646,13 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
     assert re.search(r'uses: actions/upload-artifact@.*\n\s+with:\n'
                      r'\s+name: coverage-xml[ \t]*$', coverage,
                      re.MULTILINE), coverage
-    assert re.search(r'uses: actions/download-artifact@.*\n\s+with:\n'
+    assert re.search(r'uses:\s*(?:>-\s*)?actions/download-artifact@.*\n\s+with:\n'
                      r'\s+name: coverage-xml[ \t]*$', diff,
                      re.MULTILINE), diff
-    upload = diff.partition('uses: actions/upload-artifact@')[2]
+    upload = diff.partition('actions/upload-artifact@')[2]
     assert re.search(r'with:\n\s+name: diff-coverage-comment[ \t]*$',
                      upload, re.MULTILINE), diff
-    download = comment_workflow.partition(
-        'uses: actions/download-artifact@')[2]
+    download = comment_workflow.partition('actions/download-artifact@')[2]
     assert re.search(r'with:\n\s+name: diff-coverage-comment[ \t]*$',
                      download, re.MULTILINE), comment_workflow
     assert 'run-id: ${{ github.event.workflow_run.id }}' in download, download

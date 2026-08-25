@@ -358,8 +358,11 @@ def _sequence_scalar_values(lines, start, end, parent_indent, key):
         if indent == item_indent and field.startswith('- '):
             seen = False
             field = field[2:]
+            field_indent = item_indent + 2
         elif indent != item_indent + 2:
             continue
+        else:
+            field_indent = indent
         raw_key, raw_value = _split_mapping_field(field, 'step')
         field_key = _decode_inline_scalar(raw_key, 'step key')
         if field_key != key:
@@ -368,7 +371,12 @@ def _sequence_scalar_values(lines, start, end, parent_indent, key):
             continue
         if seen:
             raise YAMLReadError(f'duplicate mapping key: {key}')
-        values.append(_decode_inline_scalar(raw_value, f'step {key}'))
+        if raw_value.strip(' ')[:1] in ('>', '|'):
+            entry = _Entry(index, field_indent, raw_value)
+            _value_start, value_end = _section(lines, index, field_indent)
+            values.append(_scalar_value(lines, entry, value_end, f'step {key}'))
+        else:
+            values.append(_decode_inline_scalar(raw_value, f'step {key}'))
         seen = True
     return values
 
