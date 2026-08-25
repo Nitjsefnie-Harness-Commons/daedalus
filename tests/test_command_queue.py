@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Command-file expiry stays independent from the bridge server."""
+"""Command expiry and single-consumer delivery stay pinned.
+
+These tests cover claim-registry behavior and forced interleavings across the
+queue and legacy delivery paths, proving that one stream receives each
+command.
+"""
 import os
 import sys
 import time
@@ -194,6 +199,10 @@ def _read_streams_once(responses):
         try:
             delivered.append((label, next_stream_data(response, timeout=8)))
         except AssertionError:
+            # A timeout here is the expected outcome for the consumer that
+            # lost the claim; that is the point of the assertion below. The
+            # count assertion in _assert_one_delivery turns one timed-out
+            # stream into evidence.
             pass
     return delivered
 
