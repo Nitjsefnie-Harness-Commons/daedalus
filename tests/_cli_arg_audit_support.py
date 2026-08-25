@@ -140,6 +140,15 @@ DECIDED_FRAME_ROUTE_CASES = (
     ('FRAME_ROUTES = (sys._getframe,)',
      "_ = FRAME_ROUTES[+0]().f_locals['args'].undeclared_probe",
      'FRAME_ROUTES[+0]()'),
+    ('BOOL_ROUTES = {True: sys._getframe}',
+     "_ = BOOL_ROUTES[+True]().f_locals['args'].undeclared_probe",
+     'BOOL_ROUTES[+True]()'),
+    ('BOOL_ROUTES = {-1: sys._getframe}',
+     "_ = BOOL_ROUTES[-True]().f_locals['args'].undeclared_probe",
+     'BOOL_ROUTES[-True]()'),
+    ('BOOL_ROUTES = {False: sys._getframe}',
+     "_ = BOOL_ROUTES[+False]().f_locals['args'].undeclared_probe",
+     'BOOL_ROUTES[+False]()'),
     ('FRAME_ROUTES = [None, sys._getframe]',
      "_ = FRAME_ROUTES[:][-1]().f_locals['args'].undeclared_probe",
      'FRAME_ROUTES[:][-1]()'),
@@ -171,6 +180,14 @@ COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
     'COMPOSITE_ROUTES[:][-1]',
     'COMPOSITE_ROUTES[0:3][1:][-1]',
     'COMPOSITE_ROUTES[-3:--1][-1]',
+    'COMPOSITE_ROUTES[+True]',
+    'COMPOSITE_ROUTES[-True]',
+    'COMPOSITE_ROUTES[+False]',
+    'COMPOSITE_ROUTES[True]',
+    'COMPOSITE_ROUTES[:+True][-1]',
+    'COMPOSITE_ROUTES[-True:][-1]',
+    'COMPOSITE_ROUTES[+False:][-1]',
+    'COMPOSITE_ROUTES[:True][-1]',
 )
 
 RESOLVER_ONLY_FRAME_ROUTE_CASES = (
@@ -356,6 +373,11 @@ def is_frame_route(value):
 # pylint: disable=unidiomatic-typecheck
 
 
+def _is_integer_index(value):
+    """Return True for an ``int`` instance, including ``bool``."""
+    return isinstance(value, int)
+
+
 def _constant_value(node, unresolved):
     if isinstance(node, ast.Constant):
         return node.value
@@ -364,18 +386,20 @@ def _constant_value(node, unresolved):
         for bound in (node.lower, node.upper, node.step):
             value = None if bound is None else _constant_value(
                 bound, unresolved)
-            if value is unresolved:
+            if (value is unresolved
+                    or (value is not None
+                        and not _is_integer_index(value))):
                 return unresolved
             bounds.append(value)
         return slice(*bounds)
     if (isinstance(node, ast.UnaryOp)
             and isinstance(node.op, (ast.UAdd, ast.USub))):
         value = _constant_value(node.operand, unresolved)
-        if type(value) is not int:
+        if not _is_integer_index(value):
             return unresolved
         if isinstance(node.op, ast.USub):
             return -value
-        return value
+        return +value
     return unresolved
 
 
@@ -401,7 +425,7 @@ def _static_attribute(base, attribute, unresolved):
 
 def _static_subscript(base, key, unresolved):
     if (type(base) in (list, tuple)
-            and (isinstance(key, int) or type(key) is slice)):
+            and (_is_integer_index(key) or type(key) is slice)):
         try:
             return base[key]
         except (IndexError, TypeError, ValueError):
