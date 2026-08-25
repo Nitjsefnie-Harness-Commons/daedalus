@@ -11,6 +11,24 @@ _DOUBLE_ESCAPES = {
     'L': '\u2028', 'P': '\u2029',
 }
 
+_SCHEMA_TYPED_WORDS = frozenset((
+    'y', 'yes', 'n', 'no', 'true', 'false', 'on', 'off', 'null', '~',
+))
+_SCHEMA_TYPED_NUMBER_OR_TIME = re.compile(
+    r'(?:'
+    r'[-+]?(?:0[bB][01_]+|0[oO][0-7_]+|0[xX][0-9a-fA-F_]+'
+    r'|0[0-7_]+|(?:0|[1-9][0-9_]*)'
+    r'|[1-9][0-9_]*(?::[0-5]?[0-9])+)'
+    r'|[-+]?(?:(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9][0-9_]*)'
+    r'(?:[eE][-+]?[0-9]+)?|[0-9]+[eE][-+]?[0-9]+'
+    r'|[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|\.inf)'
+    r'|\.nan'
+    r'|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}'
+    r'(?:[Tt ]+[0-9]{1,2}:[0-9]{2}:[0-9]{2}'
+    r'(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}'
+    r'(?::[0-9]{2})?))?)?'
+    r')', re.IGNORECASE)
+
 
 class _ScalarReaderMixin:
     """Decode scalar values for the structural workflow reader."""
@@ -398,7 +416,14 @@ class _ScalarReaderMixin:
                 text += continuation
                 blank_lines = 0
             line += 1
-        return text
+        return self._require_plain_string(text, index, context)
+
+    def _require_plain_string(self, value, index, context):
+        if (not value or value.casefold() in _SCHEMA_TYPED_WORDS
+                or _SCHEMA_TYPED_NUMBER_OR_TIME.fullmatch(value)):
+            self._refuse(
+                'plain scalar is not provably a string', index, context)
+        return value
 
     def _scalar_value(self, value, index, key_indent, value_end, context):
         value = self._strip_comment(value).strip(' \t')
@@ -417,7 +442,7 @@ class _ScalarReaderMixin:
                                       context)
         nested = self._next_nonblank(index + 1, value_end, context)
         if nested is None:
-            return ''
+            return self._require_plain_string('', index, context)
         indent = self._indent(nested, context)
         nested_value = self._strip_comment(
             self.lines[nested][indent:]).strip(' \t')
