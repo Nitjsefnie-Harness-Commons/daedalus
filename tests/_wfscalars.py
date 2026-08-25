@@ -115,6 +115,20 @@ class _ScalarReaderMixin:
         result = []
         while position < len(value):
             char = value[position]
+            if char in ' \t':
+                end = position + 1
+                while end < len(value) and value[end] in ' \t':
+                    end += 1
+                if end < len(value) and value[end] == '\n':
+                    position = end
+                    continue
+                result.append(value[position:end])
+                position = end
+                continue
+            if char == '\n':
+                folded, position = self._quoted_break(value, position)
+                result.append(folded)
+                continue
             if char != "'":
                 result.append(char)
                 position += 1
@@ -142,6 +156,20 @@ class _ScalarReaderMixin:
                     self._refuse('trailing text after double-quoted scalar',
                                  index, context)
                 return ''.join(result)
+            if char in ' \t':
+                end = position + 1
+                while end < len(value) and value[end] in ' \t':
+                    end += 1
+                if end < len(value) and value[end] == '\n':
+                    position = end
+                    continue
+                result.append(value[position:end])
+                position = end
+                continue
+            if char == '\n':
+                folded, position = self._quoted_break(value, position)
+                result.append(folded)
+                continue
             if char != '\\':
                 result.append(char)
                 position += 1
@@ -150,6 +178,11 @@ class _ScalarReaderMixin:
                 self._refuse('unterminated double-quoted escape', index,
                              context)
             escaped = value[position + 1]
+            if escaped == '\n':
+                position += 2
+                while position < len(value) and value[position] in ' \t':
+                    position += 1
+                continue
             if escaped in _DOUBLE_ESCAPES:
                 result.append(_DOUBLE_ESCAPES[escaped])
                 position += 2
@@ -174,6 +207,27 @@ class _ScalarReaderMixin:
             self._refuse('unknown double-quote escape', index, context)
         self._refuse('unterminated double-quoted scalar', index, context)
         return None
+
+    def _quoted_break(self, value, position):
+        breaks = 0
+        while position < len(value) and value[position] == '\n':
+            breaks += 1
+            position += 1
+            while position < len(value) and value[position] in ' \t':
+                position += 1
+        if breaks == 1:
+            return ' ', position
+        return '\n' * (breaks - 1), position
+
+    def _quoted_scalar(self, value, index, value_end, context):
+        raw_line = self.lines[index]
+        trailing = raw_line[len(raw_line.rstrip(' \t')):]
+        physical_lines = [value + trailing]
+        physical_lines.extend(self.lines[index + 1:value_end])
+        scalar = '\n'.join(physical_lines)
+        if value.startswith("'"):
+            return self._single_quoted(scalar, index, context)
+        return self._double_quoted(scalar, index, context)
 
     def _quoted_scalar_end(self, value, index, end, context):
         value = self._strip_comment(value).strip(' \t')
@@ -354,9 +408,11 @@ class _ScalarReaderMixin:
             self._reject_scalar_shape(value, index, context)
             self._reject_prefix(value, index, context)
             if value.startswith("'"):
-                return self._single_quoted(value, index, context)
+                return self._quoted_scalar(
+                    value, index, value_end, context)
             if value.startswith('"'):
-                return self._double_quoted(value, index, context)
+                return self._quoted_scalar(
+                    value, index, value_end, context)
             return self._plain_scalar(value, index, key_indent, value_end,
                                       context)
         nested = self._next_nonblank(index + 1, value_end, context)
@@ -371,5 +427,8 @@ class _ScalarReaderMixin:
         self._reject_prefix(nested_value, nested, context)
         if self._looks_like_mapping(nested_value):
             self._refuse('mapping where scalar was required', nested, context)
+        if nested_value.startswith(("'", '"')):
+            return self._quoted_scalar(
+                nested_value, nested, value_end, context)
         return self._plain_scalar(nested_value, nested, indent, value_end,
                                   context)
