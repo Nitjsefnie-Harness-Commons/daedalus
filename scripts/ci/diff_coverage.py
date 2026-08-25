@@ -167,21 +167,26 @@ def measure(measured, added):
     return rows, covered, total
 
 
-def unmeasured_source(measured, added):
-    """True when the report names none of the source paths the diff added.
+def unmeasured_sources(measured, added):
+    """Return changed non-test Python paths absent from the report.
 
     A systematic path-spelling mismatch — the report naming
     `src/pkg/mod.py` where the diff says `pkg/mod.py` — is otherwise
-    indistinguishable from a change confined to `tests/`: both measure
-    nothing and both render the reassuring paragraph.
+    indistinguishable from a change confined to `tests/`. Returning every
+    absent path matters when one changed source file is measured and another
+    is not: a boolean all-or-nothing guard would hide the latter.
     """
-    source = [path for path in added
-              if path.endswith('.py') and not path.startswith('tests/')]
-    return bool(source) and not any(path in measured for path in added)
+    return {
+        path for path in added
+        if path.endswith('.py')
+        and not path.startswith('tests/')
+        and path not in measured
+    }
 
 
-def render(rows, covered, total, unmeasured=False):
+def render(rows, covered, total, unmeasured=()):
     """Render the markdown comment body for one run."""
+    unmeasured = set(unmeasured)
     out = ['### Coverage of this change', '']
     if total == 0 and unmeasured:
         out.append('This change added lines to Python files outside '
@@ -189,6 +194,9 @@ def render(rows, covered, total, unmeasured=False):
                    'changed paths. Nothing here was measured, which is not '
                    'the same as nothing needing to be: the report most '
                    'likely spells paths differently than the diff does.')
+        out.append('')
+        out.append('Unmeasured changed Python files:')
+        out.extend(f'- `{path}`' for path in sorted(unmeasured))
         return '\n'.join(out) + '\n'
     if total == 0:
         # Said in full rather than as "0 lines": the common case here is a
@@ -202,7 +210,8 @@ def render(rows, covered, total, unmeasured=False):
     percent = 100.0 * covered / total
     if covered < total:
         percent = min(percent, 99.9)
-    out.append(f'**{percent:.1f}%** of added lines covered '
+    subject = 'measured added lines' if unmeasured else 'added lines'
+    out.append(f'**{percent:.1f}%** of {subject} covered '
                f'({covered}/{total}).')
     out.append('')
     out.append('| File | Covered | Added | Missed lines |')
@@ -210,9 +219,18 @@ def render(rows, covered, total, unmeasured=False):
     for path, file_covered, file_total, missed in rows:
         detail = _ranges(missed) if missed else '—'
         out.append(f'| `{path}` | {file_covered} | {file_total} | {detail} |')
+    if unmeasured:
+        out.append('')
+        out.append('The coverage report did not measure these changed '
+                   'Python files:')
+        out.extend(f'- `{path}`' for path in sorted(unmeasured))
     if covered == total:
         out.append('')
-        out.append('Every added line was reached.')
+        if unmeasured:
+            out.append('Every measured added line was reached; the files '
+                       'above were not measured.')
+        else:
+            out.append('Every added line was reached.')
     return '\n'.join(out) + '\n'
 
 
@@ -243,7 +261,7 @@ def main():
         return 1
     rows, covered, total = measure(measured, added)
     sys.stdout.write(render(rows, covered, total,
-                            unmeasured_source(measured, added)))
+                            unmeasured_sources(measured, added)))
     return 0
 
 
