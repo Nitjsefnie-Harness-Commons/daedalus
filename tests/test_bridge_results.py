@@ -413,6 +413,82 @@ def test_delivery_write_cannot_race_compatibility_cleanup(tmp):
         assert status == 200 and result.get('id') == 'retried-result', result
 
 
+_STRIPE_SITE_CUSTOMIZE = r'''
+import __main__
+import os
+import pathlib
+import threading
+import time
+import traceback
+gate = pathlib.Path(os.environ["STRIPE_GATE_DIR"])
+held_tab = os.environ["STRIPE_HELD_TAB"]
+lock_calls_lock = threading.Lock()
+def record_lock_call(target_key, lock):
+    with lock_calls_lock:
+        with (gate / "lock-calls").open("a", encoding="utf-8") as handle:
+            handle.write(f"{target_key}\t{id(lock)}\n")
+def install():
+    try:
+        while not all(hasattr(__main__, name) for name in (
+                "_delivery_lock_for", "_delivery_result_paths")):
+            time.sleep(0.001)
+        real_lock_for = __main__._delivery_lock_for
+        def recording_lock_for(target_key):
+            lock = real_lock_for(target_key)
+            record_lock_call(target_key, lock)
+            return lock
+        __main__._delivery_lock_for = recording_lock_for
+        target_key = __main__._result_key(
+            os.environ["DAEDALUS_TOKEN"], held_tab)
+        target_lock = __main__._delivery_lock_for(target_key)
+        (gate / "holder-lock").write_text(
+            f"{target_key}\t{id(target_lock)}\n", encoding="utf-8")
+        with target_lock:
+            (gate / "holding").write_text("y", encoding="utf-8")
+            try:
+                (gate / "held").write_text("held", encoding="utf-8")
+                while not (gate / "release").exists():
+                    time.sleep(0.01)
+            finally:
+                (gate / "holding").unlink()
+    except BaseException:
+        (gate / "holder-error").write_text(
+            traceback.format_exc(), encoding="utf-8")
+threading.Thread(target=install, daemon=True).start()
+'''
+
+
+def _stripe_holder_setup(tmp, held_tab):
+    """Install the in-process holder used by the delivery stripe tests."""
+    patch_dir = Path(tmp) / 'stripe-patch'
+    patch_dir.mkdir()
+    gate_dir = Path(tmp) / 'stripe-gate'
+    gate_dir.mkdir()
+    (patch_dir / 'sitecustomize.py').write_text(
+        _STRIPE_SITE_CUSTOMIZE.lstrip(), encoding='utf-8')
+    return gate_dir, {
+        'PYTHONPATH': str(patch_dir),
+        'STRIPE_GATE_DIR': str(gate_dir),
+        'STRIPE_HELD_TAB': held_tab,
+    }
+
+
+def _stripe_lock_calls(gate_dir):
+    path = gate_dir / 'lock-calls'
+    if not path.is_file():
+        return []
+    return [tuple(line.split('\t', 1))
+            for line in path.read_text(encoding='utf-8').splitlines()
+            if line]
+
+
+def _stripe_holder_lock(gate_dir):
+    path = gate_dir / 'holder-lock'
+    if not path.is_file():
+        return None
+    return tuple(path.read_text(encoding='utf-8').strip().split('\t', 1))
+
+
 def test_delivery_post_waits_for_its_target_stripe_only(tmp):
     """A held target stripe blocks that target's delivery, nothing else.
 
@@ -423,83 +499,18 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
     """
     held_tab = 'stripe-held'
     other_tab = 'stripe-other'
-    patch_dir = Path(tmp) / 'stripe-patch'
-    patch_dir.mkdir()
-    gate_dir = Path(tmp) / 'stripe-gate'
-    gate_dir.mkdir()
-    (patch_dir / 'sitecustomize.py').write_text(
-        'import __main__\n'
-        'import os\n'
-        'import pathlib\n'
-        'import threading\n'
-        'import time\n'
-        'import traceback\n'
-        'gate = pathlib.Path(os.environ["STRIPE_GATE_DIR"])\n'
-        'held_tab = os.environ["STRIPE_HELD_TAB"]\n'
-        'lock_calls_lock = threading.Lock()\n'
-        'def record_lock_call(target_key, lock):\n'
-        '    with lock_calls_lock:\n'
-        '        with (gate / "lock-calls").open("a", encoding="utf-8") as handle:\n'
-        '            handle.write(f"{target_key}\\t{id(lock)}\\n")\n'
-        'def install():\n'
-        '    try:\n'
-        '        while not all(hasattr(__main__, name) for name in (\n'
-        '                "_delivery_lock_for", "_delivery_result_paths")):\n'
-        '            time.sleep(0.001)\n'
-        '        real_lock_for = __main__._delivery_lock_for\n'
-        '        def recording_lock_for(target_key):\n'
-        '            lock = real_lock_for(target_key)\n'
-        '            record_lock_call(target_key, lock)\n'
-        '            return lock\n'
-        '        __main__._delivery_lock_for = recording_lock_for\n'
-        '        target_key = __main__._result_key(\n'
-        '            os.environ["DAEDALUS_TOKEN"], held_tab)\n'
-        '        target_lock = __main__._delivery_lock_for(target_key)\n'
-        '        (gate / "holder-lock").write_text(\n'
-        '            f"{target_key}\\t{id(target_lock)}\\n", encoding="utf-8")\n'
-        '        with target_lock:\n'
-        '            (gate / "holding").write_text("y", encoding="utf-8")\n'
-        '            try:\n'
-        '                (gate / "held").write_text("held", encoding="utf-8")\n'
-        '                while not (gate / "release").exists():\n'
-        '                    time.sleep(0.01)\n'
-        '            finally:\n'
-        '                (gate / "holding").unlink()\n'
-        '    except BaseException:\n'
-        '        (gate / "holder-error").write_text(\n'
-        '            traceback.format_exc(), encoding="utf-8")\n'
-        'threading.Thread(target=install, daemon=True).start()\n',
-        encoding='utf-8')
-    env = {
-        'PYTHONPATH': str(patch_dir),
-        'STRIPE_GATE_DIR': str(gate_dir),
-        'STRIPE_HELD_TAB': held_tab,
-    }
+    gate_dir, env = _stripe_holder_setup(tmp, held_tab)
     # The stripe is keyed on the logical target, so comparing what the holder
     # and the request locked is plain equality — there is no spelling left to
     # normalise, which is the point of keying it this way.
     target_key = f'{TOK}_{held_tab}'
 
-    def lock_calls():
-        path = gate_dir / 'lock-calls'
-        if not path.is_file():
-            return []
-        return [tuple(line.split('\t', 1))
-                for line in path.read_text(encoding='utf-8').splitlines()
-                if line]
-
-    def holder_lock():
-        path = gate_dir / 'holder-lock'
-        if not path.is_file():
-            return None
-        return tuple(path.read_text(encoding='utf-8').strip().split('\t', 1))
-
     def failure_message():
-        calls = lock_calls()
+        calls = _stripe_lock_calls(gate_dir)
         target_calls = [entry for entry in calls
                         if len(entry) == 2
                         and entry[0] == target_key]
-        held = holder_lock()
+        held = _stripe_holder_lock(gate_dir)
         error_path = gate_dir / 'holder-error'
         if error_path.is_file():
             return (
@@ -582,8 +593,8 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
                 'the injected holder failed while the request was waiting, so '
                 'the property was never exercised end to end: '
                 + (gate_dir / 'holder-error').read_text(encoding='utf-8'))
-        held = holder_lock()
-        calls = lock_calls()
+        held = _stripe_holder_lock(gate_dir)
+        calls = _stripe_lock_calls(gate_dir)
         assert held and len(held) == 2, (held, calls)
         held_dir, held_lock_id = held
         target_calls = [entry for entry in calls
@@ -594,6 +605,117 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         assert all(lock_id == held_lock_id
                    for _delivery_dir, lock_id in target_calls), (
                        held, target_calls, calls)
+
+
+def _seed_delivery(tmp, tab, did):
+    """Create one delivery before starting the in-process stripe holder."""
+    with _util.bridge(tmp) as (base, _docroot):
+        status, body = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': tab, 'id': 'seed', 'result': 'seed',
+            'error': None, 'ts': 1, '_did': did})
+        assert status == 200 and body == {'ok': True}, (status, body)
+
+
+def _wait_for_stripe_request(gate_dir, thread):
+    """Wait until the request has selected a stripe, then require holding."""
+    deadline = time.time() + 10
+    while len(_stripe_lock_calls(gate_dir)) < 2:
+        assert time.time() < deadline, (
+            'request never selected a delivery stripe: '
+            f'{_stripe_lock_calls(gate_dir)!r}')
+        time.sleep(0.01)
+    assert (gate_dir / 'holding').exists(), 'holder released the target stripe'
+    assert thread.is_alive(), (
+        'request completed while the discovered-owner stripe was held: '
+        f'{_stripe_lock_calls(gate_dir)!r}')
+
+
+def _assert_discovered_owner_lock(gate_dir, owner):
+    """The scan-discovered owner must be the lock key used by the request."""
+    holder = _stripe_holder_lock(gate_dir)
+    calls = _stripe_lock_calls(gate_dir)
+    owner_key = f'{TOK}_{owner}'
+    owner_calls = [entry for entry in calls
+                   if len(entry) == 2 and entry[0] == owner_key]
+    assert holder and len(holder) == 2 and holder[0] == owner_key, (
+        holder, calls)
+    assert len(owner_calls) >= 2, (holder, calls)
+    assert all(lock_id == holder[1] for _key, lock_id in owner_calls), (
+        holder, owner_calls, calls)
+
+
+def test_delivery_lookup_without_tab_waits_for_discovered_owner_stripe(tmp):
+    """A no-tab delivery lookup locks the tab found by the directory scan."""
+    owner = 'scan-owner'
+    unrelated = 'scan-unrelated'
+    did = 'scan-delivery'
+    _seed_delivery(tmp, owner, did)
+    gate_dir, env = _stripe_holder_setup(tmp, owner)
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        deadline = time.time() + 20
+        while not (gate_dir / 'held').exists():
+            assert time.time() < deadline, 'target stripe was not held'
+            time.sleep(0.01)
+
+        result_box = {}
+
+        def lookup_delivery():
+            query = urllib.parse.urlencode({'token': TOK, 'delivery': did})
+            result_box['value'] = _util.get_json(base + '/result?' + query)
+
+        lookup_thread = threading.Thread(target=lookup_delivery)
+        lookup_thread.start()
+        _wait_for_stripe_request(gate_dir, lookup_thread)
+        status, body = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': unrelated, 'id': 'unrelated',
+            'result': 'unrelated', 'error': None, 'ts': 2})
+        assert status == 200 and body == {'ok': True}, (status, body)
+        assert lookup_thread.is_alive(), 'unrelated result blocked the lookup'
+
+        (gate_dir / 'release').write_text('release', encoding='utf-8')
+        lookup_thread.join(timeout=20)
+        assert not lookup_thread.is_alive(), result_box
+        status, result = result_box.get('value', (None, {}))
+        assert status == 200 and result['id'] == 'seed', result_box
+        assert result['deliveryId'] == did, result
+        _assert_discovered_owner_lock(gate_dir, owner)
+
+
+def test_compatibility_consume_without_tab_waits_for_discovered_owner_stripe(
+        tmp):
+    """A no-tab consume locks the owner found from the delivery id."""
+    owner = 'consume-scan-owner'
+    unrelated = 'consume-scan-unrelated'
+    did = 'consume-scan-delivery'
+    _seed_delivery(tmp, owner, did)
+    gate_dir, env = _stripe_holder_setup(tmp, owner)
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        deadline = time.time() + 20
+        while not (gate_dir / 'held').exists():
+            assert time.time() < deadline, 'target stripe was not held'
+            time.sleep(0.01)
+
+        result_box = {}
+
+        def consume_delivery():
+            query = urllib.parse.urlencode({'token': TOK, 'consume': '1'})
+            result_box['value'] = _util.get_json(base + '/result?' + query)
+
+        consume_thread = threading.Thread(target=consume_delivery)
+        consume_thread.start()
+        _wait_for_stripe_request(gate_dir, consume_thread)
+        status, body = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': unrelated, 'id': 'unrelated',
+            'result': 'unrelated', 'error': None, 'ts': 2})
+        assert status == 200 and body == {'ok': True}, (status, body)
+        assert consume_thread.is_alive(), (
+            'unrelated result blocked the compatibility consume')
+
+        (gate_dir / 'release').write_text('release', encoding='utf-8')
+        consume_thread.join(timeout=20)
+        assert not consume_thread.is_alive(), result_box
+        assert result_box.get('value', (None, {}))[0] == 200, result_box
+        _assert_discovered_owner_lock(gate_dir, owner)
 
 
 def test_delivery_stamp_survives_restart_with_an_earlier_wall_clock(tmp):
@@ -752,14 +874,21 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
         finally:
             sys.path.pop(0)
         server.RES_DIR.mkdir(parents=True)
-        initial = len(server._delivery_locks)
+        original_locks = tuple(server._delivery_locks)
+        initial = len(original_locks)
+        returned_locks = []
         for index in range(10_000):
             _dir, delivery_file, tab = server._find_delivery_result(
                 TOK, f'absent-{index}', 'missing-did')
             assert not delivery_file.exists()
-            server._delivery_lock_for(server._result_key(TOK, tab))
+            returned_locks.append(
+                server._delivery_lock_for(server._result_key(TOK, tab)))
         assert initial == server._DELIVERY_LOCK_STRIPES
         assert len(server._delivery_locks) == initial
+        assert all(any(lock is original for original in original_locks)
+                   for lock in returned_locks)
+        assert len({id(lock) for lock in returned_locks}) <= (
+            server._DELIVERY_LOCK_STRIPES)
     finally:
         for name, value in saved.items():
             if value is None:
