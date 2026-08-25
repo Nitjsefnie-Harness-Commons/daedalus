@@ -355,10 +355,6 @@ def _compare(left, right, operator):
     if isinstance(left, (Mapping, list, tuple)) or isinstance(
             right, (Mapping, list, tuple)):
         raise ExpressionError('object and array comparisons are unsupported')
-    if isinstance(left, (int, float)) or isinstance(right, (int, float)):
-        raise ExpressionError(
-            'numeric comparison is refused; numeric semantics are not '
-            'admitted')
 
     left_text = _comparison_text(left)
     right_text = _comparison_text(right)

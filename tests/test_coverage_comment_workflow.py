@@ -13,7 +13,9 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _ghexpr import evaluate  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
-from _yamlread import YAMLReadError, job_scalar, step_scalar  # noqa: E402
+from _yamlread import (  # noqa: E402
+    YAMLReadError, _indent, job_scalar, step_scalar,
+)
 
 
 _GH_ARTIFACT_STUB = r"""#!/usr/bin/env python3
@@ -240,6 +242,17 @@ def _yaml_raises(call, detail=None):
     raise AssertionError('ambiguous YAML shape was accepted')
 
 
+def _job_raises(source, detail):
+    """Require the job scalar reader to refuse `source`."""
+    _yaml_raises(lambda: job_scalar(source, 'sample', 'if'), detail)
+
+
+def _step_raises(source, detail):
+    """Require the step scalar reader to refuse `source`."""
+    _yaml_raises(
+        lambda: step_scalar(source, 'sample', 'Download', 'if'), detail)
+
+
 def test_workflow_scalar_reader_preserves_block_values_and_chomping(tmp):
     """Job scalars retain folded blanks and literal chomping markers."""
     del tmp
@@ -250,13 +263,33 @@ def test_workflow_scalar_reader_preserves_block_values_and_chomping(tmp):
         '      first\n'
         '\n'
         '      second\n'
+        '    folded-double: >-\n'
+        '      a\n'
+        '\n'
+        '\n'
+        '      b\n'
+        '    folded-leading: >-\n'
+        '\n'
+        '      a\n'
         '    literal: |+\n'
         '      line\n'
         '\n'
         '\n'
+        '    literal-double: |-\n'
+        '      a\n'
+        '\n'
+        '\n'
+        '      b\n'
+        '    literal-leading: |-\n'
+        '\n'
+        '      a\n'
         '    plain: value\n')
     assert job_scalar(workflow, 'sample', 'folded') == 'first\nsecond'
+    assert job_scalar(workflow, 'sample', 'folded-double') == 'a\n\nb'
+    assert job_scalar(workflow, 'sample', 'folded-leading') == '\na'
     assert job_scalar(workflow, 'sample', 'literal') == 'line\n\n\n'
+    assert job_scalar(workflow, 'sample', 'literal-double') == 'a\n\n\nb'
+    assert job_scalar(workflow, 'sample', 'literal-leading') == '\na'
     assert job_scalar(workflow, 'sample', 'plain') == 'value'
 
 
@@ -287,20 +320,67 @@ def test_workflow_scalar_reader_distinguishes_missing_and_unsafe_shapes(tmp):
     assert job_scalar(workflow, 'missing', 'if') is None
     assert job_scalar(workflow, 'sample', 'if') is None
     assert step_scalar(workflow, 'sample', 'missing', 'if') is None
-    _yaml_raises(lambda: job_scalar(
-        'jobs:\n  sample:\n    if: >- broken\n', 'sample', 'if'),
-        'unsupported block scalar header')
-    _yaml_raises(lambda: job_scalar(
-        'jobs:\n  sample:\n    if: "true"\n', 'sample', 'if'),
-        'quoted scalar')
-    _yaml_raises(lambda: job_scalar(
+    _job_raises('jobs:\n  sample:\n    if: >- broken\n',
+                'unsupported block scalar header')
+    _job_raises('jobs:\n  sample:\n    if: "true"\n', 'quoted scalar')
+    _job_raises('jobs:\n  sample:\n    if: true # guard explanation\n',
+                'inline comment')
+    _job_raises('jobs:\n  sample:\n    if:\n', 'no scalar value')
+    _job_raises('jobs:\n  sample:\n    if: [true]\n', 'not a scalar')
+    _job_raises(
+        'jobs:\n  sample:\n    if: true\n'
+        '      continuation\n',
+        'multiline scalar')
+    _job_raises(
+        'jobs:\n  sample:\n    if: >1-2\n'
+        '      true\n',
+        'two indentation indicators')
+    _job_raises(
+        'jobs:\n  sample:\n    if: >2-\n'
+        '     true\n',
+        'block indentation is incomplete')
+    _job_raises('jobs:\n  sample:\n    - value\n', 'not a mapping')
+    _job_raises(
+        'jobs:\n  sample:\n    if: true\n'
+        '    if: false\n',
+        'duplicate mapping key')
+    _step_raises(
+        'jobs:\n  sample:\n    steps: []\n',
+        'steps are not a sequence')
+    _step_raises(
+        'jobs:\n  sample:\n    steps:\n',
+        'steps is not a sequence')
+    _step_raises(
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: "Download"\n',
+        'quoted step names')
+    _step_raises(
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: Download\n'
+        '      - name: Download\n',
+        'duplicate step name')
+    _job_raises('jobs:\n  sample: true\n', 'job')
+    _step_raises('jobs:\n  sample: true\n', 'job')
+    _job_raises('jobs: true\n', 'jobs is not a mapping')
+    _step_raises('jobs: true\n', 'jobs is not a mapping')
+    _job_raises('jobs:\n  - sample:\n      if: true\n',
+                'jobs is not a mapping')
+    _step_raises('jobs:\n  - sample:\n      if: true\n',
+                 'jobs is not a mapping')
+    _job_raises(
+        'jobs:\n  sample:\n    if: true\n'
+        'jobs:\n  other:\n    if: false\n',
+        'duplicate top-level key')
+    _yaml_raises(lambda: _indent(('\tkey: value', True)), 'tabs')
+    _job_raises(None, 'workflow must be a string')
+    _job_raises(
         'jobs:\n  sample:\n    if: >-\n'
         '      first\n'
-        '    && false\n', 'sample', 'if'),
+        '    && false\n',
         'unsupported YAML mapping line')
-    _yaml_raises(lambda: step_scalar(
+    _step_raises(
         'jobs:\n  sample:\n    steps:\n      name: Download\n',
-        'sample', 'Download', 'if'), 'not a sequence')
+        'not a sequence')
 
 
 def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
