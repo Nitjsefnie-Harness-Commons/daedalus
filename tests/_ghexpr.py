@@ -5,13 +5,12 @@ single-quoted strings with doubled quotes, ``true``, ``false``, ``null``,
 dotted context lookups, and the zero-argument status functions
 ``always()``, ``success()``, ``failure()``, and ``cancelled()``.  An optional
 outer ``${{ ... }}`` wrapper is accepted.  Comparisons admit ASCII-only
-strings, and a string may be compared with a boolean or null by its canonical
-ASCII spelling; booleans and null compare only to the same type.  Mappings and
-sequences are admitted only for truthiness.  Numeric literals and numeric
-context values are refused, as are non-ASCII comparison strings.  Source
-length, token count, and nesting depth are explicitly bounded.  Everything
-outside this domain raises ``ExpressionError`` rather than approximating
-GitHub Actions semantics.
+strings, booleans, and null, and require both operands to have the same scalar
+type; strings compare case-insensitively.  Mappings and sequences are admitted
+only for truthiness.  Numeric literals and numeric context values are refused,
+as are non-ASCII comparison strings.  Source length, token count, and nesting
+depth are explicitly bounded.  Everything outside this domain raises
+``ExpressionError`` rather than approximating GitHub Actions semantics.
 """
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -337,19 +336,6 @@ def _ascii_string(value):
     return value
 
 
-def _comparison_text(value):
-    """Return the admitted textual spelling of a scalar comparison value."""
-    if isinstance(value, str):
-        return _ascii_string(value)
-    if value is True:
-        return 'true'
-    if value is False:
-        return 'false'
-    if value is None:
-        return 'null'
-    return None
-
-
 def _compare(left, right, operator):
     """Compare only the explicitly admitted non-numeric scalar shapes."""
     _admit(left, 'numeric comparison')
@@ -357,11 +343,17 @@ def _compare(left, right, operator):
     if isinstance(left, (Mapping, list, tuple)) or isinstance(
             right, (Mapping, list, tuple)):
         raise ExpressionError('object and array comparisons are unsupported')
-
-    left_text = _comparison_text(left)
-    right_text = _comparison_text(right)
-    if isinstance(left, str) or isinstance(right, str):
-        equal = left_text.lower() == right_text.lower()
+    same_kind = (
+        isinstance(left, str) and isinstance(right, str)
+        or isinstance(left, bool) and isinstance(right, bool)
+        or left is None and right is None
+    )
+    if not same_kind:
+        raise ExpressionError(
+            'cross-type comparisons are refused; numeric coercion is not '
+            'admitted')
+    if isinstance(left, str):
+        equal = _ascii_string(left).lower() == _ascii_string(right).lower()
     else:
         equal = left is right
     return equal if operator == '==' else not equal
