@@ -290,10 +290,12 @@ def _same_scalar_type(left, right):
     if isinstance(left, bool) or isinstance(right, bool):
         return isinstance(left, bool) and isinstance(right, bool)
     if isinstance(left, (int, float)) or isinstance(right, (int, float)):
-        return (isinstance(left, (int, float)) and
-                not isinstance(left, bool) and
-                isinstance(right, (int, float)) and
-                not isinstance(right, bool))
+        return (
+            isinstance(left, (int, float))
+            and not isinstance(left, bool)
+            and isinstance(right, (int, float))
+            and not isinstance(right, bool)
+        )
     return isinstance(left, str) and isinstance(right, str)
 
 
