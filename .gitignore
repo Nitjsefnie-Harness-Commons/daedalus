@@ -181,6 +181,7 @@
 !/tests/_util.py
 !/tests/_workflows.py
 !/tests/_yamlread.py
+!/tests/_yamlscalar.py
 !/tests/test_bridge_credentials.py
 !/tests/test_bridge_requests.py
 !/tests/test_bridge_results.py
