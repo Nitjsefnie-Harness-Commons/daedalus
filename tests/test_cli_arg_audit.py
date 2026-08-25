@@ -55,6 +55,17 @@ import _cli_arg_audit_support as audit_support  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
+_REAL_STORAGE_DISPATCH_CASES = (
+    ('optional',
+     "PROBE_READS.append(getattr(args, 'undeclared_probe', None)); return",
+     (), (None,)),
+    ('remainder',
+     'PROBE_READS.append(args.undeclared_probe); return', (), ([],)),
+    ('required-option',
+     'PROBE_READS.append(args.undeclared_probe); return',
+     ('--undeclared-probe', 'present'), ('present',)),
+)
+
 
 def _binding_names(target):
     """Return the names a binding target assigns."""
@@ -395,59 +406,45 @@ def test_cli_audit_excludes_dest_suppress_action(tmp):
 
 
 def test_cli_audit_excludes_default_suppress_action(tmp):
+    audit_support.assert_argparse_storage_contract(_audit_fake_handler)
     parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--present', dest='shared', default=False)
     parser.add_argument(
-        '--conditional', default=argparse.SUPPRESS)
-
-    assert vars(parser.parse_args([])) == {}
-    declared, guaranteed = audit_support.namespace_dests(parser)
-    assert declared == {'conditional'}
-    assert guaranteed == set()
-    for read, _, needs_presence in \
-            audit_support.PERMITTED_NAMESPACE_READ_CASES:
-        read = read.replace('json', 'conditional')
-        expected = [read] if needs_presence else []
-        assert _audit_fake_handler(
-            read, declared, guaranteed) == expected, read
-    shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument('--present', dest='shared', default=False)
-    shared.add_argument(
         '--suppressed', dest='shared', default=argparse.SUPPRESS)
-    assert audit_support.namespace_dests(shared)[1] == {'shared'}
+    assert audit_support.namespace_dests(parser)[1] == {'shared'}
 
 
 def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
     from daedalus_cli import cli
 
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest='cmd', required=True)
-    tabs = sub.add_parser('tabs')
-    tabs.add_argument('--json', action='store_true')
-    tabs.add_argument('--undeclared-probe', action='store_true',
-                      default=argparse.SUPPRESS)
-    handler_module = _mutated_cli_tabs(
-        'guarded_suppress_cli', 'GUARDED_READS = []',
-        "GUARDED_READS.append("
-        "getattr(args, 'undeclared_probe', None)); return")
-    original_handler = cli.DISPATCH['tabs']
-    original_build_parser = cli.build_parser
-    original_argv = sys.argv
+    for index, (shape, body, argv, expected) in enumerate(
+            _REAL_STORAGE_DISPATCH_CASES):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest='cmd', required=True)
+        tabs = sub.add_parser('tabs')
+        tabs.add_argument('--json', action='store_true')
+        audit_support.add_storage_probe(tabs, shape, 'undeclared_probe')
+        handler_module = _mutated_cli_tabs(
+            f'storage_dispatch_cli_{index}', 'PROBE_READS = []', body)
+        original_handler = cli.DISPATCH['tabs']
+        original_build_parser = cli.build_parser
+        original_argv = sys.argv
 
-    def build_suppressed_parser():
-        return parser
+        def build_storage_parser(parser=parser):
+            return parser
 
-    try:
-        assert _audit_real_tabs_handler(handler_module, parser) == []
-        cli.DISPATCH['tabs'] = handler_module.__dict__['do_tabs']
-        cli.build_parser = build_suppressed_parser
-        sys.argv = ['daedalus', 'tabs']
-        cli.main()
-        assert handler_module.__dict__['GUARDED_READS'] == [None]
-    finally:
-        cli.DISPATCH['tabs'] = original_handler
-        cli.build_parser = original_build_parser
-        sys.argv = original_argv
-        sys.modules.pop(handler_module.__dict__['__name__'], None)
+        try:
+            assert _audit_real_tabs_handler(handler_module, parser) == []
+            cli.DISPATCH['tabs'] = handler_module.__dict__['do_tabs']
+            cli.build_parser = build_storage_parser
+            sys.argv = ['daedalus', 'tabs', *argv]
+            cli.main()
+            assert handler_module.__dict__['PROBE_READS'] == list(expected)
+        finally:
+            cli.DISPATCH['tabs'] = original_handler
+            cli.build_parser = original_build_parser
+            sys.argv = original_argv
+            sys.modules.pop(handler_module.__dict__['__name__'], None)
 
 
 def test_cli_audit_includes_parser_set_defaults(tmp):
