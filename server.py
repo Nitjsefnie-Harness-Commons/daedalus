@@ -2,7 +2,6 @@
 """Daedalus debug server — SSE command bridge + tab registry."""
 import hmac, itertools, json, math, os, pathlib, secrets, shutil, threading, time, uuid
 import ctypes, ctypes.util
-import zlib
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
@@ -10,6 +9,7 @@ from urllib.parse import urlparse, parse_qs
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
+from delivery_stripes import stripe_index
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
 # whose encoding it did not choose either: under a C locale a result id
@@ -428,7 +428,7 @@ def _delivery_lock_for(target_key):
     if any(char in _WINDOWS_INVALID_PATH_CHARS for char in target_key):
         raise TypeError('delivery stripe key must be the logical target')
     key = os.fsencode(target_key)
-    index = zlib.crc32(key) & (_DELIVERY_LOCK_STRIPES - 1)
+    index = stripe_index(key, _DELIVERY_LOCK_STRIPES)
     return _delivery_locks[index]
 
 
