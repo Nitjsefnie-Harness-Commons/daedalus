@@ -481,7 +481,13 @@ def _delivery_result_paths(token, tab, did):
     if not isinstance(did, str) or not did or _unsafe_component(did):
         raise ValueError('invalid delivery id')
     key = _derived_component(_result_key(token, tab))
+    resolved_delivery_root = pathlib.Path(os.path.realpath(DELIVERY_DIR))
     delivery_dir = _under(DELIVERY_DIR, key)
+    # The stripe is keyed on `key`, so the resolved directory must be the
+    # one-to-one namespace entry that key names, not an alias to another one.
+    if (_path_key(delivery_dir.parent) != _path_key(resolved_delivery_root)
+            or delivery_dir.name != key):
+        raise ValueError('delivery target is an alias')
     delivery_file = _under(
         delivery_dir, _derived_component(f'{did}.json'))
     return delivery_dir, delivery_file
