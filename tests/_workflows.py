@@ -11,25 +11,28 @@ a substring check at each call site.
 
 The bounded grammar is an allow-list. Mapping keys are only unquoted plain
 keys made from lowercase letters, digits, `_`, and `-`; every quoted or other
-key is refused. Path values are either unquoted scalars that YAML's core
-schema resolves as strings, or single- or double-quoted scalars with no
-backslash and no embedded quote of either kind. Implicit booleans in every
-case (`true`, `false`, `yes`, `no`, `on`, `off`, `y`, and `n`), nulls (`null`,
-`~`, and empty plain scalars), every core integer and float form (signs,
+key is refused. Path values are either unquoted scalars whose string type this
+reader can prove, or single- or double-quoted scalars with no backslash and no
+embedded quote of either kind. The reader refuses a plain scalar whose type
+depends on which YAML version resolves it rather than guessing one; quoting
+the value is the escape hatch. This deliberately chooses false refusal over
+false green, because the gate compares values for equality and cannot do that
+safely when the scalar's type is unknown. Implicit booleans in every case
+(`true`, `false`, `yes`, `no`, `on`, `off`, `y`, and `n`), nulls (`null`, `~`,
+and empty plain scalars), every core integer and float form (signs,
 underscores, bases, sexagesimals, `.inf`, and `.nan`), and timestamps are
 refused, as are tags, anchors, aliases, block scalars, continuations, flow
-mappings, tabs,
-duplicates, and non-empty inline trigger values. Empty trigger values (`{}`,
-`null`, and `~`) remain accepted as event declarations. Correct or refusing,
-never plausible: a construct this reader does not parse raises rather than
-returning an answer that reads like one, because a policy test cannot tell a
-wrong answer from a right one.
+mappings, tabs, duplicates, and non-empty inline trigger values. Empty trigger
+values (`{}`, `null`, and `~`) remain accepted as event declarations. Correct
+or refusing, never plausible: a construct this reader does not parse raises
+rather than returning an answer that reads like one, because a policy test
+cannot tell a wrong answer from a right one.
 """
 import re
 
 _PLAIN_KEY = re.compile(r'[a-z0-9_-]+')
 _PLAIN_MAPPING = re.compile(r':(?:[ \t]|$)')
-_NON_STRING_SCALARS = (
+_NOT_PROVABLY_STRING_SCALARS = (
     re.compile(r'^(?:y|yes|n|no|true|false|on|off)$', re.IGNORECASE),
     re.compile(r'^(?:null|~)$', re.IGNORECASE),
     re.compile(
@@ -201,7 +204,7 @@ def _scalar(value, filename='workflow', unsupported=None):
             or value.startswith(('- ', '? ', ': '))
             or _PLAIN_MAPPING.search(value)
             or any(pattern.fullmatch(value)
-                   for pattern in _NON_STRING_SCALARS)):
+                   for pattern in _NOT_PROVABLY_STRING_SCALARS)):
         raise AssertionError(failure)
     return value
 
@@ -324,6 +327,8 @@ def _workflow_triggers(workflow, filename='workflow'):
     Text rather than a YAML parse: the suites are stdlib only, and the shape
     asked about here is one nesting level deep.
     """
+    if workflow.startswith('\ufeff'):
+        workflow = workflow[1:]
     lines = workflow.splitlines()
     on_index = None
     for index, line in enumerate(lines):

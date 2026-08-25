@@ -351,6 +351,25 @@ def test_no_workflow_gates_one_commit_twice(tmp):
         ROOT / '.github' / 'workflows')
 
 
+def _assert_workflow_trigger_filters_match(workflows):
+    """Assert symmetric path filters for every paired workflow in a tree."""
+    checked = []
+    for path in sorted(workflows.iterdir()):
+        if path.suffix not in ('.yml', '.yaml'):
+            continue
+        triggers = _workflow_triggers(
+            path.read_text(encoding='utf-8'), path.name)
+        if 'pull_request' not in triggers or 'push' not in triggers:
+            continue
+        checked.append(path.name)
+        filters = [_workflow_path_filters(triggers[event], path.name)
+                   for event in ('push', 'pull_request')]
+        assert filters[0] == filters[1], (
+            f'{path.name} filters push and pull_request differently: '
+            f'{filters[0]!r} != {filters[1]!r}')
+    assert checked, 'no workflow declares both triggers; has one been renamed?'
+
+
 def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
     """Push and pull_request must make the same path-filtering choice.
 
@@ -359,22 +378,30 @@ def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
     symmetry property; the release-safety direction is pinned separately.
     """
     del tmp
-    checked = []
-    for path in sorted((ROOT / '.github' / 'workflows').iterdir()):
-        if path.suffix not in ('.yml', '.yaml'):
-            continue
-        triggers = _workflow_triggers(
-            path.read_text(encoding='utf-8'), path.name)
-        if 'pull_request' not in triggers or 'push' not in triggers:
-            continue
-        checked.append(path.name)
-        push_filter = _workflow_path_filters(triggers['push'], path.name)
-        pull_request_filter = _workflow_path_filters(
-            triggers['pull_request'], path.name)
-        assert push_filter == pull_request_filter, (
-            f'{path.name} filters push and pull_request differently: '
-            f'{push_filter!r} != {pull_request_filter!r}')
-    assert checked, 'no workflow declares both triggers; has one been renamed?'
+    _assert_workflow_trigger_filters_match(ROOT / '.github' / 'workflows')
+
+
+def test_workflow_reader_accepts_string_controls_and_a_leading_bom(tmp):
+    """Positive scalar controls stay green through the policy helper."""
+    workflows = Path(tmp) / 'workflows'
+    workflows.mkdir()
+    spelling = "[main, 'release', .gitignore, release-candidate, '**/*.md']"
+    content = ('name: control\n\non:\n  push:\n    branches: [main]\n'
+               f'    paths-ignore: {spelling}\n'
+               f'  pull_request:\n    paths-ignore: {spelling}\n')
+    (workflows / 'controls.yml').write_text(content, encoding='utf-8')
+    bom = '\ufeff' + content.replace(spelling, '[docs\ufeff.md]')
+    (workflows / 'bom.yml').write_text(bom, encoding='utf-8')
+    _assert_workflow_trigger_filters_match(workflows)
+    expected = {'paths-ignore': [
+        'main', 'release', '.gitignore', 'release-candidate', '**/*.md']}
+    triggers = _workflow_triggers(content, 'controls.yml')
+    assert _workflow_path_filters(triggers['push'], 'controls.yml') == expected
+    assert _workflow_path_filters(
+        triggers['pull_request'], 'controls.yml') == expected
+    triggers = _workflow_triggers(bom, 'bom.yml')
+    assert _workflow_path_filters(triggers['push'], 'bom.yml') == {
+        'paths-ignore': ['docs\ufeff.md']}
 
 
 def test_contribution_gates_have_unfiltered_push_triggers(tmp):

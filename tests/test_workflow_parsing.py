@@ -126,17 +126,46 @@ def test_typed_plain_scalar_pair_is_refused_and_is_yaml_unequal(tmp):
             yaml_pull_request)
 
 
-def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
-    """Every listed implicit YAML scalar family is outside the allow-list."""
+def test_yaml_core_scalars_not_provably_strings_are_refused(tmp):
+    """Refuse values whose type depends on the YAML version.
+
+    `n`, `0o52`, `1e3`, `1e1_0`, and `-.NaN` stay refused because YAML 1.1
+    and YAML 1.2 resolve each spelling differently (or YAML 1.2 cannot prove
+    it is a number). The reader refuses rather than guessing one type. The
+    other values below are non-strings in at least one of those schemas.
+    Quoting is the escape hatch when a string is intended. This is a deliberate
+    false-refusal-over-false-green trade: the policy gate compares values for
+    equality and cannot safely compare an unknown type.
+    """
     del tmp
     values = (
-        'false', 'YES', 'n', 'NULL', '~',
-        '0', '+12', '-07', '0x2a', '0o52', '0b1010', '1_000',
-        '.5', '1.', '1e3', '1e1_0', '1.0e+3', '.inf', '-.NaN', '1:20',
-        '2024-01-02', '2024-01-02  03:04:05',
-        '2024-01-02T03:04:05Z',
+        ('false', 'YAML 1.1 and YAML 1.2 booleans'),
+        ('YES', 'YAML 1.1 boolean; YAML 1.2 string'),
+        ('n', 'YAML 1.1 boolean; YAML 1.2 string'),
+        ('NULL', 'YAML 1.1 and YAML 1.2 null'),
+        ('~', 'YAML 1.1 and YAML 1.2 null'),
+        ('0', 'YAML 1.1 and YAML 1.2 integer'),
+        ('+12', 'YAML 1.1 and YAML 1.2 integer'),
+        ('-07', 'YAML 1.1 octal; YAML 1.2 integer'),
+        ('0x2a', 'YAML 1.1 and YAML 1.2 integer'),
+        ('0o52', 'YAML 1.1 string; YAML 1.2 octal integer'),
+        ('0b1010', 'YAML 1.1 and YAML 1.2 integer'),
+        ('1_000', 'YAML 1.1 integer; YAML 1.2 string'),
+        ('.5', 'YAML 1.1 and YAML 1.2 float'),
+        ('1.', 'YAML 1.1 and YAML 1.2 float'),
+        ('1e3', 'YAML 1.1 string; YAML 1.2 float'),
+        ('1e1_0', 'YAML 1.1 float; YAML 1.2 string'),
+        ('1.0e+3', 'YAML 1.1 and YAML 1.2 float'),
+        ('.inf', 'YAML 1.1 and YAML 1.2 float'),
+        ('-.NaN', 'YAML 1.1 string; YAML 1.2 float'),
+        ('1:20', 'YAML 1.1 sexagesimal integer; YAML 1.2 string'),
+        ('2024-01-02', 'YAML 1.1 timestamp; YAML 1.2 string'),
+        ('2024-01-02  03:04:05',
+         'YAML 1.1 timestamp; YAML 1.2 string'),
+        ('2024-01-02T03:04:05Z',
+         'YAML 1.1 timestamp; YAML 1.2 string'),
     )
-    for value in values:
+    for value, reason in values:
         try:
             _workflow_path_filters(
                 [f'    paths-ignore: [{value}]'], 'typed.yml')
@@ -145,7 +174,39 @@ def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
             assert value in str(failure), (value, failure)
         else:
             raise AssertionError(
-                f'implicit non-string scalar accepted: {value}')
+                f'{value}: {reason}; scalar was accepted')
+
+
+def test_string_scalar_controls_parse_in_both_events(tmp):
+    """Real string filters parse symmetrically; quote ambiguous values."""
+    del tmp
+    controls = (
+        ("['**/*.md']", ['**/*.md']),
+        ('[main]', ['main']),
+        ("['release']", ['release']),
+        ('[.gitignore]', ['.gitignore']),
+        ('[release-candidate]', ['release-candidate']),
+        ("[main, 'release-candidate', .gitignore, '**/*.md']",
+         ['main', 'release-candidate', '.gitignore', '**/*.md']),
+    )
+    for spelling, expected in controls:
+        lines = [f'    paths-ignore: {spelling}']
+        for event in ('push', 'pull_request'):
+            assert _workflow_path_filters(lines, f'{event}-controls.yml') == {
+                'paths-ignore': expected}
+
+
+def test_a_leading_bom_is_a_stream_marker_only(tmp):
+    """Strip one leading BOM while preserving a BOM embedded in a scalar."""
+    del tmp
+    workflow = ('\ufeffname: x\n\non:\n'
+                '  push:\n    paths-ignore: [docs\ufeff.md]\n'
+                '  pull_request:\n    paths-ignore: [docs\ufeff.md]\n')
+    triggers = _workflow_triggers(workflow, 'bom.yml')
+    expected = {'paths-ignore': ['docs\ufeff.md']}
+    assert _workflow_path_filters(triggers['push'], 'bom.yml') == expected
+    assert _workflow_path_filters(
+        triggers['pull_request'], 'bom.yml') == expected
 
 
 def test_invalid_plain_scalar_indicators_and_tabs_are_refused(tmp):
