@@ -12,16 +12,16 @@ a substring check at each call site.
 The bounded grammar is an allow-list. Mapping keys are only unquoted plain
 keys made from lowercase letters, digits, `_`, and `-`; every quoted or other
 key is refused. Path values are either unquoted scalars whose string type this
-reader can prove, or single- or double-quoted scalars with no backslash and no
-embedded quote of either kind. The reader refuses a plain scalar whose type
+reader can prove, or single- or double-quoted scalars with no backslash and
+no embedded copy of their surrounding quote. The reader refuses a plain scalar
 depends on which YAML version resolves it rather than guessing one; quoting
 the value is the escape hatch. This deliberately chooses false refusal over
 false green, because the gate compares values for equality and cannot do that
 safely when the scalar's type is unknown. Implicit booleans in every case
 (`true`, `false`, `yes`, `no`, `on`, `off`, `y`, and `n`), nulls (`null`, `~`,
 and empty plain scalars), every core integer and float form (signs,
-underscores, bases, sexagesimals, `.inf`, and `.nan`), and timestamps are
-refused, as are tags, anchors, aliases, block scalars, continuations, flow
+underscores, bases, sexagesimals, `.inf`, and unsigned `.nan`), and timestamps
+are refused, as are tags, anchors, aliases, block scalars, continuations, flow
 mappings, tabs, duplicates, and non-empty inline trigger values. Empty trigger
 values (`{}`, `null`, and `~`) remain accepted as event declarations. Correct
 or refusing, never plausible: a construct this reader does not parse raises
@@ -43,9 +43,9 @@ _NOT_PROVABLY_STRING_SCALARS = (
     re.compile(
         r'^(?:[-+]?(?:[0-9][0-9_]*\.[0-9_]*|'
         r'\.[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)?'
-        r'|[-+]?[0-9][0-9_]*[eE][-+]?[0-9_]+'
+        r'|[-+]?[0-9]+[eE][-+]?[0-9]+'
         r'|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*'
-        r'|[-+]?\.(?:inf|nan))$', re.IGNORECASE),
+        r'|[-+]?\.inf|\.nan)$', re.IGNORECASE),
     re.compile(
         r'^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}'
         r'(?:[Tt ]+[0-9]{1,2}:[0-9]{2}:[0-9]{2}'
@@ -196,7 +196,7 @@ def _scalar(value, filename='workflow', unsupported=None):
         if not (quoted and len(value) >= 2 and value[-1] == value[0]):
             raise AssertionError(failure)
         body = value[1:-1]
-        if '\\' in body or "'" in body or '"' in body:
+        if '\\' in body or value[0] in body:
             raise AssertionError(failure)
         return body
     if (value.startswith(('#', '[', '{'))
