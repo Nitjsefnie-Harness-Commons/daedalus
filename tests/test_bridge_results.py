@@ -437,27 +437,26 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         'gate = pathlib.Path(os.environ["STRIPE_GATE_DIR"])\n'
         'held_tab = os.environ["STRIPE_HELD_TAB"]\n'
         'lock_calls_lock = threading.Lock()\n'
-        'def record_lock_call(delivery_dir, lock):\n'
+        'def record_lock_call(target_key, lock):\n'
         '    with lock_calls_lock:\n'
         '        with (gate / "lock-calls").open("a", encoding="utf-8") as handle:\n'
-        '            handle.write(f"{os.fspath(delivery_dir)}\\t{id(lock)}\\n")\n'
+        '            handle.write(f"{target_key}\\t{id(lock)}\\n")\n'
         'def install():\n'
         '    try:\n'
         '        while not all(hasattr(__main__, name) for name in (\n'
         '                "_delivery_lock_for", "_delivery_result_paths")):\n'
         '            time.sleep(0.001)\n'
         '        real_lock_for = __main__._delivery_lock_for\n'
-        '        def recording_lock_for(delivery_dir):\n'
-        '            lock = real_lock_for(delivery_dir)\n'
-        '            record_lock_call(delivery_dir, lock)\n'
+        '        def recording_lock_for(target_key):\n'
+        '            lock = real_lock_for(target_key)\n'
+        '            record_lock_call(target_key, lock)\n'
         '            return lock\n'
         '        __main__._delivery_lock_for = recording_lock_for\n'
-        '        delivery_dir, _ = __main__._delivery_result_paths(\n'
-        '            os.environ["DAEDALUS_TOKEN"], held_tab, "stripe-did")\n'
-        '        target_lock = __main__._delivery_lock_for(delivery_dir)\n'
+        '        target_key = __main__._result_key(\n'
+        '            os.environ["DAEDALUS_TOKEN"], held_tab)\n'
+        '        target_lock = __main__._delivery_lock_for(target_key)\n'
         '        (gate / "holder-lock").write_text(\n'
-        '            f"{os.fspath(delivery_dir)}\\t{id(target_lock)}\\n",\n'
-        '            encoding="utf-8")\n'
+        '            f"{target_key}\\t{id(target_lock)}\\n", encoding="utf-8")\n'
         '        with target_lock:\n'
         '            (gate / "holding").write_text("y", encoding="utf-8")\n'
         '            try:\n'
@@ -476,13 +475,10 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         'STRIPE_GATE_DIR': str(gate_dir),
         'STRIPE_HELD_TAB': held_tab,
     }
-
-    def same_delivery_dir(recorded, expected):
-        try:
-            return os.path.samefile(os.path.normcase(recorded),
-                                    os.path.normcase(expected))
-        except (OSError, ValueError):
-            return False
+    # The stripe is keyed on the logical target, so comparing what the holder
+    # and the request locked is plain equality — there is no spelling left to
+    # normalise, which is the point of keying it this way.
+    target_key = f'{TOK}_{held_tab}'
 
     def lock_calls():
         path = gate_dir / 'lock-calls'
@@ -502,7 +498,7 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         calls = lock_calls()
         target_calls = [entry for entry in calls
                         if len(entry) == 2
-                        and same_delivery_dir(entry[0], target_delivery_dir)]
+                        and entry[0] == target_key]
         held = holder_lock()
         error_path = gate_dir / 'holder-error'
         if error_path.is_file():
@@ -522,9 +518,7 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
             f'holder-lock: {held!r}\n'
             f'lock-calls: {calls!r}')
 
-    with _util.bridge(tmp, env=env) as (base, docroot):
-        target_delivery_dir = (docroot / 'results' / 'deliveries'
-                               / f'{TOK}_{held_tab}')
+    with _util.bridge(tmp, env=env) as (base, _docroot):
         deadline = time.time() + 20
         while not (gate_dir / 'held').exists():
             assert time.time() < deadline, 'target stripe was not held'
@@ -594,9 +588,8 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
         held_dir, held_lock_id = held
         target_calls = [entry for entry in calls
                         if len(entry) == 2
-                        and same_delivery_dir(entry[0], target_delivery_dir)]
-        assert same_delivery_dir(held_dir, target_delivery_dir), (
-            held, target_delivery_dir, calls)
+                        and entry[0] == target_key]
+        assert held_dir == target_key, (held, target_key, calls)
         assert len(target_calls) >= 2, (held, calls)
         assert all(lock_id == held_lock_id
                    for _delivery_dir, lock_id in target_calls), (
@@ -761,10 +754,10 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
         server.RES_DIR.mkdir(parents=True)
         initial = len(server._delivery_locks)
         for index in range(10_000):
-            delivery_dir, delivery_file, _tab = server._find_delivery_result(
+            _dir, delivery_file, tab = server._find_delivery_result(
                 TOK, f'absent-{index}', 'missing-did')
             assert not delivery_file.exists()
-            server._delivery_lock_for(delivery_dir)
+            server._delivery_lock_for(server._result_key(TOK, tab))
         assert initial == server._DELIVERY_LOCK_STRIPES
         assert len(server._delivery_locks) == initial
     finally:
