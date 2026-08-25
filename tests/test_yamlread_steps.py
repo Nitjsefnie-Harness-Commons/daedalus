@@ -39,6 +39,23 @@ def test_step_name_can_follow_another_mapping_field(tmp):
     assert step_scalar(source, 'sample', 'target', 'if') == 'z'
 
 
+def test_step_scalar_reads_sequence_item_mapping_field(tmp):
+    """The field carried after the dash belongs to the step mapping."""
+    del tmp
+    source = (
+        "jobs:\n sample:\n  steps:\n"
+        "   - if: >-\n"
+        "       first\n"
+        "       && second\n"
+        "     name: target\n")
+    try:
+        value = step_scalar(source, 'sample', 'target', 'if')
+    except YAMLReadError as error:
+        raise AssertionError(
+            f'sequence-item scalar was not decoded: {error}') from error
+    assert value == 'first && second', value
+
+
 def test_step_name_inline_comment_is_refused(tmp):
     """A name comment cannot silently turn a present step into absence."""
     del tmp
