@@ -14,7 +14,8 @@ no-argument ``vars()``, and any named access to ``sys._getframe`` or
 ``inspect.currentframe`` (including aliases imported at module scope or
 inside the handler).
 A handler that reaches its namespace without naming the parameter or one
-of those routes is outside what this audit checks.
+of those routes is outside what this audit checks; other dynamic routes
+remain undecidable.
 """
 import argparse
 import ast
@@ -605,7 +606,8 @@ def test_cli_handlers_read_only_declared_args(tmp):
     (including aliases imported at module scope or inside the handler);
     a handler that reaches its
     namespace without naming the parameter or one of those routes is
-    outside what this audit checks.
+    outside what this audit checks; other dynamic routes remain
+    undecidable.
     """
     del tmp
     from daedalus_cli.cli import DISPATCH
