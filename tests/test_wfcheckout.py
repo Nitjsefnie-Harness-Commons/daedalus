@@ -110,6 +110,40 @@ def test_checkout_reader_ends_block_scalar_at_outdented_comment(tmp):
     assert _wfcheckout.checkout_refs(workflow) == [('build', 'safe')]
 
 
+def test_checkout_reader_consumes_doubled_quote_before_hash(tmp):
+    """A doubled apostrophe keeps a later hash inside the quoted value."""
+    del tmp
+    workflow = (
+        "name: 'Team''s #1 build'\n"
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - run: echo safe\n')
+    try:
+        refs = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError as error:
+        raise AssertionError(str(error)) from error
+    assert refs == []
+
+
+def test_checkout_reader_consumes_doubled_quote_before_key_colon(tmp):
+    """A colon after an escaped apostrophe remains inside a quoted key."""
+    del tmp
+    workflow = (
+        "'Team''s: label': ignored\n"
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: safe\n')
+    try:
+        refs = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError as error:
+        raise AssertionError(str(error)) from error
+    assert refs == [('build', 'safe')]
+
+
 def test_checkout_reader_skips_unwalked_flow_values(tmp):
     """Flow syntax outside a checkout path is not inspected."""
     del tmp
