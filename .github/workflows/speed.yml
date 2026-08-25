@@ -107,23 +107,28 @@ jobs:
   speed:
     runs-on: ubuntu-latest
 
-    # This is the one job that checks out a pull request's OWN head and runs
-    # it, which is what the benchmark is for and also what code scanning
-    # reports against this file. The containment is real but it is all
-    # after-the-fact: `pull_request` rather than `pull_request_target`, a
-    # read-only token, no secrets in reach. None of it decides WHOSE code
-    # gets to run in the first place, and that is the decision an environment
-    # makes.
+    # This job checks out a pull request's OWN head and runs it, and an
+    # environment is the only control GitHub offers that decides whose code
+    # gets to start at all. A branch pushed to this repository is already
+    # the work of someone who can push here, so it benchmarks with no
+    # ceremony; a fork is not, so it waits for a reviewer. Both names exist
+    # as environments: `benchmark` carries no protection rules,
+    # `fork-benchmark` requires a review before the job starts.
     #
-    # A branch pushed to this repository is already the work of someone who
-    # can push to this repository, so it benchmarks with no ceremony. A fork
-    # is not, so it waits for a reviewer. Both names exist as environments:
-    # `benchmark` carries no protection rules, `fork-benchmark` requires a
-    # review before the job starts.
+    # This gates the benchmark job and nothing else. tests.yml still runs a
+    # fork's code on its `suites`, `wheel` and `coverage` jobs; the lever
+    # that would gate every workflow at once is the repository's
+    # `fork-pr-contributor-approval` setting, moving from
+    # `first_time_contributors` to `all_external_contributors`.
+    #
+    # The cost of naming an environment here: every same-repo push and pull
+    # request writes a deployment record, and `benchmark` is a real
+    # environment, so a secret attached to it later is in reach of every
+    # branch pushed to this repository.
     environment: >-
       ${{ github.event_name == 'pull_request'
-          && github.event.pull_request.head.repo.full_name != github.repository
-          && 'fork-benchmark' || 'benchmark' }}
+      && github.event.pull_request.head.repo.full_name != github.repository
+      && 'fork-benchmark' || 'benchmark' }}
     # Two discarded warm-up runs, four measured ones, and two installs.
     timeout-minutes: 90
 
