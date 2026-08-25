@@ -131,7 +131,8 @@ def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
         'false', 'YES', 'n', 'NULL', '~',
         '0', '+12', '-07', '0x2a', '0o52', '0b1010', '1_000',
         '.5', '1.', '1e3', '1e1_0', '1.0e+3', '.inf', '-.NaN', '1:20',
-        '2024-01-02', '2024-01-02T03:04:05Z',
+        '2024-01-02', '2024-01-02  03:04:05',
+        '2024-01-02T03:04:05Z',
     )
     for value in values:
         try:
@@ -143,6 +144,21 @@ def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
         else:
             raise AssertionError(
                 f'implicit non-string scalar accepted: {value}')
+
+
+def test_invalid_plain_scalar_indicators_and_tabs_are_refused(tmp):
+    """Invalid YAML indicators and tabs never pass as path strings."""
+    del tmp
+    for value in ('@foo', '`foo', 'foo\tbar', 'foo:'):
+        try:
+            _workflow_path_filters(
+                [f'    paths-ignore: [{value}]'], 'invalid-scalar.yml')
+        except AssertionError as failure:
+            assert 'invalid-scalar.yml' in str(failure), (value, failure)
+            assert value.replace('\t', '\\t') in str(failure), (
+                value, failure)
+        else:
+            raise AssertionError(f'invalid plain scalar accepted: {value}')
 
 
 def test_empty_plain_path_value_is_refused_and_is_yaml_unequal(tmp):
@@ -466,13 +482,15 @@ def test_path_filters_refuse_undecoded_continuations_and_pin_yaml_values(tmp):
 def test_a_duplicate_option_key_in_one_event_is_refused(tmp):
     """Last-wins describes a document the workflow does not contain."""
     del tmp
-    try:
-        _workflow_path_filters(['    paths-ignore: [a]',
-                                '    paths-ignore: [b]'])
-    except AssertionError as failure:
-        assert "duplicate event option 'paths-ignore'" in str(failure), failure
-    else:
-        raise AssertionError('a duplicate option key was accepted')
+    for key in ('paths-ignore', 'branches'):
+        try:
+            _workflow_path_filters([f'    {key}: [a]',
+                                    f'    {key}: [b]'], 'duplicate.yml')
+        except AssertionError as failure:
+            assert "duplicate event option" in str(failure), failure
+            assert key in str(failure), failure
+        else:
+            raise AssertionError(f'a duplicate {key} key was accepted')
 
 
 def test_event_option_keys_are_the_events_own_keys(tmp):

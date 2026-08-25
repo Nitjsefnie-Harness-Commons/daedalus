@@ -18,15 +18,16 @@ case (`true`, `false`, `yes`, `no`, `on`, `off`, `y`, and `n`), nulls (`null`,
 `~`, and empty), every core integer and float form (signs, underscores,
 bases, sexagesimals, `.inf`, and `.nan`), and timestamps are refused, as are
 tags, anchors, aliases, block scalars, continuations, flow mappings, tabs,
-duplicates, and inline values. Correct or refusing, never plausible: a
-construct this reader does not parse raises rather than returning an answer
-that reads like one, because a policy test cannot tell a wrong answer from a
-right one.
+duplicates, and non-empty inline trigger values. Empty trigger values (`{}`,
+`null`, and `~`) remain accepted as event declarations. Correct or refusing,
+never plausible: a construct this reader does not parse raises rather than
+returning an answer that reads like one, because a policy test cannot tell a
+wrong answer from a right one.
 """
 import re
 
 _PLAIN_KEY = re.compile(r'[a-z0-9_-]+')
-_PLAIN_MAPPING = re.compile(r':[ \t]')
+_PLAIN_MAPPING = re.compile(r':(?:[ \t]|$)')
 _NON_STRING_SCALARS = (
     re.compile(r'^(?:y|yes|n|no|true|false|on|off)$', re.IGNORECASE),
     re.compile(r'^(?:null|~)$', re.IGNORECASE),
@@ -43,7 +44,7 @@ _NON_STRING_SCALARS = (
         r'|[-+]?\.(?:inf|nan))$', re.IGNORECASE),
     re.compile(
         r'^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}'
-        r'(?:$|[Tt ][0-9]{1,2}:[0-9]{2}:[0-9]{2}'
+        r'(?:$|[Tt ]+[0-9]{1,2}:[0-9]{2}:[0-9]{2}'
         r'(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}'
         r'(?::[0-9]{2})?))?)$'),
 )
@@ -125,10 +126,21 @@ def _option_indent(lines, filename='workflow'):
     `paths-ignore:` belongs to something nested, and reading it as the
     event's would report an asymmetry this workflow does not have.
     """
-    indents = [entry[0] for entry in
+    entries = [entry for entry in
                (_entry(line, filename) for line in lines)
                if entry is not None]
-    return min(indents) if indents else None
+    if not entries:
+        return None
+    option_indent = min(entry[0] for entry in entries)
+    seen = set()
+    for entry in entries:
+        if entry[0] != option_indent:
+            continue
+        if entry[1] in seen:
+            raise AssertionError(
+                f'{filename}: duplicate event option {entry[1]!r}')
+        seen.add(entry[1])
+    return option_indent
 
 
 def _event_option_keys(lines, filename='workflow'):
@@ -168,7 +180,7 @@ def _scalar(value, filename='workflow', unsupported=None):
         f'{filename}: unsupported scalar value: {value!r}')
     if re.fullmatch(r'[|>][0-9+-]*', value):
         raise AssertionError(failure)
-    if not value or value[0] in '!&*':
+    if not value or value[0] in '!&*@`' or '\t' in value:
         raise AssertionError(failure)
     quoted = value and value[0] in "'\""
     if quoted or (value and value[-1] in "'\""):
@@ -253,7 +265,8 @@ def _workflow_path_filters(lines, filename='workflow'):
             # Silent last-wins describes a document the workflow does not
             # contain, which is why a second `on:` block and a second
             # trigger key are both refused too.
-            raise AssertionError(f'duplicate event option {key!r}')
+            raise AssertionError(
+                f'{filename}: duplicate event option {key!r}')
         value = value.strip()
         if value.startswith('#'):
             # An explanation on the key's own line is not the key's value;
