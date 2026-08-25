@@ -20,6 +20,13 @@ import sys
 def _constant_value(node, unresolved):
     if isinstance(node, ast.Constant):
         return node.value
+    if (isinstance(node, ast.UnaryOp)
+            and isinstance(node.op, (ast.UAdd, ast.USub))
+            and isinstance(node.operand, ast.Constant)
+            and type(node.operand.value) is int):
+        if isinstance(node.op, ast.USub):
+            return -node.operand.value
+        return node.operand.value
     return unresolved
 
 
@@ -64,7 +71,7 @@ def _static_get(node, function, handler_globals, imports, unresolved,
     if (not isinstance(node, ast.Call)
             or not isinstance(node.func, ast.Attribute)
             or node.func.attr != 'get'
-            or len(node.args) != 1
+            or len(node.args) not in (1, 2)
             or node.keywords):
         return unresolved
     key = _constant_value(node.args[0], unresolved)
@@ -73,8 +80,17 @@ def _static_get(node, function, handler_globals, imports, unresolved,
     base = resolve_frame_value(
         node.func.value, function, handler_globals, imports, unresolved,
         scope_binds, constant_string)
-    if type(base) is dict:
-        return base.get(key, unresolved)
+    if type(base) is not dict:
+        return unresolved
+    if key in base:
+        return base[key]
+    if len(node.args) == 2:
+        default = _constant_value(node.args[1], unresolved)
+        if default is not unresolved:
+            return default
+        return resolve_frame_value(
+            node.args[1], function, handler_globals, imports, unresolved,
+            scope_binds, constant_string)
     return unresolved
 
 
