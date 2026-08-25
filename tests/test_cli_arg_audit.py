@@ -419,9 +419,10 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
     sys.argv = ['daedalus', 'tabs']
     try:
         cli.main()
-    except AttributeError as error:
-        assert str(error) == \
-            "'Namespace' object has no attribute 'undeclared_probe'", error
+    except (AttributeError, TypeError) as error:
+        if isinstance(error, AttributeError):
+            assert str(error) == \
+                "'Namespace' object has no attribute 'undeclared_probe'", error
     else:
         assert False, 'real dispatch did not read undeclared_probe'
     finally:
@@ -567,6 +568,12 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
          "_ = FRAME_ROUTES['active']().f_locals['args'].undeclared_probe",
          "FRAME_ROUTES['active']()"),
         ('class FrameRoutes:\n    active = sys._getframe',
+         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
+         'FrameRoutes.active()'),
+        ('class FrameRoutes:\n    active = staticmethod(sys._getframe)',
+         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
+         'FrameRoutes.active()'),
+        ('class FrameRoutes:\n    active = classmethod(sys._getframe)',
          "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
          'FrameRoutes.active()'),
         ('', "_ = sys.__dict__['_getframe']()"

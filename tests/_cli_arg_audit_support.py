@@ -1,6 +1,7 @@
 """Side-effect-free constant resolution for the CLI argument audit."""
 import ast
 import sys
+import types
 
 # Exact type checks keep resolution from invoking handler-defined descriptors.
 # pylint: disable=unidiomatic-typecheck
@@ -15,7 +16,15 @@ def _constant_value(node, unresolved):
 def _static_attribute(base, attribute, unresolved):
     if type(base) is type(sys) and attribute == '__dict__':
         return base.__dict__
-    if type(base) in (type(sys), type):
+    if type(base) is type:
+        try:
+            value = getattr(base, attribute)
+        except Exception:
+            return unresolved
+        if type(value) is types.MethodType:
+            return value.__func__
+        return value
+    if type(base) is type(sys):
         return base.__dict__.get(attribute, unresolved)
     return unresolved
 
