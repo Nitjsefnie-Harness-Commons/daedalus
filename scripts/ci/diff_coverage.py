@@ -29,12 +29,13 @@ from pathlib import Path
 # `+++ b/path`, with git's optional quoting and the /dev/null of a deletion.
 _TARGET = re.compile(r'^\+\+\+ (.*)$')
 # `@@ -old,count +new,count @@`; the counts are optional and mean 1.
-_HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
+_HUNK = re.compile(r'^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@')
 
 
 def _decode_git_path(value):
     """Decode a quoted Git path and remove its diff-side prefix."""
     if not value.startswith('"'):
+        value = value.split('\t', 1)[0]
         return value[2:] if value.startswith('b/') else value
     escaped = value[1:-1] if value.endswith('"') else value[1:]
     escapes = {
@@ -104,6 +105,7 @@ def added_lines(diff_text):
     path = None
     line_number = 0
     in_hunk = False
+    old_remaining = new_remaining = 0
     for line in diff_text.splitlines():
         # `--- ` counts as a file header only outside a hunk. Git renders a
         # REMOVED line whose content begins `-- ` as `--- ...`, and taking
@@ -121,17 +123,26 @@ def added_lines(diff_text):
             continue
         hunk = _HUNK.match(line)
         if hunk is not None:
-            line_number = int(hunk.group(1))
-            in_hunk = True
+            old_remaining = int(hunk.group(1) or 1)
+            line_number = int(hunk.group(2))
+            new_remaining = int(hunk.group(3) or 1)
+            in_hunk = bool(old_remaining or new_remaining)
             continue
         if path is None or not in_hunk:
             continue
         if line.startswith('+'):
             added.setdefault(path, set()).add(line_number)
             line_number += 1
+            new_remaining -= 1
+        elif line.startswith('-'):
+            old_remaining -= 1
         elif line.startswith(' ') or line == '':
             line_number += 1
+            old_remaining -= 1
+            new_remaining -= 1
         # A `-` line exists only in the old file and moves nothing.
+        if old_remaining == 0 and new_remaining == 0:
+            in_hunk = False
     return added
 
 
