@@ -408,7 +408,7 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
                           checkout, re.MULTILINE)
         assert depth and (depth.group(1) == '0' or int(depth.group(1)) >= 2), \
             checkout
-    assert 'git diff --unified=0 HEAD^1 HEAD' in diff, diff
+    assert 'HEAD^1 HEAD > patch.diff' in diff, diff
     assert 'github.event.pull_request.base.sha' not in diff, diff
 
 
