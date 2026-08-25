@@ -276,6 +276,33 @@ def test_checkout_reader_refuses_a_duplicate_top_level_jobs_with_location(tmp):
     _assert_yaml_refusal(workflow, 'second top-level jobs mapping')
 
 
+def test_checkout_reader_refuses_duplicate_decoded_job_keys(tmp):
+    """Two spellings of one YAML job key cannot produce a result union."""
+    del tmp
+    failures = []
+    for second_key in ('build', '"bu\\x69ld"'):
+        workflow = (
+            'jobs:\n'
+            '  build:\n'
+            '    steps:\n'
+            '      - uses: actions/checkout@v4\n'
+            '        with:\n'
+            '          ref: first\n'
+            f'  {second_key}:\n'
+            '    steps:\n'
+            '      - uses: actions/checkout@v4\n'
+            '        with:\n'
+            '          ref: second\n')
+        try:
+            actual = _wfcheckout.checkout_refs(workflow)
+        except _wfcheckout.YAMLReadError as error:
+            if 'duplicate job key' not in str(error):
+                failures.append((second_key, str(error)))
+        else:
+            failures.append((second_key, actual))
+    assert failures == [], failures
+
+
 def test_checkout_reader_refuses_a_hex_escaped_duplicate_jobs_key(tmp):
     """A hex-escaped jobs sibling cannot hide the real mapping."""
     del tmp
