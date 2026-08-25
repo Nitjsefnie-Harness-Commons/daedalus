@@ -42,15 +42,19 @@ KNOWN_INDIRECT_ARG_READS = (
 )
 
 
-def _namespace_dests(actions):
+def _namespace_dests(parser):
     """Return destinations that argparse puts on a parsed namespace."""
     # Help and version actions print and exit instead of storing, so their
-    # destinations never land on the namespace; an option declared with
-    # default=SUPPRESS is absent only while omitted, so its dest stays.
+    # destinations never land on the namespace. A default of SUPPRESS omits
+    # the destination when the option is absent, so a handler cannot rely on
+    # that attribute existing.
     never_store = (argparse._HelpAction, argparse._VersionAction)
-    return {action.dest for action in actions
-            if action.dest != argparse.SUPPRESS
-            and not isinstance(action, never_store)}
+    action_dests = {
+        action.dest for action in parser._actions
+        if action.dest != argparse.SUPPRESS
+        and action.default is not argparse.SUPPRESS
+        and not isinstance(action, never_store)}
+    return action_dests | set(parser._defaults)
 
 
 def _constant_string(node):
@@ -376,8 +380,8 @@ def _audit_real_tabs_handler(handler_module):
     subparsers = next(
         action for action in parser._actions
         if isinstance(action, argparse._SubParsersAction))
-    allowed = _namespace_dests(parser._actions) | _namespace_dests(
-        subparsers.choices['tabs']._actions)
+    allowed = _namespace_dests(parser) | _namespace_dests(
+        subparsers.choices['tabs'])
     handler = handler_module.do_tabs
     tree = ast.parse(handler_module.__source__)
     function = next(
@@ -410,17 +414,38 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
         sys.argv = original_argv
 
 
-def test_cli_audit_reports_suppressed_destination(tmp):
+def test_cli_audit_excludes_dest_suppress_action(tmp):
     from daedalus_cli.parser import build_parser
 
     parser = build_parser()
     subparsers = next(
         action for action in parser._actions
         if isinstance(action, argparse._SubParsersAction))
-    allowed = _namespace_dests(parser._actions) | _namespace_dests(
-        subparsers.choices['tabs']._actions)
+    allowed = _namespace_dests(parser) | _namespace_dests(
+        subparsers.choices['tabs'])
     violations = _audit_fake_handler('args.version', allowed)
     assert violations == ['args.version'], violations
+
+
+def test_cli_audit_excludes_default_suppress_action(tmp):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        '--conditional', default=argparse.SUPPRESS)
+
+    assert vars(parser.parse_args([])) == {}
+    allowed = _namespace_dests(parser)
+    violations = _audit_fake_handler('args.conditional', allowed)
+    assert violations == ['args.conditional'], violations
+
+
+def test_cli_audit_includes_parser_set_defaults(tmp):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.set_defaults(from_defaults=False)
+
+    assert vars(parser.parse_args([])) == {'from_defaults': False}
+    allowed = _namespace_dests(parser)
+    violations = _audit_fake_handler('args.from_defaults', allowed)
+    assert violations == [], violations
 
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
@@ -636,7 +661,7 @@ def test_cli_handlers_read_only_declared_args(tmp):
     subparsers = next(
         action for action in parser._actions
         if isinstance(action, argparse._SubParsersAction))
-    global_dests = _namespace_dests(parser._actions)
+    global_dests = _namespace_dests(parser)
     dispatch_only = sorted(set(DISPATCH) - set(subparsers.choices))
     parser_only = sorted(set(subparsers.choices) - set(DISPATCH))
     assert not dispatch_only and not parser_only, (
@@ -646,7 +671,7 @@ def test_cli_handlers_read_only_declared_args(tmp):
     handler_details = {}
     for name, handler in DISPATCH.items():
         subparser = subparsers.choices[name]
-        allowed = global_dests | _namespace_dests(subparser._actions)
+        allowed = global_dests | _namespace_dests(subparser)
         tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
         function = next(
             node for node in ast.walk(tree)
