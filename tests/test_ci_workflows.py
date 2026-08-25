@@ -388,6 +388,37 @@ def test_job_scalar_stays_inside_the_jobs_mapping(tmp):
         '  speed:\n'
         '    runs-on: ubuntu-latest\n')
     assert job_scalar(workflow, 'speed', 'environment') is None
+def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
+    """Push and pull_request must make the same path-filtering choice.
+
+    A filter on push alone lets a documentation-only commit skip the gates on
+    main while the identical pull request runs them. Mirroring that filter
+    onto pull_request would leave a documentation-only tag with zero runs, and
+    release.yml treats zero workflows recorded against the release SHA as a
+    failure. Keeping both events filtered or both unfiltered prevents that
+    drift while ensuring a documentation-only tag still runs these gates.
+    """
+    del tmp
+    checked = []
+    for path in sorted((ROOT / '.github' / 'workflows').iterdir()):
+        if path.suffix not in ('.yml', '.yaml'):
+            continue
+        triggers = _workflow_triggers(path.read_text(encoding='utf-8'))
+        if 'pull_request' not in triggers or 'push' not in triggers:
+            continue
+        checked.append(path.name)
+        push_lines = triggers['push']
+        pull_request_lines = triggers['pull_request']
+        push_filter = (push_lines[push_lines.index('paths-ignore:') + 1:]
+                       if 'paths-ignore:' in push_lines else None)
+        pull_request_filter = (
+            pull_request_lines[
+                pull_request_lines.index('paths-ignore:') + 1:]
+            if 'paths-ignore:' in pull_request_lines else None)
+        assert push_filter == pull_request_filter, (
+            f'{path.name} filters push and pull_request differently: '
+            f'{push_filter!r} != {pull_request_filter!r}')
+    assert checked, 'no workflow declares both triggers; has one been renamed?'
 
 
 def test_the_speed_gate_throws_away_its_first_round(tmp):
