@@ -131,6 +131,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          # The SHA the event named, not `refs/pull/N/merge` resolved now.
+          # `diff-coverage` checks out the same value, so the report and the
+          # diff describe one tree even if GitHub recomputes the merge ref
+          # between the two jobs.
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -374,10 +379,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # No ref: here is deliberate. The default pull-request checkout is
-          # the merge commit, which is the tree the suites ran on and the tree
-          # that will exist after merge. Any other tree gives the coverage
-          # report line numbers a diff that describes code it never measured.
+          # The merge commit the event named, and the exact SHA `coverage`
+          # measured. Resolving `refs/pull/N/merge` here instead would let
+          # GitHub hand this job a different tree than the one the coverage
+          # report describes.
+          ref: ${{ github.sha }}
+          # Both parents of that merge commit, which the diff below needs.
           fetch-depth: 0
           persist-credentials: false
 
@@ -386,14 +393,13 @@ jobs:
           name: coverage-xml
 
       - name: Measure the coverage of this change
-        env:
-          # Through the environment rather than `${{ }}` inside the script:
-          # everything a payload carries is text, never shell.
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        # HEAD is the merge tree checked out above, so compare that exact tree
-        # with the base rather than numbering lines in the PR head.
+        # HEAD is the merge tree checked out above and HEAD^1 is, by
+        # construction, the base tip that was merged into it. The event
+        # payload's `base.sha` is NOT that: the base branch can advance
+        # between the event and the checkout, and every base commit merged in
+        # since would then be reported as a line this pull request added.
         run: |
-          git diff --unified=0 "$BASE_SHA" HEAD > patch.diff
+          git diff --unified=0 HEAD^1 HEAD > patch.diff
           python3 scripts/ci/diff_coverage.py \
             --coverage coverage.xml --diff patch.diff > body.md
           cat body.md >> "$GITHUB_STEP_SUMMARY"

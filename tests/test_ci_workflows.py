@@ -494,16 +494,22 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
     assert marker, tests_workflow
     diff, marker, aggregate = diff.partition('\n  aggregate:\n')
     assert marker, tests_workflow
+    # Anchored to end of line, all four: unanchored, `coverage-xml` is a
+    # prefix of `coverage-xml-does-not-exist` and the assertion would
+    # certify a wiring that could never find its artifact.
     assert re.search(r'uses: actions/upload-artifact@.*\n\s+with:\n'
-                     r'\s+name: coverage-xml', coverage), coverage
+                     r'\s+name: coverage-xml[ \t]*$', coverage,
+                     re.MULTILINE), coverage
     assert re.search(r'uses: actions/download-artifact@.*\n\s+with:\n'
-                     r'\s+name: coverage-xml', diff), diff
+                     r'\s+name: coverage-xml[ \t]*$', diff,
+                     re.MULTILINE), diff
     upload = diff.partition('uses: actions/upload-artifact@')[2]
-    assert re.search(r'with:\n\s+name: diff-coverage-comment', upload), diff
+    assert re.search(r'with:\n\s+name: diff-coverage-comment[ \t]*$',
+                     upload, re.MULTILINE), diff
     download = comment_workflow.partition(
         'uses: actions/download-artifact@')[2]
-    assert re.search(r'with:\n\s+name: diff-coverage-comment', download), (
-        comment_workflow)
+    assert re.search(r'with:\n\s+name: diff-coverage-comment[ \t]*$',
+                     download, re.MULTILINE), comment_workflow
     assert 'run-id: ${{ github.event.workflow_run.id }}' in download, download
     assert 'github-token: ${{ github.token }}' in download, download
     assert 'pull-requests: write' not in diff, diff
@@ -522,6 +528,25 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
         'workflows: [tests]', 'types: [completed]'], triggers
     assert 'pull-requests: write' in comment_workflow, comment_workflow
     assert 'actions: read' in comment_workflow, comment_workflow
+
+
+def test_the_coverage_commenter_guards_its_privileged_shell(tmp):
+    """Pipefail, one run per head, and a destination it did not import."""
+    del tmp
+    workflow = (
+        ROOT / '.github' / 'workflows' / 'coverage-comment.yml').read_text(
+            encoding='utf-8')
+    # Actions' default shell is `bash -e` without pipefail, so in
+    # `x="$(gh api | jq ...)"` a failed API call reads as an empty answer.
+    guarded = re.findall(r'run: \|\n\s+set -euo pipefail\n', workflow)
+    assert len(guarded) == workflow.count('run: |') == 3, workflow
+    assert 'cancel-in-progress: true' in workflow, workflow
+    # The destination comes from the event; the artifact's copy is compared.
+    assert 'repos/$REPO/commits/$HEAD_SHA/pulls' in workflow, workflow
+    assert 'PR_NUMBER: ${{ steps.pr.outputs.number }}' in workflow, workflow
+    assert 'repos/$REPO/issues/$PR_NUMBER/comments' in workflow, workflow
+    assert '"$claimed" != "$PR_NUMBER"' in workflow, workflow
+    assert '(.body // "")' in workflow, workflow
 
 
 def test_dependabot_groups_an_action_used_under_more_than_one_path(tmp):
