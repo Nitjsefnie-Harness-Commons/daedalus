@@ -31,6 +31,7 @@ resolver-only routes, and one known-gap control for every named outside family.
 """
 import argparse
 import ast
+import builtins
 import inspect
 import sys
 
@@ -38,11 +39,6 @@ import sys
 # even though the audit resolves constant indirect reads itself.
 KNOWN_INDIRECT_ARG_READS = (
     ('tabs', 'json', 'do_tabs'),
-)
-
-SHADOWING_DEFAULT_CASES = (
-    'def inner(args=args):\n    return args.undeclared_probe\ninner()',
-    'f = lambda args=args: args.undeclared_probe\nf()',
 )
 
 PERMITTED_NAMESPACE_READ_CASES = (
@@ -61,6 +57,12 @@ PERMITTED_NAMESPACE_READ_CASES = (
     ("args.__dict__.get('json', False)",
      "args.__dict__.get('undeclared_probe', None)", False),
     ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')", False),
+    ("builtins.getattr(args, 'json', False)",
+     "builtins.getattr(args, 'undeclared_probe', None)", False),
+    ("builtins.hasattr(args, 'json')",
+     "builtins.hasattr(args, 'undeclared_probe')", False),
+    ("builtins.vars(args).get('json')",
+     "builtins.vars(args).get('undeclared_probe')", False),
 )
 
 NAMESPACE_ESCAPE_CASES = (
@@ -75,6 +77,30 @@ NAMESPACE_ESCAPE_CASES = (
     ('hasattr(args, some_variable)', 'hasattr(args, some_variable)'),
     ('helper(vars(args))', 'vars(args)'),
     ('args.__dict__', 'args.__dict__'),
+    ('def inner(args=args):\n    return args.undeclared_probe\ninner()',
+     'args=args'),
+    ('f = lambda args=args: args.undeclared_probe\nf()', 'args=args'),
+    ("getattr = helper\ngetattr(args, 'json', False)",
+     "getattr(args, 'json', False)"),
+    ("hasattr = helper\nhasattr(args, 'json')", "hasattr(args, 'json')"),
+    ("vars = helper\nvars(args).get('json')", "vars(args)"),
+    ("_ = (lambda getattr: getattr(args, 'json', False))(helper)",
+     "getattr(args, 'json', False)"),
+    ("def inner(getattr):\n"
+     "    return getattr(args, 'json', False)\n"
+     "inner(helper)", "getattr(args, 'json', False)"),
+    ("def inner(getattr=getattr(args, 'json', False)):\n"
+     "    return getattr(args, 'json', False)\n"
+     "inner()", "getattr(args, 'json', False)"),
+    ("_ = [getattr(args, 'json', False) for getattr in helpers]",
+     "getattr(args, 'json', False)"),
+    ("from operator import attrgetter as getattr\n"
+     "getattr(args, 'json', False)", "getattr(args, 'json', False)"),
+)
+
+BUILTIN_IDENTITY_GLOBAL_CASES = (
+    ('getattr', ()),
+    ('len', ("namespace escape: getattr(args, 'json', False)",)),
 )
 
 REFLECTIVE_ESCAPE_CASES = (
@@ -83,6 +109,22 @@ REFLECTIVE_ESCAPE_CASES = (
     ('_ = vars()', 'vars()'),
     ('_ = globals()', 'globals()'),
     ("exec('args.undeclared_probe')", "exec('args.undeclared_probe')"),
+    ("_ = builtins.locals()['args'].undeclared_probe", 'builtins.locals()'),
+    ("_ = builtins.globals()['args'].undeclared_probe",
+     'builtins.globals()'),
+    ("_ = builtins.eval('args.undeclared_probe')",
+     "builtins.eval('args.undeclared_probe')"),
+    ("builtins.exec('args.undeclared_probe')",
+     "builtins.exec('args.undeclared_probe')"),
+    ('_ = builtins.vars()', 'builtins.vars()'),
+    ("locals = helper\n_ = locals()['args'].undeclared_probe", 'locals()'),
+    ("globals = helper\n_ = globals()['args'].undeclared_probe",
+     'globals()'),
+    ("eval = helper\n_ = eval('args.undeclared_probe')",
+     "eval('args.undeclared_probe')"),
+    ("exec = helper\nexec('args.undeclared_probe')",
+     "exec('args.undeclared_probe')"),
+    ('vars = helper\n_ = vars()', 'vars()'),
     ("_ = sys._getframe().f_locals['args'].x", 'sys._getframe()'),
     ("_ = inspect.currentframe().f_locals['args'].x",
      'inspect.currentframe()'),
@@ -336,7 +378,75 @@ def _constant_mapping_read(node):
     return None
 
 
-def permitted_namespace_read(name):
+def _callable_body_contains(scope, child):
+    if isinstance(scope, ast.Lambda):
+        return child is scope.body
+    return child in scope.body
+
+
+def _builtin_name_is_shadowed(node, name, function, scope_binds,
+                              comprehension_shadows):
+    current = node
+    callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    comprehensions = (ast.ListComp, ast.SetComp, ast.DictComp,
+                      ast.GeneratorExp)
+    while current is not function:
+        parent = current._parent
+        if (isinstance(parent, comprehensions)
+                and comprehension_shadows(parent, name)):
+            return True
+        if (isinstance(parent, callables)
+                and _callable_body_contains(parent, current)
+                and scope_binds(parent, name)):
+            return True
+        current = parent
+    return False
+
+
+def is_builtin_reference(node, name, function, handler_globals,
+                         scope_binds, comprehension_shadows):
+    """Return whether ``node`` provably names one exact builtin."""
+    expected = getattr(builtins, name)
+    if isinstance(node, ast.Name):
+        if (node.id != name
+                or _builtin_name_is_shadowed(
+                    node, name, function, scope_binds,
+                    comprehension_shadows)):
+            return False
+        return handler_globals.get(name, expected) is expected
+    if (not isinstance(node, ast.Attribute)
+            or node.attr != name
+            or not isinstance(node.value, ast.Name)):
+        return False
+    module_name = node.value.id
+    if _builtin_name_is_shadowed(
+            node, module_name, function, scope_binds,
+            comprehension_shadows):
+        return False
+    return handler_globals.get(module_name) is builtins
+
+
+def reflective_builtin_call(node, function, handler_globals, scope_binds,
+                            comprehension_shadows):
+    """Return whether a call must be treated as reflective."""
+    if not isinstance(node, ast.Call):
+        return False
+    names = ('locals', 'globals', 'eval', 'exec')
+    if (isinstance(node.func, ast.Name)
+            and (node.func.id in names
+                 or (node.func.id == 'vars' and not node.args))):
+        return True
+    if not node.args:
+        names += ('vars',)
+    return any(
+        is_builtin_reference(
+            node.func, name, function, handler_globals,
+            scope_binds, comprehension_shadows)
+        for name in names)
+
+
+def permitted_namespace_read(name, function, handler_globals, scope_binds,
+                             comprehension_shadows):
     """Resolve a permitted namespace read, or None for an escape."""
     parent = name._parent
     if isinstance(parent, ast.Attribute) and parent.value is name:
@@ -346,21 +456,28 @@ def permitted_namespace_read(name):
             return parent.attr, parent, True
         return _constant_mapping_read(parent)
     if not (isinstance(parent, ast.Call)
-            and isinstance(parent.func, ast.Name)
             and parent.args and parent.args[0] is name
             and not parent.keywords):
         return None
-    if parent.func.id == 'vars' and len(parent.args) == 1:
+    if (len(parent.args) == 1
+            and is_builtin_reference(
+                parent.func, 'vars', function, handler_globals,
+                scope_binds, comprehension_shadows)):
         return _constant_mapping_read(parent)
-    arities = {'getattr': (2, 3), 'hasattr': (2,)}.get(parent.func.id)
-    if not (arities and len(parent.args) in arities
-            and not any(isinstance(argument, ast.Starred)
-                        for argument in parent.args)):
+    builtin_name = next(
+        (candidate for candidate in ('getattr', 'hasattr')
+         if is_builtin_reference(
+             parent.func, candidate, function, handler_globals,
+             scope_binds, comprehension_shadows)), None)
+    arities = {'getattr': (2, 3), 'hasattr': (2,)}.get(builtin_name)
+    if (not arities or len(parent.args) not in arities
+            or any(isinstance(argument, ast.Starred)
+                   for argument in parent.args)):
         return None
     attribute = constant_string(parent.args[1])
     if attribute is None:
         return None
-    needs_presence = parent.func.id == 'getattr' and len(parent.args) == 2
+    needs_presence = builtin_name == 'getattr' and len(parent.args) == 2
     return attribute, parent, needs_presence
 
 
