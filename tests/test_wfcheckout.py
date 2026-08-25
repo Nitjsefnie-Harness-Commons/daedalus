@@ -524,6 +524,20 @@ def test_checkout_reader_refuses_an_explicit_top_level_jobs_key(tmp):
     _assert_yaml_refusal(mutated, 'explicit key')
 
 
+def test_checkout_reader_refuses_a_complex_explicit_root_key(tmp):
+    """A compact mapping cannot masquerade as an explicit scalar key."""
+    del tmp
+    workflow = (
+        '? name: workflow\n'
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: hidden\n')
+    _assert_yaml_refusal(workflow, 'explicit key')
+
+
 def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
     """Apply the pin's conservative expression contract to one workflow."""
     offenders = []
