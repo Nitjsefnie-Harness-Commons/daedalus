@@ -38,7 +38,7 @@ _NON_STRING_SCALARS = (
     re.compile(
         r'^(?:[-+]?(?:[0-9][0-9_]*\.[0-9_]*|'
         r'\.[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)?'
-        r'|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+'
+        r'|[-+]?[0-9][0-9_]*[eE][-+]?[0-9_]+'
         r'|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*'
         r'|[-+]?\.(?:inf|nan))$', re.IGNORECASE),
     re.compile(
@@ -287,6 +287,9 @@ def _workflow_path_filters(lines, filename='workflow'):
                 raise AssertionError(
                     f'{filename}: unsupported block sequence continuation: '
                     f'{stripped!r}')
+        if item_indent is None:
+            raise AssertionError(
+                f'{filename}: unsupported scalar value: {value!r}')
         filters[key] = values
     return filters
 
