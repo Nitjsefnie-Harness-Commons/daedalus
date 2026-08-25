@@ -1,11 +1,20 @@
 """Side-effect-free static analysis for the CLI argument audit.
 
+Parser destinations split into DECLARED and GUARANTEED PRESENT. A suppressed-
+default action contributes only to DECLARED; a same-destination non-suppressed
+action still contributes to GUARANTEED PRESENT. Every ``set_defaults`` key
+is in both. Help/version actions and ``argparse.SUPPRESS`` destinations
+contribute to neither. Direct attributes and exact-dict subscripts need
+GUARANTEED PRESENT. Bare ``getattr`` does too; ``hasattr`` and defaulted
+``getattr`` and exact-dict ``.get`` need DECLARED.
+
 The resolver follows supplied in-function imports and unshadowed handler
 globals by object identity. It decides module attributes, module ``__dict__``,
-exact-class attributes read directly from MRO dictionaries, signed-integer
-list/tuple subscripts, constant-key dict subscripts and
-``.get(key[, default])``, and constant-name ``getattr``. Single-argument
-``vars`` is resolved on exact modules and classes; a class yields a mapping
+exact-class MRO attributes, exact list/tuple subscripts, and constant-key dict
+reads. Unary signed-integer evaluation recurses through arbitrary stacks.
+Constant slices recursively resolve bounds, preserve omissions, and keep exact
+sliced sequences eligible for another subscript. Constant-name ``getattr`` and
+single-argument ``vars`` resolve exact modules and classes; a class yields a
 proxy, whose downstream reads remain outside the exact-dict rules.
 Exact ``staticmethod`` and ``classmethod`` wrappers are unwrapped; every other
 descriptor stays raw, so its ``__get__`` is never invoked. The caller refuses
@@ -14,12 +23,11 @@ unresolved canonical ``_getframe`` and ``currentframe`` spellings.
 The resolver never runs handler-defined code. Descriptors other than the two
 exact wrappers, ``functools.partial``, exception traceback frames, other
 container types, the iterator protocol, comprehension results, instance
-attributes, ``operator.attrgetter`` and runtime-built names stay outside
-frame-route resolution. Frame acquisition in another function is
+attributes, ``operator.attrgetter``, runtime-built names, and computed or
+call-produced subscript components stay outside. Frame acquisition elsewhere is
 categorically outside because the audit inspects only the handler's own body.
-The module-level case tables enumerate the permitted reads, refused escapes,
-decided frame routes, resolver-only controls and known outside families used
-by the focused tests.
+The case tables enumerate permitted reads, refused escapes, decided and
+resolver-only routes, and one known-gap control for every named outside family.
 """
 import argparse
 import ast
