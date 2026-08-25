@@ -67,6 +67,10 @@ def _indent(line):
 
 def _mapping_key(stripped, filename='workflow'):
     """Return a positively understood plain mapping key and its value."""
+    if '\t' in stripped:
+        raise AssertionError(
+            f'{filename}: tab in mapping entry: {stripped!r}')
+    stripped = stripped.strip()
     if not stripped or stripped.startswith('#'):
         return None
     if stripped == '-' or stripped.startswith(('- ', '-\t')):
@@ -114,7 +118,7 @@ def _mapping_key(stripped, filename='workflow'):
 def _entry(line, filename='workflow'):
     """Return (indent, key, value) for one mapping line, or None."""
     indent = _indent(line)
-    entry = _mapping_key(line.strip(), filename)
+    entry = _mapping_key(line, filename)
     if entry is None:
         return None
     return indent, entry[0], entry[1]
@@ -181,7 +185,8 @@ def _scalar(value, filename='workflow', unsupported=None):
         f'{filename}: unsupported scalar value: {value!r}')
     if re.fullmatch(r'[|>][0-9+-]*', value):
         raise AssertionError(failure)
-    if not value or value[0] in '!&*@`' or '\t' in value:
+    if (not value or value[0] in '!&*@`%]}|>,'
+            or '\t' in value):
         raise AssertionError(failure)
     quoted = value and value[0] in "'\""
     if quoted or (value and value[-1] in "'\""):
@@ -351,7 +356,7 @@ def _workflow_triggers(workflow, filename='workflow'):
             # written `workflow_dispatch: {}` or with a trailing comment is
             # still that trigger, and a reader that missed it would report
             # the one it was looking for as absent.
-            entry = _mapping_key(stripped, filename)
+            entry = _mapping_key(line, filename)
             if entry is not None:
                 name, rest = entry
                 # Options written on the key's own line are options this
