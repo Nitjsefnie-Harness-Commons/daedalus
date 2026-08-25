@@ -13,6 +13,8 @@ on:
     # this a second time against the same SHA, and a branch with no pull
     # request open is not a tree anyone is reviewing.
     branches: [main]
+    # The gate runs on the push to main, and release.yml later finds that run
+    # by the shared commit SHA; a documentation-only commit must still run it.
   pull_request:
   workflow_dispatch:
 

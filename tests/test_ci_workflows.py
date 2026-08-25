@@ -7,6 +7,7 @@ release published before its checks finished. These tests read the workflow
 files themselves, and run the /claim script as shell rather than trusting a
 reading of it.
 """
+import ast
 import fnmatch
 import os
 import re
@@ -267,29 +268,110 @@ def _mapping_key(stripped):
     return None
 
 
-def _workflow_triggers(workflow):
+def _workflow_path_filters(lines):
+    """Return normalized `paths` and `paths-ignore` entries for an event."""
+    filters = {}
+    entry_pattern = re.compile(
+        r'''(?:(['"])([^'"]+)\1|([A-Za-z0-9_-]+))\s*:\s*(.*)$''')
+
+    def _entry(line):
+        """Return (indent, key, value) for one mapping line, or None."""
+        indent = len(line) - len(line.lstrip(' '))
+        match = entry_pattern.fullmatch(line.strip())
+        if not match:
+            return None
+        return indent, match.group(2) or match.group(3), match.group(4)
+
+    def _scalar(value):
+        """Remove one matching pair of quotes around a path value."""
+        value = value.strip()
+        if (len(value) >= 2 and value[0] in "'\""
+                and value[-1] == value[0]):
+            return value[1:-1]
+        return value
+
+    for index, line in enumerate(lines):
+        current = _entry(line)
+        if current is None or current[1] not in ('paths', 'paths-ignore'):
+            continue
+        indent, key, value = current
+        value = value.strip()
+        if value:
+            try:
+                parsed = ast.literal_eval(value)
+            except (SyntaxError, ValueError) as error:
+                raise AssertionError(
+                    f'{key} has an unsupported value: {value!r}') from error
+            assert (isinstance(parsed, list)
+                    and all(isinstance(item, str) for item in parsed)), (
+                        f'{key} must be a list of strings: {value!r}')
+            filters[key] = parsed
+            continue
+
+        values = []
+        for following in lines[index + 1:]:
+            next_entry = _entry(following)
+            if next_entry is not None and next_entry[0] <= indent:
+                break
+            stripped = following.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            if stripped.startswith('-'):
+                values.append(_scalar(stripped[1:]))
+        filters[key] = values
+    return filters
+
+
+def _workflow_triggers(workflow, filename='workflow'):
     """The `on:` mapping as {trigger name: its indented lines}.
 
     Text rather than a YAML parse: the suites are stdlib only, and the shape
     asked about here is one nesting level deep.
     """
-    triggers, current, inside = {}, None, False
-    for line in workflow.splitlines():
-        if not inside:
-            inside = line.startswith('on:')
+    lines = workflow.splitlines()
+    on_index = None
+    on_pattern = re.compile(r'''(?:(['"])on\1|on)\s*:(.*)$''')
+    for index, line in enumerate(lines):
+        if line.startswith((' ', '\t')):
             continue
-        if line and not line.startswith(' '):
-            break
+        match = on_pattern.fullmatch(line)
+        if not match:
+            continue
+        if on_index is not None:
+            raise AssertionError(f'{filename}: duplicate on: blocks')
+        value = match.group(2).strip()
+        if value and not value.startswith('#'):
+            raise AssertionError(
+                f'{filename}: inline on: block is not understood: {line!r}')
+        on_index = index
+        break
+
+    assert on_index is not None, (
+        f'{filename}: no understood top-level on: block')
+    triggers, current = {}, None
+    for line in lines[on_index + 1:]:
         stripped = line.strip()
         if not stripped or stripped.startswith('#'):
             continue
-        key = _mapping_key(stripped)
-        if (line.startswith('  ') and not line.startswith('   ')
-                and key is not None):
-            current = key
-            triggers[current] = []
-        elif current is not None:
-            triggers[current].append(stripped)
+        if not line.startswith((' ', '\t')):
+            break
+        indent = len(line) - len(line.lstrip(' '))
+        if indent == 2:
+            # `_mapping_key` rather than a bare `endswith(':')`: a trigger
+            # written `workflow_dispatch: {}` or with a trailing comment is
+            # still that trigger, and a reader that missed it would report
+            # the one it was looking for as absent.
+            name = _mapping_key(stripped)
+            if name is not None:
+                if name in triggers:
+                    raise AssertionError(
+                        f'{filename}: duplicate trigger {name!r}')
+                triggers[name] = []
+                current = name
+                continue
+        if current is not None:
+            triggers[current].append(line)
+    assert triggers, f'{filename}: on: block has no understood triggers'
     return triggers
 
 
@@ -309,11 +391,13 @@ def test_no_workflow_gates_one_commit_twice(tmp):
     del tmp
     checked = []
     for path in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
-        triggers = _workflow_triggers(path.read_text(encoding='utf-8'))
+        triggers = _workflow_triggers(
+            path.read_text(encoding='utf-8'), path.name)
         if 'pull_request' not in triggers or 'push' not in triggers:
             continue
         checked.append(path.name)
-        assert any(line.startswith('branches:') for line in triggers['push']), (
+        assert any(line.strip().startswith('branches:')
+                   for line in triggers['push']), (
             f'{path.name} runs on every branch push AND on pull_request, so a '
             f'pull request from this repository gates its head SHA twice')
     assert checked, 'no workflow declares both triggers; has one been renamed?'
@@ -392,33 +476,49 @@ def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
     """Push and pull_request must make the same path-filtering choice.
 
     A filter on push alone lets a documentation-only commit skip the gates on
-    main while the identical pull request runs them. Mirroring that filter
-    onto pull_request would leave a documentation-only tag with zero runs, and
-    release.yml treats zero workflows recorded against the release SHA as a
-    failure. Keeping both events filtered or both unfiltered prevents that
-    drift while ensuring a documentation-only tag still runs these gates.
+    main while the identical pull request runs them. This test owns only the
+    symmetry property; the release-safety direction is pinned separately.
     """
     del tmp
     checked = []
     for path in sorted((ROOT / '.github' / 'workflows').iterdir()):
         if path.suffix not in ('.yml', '.yaml'):
             continue
-        triggers = _workflow_triggers(path.read_text(encoding='utf-8'))
+        triggers = _workflow_triggers(
+            path.read_text(encoding='utf-8'), path.name)
         if 'pull_request' not in triggers or 'push' not in triggers:
             continue
         checked.append(path.name)
-        push_lines = triggers['push']
-        pull_request_lines = triggers['pull_request']
-        push_filter = (push_lines[push_lines.index('paths-ignore:') + 1:]
-                       if 'paths-ignore:' in push_lines else None)
-        pull_request_filter = (
-            pull_request_lines[
-                pull_request_lines.index('paths-ignore:') + 1:]
-            if 'paths-ignore:' in pull_request_lines else None)
+        push_filter = _workflow_path_filters(triggers['push'])
+        pull_request_filter = _workflow_path_filters(
+            triggers['pull_request'])
         assert push_filter == pull_request_filter, (
             f'{path.name} filters push and pull_request differently: '
             f'{push_filter!r} != {pull_request_filter!r}')
     assert checked, 'no workflow declares both triggers; has one been renamed?'
+
+
+def test_contribution_gates_have_unfiltered_push_triggers(tmp):
+    """The six contribution gates run on every push to main.
+
+    This test owns the release-safety direction: release.yml finds these runs
+    by the shared commit SHA, so a Markdown-only push must not be filtered.
+    """
+    del tmp
+    gate_names = (
+        'tests.yml', 'lint.yml', 'types.yml', 'eslint.yml', 'audit.yml',
+        'codeql.yml',
+    )
+    workflows = ROOT / '.github' / 'workflows'
+    for name in gate_names:
+        path = workflows / name
+        assert path.is_file(), f'named contribution gate is missing: {name}'
+        triggers = _workflow_triggers(
+            path.read_text(encoding='utf-8'), name)
+        assert 'push' in triggers, f'{name} has no push trigger'
+        assert not _workflow_path_filters(triggers['push']), (
+            f'{name} filters its push trigger: '
+            f'{_workflow_path_filters(triggers["push"])}')
 
 
 def test_the_speed_gate_throws_away_its_first_round(tmp):
