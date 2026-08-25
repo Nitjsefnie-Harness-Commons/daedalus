@@ -96,7 +96,7 @@ def test_path_filters_normalize_block_and_flow_sequences(tmp):
         "      - '**/*.md'",
     ]
     assert _workflow_path_filters(block) == {'paths-ignore': expected}
-    for item in ("'**/*.md'", '"**/*.md"', '**/*.md'):
+    for item in ("'**/*.md'", '"**/*.md"'):
         flow = [f'    paths-ignore: [{item}]']
         assert _workflow_path_filters(flow) == {'paths-ignore': expected}
 
@@ -238,6 +238,64 @@ def test_flow_items_that_were_not_parsed_are_refused(tmp):
             assert 'unsupported value' in str(failure), (value, failure)
         else:
             raise AssertionError(f'unparsed flow item accepted: {value}')
+
+
+def test_path_filters_refuse_tags_and_pin_their_yaml_values(tmp):
+    """A tag is refused rather than returned as part of the scalar."""
+    del tmp
+    yaml_push = {'paths-ignore': ['foo']}
+    yaml_pull_request = {'paths-ignore': ['!!str foo']}
+    assert yaml_push != yaml_pull_request
+    value = '[!!str foo]'
+    try:
+        _workflow_path_filters(
+            [f'    paths-ignore: {value}'], 'tagged-push.yml')
+    except AssertionError as failure:
+        assert 'tagged-push.yml' in str(failure), failure
+        assert value in str(failure), failure
+    else:
+        raise AssertionError('tagged-push.yml: YAML tag was accepted')
+    assert _workflow_path_filters(
+        ["    paths-ignore: ['!!str foo']"], 'tagged-pull-request.yml') == {
+            'paths-ignore': yaml_pull_request['paths-ignore']}
+
+
+def test_path_filters_refuse_anchors_and_aliases_and_pin_yaml_values(tmp):
+    """Anchor and alias syntax is refused in block path sequences."""
+    del tmp
+    yaml_anchor = {'paths-ignore': ['foo', 'foo']}
+    yaml_literal = {'paths-ignore': ['&named foo', '*named']}
+    assert yaml_anchor != yaml_literal
+    for filename, offending in (
+            ('anchored.yml', '&named foo'),
+            ('aliased.yml', '*named')):
+        try:
+            _workflow_path_filters([
+                '    paths-ignore:', f'      - {offending}'], filename)
+        except AssertionError as failure:
+            assert filename in str(failure), failure
+            assert offending in str(failure), failure
+        else:
+            raise AssertionError(f'{filename}: YAML property was accepted')
+    assert _workflow_path_filters([
+        '    paths-ignore:',
+        "      - '&named foo'",
+        "      - '*named'"], 'literal.yml') == {
+            'paths-ignore': yaml_literal['paths-ignore']}
+
+
+def test_path_filters_refuse_undecoded_block_quote_syntax(tmp):
+    """Unsupported quote escapes in block items are refused."""
+    del tmp
+    for value in ("'a''b'", '"a\\\\b"'):
+        try:
+            _workflow_path_filters([
+                '    paths-ignore:', f'      - {value}'], 'quoted.yml')
+        except AssertionError as failure:
+            assert 'quoted.yml' in str(failure), failure
+            assert repr(value) in str(failure), failure
+        else:
+            raise AssertionError(f'undecoded quote syntax accepted: {value}')
 
 
 def test_a_duplicate_option_key_in_one_event_is_refused(tmp):
