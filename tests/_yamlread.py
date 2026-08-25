@@ -33,7 +33,7 @@ def job_scalar(workflow, job, key):
     if jobs is None:
         return None
     jobs_indent, jobs_rest = _entry(lines[jobs])
-    if jobs_rest.strip():
+    if jobs_rest.strip(' '):
         raise YAMLReadError('jobs is not a mapping')
     body = _section(lines, jobs, jobs_indent)
     _require_mapping_body(lines, *body, jobs_indent, 'jobs')
@@ -43,7 +43,7 @@ def job_scalar(workflow, job, key):
     job_index = job_entry.index
     job_indent = job_entry.indent
     job_rest = job_entry.rest
-    if job_rest.strip():
+    if job_rest.strip(' '):
         raise YAMLReadError(f'job {job!r} is not a mapping')
     job_body = _section(lines, job_index, job_indent)
     _require_mapping_body(lines, *job_body, job_indent, f'job {job!r}')
@@ -57,7 +57,7 @@ def step_scalar(workflow, job, step, key):
     if jobs is None:
         return None
     jobs_indent, jobs_rest = _entry(lines[jobs])
-    if jobs_rest.strip():
+    if jobs_rest.strip(' '):
         raise YAMLReadError('jobs is not a mapping')
     jobs_body = _section(lines, jobs, jobs_indent)
     _require_mapping_body(lines, *jobs_body, jobs_indent, 'jobs')
@@ -67,7 +67,7 @@ def step_scalar(workflow, job, step, key):
     job_index = job_entry.index
     job_indent = job_entry.indent
     job_rest = job_entry.rest
-    if job_rest.strip():
+    if job_rest.strip(' '):
         raise YAMLReadError(f'job {job!r} is not a mapping')
     job_body = _section(lines, job_index, job_indent)
     _require_mapping_body(lines, *job_body, job_indent, f'job {job!r}')
@@ -77,7 +77,7 @@ def step_scalar(workflow, job, step, key):
     steps_index = steps_entry.index
     steps_indent = steps_entry.indent
     steps_rest = steps_entry.rest
-    if steps_rest.strip():
+    if steps_rest.strip(' '):
         raise YAMLReadError(f'job {job!r} steps are not a sequence')
     steps_body = _section(lines, steps_index, steps_indent)
     _require_sequence_body(lines, *steps_body, steps_indent,
@@ -108,8 +108,8 @@ def _entry(line):
     indent = len(text) - len(text.lstrip(' '))
     body = text[indent:]
     name, colon, rest = body.partition(':')
-    if (not colon or not name or name != name.strip()
-            or rest and not rest[0].isspace()):
+    if (not colon or not name or name != name.strip(' ')
+            or rest and rest[0] != ' '):
         raise YAMLReadError(f'unsupported YAML mapping line: {text!r}')
     return indent, rest
 
@@ -117,13 +117,13 @@ def _entry(line):
 def _meaningful(line):
     """Whether a line contributes YAML structure rather than whitespace."""
     text, _ended = line
-    return bool(text.strip()) and not text.lstrip().startswith('#')
+    return bool(text.strip(' ')) and not text.lstrip(' ').startswith('#')
 
 
 def _comment(line):
     """Whether a line is a YAML comment."""
     text, _ended = line
-    return text.lstrip().startswith('#')
+    return text.lstrip(' ').startswith('#')
 
 
 def _indent(line):
@@ -266,7 +266,7 @@ def _sequence_entry(
                 continue
             if step_name is not None:
                 raise YAMLReadError('duplicate mapping key: name')
-            value = rest.strip()
+            value = rest.strip(' ')
             if value.startswith('"') or value.startswith("'"):
                 raise YAMLReadError('quoted step names are unsupported')
             if ' #' in value:
@@ -294,7 +294,7 @@ def _scalar_entry(lines, start, end, parent_indent, name):
     index = entry.index
     key_indent = entry.indent
     rest = entry.rest
-    value = rest.strip()
+    value = rest.strip(' ')
     if not value:
         raise YAMLReadError(f'{name} has no scalar value')
     if value[:1] not in ('>', '|'):
@@ -329,7 +329,7 @@ def _parse_header(value, name):
     """Parse a block scalar header and reject an incomplete shape."""
     header = value
     if ' #' in header:
-        header = header.split(' #', 1)[0].rstrip()
+        header = header.split(' #', 1)[0].rstrip(' ')
     match = _BLOCK_HEADER.fullmatch(header)
     if not match:
         raise YAMLReadError(f'{name} has an unsupported block scalar header')
@@ -351,7 +351,7 @@ def _decode_block(lines, parent_indent, style, chomp, explicit, name):
         content_indent = parent_indent + 1
         for line in lines:
             text, _ended = line
-            if text.strip():
+            if text.strip(' '):
                 content_indent = max(content_indent, _indent(line))
                 break
             content_indent = max(content_indent, len(text))
@@ -359,7 +359,7 @@ def _decode_block(lines, parent_indent, style, chomp, explicit, name):
     more_indented = []
     for line in lines:
         text, _ended = line
-        if not text.strip() and len(text) <= content_indent:
+        if not text.strip(' ') and len(text) <= content_indent:
             parts.append('')
             more_indented.append(False)
             continue
