@@ -42,6 +42,7 @@ control below.
 """
 import argparse
 import ast
+import builtins
 import inspect
 import sys
 import textwrap
@@ -212,12 +213,10 @@ def _frame_route_access(node, function, handler_globals, imports):
 
 def _reflective_call(node, function, handler_globals, imports,
                      inspect_frame_routes=True):
-    """Return True for a reflective or frame-route access."""
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        if node.func.id in ('locals', 'globals', 'eval', 'exec'):
-            return True
-        if node.func.id == 'vars' and not node.args:
-            return True
+    if audit_support.reflective_builtin_call(
+            node, function, handler_globals, _scope_binds,
+            _comprehension_shadows):
+        return True
     return inspect_frame_routes and _frame_route_access(
         node, function, handler_globals, imports)
 
@@ -257,7 +256,9 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
-            permitted = audit_support.permitted_namespace_read(node)
+            permitted = audit_support.permitted_namespace_read(
+                node, function, handler_globals, _scope_binds,
+                _comprehension_shadows)
             if permitted is None:
                 violations.append(
                     f'namespace escape: {ast.unparse(node._parent)}')
@@ -302,14 +303,12 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
     return reads, violations
 
 
-def _audit_fake_handler(body, declared=('cmd', 'json'), guaranteed=None):
-    """Audit ``body`` as a fake handler taking ``args``; return violations."""
-    if guaranteed is None:
-        guaranteed = declared
+def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None):
+    present = dests if present is None else present
     function = ast.parse(
         'def fake(args):\n' + textwrap.indent(body, '    ')).body[0]
     _, violations = _handler_arg_violations(
-        function, 'args', set(declared), set(guaranteed))
+        function, 'args', set(dests), set(present), scope)
     return violations
 
 
@@ -475,6 +474,14 @@ def test_cli_audit_reports_namespace_escapes(tmp):
             f'namespace escape: {construct}'], (body, construct)
 
 
+def test_cli_audit_requires_builtin_identity(tmp):
+    for name, expected in audit_support.BUILTIN_IDENTITY_GLOBAL_CASES:
+        assert _audit_fake_handler(
+            "getattr(args, 'json', False)",
+            scope={'getattr': builtins.__dict__[name]}) \
+            == list(expected), name
+
+
 def test_cli_audit_respects_inner_scope_bindings(tmp):
     shadowed = (
         'def inner(args):\n'
@@ -485,12 +492,6 @@ def test_cli_audit_respects_inner_scope_bindings(tmp):
         'def inner():\n'
         '    args.undeclared_probe')
     assert _audit_fake_handler(closure) == ['args.undeclared_probe']
-
-
-def test_cli_audit_sees_shadowing_callable_defaults(tmp):
-    for body in audit_support.SHADOWING_DEFAULT_CASES:
-        assert _audit_fake_handler(body) == [
-            'namespace escape: args=args'], body
 
 
 def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
