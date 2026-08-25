@@ -6,10 +6,12 @@ dotted context lookups, and the zero-argument status functions
 ``always()``, ``success()``, ``failure()``, and ``cancelled()``.  An optional
 outer ``${{ ... }}`` wrapper is accepted.  Comparisons admit ASCII-only
 strings, booleans, and null, and require both operands to have the same scalar
-type; strings compare case-insensitively.  Mappings and sequences are admitted
-only for truthiness.  Numeric literals and numeric context values are refused,
-as are non-ASCII comparison strings.  Source length, token count, and nesting
-depth are explicitly bounded.  Everything outside this domain raises
+type; strings compare case-insensitively.  ``&&`` and ``||`` select and return
+operands using Actions truthiness rather than coercing the result to a boolean.
+Mappings and sequences are admitted as truthy operands but refused in
+comparisons.  Numeric literals and numeric context values are refused, as are
+non-ASCII comparison strings.  Source length, token count, and nesting depth
+are explicitly bounded.  Everything outside this domain raises
 ``ExpressionError`` rather than approximating GitHub Actions semantics.
 """
 from collections.abc import Mapping
@@ -42,7 +44,7 @@ _STATUS_FUNCTIONS = frozenset(('always', 'success', 'failure', 'cancelled'))
 
 
 def evaluate(expression, context):
-    """Evaluate one condition to a boolean result in the admitted subset."""
+    """Evaluate one expression to its Actions-style admitted value."""
     if not isinstance(expression, str):
         raise ExpressionError('expression must be a string')
     if len(expression) > MAX_SOURCE_LENGTH:
@@ -55,7 +57,7 @@ def evaluate(expression, context):
     if not isinstance(context, Mapping):
         raise ExpressionError('context must be a mapping')
     parser = _Parser(_tokenize(source), context)
-    return _truthy(parser.parse())
+    return parser.parse()
 
 
 def _unwrap(expression):
