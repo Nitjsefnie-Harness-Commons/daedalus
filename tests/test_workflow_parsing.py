@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _workflows import (  # noqa: E402
+    _event_option_keys,
     _trigger_names,
     _workflow_path_filters,
     _workflow_triggers,
@@ -119,6 +120,168 @@ def test_path_filters_accept_empty_flow_sequences(tmp):
     assert _workflow_path_filters(['    paths-ignore: []']) == {
         'paths-ignore': [],
     }
+
+
+def test_an_inline_trigger_value_is_refused(tmp):
+    """A trigger cannot declare its options on the key's own line.
+
+    Only the lines indented under a trigger become its options, so
+    `push: {branches: [main], paths-ignore: ['**/*.md']}` read as a key
+    plus nothing records a push trigger with NO filters — issue #144's
+    defect passing the test written to catch it, on YAML actionlint and
+    zizmor both accept. The `on:` level already refuses an inline value.
+    """
+    del tmp
+    inline = ('name: x\n\non:\n'
+              "  push: {branches: [main], paths-ignore: ['**/*.md']}\n"
+              '  pull_request:\n\npermissions:\n  contents: read\n')
+    try:
+        _workflow_triggers(inline, 'inline.yml')
+    except AssertionError as failure:
+        assert "inline value for 'push' is not understood" in str(failure), (
+            failure)
+    else:
+        raise AssertionError('an inline trigger mapping was accepted')
+
+
+def test_a_block_sequence_at_the_trigger_indent_belongs_to_its_key(tmp):
+    """`schedule:` with its crons at indent 2 is one trigger, not two.
+
+    A `- cron: ...` line is a mapping line, so a reader taking any key at
+    the trigger indent registers a trigger literally named `- cron` and
+    hands the rest of the event to it; a second cron entry then raises
+    `duplicate trigger` and every policy test errors on a valid workflow.
+    """
+    del tmp
+    workflow = ('name: x\n\non:\n  push:\n    branches: [main]\n'
+                '  schedule:\n'
+                "  - cron: '12 4 * * *'\n"
+                "  - cron: '47 3 * * 3'\n"
+                '  pull_request:\n\npermissions:\n  contents: read\n')
+    triggers = _workflow_triggers(workflow, 'crons.yml')
+    assert sorted(triggers) == ['pull_request', 'push', 'schedule'], (
+        sorted(triggers))
+    assert len(triggers['schedule']) == 2, triggers['schedule']
+    assert _event_option_keys(triggers['push']) == ['branches'], (
+        triggers['push'])
+
+
+def test_path_filters_drop_a_trailing_comment_from_a_block_item(tmp):
+    """A comment after a path is not part of the path.
+
+    YAML calls `- LICENSE  # not code` and `- LICENSE` the same filter, so
+    keeping the comment reports an asymmetry the workflow does not have. A
+    `#` inside quotes, or one with no whitespace before it, is a value.
+    """
+    del tmp
+    assert _workflow_path_filters([
+        '    paths-ignore:',
+        '      - LICENSE  # not code',
+        "      - '**/*.md'   # docs only",
+        "      - 'has # hash'",
+        '      - keep#me',
+    ]) == {'paths-ignore': ['LICENSE', '**/*.md', 'has # hash', 'keep#me']}
+
+
+def test_path_filters_accept_a_comment_after_the_key(tmp):
+    """An explanation on the key's line is not the key's value.
+
+    `_mapping_key` reads a trigger key written this way, and this
+    repository's style puts such explanations exactly there; the option
+    level used to raise `unsupported value` on the comment instead.
+    """
+    del tmp
+    assert _workflow_path_filters([
+        '    paths-ignore:  # deny-list, not an allow-list',
+        '      - LICENSE',
+    ]) == {'paths-ignore': ['LICENSE']}
+
+
+def test_tab_indentation_is_refused(tmp):
+    """A tab has no indentation width, so it is refused, not measured.
+
+    Counting only spaces made a tab-indented line look unindented: the
+    event's option indent collapsed to 0 and every space-indented filter
+    was skipped, leaving `{}` — which both policy tests read as a trigger
+    declaring no filters at all.
+    """
+    del tmp
+    try:
+        _workflow_path_filters(['\tbranches: [main]',
+                                "    paths-ignore: ['**/*.md']"])
+    except AssertionError as failure:
+        assert 'tab in the indentation' in str(failure), failure
+    else:
+        raise AssertionError('tab indentation was measured as zero')
+    tabbed = ('name: x\n\non:\n  push:\n\tbranches: [main]\n'
+              '  pull_request:\n\npermissions:\n  contents: read\n')
+    try:
+        _workflow_triggers(tabbed, 'tabbed.yml')
+    except AssertionError as failure:
+        assert 'tab in the indentation' in str(failure), failure
+    else:
+        raise AssertionError('a tab-indented option line was accepted')
+
+
+def test_flow_items_that_were_not_parsed_are_refused(tmp):
+    """A flow mapping or a quote escape is refused, not handed back.
+
+    `[{a: b}, c]` and `[a: b]` are mappings to YAML; `["a\\", b]` is the
+    one path `a\\` and `['a''b']` is `a'b`. Returning any of them verbatim
+    is a value this reader never parsed, which is what it exists to avoid.
+    """
+    del tmp
+    for value in ('[{a: b}, c]', '[a: b]', '["a\\\\", b]', "['a''b']"):
+        try:
+            _workflow_path_filters([f'    paths-ignore: {value}'])
+        except AssertionError as failure:
+            assert 'unsupported value' in str(failure), (value, failure)
+        else:
+            raise AssertionError(f'unparsed flow item accepted: {value}')
+
+
+def test_a_duplicate_option_key_in_one_event_is_refused(tmp):
+    """Last-wins describes a document the workflow does not contain."""
+    del tmp
+    try:
+        _workflow_path_filters(['    paths-ignore: [a]',
+                                '    paths-ignore: [b]'])
+    except AssertionError as failure:
+        assert "duplicate event option 'paths-ignore'" in str(failure), failure
+    else:
+        raise AssertionError('a duplicate option key was accepted')
+
+
+def test_event_option_keys_are_the_events_own_keys(tmp):
+    """A key nested under an option is not an option of the event.
+
+    `test_no_workflow_gates_one_commit_twice` asks whether push carries a
+    `branches:` filter. Any line starting `branches:` would answer yes for
+    the block below, where the event itself declares no such filter.
+    """
+    del tmp
+    lines = [
+        '    paths:',
+        "      - '**'",
+        '    types:',
+        '      branches: [main]',
+    ]
+    assert _event_option_keys(lines) == ['paths', 'types']
+
+
+def test_path_filters_split_multi_item_flow_sequences(tmp):
+    """The comma scan is what replaced ast.literal_eval, so pin it here.
+
+    Every other flow case in this suite holds one item, which leaves the
+    splitting loop exercised only through the repository's own workflows.
+    """
+    del tmp
+    assert _workflow_path_filters(
+        ['    paths-ignore: [README.md, LICENSE, .gitignore]']) == {
+            'paths-ignore': ['README.md', 'LICENSE', '.gitignore']}
+    assert _workflow_path_filters(
+        ['''    paths: [src/**, 'docs/*.md', "a b", .c]''']) == {
+            'paths': ['src/**', 'docs/*.md', 'a b', '.c']}
 
 
 if __name__ == '__main__':
