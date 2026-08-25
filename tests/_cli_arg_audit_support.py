@@ -1,9 +1,19 @@
-"""Side-effect-free constant resolution for the CLI argument audit."""
+"""Side-effect-free constant resolution for the CLI argument audit.
+
+Frame routes are resolved through in-function imports, global names, module
+attributes, exact-class attributes (including ``staticmethod`` and
+``classmethod``), constant list/tuple/dict subscripts, constant-key ``.get``
+on an exact dict or module ``__dict__``, and constant-name ``getattr``/``vars``
+calls. Unresolved ``_getframe`` and ``currentframe`` spellings are refused
+outright. Every other route is outside this audit, including other container
+types, the iterator protocol, comprehension results, instance attribute
+reads, ``operator.attrgetter``, and names built at runtime.
+"""
 import ast
 import sys
-import types
 
-# Exact type checks keep resolution from invoking handler-defined descriptors.
+# Exact type checks and direct MRO dictionary lookup avoid handler-defined
+# descriptors while preserving staticmethod and classmethod routes.
 # pylint: disable=unidiomatic-typecheck
 
 
@@ -17,13 +27,17 @@ def _static_attribute(base, attribute, unresolved):
     if type(base) is type(sys) and attribute == '__dict__':
         return base.__dict__
     if type(base) is type:
-        try:
-            value = getattr(base, attribute)
-        except Exception:
-            return unresolved
-        if type(value) is types.MethodType:
-            return value.__func__
-        return value
+        for owner in base.__mro__:
+            namespace = owner.__dict__
+            if attribute not in namespace:
+                continue
+            value = namespace[attribute]
+            if type(value) is staticmethod:
+                return value.__func__
+            if type(value) is classmethod:
+                return value.__func__
+            return value
+        return unresolved
     if type(base) is type(sys):
         return base.__dict__.get(attribute, unresolved)
     return unresolved
@@ -35,6 +49,30 @@ def _static_subscript(base, key, unresolved):
             return base[key]
         except IndexError:
             return unresolved
+    if type(base) is tuple and isinstance(key, int):
+        try:
+            return base[key]
+        except IndexError:
+            return unresolved
+    if type(base) is dict:
+        return base.get(key, unresolved)
+    return unresolved
+
+
+def _static_get(node, function, handler_globals, imports, unresolved,
+                scope_binds, constant_string):
+    if (not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Attribute)
+            or node.func.attr != 'get'
+            or len(node.args) != 1
+            or node.keywords):
+        return unresolved
+    key = _constant_value(node.args[0], unresolved)
+    if key is unresolved:
+        return unresolved
+    base = resolve_frame_value(
+        node.func.value, function, handler_globals, imports, unresolved,
+        scope_binds, constant_string)
     if type(base) is dict:
         return base.get(key, unresolved)
     return unresolved
@@ -42,6 +80,11 @@ def _static_subscript(base, key, unresolved):
 
 def _builtin_call(node, function, handler_globals, imports, unresolved,
                   scope_binds, constant_string):
+    static_get = _static_get(
+        node, function, handler_globals, imports, unresolved,
+        scope_binds, constant_string)
+    if static_get is not unresolved:
+        return static_get
     if (not isinstance(node, ast.Call)
             or not isinstance(node.func, ast.Name)
             or node.keywords
