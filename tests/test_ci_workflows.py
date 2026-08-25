@@ -318,6 +318,30 @@ def test_no_workflow_gates_one_commit_twice(tmp):
     assert checked, 'no workflow declares both triggers; has one been renamed?'
 
 
+def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
+    """A fork's code waits for a review; a branch pushed here does not.
+
+    The speed job is the only one that checks out a pull request's own head
+    and runs it. Everything else about the job is containment applied after
+    that decision — a read-only token, no secrets, `pull_request` rather than
+    `pull_request_target`. The environment is what decides whose code runs at
+    all, so it is pinned here: a fork routes to an environment that requires a
+    reviewer, and anything pushed to this repository routes to one that does
+    not.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
+        encoding='utf-8')
+    _, marker, after = workflow.partition('    environment:')
+    assert marker, 'the speed job declares no environment'
+    block, _, _ = after.partition('\n    timeout-minutes:')
+    assert 'head.repo.full_name != github.repository' in block, block
+    # The fork name must be the one selected when that comparison holds.
+    fork = block.index("'fork-benchmark'")
+    trusted = block.index("'benchmark'")
+    assert fork < trusted, block
+
+
 def test_the_speed_gate_throws_away_its_first_round(tmp):
     """The first suite a job runs is not one of the measured ones.
 
