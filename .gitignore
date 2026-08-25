@@ -165,6 +165,7 @@
 !/tests/_repo.py
 !/tests/_segments.py
 !/tests/_util.py
+!/tests/_yamlread.py
 !/tests/test_bridge_credentials.py
 !/tests/test_bridge_requests.py
 !/tests/test_bridge_results.py

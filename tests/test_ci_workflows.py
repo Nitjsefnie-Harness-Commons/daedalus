@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _yamlread import job_scalar  # noqa: E402
 
 
 _GH_STUB = r"""#!/usr/bin/env python3
@@ -319,27 +320,56 @@ def test_no_workflow_gates_one_commit_twice(tmp):
 
 
 def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
-    """A fork's code waits for a review; a branch pushed here does not.
+    """The speed job's environment is exactly this routing expression.
 
     The speed job is the only one that checks out a pull request's own head
     and runs it. Everything else about the job is containment applied after
     that decision — a read-only token, no secrets, `pull_request` rather than
-    `pull_request_target`. The environment is what decides whose code runs at
-    all, so it is pinned here: a fork routes to an environment that requires a
-    reviewer, and anything pushed to this repository routes to one that does
-    not.
+    `pull_request_target` — so the environment is what decides whose code
+    runs at all, and it is pinned whole: any edit to the event guard, to the
+    repository comparison, to which name each branch selects, or to the
+    scalar's chomping fails this one equality.
+
+    What is pinned is the expression the workflow carries. Whether
+    `fork-benchmark` actually requires a reviewer is repository
+    configuration — an environment's protection rules, which GitHub recreates
+    empty if the environment is deleted — and no test in this repository can
+    see it.
     """
     del tmp
+    expected = (
+        "${{ github.event_name == 'pull_request'"
+        ' && github.event.pull_request.head.repo.full_name'
+        " != github.repository"
+        " && 'fork-benchmark' || 'benchmark' }}")
     workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
         encoding='utf-8')
-    _, marker, after = workflow.partition('    environment:')
-    assert marker, 'the speed job declares no environment'
-    block, _, _ = after.partition('\n    timeout-minutes:')
-    assert 'head.repo.full_name != github.repository' in block, block
-    # The fork name must be the one selected when that comparison holds.
-    fork = block.index("'fork-benchmark'")
-    trusted = block.index("'benchmark'")
-    assert fork < trusted, block
+    actual = job_scalar(workflow, 'speed', 'environment')
+    # Whitespace inside the expression collapses, so how the scalar is
+    # wrapped is free; a trailing newline collapses to a space rather than
+    # vanishing, so `>` in place of `>-` fails here instead of shipping a
+    # newline in an environment name.
+    assert actual is not None and re.sub(r'\s+', ' ', actual) == expected, (
+        f'speed.yml routes the speed job by {actual!r}, '
+        f'not by {expected!r}')
+
+
+def test_a_decoy_job_cannot_supply_the_speed_environment(tmp):
+    """The environment above answers for `speed`, not for whoever is first.
+
+    Read as raw text this was `workflow.partition('    environment:')`, which
+    matches the first four-space-indented `environment:` anywhere in the
+    file — so hanging the key on a job declared above `speed` and stripping
+    it off `speed` left the gate green with forks running unreviewed.
+    """
+    del tmp
+    workflow = ('jobs:\n'
+                '  decoy:\n'
+                '    environment: benchmark\n'
+                '  speed:\n'
+                '    runs-on: ubuntu-latest\n')
+    assert job_scalar(workflow, 'decoy', 'environment') == 'benchmark'
+    assert job_scalar(workflow, 'speed', 'environment') is None
 
 
 def test_the_speed_gate_throws_away_its_first_round(tmp):
