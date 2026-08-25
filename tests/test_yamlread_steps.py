@@ -56,6 +56,22 @@ def test_step_scalar_reads_sequence_item_mapping_field(tmp):
     assert value == 'first && second', value
 
 
+def test_equivalent_quoted_step_keys_are_duplicates(tmp):
+    """Quoted and plain spellings cannot define one field twice."""
+    del tmp
+    source = (
+        "jobs:\n sample:\n  steps:\n"
+        "   - name: target\n"
+        "     if: z\n"
+        "     'if': false\n")
+    try:
+        step_scalar(source, 'sample', 'target', 'if')
+    except YAMLReadError as error:
+        assert 'duplicate mapping key: if' in str(error), str(error)
+        return
+    raise AssertionError('equivalent duplicate if keys were accepted')
+
+
 def test_step_name_inline_comment_is_refused(tmp):
     """A name comment cannot silently turn a present step into absence."""
     del tmp
