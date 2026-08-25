@@ -14,7 +14,8 @@ from _repo import ROOT  # noqa: E402
 from _ghexpr import evaluate  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _yamlread import (  # noqa: E402
-    YAMLReadError, _indent, job_mapping, job_scalar, step_scalar,
+    YAMLReadError, _indent, job_mapping, job_scalar,
+    step_scalar, step_scalars,
 )
 
 
@@ -653,14 +654,10 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
     permissions = job_mapping(
         tests_workflow, 'diff-coverage', 'permissions')
     assert permissions == {'contents': 'read'}, permissions
-    # Only the YAML decides what runs. The file's own prose explains that
-    # it checks nothing out, so naming the action in a comment is not a
-    # checkout step and must not read as one.
-    yaml_only = '\n'.join(
-        line for line in comment_workflow.splitlines()
-        if not line.lstrip().startswith('#'))
-    assert 'actions/checkout' not in yaml_only, (
-        f'the commenting workflow checks something out:\n{yaml_only}')
+    uses = step_scalars(comment_workflow, 'comment', 'uses')
+    assert uses is not None, 'comment steps were not decoded'
+    assert all(value.split('@', 1)[0].casefold() != 'actions/checkout'
+               for value in uses), uses
     needs = aggregate.partition('needs:')[2].partition('runs-on:')[0]
     assert 'diff-coverage' not in needs, needs
     triggers = _workflow_triggers(comment_workflow)
