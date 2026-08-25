@@ -169,6 +169,7 @@
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py
 !/tests/_evalpages.py
+!/tests/_ghexpr.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_overlap.py
@@ -201,6 +202,7 @@
 !/tests/test_extension_boundary.py
 !/tests/test_extension_policy.py
 !/tests/test_file_sizes.py
+!/tests/test_ghexpr.py
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
