@@ -223,6 +223,21 @@ def test_checkout_reader_keeps_tabs_after_block_scalar_indent(tmp):
     assert failures == [], failures
 
 
+def test_checkout_reader_folds_plain_scalar_blank_line_to_newline(tmp):
+    """A physical blank line in a plain scalar folds to a newline."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: first\n'
+        '\n'
+        '            second\n')
+    assert _wfcheckout.checkout_refs(workflow) == [('build', 'first\nsecond')]
+
+
 def test_checkout_reader_skips_unwalked_flow_values(tmp):
     """Flow syntax outside a checkout path is not inspected."""
     del tmp
