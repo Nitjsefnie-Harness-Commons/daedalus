@@ -203,7 +203,8 @@ def test_checkout_reader_returns_structured_checkout_refs(tmp):
         '    steps:\n'
         '      - uses: actions/checkout@v4\n'
         '        with:\n'
-        '          ref: ${{ github.sha }}\n'
+        '          ref: \u00a0${{ github.sha }}\u00a0\n'
+        '            \u00a0\n'
         '  test:\n'
         '    steps:\n'
         '      - uses: actions/checkout@v4\n'
@@ -213,7 +214,7 @@ def test_checkout_reader_returns_structured_checkout_refs(tmp):
         '           with:\n'
         '             ref: ${{ steps.baseline.outputs.ref }}\n')
     assert _wfcheckout.checkout_refs(workflow) == [
-        ('build', '${{ github.sha }}'),
+        ('build', '\u00a0${{ github.sha }}\u00a0 \u00a0'),
         ('aligned', '${{ steps.baseline.outputs.ref }}')]
 
 
@@ -406,6 +407,9 @@ def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
          '      - uses: actions/checkout@v4\n'
          '        with:\n'
          '          ref: !str point\n', 'explicit tag'),
+        ('jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n'
+         '        with:\n          ref:\u00a0hidden\n',
+         'mapping entry without a colon'),
         ('jobs:\n  build:\n    steps:\n'
          '      - ? uses\n'
          '        : actions/checkout@v4\n', 'explicit key'),
@@ -607,6 +611,8 @@ def test_checkout_pin_checks_all_contexts_and_identifier_segments(tmp):
         '${{ inputs.base_ref }}',
         '${{ matrix.base_ref }}',
         '${{ vars.base_ref }}',
+        ('${{ steps.baseline.outputs.point }}\u00a0'
+         '# ${{ steps.baseline.outputs.ref }}'),
     )
     for expression in expressions:
         workflow = (
