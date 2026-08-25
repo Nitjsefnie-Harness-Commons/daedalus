@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _ghexpr import evaluate  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 
 
@@ -218,6 +219,57 @@ def _step_condition(workflow, step_name):
     return match.group(0)
 
 
+def _condition_expression(block, indent=''):
+    """Turn one YAML `if` scalar into the expression it evaluates."""
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        marker = indent + 'if:'
+        if not line.startswith(marker):
+            continue
+        value = line[len(marker):].strip()
+        parts = [] if value in ('>-', '>', '|-', '|') else [value]
+        index += 1
+        while index < len(lines):
+            continuation = lines[index]
+            if continuation and continuation.startswith(indent + ' '):
+                parts.append(continuation.strip())
+                index += 1
+                continue
+            break
+        expression = ' '.join(part for part in parts if part)
+        assert expression, block
+        return expression
+    raise AssertionError(f'missing condition with indent {indent!r}')
+
+
+def _job_condition(workflow, job):
+    """Extract one job's condition without interpreting neighboring YAML."""
+    jobs = workflow.partition('\njobs:\n')[2]
+    marker = f'  {job}:\n'
+    _, found, section = jobs.partition(marker)
+    assert found, jobs
+    boundary = re.search(r'\n  [A-Za-z0-9_-]+:\n', section)
+    if boundary:
+        section = section[:boundary.start()]
+    return _condition_expression(section, '    ')
+
+
+def _step_context(present, stale):
+    """Build the explicit values used by the commenter step conditions."""
+    return {
+        'steps': {
+            'artifact': {'outputs': {'present': present}},
+            'pr': {'outputs': {'stale': stale}},
+        },
+        'status': {
+            'always': True,
+            'success': True,
+            'failure': False,
+            'cancelled': False,
+        },
+    }
+
+
 def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
     """Both producers use the event SHA and the diff has HEAD^1 available."""
     del tmp
@@ -239,9 +291,10 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
     for checkout in checkouts:
         assert re.search(r'^\s+ref: \$\{\{ github\.sha \}\}\s*$',
                          checkout, re.MULTILINE), checkout
-    body = checkouts[0]
-    depth = re.search(r'^\s+fetch-depth: (\d+)\s*$', body, re.MULTILINE)
-    assert depth and (depth.group(1) == '0' or int(depth.group(1)) >= 2), body
+        depth = re.search(r'^\s+fetch-depth: (\d+)\s*$',
+                          checkout, re.MULTILINE)
+        assert depth and (depth.group(1) == '0' or int(depth.group(1)) >= 2), \
+            checkout
     assert 'git diff --unified=0 HEAD^1 HEAD' in diff, diff
     assert 'github.event.pull_request.base.sha' not in diff, diff
 
@@ -351,9 +404,21 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
         state[0]['body'], state
     assert '**100.0%**' not in state[0]['body'], state
 
-    jobs = _workflow().partition('\njobs:\n')[2]
-    assert "github.event.workflow_run.event == 'pull_request'" in jobs, jobs
-    assert 'github.event.workflow_run.conclusion' not in jobs, jobs
+    condition = _job_condition(_workflow(), 'comment')
+    for conclusion in ('cancelled', 'success'):
+        context = {
+            'github': {'event': {'workflow_run': {
+                'event': 'pull_request',
+                'conclusion': conclusion,
+            }}},
+        }
+        assert evaluate(condition, context) is True, condition
+    non_pull_request = {
+        'github': {'event': {'workflow_run': {
+            'event': 'push', 'conclusion': 'success',
+        }}},
+    }
+    assert evaluate(condition, non_pull_request) is False, condition
 
 
 def test_a_rerun_of_a_cannot_overwrite_newer_b(tmp):
@@ -378,9 +443,6 @@ def test_commenter_runs_every_completed_run_and_orders_stale_gate(
     """Every completed run can mark stale, while older heads never post."""
     del tmp
     workflow = _workflow()
-    jobs = workflow.partition('\njobs:\n')[2]
-    assert "github.event.workflow_run.event == 'pull_request'" in jobs, jobs
-    assert 'github.event.workflow_run.conclusion' not in jobs, jobs
     resolve = workflow.index('- name: Resolve the target pull request')
     download = workflow.index('- name: Download the comment artifact')
     post = workflow.index('- name: Post or update the pull request comment')
@@ -391,19 +453,25 @@ def test_commenter_runs_every_completed_run_and_orders_stale_gate(
         workflow, 'Resolve the target pull request from the event')
     assert 'HEAD_SHA' in resolve_script
     assert 'current_sha' in resolve_script
-    for step_name in ('Mark missing patch coverage',
-                      'Download the comment artifact',
+    current = _step_context('true', 'false')
+    stale = _step_context('true', 'true')
+    for step_name in ('Download the comment artifact',
                       'Post or update the pull request comment'):
         condition = _step_condition(workflow, step_name)
-        assert "steps.pr.outputs.stale != 'true'" in condition, condition
+        expression = _condition_expression(condition, '        ')
+        assert evaluate(expression, current) is True, expression
+        assert evaluate(expression, stale) is False, expression
 
 
 def test_missing_marker_step_owns_its_artifact_and_stale_conditions(tmp):
     """Invalidation is enabled only for a current run missing its artifact."""
     del tmp
-    condition = _step_condition(_workflow(), 'Mark missing patch coverage')
-    assert "steps.artifact.outputs.present != 'true'" in condition, condition
-    assert "steps.pr.outputs.stale != 'true'" in condition, condition
+    expression = _condition_expression(
+        _step_condition(_workflow(), 'Mark missing patch coverage'),
+        '        ')
+    assert evaluate(expression, _step_context('false', 'false')) is True
+    assert evaluate(expression, _step_context('true', 'false')) is False
+    assert evaluate(expression, _step_context('false', 'true')) is False
 
 
 def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
