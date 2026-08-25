@@ -52,12 +52,11 @@ concurrency:
 
 jobs:
   comment:
-    # Every completed, non-cancelled run gets a chance to replace an old
-    # percentage with a plainly labelled "not measured" marker. Otherwise a
-    # red run leaves the previous commit's number looking current.
+    # Every completed run gets a chance to replace an old percentage with a
+    # plainly labelled "not measured" marker. Otherwise a red or cancelled
+    # run leaves the previous commit's number looking current.
     if: >-
       github.event.workflow_run.event == 'pull_request'
-      && github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
