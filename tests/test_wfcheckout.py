@@ -207,8 +207,9 @@ def test_checkout_reader_keeps_tabs_after_block_scalar_indent(tmp):
             '        with:\n'
             '          ref: |-\n'
             '            first\n'
+            '            \t\n'
             '            \tsecond\n',
-            [('build', 'first\n\tsecond')],
+            [('build', 'first\n\t\n\tsecond')],
         ),
     )
     failures = []

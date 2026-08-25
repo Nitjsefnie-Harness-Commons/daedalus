@@ -16,7 +16,7 @@ class _ScalarReaderMixin:
     """Decode scalar values for the structural workflow reader."""
 
     def _scalar_blank(self, index):
-        return not self.lines[index].strip(' \t')
+        return not self.lines[index].strip(' ')
 
     def _scalar_indent(self, index):
         line = self.lines[index]
@@ -281,7 +281,7 @@ class _ScalarReaderMixin:
         parts = []
         for line in range(body_start, body_end):
             raw = self.lines[line]
-            if not raw.strip(' \t'):
+            if self._scalar_blank(line):
                 parts.append('')
                 continue
             parts.append(raw[content_indent:])
