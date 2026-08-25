@@ -235,9 +235,9 @@ jobs:
         # The buffer absorbs measurement variation — which suites reach a
         # subprocess before it exits, and which optional dependency set the
         # runner resolved — not a licence to regress into it.
-        # measured: 84.9
-        # floor: 83.4
-        run: python -m coverage report --fail-under=83.4 --precision=1
+        # measured: 85.1
+        # floor: 83.6
+        run: python -m coverage report --fail-under=83.6 --precision=1
 
       - name: Work out the raise this run justifies
         # The floor was raised by hand, so the measurement recorded beside it
