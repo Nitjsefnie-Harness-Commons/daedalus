@@ -643,7 +643,7 @@ def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
     call = function.body[0].value
     value = _frame_value(
         call, function, {'FrameRoutes': FrameRoutes}, {})
-    assert type(value) is type(FrameRoutes.__dict__)
+    assert isinstance(value, type(FrameRoutes.__dict__))
     assert value['active'] is sys._getframe
 
 
