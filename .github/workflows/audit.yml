@@ -42,9 +42,8 @@ on:
     # this a second time against the same SHA, and a branch with no pull
     # request open is not a tree anyone is reviewing.
     branches: [main]
-    # The filter was dropped rather than mirrored: release.yml counts runs
-    # recorded against a release SHA and treats zero as a failure, so a
-    # documentation-only tag must still run this gate.
+    # The gate runs on the push to main, and release.yml later finds that run
+    # by the shared commit SHA; a documentation-only commit must still run it.
   pull_request:
   schedule:
     # Off the hour, and not 03:47, which is codeql's slot.
