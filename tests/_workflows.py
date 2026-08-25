@@ -206,6 +206,12 @@ def _scalar(value, filename='workflow', unsupported=None):
     return value
 
 
+def _flow_item_has_mapping_syntax(item):
+    """Whether an unquoted flow item contains mapping delimiters."""
+    return (item[-1] in "'\"[]{}:" or any(char in item for char in '[]{}')
+            or ': ' in item)
+
+
 def _flow_sequence(value, key, filename='workflow'):
     """Parse the bounded flow-sequence subset used by these workflows."""
     value = value.strip()
@@ -248,8 +254,7 @@ def _flow_sequence(value, key, filename='workflow'):
             raise AssertionError(unsupported)
         # `[{a: b}, c]` and `[a: b]` are mappings, not scalars — YAML makes
         # a colon-plus-space a key even without the braces.
-        if (item[-1] in "'\"[]{}:" or '[' in item or '{' in item
-                or ']' in item or '}' in item or ': ' in item):
+        if _flow_item_has_mapping_syntax(item):
             raise AssertionError(unsupported)
         result.append(_scalar(item, filename, unsupported))
     return result
