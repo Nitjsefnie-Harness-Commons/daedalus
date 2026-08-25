@@ -281,6 +281,8 @@ def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
     cases = (
         ('name: no jobs\n', 'top-level jobs mapping'),
         ('jobs:\n', 'jobs value is not a block mapping'),
+        ('jobs:\nname: workflow\n',
+         'jobs value is not a block mapping'),
         ('jobs:\n  build:\n', 'job value is not a block mapping'),
         ('jobs:\n  build:\n    steps:\n',
          'steps value is not a block sequence'),
