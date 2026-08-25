@@ -191,7 +191,7 @@ def test_timing_a_tree_that_yields_nothing_is_a_failure(tmp):
 
 
 def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
-    """No checkout's `ref:` may come from a step output named like a head.
+    """No checkout's `ref:` may come from a name that reads like a head.
 
     CodeQL's untrusted-checkout query (code-scanning alert #82) reads an
     actions/checkout step as pulling a pull request's untrusted head when
@@ -201,22 +201,39 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     the output carrying it is named `point`; naming it `ref` was what drew
     the alert. This pins the name class, so a rename back goes red here
     rather than in the next default-branch analysis.
+
+    The heuristic tests the field name of ANY reference expression that
+    is not a `github.*` one, so the pin mirrors it over every workflow in
+    `.github/workflows/`: `(steps|needs|jobs).<id>.outputs.<name>` and
+    `env.<name>` in a checkout's `ref:` are all checked. The query's
+    regexpMatch is case-sensitive, so `BASE_REF` would evade the analyser
+    itself; the check still tests each name as written and its lowercase
+    form both, because a spelling that reads as `ref` to a human stays
+    one lowercase rename away from the alert.
     """
-    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
-        encoding='utf-8')
     forbidden = ('head', 'branch', 'ref', 'sha', 'commit')
+    reference = re.compile(
+        r'(?m)^\s*ref:\s*\$\{\{\s*'
+        r'(?:'
+        r'(?:steps|needs|jobs)\.[\w-]+\.outputs\.([\w-]+)'
+        r'|env\.([A-Za-z0-9_]+)'
+        r')\s*}}')
     offenders = []
-    for block in re.split(r'(?m)^      - ', workflow):
-        if 'uses: actions/checkout@' not in block:
-            continue
-        for match in re.finditer(
-                r'(?m)^\s*ref:\s*\$\{\{\s*steps\.[\w-]+\.outputs\.([\w-]+)'
-                r'\s*}}', block):
-            name = match.group(1)
-            if any(word in name for word in forbidden):
-                offenders.append(name)
+    workflows = sorted((ROOT / '.github' / 'workflows').glob('*.yml'))
+    workflows += sorted((ROOT / '.github' / 'workflows').glob('*.yaml'))
+    for path in workflows:
+        text = path.read_text(encoding='utf-8')
+        for block in re.split(r'(?m)^      - ', text):
+            if 'uses: actions/checkout@' not in block:
+                continue
+            for match in reference.finditer(block):
+                name = match.group(1) or match.group(2)
+                if any(word in spelling
+                       for spelling in (name, name.lower())
+                       for word in forbidden):
+                    offenders.append(f'{path.name}: {name}')
     assert not offenders, (
-        'a checkout takes its ref from a step output named '
+        'a checkout takes its ref from a non-github expression named '
         f'{offenders}, which an analyser reads as an untrusted head')
 
 
