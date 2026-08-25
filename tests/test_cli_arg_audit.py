@@ -50,21 +50,6 @@ import _cli_arg_audit_support as audit_support  # noqa: E402
 sys.path.insert(0, str(_util.ROOT))
 
 
-def _namespace_dests(parser):
-    """Return destinations that argparse puts on a parsed namespace."""
-    # Help and version actions print and exit instead of storing, so their
-    # destinations never land on the namespace. A default of SUPPRESS omits
-    # the destination when the option is absent, so a handler cannot rely on
-    # that attribute existing.
-    never_store = (argparse._HelpAction, argparse._VersionAction)
-    action_dests = {
-        action.dest for action in parser._actions
-        if action.dest != argparse.SUPPRESS
-        and action.default is not argparse.SUPPRESS
-        and not isinstance(action, never_store)}
-    return action_dests | set(parser._defaults)
-
-
 def _binding_names(target):
     """Return the names a binding target assigns."""
     if isinstance(target, ast.Name):
@@ -232,60 +217,7 @@ def _reflective_call(node, function, handler_globals, imports,
         node, function, handler_globals, imports)
 
 
-def _constant_mapping_read(node):
-    """Return (attribute, node) for a constant exact-dict read."""
-    parent = node._parent
-    if (isinstance(parent, ast.Subscript) and parent.value is node
-            and isinstance(parent.ctx, ast.Load)):
-        attribute = audit_support.constant_string(parent.slice)
-        if attribute is not None:
-            return attribute, parent
-    if (not isinstance(parent, ast.Attribute)
-            or parent.value is not node
-            or parent.attr != 'get'):
-        return None
-    call = parent._parent
-    if (not isinstance(call, ast.Call)
-            or call.func is not parent
-            or len(call.args) not in (1, 2)
-            or call.keywords
-            or any(isinstance(argument, ast.Starred)
-                   for argument in call.args)):
-        return None
-    attribute = audit_support.constant_string(call.args[0])
-    if attribute is not None:
-        return attribute, call
-    return None
-
-
-def _permitted_namespace_read(name):
-    """Resolve a permitted namespace read, or None for an escape."""
-    parent = name._parent
-    if isinstance(parent, ast.Attribute) and parent.value is name:
-        if not isinstance(parent.ctx, ast.Load):
-            return None
-        if parent.attr != '__dict__':
-            return parent.attr, parent
-        return _constant_mapping_read(parent)
-    if not (isinstance(parent, ast.Call)
-            and isinstance(parent.func, ast.Name)
-            and parent.args and parent.args[0] is name
-            and not parent.keywords):
-        return None
-    if parent.func.id == 'vars' and len(parent.args) == 1:
-        return _constant_mapping_read(parent)
-    arities = {'getattr': (2, 3), 'hasattr': (2,)}.get(parent.func.id)
-    if not (arities and len(parent.args) in arities
-            and not any(isinstance(argument, ast.Starred)
-                        for argument in parent.args)):
-        return None
-    attribute = audit_support.constant_string(parent.args[1])
-    if attribute is None:
-        return None
-    return attribute, parent
-
-
-def _handler_arg_violations(function, args_name, allowed,
+def _handler_arg_violations(function, args_name, declared, guaranteed,
                             handler_globals=None):
     """Return (reads, violations) for one handler's namespace use."""
     for node in ast.walk(function):
@@ -295,6 +227,7 @@ def _handler_arg_violations(function, args_name, allowed,
         handler_globals = globals()
     frame_imports = _frame_imports(function)
     reads = {}
+    read_requirements = {}
     violations = []
 
     def check(node, inspect_frame_routes=True):
@@ -319,14 +252,15 @@ def _handler_arg_violations(function, args_name, allowed,
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
-            permitted = _permitted_namespace_read(node)
+            permitted = audit_support.permitted_namespace_read(node)
             if permitted is None:
                 violations.append(
                     f'namespace escape: {ast.unparse(node._parent)}')
             else:
-                attribute, construct = permitted
-                reads.setdefault(attribute, set()).add(
-                    ast.unparse(construct))
+                attribute, construct, needs_presence = permitted
+                rendered = ast.unparse(construct)
+                reads.setdefault(attribute, set()).add(rendered)
+                read_requirements[(attribute, rendered)] = needs_presence
         visit(node, inspect_frame_routes)
 
     def visit(node, inspect_frame_routes=True):
@@ -355,17 +289,22 @@ def _handler_arg_violations(function, args_name, allowed,
             check(returns, inspect_frame_routes)
 
     visit(function)
-    for attribute, constructs in sorted(reads.items()):
+    for (attribute, construct), needs_presence in sorted(
+            read_requirements.items()):
+        allowed = guaranteed if needs_presence else declared
         if attribute not in allowed:
-            violations.extend(sorted(constructs))
+            violations.append(construct)
     return reads, violations
 
 
-def _audit_fake_handler(body, allowed=('cmd', 'json')):
+def _audit_fake_handler(body, declared=('cmd', 'json'), guaranteed=None):
     """Audit ``body`` as a fake handler taking ``args``; return violations."""
+    if guaranteed is None:
+        guaranteed = declared
     function = ast.parse(
         'def fake(args):\n' + textwrap.indent(body, '    ')).body[0]
-    _, violations = _handler_arg_violations(function, 'args', set(allowed))
+    _, violations = _handler_arg_violations(
+        function, 'args', set(declared), set(guaranteed))
     return violations
 
 
@@ -389,16 +328,20 @@ def _mutated_cli_tabs(package_name, module_prelude, body):
     return module
 
 
-def _audit_real_tabs_handler(handler_module):
+def _audit_real_tabs_handler(handler_module, parser=None):
     """Audit an in-memory module's actual dispatched ``do_tabs`` handler."""
-    from daedalus_cli.parser import build_parser
+    if parser is None:
+        from daedalus_cli.parser import build_parser
 
-    parser = build_parser()
+        parser = build_parser()
     subparsers = next(
         action for action in parser._actions
         if isinstance(action, argparse._SubParsersAction))
-    allowed = _namespace_dests(parser) | _namespace_dests(
+    declared, guaranteed = audit_support.namespace_dests(parser)
+    sub_declared, sub_guaranteed = audit_support.namespace_dests(
         subparsers.choices['tabs'])
+    declared |= sub_declared
+    guaranteed |= sub_guaranteed
     handler = handler_module.do_tabs
     tree = ast.parse(handler_module.__source__)
     function = next(
@@ -407,7 +350,7 @@ def _audit_real_tabs_handler(handler_module):
         and node.name == 'do_tabs')
     args_name = (function.args.posonlyargs + function.args.args)[0].arg
     _, violations = _handler_arg_violations(
-        function, args_name, allowed, handler.__globals__)
+        function, args_name, declared, guaranteed, handler.__globals__)
     return violations
 
 
@@ -438,9 +381,12 @@ def test_cli_audit_excludes_dest_suppress_action(tmp):
     subparsers = next(
         action for action in parser._actions
         if isinstance(action, argparse._SubParsersAction))
-    allowed = _namespace_dests(parser) | _namespace_dests(
+    declared, guaranteed = audit_support.namespace_dests(parser)
+    sub_declared, sub_guaranteed = audit_support.namespace_dests(
         subparsers.choices['tabs'])
-    violations = _audit_fake_handler('args.version', allowed)
+    violations = _audit_fake_handler(
+        'args.version', declared | sub_declared,
+        guaranteed | sub_guaranteed)
     assert violations == ['args.version'], violations
 
 
@@ -450,9 +396,54 @@ def test_cli_audit_excludes_default_suppress_action(tmp):
         '--conditional', default=argparse.SUPPRESS)
 
     assert vars(parser.parse_args([])) == {}
-    allowed = _namespace_dests(parser)
-    violations = _audit_fake_handler('args.conditional', allowed)
-    assert violations == ['args.conditional'], violations
+    declared, guaranteed = audit_support.namespace_dests(parser)
+    assert declared == {'conditional'}
+    assert guaranteed == set()
+    for read, _, needs_presence in \
+            audit_support.PERMITTED_NAMESPACE_READ_CASES:
+        read = read.replace('json', 'conditional')
+        expected = [read] if needs_presence else []
+        assert _audit_fake_handler(
+            read, declared, guaranteed) == expected, read
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument('--present', dest='shared', default=False)
+    shared.add_argument(
+        '--suppressed', dest='shared', default=argparse.SUPPRESS)
+    assert audit_support.namespace_dests(shared)[1] == {'shared'}
+
+
+def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
+    from daedalus_cli import cli
+
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest='cmd', required=True)
+    tabs = sub.add_parser('tabs')
+    tabs.add_argument('--json', action='store_true')
+    tabs.add_argument('--undeclared-probe', action='store_true',
+                      default=argparse.SUPPRESS)
+    handler_module = _mutated_cli_tabs(
+        'guarded_suppress_cli', 'GUARDED_READS = []',
+        "GUARDED_READS.append("
+        "getattr(args, 'undeclared_probe', None)); return")
+    original_handler = cli.DISPATCH['tabs']
+    original_build_parser = cli.build_parser
+    original_argv = sys.argv
+
+    def build_suppressed_parser():
+        return parser
+
+    try:
+        assert _audit_real_tabs_handler(handler_module, parser) == []
+        cli.DISPATCH['tabs'] = handler_module.do_tabs
+        cli.build_parser = build_suppressed_parser
+        sys.argv = ['daedalus', 'tabs']
+        cli.main()
+        assert handler_module.GUARDED_READS == [None]
+    finally:
+        cli.DISPATCH['tabs'] = original_handler
+        cli.build_parser = original_build_parser
+        sys.argv = original_argv
+        sys.modules.pop(handler_module.__dict__['__name__'], None)
 
 
 def test_cli_audit_includes_parser_set_defaults(tmp):
@@ -460,13 +451,15 @@ def test_cli_audit_includes_parser_set_defaults(tmp):
     parser.set_defaults(from_defaults=False)
 
     assert vars(parser.parse_args([])) == {'from_defaults': False}
-    allowed = _namespace_dests(parser)
-    violations = _audit_fake_handler('args.from_defaults', allowed)
+    declared, guaranteed = audit_support.namespace_dests(parser)
+    violations = _audit_fake_handler(
+        'args.from_defaults', declared, guaranteed)
     assert violations == [], violations
 
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
-    for declared, undeclared in audit_support.PERMITTED_NAMESPACE_READ_CASES:
+    for declared, undeclared, _ in \
+            audit_support.PERMITTED_NAMESPACE_READ_CASES:
         assert _audit_fake_handler(declared) == [], declared
         assert _audit_fake_handler(undeclared) == [undeclared], undeclared
 
@@ -637,7 +630,7 @@ def test_cli_handlers_read_only_declared_args(tmp):
     subparsers = next(
         action for action in parser._actions
         if isinstance(action, argparse._SubParsersAction))
-    global_dests = _namespace_dests(parser)
+    global_declared, global_guaranteed = audit_support.namespace_dests(parser)
     dispatch_only = sorted(set(DISPATCH) - set(subparsers.choices))
     parser_only = sorted(set(subparsers.choices) - set(DISPATCH))
     assert not dispatch_only and not parser_only, (
@@ -647,7 +640,9 @@ def test_cli_handlers_read_only_declared_args(tmp):
     handler_details = {}
     for name, handler in DISPATCH.items():
         subparser = subparsers.choices[name]
-        allowed = global_dests | _namespace_dests(subparser)
+        declared, guaranteed = audit_support.namespace_dests(subparser)
+        declared |= global_declared
+        guaranteed |= global_guaranteed
         tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
         function = next(
             node for node in ast.walk(tree)
@@ -655,9 +650,9 @@ def test_cli_handlers_read_only_declared_args(tmp):
         positional = function.args.posonlyargs + function.args.args
         args_name = positional[0].arg
         reads, handler_violations = _handler_arg_violations(
-            function, args_name, allowed, handler.__globals__)
+            function, args_name, declared, guaranteed, handler.__globals__)
         handler_details[name] = {'handler': handler.__qualname__,
-                                 'allowed': allowed, 'reads': reads}
+                                 'declared': declared, 'reads': reads}
         violations.extend(
             (name, construct, handler.__qualname__)
             for construct in handler_violations)
@@ -673,7 +668,7 @@ def test_cli_handlers_read_only_declared_args(tmp):
         if attribute not in detail['reads']:
             stale_reads.append(
                 f'{command}: {attribute} absent from handler source')
-        if attribute not in detail['allowed']:
+        if attribute not in detail['declared']:
             stale_reads.append(
                 f'{command}: {attribute} not declared by parser')
     assert not stale_reads, '\n'.join(stale_reads)
