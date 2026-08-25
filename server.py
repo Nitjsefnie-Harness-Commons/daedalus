@@ -1520,41 +1520,47 @@ class Handler(BaseHTTPRequestHandler):
             name = f.name
             if name.startswith('.') or not name.endswith('.json'):
                 continue  # skip .tmp in-flight writes
-            try:
-                age = time.time() - f.stat().st_mtime
-            except OSError:
-                continue  # vanished or became unavailable during the scan
-            if age > CMD_TTL:
-                # Already gone, or gone by the next sweep: an expired command
-                # is not delivered either way.
+            # Use logical names: path spellings can differ between realpath
+            # and directory enumeration, as `_delivery_lock_for` documents.
+            with command_queue.claimed(
+                    f'queue:{qdir.name}/{name}') as owned:
+                if not owned:
+                    continue  # another consumer covering this queue has it
+                try:
+                    age = time.time() - f.stat().st_mtime
+                except OSError:
+                    continue  # vanished or became unavailable during the scan
+                if age > CMD_TTL:
+                    # Already gone, or gone by the next sweep: an expired command
+                    # is not delivered either way.
+                    try: f.unlink()
+                    except OSError: pass  # expired either way
+                    print(f'[STREAM] TTL-DROP {_log_safe(qdir.name)}/{_log_safe(name)}', flush=True)
+                    continue
+                try:
+                    data = json.loads(f.read_text(encoding='utf-8'))
+                except (OSError, json.JSONDecodeError, ValueError):
+                    # A visible final name may still have an older non-atomic
+                    # writer. Leave it in place so that writer does not finish a
+                    # command into an unlinked inode; the TTL sweep bounds retries
+                    # for an entry that never becomes valid.
+                    continue
+                if not isinstance(data, dict):
+                    # Same: readable JSON that is not a command object.
+                    try: f.unlink()
+                    except OSError: pass  # the TTL sweep takes it
+                    continue
+                if chrome_tab is not None:
+                    data['chromeTab'] = chrome_tab
+                self._write_frame(data)  # BEFORE unlink
+                # The claim excludes other consumers until this write and
+                # unlink finish. A file that will not unlink is redelivered
+                # on the next tick and deduplicated by its `_did`.
                 try: f.unlink()
-                except OSError: pass  # expired either way
-                print(f'[STREAM] TTL-DROP {_log_safe(qdir.name)}/{_log_safe(name)}', flush=True)
-                continue
-            try:
-                data = json.loads(f.read_text(encoding='utf-8'))
-            except (OSError, json.JSONDecodeError, ValueError):
-                # A visible final name may still have an older non-atomic
-                # writer. Leave it in place so that writer does not finish a
-                # command into an unlinked inode; the TTL sweep bounds retries
-                # for an entry that never becomes valid.
-                continue
-            if not isinstance(data, dict):
-                # Same: readable JSON that is not a command object.
-                try: f.unlink()
-                except OSError: pass  # the TTL sweep takes it
-                continue
-            if chrome_tab is not None:
-                data['chromeTab'] = chrome_tab
-            self._write_frame(data)  # BEFORE unlink
-            # The frame is already on the wire. A file that will not unlink is
-            # redelivered on the next tick and deduplicated by the `_did` the
-            # frame carries, which is why delivery does not depend on this.
-            try: f.unlink()
-            except OSError: pass  # a redelivery is deduplicated by _did
-            _last_delivery_ts = time.time()
-            count += 1
-            print(f'[STREAM] DELIVERED q={_log_safe(qdir.name)} id={_log_safe(data.get("id", ""))} did={_log_safe(data.get("_did", ""))}', flush=True)
+                except OSError: pass  # a redelivery is deduplicated by _did
+                _last_delivery_ts = time.time()
+                count += 1
+                print(f'[STREAM] DELIVERED q={_log_safe(qdir.name)} id={_log_safe(data.get("id", ""))} did={_log_safe(data.get("_did", ""))}', flush=True)
         return count
 
     def _drain_legacy_file(self, path, chrome_tab):
@@ -1565,32 +1571,38 @@ class Handler(BaseHTTPRequestHandler):
         deleting it would discard the writer's eventual complete command.
         """
         global _last_delivery_ts
-        if not path.exists():
-            return 0
-        try:
-            data = json.loads(path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError, RecursionError, ValueError):
-            return 0
-        if not isinstance(data, dict):
-            return 0
-        try:
-            age = time.time() - path.stat().st_mtime
-        except OSError:
-            return 0
-        if age > CMD_TTL:
-            # Already gone, or gone by the next sweep.
+        # Use the logical filename: path spellings can differ between routes,
+        # as `_delivery_lock_for` documents for its logical target key.
+        with command_queue.claimed(f'legacy:{path.name}') as owned:
+            if not owned:
+                return 0
+            if not path.exists():
+                return 0
+            try:
+                data = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, json.JSONDecodeError, RecursionError, ValueError):
+                return 0
+            if not isinstance(data, dict):
+                return 0
+            try:
+                age = time.time() - path.stat().st_mtime
+            except OSError:
+                return 0
+            if age > CMD_TTL:
+                # Already gone, or gone by the next sweep.
+                try: path.unlink()
+                except OSError: pass  # expired either way
+                return 0
+            if chrome_tab is not None:
+                data['chromeTab'] = chrome_tab
+            self._write_frame(data)  # BEFORE unlink
+            # The claim excludes other consumers until this write and unlink
+            # finish. A redelivery is deduplicated by the `_did` it carries.
             try: path.unlink()
-            except OSError: pass  # expired either way
-            return 0
-        if chrome_tab is not None:
-            data['chromeTab'] = chrome_tab
-        self._write_frame(data)  # BEFORE unlink
-        # Delivered already; a redelivery is deduplicated by `_did`.
-        try: path.unlink()
-        except OSError: pass  # a redelivery is deduplicated by _did
-        _last_delivery_ts = time.time()
-        print(f'[STREAM] DELIVERED legacy={_log_safe(path.name)} id={_log_safe(data.get("id", ""))}', flush=True)
-        return 1
+            except OSError: pass  # a redelivery is deduplicated by _did
+            _last_delivery_ts = time.time()
+            print(f'[STREAM] DELIVERED legacy={_log_safe(path.name)} id={_log_safe(data.get("id", ""))}', flush=True)
+            return 1
 
     def _drain_legacy_ext(self, token, extension_legacy_name, killed_event):
         """Extension stream: deliver legacy per-tab raw-write files ({token}_<tab>.json),
