@@ -187,6 +187,32 @@ def _tests_workflow():
         encoding='utf-8')
 
 
+def test_diff_coverage_action_pin_lines_fit_79_columns(tmp):
+    """Full action SHAs remain readable without over-length physical lines."""
+    del tmp
+    workflow = _tests_workflow()
+    _, marker, producer = workflow.partition('\n  diff-coverage:\n')
+    assert marker, 'tests workflow has no diff-coverage job'
+    producer, marker, _ = producer.partition('\n  aggregate:\n')
+    assert marker, 'diff-coverage job has no following aggregate job'
+    commenter = (
+        ROOT / '.github' / 'workflows' / 'coverage-comment.yml').read_text(
+            encoding='utf-8')
+    pins = (
+        (producer, 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'),
+        (producer, 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'),
+        (producer, 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'),
+        (commenter, 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'),
+    )
+    offenders = []
+    for source, pin in pins:
+        matches = [line for line in source.splitlines() if pin in line]
+        assert len(matches) == 1, (pin, matches)
+        if len(matches[0]) > 79:
+            offenders.append((len(matches[0]), matches[0]))
+    assert not offenders, offenders
+
+
 def _assert_diff_coverage_permissions(workflow):
     """Require the producer job's complete decoded permission grant."""
     permissions = job_mapping(workflow, 'diff-coverage', 'permissions')
@@ -466,7 +492,8 @@ def test_the_speed_gate_is_not_manually_dispatchable(tmp):
 def _pinned_actions():
     """{action path: {sha: [workflow names]}} over every `uses:` in the tree."""
     used = {}
-    pattern = re.compile(r'uses:\s*([\w.-]+/[\w./-]+)@([0-9a-f]{40})')
+    pattern = re.compile(
+        r'uses:\s*(?:>-\s*)?([\w.-]+/[\w./-]+)@([0-9a-f]{40})')
     for path in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
         for action, sha in pattern.findall(path.read_text(encoding='utf-8')):
             used.setdefault(action, {}).setdefault(sha, []).append(path.name)
