@@ -230,6 +230,8 @@ class _ScalarReaderMixin:
         indent_indicator = first_indent or second_indent
         body_start = index + 1
         body_end = body_start
+        content_indent = (parent_indent + int(indent_indicator)
+                          if indent_indicator else None)
         while body_end < end:
             if self._scalar_blank(body_end):
                 body_end += 1
@@ -237,19 +239,16 @@ class _ScalarReaderMixin:
             indent = self._scalar_indent(body_end)
             if indent <= parent_indent:
                 break
+            if content_indent is not None and indent < content_indent:
+                if self.lines[body_end][indent:].startswith('#'):
+                    break
+                self._refuse('inconsistent block scalar indentation', index,
+                             context)
+            if content_indent is None:
+                content_indent = indent
             body_end += 1
-
-        nonblank = [
-            self._scalar_indent(line)
-            for line in range(body_start, body_end)
-            if not self._scalar_blank(line)
-        ]
-        content_indent = (parent_indent + int(indent_indicator)
-                          if indent_indicator else
-                          (min(nonblank) if nonblank else parent_indent + 1))
-        if any(indent < content_indent for indent in nonblank):
-            self._refuse('inconsistent block scalar indentation', index,
-                         context)
+        if content_indent is None:
+            content_indent = parent_indent + 1
         return style, chomping, body_start, body_end, content_indent
 
     def _line_scalar_end(self, index, end, context):

@@ -106,7 +106,7 @@ def test_checkout_reader_ends_block_scalar_at_outdented_comment(tmp):
         '        with:\n'
         '          ref: |-\n'
         '            safe\n'
-        '# ${{ steps.baseline.outputs.ref }}\n')
+        '           # ${{ steps.baseline.outputs.ref }}\n')
     assert _wfcheckout.checkout_refs(workflow) == [('build', 'safe')]
 
 
