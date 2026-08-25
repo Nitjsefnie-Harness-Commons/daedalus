@@ -1,4 +1,4 @@
-"""Side-effect-free constant resolution for the CLI argument audit.
+"""Side-effect-free static analysis for the CLI argument audit.
 
 The resolver follows supplied in-function imports and unshadowed handler
 globals by object identity. It decides module attributes, module ``__dict__``,
@@ -21,6 +21,7 @@ The module-level case tables enumerate the permitted reads, refused escapes,
 decided frame routes, resolver-only controls and known outside families used
 by the focused tests.
 """
+import argparse
 import ast
 import inspect
 import sys
@@ -42,21 +43,21 @@ SHADOWING_DEFAULT_CASES = (
 )
 
 PERMITTED_NAMESPACE_READ_CASES = (
-    ('args.json', 'args.undeclared_probe'),
-    ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')"),
+    ('args.json', 'args.undeclared_probe', True),
+    ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')", True),
     ("getattr(args, 'json', False)",
-     "getattr(args, 'undeclared_probe', None)"),
-    ("vars(args)['json']", "vars(args)['undeclared_probe']"),
-    ("args.__dict__['json']", "args.__dict__['undeclared_probe']"),
+     "getattr(args, 'undeclared_probe', None)", False),
+    ("vars(args)['json']", "vars(args)['undeclared_probe']", True),
+    ("args.__dict__['json']", "args.__dict__['undeclared_probe']", True),
     ("vars(args).get('json')",
-     "vars(args).get('undeclared_probe')"),
+     "vars(args).get('undeclared_probe')", False),
     ("args.__dict__.get('json')",
-     "args.__dict__.get('undeclared_probe')"),
+     "args.__dict__.get('undeclared_probe')", False),
     ("vars(args).get('json', False)",
-     "vars(args).get('undeclared_probe', None)"),
+     "vars(args).get('undeclared_probe', None)", False),
     ("args.__dict__.get('json', False)",
-     "args.__dict__.get('undeclared_probe', None)"),
-    ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')"),
+     "args.__dict__.get('undeclared_probe', None)", False),
+    ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')", False),
 )
 
 NAMESPACE_ESCAPE_CASES = (
@@ -245,11 +246,80 @@ KNOWN_GAP_FRAME_ROUTE_CASES = (
 _FRAME_ROUTE_OBJECTS = (sys._getframe, inspect.currentframe)
 
 
+def namespace_dests(parser):
+    """Return the declared and guaranteed namespace destinations."""
+    never_store = (argparse._HelpAction, argparse._VersionAction)
+    actions = [
+        action for action in parser._actions
+        if action.dest != argparse.SUPPRESS
+        and not isinstance(action, never_store)]
+    defaults = set(parser._defaults)
+    declared = {action.dest for action in actions} | defaults
+    guaranteed = {
+        action.dest for action in actions
+        if action.default is not argparse.SUPPRESS}
+    return declared, guaranteed | defaults
+
+
 def constant_string(node):
     """Return the string of a constant node, or None for anything else."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     return None
+
+
+def _constant_mapping_read(node):
+    """Return (attribute, node, needs-presence) for an exact-dict read."""
+    parent = node._parent
+    if (isinstance(parent, ast.Subscript) and parent.value is node
+            and isinstance(parent.ctx, ast.Load)):
+        attribute = constant_string(parent.slice)
+        if attribute is not None:
+            return attribute, parent, True
+    if (not isinstance(parent, ast.Attribute)
+            or parent.value is not node
+            or parent.attr != 'get'):
+        return None
+    call = parent._parent
+    if (not isinstance(call, ast.Call)
+            or call.func is not parent
+            or len(call.args) not in (1, 2)
+            or call.keywords
+            or any(isinstance(argument, ast.Starred)
+                   for argument in call.args)):
+        return None
+    attribute = constant_string(call.args[0])
+    if attribute is not None:
+        return attribute, call, False
+    return None
+
+
+def permitted_namespace_read(name):
+    """Resolve a permitted namespace read, or None for an escape."""
+    parent = name._parent
+    if isinstance(parent, ast.Attribute) and parent.value is name:
+        if not isinstance(parent.ctx, ast.Load):
+            return None
+        if parent.attr != '__dict__':
+            return parent.attr, parent, True
+        return _constant_mapping_read(parent)
+    if not (isinstance(parent, ast.Call)
+            and isinstance(parent.func, ast.Name)
+            and parent.args and parent.args[0] is name
+            and not parent.keywords):
+        return None
+    if parent.func.id == 'vars' and len(parent.args) == 1:
+        return _constant_mapping_read(parent)
+    arities = {'getattr': (2, 3), 'hasattr': (2,)}.get(parent.func.id)
+    if not (arities and len(parent.args) in arities
+            and not any(isinstance(argument, ast.Starred)
+                        for argument in parent.args)):
+        return None
+    attribute = constant_string(parent.args[1])
+    if attribute is None:
+        return None
+    needs_presence = parent.func.id == 'getattr' and len(parent.args) == 2
+    return attribute, parent, needs_presence
 
 
 def is_frame_route(value):
