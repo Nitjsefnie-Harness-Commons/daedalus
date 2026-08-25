@@ -566,9 +566,10 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     the alert. This pins the name class, so a rename back goes red here
     rather than in the next default-branch analysis.
 
-    The pin promises a safe superset of the query: every identifier segment
-    in every non-`github` dotted expression is checked, including step and
-    needed-job ids and `secrets`, `inputs`, `matrix` and `vars` contexts.
+    The pin is a conservative superset of the analyser heuristic's checked
+    identifier-name class for non-`github` dotted expressions: every segment
+    is checked, including step and needed-job ids and `secrets`, `inputs`,
+    `matrix` and `vars` contexts.
     `vars` is intentionally over-approximated because CodeQL does not model
     it. The query's regexpMatch is case-sensitive, so `BASE_REF` would evade
     the analyser itself; the check tests each name as written and lowercased
