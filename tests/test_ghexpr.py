@@ -42,18 +42,29 @@ def test_context_paths_and_expression_wrapper(tmp):
     assert evaluate("github.event.name != 'push'", context)
 
 
-def test_status_functions_come_from_the_context(tmp):
-    """Status functions read explicit values rather than hidden defaults."""
+def test_always_is_unconditional(tmp):
+    """Caller context cannot turn Actions' constant status function off."""
+    del tmp
+    context = {
+        'github': {'ref': 'refs/heads/topic'},
+        'status': {'always': False},
+    }
+    assert evaluate(
+        "github.ref == 'refs/heads/main' || always()", context) is True
+    assert evaluate('always()', {}) is True
+
+
+def test_run_state_status_functions_come_from_the_context(tmp):
+    """Run-dependent status functions read the caller's explicit state."""
     del tmp
     context = {'status': {
-        'always': True,
         'success': False,
         'failure': True,
         'cancelled': False,
     }}
-    assert evaluate('always()', context) is True
     assert evaluate('failure() && !cancelled()', context) is True
     assert evaluate('success()', context) is False
+    assert evaluate('cancelled()', context) is False
 
 
 def test_actions_truthiness_and_comparison(tmp):
@@ -165,7 +176,7 @@ def test_invalid_context_and_literals_refuse(tmp):
     _raises('${{ true', {})
     _raises('true trailing', {})
     _raises('value', {'value': object()})
-    _raises('always()', {})
+    _raises('success()', {})
 
 
 if __name__ == '__main__':

@@ -251,6 +251,8 @@ class _Parser:
         return self._lookup(path)
 
     def _status_value(self, name):
+        if name == 'always':
+            return True
         status = self._context.get('status')
         if not isinstance(status, Mapping):
             raise ExpressionError('context.status must be a mapping')
