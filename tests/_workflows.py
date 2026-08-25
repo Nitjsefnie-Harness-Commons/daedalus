@@ -121,6 +121,8 @@ def _scalar(value, filename='workflow', unsupported=None):
     value = _uncommented(value).strip()
     failure = unsupported or (
         f'{filename}: unsupported scalar value: {value!r}')
+    if re.fullmatch(r'[|>][0-9+-]*', value):
+        raise AssertionError(failure)
     if value and value[0] in '!&*':
         raise AssertionError(failure)
     quoted = value and value[0] in "'\""
@@ -212,6 +214,7 @@ def _workflow_path_filters(lines, filename='workflow'):
             continue
 
         values = []
+        item_indent = None
         for following in lines[index + 1:]:
             next_entry = _entry(following)
             if next_entry is not None and next_entry[0] <= indent:
@@ -220,7 +223,18 @@ def _workflow_path_filters(lines, filename='workflow'):
             if not stripped or stripped.startswith('#'):
                 continue
             if stripped.startswith('-'):
+                following_indent = _indent(following)
+                if item_indent is None:
+                    item_indent = following_indent
+                elif following_indent != item_indent:
+                    raise AssertionError(
+                        f'{filename}: unsupported block sequence line: '
+                        f'{stripped!r}')
                 values.append(_scalar(stripped[1:], filename))
+            elif item_indent is not None and _indent(following) > item_indent:
+                raise AssertionError(
+                    f'{filename}: unsupported block sequence continuation: '
+                    f'{stripped!r}')
         filters[key] = values
     return filters
 
