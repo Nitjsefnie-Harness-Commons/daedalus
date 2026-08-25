@@ -312,11 +312,14 @@ class _ScalarReaderMixin:
         return text.rstrip('\n') + '\n'
 
     def _plain_scalar(self, value, index, key_indent, value_end, context):
-        pieces = [self._decode_scalar(value, index, context)]
+        text = self._decode_scalar(value, index, context)
+        blank_lines = 0
         line = index + 1
         while line < value_end:
             if self._blank(line):
                 self._indent(line, context)
+                if self._scalar_blank(line):
+                    blank_lines += 1
                 line += 1
                 continue
             indent = self._indent(line, context)
@@ -324,9 +327,11 @@ class _ScalarReaderMixin:
                 break
             continuation = self._strip_comment(self.lines[line].strip(' \t'))
             if continuation:
-                pieces.append(continuation)
+                text += ('\n' * blank_lines if blank_lines else ' ')
+                text += continuation
+                blank_lines = 0
             line += 1
-        return ' '.join(pieces)
+        return text
 
     def _scalar_value(self, value, index, key_indent, value_end, context):
         value = self._strip_comment(value).strip(' \t')
