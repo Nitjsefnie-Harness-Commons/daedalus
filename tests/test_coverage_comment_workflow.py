@@ -14,7 +14,7 @@ from _repo import ROOT  # noqa: E402
 from _ghexpr import evaluate  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _yamlread import (  # noqa: E402
-    YAMLReadError, _indent, job_scalar, step_scalar,
+    YAMLReadError, _indent, job_mapping, job_scalar, step_scalar,
 )
 
 
@@ -650,7 +650,9 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
                      download, re.MULTILINE), comment_workflow
     assert 'run-id: ${{ github.event.workflow_run.id }}' in download, download
     assert 'github-token: ${{ github.token }}' in download, download
-    assert 'pull-requests: write' not in diff, diff
+    permissions = job_mapping(
+        tests_workflow, 'diff-coverage', 'permissions')
+    assert permissions == {'contents': 'read'}, permissions
     # Only the YAML decides what runs. The file's own prose explains that
     # it checks nothing out, so naming the action in a comment is not a
     # checkout step and must not read as one.

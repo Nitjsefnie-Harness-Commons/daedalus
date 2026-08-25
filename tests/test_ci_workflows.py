@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _yamlread import job_scalar  # noqa: E402
+from _yamlread import job_mapping, job_scalar  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
 
@@ -179,6 +179,97 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     # ${{ }} in the run block would be an injection.
     _, _, after = workflow.partition('        run: |')
     assert '${{' not in after, 'an expression is interpolated into the script'
+
+
+def _tests_workflow():
+    """Read the pull-request workflow whose producer job is untrusted."""
+    return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+
+
+def _assert_diff_coverage_permissions(workflow):
+    """Require the producer job's complete decoded permission grant."""
+    permissions = job_mapping(workflow, 'diff-coverage', 'permissions')
+    assert permissions == {'contents': 'read'}, (
+        f'unsafe decoded permissions: {permissions!r}')
+
+
+def _assert_permissions_mutation_refused(workflow):
+    """Require one widened real-workflow mutation to fail the contract."""
+    try:
+        _assert_diff_coverage_permissions(workflow)
+    except AssertionError as error:
+        assert 'unsafe decoded permissions' in str(error), str(error)
+        return
+    raise AssertionError('widened decoded permissions were accepted')
+
+
+def test_diff_coverage_permissions_are_exactly_read_only(tmp):
+    """The job running pull-request code has only contents read access."""
+    del tmp
+    _assert_diff_coverage_permissions(_tests_workflow())
+
+
+def test_permission_whitespace_mutation_is_refused(tmp):
+    """Whitespace before the colon cannot hide pull-request write access."""
+    del tmp
+    workflow = _tests_workflow()
+    mutated = workflow.replace(
+        '      contents: read\n',
+        '      contents: read\n      pull-requests : write\n', 1)
+    assert mutated != workflow, 'real permission mapping was not mutated'
+    _assert_permissions_mutation_refused(mutated)
+
+
+def test_quoted_and_escaped_permission_keys_are_refused(tmp):
+    """Equivalent decoded keys cannot hide a widened permission grant."""
+    del tmp
+    workflow = _tests_workflow()
+    additions = (
+        "      'pull-requests': write\n",
+        '      "pull\\x2drequests": write\n',
+    )
+    for addition in additions:
+        mutated = workflow.replace(
+            '      contents: read\n',
+            '      contents: read\n' + addition, 1)
+        assert mutated != workflow, addition
+        _assert_permissions_mutation_refused(mutated)
+
+
+def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
+    """Equivalent decoded mapping fields cannot hide the widened grant."""
+    del tmp
+    workflow = _tests_workflow()
+    replacements = (
+        "    'permissions':\n",
+        '    "permis\\x73ions":\n',
+    )
+    for field in replacements:
+        mutated = workflow.replace(
+            '    permissions:\n      contents: read\n',
+            field + '      contents: read\n'
+            '      pull-requests: write\n', 1)
+        assert mutated != workflow, field
+        _assert_permissions_mutation_refused(mutated)
+
+
+def test_permission_values_and_unknown_keys_fail_closed(tmp):
+    """Decoded writes and unrecognised permission names are refused."""
+    del tmp
+    workflow = _tests_workflow()
+    mutations = (
+        workflow.replace('      contents: read\n',
+                         '      contents: write\n', 1),
+        workflow.replace('      contents: read\n',
+                         '      contents: "wr\\x69te"\n', 1),
+        workflow.replace(
+            '      contents: read\n',
+            '      contents: read\n      future-scope: read\n', 1),
+    )
+    for mutated in mutations:
+        assert mutated != workflow, 'real permission mapping was not mutated'
+        _assert_permissions_mutation_refused(mutated)
 
 
 def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
