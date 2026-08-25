@@ -236,6 +236,36 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
+def _mapping_key(stripped):
+    """The key of a `key:` or `key: value` entry, or None if it is neither.
+
+    A trigger is not always written bare. `workflow_dispatch: # manual` and
+    `workflow_dispatch: {}` are the same key with a comment and with an empty
+    map, and a reader that only accepts a line ENDING in a colon records
+    neither — so a test asking which triggers exist would answer that one it
+    was looking for is absent while the workflow declares it.
+    """
+    quote = ''
+    for index, char in enumerate(stripped):
+        if quote:
+            if char == quote:
+                quote = ''
+            continue
+        if char in '"\'':
+            quote = char
+            continue
+        if char == '#':
+            # A comment reached before any colon: the line is not an entry.
+            return None
+        if char == ':':
+            rest = stripped[index + 1:]
+            if rest and not rest[0].isspace():
+                # `a:b` is one scalar; YAML needs the space to make it a map.
+                return None
+            return stripped[:index].strip().strip('\'"').strip()
+    return None
+
+
 def _workflow_triggers(workflow):
     """The `on:` mapping as {trigger name: its indented lines}.
 
@@ -252,9 +282,10 @@ def _workflow_triggers(workflow):
         stripped = line.strip()
         if not stripped or stripped.startswith('#'):
             continue
+        key = _mapping_key(stripped)
         if (line.startswith('  ') and not line.startswith('   ')
-                and stripped.endswith(':')):
-            current = stripped[:-1]
+                and key is not None):
+            current = key
             triggers[current] = []
         elif current is not None:
             triggers[current].append(stripped)
@@ -359,6 +390,68 @@ def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     script, _, _ = after.partition('- name: Check out this commit')
     _, _, body = script.partition('run: |')
     assert '${{' not in body, 'an expression is interpolated into the script'
+
+
+def _trigger_names(workflow):
+    """Trigger keys of an `on:` block, past YAML quoting and stray spacing."""
+    return {key.strip().strip('\'"').strip()
+            for key in _workflow_triggers(workflow)}
+
+
+def test_trigger_names_survive_every_spelling_of_a_key(tmp):
+    """A trigger is found however its YAML key happens to be written.
+
+    The test below refuses one trigger by name, which is only a refusal if the
+    name is found however it was spelled. Each of these is valid YAML that
+    declares `workflow_dispatch`, and a reader keyed on a line ENDING in a
+    colon sees none of the last three.
+    """
+    del tmp
+    head = ('name: x\n\non:\n  push:\n    branches: [main]\n'
+            '  pull_request:\n')
+    tail = '\npermissions:\n  contents: read\n'
+    declared = (
+        '  workflow_dispatch:\n',
+        '  workflow_dispatch :\n',
+        "  'workflow_dispatch':\n",
+        '  "workflow_dispatch":\n',
+        '  workflow_dispatch: # manual benchmark\n',
+        '  workflow_dispatch: {}\n',
+        '  workflow_dispatch:\n    inputs:\n      x:\n        type: string\n',
+    )
+    for block in declared:
+        names = _trigger_names(head + block + tail)
+        assert 'workflow_dispatch' in names, (block, sorted(names))
+        assert {'push', 'pull_request'} <= names, (block, sorted(names))
+    # A mention inside a comment declares nothing.
+    absent = _trigger_names(
+        head + '  # workflow_dispatch: not a trigger\n' + tail)
+    assert 'workflow_dispatch' not in absent, sorted(absent)
+
+
+def test_the_speed_gate_is_not_manually_dispatchable(tmp):
+    """The one job whose checkout ref is a step output takes no manual run.
+
+    Code scanning reports three `actions/cache-poisoning/poisonable-step`
+    findings on this file, and each names the trigger rather than any cache
+    input: `(workflow_dispatch)`. They are false positives — the query treats
+    a dispatched run as holding the default branch's cache scope whatever ref
+    it was started on, while a real run's scope follows the ref it was given.
+    The trigger is dropped anyway rather than carrying three permanently
+    dismissed alerts, so re-adding it reopens all three.
+
+    Read through `_workflow_triggers` rather than by substring: `push` and
+    `pull_request` are asserted present because without them the refusal above
+    would be satisfied by a file that had stopped declaring triggers at all.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
+        encoding='utf-8')
+    names = _trigger_names(workflow)
+    assert 'workflow_dispatch' not in names, sorted(names)
+    assert 'repository_dispatch' not in names, sorted(names)
+    assert 'push' in names, sorted(names)
+    assert 'pull_request' in names, sorted(names)
 
 
 def _pinned_actions():
