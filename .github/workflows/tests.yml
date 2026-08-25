@@ -352,3 +352,39 @@ jobs:
           fi
           echo 'Main moved while this run measured; the next push raises instead.' \
             >> "$GITHUB_STEP_SUMMARY"
+
+  aggregate:
+    name: Aggregate workflow checks
+    if: ${{ always() }}
+    needs:
+      - suites
+      - wheel
+      - coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+
+    steps:
+      - name: Check dependency results
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ['NEEDS_JSON'])
+          unsuccessful = [
+              f"{name}={details['result']}"
+              for name, details in needs.items()
+              if details['result'] != 'success'
+          ]
+          if unsuccessful:
+              print(
+                  'Dependencies not successful: ' + ', '.join(unsuccessful),
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print('All dependencies succeeded: ' + ', '.join(sorted(needs)))
+          PY
