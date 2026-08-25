@@ -67,13 +67,9 @@ def test_run_state_status_functions_come_from_the_context(tmp):
     assert evaluate('cancelled()', context) is False
 
 
-def test_actions_truthiness_and_comparison(tmp):
-    """Admitted values keep their supported truthiness and equality."""
+def test_actions_same_type_comparison(tmp):
+    """Admitted same-type scalars keep Actions equality semantics."""
     del tmp
-    assert evaluate('empty', {'empty': ''}) is False
-    assert evaluate('nothing', {'nothing': None}) is False
-    assert evaluate('text_zero', {'text_zero': '0'}) is True
-    assert evaluate('items', {'items': []}) is True
     assert evaluate("value == 'FOO'", {'value': 'foo'}) is True
     assert evaluate('left != right', {
         'left': True, 'right': False,
@@ -86,6 +82,20 @@ def test_actions_truthiness_and_comparison(tmp):
     _raises('value == zero', {
         'value': None, 'zero': 0,
     }, 'numeric context value')
+
+
+def test_evaluate_returns_actions_operands(tmp):
+    """Logical selection and bare values return operands, not truthiness."""
+    del tmp
+    assert evaluate("'left' || 'right'", {}) == 'left'
+    assert evaluate("'' || 'right'", {}) == 'right'
+    assert evaluate("'left' && 'right'", {}) == 'right'
+    assert evaluate("'' && 'right'", {}) == ''
+    assert evaluate('null', {}) is None
+    assert evaluate('empty', {'empty': ''}) == ''
+    assert evaluate('text_zero', {'text_zero': '0'}) == '0'
+    items = []
+    assert evaluate('items', {'items': items}) is items
 
 
 def test_cross_type_equality_refuses_numeric_coercion(tmp):
