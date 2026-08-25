@@ -123,6 +123,7 @@ class _WorkflowReader(_ScalarReaderMixin):
             self._refuse('jobs value is not a block mapping',
                          self.jobs_line, 'jobs mapping')
         results = []
+        seen_jobs = set()
         index = self.jobs_line + 1
         while index < len(self.lines):
             if self._blank(index):
@@ -142,6 +143,9 @@ class _WorkflowReader(_ScalarReaderMixin):
             job, rest = self._mapping_parts(index, 'jobs mapping')
             if job == '<<':
                 self._refuse('merge key', index, 'jobs mapping')
+            if job in seen_jobs:
+                self._refuse('duplicate job key', index, 'jobs mapping')
+            seen_jobs.add(job)
             end = self._value_end(index + 1, len(self.lines), job_indent,
                                   f'job {job}', check_tabs=False)
             if rest:

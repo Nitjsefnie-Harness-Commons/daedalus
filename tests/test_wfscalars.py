@@ -290,6 +290,13 @@ def test_checkout_reader_decodes_multiline_quoted_scalars(tmp):
             '          ref: "feature\\\n            branch"\n',
             'featurebranch',
         ),
+        (
+            'quoted ref followed by comments',
+            'name: Team build\n',
+            "          ref: 'feature: #branch' # trailing\n"
+            '          # after ref\n',
+            'feature: #branch',
+        ),
     )
     failures = []
     for name, root, ref, expected in cases:
