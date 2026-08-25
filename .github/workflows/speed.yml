@@ -78,8 +78,10 @@ on:
   #
   # Code scanning reports three cache-poisoning findings against this file,
   # and every one of them names the trigger — `due to privilege checkout of
-  # untrusted code from steps.baseline.outputs.ref. (workflow_dispatch)` —
-  # rather than any cache input. They are FALSE POSITIVES: the query treats
+  # untrusted code from steps.baseline.outputs.ref. (workflow_dispatch)`,
+  # quoted as the alerts worded it, back when that output was still named
+  # `ref` — rather than any cache input. They are FALSE POSITIVES: the
+  # query treats
   # `workflow_dispatch` as running in the default branch's cache scope
   # whatever ref it was started on, while a real run's cache scope follows
   # the ref it was given. Dispatching on main runs main's own code;
@@ -172,8 +174,15 @@ jobs:
               ref=""
               ;;
           esac
+          # The output is named `point`, not `ref`, on purpose. The value is
+          # the pull request's base SHA or a published release tag — trusted
+          # code, never the pull request's head — and CodeQL's
+          # untrusted-checkout heuristic reads any checkout whose ref comes
+          # from a step output named like head, branch, ref, sha or commit
+          # as checking out an untrusted head. Renaming this output back to
+          # `ref` would silently reintroduce that alert.
           if [ -z "$ref" ]; then
-            echo "ref=" >> "$GITHUB_OUTPUT"
+            echo "point=" >> "$GITHUB_OUTPUT"
             echo "No release exists yet, so there is no baseline to compare"
             echo "against. This becomes a real gate once release.yml cuts one."
             {
@@ -182,12 +191,12 @@ jobs:
               echo "Skipped: no release exists yet to use as a baseline."
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+            echo "point=$ref" >> "$GITHUB_OUTPUT"
             echo "Baseline: $ref"
           fi
 
       - name: Check out this commit
-        if: steps.baseline.outputs.ref != ''
+        if: steps.baseline.outputs.point != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # The exact head of the pull request, not the merge commit checkout
@@ -200,10 +209,10 @@ jobs:
           persist-credentials: false
 
       - name: Check out the baseline
-        if: steps.baseline.outputs.ref != ''
+        if: steps.baseline.outputs.point != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ steps.baseline.outputs.ref }}
+          ref: ${{ steps.baseline.outputs.point }}
           path: base
           persist-credentials: false
 
@@ -220,12 +229,12 @@ jobs:
       # warm-up, so a warm or cold pip cache moves setup time rather than the
       # ratio the job reports.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
-        if: steps.baseline.outputs.ref != ''
+        if: steps.baseline.outputs.point != ''
         with:
           python-version: "3.13"
 
       - name: Build one virtualenv per side
-        if: steps.baseline.outputs.ref != ''
+        if: steps.baseline.outputs.point != ''
         # Separate environments because the two sides pin different versions,
         # and a shared one would silently benchmark whichever resolved last
         # against both trees.
@@ -246,7 +255,7 @@ jobs:
           echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
 
       - name: Run both suites, interleaved
-        if: steps.baseline.outputs.ref != ''
+        if: steps.baseline.outputs.point != ''
         # A failing test does NOT fail this job: tests.yml owns that verdict,
         # and a non-passing test is simply absent from the side's durations and
         # drops out of the intersection. What this step must guarantee is that
@@ -297,9 +306,9 @@ jobs:
           ls -la reports/*/
 
       - name: Compare
-        if: steps.baseline.outputs.ref != ''
+        if: steps.baseline.outputs.point != ''
         env:
-          BASE_LABEL: ${{ steps.baseline.outputs.ref }}
+          BASE_LABEL: ${{ steps.baseline.outputs.point }}
         # The comparator comes from the HEAD checkout, so an improvement to the
         # comparison itself takes effect on the commit that makes it rather
         # than one release later.
@@ -314,7 +323,7 @@ jobs:
             --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the duration summaries
-        if: ${{ !cancelled() && steps.baseline.outputs.ref != '' }}
+        if: ${{ !cancelled() && steps.baseline.outputs.point != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: speed-durations

@@ -7,6 +7,7 @@ Each of those is a decision about what a number is allowed to describe, so
 these tests drive the comparison with rounds that disagree.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -187,6 +188,36 @@ def test_timing_a_tree_that_yields_nothing_is_a_failure(tmp):
     code = _time_tests().main(
         ['--tree', str(tree), '--python', sys.executable, '--out', str(out)])
     assert code == 1, code
+
+
+def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
+    """No checkout's `ref:` may come from a step output named like a head.
+
+    CodeQL's untrusted-checkout query (code-scanning alert #82) reads an
+    actions/checkout step as pulling a pull request's untrusted head when
+    its `ref:` comes from a `steps.*` output whose name contains `head`,
+    `branch`, `ref`, `sha` or `commit`. The baseline checkout in speed.yml
+    pulls the pull request's base SHA or a release tag — trusted code — so
+    the output carrying it is named `point`; naming it `ref` was what drew
+    the alert. This pins the name class, so a rename back goes red here
+    rather than in the next default-branch analysis.
+    """
+    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
+        encoding='utf-8')
+    forbidden = ('head', 'branch', 'ref', 'sha', 'commit')
+    offenders = []
+    for block in re.split(r'(?m)^      - ', workflow):
+        if 'uses: actions/checkout@' not in block:
+            continue
+        for match in re.finditer(
+                r'(?m)^\s*ref:\s*\$\{\{\s*steps\.[\w-]+\.outputs\.([\w-]+)'
+                r'\s*}}', block):
+            name = match.group(1)
+            if any(word in name for word in forbidden):
+                offenders.append(name)
+    assert not offenders, (
+        'a checkout takes its ref from a step output named '
+        f'{offenders}, which an analyser reads as an untrusted head')
 
 
 def main():
