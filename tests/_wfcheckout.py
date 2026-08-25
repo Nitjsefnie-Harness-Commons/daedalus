@@ -501,7 +501,7 @@ class _WorkflowReader:
         entries = []
         key_indent = None
         if first and not first.startswith('#'):
-            key_indent = step_indent + 2
+            key_indent = step_indent + body.index(first)
             key, rest = self._mapping_parts(start, context, first)
             if key == '<<':
                 self._refuse('merge key', start, context)
