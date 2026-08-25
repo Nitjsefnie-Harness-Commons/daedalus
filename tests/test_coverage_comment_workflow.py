@@ -181,8 +181,7 @@ def test_workflow_harness_scrubs_coverage_environment(tmp):
     result, output = _run_artifact_check(
         tmp, {'total_count': 0, 'artifacts': []}, extra_env={
             'ASSERT_NO_COVERAGE_ENV': '1',
-            'COVERAGE_FILE': '/tmp/stub.coverage',
-            'COVERAGE_PROCESS_START': '/tmp/stub.toml',
+            'COVERAGE_PROCESS_START': str(ROOT / 'pyproject.toml'),
             'COVERAGE_CONTEXT': 'workflow-contract',
         })
     assert result.returncode == 0, (result.stdout, result.stderr)
