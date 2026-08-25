@@ -38,12 +38,11 @@ def test_a_second_top_level_on_block_is_refused(tmp):
 
 
 def test_trigger_names_survive_every_spelling_of_a_key(tmp):
-    """A trigger is found however its YAML key happens to be written.
+    """A trigger is found however its plain YAML key is spaced or commented.
 
     The test below refuses one trigger by name, which is only a refusal if the
-    name is found however it was spelled. Each of these is valid YAML that
-    declares `workflow_dispatch`, and a reader keyed on a line ENDING in a
-    colon sees none of the last three.
+    name is found however it was spaced. Each of these is valid YAML that
+    declares `workflow_dispatch`.
     """
     del tmp
     head = ('name: x\n\non:\n  push:\n    branches: [main]\n'
@@ -52,8 +51,6 @@ def test_trigger_names_survive_every_spelling_of_a_key(tmp):
     declared = (
         '  workflow_dispatch:\n',
         '  workflow_dispatch :\n',
-        "  'workflow_dispatch':\n",
-        '  "workflow_dispatch":\n',
         '  workflow_dispatch: # manual benchmark\n',
         '  workflow_dispatch: {}\n',
         '  workflow_dispatch:\n    inputs:\n      x:\n        type: string\n',
@@ -66,6 +63,86 @@ def test_trigger_names_survive_every_spelling_of_a_key(tmp):
     absent = _trigger_names(
         head + '  # workflow_dispatch: not a trigger\n' + tail)
     assert 'workflow_dispatch' not in absent, sorted(absent)
+
+
+def test_quoted_trigger_name_is_refused_instead_of_dropped(tmp):
+    """A quoted `push` key cannot disappear from the comparison set."""
+    del tmp
+    workflow = ('name: x\n\non:\n'
+                '  "push":\n'
+                '    paths-ignore: [foo]\n'
+                '  pull_request:\n'
+                '    paths-ignore: [bar]\n')
+    try:
+        _workflow_triggers(workflow, 'quoted-trigger.yml')
+    except AssertionError as failure:
+        assert 'quoted-trigger.yml' in str(failure), failure
+        assert '"push"' in str(failure), failure
+    else:
+        raise AssertionError('a quoted trigger key was accepted')
+
+
+def test_quoted_path_key_pair_is_refused_and_is_yaml_unequal(tmp):
+    """Escaped path keys cannot make two different filters look empty."""
+    del tmp
+    yaml_push = {'paths-ignore': ['foo']}
+    yaml_pull_request = {'paths-ignore': ['bar']}
+    assert yaml_push != yaml_pull_request
+    workflow = ('name: x\n\non:\n'
+                '  push:\n'
+                '    "paths\\u002dignore": [foo]\n'
+                '  pull_request:\n'
+                '    "paths\\u002dignore": [bar]\n')
+    triggers = _workflow_triggers(workflow, 'quoted-path-key.yml')
+    for event in ('push', 'pull_request'):
+        try:
+            _workflow_path_filters(
+                triggers[event], 'quoted-path-key.yml')
+        except AssertionError as failure:
+            assert 'quoted-path-key.yml' in str(failure), failure
+            assert repr('"paths\\u002dignore"') in str(failure), failure
+        else:
+            raise AssertionError(f'{event}: quoted path key was accepted')
+
+
+def test_typed_plain_scalar_pair_is_refused_and_is_yaml_unequal(tmp):
+    """A YAML boolean cannot be flattened into the quoted string spelling."""
+    del tmp
+    yaml_push = {'paths-ignore': [True]}
+    yaml_pull_request = {'paths-ignore': ['true']}
+    assert yaml_push != yaml_pull_request
+    try:
+        _workflow_path_filters(
+            ['    paths-ignore: [true]'], 'typed-push.yml')
+    except AssertionError as failure:
+        assert 'typed-push.yml' in str(failure), failure
+        assert '[true]' in str(failure), failure
+    else:
+        raise AssertionError('a typed plain scalar was accepted')
+    assert _workflow_path_filters(
+        ["    paths-ignore: ['true']"], 'typed-pull-request.yml') == (
+            yaml_pull_request)
+
+
+def test_yaml_core_non_string_scalar_spellings_are_refused(tmp):
+    """Every listed implicit YAML scalar family is outside the allow-list."""
+    del tmp
+    values = (
+        'false', 'YES', 'n', 'NULL', '~',
+        '0', '+12', '-07', '0x2a', '0o52', '0b1010', '1_000',
+        '.5', '1.', '1e3', '1.0e+3', '.inf', '-.NaN', '1:20',
+        '2024-01-02', '2024-01-02T03:04:05Z',
+    )
+    for value in values:
+        try:
+            _workflow_path_filters(
+                [f'    paths-ignore: [{value}]'], 'typed.yml')
+        except AssertionError as failure:
+            assert 'typed.yml' in str(failure), (value, failure)
+            assert value in str(failure), (value, failure)
+        else:
+            raise AssertionError(
+                f'implicit non-string scalar accepted: {value}')
 
 
 def test_path_filters_ignore_deeper_nested_mappings(tmp):
