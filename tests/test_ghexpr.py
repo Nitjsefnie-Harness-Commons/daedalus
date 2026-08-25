@@ -25,6 +25,20 @@ def _raises(expression, context, detail=None):
     raise AssertionError(f'expression was accepted: {expression!r}')
 
 
+def _status_raises(function, value):
+    """Require a run-dependent status function to reject `value`."""
+    expression = f'{function}()'
+    try:
+        evaluate(expression, {'status': {function: value}})
+    except ExpressionError as error:
+        expected = (
+            f'{expression} status value must be a boolean, got {value!r}')
+        assert str(error) == expected, str(error)
+        return
+    raise AssertionError(
+        f'{expression} accepted non-boolean status {value!r}')
+
+
 def test_boolean_logic_and_parentheses(tmp):
     """The supported operators obey Actions' precedence and negation."""
     del tmp
@@ -65,6 +79,24 @@ def test_run_state_status_functions_come_from_the_context(tmp):
     assert evaluate('failure() && !cancelled()', context) is True
     assert evaluate('success()', context) is False
     assert evaluate('cancelled()', context) is False
+
+
+def test_success_requires_a_boolean_status_value(tmp):
+    """A string spelling cannot become success()'s return value."""
+    del tmp
+    _status_raises('success', 'false')
+
+
+def test_failure_requires_a_boolean_status_value(tmp):
+    """Null cannot become failure()'s return value."""
+    del tmp
+    _status_raises('failure', None)
+
+
+def test_cancelled_requires_a_boolean_status_value(tmp):
+    """A container cannot become cancelled()'s return value."""
+    del tmp
+    _status_raises('cancelled', [])
 
 
 def test_actions_same_type_comparison(tmp):

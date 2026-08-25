@@ -259,7 +259,11 @@ class _Parser:
             raise ExpressionError('context.status must be a mapping')
         if name not in status:
             raise ExpressionError(f'missing status value: {name}')
-        return _admit(status[name], 'numeric context value')
+        value = status[name]
+        if not isinstance(value, bool):
+            raise ExpressionError(
+                f'{name}() status value must be a boolean, got {value!r}')
+        return value
 
     def _lookup(self, path):
         value = self._context
