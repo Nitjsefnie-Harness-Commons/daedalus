@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-import _yamlread  # noqa: E402
+import _wfcheckout  # noqa: E402
 
 
 _FORBIDDEN_CHECKOUT_NAMES = ('head', 'branch', 'ref', 'sha', 'commit')
@@ -207,7 +207,7 @@ def test_checkout_reader_returns_structured_checkout_refs(tmp):
         '  test:\n'
         '    steps:\n'
         '      - uses: actions/checkout@v4\n')
-    assert _yamlread.checkout_refs(workflow) == [
+    assert _wfcheckout.checkout_refs(workflow) == [
         ('build', '${{ github.sha }}')]
 
 
@@ -240,7 +240,7 @@ def test_checkout_reader_decodes_supported_scalar_styles(tmp):
         '        - uses: actions/checkout@v4\n'
         '          with:\n'
         '            ref: "line\\nnext"\n')
-    assert _yamlread.checkout_refs(workflow) == [
+    assert _wfcheckout.checkout_refs(workflow) == [
         ('plain', "one'two"),
         ('folded', 'first second'),
         ('literal', 'first\nsecond\n'),
@@ -261,13 +261,13 @@ def test_checkout_reader_skips_unwalked_flow_values(tmp):
         '    steps:\n'
         '      - uses: actions/setup-python@v4\n'
         '        with: {ref: [not, a, checkout]}\n')
-    assert _yamlread.checkout_refs(workflow) == []
+    assert _wfcheckout.checkout_refs(workflow) == []
 
 
 def _assert_yaml_refusal(workflow, wording):
     try:
-        _yamlread.checkout_refs(workflow)
-    except _yamlread.YAMLReadError as error:
+        _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError as error:
         message = str(error)
         assert wording in message, message
         assert 'line ' in message, message
@@ -392,13 +392,23 @@ def test_checkout_reader_refuses_a_duplicate_top_level_jobs_with_location(tmp):
     _assert_yaml_refusal(workflow, 'second top-level jobs mapping')
 
 
+def test_checkout_reader_refuses_an_explicit_top_level_jobs_key(tmp):
+    """An explicit top-level jobs key cannot silently hide checkout steps."""
+    del tmp
+    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    workflow = path.read_text(encoding='utf-8')
+    mutated = workflow.replace('jobs:\n', '? jobs\n:\n', 1)
+    assert mutated != workflow
+    _assert_yaml_refusal(mutated, 'explicit key')
+
+
 def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
     """Apply the pin's conservative expression contract to one workflow."""
     offenders = []
     expressions = re.compile(r'\$\{\{(.*?)\}\}', re.DOTALL)
     try:
-        refs = _yamlread.checkout_refs(workflow)
-    except _yamlread.YAMLReadError as error:
+        refs = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError as error:
         raise AssertionError(f'{workflow_name}: {error}') from error
     for job, ref in refs:
         matches = list(expressions.finditer(ref))
