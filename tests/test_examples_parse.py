@@ -126,10 +126,23 @@ def test_async_body_check_catches_delimiter_crossing(tmp):
     control = Path(tmp) / 'control.js'
     control.write_text(body, encoding='utf-8')
     assert _async_body_result(node, control, tmp).returncode == 0
-    mutated = Path(tmp) / 'mutated.js'
-    mutated.write_text(
-        body + '}\nasync function maskedSyntaxError() {\n',
+    attack = body + '}\nasync function maskedSyntaxError() {\n'
+
+    # The attack has to be one the old textual wrapper ACCEPTED, or this test
+    # would pass on any invalid source and prove nothing about delimiters.
+    # Removing the crossing `}` leaves the wrapper's own function unclosed,
+    # so this assertion fails and the test stops being a tautology.
+    wrapped = Path(tmp) / 'wrapped.js'
+    wrapped.write_text(
+        'async function __example__() {\n' + attack + '\n}\n',
         encoding='utf-8')
+    checked = subprocess.run(
+        [node, '--check', str(wrapped)], cwd=ROOT, capture_output=True,
+        text=True, timeout=30)
+    assert checked.returncode == 0, checked.stderr
+
+    mutated = Path(tmp) / 'mutated.js'
+    mutated.write_text(attack, encoding='utf-8')
     # Textual wrapping let these delimiters consume the wrapper's own braces
     # and pass; an independently compiled body must reject them.
     assert _async_body_result(node, mutated, tmp).returncode != 0
