@@ -7,13 +7,17 @@ against a model of it. The CLI is always run as a subprocess, the way a shell
 would run it.
 """
 import base64
+import argparse
+import ast
 import contextlib
 import http.server
+import inspect
 import json
 import os
 import subprocess
 import sys
 import threading
+import textwrap
 import time
 import uuid
 from pathlib import Path
@@ -36,6 +40,172 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 OUT_MARKS = ('\u2192', '->')
 IN_MARKS = ('\u2190', '<-')
 TOK = 'clitok'
+
+# `do_tabs` reads args.json through getattr(); keep that access documented even
+# though the audit below now resolves constant indirect reads itself.
+KNOWN_INDIRECT_ARG_READS = (
+    ('tabs', 'json', 'do_tabs'),
+)
+
+# Each entry is (subcommand, handler qualname, unresolved construct kind,
+# reason). There are currently no handlers whose namespace flow is too dynamic
+# for the static audit; adding one requires naming the construct and why it is
+# safe rather than silently widening the blind spot.
+UNRESOLVABLE_ARG_READ_EXCEPTIONS = ()
+
+
+def _namespace_dests(actions):
+    """Return action destinations that argparse actually puts on a namespace."""
+    return {
+        action.dest for action in actions
+        if argparse.SUPPRESS not in (action.default, action.dest)
+    }
+
+
+def _target_names(target):
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.List, ast.Tuple)):
+        names = set()
+        for item in target.elts:
+            names.update(_target_names(item))
+        return names
+    return set()
+
+
+class _ArgNamespaceAudit(ast.NodeVisitor):
+    """Resolve CLI namespace reads that are statically identifiable."""
+
+    def __init__(self, function, args_name):
+        self.args_name = args_name
+        self.aliases = set()
+        self.reads = {}
+        self.unresolved = []
+        for node in ast.walk(function):
+            if isinstance(node, ast.Assign):
+                value = node.value
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign):
+                value = node.value
+                targets = [node.target]
+            elif isinstance(node, ast.NamedExpr):
+                value = node.value
+                targets = [node.target]
+            else:
+                continue
+            if isinstance(value, ast.Name) and value.id == args_name:
+                for target in targets:
+                    self.aliases.update(_target_names(target))
+
+    @staticmethod
+    def _constant_name(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return None
+
+    def _record_read(self, attribute, node):
+        self.reads.setdefault(attribute, set()).add(ast.unparse(node))
+
+    def _record_unresolved(self, kind, node):
+        self.unresolved.append((kind, ast.unparse(node)))
+
+    def _is_args_name(self, node):
+        return isinstance(node, ast.Name) and node.id == self.args_name
+
+    def _is_alias_name(self, node):
+        return isinstance(node, ast.Name) and node.id in self.aliases
+
+    def _is_vars_call(self, node):
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == 'vars'
+                and len(node.args) == 1
+                and not node.keywords
+                and self._is_args_name(node.args[0]))
+
+    def _is_args_dict(self, node):
+        return (isinstance(node, ast.Attribute)
+                and node.attr == '__dict__'
+                and self._is_args_name(node.value))
+
+    def visit_Attribute(self, node):
+        if isinstance(node.value, ast.Name) and isinstance(node.ctx, ast.Load):
+            if self._is_args_name(node.value):
+                if node.attr == '__dict__':
+                    self._record_unresolved('namespace attribute', node)
+                else:
+                    self._record_read(node.attr, node)
+                return
+            if self._is_alias_name(node.value):
+                self._record_unresolved('namespace alias access', node)
+                return
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        if (isinstance(node.func, ast.Name)
+                and node.func.id == 'getattr'
+                and len(node.args) >= 2
+                and self._is_args_name(node.args[0])):
+            attribute = self._constant_name(node.args[1])
+            if attribute is None:
+                self._record_unresolved('dynamic getattr', node)
+            else:
+                self._record_read(attribute, node)
+            return
+        if (isinstance(node.func, ast.Name)
+                and node.func.id == 'vars'
+                and len(node.args) == 1
+                and self._is_args_name(node.args[0])):
+            self._record_unresolved('namespace passed to vars', node)
+            return
+        values = list(node.args) + [keyword.value for keyword in node.keywords]
+        values = [value.value if isinstance(value, ast.Starred) else value
+                  for value in values]
+        if any(self._is_args_name(value) for value in values):
+            self._record_unresolved('namespace passed to another function', node)
+        if any(self._is_alias_name(value) for value in values):
+            self._record_unresolved('namespace alias passed to another function', node)
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node):
+        if self._is_vars_call(node.value):
+            attribute = self._constant_name(node.slice)
+            if attribute is None:
+                self._record_unresolved('dynamic namespace dict access', node)
+            else:
+                self._record_read(attribute, node)
+            return
+        if self._is_args_dict(node.value):
+            attribute = self._constant_name(node.slice)
+            if attribute is None:
+                self._record_unresolved('dynamic namespace dict access', node)
+            else:
+                self._record_read(attribute, node)
+            return
+        if self._is_alias_name(node.value):
+            self._record_unresolved('namespace alias access', node)
+        self.generic_visit(node)
+
+
+def _audit_arg_namespace(function, args_name):
+    audit = _ArgNamespaceAudit(function, args_name)
+    audit.visit(function)
+    return audit.reads, audit.unresolved
+
+
+def _handler_arg_violations(function, args_name, allowed, command,
+                            handler_name, exception_keys):
+    reads, unresolved = _audit_arg_namespace(function, args_name)
+    violations = []
+    for attribute, constructs in sorted(reads.items()):
+        if attribute not in allowed:
+            violations.extend(sorted(constructs))
+    for construct_kind, construct in unresolved:
+        if (command, handler_name, construct_kind) not in exception_keys:
+            violations.append(f'{construct_kind}: {construct}')
+    return reads, violations
+
+
 os.environ['TOKEN'] = ''
 os.environ['DAEDALUS_TOKEN'] = TOK
 
@@ -85,6 +255,105 @@ def test_help_exits_zero(tmp):
     r = run_cli(['--help'], cli_env())
     assert r.returncode == 0, (r.returncode, r.stderr)
     assert 'usage' in r.stdout.lower()
+
+
+def test_cli_handlers_read_only_declared_args(tmp):
+    """Every dispatched handler reads only its parser's declared arguments."""
+    del tmp
+    from daedalus_cli.cli import DISPATCH
+    from daedalus_cli.parser import build_parser
+
+    parser = build_parser()
+    subparsers = next(
+        action for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction))
+    global_dests = _namespace_dests(parser._actions)
+    violations = []
+    handler_details = {}
+    exception_keys = set()
+    exception_errors = []
+    for entry in UNRESOLVABLE_ARG_READ_EXCEPTIONS:
+        if len(entry) != 4:
+            exception_errors.append(f'invalid unresolved-read exception: {entry}')
+            continue
+        command, handler_name, construct_kind, reason = entry
+        if not isinstance(reason, str) or not reason.strip():
+            exception_errors.append(
+                f'unresolved-read exception has no reason: {entry}')
+            continue
+        if (command not in DISPATCH
+                or DISPATCH[command].__qualname__ != handler_name):
+            exception_errors.append(
+                f'unresolved-read exception refers to no handler: {entry}')
+            continue
+        exception_keys.add((command, handler_name, construct_kind))
+
+    for name, handler in DISPATCH.items():
+        subparser = subparsers.choices[name]
+        allowed = global_dests | _namespace_dests(subparser._actions)
+        source = textwrap.dedent(inspect.getsource(handler))
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+        positional = function.args.posonlyargs + function.args.args
+        args_name = positional[0].arg
+        reads, handler_violations = _handler_arg_violations(
+            function, args_name, allowed, name, handler.__qualname__,
+            exception_keys)
+        handler_details[name] = {
+            'handler': handler.__qualname__,
+            'allowed': allowed,
+            'reads': reads,
+        }
+        violations.extend(
+            (name, construct, handler.__qualname__)
+            for construct in handler_violations)
+
+    assert not exception_errors, '\n'.join(exception_errors)
+
+    stale_exceptions = []
+    for entry in KNOWN_INDIRECT_ARG_READS:
+        if len(entry) != 3:
+            stale_exceptions.append(f'invalid known indirect read: {entry}')
+            continue
+        command, attribute, handler_name = entry
+        detail = handler_details.get(command)
+        if detail is None or detail['handler'] != handler_name:
+            stale_exceptions.append(
+                f'known indirect read refers to no dispatched handler: {entry}')
+            continue
+        if attribute not in detail['reads']:
+            stale_exceptions.append(
+                f'known indirect read is absent from handler source: {entry}')
+        if attribute not in detail['allowed']:
+            stale_exceptions.append(
+                f'known indirect read is not declared by parser: {entry}')
+    assert not stale_exceptions, '\n'.join(stale_exceptions)
+
+    details = '\n'.join(
+        f'{name}: {construct} read by {handler}'
+        for name, construct, handler in violations)
+    assert not violations, f'undeclared CLI argument reads:\n{details}'
+
+
+def test_cli_audit_reports_suppressed_destination(tmp):
+    """A handler read of argparse's absent ``version`` is reported."""
+    del tmp
+    from daedalus_cli.parser import build_parser
+
+    parser = build_parser()
+    subparsers = next(
+        action for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction))
+    allowed = _namespace_dests(parser._actions) | _namespace_dests(
+        subparsers.choices['tabs']._actions)
+    function = ast.parse(
+        'def fake(args):\n'
+        '    args.version\n').body[0]
+    _, violations = _handler_arg_violations(
+        function, 'args', allowed, 'tabs', 'fake', set())
+    assert violations == ['args.version'], violations
 
 
 def test_result_printer_labels_eval_world_as_a_channel(tmp):
