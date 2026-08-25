@@ -224,7 +224,8 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
     result = subprocess.run(
         [bash, '-c', _run_block(_workflow(), block_name)], cwd=workdir,
         env=env, capture_output=True, text=True, timeout=60)
-    return result, json.loads(state_path.read_text(encoding='utf-8')), calls, output
+    return (result, json.loads(state_path.read_text(encoding='utf-8')), calls,
+            output)
 
 
 def _writes(calls):
@@ -270,8 +271,8 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
         head_sha='B', current_head='B')
     assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert len(_writes(calls)) == 1, calls.read_text(encoding='utf-8')
-    assert 'Patch coverage was not measured for commit B.' in state[0]['body'], \
-        state
+    assert 'Patch coverage was not measured for commit B.' in \
+        state[0]['body'], state
     assert '**100.0%**' not in state[0]['body'], state
 
 
@@ -290,7 +291,8 @@ def test_a_rerun_of_a_cannot_overwrite_newer_b(tmp):
     assert len(_writes(calls)) == 0, calls.read_text(encoding='utf-8')
 
 
-def test_commenter_runs_completed_non_cancelled_runs_and_orders_stale_gate(tmp):
+def test_commenter_runs_completed_non_cancelled_runs_and_orders_stale_gate(
+        tmp):
     """Failure runs can mark stale, while older heads never reach posting."""
     del tmp
     workflow = _workflow()
