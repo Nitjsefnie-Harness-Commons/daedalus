@@ -178,6 +178,7 @@
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
 !/tests/test_eval_relay.py
+!/tests/test_examples_parse.py
 !/tests/test_extension_boundary.py
 !/tests/test_extension_policy.py
 !/tests/test_file_sizes.py
