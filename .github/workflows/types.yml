@@ -17,8 +17,11 @@ on:
     # this a second time against the same SHA, and a branch with no pull
     # request open is not a tree anyone is reviewing.
     branches: [main]
-    # The gate runs on the push to main, and release.yml later finds that run
-    # by the shared commit SHA; a documentation-only commit must still run it.
+    # No paths filter here: at least one gate must run on every commit
+    # that can be tagged, and these six are the unfiltered set.
+    # release.yml names no workflow of its own — it waits on the runs
+    # for the tagged SHA and fails when the count of non-release runs
+    # is zero; speed, version and actionlint keep their path filters.
   pull_request:
   workflow_dispatch:
 
