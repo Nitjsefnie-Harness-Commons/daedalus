@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Check the syntax of every JavaScript example shipped by the repository."""
-import re
 import shutil
 import subprocess
 import sys
@@ -22,17 +21,12 @@ EXPECTED_FAILURES = {
 
 
 def _tracked_examples():
-    """Return the tracked JavaScript examples, without a hand-maintained list."""
+    """Return the tracked JavaScript examples from Git, not a fixed list."""
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', 'examples/*.js'],
         capture_output=True, check=True, text=True, timeout=30)
     return [line for line in listed.stdout.splitlines() if line]
 
-
-# A literal 'import '/'export ' prefix misses spellings like `export{};`,
-# so the guard matches the keyword as a complete token instead: a word end
-# that `$` and `_` cannot fake, since \b alone treats them inconsistently.
-_MODULE_SYNTAX = re.compile(r'^\s*(?:import|export)\b(?![$\w])', re.MULTILINE)
 
 # Compiling with the AsyncFunction constructor checks the source as an
 # independent function body. Textual wrapping was unsound: the source's own
@@ -50,14 +44,12 @@ try {
 """
 
 
-def _has_module_syntax(source):
-    """Whether a source declares module imports or exports, by token shape."""
-    return _MODULE_SYNTAX.search(source) is not None
-
-
 def _async_body_result(node, target, tmp):
     """Compile the file at `target` as an async function body, never run it."""
-    helper = Path(tmp) / 'parse_async_body.js'
+    # The .cjs extension is load-bearing: a .js file's module system follows
+    # the nearest ancestor package.json, and {"type":"module"} there would
+    # make require() throw before any example is compiled.
+    helper = Path(tmp) / 'parse_async_body.cjs'
     helper.write_text(_ASYNC_BODY_HELPER, encoding='utf-8')
     return subprocess.run(
         [node, str(helper), str(target)], cwd=ROOT, capture_output=True,
@@ -70,21 +62,17 @@ def _assert_parses_as_async_body(node, filename, tmp):
     if source.startswith('#!'):
         raise AssertionError(
             f'{filename}: cannot check an example with a shebang as a body')
-    if _has_module_syntax(source):
-        raise AssertionError(
-            f'{filename}: cannot check an example with module syntax as a '
-            'body')
 
     # The expected-failure example is a classic script body, so its top-level
-    # await and return become valid inside an async function. A shebang or
-    # import/export is rejected above instead of silently skipping the check.
+    # await and return become valid inside an async function. A shebang is
+    # rejected above; static module syntax is rejected by the compile itself.
     checked = _async_body_result(node, ROOT / filename, tmp)
     assert checked.returncode == 0, (
         f'{filename}: async-body parse failed:\n{checked.stderr}')
 
 
 def test_tracked_examples_have_expected_node_syntax(tmp):
-    """Every example parses unless its explicit exception says why it cannot."""
+    """Every example parses unless an explicit exception says it cannot."""
     node = shutil.which('node')
     if not node:
         _util.skip('node is required to syntax-check JavaScript examples')
@@ -113,15 +101,20 @@ def test_tracked_examples_have_expected_node_syntax(tmp):
                 f'{filename}: node --check failed:\n{checked.stderr}')
 
 
-def test_module_syntax_guard_matches_token_shape(tmp):
-    """The guard fires on any import/export token, not one literal spelling."""
-    for source in ('export{};', 'export {a};', 'export default x;',
-                   "import{x}from'y';", "import 'y';",
-                   "import*as ns from'y';"):
-        assert _has_module_syntax(source), source
-    for source in ('importantThing = 1;', 'exports.foo = 1;',
-                   'exported = 2;', 'importer();'):
-        assert not _has_module_syntax(source), source
+def test_async_body_parse_is_the_module_syntax_oracle(tmp):
+    """The body parse rejects export{}; but accepts import('x')."""
+    node = shutil.which('node')
+    if not node:
+        _util.skip('node is required to syntax-check JavaScript examples')
+    module = Path(tmp) / 'module.js'
+    module.write_text('export{};\n', encoding='utf-8')
+    # A static export is not valid in a function body; the compile rejects it.
+    assert _async_body_result(node, module, tmp).returncode != 0
+    dynamic = Path(tmp) / 'dynamic.js'
+    dynamic.write_text("const loaded = import('x');\nreturn loaded;\n",
+                       encoding='utf-8')
+    # Dynamic import is legal in an async body; the deleted regex rejected it.
+    assert _async_body_result(node, dynamic, tmp).returncode == 0
 
 
 def test_async_body_check_catches_delimiter_crossing(tmp):
@@ -129,14 +122,13 @@ def test_async_body_check_catches_delimiter_crossing(tmp):
     node = shutil.which('node')
     if not node:
         _util.skip('node is required to syntax-check JavaScript examples')
-    source = (ROOT / 'examples/scrape-discord-messages.js').read_text(
-        encoding='utf-8')
-    unmodified = Path(tmp) / 'unmodified.js'
-    unmodified.write_text(source, encoding='utf-8')
-    assert _async_body_result(node, unmodified, tmp).returncode == 0
+    body = 'const value = await Promise.resolve(1);\nreturn value;\n'
+    control = Path(tmp) / 'control.js'
+    control.write_text(body, encoding='utf-8')
+    assert _async_body_result(node, control, tmp).returncode == 0
     mutated = Path(tmp) / 'mutated.js'
     mutated.write_text(
-        source + '\n}\nasync function maskedSyntaxError() {\n',
+        body + '}\nasync function maskedSyntaxError() {\n',
         encoding='utf-8')
     # Textual wrapping let these delimiters consume the wrapper's own braces
     # and pass; an independently compiled body must reject them.
