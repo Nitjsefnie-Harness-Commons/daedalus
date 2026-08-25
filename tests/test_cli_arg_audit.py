@@ -1,44 +1,43 @@
 #!/usr/bin/env python3
-"""Static proof that CLI handlers name only parser-declared attributes.
+"""Static proof that CLI handlers read only parser-declared attributes.
 
 ``test_cli_handlers_read_only_declared_args`` scans every dispatched handler;
-the focused controls make each whitelist rule and resolver boundary executable.
+the focused controls make each classifier rule and resolver boundary
+executable.
 
-Parser destinations have two properties. DECLARED includes every action
-destination, including suppressed-default actions, plus every ``set_defaults``
-key. GUARANTEED PRESENT includes destinations contributed by a non-suppressed
-action plus each ``set_defaults`` key. Help/version actions and an action whose
-destination is ``argparse.SUPPRESS`` contribute to neither.
+DECLARED contains each non-help/version action whose destination is not
+``argparse.SUPPRESS``, plus every ``set_defaults`` key. GUARANTEED PRESENT
+contains a destination when an action has a non-suppressed default, is required
+on every successful parse, or is a positional ``REMAINDER``; parser defaults
+are guaranteed too. Same-destination actions combine those properties.
 
-Direct attributes, exact ``vars(args)``/``args.__dict__`` subscripts, and
-constant-name ``getattr`` without a default require GUARANTEED PRESENT.
-``hasattr``, defaulted ``getattr``, and constant-key mapping ``.get`` require
-only DECLARED. An undeclared name is therefore refused even when its read is
-runtime-safe. Every other mention of the parameter is a namespace escape, as
-are named ``locals``, ``globals``, ``eval``, ``exec`` and no-argument ``vars``.
+Direct attributes, exact ``vars(args)``/``args.__dict__`` subscripts, and bare
+``getattr`` without a default require GUARANTEED. ``hasattr``, defaulted
+``getattr``, and constant-key mapping ``.get`` require DECLARED. These calls
+receive builtin semantics only by identity: no enclosing callable or
+comprehension may bind the bare name, and a module global must be absent or the
+exact builtin. Attribute calls require the exact ``builtins`` module. Defaults,
+decorators, and annotations use outer scope; every other live use of the
+handler parameter escapes. Bare reflective names are refused by spelling even
+when shadowed (fail-closed); exact ``builtins`` forms are also refused.
 
-Frame routes are decided through in-function imports, unshadowed handler
-globals, module attributes and module ``__dict__`, exact-class MRO attributes,
-signed-integer list/tuple subscripts, constant-key dict subscripts and
-``.get(key[, default])``, and constant-name ``getattr``. Single-argument
-``vars`` is resolved on exact modules and classes; a class yields a mapping
-proxy, whose downstream reads remain outside the exact-dict rules.
-Exact ``staticmethod`` and ``classmethod`` wrappers are unwrapped. Unresolved
-canonical ``_getframe`` and ``currentframe`` spellings are refused.
+Frame routes resolve through supplied imports, unshadowed globals, exact
+module/class attributes, module ``__dict__``, exact list/tuple subscripts and
+slices, constant-key dict reads/``.get``, and bare constant-name ``getattr``.
+One-argument ``vars`` resolves exact modules/classes; class mapping-proxy reads
+stay outside. Exact static/class methods unwrap; other descriptors stay raw.
+Canonical unresolved ``_getframe``/``currentframe`` spellings are refused.
 
-Unary ``+``/``-`` evaluation recurses through arbitrary stacks. Constant
-slices recursively resolve bounds and preserve omissions; exact list/tuple
-results can be sliced again.
+An integer index is an ``isinstance(value, int)`` value, including ``bool``.
+Unary ``+``/``-`` executes through arbitrary stacks, so ``+True`` is integer
+``1``. Slice bounds use the same definition and exact sliced sequences remain
+eligible for another subscript.
 
-Resolution never invokes handler-defined code or descriptor binding. A class
-descriptor other than exact ``staticmethod`` or ``classmethod`` stays outside,
-as do ``functools.partial``, exception traceback frames, other container
-types, the iterator protocol, comprehension results, instance attributes,
-``operator.attrgetter``, runtime-built names, mapping-proxy reads, and computed
-or call-produced subscript components. Any route whose frame is
-acquired in another function is categorically outside because only the
-handler's own body is inspected. Every named outside family has a known-gap
-control below.
+Resolution never runs handler code. Non-exact descriptors, ``partial``,
+traceback frames, other containers, iterators, comprehension results, instance
+attributes, ``attrgetter``, runtime names, class mapping-proxy reads, binary or
+call-produced indices, and frame acquisition in another function stay outside.
+Every named outside family has a corresponding known-gap control below.
 """
 import argparse
 import ast
