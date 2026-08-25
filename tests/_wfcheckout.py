@@ -616,15 +616,14 @@ class _WorkflowReader:
                 if explicit_key == 'jobs':
                     self._refuse('explicit key', index, 'jobs mapping')
                 continue
-            if not body.startswith(('jobs', "'jobs'", '"jobs"')):
-                continue
-            if not re.match(r"(?:jobs|'jobs'|\"jobs\")\s*:", body):
+            key, rest = self._mapping_parts(index, 'workflow', body)
+            if key != 'jobs':
                 continue
             if self.jobs_line is not None:
                 self._refuse('second top-level jobs mapping', index,
                              'workflow')
             self.jobs_line = index
-            self.jobs_rest = body[body.index(':') + 1:].strip()
+            self.jobs_rest = rest
 
     def read(self):
         return self._find_jobs()
