@@ -272,9 +272,9 @@ def _sequence_entry(
             if ' #' in value:
                 raise YAMLReadError(
                     'step name has an unsupported inline comment')
-            if value.startswith('&'):
+            if value.startswith(('&', '*')):
                 raise YAMLReadError(
-                    'YAML anchors in step names are unsupported')
+                    'YAML anchors and aliases in step names are unsupported')
             if value.startswith('!'):
                 raise YAMLReadError(
                     'YAML tags in step names are unsupported')
