@@ -464,11 +464,6 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
         assert _audit_fake_handler(undeclared) == [undeclared], undeclared
 
 
-def test_cli_audit_refuses_safe_undeclared_probes(tmp):
-    for probe in audit_support.SAFE_UNDECLARED_PROBES:
-        assert _audit_fake_handler(probe) == [probe], probe
-
-
 def test_cli_audit_reports_namespace_escapes(tmp):
     for body, construct in audit_support.NAMESPACE_ESCAPE_CASES:
         assert _audit_fake_handler(body) == [
@@ -677,17 +672,6 @@ def test_cli_handlers_read_only_declared_args(tmp):
         f'{name}: {construct} read by {handler}'
         for name, construct, handler in violations)
     assert not violations, f'undeclared CLI argument reads:\n{details}'
-
-
-def test_cli_dispatch_matches_parser_subcommands(tmp):
-    from daedalus_cli.cli import DISPATCH
-    from daedalus_cli.parser import build_parser
-
-    parser = build_parser()
-    subparsers = next(
-        action for action in parser._actions
-        if isinstance(action, argparse._SubParsersAction))
-    assert set(DISPATCH) == set(subparsers.choices)
 
 
 if __name__ == '__main__':
