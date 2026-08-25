@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _yamlread import job_scalar  # noqa: E402
+from _yamlread import job_mapping, job_scalar  # noqa: E402
 
 
 def test_a_decoy_job_cannot_supply_the_speed_environment(tmp):
@@ -50,6 +50,23 @@ def test_job_scalar_stays_inside_the_jobs_mapping(tmp):
         '  speed:\n'
         '    runs-on: ubuntu-latest\n')
     assert job_scalar(workflow, 'speed', 'environment') is None
+
+
+def test_job_mapping_decodes_keys_and_values_like_yaml(tmp):
+    """Plain spacing and quoted escapes produce their decoded strings."""
+    del tmp
+    source = (
+        'jobs:\n'
+        '  sample:\n'
+        '    "permis\\x73ions":\n'
+        '      contents : "r\\x65ad"\n'
+        "      'actions': 'read'\n"
+        '      "pull\\x2drequests": write\n')
+    assert job_mapping(source, 'sample', 'permissions') == {
+        'contents': 'read',
+        'actions': 'read',
+        'pull-requests': 'write',
+    }
 
 
 if __name__ == '__main__':

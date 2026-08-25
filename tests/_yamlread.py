@@ -24,6 +24,13 @@ class _Entry:
 
 _BLOCK_HEADER = re.compile(r'^(?P<style>[>|])(?P<first>[1-9]?)'
                            r'(?P<chomp>[+-]?)(?P<second>[1-9]?)$')
+_PLAIN_INLINE = re.compile(r'^[-A-Za-z0-9_.@/+:$()]+$')
+_DOUBLE_ESCAPES = {
+    '0': '\0', 'a': '\a', 'b': '\b', 't': '\t', 'n': '\n',
+    'v': '\v', 'f': '\f', 'r': '\r', 'e': '\x1b', ' ': ' ',
+    '"': '"', '/': '/', '\\': '\\', 'N': '\x85', '_': '\xa0',
+    'L': '\u2028', 'P': '\u2029',
+}
 
 
 def job_scalar(workflow, job, key):
@@ -48,6 +55,39 @@ def job_scalar(workflow, job, key):
     job_body = _section(lines, job_index, job_indent)
     _require_mapping_body(lines, *job_body, job_indent, f'job {job!r}')
     return _scalar_entry(lines, *job_body, job_indent, key)
+
+
+def job_mapping(workflow, job, key):
+    """Return one decoded scalar mapping on the named top-level job."""
+    lines = _lines(workflow)
+    jobs_entry = _decoded_mapping_entry(
+        lines, 0, len(lines), -1, 'jobs')
+    if jobs_entry is None:
+        return None
+    if jobs_entry.rest.strip(' '):
+        raise YAMLReadError('jobs is not a mapping')
+    jobs_body = _section(lines, jobs_entry.index, jobs_entry.indent)
+    _require_mapping_body(
+        lines, *jobs_body, jobs_entry.indent, 'jobs')
+    job_entry = _decoded_mapping_entry(
+        lines, *jobs_body, jobs_entry.indent, job)
+    if job_entry is None:
+        return None
+    if job_entry.rest.strip(' '):
+        raise YAMLReadError(f'job {job!r} is not a mapping')
+    job_body = _section(lines, job_entry.index, job_entry.indent)
+    _require_mapping_body(
+        lines, *job_body, job_entry.indent, f'job {job!r}')
+    mapping_entry = _decoded_mapping_entry(
+        lines, *job_body, job_entry.indent, key)
+    if mapping_entry is None:
+        return None
+    if mapping_entry.rest.strip(' '):
+        raise YAMLReadError(f'{key} is not a mapping')
+    mapping_body = _section(
+        lines, mapping_entry.index, mapping_entry.indent)
+    return _scalar_mapping(
+        lines, *mapping_body, mapping_entry.indent, key)
 
 
 def step_scalar(workflow, job, step, key):
@@ -217,6 +257,200 @@ def _mapping_entry(
     if len(matches) > 1:
         raise YAMLReadError(f'duplicate mapping key: {name}')
     return matches[0] if matches else None
+
+
+def _decoded_mapping_entry(
+        lines, start, end, parent_indent, name) -> _Entry | None:
+    """Find one child mapping field by its decoded scalar key."""
+    child_indent = None
+    matches = []
+    for index in range(start, end):
+        line = lines[index]
+        if not _meaningful(line):
+            continue
+        indent = _indent(line)
+        if indent <= parent_indent:
+            continue
+        if child_indent is None:
+            child_indent = indent
+        if indent != child_indent:
+            continue
+        text, _ended = line
+        field = text[indent:]
+        if field.startswith('- '):
+            raise YAMLReadError('mapping body contains a sequence item')
+        raw_key, rest = _split_mapping_field(field, 'mapping')
+        key = _decode_inline_scalar(raw_key, 'mapping key')
+        if key == name:
+            matches.append(_Entry(index, indent, rest))
+    if len(matches) > 1:
+        raise YAMLReadError(f'duplicate mapping key: {name}')
+    return matches[0] if matches else None
+
+
+def _split_mapping_field(text, owner):
+    """Split one inline mapping field without mistaking quoted colons."""
+    if '\t' in text:
+        raise YAMLReadError(f'{owner} contains an unsupported tab')
+    quote = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote == "'":
+            if char == "'" and text[index:index + 2] == "''":
+                index += 2
+                continue
+            if char == "'":
+                quote = None
+        elif quote == '"':
+            if char == '\\':
+                index += 2
+                continue
+            if char == '"':
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == ':' and (
+                index + 1 == len(text) or text[index + 1] == ' '):
+            key = text[:index].strip(' ')
+            if not key:
+                raise YAMLReadError(f'{owner} has an empty mapping key')
+            return key, text[index + 1:]
+        index += 1
+    raise YAMLReadError(f'{owner} has an unsupported mapping field')
+
+
+def _strip_inline_comment(value):
+    """Remove one YAML comment outside quoted scalar content."""
+    quote = None
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote == "'":
+            if char == "'" and value[index:index + 2] == "''":
+                index += 2
+                continue
+            if char == "'":
+                quote = None
+        elif quote == '"':
+            if char == '\\':
+                index += 2
+                continue
+            if char == '"':
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == '#' and (
+                index == 0 or value[index - 1] == ' '):
+            return value[:index].rstrip(' ')
+        index += 1
+    return value.rstrip(' ')
+
+
+def _decode_single_quoted(value, owner):
+    """Decode one complete single-quoted YAML scalar."""
+    if len(value) < 2 or not value.endswith("'"):
+        raise YAMLReadError(f'{owner} has an incomplete quoted scalar')
+    body = value[1:-1]
+    decoded = []
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char == "'":
+            if body[index:index + 2] != "''":
+                raise YAMLReadError(
+                    f'{owner} has an unsupported quoted scalar')
+            decoded.append("'")
+            index += 2
+            continue
+        if ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff:
+            raise YAMLReadError(f'{owner} contains an unsupported character')
+        decoded.append(char)
+        index += 1
+    return ''.join(decoded)
+
+
+def _decode_double_quoted(value, owner):
+    """Decode one complete single-line double-quoted YAML scalar."""
+    if len(value) < 2 or not value.endswith('"'):
+        raise YAMLReadError(f'{owner} has an incomplete quoted scalar')
+    body = value[1:-1]
+    decoded = []
+    index = 0
+    widths = {'x': 2, 'u': 4, 'U': 8}
+    while index < len(body):
+        char = body[index]
+        if char == '"':
+            raise YAMLReadError(f'{owner} has an unsupported quoted scalar')
+        if char != '\\':
+            if ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff:
+                raise YAMLReadError(
+                    f'{owner} contains an unsupported character')
+            decoded.append(char)
+            index += 1
+            continue
+        if index + 1 == len(body):
+            raise YAMLReadError(f'{owner} has an incomplete YAML escape')
+        escaped = body[index + 1]
+        if escaped in _DOUBLE_ESCAPES:
+            decoded.append(_DOUBLE_ESCAPES[escaped])
+            index += 2
+            continue
+        width = widths.get(escaped)
+        digits = body[index + 2:index + 2 + (width or 0)]
+        if (width is None or len(digits) != width
+                or not all(char in '0123456789abcdefABCDEF'
+                           for char in digits)):
+            raise YAMLReadError(f'{owner} has an unsupported YAML escape')
+        codepoint = int(digits, 16)
+        if codepoint > 0x10ffff or 0xd800 <= codepoint <= 0xdfff:
+            raise YAMLReadError(f'{owner} has an invalid Unicode escape')
+        decoded.append(chr(codepoint))
+        index += 2 + width
+    return ''.join(decoded)
+
+
+def _decode_inline_scalar(value, owner):
+    """Decode the bounded one-line scalar subset used by policy maps."""
+    value = _strip_inline_comment(value.strip(' '))
+    if not value:
+        raise YAMLReadError(f'{owner} has no scalar value')
+    if value.startswith("'"):
+        return _decode_single_quoted(value, owner)
+    if value.startswith('"'):
+        return _decode_double_quoted(value, owner)
+    if not _PLAIN_INLINE.fullmatch(value):
+        raise YAMLReadError(f'{owner} has an unsupported plain scalar')
+    return value
+
+
+def _scalar_mapping(lines, start, end, parent_indent, owner):
+    """Decode a nonempty mapping whose keys and values are inline scalars."""
+    first = _first_child(lines, start, end, parent_indent)
+    if first is None:
+        raise YAMLReadError(f'{owner} is not a scalar mapping')
+    child_indent = _indent(lines[first])
+    values = {}
+    for index in range(start, end):
+        line = lines[index]
+        if not _meaningful(line):
+            continue
+        indent = _indent(line)
+        if indent <= parent_indent:
+            continue
+        if indent != child_indent:
+            raise YAMLReadError(f'{owner} has a nested mapping value')
+        text, _ended = line
+        field = text[indent:]
+        if field.startswith('- '):
+            raise YAMLReadError(f'{owner} is not a mapping')
+        raw_key, raw_value = _split_mapping_field(field, owner)
+        key = _decode_inline_scalar(raw_key, f'{owner} key')
+        if key in values:
+            raise YAMLReadError(f'duplicate mapping key: {key}')
+        values[key] = _decode_inline_scalar(
+            raw_value, f'{owner} value for {key!r}')
+    return values
 
 
 def _sequence_entry(
