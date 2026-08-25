@@ -32,11 +32,6 @@ KNOWN_INDIRECT_ARG_READS = (
     ('tabs', 'json', 'do_tabs'),
 )
 
-SAFE_UNDECLARED_PROBES = (
-    "getattr(args, 'undeclared_probe', None)",
-    "hasattr(args, 'undeclared_probe')",
-)
-
 SHADOWING_DEFAULT_CASES = (
     'def inner(args=args):\n    return args.undeclared_probe\ninner()',
     'f = lambda args=args: args.undeclared_probe\nf()',
