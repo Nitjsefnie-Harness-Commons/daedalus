@@ -78,6 +78,38 @@ def test_checkout_reader_decodes_supported_scalar_styles(tmp):
     ]
 
 
+def test_checkout_reader_keeps_block_scalar_comment_content(tmp):
+    """An indented hash line is scalar data, not a YAML comment."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: |-\n'
+        '            # ${{ steps.baseline.outputs.ref }}\n'
+        '                                                    safe\n')
+    assert _wfcheckout.checkout_refs(workflow) == [
+        ('build', '# ${{ steps.baseline.outputs.ref }}\n'
+                  '                                        safe')]
+
+
+def test_checkout_reader_ends_block_scalar_at_outdented_comment(tmp):
+    """An outdented YAML comment is not sliced into scalar content."""
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: |-\n'
+        '            safe\n'
+        '# ${{ steps.baseline.outputs.ref }}\n')
+    assert _wfcheckout.checkout_refs(workflow) == [('build', 'safe')]
+
+
 def test_checkout_reader_skips_unwalked_flow_values(tmp):
     """Flow syntax outside a checkout path is not inspected."""
     del tmp
