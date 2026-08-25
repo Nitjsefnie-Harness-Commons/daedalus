@@ -20,6 +20,38 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
+_VERSION_SITE_COUNT_WORDS = {
+    'one': 1,
+    'two': 2,
+    'three': 3,
+    'four': 4,
+    'five': 5,
+    'six': 6,
+    'seven': 7,
+    'eight': 8,
+    'nine': 9,
+    'ten': 10,
+    'eleven': 11,
+    'twelve': 12,
+}
+_VERSION_SITE_COUNT_COMMENT = re.compile(
+    r'^\s*# sends its report to stderr, so a tree whose '
+    r'(?P<word>[a-z]+) sites disagree\s*$', re.MULTILINE)
+
+
+def _version_workflow_site_count(workflow):
+    """Read the concrete site count from the version workflow comment."""
+    match = _VERSION_SITE_COUNT_COMMENT.search(workflow)
+    if match is None:
+        raise AssertionError('version workflow site-count comment not found')
+    word = match.group('word')
+    try:
+        return _VERSION_SITE_COUNT_WORDS[word]
+    except KeyError as exc:
+        raise AssertionError(
+            f'unrecognised version-site count word {word!r} in workflow comment') from exc
+
+
 def _copy_versioned_tree(dest):
     """Copy just the files check_versions.py reads, preserving layout."""
     checker = _util.load(ROOT / 'scripts' / 'check_versions.py', 'check_versions_ro')
@@ -238,6 +270,20 @@ def test_check_versions_prints_the_canonical_version_alone(tmp):
     assert r.stdout.strip() == expected, (r.stdout, expected)
     # The consistency report still runs; it just does not land on stdout.
     assert 'consistent across' in r.stderr, r.stderr
+
+
+def test_version_workflow_comment_counts_checker_sites(tmp):
+    """The workflow's concrete site count stays tied to ``SITES``."""
+    del tmp
+    checker = _util.load(ROOT / 'scripts' / 'check_versions.py',
+                         'check_versions_workflow_count')
+    workflow = (ROOT / '.github' / 'workflows' / 'version.yml').read_text(
+        encoding='utf-8')
+    count = _version_workflow_site_count(workflow)
+    expected = len(checker.SITES)
+    assert count == expected, (
+        f'version workflow says {count} sites, but '
+        f'scripts/check_versions.py lists {expected}')
 
 
 def test_the_version_gate_refuses_an_already_published_version(tmp):
