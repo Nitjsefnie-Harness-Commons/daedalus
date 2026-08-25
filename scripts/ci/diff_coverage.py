@@ -112,6 +112,9 @@ def added_lines(diff_text):
     in_hunk = False
     old_remaining = new_remaining = 0
     for line in diff_text.splitlines():
+        if line.startswith('Binary files '):
+            raise ValueError(
+                f'binary diff record is not measurable: {line}')
         # `--- ` counts as a file header only outside a hunk. Git renders a
         # REMOVED line whose content begins `-- ` as `--- ...`, and taking
         # that for a header clears the path and silently drops every later

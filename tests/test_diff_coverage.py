@@ -172,6 +172,93 @@ def _git(repo, *args):
                           capture_output=True, text=True, timeout=60)
 
 
+def _git_input(repo, value, *args):
+    """Run one git command whose standard input builds an object."""
+    return subprocess.run(
+        ('git', '-C', str(repo)) + args,
+        input=value, check=True, capture_output=True, text=True, timeout=60)
+
+
+def _source_tree(repo, source, attributes=None):
+    """Build a tree containing the real diff coverage module as a blob."""
+    source_blob = _git_input(
+        repo, source, 'hash-object', '-w', '--stdin').stdout.strip()
+    ci_tree = _git_input(
+        repo,
+        f'100644 blob {source_blob}\tdiff_coverage.py\n',
+        'mktree').stdout.strip()
+    scripts_tree = _git_input(
+        repo, f'040000 tree {ci_tree}\tci\n', 'mktree').stdout.strip()
+    entries = f'040000 tree {scripts_tree}\tscripts\n'
+    if attributes is not None:
+        attributes_blob = _git_input(
+            repo, attributes,
+            'hash-object', '-w', '--stdin').stdout.strip()
+        entries += f'100644 blob {attributes_blob}\t.gitattributes\n'
+    return _git_input(repo, entries, 'mktree').stdout.strip()
+
+
+def test_real_workflow_diffs_binary_attributed_python_as_text(tmp):
+    """The producer command overrides a pull-request binary attribute."""
+    workflow = (
+        ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+            encoding='utf-8')
+    marker = '      - name: Measure the coverage of this change\n'
+    _before, found, after = workflow.partition(marker)
+    assert found, 'real workflow has no diff coverage measurement step'
+    _before, found, after = after.partition('        run: |\n')
+    assert found, 'real measurement step has no shell block'
+    run_lines = [line[10:] for line in after.splitlines()
+                 if line.startswith('          ')]
+    start = next(index for index, line in enumerate(run_lines)
+                 if line.startswith('git diff '))
+    command_lines = [run_lines[start]]
+    while command_lines[-1].endswith('\\'):
+        command_lines.append(run_lines[start + len(command_lines)])
+    command = '\n'.join(command_lines)
+
+    repo = Path(tmp) / 'binary-attribute'
+    repo.mkdir()
+    _git(repo, 'init', '-q')
+    _git(repo, 'config', 'user.email', 'tests@example.invalid')
+    _git(repo, 'config', 'user.name', 'Tests')
+    module = _SCRIPT.read_text(encoding='utf-8')
+    added = 'BINARY_ATTRIBUTE_PROBE = 1\n'
+    attributes = 'scripts/ci/diff_coverage.py binary\n'
+    base_tree = _source_tree(repo, module)
+    base = _git_input(repo, 'base\n', 'commit-tree', base_tree).stdout.strip()
+    head_tree = _source_tree(repo, module + added, attributes)
+    head = _git_input(
+        repo, 'head\n', 'commit-tree', head_tree, '-p', base).stdout.strip()
+    _git(repo, 'update-ref', 'HEAD', head)
+    (repo / '.gitattributes').write_text(attributes, encoding='utf-8')
+
+    done = subprocess.run(
+        ['bash', '-c', command], cwd=repo,
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    patch = (repo / 'patch.diff').read_text(encoding='utf-8')
+    assert 'Binary files ' not in patch, patch
+    assert f'+{added}' in patch, patch
+    line = len(module.splitlines()) + 1
+    parsed = diff_coverage.added_lines(patch)
+    assert parsed.get('scripts/ci/diff_coverage.py') == {line}, parsed
+
+
+def test_a_binary_diff_record_is_refused(tmp):
+    """A binary record cannot silently erase a changed source path."""
+    del tmp
+    diff = (
+        'diff --git a/pkg/mod.py b/pkg/mod.py\n'
+        'Binary files a/pkg/mod.py and b/pkg/mod.py differ\n')
+    try:
+        diff_coverage.added_lines(diff)
+    except ValueError as error:
+        assert 'binary diff record' in str(error), str(error)
+    else:
+        raise AssertionError('binary diff record was silently ignored')
+
+
 def test_a_removed_line_of_dashes_keeps_the_rest_of_the_file(tmp):
     """Git renders a removed `-- ...` line as `--- ...`, not as a header.
 
