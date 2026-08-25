@@ -129,10 +129,10 @@ def test_typed_plain_scalar_pair_is_refused_and_is_yaml_unequal(tmp):
 def test_yaml_core_scalars_not_provably_strings_are_refused(tmp):
     """Refuse values whose type depends on the YAML version.
 
-    `n`, `0o52`, `1e3`, `1e1_0`, and `-.NaN` stay refused because YAML 1.1
-    and YAML 1.2 resolve each spelling differently (or YAML 1.2 cannot prove
-    it is a number). The reader refuses rather than guessing one type. The
-    other values below are non-strings in at least one of those schemas.
+    `n`, `0o52`, and `1e3` stay refused because YAML 1.1 and YAML 1.2
+    resolve each spelling differently (or YAML 1.2 cannot prove it is a
+    number). The reader refuses rather than guessing one type. The other
+    values below are non-strings in at least one of those schemas.
     Quoting is the escape hatch when a string is intended. This is a deliberate
     false-refusal-over-false-green trade: the policy gate compares values for
     equality and cannot safely compare an unknown type.
@@ -149,15 +149,13 @@ def test_yaml_core_scalars_not_provably_strings_are_refused(tmp):
         ('-07', 'YAML 1.1 octal; YAML 1.2 integer'),
         ('0x2a', 'YAML 1.1 and YAML 1.2 integer'),
         ('0o52', 'YAML 1.1 string; YAML 1.2 octal integer'),
-        ('0b1010', 'YAML 1.1 and YAML 1.2 integer'),
+        ('0b1010', 'YAML 1.1 binary integer; YAML 1.2 string'),
         ('1_000', 'YAML 1.1 integer; YAML 1.2 string'),
         ('.5', 'YAML 1.1 and YAML 1.2 float'),
         ('1.', 'YAML 1.1 and YAML 1.2 float'),
         ('1e3', 'YAML 1.1 string; YAML 1.2 float'),
-        ('1e1_0', 'YAML 1.1 float; YAML 1.2 string'),
         ('1.0e+3', 'YAML 1.1 and YAML 1.2 float'),
         ('.inf', 'YAML 1.1 and YAML 1.2 float'),
-        ('-.NaN', 'YAML 1.1 string; YAML 1.2 float'),
         ('1:20', 'YAML 1.1 sexagesimal integer; YAML 1.2 string'),
         ('2024-01-02', 'YAML 1.1 timestamp; YAML 1.2 string'),
         ('2024-01-02  03:04:05',
@@ -186,6 +184,8 @@ def test_string_scalar_controls_parse_in_both_events(tmp):
         ("['release']", ['release']),
         ('[.gitignore]', ['.gitignore']),
         ('[release-candidate]', ['release-candidate']),
+        ('["**/what\'s-new.md"]', ["**/what's-new.md"]),
+        ("['say \"hi\".md']", ['say "hi".md']),
         ("[main, 'release-candidate', .gitignore, '**/*.md']",
          ['main', 'release-candidate', '.gitignore', '**/*.md']),
     )
@@ -194,6 +194,24 @@ def test_string_scalar_controls_parse_in_both_events(tmp):
         for event in ('push', 'pull_request'):
             assert _workflow_path_filters(lines, f'{event}-controls.yml') == {
                 'paths-ignore': expected}
+
+
+def test_schema_stable_scalar_pairs_parse_as_equal_strings(tmp):
+    """Plain and quoted schema-stable scalars decode to the same string."""
+    del tmp
+    controls = (
+        ('1e1_0', "'1e1_0'", ['1e1_0']),
+        ('-.NaN', "'-.NaN'", ['-.NaN']),
+    )
+    for plain, quoted, expected in controls:
+        lines = {
+            'push': [f'    paths-ignore: [{plain}]'],
+            'pull_request': [f'    paths-ignore: [{quoted}]'],
+        }
+        for event in ('push', 'pull_request'):
+            assert _workflow_path_filters(
+                lines[event], f'{event}-stable.yml') == {
+                    'paths-ignore': expected}
 
 
 def test_a_leading_bom_is_a_stream_marker_only(tmp):
