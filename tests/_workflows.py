@@ -15,9 +15,10 @@ key is refused. Path values are either unquoted scalars that YAML's core
 schema resolves as strings, or single- or double-quoted scalars with no
 backslash and no embedded quote of either kind. Implicit booleans in every
 case (`true`, `false`, `yes`, `no`, `on`, `off`, `y`, and `n`), nulls (`null`,
-`~`, and empty), every core integer and float form (signs, underscores,
-bases, sexagesimals, `.inf`, and `.nan`), and timestamps are refused, as are
-tags, anchors, aliases, block scalars, continuations, flow mappings, tabs,
+`~`, and empty plain scalars), every core integer and float form (signs,
+underscores, bases, sexagesimals, `.inf`, and `.nan`), and timestamps are
+refused, as are tags, anchors, aliases, block scalars, continuations, flow
+mappings, tabs,
 duplicates, and non-empty inline trigger values. Empty trigger values (`{}`,
 `null`, and `~`) remain accepted as event declarations. Correct or refusing,
 never plausible: a construct this reader does not parse raises rather than
