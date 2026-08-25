@@ -400,8 +400,9 @@ def _audit_real_tabs_handler(handler_module):
     handler = handler_module.do_tabs
     tree = ast.parse(handler_module.__source__)
     function = next(
-        node for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == 'do_tabs')
     args_name = (function.args.posonlyargs + function.args.args)[0].arg
     _, violations = _handler_arg_violations(
         function, args_name, allowed, handler.__globals__)
@@ -418,10 +419,9 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
     sys.argv = ['daedalus', 'tabs']
     try:
         cli.main()
-    except (AttributeError, TypeError) as error:
-        if isinstance(error, AttributeError):
-            assert str(error) == \
-                "'Namespace' object has no attribute 'undeclared_probe'", error
+    except AttributeError as error:
+        assert str(error) == \
+            "'Namespace' object has no attribute 'undeclared_probe'", error
     else:
         assert False, 'real dispatch did not read undeclared_probe'
     finally:
@@ -557,6 +557,7 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
         ('helper(sys._getframe)', 'sys._getframe'),
         ('helper(inspect.currentframe)', 'inspect.currentframe'),
         ('_ = _getframe()', '_getframe()'),
+        ('_ = currentframe()', 'currentframe()'),
     ]
     for body, construct in cases:
         assert _audit_fake_handler(body) == [
@@ -651,9 +652,6 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
         ('class FrameRoutes:\n    active = staticmethod(sys._getframe)',
          "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
          'FrameRoutes.active()'),
-        ('class FrameRoutes:\n    active = classmethod(sys._getframe)',
-         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
-         'FrameRoutes.active()'),
         ('', "_ = sys.__dict__['_getframe']()"
          ".f_locals['args'].undeclared_probe", "sys.__dict__['_getframe']()"),
         ('', "_ = sys.__dict__.get('_getframe')()"
@@ -674,19 +672,98 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
         finally:
             sys.modules.pop(handler_module.__dict__['__name__'], None)
 
-    # Documented gaps, not oversights: neither route is resolved.
+    resolver_only_cases = [
+        ('exact classmethod route (resolver only)',
+         'class FrameRoutes:\n'
+         '    active = classmethod(sys._getframe)',
+         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe",
+         'FrameRoutes.active()'),
+        ('unresolved currentframe spelling (resolver only)', '',
+         "_ = currentframe().f_locals['args'].undeclared_probe",
+         'currentframe()'),
+    ]
+    for index, (case_name, module_prelude, body, construct) in enumerate(
+            resolver_only_cases):
+        handler_module = _mutated_cli_tabs(
+            f'resolver_only_cli_{index}', module_prelude, body)
+        try:
+            violations = _audit_real_tabs_handler(handler_module)
+            assert any(construct in violation for violation in violations), \
+                (case_name, violations)
+        finally:
+            sys.modules.pop(handler_module.__dict__['__name__'], None)
+
+    # Documented gaps, not oversights: these routes stay unresolved.
     gaps = [
-        ('FRAME_ROUTES = [sys._getframe]',
+        ('comprehension result',
+         'FRAME_ROUTES = [sys._getframe]',
          "_ = [route for route in FRAME_ROUTES][0]()"
          ".f_locals['args'].undeclared_probe"),
-        ('class FrameRoutes:\n    active = sys._getframe',
+        ('instance attribute',
+         'class FrameRoutes:\n    active = sys._getframe',
          "_ = FrameRoutes().active().f_locals['args'].undeclared_probe"),
+        ('custom descriptor class attribute',
+         'class RouteDescriptor:\n'
+         '    def __get__(self, obj, objtype=None):\n'
+         '        return sys._getframe\n'
+         'class FrameRoutes:\n'
+         '    active = RouteDescriptor()',
+         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe"),
+        ('property descriptor',
+         'class FrameRoutes:\n'
+         '    @property\n'
+         '    def active(self):\n'
+         '        return sys._getframe',
+         "_ = FrameRoutes().active().f_locals['args'].undeclared_probe"),
+        ('cached-property descriptor',
+         'import functools\n'
+         'class FrameRoutes:\n'
+         '    @functools.cached_property\n'
+         '    def active(self):\n'
+         '        return sys._getframe',
+         "_ = FrameRoutes().active().f_locals['args'].undeclared_probe"),
+        ('staticmethod subclass descriptor',
+         'class RouteStaticmethod(staticmethod):\n'
+         '    pass\n'
+         'class FrameRoutes:\n'
+         '    active = RouteStaticmethod(sys._getframe)',
+         "_ = FrameRoutes.active().f_locals['args'].undeclared_probe"),
+        ('functools.partial',
+         'import functools\n'
+         'FRAME_ROUTE = functools.partial(sys._getframe)',
+         "_ = FRAME_ROUTE().f_locals['args'].undeclared_probe"),
+        ('exception traceback frame', '',
+         "try:\n"
+         "        raise RuntimeError('probe')\n"
+         "    except RuntimeError as err:\n"
+         "        _ = err.__traceback__.tb_frame.f_locals['args']"
+         ".undeclared_probe"),
+        ('frame acquisition in another function',
+         'def caller_namespace():\n'
+         "    return sys._getframe(1).f_locals['args']",
+         '_ = caller_namespace().undeclared_probe'),
+        ('other container type',
+         'import collections\n'
+         'FRAME_ROUTES = collections.deque((sys._getframe,))',
+         "_ = FRAME_ROUTES[0]().f_locals['args'].undeclared_probe"),
+        ('iterator protocol',
+         'FRAME_ROUTES = (sys._getframe,)',
+         "_ = next(iter(FRAME_ROUTES))()"
+         ".f_locals['args'].undeclared_probe"),
+        ('operator.attrgetter',
+         'import operator',
+         "_ = operator.attrgetter('_getframe')(sys)()"
+         ".f_locals['args'].undeclared_probe"),
+        ('runtime-built name', '',
+         "_ = getattr(sys, '_get' + 'frame')()"
+         ".f_locals['args'].undeclared_probe"),
     ]
-    for index, (module_prelude, body) in enumerate(gaps):
+    for index, (case_name, module_prelude, body) in enumerate(gaps):
         handler_module = _mutated_cli_tabs(
             f'known_gap_cli_{index}', module_prelude, body)
         try:
-            assert _audit_real_tabs_handler(handler_module) == []
+            violations = _audit_real_tabs_handler(handler_module)
+            assert violations == [], (case_name, violations)
             _assert_real_tabs_dispatch_crashes(handler_module)
         finally:
             sys.modules.pop(handler_module.__dict__['__name__'], None)
