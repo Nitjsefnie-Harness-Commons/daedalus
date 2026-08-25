@@ -235,13 +235,24 @@ def run_background_overlap(background, commands, order, result_base='',
 
 
 def load(path, name=None):
-    """Import a module by path without running its __main__ block."""
+    """Import a module by path without running its __main__ block.
+
+    The repository root is importable while the module executes.
+    """
     path = str(path)
     name = name or ('mod_' + os.path.splitext(os.path.basename(path))[0]
                     .replace('-', '_'))
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    root = str(ROOT)
+    added_root = root not in sys.path
+    if added_root:
+        sys.path.insert(0, root)
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        if added_root:
+            sys.path.remove(root)
     return mod
 
 
