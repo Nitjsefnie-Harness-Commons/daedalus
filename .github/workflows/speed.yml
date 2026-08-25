@@ -80,13 +80,13 @@ on:
   # and every one of them names the trigger — `due to privilege checkout of
   # untrusted code from steps.baseline.outputs.ref. (workflow_dispatch)`,
   # quoted as the alerts worded it, back when that output was still named
-  # `ref` — rather than any cache input. They are FALSE POSITIVES: the
-  # query treats
-  # `workflow_dispatch` as running in the default branch's cache scope
-  # whatever ref it was started on, while a real run's cache scope follows
-  # the ref it was given. Dispatching on main runs main's own code;
-  # dispatching on a feature ref writes that ref's scope, not main's. The
-  # combination the query describes does not arise.
+  # `ref` — rather than any cache input. They are FALSE POSITIVES:
+  # the query treats `workflow_dispatch` as running in the default
+  # branch's cache scope whatever ref it was started on, while a real
+  # run's cache scope follows the ref it was given. Dispatching on
+  # main runs main's own code; dispatching on a feature ref writes
+  # that ref's scope, not main's. The combination the query describes
+  # does not arise.
   #
   # The trigger goes anyway, because the alternative is carrying three
   # permanently dismissed alerts on a file whose checkout ref is a step
