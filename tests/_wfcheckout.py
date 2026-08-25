@@ -71,6 +71,10 @@ class _WorkflowReader(_ScalarReaderMixin):
                       else self._raw_indent(index)[0])
             if indent <= parent_indent:
                 return index
+            scalar_end = self._line_scalar_end(index, end, context)
+            if scalar_end is not None and scalar_end > index + 1:
+                index = scalar_end
+                continue
             index += 1
         return end
 
@@ -345,7 +349,10 @@ class _WorkflowReader(_ScalarReaderMixin):
         started = False
         ended = False
         root_indent = None
+        scalar_until = 0
         for index, line in enumerate(self.lines):
+            if index < scalar_until:
+                continue
             if line and (line[0] == '\ufeff' or (
                     line[0].isspace() and line[0] not in ' \t')):
                 self._refuse('unsupported structural character', index,
@@ -356,6 +363,10 @@ class _WorkflowReader(_ScalarReaderMixin):
             prefix = line[:len(line) - len(line.lstrip(' \t'))]
             if '\t' in prefix:
                 self._refuse('tab in indentation', index, 'workflow')
+            scalar_end = self._line_scalar_end(
+                index, len(self.lines), 'workflow')
+            if scalar_end is not None:
+                scalar_until = scalar_end
             marker = self._strip_comment(stripped)
             if not prefix and marker == '---':
                 if started:
