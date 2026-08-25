@@ -64,6 +64,10 @@ def test_actions_truthiness_and_comparison(tmp):
     assert evaluate('text_zero', {'text_zero': '0'}) is True
     assert evaluate('items', {'items': []}) is True
     assert evaluate("value == 'FOO'", {'value': 'foo'}) is True
+    assert evaluate('left != right', {
+        'left': True, 'right': False,
+    }) is True
+    assert evaluate('value == true', {'value': 'TRUE'}) is True
     assert evaluate("value == 'It''s open source!'", {
         'value': "It's open source!",
     }) is True
