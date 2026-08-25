@@ -220,9 +220,9 @@ def _mapping_entry(
 
 def _sequence_entry(
         lines, start, end, parent_indent, name) -> _Entry | None:
-    """Find one named ``- name:`` sequence item."""
+    """Find one sequence item whose name mapping field matches."""
     item_indent = None
-    matches = []
+    items = []
     for index in range(start, end):
         line = lines[index]
         if not _meaningful(line):
@@ -236,15 +236,49 @@ def _sequence_entry(
             item_indent = indent
         if indent != item_indent:
             continue
-        item = stripped[2:]
-        key, colon, rest = item.partition(':')
-        if not colon or key != 'name':
-            continue
-        value = rest.strip()
-        if value.startswith('"') or value.startswith("'"):
-            raise YAMLReadError('quoted step names are unsupported')
-        if value == name:
-            matches.append(_Entry(index, indent))
+        items.append(index)
+
+    matches = []
+    for offset, index in enumerate(items):
+        item_end = items[offset + 1] if offset + 1 < len(items) else end
+        text, _ended = lines[index]
+        fields = [text[item_indent + 2:]]
+        for following in range(index + 1, item_end):
+            line = lines[following]
+            if not _meaningful(line):
+                continue
+            indent = _indent(line)
+            if indent != item_indent + 2:
+                continue
+            text, _ended = line
+            fields.append(text[indent:])
+
+        step_name = None
+        for field in fields:
+            key, colon, rest = field.partition(':')
+            if not colon:
+                continue
+            if key == "'name'":
+                key = 'name'
+            if key != 'name':
+                continue
+            if step_name is not None:
+                raise YAMLReadError('duplicate mapping key: name')
+            value = rest.strip()
+            if value.startswith('"') or value.startswith("'"):
+                raise YAMLReadError('quoted step names are unsupported')
+            if ' #' in value:
+                raise YAMLReadError(
+                    'step name has an unsupported inline comment')
+            if value.startswith('&'):
+                raise YAMLReadError(
+                    'YAML anchors in step names are unsupported')
+            if value.startswith('!'):
+                raise YAMLReadError(
+                    'YAML tags in step names are unsupported')
+            step_name = value
+        if step_name == name:
+            matches.append(_Entry(index, item_indent))
     if len(matches) > 1:
         raise YAMLReadError(f'duplicate step name: {name}')
     return matches[0] if matches else None
