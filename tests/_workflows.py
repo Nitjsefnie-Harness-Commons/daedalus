@@ -9,7 +9,6 @@ path filters each one carries. Both answers have to survive the spellings
 YAML allows for the same thing, which is why this is a module rather than
 a substring check at each call site.
 """
-import ast
 import re
 
 
@@ -65,6 +64,51 @@ def _workflow_path_filters(lines):
             return value[1:-1]
         return value
 
+    def _flow_sequence(value, key):
+        """Parse the bounded flow-sequence subset used by these workflows."""
+        value = value.strip()
+        unsupported = f'{key} has an unsupported value: {value!r}'
+        if not (value.startswith('[') and value.endswith(']')):
+            raise AssertionError(unsupported)
+        content = value[1:-1].strip()
+        if not content:
+            return []
+
+        items = []
+        start = 0
+        quote = ''
+        for index, char in enumerate(content):
+            if quote:
+                if char == quote:
+                    quote = ''
+                continue
+            if char in "'\"":
+                quote = char
+            elif char == ',':
+                item = content[start:index].strip()
+                if not item:
+                    raise AssertionError(unsupported)
+                items.append(item)
+                start = index + 1
+        if quote:
+            raise AssertionError(unsupported)
+        item = content[start:].strip()
+        if not item:
+            raise AssertionError(unsupported)
+        items.append(item)
+
+        result = []
+        for item in items:
+            if item[0] in "'\"":
+                if len(item) < 2 or item[-1] != item[0]:
+                    raise AssertionError(unsupported)
+                result.append(item[1:-1])
+                continue
+            if item[-1] in "'\"[]" or '[' in item:
+                raise AssertionError(unsupported)
+            result.append(item)
+        return result
+
     # Only a key at the event's OWN option indent is one of its filters. A
     # deeper `paths-ignore:` belongs to something nested, and reading it as
     # the event's would report an asymmetry this workflow does not have.
@@ -81,15 +125,7 @@ def _workflow_path_filters(lines):
         indent, key, value = current
         value = value.strip()
         if value:
-            try:
-                parsed = ast.literal_eval(value)
-            except (SyntaxError, ValueError) as error:
-                raise AssertionError(
-                    f'{key} has an unsupported value: {value!r}') from error
-            assert (isinstance(parsed, list)
-                    and all(isinstance(item, str) for item in parsed)), (
-                        f'{key} must be a list of strings: {value!r}')
-            filters[key] = parsed
+            filters[key] = _flow_sequence(value, key)
             continue
 
         values = []

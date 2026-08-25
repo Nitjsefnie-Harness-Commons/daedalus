@@ -11,7 +11,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _workflows import _trigger_names, _workflow_triggers  # noqa: E402
+from _workflows import (  # noqa: E402
+    _trigger_names,
+    _workflow_path_filters,
+    _workflow_triggers,
+)
 
 
 def test_a_second_top_level_on_block_is_refused(tmp):
@@ -61,6 +65,60 @@ def test_trigger_names_survive_every_spelling_of_a_key(tmp):
     absent = _trigger_names(
         head + '  # workflow_dispatch: not a trigger\n' + tail)
     assert 'workflow_dispatch' not in absent, sorted(absent)
+
+
+def test_path_filters_ignore_deeper_nested_mappings(tmp):
+    """A nested filter is not an event-level path filter."""
+    del tmp
+    lines = [
+        '    branches:',
+        '      - main',
+        '    nested:',
+        '      paths-ignore:',
+        "        - '**/*.md'",
+    ]
+    assert _workflow_path_filters(lines) == {}
+
+
+def test_path_filters_accept_empty_events(tmp):
+    """An event with no options has no path filters."""
+    del tmp
+    assert _workflow_path_filters([]) == {}
+
+
+def test_path_filters_normalize_block_and_flow_sequences(tmp):
+    """Block and flow filters normalize quoted and bare scalars alike."""
+    del tmp
+    expected = ['**/*.md']
+    block = [
+        '    paths-ignore:',
+        "      - '**/*.md'",
+    ]
+    assert _workflow_path_filters(block) == {'paths-ignore': expected}
+    for item in ("'**/*.md'", '"**/*.md"', '**/*.md'):
+        flow = [f'    paths-ignore: [{item}]']
+        assert _workflow_path_filters(flow) == {'paths-ignore': expected}
+
+
+def test_path_filters_keep_paths_keys_separate(tmp):
+    """Both filter keys are returned independently for one event."""
+    del tmp
+    lines = [
+        '    paths: [src/**]',
+        "    paths-ignore: ['**/*.md']",
+    ]
+    assert _workflow_path_filters(lines) == {
+        'paths': ['src/**'],
+        'paths-ignore': ['**/*.md'],
+    }
+
+
+def test_path_filters_accept_empty_flow_sequences(tmp):
+    """An empty flow sequence produces an empty filter list."""
+    del tmp
+    assert _workflow_path_filters(['    paths-ignore: []']) == {
+        'paths-ignore': [],
+    }
 
 
 if __name__ == '__main__':
