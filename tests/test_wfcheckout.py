@@ -186,6 +186,43 @@ def test_checkout_reader_skips_multiline_quoted_mapping_content(tmp):
     assert failures == [], failures
 
 
+def test_checkout_reader_keeps_tabs_after_block_scalar_indent(tmp):
+    """A tab after required scalar spaces is content, not indentation."""
+    del tmp
+    cases = (
+        (
+            'jobs:\n'
+            '  build:\n'
+            '    steps:\n'
+            '      - run: |\n'
+            '          echo before\n'
+            '          \techo after\n',
+            [],
+        ),
+        (
+            'jobs:\n'
+            '  build:\n'
+            '    steps:\n'
+            '      - uses: actions/checkout@v4\n'
+            '        with:\n'
+            '          ref: |-\n'
+            '            first\n'
+            '            \tsecond\n',
+            [('build', 'first\n\tsecond')],
+        ),
+    )
+    failures = []
+    for workflow, expected in cases:
+        try:
+            actual = _wfcheckout.checkout_refs(workflow)
+        except _wfcheckout.YAMLReadError as error:
+            failures.append(str(error))
+        else:
+            if actual != expected:
+                failures.append((actual, expected))
+    assert failures == [], failures
+
+
 def test_checkout_reader_skips_unwalked_flow_values(tmp):
     """Flow syntax outside a checkout path is not inspected."""
     del tmp

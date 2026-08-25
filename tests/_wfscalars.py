@@ -18,6 +18,10 @@ class _ScalarReaderMixin:
     def _scalar_blank(self, index):
         return not self.lines[index].strip(' \t')
 
+    def _scalar_indent(self, index):
+        line = self.lines[index]
+        return len(line) - len(line.lstrip(' '))
+
     def _strip_comment(self, text):
         quote = None
         escaped = False
@@ -208,11 +212,16 @@ class _ScalarReaderMixin:
 
     def _mapping_value_end(self, value, index, end, key_indent, context,
                            check_tabs=False):
-        quoted_end = self._quoted_scalar_end(value, index, end, context)
-        start = index + 1 if quoted_end is None else quoted_end
+        value = self._strip_comment(value).strip(' \t')
+        if value.startswith(('|', '>')):
+            start = self._block_scalar_range(
+                value, index, end, key_indent, context)[3]
+        else:
+            quoted_end = self._quoted_scalar_end(value, index, end, context)
+            start = index + 1 if quoted_end is None else quoted_end
         return self._value_end(start, end, key_indent, context, check_tabs)
 
-    def _block_scalar(self, header, index, parent_indent, context):
+    def _block_scalar_range(self, header, index, end, parent_indent, context):
         header = self._strip_comment(header).strip(' \t')
         match = re.fullmatch(r'([|>])([1-9]?)([+-]?)([1-9]?)', header)
         if not match or (match.group(2) and match.group(4)):
@@ -221,18 +230,17 @@ class _ScalarReaderMixin:
         indent_indicator = first_indent or second_indent
         body_start = index + 1
         body_end = body_start
-        while body_end < len(self.lines):
+        while body_end < end:
             if self._scalar_blank(body_end):
-                self._indent(body_end, context)
                 body_end += 1
                 continue
-            indent = self._indent(body_end, context)
+            indent = self._scalar_indent(body_end)
             if indent <= parent_indent:
                 break
             body_end += 1
 
         nonblank = [
-            self._indent(line, context)
+            self._scalar_indent(line)
             for line in range(body_start, body_end)
             if not self._scalar_blank(line)
         ]
@@ -242,6 +250,34 @@ class _ScalarReaderMixin:
         if any(indent < content_indent for indent in nonblank):
             self._refuse('inconsistent block scalar indentation', index,
                          context)
+        return style, chomping, body_start, body_end, content_indent
+
+    def _line_scalar_end(self, index, end, context):
+        indent = self._scalar_indent(index)
+        body = self.lines[index][indent:]
+        key_indent = indent
+        if body.startswith('-') and (len(body) == 1 or body[1] in ' \t'):
+            first = body[1:].lstrip(' \t')
+            if not first or first.startswith('#'):
+                return None
+            key_indent += body.index(first)
+            body = first
+        if not self._looks_like_mapping(body):
+            return None
+        position = self._mapping_colon(body, index, context)
+        value = self._strip_comment(body[position + 1:]).strip(' \t')
+        quoted_end = self._quoted_scalar_end(value, index, end, context)
+        if quoted_end is not None:
+            return quoted_end
+        if value.startswith(('|', '>')):
+            return self._block_scalar_range(
+                value, index, end, key_indent, context)[3]
+        return None
+
+    def _block_scalar(self, header, index, parent_indent, context):
+        style, chomping, body_start, body_end, content_indent = \
+            self._block_scalar_range(
+                header, index, len(self.lines), parent_indent, context)
         parts = []
         for line in range(body_start, body_end):
             raw = self.lines[line]
