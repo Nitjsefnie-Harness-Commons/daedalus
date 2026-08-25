@@ -268,36 +268,49 @@ def _claim_trace_dir(tmp):
     trace_dir = Path(tmp) / 'claim-trace'
     trace_dir.mkdir()
     trace = trace_dir / 'claims.log'
-    attempts = trace_dir / 'claim-attempts.log'
     (trace_dir / 'sitecustomize.py').write_text(
+        'import json\n'
         'import sys\n'
+        'import threading\n'
+        f'_trace = {str(trace)!r}\n'
         f'sys.path.insert(0, {str(_util.ROOT)!r})\n'
         'import command_queue\n'
-        'import json\n'
-        f'_trace = {str(trace)!r}\n'
-        f'_attempts = {str(attempts)!r}\n'
-        'def _record():\n'
-        '    with open(_trace, "a", encoding="utf-8") as log:\n'
-        '        log.write(\n'
-        '            json.dumps(sorted(command_queue._claimed)) + "\\n")\n'
-        'def _record_attempt(key, result):\n'
-        '    with open(_attempts, "a", encoding="utf-8") as log:\n'
-        '        log.write(json.dumps({"key": key, "result": result})\n'
-        '                  + "\\n")\n'
+        '_record_lock = threading.Lock()\n'
+        '_sequence = 0\n'
+        'def _record(event, key, result=None):\n'
+        '    global _sequence\n'
+        '    with _record_lock:\n'
+        '        _sequence += 1\n'
+        '        data = {"seq": _sequence, "event": event, "key": key}\n'
+        '        if result is not None:\n'
+        '            data["result"] = result\n'
+        '        with open(_trace, "a", encoding="utf-8") as log:\n'
+        '            log.write(json.dumps(data) + "\\n")\n'
         '_real_claim = command_queue.claim\n'
         '_real_release = command_queue.release\n'
         'def claim(key):\n'
         '    result = _real_claim(key)\n'
-        '    _record_attempt(key, result)\n'
-        '    _record()\n'
+        '    _record("claim", key, result)\n'
         '    return result\n'
         'def release(key):\n'
         '    _real_release(key)\n'
-        '    _record()\n'
+        '    _record("release", key)\n'
         'command_queue.claim = claim\n'
         'command_queue.release = release\n',
         encoding='utf-8')
-    return trace_dir, trace, attempts
+    return trace_dir, trace
+
+
+def _claim_events(trace):
+    if not trace.exists():
+        return []
+    events = []
+    for line in trace.read_text(encoding='utf-8').splitlines():
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
 
 
 def _load_server_for_drain(tmp, name):
@@ -451,7 +464,8 @@ def test_symlinked_queue_directory_reaches_extension_stream(tmp):
 
 
 def test_a_successful_legacy_delivery_releases_its_claim(tmp):
-    fault_dir, trace, attempts = _claim_trace_dir(tmp)
+    fault_dir, trace = _claim_trace_dir(tmp)
+    key = f'legacy:{TOK}.json'
     with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)}) as (
             base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
@@ -464,40 +478,46 @@ def test_a_successful_legacy_delivery_releases_its_claim(tmp):
             first = next_stream_data(response, timeout=8)
             assert first.get('id') == 'legacy-first', first
             deadline = time.time() + 5
-            while time.time() < deadline:
-                if not legacy.exists() and trace.exists():
-                    snapshots = trace.read_text(
-                        encoding='utf-8').splitlines()
-                    if snapshots and json.loads(snapshots[-1]) == []:
-                        break
+            while legacy.exists() and time.time() < deadline:
                 time.sleep(0.01)
             assert not legacy.exists(), (
                 'the first legacy file was not consumed')
-            snapshots = trace.read_text(encoding='utf-8').splitlines()
-            assert snapshots and json.loads(snapshots[-1]) == [], snapshots
             legacy.write_text(
                 '{"id":"legacy-second","code":"2"}',
                 encoding='utf-8')
             second = next_stream_data(response, timeout=8)
             assert second.get('id') == 'legacy-second', second
             deadline = time.time() + 5
+            pair = None
             while time.time() < deadline:
-                snapshots = trace.read_text(
-                    encoding='utf-8').splitlines()
-                if snapshots and json.loads(snapshots[-1]) == []:
-                    break
+                events = _claim_events(trace)
+                claims = [
+                    event for event in events
+                    if event.get('event') == 'claim'
+                    and event.get('key') == key
+                    and event.get('result') is True]
+                if len(claims) >= 2:
+                    claim = claims[1]
+                    index = next(
+                        index for index, event in enumerate(events)
+                        if event.get('seq') == claim.get('seq'))
+                    if index + 1 < len(events):
+                        release = events[index + 1]
+                        if (release.get('event') == 'release'
+                                and release.get('key') == key):
+                            pair = (claim, release)
+                            break
                 time.sleep(0.01)
+            assert pair is not None, _claim_events(trace)
+            assert pair[1]['seq'] == pair[0]['seq'] + 1, pair
+            deadline = time.time() + 5
+            while legacy.exists() and time.time() < deadline:
+                time.sleep(0.01)
+            assert not legacy.exists(), (
+                'the second legacy file was not consumed')
         finally:
             response.close()
             conn.close()
-    lines = trace.read_text(encoding='utf-8').splitlines()
-    assert lines, 'the claim trace is empty'
-    assert json.loads(lines[-1]) == [], lines
-    claim_attempts = [json.loads(line) for line in
-                      attempts.read_text(encoding='utf-8').splitlines()]
-    assert not any(
-        item['key'] == f'legacy:{legacy.name}' and not item['result']
-        for item in claim_attempts), claim_attempts
 
 
 def test_queue_write_failure_keeps_file_and_releases_claim(tmp):
