@@ -309,18 +309,21 @@ def _decode_block(lines, parent_indent, style, chomp, explicit, name):
     """Decode a complete folded or literal block and apply its chomping."""
     if not lines:
         return ''
-    nonempty = [line for line in lines if line[0].strip()]
     if explicit:
         content_indent = parent_indent + explicit
-    elif nonempty:
-        content_indent = min(_indent(line) for line in nonempty)
     else:
         content_indent = parent_indent + 1
+        for line in lines:
+            text, _ended = line
+            if text.strip():
+                content_indent = max(content_indent, _indent(line))
+                break
+            content_indent = max(content_indent, len(text))
     parts = []
     more_indented = []
     for line in lines:
         text, _ended = line
-        if not text.strip():
+        if not text.strip() and len(text) <= content_indent:
             parts.append('')
             more_indented.append(False)
             continue
@@ -358,4 +361,5 @@ def _decode_block(lines, parent_indent, style, chomp, explicit, name):
         return value.rstrip('\n')
     if chomp == '+':
         return value
-    return value.rstrip('\n') + ('\n' if value.endswith('\n') else '')
+    return value.rstrip('\n') + (
+        '\n' if value.endswith('\n') and any(parts) else '')
