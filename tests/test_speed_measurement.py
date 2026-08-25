@@ -279,6 +279,14 @@ def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
     """Unsupported syntax on the walked path fails closed with its location."""
     del tmp
     cases = (
+        ('name: no jobs\n', 'top-level jobs mapping'),
+        ('jobs:\n', 'jobs value is not a block mapping'),
+        ('jobs:\n  build:\n', 'job value is not a block mapping'),
+        ('jobs:\n  build:\n    steps:\n',
+         'steps value is not a block sequence'),
+        ('jobs:\n  build:\n    steps:\n      -\n',
+         'step is not a mapping sequence item'),
+        ('\tjobs:\n', 'tab in indentation'),
         ('jobs: {build: {steps: []}}\n', 'flow mapping'),
         ('jobs:\n  build:\n    steps: []\n', 'flow sequence'),
         ('jobs:\n  build:\n    steps:\n'
