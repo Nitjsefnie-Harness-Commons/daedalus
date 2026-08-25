@@ -260,7 +260,7 @@ def _sequence_entry(
             if not colon:
                 continue
             _entry((field, False))
-            if key == "'name'":
+            if key in ("'name'", '"name"'):
                 key = 'name'
             if key != 'name':
                 continue

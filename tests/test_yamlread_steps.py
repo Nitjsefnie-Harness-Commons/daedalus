@@ -63,6 +63,15 @@ def test_quoted_step_name_key_is_recognized(tmp):
     assert step_scalar(source, 'sample', 'target', 'if') == 'z'
 
 
+def test_double_quoted_step_name_key_is_recognized(tmp):
+    """A double-quoted name key still names the step mapping field."""
+    del tmp
+    source = (
+        "jobs:\n sample:\n  steps:\n"
+        "   - \"name\": target\n     if: z")
+    assert step_scalar(source, 'sample', 'target', 'if') == 'z'
+
+
 def test_step_name_without_mapping_separator_is_refused(tmp):
     """A colon without following whitespace is not a mapping field."""
     del tmp
