@@ -36,7 +36,7 @@ def _raises_incomplete(source):
 
 
 def test_shallow_and_equal_whitespace_are_empty_lines(tmp):
-    """Whitespace at or before the indent remains an empty physical line."""
+    """Whitespace at the content-indent boundary keeps its exact role."""
     del tmp
     shallow = '      a\n    \n      b\n'
     equal = '      a\n      \n      b\n'
@@ -48,6 +48,16 @@ def test_shallow_and_equal_whitespace_are_empty_lines(tmp):
         assert job_scalar(_source('|', body), 'sample', 'if') == 'a\n\nb\n'
         assert job_scalar(_source('|-', body), 'sample', 'if') == 'a\n\nb'
         assert job_scalar(_source('|+', body), 'sample', 'if') == 'a\n\nb\n'
+
+    just_deeper = '      a\n       \n      b\n'
+    assert job_scalar(_source('>', just_deeper), 'sample', 'if') == 'a\n \nb\n'
+    assert job_scalar(_source('>-', just_deeper), 'sample', 'if') == 'a\n \nb'
+    assert job_scalar(_source('>+', just_deeper), 'sample', 'if') == (
+        'a\n \nb\n')
+    assert job_scalar(_source('|', just_deeper), 'sample', 'if') == 'a\n \nb\n'
+    assert job_scalar(_source('|-', just_deeper), 'sample', 'if') == 'a\n \nb'
+    assert job_scalar(_source('|+', just_deeper), 'sample', 'if') == (
+        'a\n \nb\n')
 
 
 def test_leading_and_trailing_whitespace_lines_are_preserved(tmp):
