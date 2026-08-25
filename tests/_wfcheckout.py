@@ -602,8 +602,8 @@ class _WorkflowReader:
         ended = False
         root_indent = None
         for index, line in enumerate(self.lines):
-            if line and (line[0] == '\ufeff' or
-                         (line[0].isspace() and line[0] not in ' \t')):
+            if line and (line[0] == '\ufeff' or (
+                    line[0].isspace() and line[0] not in ' \t')):
                 self._refuse('unsupported structural character', index,
                              'workflow')
             stripped = line.strip()
@@ -641,6 +641,8 @@ class _WorkflowReader:
                     self._refuse('explicit key', index, 'jobs mapping')
                 continue
             key, rest = self._mapping_parts(index, 'workflow', body)
+            if key == '<<':
+                self._refuse('merge key', index, 'workflow')
             self._reject_root_quoted_scalar(rest, index)
             if not rest:
                 nested = self._next_nonblank(
