@@ -260,6 +260,49 @@ def test_checkout_reader_folds_plain_scalar_blank_line_to_newline(tmp):
     assert _wfcheckout.checkout_refs(workflow) == [('build', 'first\nsecond')]
 
 
+def test_checkout_reader_decodes_multiline_quoted_scalars(tmp):
+    """Root values and checkout refs use YAML quoted-line folding."""
+    del tmp
+    body = (
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n')
+    cases = (
+        (
+            'double root and single ref',
+            'name: "Team\n  build"\n',
+            "          ref: 'feature\n            branch'\n",
+            'feature branch',
+        ),
+        (
+            'single root and double ref',
+            "name: 'Team\n  build'\n",
+            '          ref: "feature\n            branch"\n',
+            'feature branch',
+        ),
+        (
+            'escaped double-quoted line',
+            'name: Team build\n',
+            '          ref: "feature\\\n            branch"\n',
+            'featurebranch',
+        ),
+    )
+    failures = []
+    for name, root, ref, expected in cases:
+        try:
+            actual = _wfcheckout.checkout_refs(root + body + ref)
+        except _wfcheckout.YAMLReadError as error:
+            failures.append((name, str(error)))
+        else:
+            if actual != [('build', expected)]:
+                failures.append((name, actual, expected))
+    assert failures == [], failures
+
+
 def test_checkout_reader_refuses_a_multiline_quoted_root_value(tmp):
     """Physical lines in a quoted scalar cannot become root mapping keys."""
     del tmp
@@ -270,8 +313,8 @@ def test_checkout_reader_refuses_a_multiline_quoted_root_value(tmp):
         '    steps:\n'
         '      - run: echo decoy"\n')
     cases = (
-        ('name: "decoy\n', 'unterminated double-quoted scalar'),
-        ('name:\n  "decoy\n', 'unterminated double-quoted scalar'),
+        ('name: "decoy\n', 'top-level jobs mapping not found'),
+        ('name:\n  "decoy\n', 'top-level jobs mapping not found'),
         ('name: !!str "decoy\n', 'explicit tag'),
         ('name: &label "decoy\n', 'anchor'),
     )

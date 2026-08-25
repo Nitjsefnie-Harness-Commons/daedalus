@@ -92,13 +92,18 @@ class _WorkflowReader(_ScalarReaderMixin):
         while scalar.startswith(('&', '!')):
             parts = scalar.split(None, 1)
             if len(parts) == 1:
-                return
+                return None
             scalar = parts[1].lstrip(' \t')
             if scalar.startswith(("'", '"')):
                 self._reject_prefix(value, index, 'workflow value')
         if scalar.startswith(("'", '"')) \
                 and not self._looks_like_mapping(scalar):
-            self._decode_scalar(scalar, index, 'workflow value')
+            value_end = self._quoted_scalar_end(
+                scalar, index, len(self.lines), 'workflow value')
+            self._quoted_scalar(
+                scalar, index, value_end, 'workflow value')
+            return value_end
+        return None
 
     def _find_jobs(self):
         if self.jobs_line is None:
@@ -411,15 +416,19 @@ class _WorkflowReader(_ScalarReaderMixin):
             key, rest = self._mapping_parts(index, 'workflow', body)
             if key == '<<':
                 self._refuse('merge key', index, 'workflow')
-            self._reject_root_quoted_scalar(rest, index)
+            quoted_end = self._reject_root_quoted_scalar(rest, index)
+            if quoted_end is not None:
+                scalar_until = max(scalar_until, quoted_end)
             if not rest:
                 nested = self._next_nonblank(
                     index + 1, len(self.lines), 'workflow value')
                 if nested is not None:
                     indent = self._indent(nested, 'workflow value')
                     if indent > root_indent:
-                        self._reject_root_quoted_scalar(
+                        quoted_end = self._reject_root_quoted_scalar(
                             self.lines[nested][indent:], nested)
+                        if quoted_end is not None:
+                            scalar_until = max(scalar_until, quoted_end)
             if key != 'jobs':
                 continue
             if self.jobs_line is not None:
