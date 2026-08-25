@@ -108,7 +108,8 @@ def _entry(line):
     indent = len(text) - len(text.lstrip(' '))
     body = text[indent:]
     name, colon, rest = body.partition(':')
-    if not colon or not name or name != name.strip():
+    if (not colon or not name or name != name.strip()
+            or rest and not rest[0].isspace()):
         raise YAMLReadError(f'unsupported YAML mapping line: {text!r}')
     return indent, rest
 
@@ -258,6 +259,7 @@ def _sequence_entry(
             key, colon, rest = field.partition(':')
             if not colon:
                 continue
+            _entry((field, False))
             if key == "'name'":
                 key = 'name'
             if key != 'name':
