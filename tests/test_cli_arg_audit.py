@@ -15,11 +15,11 @@ Direct attributes, exact ``vars(args)``/``args.__dict__`` subscripts, and bare
 ``getattr`` without a default require GUARANTEED. ``hasattr``, defaulted
 ``getattr``, and constant-key mapping ``.get`` require DECLARED. These calls
 receive builtin semantics only by identity: no enclosing callable or
-comprehension may bind the bare name, and a module global must be absent or the
-exact builtin. Attribute calls require the exact ``builtins`` module. Defaults,
-decorators, and annotations use outer scope; every other live use of the
-handler parameter escapes. Bare reflective names are refused by spelling even
-when shadowed (fail-closed); exact ``builtins`` forms are also refused.
+comprehension may bind the bare name at that evaluation point. A module global
+or the function's effective builtins must resolve to the exact builtin.
+Attribute calls require the exact ``builtins`` module. Callable headers use
+outer scope; every other live use of the parameter escapes. Bare reflective
+names are refused even when shadowed; exact ``builtins`` forms are refused too.
 
 Frame routes resolve through supplied imports, unshadowed globals, exact
 module/class attributes, module ``__dict__``, exact list/tuple subscripts and
@@ -33,15 +33,15 @@ Unary ``+``/``-`` executes through arbitrary stacks, so ``+True`` is integer
 ``1``. Slice bounds use the same definition and exact sliced sequences remain
 eligible for another subscript.
 
-Resolution never runs handler code. Non-exact descriptors, ``partial``,
-traceback frames, other containers, iterators, comprehension results, instance
-attributes, ``attrgetter``, runtime names, class mapping-proxy reads, binary or
-call-produced indices, and frame acquisition in another function stay outside.
-Every named outside family has a corresponding known-gap control below.
+Resolution never runs handler code. Outside are non-exact descriptors,
+``partial``, traceback frames, other containers/iterators, comprehension
+results, instance attributes, ``attrgetter``, runtime names, mapping-proxy
+reads, binary/call indices, and external frame acquisition. Each named family
+has a known-gap control, and every known-gap control belongs to a named family.
 """
 import argparse
 import ast
-import builtins
+import builtins  # pylint: disable=unused-import
 import inspect
 import sys
 import textwrap
@@ -143,11 +143,16 @@ def _scope_binds(function, name):
     return binds and not reaches_handler
 
 
-def _comprehension_shadows(comprehension, name):
-    """Return True when one of a comprehension's targets binds ``name``."""
+def _comprehension_shadows(comprehension, name, child=None,
+                           before_target=False):
+    """Return whether a target has bound ``name`` at one child."""
+    generators = comprehension.generators
+    if child in generators:
+        end = generators.index(child) + (not before_target)
+        generators = generators[:end]
     return any(
         name in _binding_names(generator.target)
-        for generator in comprehension.generators)
+        for generator in generators)
 
 
 _FRAME_ROUTE_ATTRS = {'sys': '_getframe', 'inspect': 'currentframe'}
@@ -371,7 +376,6 @@ def _audit_real_tabs_handler(handler_module, parser=None):
 def _assert_real_tabs_dispatch_crashes(handler_module):
     """The same mutation must fail real dispatch, not just the audit."""
     from daedalus_cli import cli
-
     original_handler = cli.DISPATCH['tabs']
     original_argv = sys.argv
     cli.DISPATCH['tabs'] = handler_module.do_tabs
@@ -390,7 +394,6 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
 
 def test_cli_audit_excludes_dest_suppress_action(tmp):
     from daedalus_cli.parser import build_parser
-
     parser = build_parser()
     subparsers = next(
         action for action in parser._actions
@@ -415,7 +418,6 @@ def test_cli_audit_excludes_default_suppress_action(tmp):
 
 def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
     from daedalus_cli import cli
-
     for index, (shape, body, argv, expected) in enumerate(
             _REAL_STORAGE_DISPATCH_CASES):
         parser = argparse.ArgumentParser()
@@ -449,7 +451,6 @@ def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
 def test_cli_audit_includes_parser_set_defaults(tmp):
     parser = argparse.ArgumentParser(add_help=False)
     parser.set_defaults(from_defaults=False)
-
     assert vars(parser.parse_args([])) == {'from_defaults': False}
     declared, guaranteed = audit_support.namespace_dests(parser)
     violations = _audit_fake_handler(
@@ -471,11 +472,8 @@ def test_cli_audit_reports_namespace_escapes(tmp):
 
 
 def test_cli_audit_requires_builtin_identity(tmp):
-    for name, expected in audit_support.BUILTIN_IDENTITY_GLOBAL_CASES:
-        assert _audit_fake_handler(
-            "getattr(args, 'json', False)",
-            scope={'getattr': builtins.__dict__[name]}) \
-            == list(expected), name
+    for body, scope, expected in audit_support.BUILTIN_IDENTITY_GLOBAL_CASES:
+        assert _audit_fake_handler(body, scope=scope) == list(expected), body
 
 
 def test_cli_audit_respects_inner_scope_bindings(tmp):
@@ -512,7 +510,6 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
 
     class FrameRoutes:
         active = Descriptor()
-
     function = ast.parse(
         "def do_tabs(args):\n    FrameRoutes.active()\n").body[0]
     attr_node = function.body[0].value.func
@@ -523,6 +520,16 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
 
 
 def test_cli_audit_resolver_resolves_dict_get_default(tmp):
+    unresolved = object()
+    for expression, expected in (('+True', 1), ('-True', -1), ('+False', 0)):
+        value = audit_support._constant_value(
+            ast.parse(expression, mode='eval').body, unresolved)
+        assert (type(value), value) == (int, expected), expression
+    resolved = audit_support._constant_value(
+        ast.parse('routes[:+True]', mode='eval').body.slice, unresolved)
+    assert (type(resolved.stop), resolved.stop) == (int, 1)
+    invalid = ast.parse("routes['not-an-index':]", mode='eval').body.slice
+    assert audit_support._constant_value(invalid, unresolved) is unresolved
     function = ast.parse(
         "def do_tabs(args):\n"
         "    return ROUTES.get('active', DEFAULT_ROUTE)\n").body[0]
@@ -531,13 +538,11 @@ def test_cli_audit_resolver_resolves_dict_get_default(tmp):
         'ROUTES': {'active': sys._getframe},
         'DEFAULT_ROUTE': inspect.currentframe,
     }
-
     assert _frame_value(
         call, function, handler_globals, {}) is sys._getframe
     handler_globals['ROUTES'] = {}
     assert _frame_value(
         call, function, handler_globals, {}) is inspect.currentframe
-
     literal_function = ast.parse(
         "def do_tabs(args):\n"
         "    return ROUTES.get('active', None)\n").body[0]
@@ -638,7 +643,6 @@ def test_cli_audit_respects_nested_local_bindings(tmp):
 def test_cli_handlers_read_only_declared_args(tmp):
     from daedalus_cli.cli import DISPATCH
     from daedalus_cli.parser import build_parser
-
     parser = build_parser()
     subparsers = next(
         action for action in parser._actions

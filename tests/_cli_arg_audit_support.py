@@ -1,33 +1,27 @@
 """Side-effect-free static analysis for the CLI argument audit.
 
-DECLARED contains each non-help/version action whose destination is not
-``argparse.SUPPRESS``, plus every ``set_defaults`` key. GUARANTEED PRESENT
-contains a destination when an action has a non-suppressed default, is required
-on every successful parse, or is a positional ``REMAINDER``; every parser
-default is also guaranteed. Same-destination actions combine those properties.
-Direct attributes, exact-dict subscripts, and bare ``getattr`` need GUARANTEED;
-``hasattr``, defaulted ``getattr``, and exact-dict ``.get`` need DECLARED.
-
-``getattr``, ``hasattr``, and ``vars`` receive builtin semantics only by exact
-identity. A bare name must be unbound by callable/comprehension scopes
-and absent from module globals or bound there to that builtin. Attribute bases
-must be the exact ``builtins`` module. Callable headers use outer scope. Bare
-``locals``/``globals``/``eval``/``exec`` and no-argument ``vars`` are refused
-by spelling even when shadowed (fail-closed); exact ``builtins`` forms are too.
-
+DECLARED contains each non-help/version, non-SUPPRESS destination plus every
+``set_defaults`` key. GUARANTEED PRESENT contains a destination with a
+non-suppressed default, a required action on every successful parse, or a
+positional ``REMAINDER``; parser defaults are guaranteed too. Same-destination
+actions combine. Direct/exact-dict and bare ``getattr`` reads need GUARANTEED;
+guarded reads need DECLARED.
+``getattr``/``hasattr``/``vars`` get builtin semantics only by exact identity
+in the function's effective builtins after callable/comprehension and global
+shadowing at that evaluation point. Exact ``builtins`` attributes qualify.
+Callable headers use outer scope. Bare reflective spellings are refused even
+when shadowed (fail-closed); exact ``builtins`` forms are refused too.
 The resolver follows supplied imports and unshadowed globals by identity. It
-decides module/class attributes, module ``__dict__``, exact list/tuple
-subscripts/slices and constant-key dict reads. Indices and bounds pass
-``isinstance(value, int)``; ``bool`` counts, and unary ``+True`` is ``1``.
-Bare constant-name ``getattr`` and one-argument ``vars`` resolve exact modules
-and classes. Exact static/class methods unwrap; other descriptors stay raw.
-Unresolved canonical ``_getframe``/``currentframe`` spellings are refused.
-
+decides module/class attributes, module ``__dict__``, exact list/tuple slices
+and subscripts, and constant-key dict reads. Indices and bounds use
+``isinstance(value, int)``; ``bool`` counts and unary ``+True`` becomes ``1``.
+Exact static/class methods unwrap; other descriptors stay raw. Canonical
+unresolved ``_getframe``/``currentframe`` spellings are refused.
 Resolution never runs handler code. Non-exact descriptors, ``partial``,
-traceback frames, other containers, iterators, comprehension results, instance
-attributes, ``attrgetter``, runtime names, class mapping-proxy reads, binary or
-call-produced indices, and frame acquisition in another function stay outside.
-The tables include a known-gap control for every named outside family.
+traceback frames, other containers/iterators, comprehension results, instance
+attributes, ``attrgetter``, runtime names, mapping-proxy reads, binary/call
+indices, and external frame acquisition stay outside. Each named family has a
+known-gap control, and every known-gap control belongs to a named family.
 """
 import argparse
 import ast
@@ -37,10 +31,7 @@ import sys
 
 # ``do_tabs`` reads args.json through getattr(); keep that access documented
 # even though the audit resolves constant indirect reads itself.
-KNOWN_INDIRECT_ARG_READS = (
-    ('tabs', 'json', 'do_tabs'),
-)
-
+KNOWN_INDIRECT_ARG_READS = (('tabs', 'json', 'do_tabs'),)
 PERMITTED_NAMESPACE_READ_CASES = (
     ('args.json', 'args.undeclared_probe', True),
     ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')", True),
@@ -64,7 +55,6 @@ PERMITTED_NAMESPACE_READ_CASES = (
     ("builtins.vars(args).get('json')",
      "builtins.vars(args).get('undeclared_probe')", False),
 )
-
 NAMESPACE_ESCAPE_CASES = (
     ('other = args', 'other = args'),
     ('other = args\nthird = other\nthird.x', 'other = args'),
@@ -97,12 +87,14 @@ NAMESPACE_ESCAPE_CASES = (
     ("from operator import attrgetter as getattr\n"
      "getattr(args, 'json', False)", "getattr(args, 'json', False)"),
 )
-
 BUILTIN_IDENTITY_GLOBAL_CASES = (
-    ('getattr', ()),
-    ('len', ("namespace escape: getattr(args, 'json', False)",)),
+    ("getattr(args, 'json', False)", {'getattr': builtins.getattr}, ()),
+    ("getattr(args, 'json', False)", {'getattr': len},
+     ("namespace escape: getattr(args, 'json', False)",)),
+    ("getattr(args, 'json', False)", {'__builtins__': {'getattr': len}},
+     ("namespace escape: getattr(args, 'json', False)",)),
+    ("_ = [value for getattr in (getattr(args, 'json', False),)]", None, ()),
 )
-
 # Shape, argv, empty result, seeded empty result, result, GUARANTEED.
 ARGPARSE_STORAGE_CASES = (
     ('optional', (), (), 'seed', (), False),
@@ -114,7 +106,6 @@ ARGPARSE_STORAGE_CASES = (
     ('question', (), (), 'seed', (), False),
     ('positional', ('x',), None, None, 'x', True),
 )
-
 REFLECTIVE_ESCAPE_CASES = (
     ("_ = locals()['args'].undeclared_probe", 'locals()'),
     ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
@@ -158,7 +149,6 @@ REFLECTIVE_ESCAPE_CASES = (
     ('_ = _getframe()', '_getframe()'),
     ('_ = currentframe()', 'currentframe()'),
 )
-
 DECIDED_FRAME_ROUTE_CASES = (
     ('from sys import _getframe as get_frame',
      "_ = get_frame().f_locals['args'].undeclared_probe", 'get_frame()'),
@@ -223,7 +213,6 @@ DECIDED_FRAME_ROUTE_CASES = (
     ('', "_ = vars(sys)['_getframe']()"
      ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),
 )
-
 COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
     'COMPOSITE_ROUTES[--1]',
     'COMPOSITE_ROUTES[---1]',
@@ -243,7 +232,6 @@ COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
     'COMPOSITE_ROUTES[+False:][-1]',
     'COMPOSITE_ROUTES[:True][-1]',
 )
-
 RESOLVER_ONLY_FRAME_ROUTE_CASES = (
     ('exact classmethod route (resolver only)',
      'class FrameRoutes:\n'
@@ -254,7 +242,6 @@ RESOLVER_ONLY_FRAME_ROUTE_CASES = (
      "_ = currentframe().f_locals['args'].undeclared_probe",
      'currentframe()'),
 )
-
 KNOWN_GAP_FRAME_ROUTE_CASES = (
     ('comprehension result',
      'FRAME_ROUTES = [sys._getframe]',
@@ -447,14 +434,20 @@ def _callable_body_contains(scope, child):
 def _builtin_name_is_shadowed(node, name, function, scope_binds,
                               comprehension_shadows):
     current = node
+    generator, before_target = None, False
     callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
     comprehensions = (ast.ListComp, ast.SetComp, ast.DictComp,
                       ast.GeneratorExp)
     while current is not function:
         parent = current._parent
+        if isinstance(parent, ast.comprehension):
+            generator, before_target = parent, current is parent.iter
         if (isinstance(parent, comprehensions)
-                and comprehension_shadows(parent, name)):
+                and comprehension_shadows(
+                    parent, name, generator, before_target)):
             return True
+        if isinstance(parent, comprehensions):
+            generator = None
         if (isinstance(parent, callables)
                 and _callable_body_contains(parent, current)
                 and scope_binds(parent, name)):
@@ -473,7 +466,13 @@ def is_builtin_reference(node, name, function, handler_globals,
                     node, name, function, scope_binds,
                     comprehension_shadows)):
             return False
-        return handler_globals.get(name, expected) is expected
+        if name in handler_globals:
+            return handler_globals[name] is expected
+        namespace = handler_globals.get('__builtins__', builtins)
+        namespace = (namespace if isinstance(namespace, dict) else
+                     namespace.__dict__
+                     if type(namespace) is type(builtins) else {})
+        return namespace.get(name) is expected
     if (not isinstance(node, ast.Attribute)
             or node.attr != name
             or not isinstance(node.value, ast.Name)):
