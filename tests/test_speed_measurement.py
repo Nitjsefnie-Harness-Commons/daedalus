@@ -317,6 +317,23 @@ def test_checkout_reader_refuses_a_nonzero_root_mapping_indent(tmp):
     _assert_yaml_refusal(workflow, 'nonzero root mapping indentation')
 
 
+def test_checkout_reader_never_omits_jobs_before_an_nbsp_decoy(tmp):
+    """A BOM and Unicode-space decoy cannot redirect the root scan."""
+    del tmp
+    workflow = (
+        '\ufeffjobs:\n  real:\n    runs-on: ubuntu-latest\n'
+        '    steps:\n      - uses: actions/checkout@v4\n'
+        '        with:\n          ref: hidden\n'
+        '\u00a0jobs:\n  decoy:\n    runs-on: ubuntu-latest\n'
+        '    steps:\n      - run: echo decoy\n')
+    try:
+        refs = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError:
+        refs = None
+    assert refs != [], 'a real checkout cannot be silently omitted'
+    assert refs is None or refs == [('real', 'hidden')], refs
+
+
 def test_checkout_reader_refuses_a_multiline_quoted_root_value(tmp):
     """Physical lines in a quoted scalar cannot become root mapping keys."""
     del tmp
