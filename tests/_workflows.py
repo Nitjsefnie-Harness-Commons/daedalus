@@ -235,7 +235,7 @@ def _flow_item_has_mapping_syntax(item):
 
 def _flow_sequence(value, key, filename='workflow'):
     """Parse the bounded flow-sequence subset used by these workflows."""
-    value = value.strip()
+    value = _uncommented(value).strip()
     unsupported = f'{filename}: {key} has an unsupported value: {value!r}'
     if not (value.startswith('[') and value.endswith(']')):
         raise AssertionError(unsupported)
