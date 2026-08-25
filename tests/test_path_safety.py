@@ -524,8 +524,11 @@ def test_delivery_stripe_is_keyed_on_the_logical_target(tmp):
     answer = json.loads(marked[0][len('STRIPE '):])
     assert answer['same_lock'] is True, answer
     # A path reaching this function is the regression that mattered, so it is
-    # refused rather than quietly hashed into some stripe.
+    # refused rather than quietly hashed into some stripe. Both spellings are
+    # asserted: the one that actually shipped was a str, so refusing only path
+    # OBJECTS would leave the original bug uncaught.
     assert answer['refused_path_object'] is True, answer
+    assert answer['refused_str_path'] is True, answer
 
 
 if __name__ == '__main__':

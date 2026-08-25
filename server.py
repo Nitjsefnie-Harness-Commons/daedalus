@@ -417,7 +417,15 @@ def _delivery_lock_for(target_key):
     # A path-like key is the exact mistake this function was written with, and
     # it failed silently: two spellings of one directory chose two stripes and
     # the serialization simply was not there. Refusing it makes that loud.
+    #
+    # A string spelling counts. The spelling that actually shipped was
+    # `\\?\C:\...\tok_tab`, a str, so a check that only refused path
+    # OBJECTS would not have caught the bug it was written for. No legitimate
+    # key can contain one of these characters: a key is `<token>_<tab>` and
+    # `_unsafe_component` already rejects every one of them in either half.
     if not isinstance(target_key, str):
+        raise TypeError('delivery stripe key must be the logical target')
+    if any(char in _WINDOWS_INVALID_PATH_CHARS for char in target_key):
         raise TypeError('delivery stripe key must be the logical target')
     key = os.fsencode(target_key)
     index = zlib.crc32(key) & (_DELIVERY_LOCK_STRIPES - 1)
