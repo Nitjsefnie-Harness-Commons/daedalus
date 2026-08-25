@@ -103,6 +103,18 @@ BUILTIN_IDENTITY_GLOBAL_CASES = (
     ('len', ("namespace escape: getattr(args, 'json', False)",)),
 )
 
+# Shape, argv, empty result, seeded empty result, result, GUARANTEED.
+ARGPARSE_STORAGE_CASES = (
+    ('optional', (), (), 'seed', (), False),
+    ('optional-remainder', ('--probe',), (), 'seed', [], False),
+    ('required-option', ('--probe', 'x'), None, None, 'x', True),
+    ('remainder', (), [], [], [], True),
+    ('star', (), (), 'seed', (), False),
+    ('plus', ('x',), None, None, ['x'], True),
+    ('question', (), (), 'seed', (), False),
+    ('positional', ('x',), None, None, 'x', True),
+)
+
 REFLECTIVE_ESCAPE_CASES = (
     ("_ = locals()['args'].undeclared_probe", 'locals()'),
     ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
@@ -330,6 +342,51 @@ KNOWN_GAP_FRAME_ROUTE_CASES = (
 _FRAME_ROUTE_OBJECTS = (sys._getframe, inspect.currentframe)
 
 
+def add_storage_probe(parser, shape, dest='probe'):
+    options = {'default': argparse.SUPPRESS}
+    if shape in ('optional', 'optional-remainder', 'required-option'):
+        option = f'--{dest.replace("_", "-")}'
+        options['required'] = shape == 'required-option'
+        if shape == 'optional-remainder':
+            options['nargs'] = argparse.REMAINDER
+        return parser.add_argument(option, **options)
+    nargs = {
+        'remainder': argparse.REMAINDER, 'star': '*', 'plus': '+',
+        'question': '?', 'positional': None}[shape]
+    if nargs is None:
+        return parser.add_argument(dest, **options)
+    return parser.add_argument(dest, nargs=nargs, **options)
+
+
+def _stored(value):
+    return {} if value == () else {'probe': value}
+
+
+def assert_argparse_storage_contract(audit_handler):
+    for case in ARGPARSE_STORAGE_CASES:
+        shape, argv, empty, seeded_empty, minimal, is_guaranteed = case
+        parser = argparse.ArgumentParser(add_help=False)
+        add_storage_probe(parser, shape)
+        declared, guaranteed = namespace_dests(parser)
+        expected_guaranteed = {'probe'} if is_guaranteed else set()
+        assert declared == {'probe'}, shape
+        assert guaranteed == expected_guaranteed, shape
+        expected_read = [] if is_guaranteed else ['args.probe']
+        assert audit_handler(
+            'args.probe', declared, guaranteed) == expected_read, shape
+        if empty is not None:
+            assert vars(parser.parse_args([])) == _stored(empty), shape
+        assert vars(parser.parse_args(argv)) == _stored(minimal), shape
+        seeded = argparse.ArgumentParser(add_help=False)
+        add_storage_probe(seeded, shape)
+        seeded.set_defaults(probe='seed')
+        assert namespace_dests(seeded) == ({'probe'}, {'probe'}), shape
+        if seeded_empty is not None:
+            assert vars(seeded.parse_args([])) == _stored(seeded_empty), shape
+        seeded_minimal = minimal if argv else seeded_empty
+        assert vars(seeded.parse_args(argv)) == _stored(seeded_minimal), shape
+
+
 def namespace_dests(parser):
     """Return the declared and guaranteed namespace destinations."""
     never_store = (argparse._HelpAction, argparse._VersionAction)
@@ -341,7 +398,10 @@ def namespace_dests(parser):
     declared = {action.dest for action in actions} | defaults
     guaranteed = {
         action.dest for action in actions
-        if action.default is not argparse.SUPPRESS}
+        if (action.default is not argparse.SUPPRESS
+            or action.required
+            or (not action.option_strings
+                and action.nargs == argparse.REMAINDER))}
     return declared, guaranteed | defaults
 
 
