@@ -372,6 +372,24 @@ def test_a_decoy_job_cannot_supply_the_speed_environment(tmp):
     assert job_scalar(workflow, 'speed', 'environment') is None
 
 
+def test_job_scalar_stays_inside_the_jobs_mapping(tmp):
+    """A scalar outside `jobs` cannot impersonate the speed job."""
+    del tmp
+    workflow = (
+        'name: speed\n'
+        'run-name: |\n'
+        '  speed:\n'
+        '    environment: >-\n'
+        "      ${{ github.event_name == 'pull_request'\n"
+        '      && github.event.pull_request.head.repo.full_name != '
+        'github.repository\n'
+        "      && 'fork-benchmark' || 'benchmark' }}\n"
+        'jobs:\n'
+        '  speed:\n'
+        '    runs-on: ubuntu-latest\n')
+    assert job_scalar(workflow, 'speed', 'environment') is None
+
+
 def test_the_speed_gate_throws_away_its_first_round(tmp):
     """The first suite a job runs is not one of the measured ones.
 

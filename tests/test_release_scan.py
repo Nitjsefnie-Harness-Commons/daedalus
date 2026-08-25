@@ -57,7 +57,8 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(iter_tree_files(ROOT))
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 130, f'expected 130 tracked paths, found {len(tracked)}'
+    assert len(tracked) == 130, (
+        f'expected 130 tracked paths, found {len(tracked)}')
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (

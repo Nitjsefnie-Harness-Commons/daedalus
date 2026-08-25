@@ -20,21 +20,55 @@ def job_scalar(workflow, job, key):
     job is not found here. None when `job` does not declare `key`.
     """
     lines = workflow.splitlines()
-    if f'  {job}:' not in lines:
+    jobs = next((number for number, line in enumerate(lines)
+                 if line.startswith('jobs:')
+                 and (not line[5:].strip()
+                      or line[5:].lstrip().startswith('#'))), None)
+    if jobs is None:
         return None
-    body = lines[lines.index(f'  {job}:') + 1:]
-    for number, line in enumerate(body):
-        if line.strip() and not line.startswith('    '):
-            return None
+    body_end = len(lines)
+    for number, line in enumerate(lines[jobs + 1:], jobs + 1):
+        if (line.strip() and not line.lstrip().startswith('#')
+                and not line.startswith((' ', '\t'))):
+            body_end = number
+            break
+    body = lines[jobs + 1:body_end]
+    job_indent = next((len(line) - len(line.lstrip()) for line in body
+                       if line.strip() and not line.lstrip().startswith('#')),
+                      None)
+    if job_indent is None:
+        return None
+    job_name = ' ' * job_indent + job + ':'
+    job_start = next((number for number, line in enumerate(body)
+                      if line == job_name
+                      or line.startswith(job_name + ' #')), None)
+    if job_start is None:
+        return None
+    job_end = len(body)
+    for number, line in enumerate(body[job_start + 1:], job_start + 1):
+        if line.strip() and not line.lstrip().startswith('#'):
+            indent = len(line) - len(line.lstrip())
+            if indent <= job_indent:
+                job_end = number
+                break
+    job_body = body[job_start + 1:job_end]
+    key_indent = next((len(line) - len(line.lstrip()) for line in job_body
+                       if line.strip() and not line.lstrip().startswith('#')),
+                      None)
+    if key_indent is None:
+        return None
+    key_name = ' ' * key_indent + key + ':'
+    for number, line in enumerate(job_body):
         name, colon, rest = line.partition(':')
-        if not colon or name != f'    {key}':
+        if not colon or name != key_name[:-1]:
             continue
         header = rest.strip()
         if header[:1] not in ('>', '|'):
             return header
         block = []
-        for content in body[number + 1:]:
-            if content.strip() and not content.startswith('     '):
+        for content in job_body[number + 1:]:
+            if (content.strip()
+                    and len(content) - len(content.lstrip()) <= key_indent):
                 break
             block.append(content)
         while block and not block[-1].strip():
