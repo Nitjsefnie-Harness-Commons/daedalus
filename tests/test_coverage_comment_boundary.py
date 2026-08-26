@@ -128,7 +128,7 @@ def test_workflow_step_composes_container_shell_and_environment(tmp):
         'env': {
             'JOB_ONLY': 'job',
             'SHARED': 'job',
-            'BASH_ENV': '${{ github.workspace }}/hook.sh',
+            'BASH_ENV': 'hook.sh',
         },
     }
     step = {'run': 'true', 'env': {'SHARED': '${{ github.token }}'}}
@@ -166,7 +166,7 @@ def test_workflow_step_composes_container_shell_and_environment(tmp):
     assert job_env['WORKFLOW_ONLY'] == 'workflow', job_env
     assert job_env['JOB_ONLY'] == 'job', job_env
     assert job_env['SHARED'] == 'step', job_env
-    assert job_env['BASH_ENV'] == str(Path(tmp) / 'hook.sh'), job_env
+    assert job_env['BASH_ENV'] == 'hook.sh', job_env
 
 
 def _workflow():
