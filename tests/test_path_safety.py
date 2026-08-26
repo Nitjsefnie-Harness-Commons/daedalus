@@ -358,6 +358,55 @@ def test_delivery_alias_is_refused_but_a_missing_target_is_accepted(tmp):
                 / 'missing-delivery.json').is_file()
 
 
+_PATH_SAFETY_PROBE = r"""
+import json
+import os
+import sys
+
+import path_safety
+
+root = sys.argv[1]
+contained = path_safety.under(root, 'inside.txt')
+try:
+    path_safety.under(root, '..', 'escaped.txt')
+except ValueError:
+    escape = 'refused'
+else:
+    escape = 'allowed'
+
+print('PATH_SAFETY ' + json.dumps({
+    'unsafe': path_safety.unsafe_component('../escape'),
+    'contained': os.path.basename(str(contained)),
+    'escape': escape,
+    'targets': path_safety.command_target_names('tok', 'tab'),
+}))
+"""
+
+
+def test_the_validation_helpers_import_without_the_bridge_environment(tmp):
+    """Validation helpers remain usable without bridge startup settings."""
+    probe_root = Path(tmp) / 'path-safety-root'
+    probe_root.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    for name in ('DAEDALUS_DIR', 'DAEDALUS_PORT', 'DAEDALUS_TOKEN'):
+        env.pop(name, None)
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    proc = subprocess.run(
+        [sys.executable, '-c', _PATH_SAFETY_PROBE, str(probe_root)],
+        cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith('PATH_SAFETY ')]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    answer = json.loads(marked[0][len('PATH_SAFETY '):])
+    assert answer['unsafe'] is True, (proc.stdout, proc.stderr, answer)
+    assert answer['contained'] == 'inside.txt', (
+        proc.stdout, proc.stderr, answer)
+    assert answer['escape'] == 'refused', (proc.stdout, proc.stderr, answer)
+    assert answer['targets'] == ['tok_tab', 'tok_tab.json'], (
+        proc.stdout, proc.stderr, answer)
+
+
 _STRIPE_PROBE = r"""
 import json
 import os
@@ -407,7 +456,7 @@ import os
 import os.path
 import sys
 
-import server
+import path_safety
 
 root = sys.argv[1]
 name = 'tok_extension.json'
@@ -435,11 +484,11 @@ os.path.realpath = one_side_prefixed
 answer = {}
 try:
     try:
-        answer['contained'] = os.path.basename(str(server._under(root, name)))
+        answer['contained'] = os.path.basename(str(path_safety.under(root, name)))
     except ValueError as failure:
         answer['contained'] = 'REFUSED: ' + str(failure)
     try:
-        server._under(root, '..', name)
+        path_safety.under(root, '..', name)
         answer['escape'] = 'ALLOWED'
     except ValueError:
         answer['escape'] = 'refused'
