@@ -16,6 +16,22 @@ import _util  # noqa: E402
 from _bridge import TOK, put_command  # noqa: E402
 
 
+def test_sync_tabs_dashboard_event_lands_in_command_tree(tmp):
+    with _util.bridge(tmp) as (base, docroot):
+        status, body = _util.post_json(
+            base + '/sync-tabs', {'token': TOK, 'tabs': []})
+        assert status == 200 and body == {'ok': True, 'count': 0}, (
+            status, body)
+
+        queue = Path(docroot) / 'commands' / f'{TOK}_dashboard'
+        events = list(queue.glob('*.json'))
+        assert len(events) == 1, events
+        event = json.loads(events[0].read_text(encoding='utf-8'))
+        assert event['type'] == 'tabs-synced' and event['count'] == 0, event
+        wrong_root = Path(docroot) / 'results' / f'{TOK}_dashboard'
+        assert not wrong_root.exists(), wrong_root
+
+
 def test_tabs_registry(tmp):
     with _util.bridge(tmp) as (base, _docroot):
         tabs = [{'tabId': '11', 'url': 'https://example.com/a', 'title': 'A'},
