@@ -12,22 +12,29 @@ _DOUBLE_ESCAPES = {
 }
 
 _SCHEMA_TYPED_WORDS = frozenset((
-    'y', 'yes', 'n', 'no', 'true', 'false', 'on', 'off', 'null', '~',
+    'yes', 'Yes', 'YES', 'no', 'No', 'NO',
+    'true', 'True', 'TRUE', 'false', 'False', 'FALSE',
+    'on', 'On', 'ON', 'off', 'Off', 'OFF',
+    'null', 'Null', 'NULL', '~',
 ))
 _SCHEMA_TYPED_NUMBER_OR_TIME = re.compile(
     r'(?:'
-    r'[-+]?(?:0[bB][01_]+|0[oO][0-7_]+|0[xX][0-9a-fA-F_]+'
-    r'|0[0-7_]+|(?:0|[1-9][0-9_]*)'
-    r'|[1-9][0-9_]*(?::[0-5]?[0-9])+)'
-    r'|[-+]?(?:(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9][0-9_]*)'
-    r'(?:[eE][-+]?[0-9]+)?|[0-9]+[eE][-+]?[0-9]+'
-    r'|[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|\.inf)'
-    r'|\.nan'
+    r'[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?'
+    r'|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?'
+    r'|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*'
+    r'|[-+]?\.(?:inf|Inf|INF)'
+    r'|\.(?:nan|NaN|NAN)'
+    r'|[-+]?0b[0-1_]+'
+    r'|[-+]?0[0-7_]+'
+    r'|[-+]?(?:0|[1-9][0-9_]*)'
+    r'|[-+]?0x[0-9a-fA-F_]+'
+    r'|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+'
+    r'|[0-9]{4}-[0-9]{2}-[0-9]{2}'
     r'|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}'
-    r'(?:[Tt ]+[0-9]{1,2}:[0-9]{2}:[0-9]{2}'
-    r'(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}'
-    r'(?::[0-9]{2})?))?)?'
-    r')', re.IGNORECASE)
+    r'(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}'
+    r'(?:\.[0-9]*)?'
+    r'(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?'
+    r')')
 
 
 class _ScalarReaderMixin:
@@ -419,7 +426,7 @@ class _ScalarReaderMixin:
         return self._require_plain_string(text, index, context)
 
     def _require_plain_string(self, value, index, context):
-        if (not value or value.casefold() in _SCHEMA_TYPED_WORDS
+        if (not value or value in _SCHEMA_TYPED_WORDS
                 or _SCHEMA_TYPED_NUMBER_OR_TIME.fullmatch(value)):
             self._refuse(
                 'plain scalar is not provably a string', index, context)
