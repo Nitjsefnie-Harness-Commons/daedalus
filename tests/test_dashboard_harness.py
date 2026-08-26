@@ -86,6 +86,13 @@ def _phase_trace(result):
     return re.findall(r'^\[phase\] (.+)$', result.stderr, re.MULTILINE)
 
 
+def _backstop_seconds(failure):
+    match = re.search(
+        r'outer backstop timed out after ([0-9.]+)s;', failure)
+    assert match, failure
+    return float(match.group(1))
+
+
 def test_phase_records_a_harness_checkpoint(tmp):
     """A phase reaches captured stderr in its stable diagnostic format."""
     del tmp
@@ -279,7 +286,7 @@ export function formatEvalWorld(value) {
     failure = _harness_failure(
         behaviour._DASHBOARD_WORLD_HARNESS, module,
         step_timeout=0.5)
-    assert 'outer backstop timed out after 1.0s' in failure, failure
+    assert _backstop_seconds(failure) == 1.0, failure
     assert 'last phase: dashboard harness finished' in failure, failure
     assert '"cdp"' in failure, failure
     assert '[phase] dashboard module imported' in failure, failure
@@ -290,7 +297,7 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
     del tmp
     failure = _harness_failure(
         'for (;;) {}', bounded_steps=0, step_timeout=0.1)
-    assert 'outer backstop timed out after 0.1s' in failure, failure
+    assert _backstop_seconds(failure) == 0.1, failure
     assert 'last phase: none recorded' in failure, failure
 
 
