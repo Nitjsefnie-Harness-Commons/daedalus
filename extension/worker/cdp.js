@@ -2,18 +2,23 @@
 /* exported _releaseCdpObjects, _cdpSettle */
 /* global postResult */
 
-const _cdpSessions = {}; // chromeTabId -> true while a sticky CDP session is held
+// chromeTabId -> true while a sticky CDP session is held
+const _cdpSessions = {};
 
 async function handleCdp(cmd) {
-  if (!cmd.method) return postResult(cmd._execution, null, 'Missing CDP method', 'extension');
+  if (!cmd.method) return postResult(
+    cmd._execution, null, 'Missing CDP method', 'extension');
   try {
     let chromeTabId = cmd.tabId;
     if (!chromeTabId || chromeTabId === 'extension') {
-      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!active) return postResult(cmd._execution, null, 'No active tab', 'extension');
+      const [active] = await chrome.tabs.query(
+        { active: true, currentWindow: true });
+      if (!active) return postResult(
+        cmd._execution, null, 'No active tab', 'extension');
       chromeTabId = active.id;
     }
-    chromeTabId = typeof chromeTabId === 'number' ? chromeTabId : parseInt(chromeTabId);
+    chromeTabId = typeof chromeTabId === 'number'
+      ? chromeTabId : parseInt(chromeTabId);
 
     const heldBefore = !!_cdpSessions[chromeTabId];
     const keep = !!cmd.keep_session;
@@ -22,12 +27,15 @@ async function handleCdp(cmd) {
     }
     if (keep) _cdpSessions[chromeTabId] = true;
     try {
-      const result = await chrome.debugger.sendCommand({ tabId: chromeTabId }, cmd.method, cmd.params || {});
+      const result = await chrome.debugger.sendCommand(
+        { tabId: chromeTabId }, cmd.method, cmd.params || {});
       await postResult(cmd._execution, result, null, 'extension');
     } finally {
       if (!keep) {
         delete _cdpSessions[chromeTabId];
-        try { await chrome.debugger.detach({ tabId: chromeTabId }); } catch (_) {}
+        try {
+          await chrome.debugger.detach({ tabId: chromeTabId });
+        } catch (_) {}
       }
     }
   } catch (e) {
@@ -92,7 +100,8 @@ async function _cdpSettle(chromeTabId, remote) {
           timeoutId = setTimeout(() => {
             timedOut = true;
             reject(new Error(
-              `promise settlement timed out after ${_CDP_PROMISE_TIMEOUT_MS} ms`));
+              `promise settlement timed out after ${
+                _CDP_PROMISE_TIMEOUT_MS} ms`));
           }, _CDP_PROMISE_TIMEOUT_MS);
         }),
       ])
