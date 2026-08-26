@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Executable contracts for locating named workflow steps."""
+import itertools
 import sys
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import _util  # noqa: E402
 from _yamlread import (  # noqa: E402
     YAMLReadError, _comment, job_scalar, step_scalar, step_scalars,
 )
+from _yamlscalar import decode_inline_scalar  # noqa: E402
 
 
 def _raises(source, detail):
@@ -231,6 +233,60 @@ def test_step_scalar_list_decodes_folded_values(tmp):
         raise AssertionError(
             f'folded step scalar was not decoded: {error}') from error
     assert values == ['owner/action@0123456789abcdef'], values
+
+
+def test_plain_scalar_oracle_corpus_refuses_unsafe_spellings(tmp):
+    """The bounded grammar refuses every unsafe plain scalar spelling."""
+    del tmp
+    sha = '3d3c42e5aac5ba805825da76410c181273ba90b1'
+    checkout = f'actions/checkout@{sha}'
+    spellings = {
+        checkout, f"'{checkout}'", f'"{checkout}"',
+        f'"actions\\/checkout@{sha}"',
+        f'"actions\\x2fcheckout@{sha}"',
+        f'"actions\\u002fcheckout@{sha}"',
+        f'"actions\\U0000002fcheckout@{sha}"',
+        "'a''b'", '"a\\tb"', '"a\\Nb"', '"a\\_b"',
+        '"a\\Lb"', '"a\\Pb"', 'plain', 'a:b', 'a::b', '-', ':',
+        '@bad', 'foo # comment', "'foo # data' # comment",
+        '"foo # data" # comment',
+    }
+    alphabet = 'aA09-_.@/+:$()'
+    for length in range(1, 4):
+        spellings.update(
+            ''.join(chars)
+            for chars in itertools.product(alphabet, repeat=length))
+    assert len(spellings) == 2974, len(spellings)
+    accepted = []
+    for spelling in sorted(spellings):
+        try:
+            decode_inline_scalar(spelling, 'oracle corpus')
+        except YAMLReadError:
+            continue
+        if (':' in spelling or spelling == '-'
+                or spelling.startswith('@')):
+            accepted.append(spelling)
+    assert not accepted, (
+        f'accepted {len(accepted)} unsafe spellings: {accepted[:20]!r}')
+
+
+def test_real_workflow_trailing_colon_action_is_refused(tmp):
+    """A runtime-invalid action scalar cannot pass trusted step policy."""
+    del tmp
+    workflow = _coverage_workflow()
+    action = (
+        'actions/download-artifact@'
+        '37930b1c2abaa49bbe596cd826c3c89aef350131'
+    )
+    folded = f'        uses: >-\n          {action}\n'
+    mutated = workflow.replace(folded, f'        uses: {action}:\n', 1)
+    assert mutated != workflow, 'real download action was not mutated'
+    try:
+        step_scalars(mutated, 'comment', 'uses')
+    except YAMLReadError as error:
+        assert 'unsupported plain scalar' in str(error), str(error)
+        return
+    raise AssertionError('runtime-invalid trailing-colon action was accepted')
 
 
 def test_privileged_workflow_has_no_decoded_checkout(tmp):
