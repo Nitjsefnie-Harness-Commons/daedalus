@@ -217,14 +217,14 @@ try {
 
 
 def test_backstop_grows_with_the_bounded_step_count(tmp):
-    """The outer timeout leaves every declared inner step time to report."""
+    """The outer timeout reserves every step plus one full-step grace."""
     del tmp
     assert hasattr(_dashnode, 'dashboard_child_timeout'), (
         'dashboard_child_timeout did not derive the outer backstop')
+    zero_steps = _dashnode.dashboard_child_timeout(0, step_timeout=0.25)
     one_step = _dashnode.dashboard_child_timeout(1, step_timeout=0.25)
     three_steps = _dashnode.dashboard_child_timeout(3, step_timeout=0.25)
-    assert one_step > 0.25, one_step
-    assert three_steps > one_step, (one_step, three_steps)
+    assert (zero_steps, one_step, three_steps) == (0.25, 0.5, 1.0)
 
 
 def test_shipped_harnesses_pin_their_exact_bounded_step_counts(tmp):
@@ -292,6 +292,36 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
         'for (;;) {}', bounded_steps=0, step_timeout=0.1)
     assert 'outer backstop timed out after 0.1s' in failure, failure
     assert 'last phase: none recorded' in failure, failure
+
+
+def test_last_phase_preserves_regex_metacharacters(tmp):
+    """Phase extraction treats a diagnostic label as arbitrary text."""
+    del tmp
+    failure = _harness_failure(
+        "phase('selector [update] (2/3) .*'); setInterval(() => {}, 10);",
+        step_timeout=0.3)
+    assert 'last phase: selector [update] (2/3) .*;' in failure, failure
+
+
+def test_last_phase_accepts_an_unterminated_final_line(tmp):
+    """A killed child's final phase does not require a trailing newline."""
+    del tmp
+    failure = _harness_failure(
+        "process.stderr.write('[phase] final partial line'); "
+        "setInterval(() => {}, 10);", step_timeout=0.3)
+    assert 'last phase: final partial line;' in failure, failure
+
+
+def test_outer_backstop_preserves_named_output_fields(tmp):
+    """Captured stdout and stderr keep independently named fields."""
+    del tmp
+    source = r"""
+process.stdout.write('OUT');
+process.stderr.write('[phase] output fields\nERR');
+setInterval(() => {}, 10);
+"""
+    failure = _harness_failure(source, step_timeout=0.3)
+    assert "stdout: 'OUT'; stderr: '[phase] output fields\\nERR'" in failure
 
 
 def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
