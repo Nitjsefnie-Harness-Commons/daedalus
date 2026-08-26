@@ -6,8 +6,6 @@ the real Node subprocess boundary and the exact evidence returned to Python.
 """
 import contextlib
 import http.server
-import os
-import signal
 import subprocess
 import sys
 import threading
@@ -109,13 +107,14 @@ def _slow_result_server():
         def do_GET(self):
             time.sleep(30)
             body = b'{"pending":false}'
-            self.send_response(200)
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
             try:
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
                 self.wfile.write(body)
-            except BrokenPipeError:
-                # The bounded fetch closes before this delayed reply is sent.
+            except OSError:
+                # The test deliberately ends the peer while this is pending,
+                # so its closed socket is expected to reset here.
                 pass
 
         # pylint: disable-next=redefined-builtin
@@ -243,7 +242,7 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
         'import subprocess, sys, time\n'
         'from pathlib import Path\n'
         'grandchild = subprocess.Popen('
-        '[sys.executable, "-c", "import time; time.sleep(60)"])\n'
+        '[sys.executable, "-c", "import time; time.sleep(10)"])\n'
         'target = Path(sys.argv[1])\n'
         'pending = target.with_suffix(".tmp")\n'
         'pending.write_text(str(grandchild.pid), encoding="ascii")\n'
@@ -253,20 +252,13 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
     process = subprocess.Popen(
         [sys.executable, '-c', client, str(pid_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    grandchild_pid = None
     try:
         _wait_for_path(pid_path)
-        grandchild_pid = int(pid_path.read_text(encoding='ascii'))
         states = _overlap.client_states({'pipe-owner': process}, grace=0.1)
     finally:
         if process.poll() is None:
             process.kill()
             process.communicate()
-        if grandchild_pid is not None:
-            try:
-                os.kill(grandchild_pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
     state = states['pipe-owner']
     assert state['stillRunning'] is True, state
     assert state['returncode'] is not None, state
