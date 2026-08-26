@@ -20,7 +20,6 @@ control belongs to a named family.
 """
 import argparse
 import ast
-import builtins  # pylint: disable=unused-import
 import inspect
 import sys
 import textwrap
@@ -303,6 +302,9 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
 
 def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None):
     present = dests if present is None else present
+    if scope is None:
+        scope = dict(globals())
+        scope['builtins'] = sys.modules['builtins']
     function = ast.parse(
         'def fake(args):\n' + textwrap.indent(body, '    ')).body[0]
     _, violations = _handler_arg_violations(
@@ -701,6 +703,24 @@ def test_cli_audit_respects_nested_local_bindings(tmp):
         "    args = type('T', (), {'json': True})()\n"
         '    return args.json')
     assert _audit_fake_handler(shadowed) == []
+
+
+def test_cli_audit_module_has_no_dead_imports(tmp):
+    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    imported = set()
+    for statement in tree.body:
+        if isinstance(statement, ast.Import):
+            imported |= {
+                alias.asname or alias.name.split('.')[0]
+                for alias in statement.names}
+        elif isinstance(statement, ast.ImportFrom):
+            imported |= {
+                alias.asname or alias.name for alias in statement.names}
+    loaded = {
+        node.id for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+    unused = sorted(imported - loaded)
+    assert unused == [], unused
 
 
 def test_cli_handlers_read_only_declared_args(tmp):
