@@ -233,6 +233,23 @@ def test_checkout_pin_allows_github_access_with_literal_fallback(tmp):
     assert failures == [], failures
 
 
+def test_checkout_pin_ignores_comment_after_plain_scalar_quote(tmp):
+    """A comment cannot introduce a forbidden identifier into a safe ref."""
+    del tmp
+    workflow = (
+        'name: plain quote oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        "          ref: a' # ${{ steps.baseline.outputs.ref }}\n")
+    assert _wfcheckout.checkout_refs(workflow) == [('build', "a'")]
+    _assert_checkout_refs_safe(workflow)
+
+
 def test_checkout_pin_skips_github_and_rejects_non_reference_expressions(tmp):
     """GitHub refs are excluded; expressions the pin cannot decompose fail."""
     del tmp
