@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _worker_sources import import_scripts_stub  # noqa: E402
 
 
 _CDP_HANDLE_LIFECYCLE_HARNESS = r"""
@@ -180,6 +181,7 @@ const context = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
+""" + import_scripts_stub('context') + r"""
 
 function delay() {
   return new Promise((resolve) => setImmediate(resolve));
