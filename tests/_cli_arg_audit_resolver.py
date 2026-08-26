@@ -148,8 +148,35 @@ def _builtin_name_is_shadowed(node, name, function, scope_binds,
     return False
 
 
-def _statement_bound_names(statement):
+def _current_module_expression(node):
+    return (isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == 'modules'
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id == 'sys'
+            and isinstance(node.slice, ast.Name)
+            and node.slice.id == '__name__')
+
+
+def _module_binding_write(node):
+    if (not isinstance(node, (ast.Attribute, ast.Subscript))
+            or not isinstance(node.ctx, (ast.Store, ast.Del))):
+        return None
+    if isinstance(node, ast.Attribute) \
+            and _current_module_expression(node.value):
+        return node.attr
+    if (isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == '__dict__'
+            and _current_module_expression(node.value.value)):
+        return constant_string(node.slice)
+    return None
+
+
+def _statement_binding_writes(statement):
     names = set()
+    module_names = set()
+    builtin_module_attributes = set()
     stack = [statement]
     while stack:
         node = stack.pop()
@@ -166,14 +193,22 @@ def _statement_bound_names(statement):
             continue
         if isinstance(node, ast.ExceptHandler) and node.name is not None:
             names.add(node.name)
+        module_binding = _module_binding_write(node)
+        if module_binding is not None:
+            module_names.add(module_binding)
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.ctx, (ast.Store, ast.Del))
+                and isinstance(node.value, ast.Name)):
+            builtin_module_attributes.add((node.value.id, node.attr))
         if isinstance(node, ast.Name) \
                 and isinstance(node.ctx, (ast.Store, ast.Del)):
             names.add(node.id)
         stack.extend(ast.iter_child_nodes(node))
-    return names
+    return names, module_names, builtin_module_attributes
 
 
-def _update_builtin_bindings(statement, bindings, unresolved):
+def _update_builtin_bindings(statement, bindings, handler_globals,
+                             unresolved, function, scope_binds):
     if isinstance(statement, ast.Import):
         for alias in statement.names:
             name = alias.asname or alias.name.split('.')[0]
@@ -187,18 +222,106 @@ def _update_builtin_bindings(statement, bindings, unresolved):
                 builtins.__dict__.get(alias.name, unresolved)
                 if statement.module == 'builtins' else unresolved)
         return
-    for name in _statement_bound_names(statement):
+    names, module_names, builtin_module_attributes = \
+        _statement_binding_writes(statement)
+    for name in names:
         bindings[name] = unresolved
+    for name in module_names:
+        if name not in bindings or not scope_binds(function, name):
+            bindings[name] = unresolved
+    for name, attribute in builtin_module_attributes:
+        value = bindings.get(name, handler_globals.get(name, unresolved))
+        if value is builtins:
+            bindings[(name, attribute)] = unresolved
 
 
-def _builtin_bindings_before(node, function, unresolved):
-    """Return straight-line builtin imports and invalidations before node."""
+def _statement_prefixes(node, function):
+    """Return enclosing statement prefixes from outermost to innermost."""
+    prefixes = []
+    current = node
+    while current is not function:
+        parent = current._parent
+        for _, children in ast.iter_fields(parent):
+            if (isinstance(children, list)
+                    and current in children
+                    and all(isinstance(child, ast.stmt)
+                            for child in children)):
+                prefixes.append(children[:children.index(current)])
+                break
+        current = parent
+    return reversed(prefixes)
+
+
+def _builtin_bindings_at(node, function, handler_globals, unresolved,
+                         scope_binds):
+    """Return builtin imports and invalidations at one call site."""
     bindings = {}
-    for statement in function.body:
-        if any(candidate is node for candidate in ast.walk(statement)):
-            break
-        _update_builtin_bindings(statement, bindings, unresolved)
+    for prefix in _statement_prefixes(node, function):
+        for statement in prefix:
+            _update_builtin_bindings(
+                statement, bindings, handler_globals, unresolved,
+                function, scope_binds)
     return bindings
+
+
+def _execution_callable(node, function):
+    current = node
+    callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    while current is not function:
+        parent = current._parent
+        if (isinstance(parent, callables)
+                and _callable_body_contains(parent, current)):
+            return parent
+        current = parent
+    return function
+
+
+def _captured_callable(node, function):
+    owner = _execution_callable(node, function)
+    return None if owner is function else owner
+
+
+def _direct_invocations(captured, function):
+    if not isinstance(captured, ast.FunctionDef):
+        return ()
+    references = tuple(
+        node for node in ast.walk(function)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id == captured.name
+        and node.lineno > captured.end_lineno
+        and _execution_callable(node, function) is function)
+    if (not references
+            or any(not isinstance(node._parent, ast.Call)
+                   or node._parent.func is not node
+                   for node in references)):
+        return ()
+    rebound = any(
+        isinstance(node, ast.Name)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.id == captured.name
+        and node.lineno > captured.end_lineno
+        for node in ast.walk(function))
+    if rebound:
+        return ()
+    return tuple(node._parent for node in references)
+
+
+def _captured_identity_is_exact(node, reference_name, expected, function,
+                                handler_globals, unresolved, scope_binds):
+    if not scope_binds(function, reference_name):
+        return True
+    captured = _captured_callable(node, function)
+    if captured is None:
+        return True
+    invocations = _direct_invocations(captured, function)
+    if not invocations:
+        return False
+    return all(
+        _builtin_bindings_at(
+            call, function, handler_globals, unresolved, scope_binds
+        ).get(reference_name, unresolved) is expected
+        for call in invocations)
 
 
 def is_builtin_reference(node, name, function, handler_globals,
@@ -206,13 +329,18 @@ def is_builtin_reference(node, name, function, handler_globals,
     """Return whether ``node`` provably names one exact builtin."""
     expected = getattr(builtins, name)
     unresolved = object()
-    bindings = _builtin_bindings_before(node, function, unresolved)
+    bindings = _builtin_bindings_at(
+        node, function, handler_globals, unresolved, scope_binds)
     if isinstance(node, ast.Name):
         reference_name = node.id
         exact_local = bindings.get(reference_name) is expected
         if _builtin_name_is_shadowed(
                 node, reference_name, function, scope_binds,
                 comprehension_shadows, exact_local):
+            return False
+        if not _captured_identity_is_exact(
+                node, reference_name, expected, function,
+                handler_globals, unresolved, scope_binds):
             return False
         value = resolve_frame_value(
             node, function, handler_globals, bindings, unresolved,
@@ -231,10 +359,16 @@ def is_builtin_reference(node, name, function, handler_globals,
             or not isinstance(node.value, ast.Name)):
         return False
     module_name = node.value.id
+    if bindings.get((module_name, node.attr)) is unresolved:
+        return False
     exact_local = bindings.get(module_name) is builtins
     if _builtin_name_is_shadowed(
             node, module_name, function, scope_binds,
             comprehension_shadows, exact_local):
+        return False
+    if not _captured_identity_is_exact(
+            node, module_name, builtins, function,
+            handler_globals, unresolved, scope_binds):
         return False
     value = resolve_frame_value(
         node, function, handler_globals, bindings, unresolved,

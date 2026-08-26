@@ -11,9 +11,11 @@ same non-SUPPRESS destination. Direct attributes, exact-dict subscripts, and
 bare ``getattr`` reads require GUARANTEED; guarded reads require DECLARED.
 
 Builtin names, module attributes, and aliases qualify only when static
-resolution proves the exact builtin object at the call site. Straight-line
-handler imports establish exact local aliases; earlier rebindings or deletions
-invalidate them, and Python's local/global scope rules remain authoritative.
+resolution proves the exact builtin object at the call site. Enclosing
+statement prefixes establish exact local aliases; earlier name or attribute
+rebindings and deletions invalidate them, and Python's local/global scope
+rules remain authoritative. Captured local aliases also require exact identity
+at every proven direct invocation.
 Callable headers use outer scope; every other live parameter use escapes.
 
 Frame resolution follows supplied imports and globals by identity, exact
@@ -480,6 +482,32 @@ def test_cli_audit_reports_namespace_escapes(tmp):
 def test_cli_audit_requires_builtin_identity(tmp):
     for body, scope, expected in audit_support.BUILTIN_IDENTITY_GLOBAL_CASES:
         assert _audit_fake_handler(body, scope=scope) == list(expected), body
+
+
+def test_cli_audit_rechecks_builtin_identity_at_call_site(tmp):
+    mismatches = {}
+    for case in audit_support.BUILTIN_IDENTITY_CALL_SITE_CASES:
+        name, body, scope, expected = case
+        actual = _audit_fake_handler(body, scope=scope)
+        if actual != list(expected):
+            mismatches[name] = {'expected': list(expected), 'actual': actual}
+    assert mismatches == {}, mismatches
+
+
+def test_cli_audit_rechecks_builtin_identity_in_real_handler(tmp):
+    body = (
+        "sys.modules[__name__].G = (\n"
+        "        lambda namespace, *_: namespace.undeclared_probe)\n"
+        "    G(args, 'json', False)")
+    handler_module = _mutated_cli_tabs(
+        'builtin_call_site_cli',
+        'from builtins import getattr as G', body)
+    try:
+        assert _audit_real_tabs_handler(handler_module) == [
+            "namespace escape: G(args, 'json', False)"]
+        _assert_real_tabs_dispatch_crashes(handler_module)
+    finally:
+        sys.modules.pop(handler_module.__dict__['__name__'], None)
 
 
 def test_cli_audit_resolves_exact_builtin_aliases(tmp):

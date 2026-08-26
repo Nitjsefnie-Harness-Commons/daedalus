@@ -8,9 +8,11 @@ Direct reads require GUARANTEED; defaulted or presence-guarded reads require
 DECLARED.
 
 Builtin names, module attributes, and aliases qualify only when static
-resolution proves the exact builtin object at the call site. Straight-line
-imports establish exact aliases, earlier rebindings and deletions invalidate
-them, and unresolved or shadowed references fail closed.
+resolution proves the exact builtin object at the call site. Enclosing
+statement prefixes establish exact aliases, earlier name or attribute
+rebindings and deletions invalidate them, and unresolved or shadowed
+references fail closed. Captured local aliases also require exact identity at
+every proven direct invocation.
 
 The constant resolver follows exact modules, classes, static/class methods,
 list/tuple/dict values, constant keys, integer indices, and slices without
@@ -115,6 +117,63 @@ BUILTIN_IDENTITY_GLOBAL_CASES = (
     ("getattr(args, 'json', False)", {'__builtins__': {'getattr': len}},
      ("namespace escape: getattr(args, 'json', False)",)),
     ("_ = [value for getattr in (getattr(args, 'json', False),)]", None, ()),)
+BUILTIN_IDENTITY_CALL_SITE_CASES = (
+    ('module attribute reassigned before use',
+     "sys.modules[__name__].G = len\nG(args, 'json', False)",
+     {'G': builtins.getattr, 'sys': sys, '__name__': __name__},
+     ("namespace escape: G(args, 'json', False)",)),
+    ('module dictionary reassigned before use',
+     "sys.modules[__name__].__dict__['G'] = len\n"
+     "G(args, 'json', False)",
+     {'G': builtins.getattr, 'sys': sys, '__name__': __name__},
+     ("namespace escape: G(args, 'json', False)",)),
+    ('global import reassigned through module dictionary',
+     "global G\nfrom builtins import getattr as G\n"
+     "sys.modules[__name__].__dict__['G'] = len\n"
+     "G(args, 'json', False)",
+     {'sys': sys, '__name__': __name__},
+     ("namespace escape: G(args, 'json', False)",)),
+    ('branch rebinding before nested call',
+     "from builtins import getattr as g\n"
+     "if condition:\n    g = len\n    g(args, 'json', False)", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('loop-body rebinding before nested call',
+     "from builtins import getattr as g\n"
+     "for value in values:\n    g = len\n    g(args, 'json', False)", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('closure captures exact alias',
+     "from builtins import getattr as g\n"
+     "def inner():\n    return g(args, 'json', False)\ninner()", {}, ()),
+    ('closure alias rebound before invocation',
+     "from builtins import getattr as g\n"
+     "def inner():\n    return g(args, 'json', False)\n"
+     "g = len\ninner()", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('closure invoked before alias rebound',
+     "from builtins import getattr as g\n"
+     "def inner():\n    return g(args, 'json', False)\n"
+     "inner()\ng = len", {}, ()),
+    ('conditional binding before later call',
+     "if condition:\n    from builtins import getattr as g\n"
+     "g(args, 'json', False)", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('same-branch conditional binding',
+     "if condition:\n    from builtins import getattr as g\n"
+     "    g(args, 'json', False)", {}, ()),
+    ('unrelated object attribute reassigned',
+     "from builtins import getattr as g\nthing.g = len\n"
+     "g(args, 'json', False)", {}, ()),
+    ('module attribute preserves exact local alias',
+     "from builtins import getattr as g\n"
+     "sys.modules[__name__].g = len\ng(args, 'json', False)",
+     {'sys': sys, '__name__': __name__}, ()),
+    ('builtin module unrelated attribute reassigned',
+     "import builtins\nbuiltins.len = helper\n"
+     "builtins.getattr(args, 'json', False)", {}, ()),
+    ('builtin module target attribute reassigned',
+     "import builtins\nbuiltins.getattr = helper\n"
+     "builtins.getattr(args, 'json', False)", {},
+     ("namespace escape: builtins.getattr(args, 'json', False)",)),)
 BUILTIN_IDENTITY_LOCAL_CASES = (
     ('local from-import',
      "from builtins import getattr\ngetattr(args, 'json', False)", {}, ()),
@@ -475,7 +534,9 @@ DOCSTRING_RULE_PHRASES = (
     ('A required mutually exclusive group guarantees a destination only '
      'when every member stores that same non-SUPPRESS destination'),
     ('Builtin names, module attributes, and aliases qualify only when static '
-     'resolution proves the exact builtin object at the call site'),)
+     'resolution proves the exact builtin object at the call site'),
+    ('Captured local aliases also require exact identity at every proven '
+     'direct invocation'),)
 
 
 @contextlib.contextmanager
