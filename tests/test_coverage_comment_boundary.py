@@ -2,11 +2,14 @@
 """Executable contracts for the coverage comment privilege boundary."""
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _workflowrun  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _coverage_comment_steps import EXPECTED_STEP_MAPPINGS  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -40,6 +43,64 @@ _HOSTILE_BODIES = {
         "fs.writeFileSync('body.md', 'javascript replaced body\\n');\n"
     ),
 }
+
+
+def test_workflow_step_shells_are_resolved_through_path(tmp):
+    """Default and declared shell programs are resolved before execution."""
+    calls = []
+    real_run = _workflowrun.subprocess.run
+
+    def capture_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    _workflowrun.subprocess.run = capture_run
+    try:
+        _workflowrun.run_step(tmp, {'run': 'true'}, os.environ)
+        _workflowrun.run_step(
+            tmp, {'run': 'true', 'shell': 'bash --noprofile {0}'},
+            os.environ)
+    finally:
+        _workflowrun.subprocess.run = real_run
+
+    resolved = shutil.which('bash')
+    assert resolved is not None and os.path.isabs(resolved), resolved
+    programs = [command[0] for command, _kwargs in calls]
+    assert programs == [resolved, resolved], (
+        f'shell executables were not PATH-resolved: {programs!r}')
+    script_path = str(Path(tmp) / 'workflow-step.sh')
+    assert calls[0][0][1:] == ['-e', script_path], calls[0]
+    assert calls[1][0][1:] == ['--noprofile', script_path], calls[1]
+
+
+def test_workflow_step_rejects_an_unresolved_shell(tmp):
+    """A missing shell is rejected before a bare invocation is attempted."""
+    missing = 'daedalus-missing-workflow-shell'
+    assert shutil.which(missing) is None, missing
+    calls = []
+    message = ''
+    real_run = _workflowrun.subprocess.run
+
+    def capture_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    _workflowrun.subprocess.run = capture_run
+    try:
+        try:
+            _workflowrun.run_step(
+                tmp, {'run': 'true', 'shell': f'{missing} {{0}}'},
+                os.environ)
+        except FileNotFoundError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError(
+                f'unresolved shell {missing!r} reached subprocess.run')
+    finally:
+        _workflowrun.subprocess.run = real_run
+
+    assert missing in message, message
+    assert not calls, calls
 
 
 def _workflow():
