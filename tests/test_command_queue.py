@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Command expiry and claim exclusivity stay pinned.
+"""Command expiry and claim guarantees stay pinned.
 
-These tests cover claim-registry behavior and forced interleavings across the
-queue and legacy delivery paths, proving claim exclusivity within one bridge
-process: at most one consumer is active on a given logical queue key at a
-time. Delivery remains at-least-once, with a stable `_did` for extension-side
-deduplication.
+Claim-registry mutual exclusion applies only to consumers that go through
+`command_queue.claimed`—the SSE queue and legacy drain paths—and, within
+one bridge process, prevents two such consumers from being active on one
+logical key at a time. File delivery remains at-least-once: the frame is
+written before unlink and a failed unlink is swallowed, so an entry can be
+re-emitted.
+`_did` deduplication applies to commands enqueued through `PUT /command`,
+which carry a server-assigned delivery id; raw legacy drops do not.
 """
 import json
 import os
