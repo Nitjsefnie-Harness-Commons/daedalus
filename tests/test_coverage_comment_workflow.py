@@ -650,9 +650,9 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
     assert re.search(r'uses: actions/upload-artifact@.*\n\s+with:\n'
                      r'\s+name: coverage-xml[ \t]*$', coverage,
                      re.MULTILINE), coverage
-    assert re.search(r'uses:\s*(?:>-\s*)?actions/download-artifact@.*\n\s+with:\n'
-                     r'\s+name: coverage-xml[ \t]*$', diff,
-                     re.MULTILINE), diff
+    assert re.search(r'uses:\s*(?:>-\s*)?actions/download-artifact@.*\n'
+                     r'\s+with:\n\s+name: coverage-xml[ \t]*$',
+                     diff, re.MULTILINE), diff
     upload = diff.partition('actions/upload-artifact@')[2]
     assert re.search(r'with:\n\s+name: diff-coverage-comment[ \t]*$',
                      upload, re.MULTILINE), diff
