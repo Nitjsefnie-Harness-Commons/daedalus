@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """The classic service worker's module-boundary contract."""
+import os
 import re
 import shutil
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -51,9 +53,11 @@ def _runtime_observations(watched_by_source=None):
         watched_by_source = {}
     details = []
     for relative, source in _observed_worker_sources():
+        globals_ = _directive_names(source, 'global')
         details.append({
             'path': ROOT / relative,
-            'globals': _directive_names(source, 'global'),
+            'globals': globals_,
+            'probes': globals_ | _directive_names(source, 'exported'),
             'watched': watched_by_source.get(relative, ()),
         })
     observed = observe_worker_runtime(details)
@@ -172,6 +176,32 @@ for (const item of (() => {
     for path in collision_paths:
         assert '_executionContext' in observed[str(path)]['bindings'], path
     assert '_executionContext' not in observed[str(harmless)]['bindings']
+
+
+def test_worker_boundary_runs_without_untracked_node_modules(tmp):
+    """The tracked tree alone supplies every boundary-suite dependency."""
+    if os.environ.get('DAEDALUS_TRACKED_EXPORT_CHILD') == '1':
+        return
+    export_root = Path(tmp) / 'tracked'
+    export_root.mkdir()
+    listed = subprocess.run(
+        ['git', 'ls-files', '-z'], cwd=ROOT,
+        capture_output=True, check=True).stdout
+    for raw_path in listed.split(b'\0'):
+        if not raw_path:
+            continue
+        relative = Path(os.fsdecode(raw_path))
+        destination = export_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, destination)
+    environment = os.environ.copy()
+    environment['DAEDALUS_TRACKED_EXPORT_CHILD'] = '1'
+    result = subprocess.run(
+        [sys.executable, 'tests/test_worker_module_boundary.py'],
+        cwd=export_root, env=environment,
+        capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
 
 
 def test_runtime_observer_rejects_handler_reassignment(tmp):
