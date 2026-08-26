@@ -73,7 +73,7 @@ def run_dashboard_node(source, *arguments, module=False, bounded_steps=1,
         process.kill()
         stdout, stderr = process.communicate()
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
-        last_phase = phases[-1] if phases else ''
+        last_phase = phases[-1] if phases else 'none recorded'
         raise AssertionError(
             f'dashboard harness outer backstop timed out after {timeout}s; '
             f'last phase: {last_phase}; stdout: {stdout!r}; '
