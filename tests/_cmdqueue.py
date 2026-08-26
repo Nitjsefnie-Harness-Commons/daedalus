@@ -4,14 +4,14 @@ import time
 
 
 _POLL_DELAY = 0.05
-_UNLINK_ATTEMPTS = 25
+UNLINK_ATTEMPTS = 25
 _UNLINK_RETRY_DELAY = 0.02
 
 
 def clear_command_queue(directory):
     if directory.is_dir():
         for queued in directory.glob('*.json'):
-            for remaining in range(_UNLINK_ATTEMPTS - 1, -1, -1):
+            for remaining in range(UNLINK_ATTEMPTS - 1, -1, -1):
                 try:
                     queued.unlink()
                     break
@@ -19,18 +19,25 @@ def clear_command_queue(directory):
                     break
                 except PermissionError:
                     if not remaining:
-                        raise
+                        break
                     time.sleep(_UNLINK_RETRY_DELAY)
+    if not directory.is_dir():
+        return set()
+    return {queued.name for queued in directory.glob('*.json')}
 
 
-def wait_for_command(directory, timeout, producer_alive=None):
+def wait_for_command(directory, timeout, producer_alive=None,
+                     ignored_names=None):
     deadline = time.monotonic() + timeout
+    ignored_names = set(ignored_names or ())
     saw_queue_file = False
     while True:
         now = time.monotonic()
         if now >= deadline:
             return None
-        files = sorted(directory.glob('*.json')) if directory.is_dir() else []
+        files = (sorted(queued for queued in directory.glob('*.json')
+                        if queued.name not in ignored_names)
+                 if directory.is_dir() else [])
         if files:
             saw_queue_file = True
             try:
