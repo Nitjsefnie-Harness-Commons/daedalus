@@ -435,6 +435,41 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
     assert '2-3' in done.stdout, done.stdout
 
 
+def test_the_cli_reports_wholly_uncovered_numeric_lines(tmp):
+    """Numeric zero hits are usable and render a wholly uncovered patch."""
+    _write(tmp, 'zero.py', 'first = 1\nsecond = 2\n')
+    coverage_xml = _write(
+        tmp, 'zero.xml',
+        '<coverage><class filename="zero.py"><lines>'
+        '<line number="1" hits="0"/>'
+        '<line number="2" hits="0"/>'
+        '</lines></class></coverage>\n')
+    diff = _write(
+        tmp, 'zero.diff',
+        'diff --git a/zero.py b/zero.py\n'
+        '--- /dev/null\n'
+        '+++ b/zero.py\n'
+        '@@ -0,0 +1,2 @@\n'
+        '+first = 1\n'
+        '+second = 2\n')
+    try:
+        measured = diff_coverage.executable_lines(coverage_xml)
+    except ValueError as error:
+        raise AssertionError(
+            f'numeric zero-hit lines were rejected: {error}') from error
+    assert measured == {'zero.py': {1: 0, 2: 0}}
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+         '--diff', str(diff)],
+        cwd=tmp, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (
+        done.returncode, done.stdout, done.stderr)
+    assert done.stderr == '', done.stderr
+    assert '**0.0%** of added lines covered (0/2).' in done.stdout, (
+        done.stdout)
+    assert '| `zero.py` | 0 | 2 | 1-2 |' in done.stdout, done.stdout
+
+
 def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
     """Hunk counts end one file before the next plain file header."""
     _write(tmp, 'a.py', 'covered_a = 1\n')
