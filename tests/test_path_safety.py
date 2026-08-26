@@ -363,7 +363,6 @@ import json
 import os
 import sys
 
-import command_queue
 import path_safety
 
 root = sys.argv[1]
@@ -379,7 +378,7 @@ print('PATH_SAFETY ' + json.dumps({
     'unsafe': path_safety.unsafe_component('../escape'),
     'contained': os.path.basename(str(contained)),
     'escape': escape,
-    'targets': command_queue.command_target_names('tok', 'tab'),
+    'derived': path_safety.derived_component('tok_tab'),
 }))
 """
 
@@ -404,7 +403,7 @@ def test_the_validation_helpers_import_without_the_bridge_environment(tmp):
     assert answer['contained'] == 'inside.txt', (
         proc.stdout, proc.stderr, answer)
     assert answer['escape'] == 'refused', (proc.stdout, proc.stderr, answer)
-    assert answer['targets'] == ['tok_tab', 'tok_tab.json'], (
+    assert answer['derived'] == 'tok_tab', (
         proc.stdout, proc.stderr, answer)
 
 

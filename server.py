@@ -432,8 +432,7 @@ class _JSONObject(dict):
 
 
 def _normalized_tab_id(value):
-    """Normalize string or integer tab-id JSON values; return None
-    otherwise."""
+    """Normalize string or integer tab-id JSON values; return None otherwise."""
     if isinstance(value, str):
         return value
     if isinstance(value, int) and not isinstance(value, bool):
@@ -1778,7 +1777,8 @@ class Handler(BaseHTTPRequestHandler):
                     stored_bytes - replaced_bytes + len(raw))
                 if marks is not None:
                     marks.append(('record', time.perf_counter()))
-                    segment_store.log_timing(_log_safe(job), stored_count, marks)
+                    segment_store.log_timing(
+                        _log_safe(job), stored_count, marks)
             except OSError:
                 return self._json(500, {'error': 'segment storage failure'})
         print(f'[SEGMENT] {job}/{filename} ({len(raw)} bytes)', flush=True)

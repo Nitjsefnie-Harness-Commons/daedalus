@@ -218,11 +218,6 @@ def write_usage(job, count, stored):
             pass  # the next write of this record reuses the same temp name
 
 
-def new_signature():
-    """Mint one URL-safe capability for a new segment job."""
-    return secrets.token_urlsafe(32)
-
-
 def log_timing(job, stored, marks):
     """Print one per-phase line for a segment write, when DEBUG_TIMING is on.
 
