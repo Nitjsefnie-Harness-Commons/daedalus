@@ -296,13 +296,74 @@ class _ScalarReaderMixin:
     def _mapping_value_end(self, value, index, end, key_indent, context,
                            check_tabs=False):
         value = self._strip_comment(value).strip(' \t')
-        if value.startswith(('|', '>')):
+        flow_end = self._flow_value_end(value, index, end, context)
+        if flow_end is not None:
+            start = flow_end
+        elif value.startswith(('|', '>')):
             start = self._block_scalar_range(
                 value, index, end, key_indent, context)[3]
         else:
             quoted_end = self._quoted_scalar_end(value, index, end, context)
             start = index + 1 if quoted_end is None else quoted_end
         return self._value_end(start, end, key_indent, context, check_tabs)
+
+    def _flow_value_end(self, value, index, end, context):
+        value = self._strip_comment(value).strip(' \t')
+        if not value.startswith(('[', '{')):
+            return None
+        closing = {']': '[', '}': '{'}
+        stack = []
+        quote = None
+        line = index
+        source = value
+        position = 0
+        while line < end:
+            while position < len(source):
+                char = source[position]
+                if quote == '"':
+                    if char == '\\':
+                        position += 2
+                        continue
+                    if char == '"':
+                        quote = None
+                    position += 1
+                    continue
+                if quote == "'":
+                    if char == "'":
+                        if position + 1 < len(source) \
+                                and source[position + 1] == "'":
+                            position += 2
+                            continue
+                        quote = None
+                    position += 1
+                    continue
+                if char in ('"', "'") and (
+                        position == 0 or source[position - 1] in ' \t[{,:'):
+                    quote = char
+                elif char == '#' and (
+                        position == 0 or source[position - 1] in ' \t'):
+                    break
+                elif char in '[{':
+                    stack.append(char)
+                elif char in ']}':
+                    if not stack or stack[-1] != closing[char]:
+                        self._refuse('unbalanced flow value', line, context)
+                    stack.pop()
+                    if not stack:
+                        tail = self._strip_comment(
+                            source[position + 1:]).strip(' \t')
+                        if tail:
+                            self._refuse(
+                                'trailing text after flow value', line,
+                                context)
+                        return line + 1
+                position += 1
+            line += 1
+            if line < end:
+                source = self.lines[line]
+                position = 0
+        self._refuse('unterminated flow value', index, context)
+        return None
 
     def _block_scalar_range(self, header, index, end, parent_indent, context):
         header = self._strip_comment(header).strip(' \t')
@@ -360,7 +421,7 @@ class _ScalarReaderMixin:
         if value.startswith(('|', '>')):
             return self._block_scalar_range(
                 value, index, end, key_indent, context)[3]
-        return None
+        return self._flow_value_end(value, index, end, context)
 
     def _block_scalar(self, header, index, parent_indent, context):
         style, chomping, body_start, body_end, content_indent = \

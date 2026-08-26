@@ -57,6 +57,95 @@ def test_checkout_reader_skips_unwalked_flow_values(tmp):
     assert _wfcheckout.checkout_refs(workflow) == []
 
 
+def test_checkout_reader_skips_balanced_multiline_flow_values(tmp):
+    """Balanced flow values outside the checkout path are unwalked."""
+    del tmp
+    checkout = (
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: safe\n')
+    cases = (
+        (
+            'root on',
+            'name: root on\n'
+            'on: [\n'
+            '  push,\n'
+            '  pull_request,\n'
+            ']\n' + checkout,
+        ),
+        (
+            'root env',
+            'name: root env\n'
+            'on: push\n'
+            'env: {\n'
+            '  SAFE_REF: main,\n'
+            '}\n' + checkout,
+        ),
+        (
+            'job strategy',
+            'name: job strategy\n'
+            'on: push\n'
+            'jobs:\n'
+            '  build:\n'
+            '    strategy: {\n'
+            '      fail-fast: false,\n'
+            '    }\n'
+            '    runs-on: ubuntu-latest\n'
+            '    steps:\n'
+            '      - uses: actions/checkout@v4\n'
+            '        with:\n'
+            '          ref: safe\n',
+        ),
+        (
+            'step env',
+            'name: step env\n'
+            'on: push\n'
+            'jobs:\n'
+            '  build:\n'
+            '    runs-on: ubuntu-latest\n'
+            '    steps:\n'
+            '      - env: {\n'
+            "          SAFE_REF: don't,\n"
+            '        }\n'
+            '        run: echo "$SAFE_REF"\n'
+            '      - uses: actions/checkout@v4\n'
+            '        with:\n'
+            '          ref: safe\n',
+        ),
+        (
+            'non-checkout with',
+            'name: action with\n'
+            'on: push\n'
+            'jobs:\n'
+            '  build:\n'
+            '    runs-on: ubuntu-latest\n'
+            '    steps:\n'
+            '      - uses: actions/setup-python@'
+            '5fda3b95a4ea91299a34e894583c3862153e4b97\n'
+            '        with: {\n'
+            '          python-version: "3.12",\n'
+            '        }\n'
+            '      - uses: actions/checkout@v4\n'
+            '        with:\n'
+            '          ref: safe\n',
+        ),
+    )
+    failures = []
+    for name, workflow in cases:
+        try:
+            actual = _wfcheckout.checkout_refs(workflow)
+        except _wfcheckout.YAMLReadError as error:
+            failures.append((name, str(error)))
+        else:
+            if actual != [('build', 'safe')]:
+                failures.append((name, actual))
+    assert failures == [], failures
+
+
 def test_checkout_reader_never_omits_indented_jobs_for_a_quoted_decoy(tmp):
     """An unsupported root shape must not make a real checkout disappear."""
     del tmp
@@ -167,6 +256,11 @@ def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
         ('jobs:\n  build:\n    steps:\n'
          '      - uses: actions/checkout@v4\n'
          '        with: {ref: point}\n', 'flow mapping'),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with: {\n'
+         '          ref: point,\n'
+         '        }\n', 'flow mapping'),
         ('jobs:\n  build:\n    steps: &saved\n', 'anchor'),
         ('jobs:\n  build:\n    steps:\n'
          '      - uses: *saved\n', 'alias'),
