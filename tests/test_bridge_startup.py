@@ -17,6 +17,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
 
+def test_log_safe_import_has_no_daedalus_configuration_side_effects(tmp):
+    """The shared renderer must be importable without bridge configuration."""
+    del tmp
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith('DAEDALUS_') and key != 'TOKEN'
+    }
+    code = """
+import pathlib
+import sys
+import log_safe
+
+root = pathlib.Path.cwd().resolve()
+loaded = []
+for name, module in sys.modules.items():
+    source = getattr(module, '__file__', None)
+    if source is None:
+        continue
+    try:
+        pathlib.Path(source).resolve().relative_to(root)
+    except ValueError:
+        continue
+    loaded.append(name)
+assert loaded == ['log_safe'], loaded
+assert callable(log_safe.log_safe)
+"""
+    loaded = subprocess.run(
+        [sys.executable, '-c', code], cwd=str(_util.ROOT), env=env,
+        capture_output=True, text=True, check=False)
+    assert loaded.returncode == 0, loaded.stderr
+
+
 def test_bridge_configuration_is_resolvable_as_a_unit(tmp):
     """Configuration imports with documented paths, defaults, and guards."""
     root = Path(tmp) / 'config-root'
@@ -179,7 +211,7 @@ def test_a_lost_draw_no_longer_kills_the_bridge_fixture(tmp):
         squatter.close()
 
 
-def test_log_safe_never_raises_and_stays_useful(tmp):
+def test_shared_log_safe_never_raises_and_stays_useful(tmp):
     """The log-line safeguard must not itself be able to raise.
 
     str(value) was evaluated outside any fallback: a conversion-limited huge
@@ -189,30 +221,15 @@ def test_log_safe_never_raises_and_stays_useful(tmp):
     non-string — the same failure class the helper exists to close, one
     layer inside it.
     """
-    env = {'DAEDALUS_DIR': str(tmp), 'DAEDALUS_PORT': '8081'}
-    saved = {key: os.environ.get(key) for key in env}
-    os.environ.update(env)
-    root = str(_util.ROOT)
-    added_root = root not in sys.path
-    if added_root:
-        sys.path.insert(0, root)
-    try:
-        mod = _util.load(_util.ROOT / 'server.py', 'server_log_safe_unit')
-    finally:
-        if added_root:
-            sys.path.remove(root)
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+    del tmp
+    mod = _util.load(_util.ROOT / 'log_safe.py', 'shared_log_safe_contract')
 
     for value, expected in _util.log_safe_cases():
-        assert mod._log_safe(value) == expected, (
-            f'_log_safe({type(value).__name__}) disagrees')
+        assert mod.log_safe(value) == expected, (
+            f'log_safe({type(value).__name__}) disagrees')
     # Ordinary values pass through in full, ASCII and non-ASCII alike.
-    assert mod._log_safe('plain ascii') == 'plain ascii'
-    assert mod._log_safe('héllo — 世界') == 'héllo — 世界'
+    assert mod.log_safe('plain ascii') == 'plain ascii'
+    assert mod.log_safe('héllo — 世界') == 'héllo — 世界'
 
 
 def test_dashboard_static_serving(tmp):
