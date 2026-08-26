@@ -99,6 +99,36 @@ def test_checkout_pin_checks_all_contexts_and_identifier_segments(tmp):
             raise AssertionError(f'expected refusal for {expression}')
 
 
+def test_checkout_pin_checks_mixed_case_checkout_actions(tmp):
+    """Action-name casing cannot hide an unsafe checkout ref from the pin."""
+    del tmp
+    failures = []
+    for action in (
+            'actions/checkout@v4',
+            'Actions/Checkout@v4',
+            'ACTIONS/CHECKOUT@v4'):
+        workflow = (
+            'name: checkout identity oracle\n'
+            'on: push\n'
+            'jobs:\n'
+            '  build:\n'
+            '    runs-on: ubuntu-latest\n'
+            '    steps:\n'
+            '      - id: baseline\n'
+            '        run: echo "ref=main" >> "$GITHUB_OUTPUT"\n'
+            f'      - uses: {action}\n'
+            '        with:\n'
+            '          ref: ${{ steps.baseline.outputs.ref }}\n')
+        try:
+            _assert_checkout_refs_safe(workflow)
+        except AssertionError as error:
+            if 'ref' not in str(error):
+                failures.append((action, str(error)))
+        else:
+            failures.append((action, 'pin accepted the checkout ref'))
+    assert failures == [], failures
+
+
 def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
     """A leading GitHub access cannot exempt later dotted accesses."""
     del tmp
