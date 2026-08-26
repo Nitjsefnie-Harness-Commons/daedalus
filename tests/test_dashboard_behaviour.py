@@ -9,12 +9,11 @@ a Node VM rather than reading them where a run can answer instead.
 """
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -106,14 +105,8 @@ process.stdout.write(JSON.stringify({
 def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
     """A retired port callback cannot clear or replace the current port."""
     del tmp
-    node = shutil.which('node')
-    assert node, 'node is required to execute the content keep-alive lifecycle'
-    result = subprocess.run(
-        [node, '-e', _CONTENT_KEEPALIVE_HARNESS,
-         str(ROOT / 'extension' / 'content.js')],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
+    result = _dashnode.run_dashboard_node(
+        _CONTENT_KEEPALIVE_HARNESS, ROOT / 'extension' / 'content.js')
     actual = json.loads(result.stdout)
     assert actual == {
         'portCount': 2,
@@ -188,14 +181,9 @@ function response(status, data) {
 
 def test_dashboard_failed_consume_is_not_a_success(tmp):
     """The dashboard must reject when its matching-result consume fails."""
-    node = shutil.which('node')
-    assert node, 'node is required to execute the dashboard API boundary'
-    result = subprocess.run(
-        [node, '-e', _DASHBOARD_CONSUME_HARNESS,
-         str(ROOT / 'dashboard' / 'api.js')],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
+    del tmp
+    _dashnode.run_dashboard_node(
+        _DASHBOARD_CONSUME_HARNESS, ROOT / 'dashboard' / 'api.js')
 
 
 _DASHBOARD_WORLD_HARNESS = r"""
@@ -223,14 +211,9 @@ const fs = require('fs');
 def test_dashboard_labels_eval_world_as_a_channel(tmp):
     """Dashboard text presents `world` only as execution-channel metadata."""
     del tmp
-    node = shutil.which('node')
-    assert node, 'node is required to execute the dashboard world formatter'
-    result = subprocess.run(
-        [node, '-e', _DASHBOARD_WORLD_HARNESS,
-         str(ROOT / 'dashboard' / 'sections' / '_util.js')],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
+    result = _dashnode.run_dashboard_node(
+        _DASHBOARD_WORLD_HARNESS,
+        ROOT / 'dashboard' / 'sections' / '_util.js')
     assert json.loads(result.stdout) == [
         'channel=cdp',
         'channel=page-main',
@@ -383,13 +366,9 @@ process.stdout.write(JSON.stringify({
 
 
 def _run_tab_selector_harness():
-    node = shutil.which('node')
-    assert node, 'node is required to execute the dashboard tab selector'
-    result = subprocess.run(
-        [node, '--input-type=module', '--eval', _TAB_SELECTOR_HARNESS,
-         str(ROOT / 'dashboard' / 'sections' / '_util.js')],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    result = _dashnode.run_dashboard_node(
+        _TAB_SELECTOR_HARNESS,
+        ROOT / 'dashboard' / 'sections' / '_util.js', module=True)
     return json.loads(result.stdout)
 
 
