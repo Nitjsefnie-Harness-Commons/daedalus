@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _overlap  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -609,29 +610,6 @@ def test_typed_command_does_not_return_a_stale_fixed_id_result(tmp):
         assert 'stale.invalid' not in out, out
 
 
-def _client_states(processes):
-    """What each same-id client was doing when the harness gave up.
-
-    The harness reports only its own timeout, and the `finally` below kills
-    both clients and discards what they said — so a run where a client left
-    before its result arrived is indistinguishable from one where the result
-    never came. This is the difference, read at the moment it matters.
-    """
-    states = {}
-    for owner, proc in processes.items():
-        alive = proc.poll() is None
-        if alive:
-            proc.kill()
-        out, err = proc.communicate(timeout=20)
-        states[owner] = {
-            'stillRunning': alive,
-            'returncode': proc.returncode,
-            'stdout': out.strip(),
-            'stderr': err.strip(),
-        }
-    return states
-
-
 def _run_same_id_client_overlap(tmp, completion_order):
     owners = ('owner-a', 'owner-b')
     with _util.bridge(tmp) as (base, docroot):
@@ -661,23 +639,25 @@ def _run_same_id_client_overlap(tmp, completion_order):
             assert set(by_owner) == set(owners), by_owner
             commands = [by_owner[owner] for owner in owners]
             try:
-                _util.run_background_overlap(
+                posted = _overlap.run_background_overlap(
                     _util.ROOT / 'extension' / 'background.js', commands,
                     completion_order, result_base=base, token=TOK,
                     wait_between=False)
             except AssertionError as failure:
                 raise AssertionError(
-                    f'{failure}; clients: {_client_states(processes)}'
+                    f'{failure}; clients: '
+                    f'{_overlap.client_states(processes, grace=1)}'
                 ) from failure
+            states = _overlap.client_states(processes, grace=20)
+            _overlap.assert_clients_exited(states, posted)
             results = {}
-            for owner, proc in processes.items():
-                out, err = proc.communicate(timeout=20)
+            for owner, state in states.items():
                 foreign = owners[1] if owner == owners[0] else owners[0]
                 results[owner] = {
-                    'returncode': proc.returncode,
-                    'ownResult': owner in out,
-                    'foreignResult': foreign in out,
-                    'stderr': err.strip(),
+                    'returncode': state['returncode'],
+                    'ownResult': owner in state['stdout'],
+                    'foreignResult': foreign in state['stdout'],
+                    'stderr': state['stderr'],
                 }
             return results
         finally:
