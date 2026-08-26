@@ -5,10 +5,12 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+_SPAWN_LOCK = threading.Lock()
 
 
 def _read_summary(path):
@@ -46,12 +48,14 @@ def _run_suite(suite, summaries):
     summary_path = Path(summaries) / f"{suite.stem}.json"
     output_path = Path(summaries) / f"{suite.stem}.output"
     env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
-    with output_path.open("wb") as output:
-        result = subprocess.run(
-            [sys.executable, str(suite)], cwd=ROOT,
-            stdin=subprocess.DEVNULL, stdout=output,
-            stderr=subprocess.STDOUT, check=False, env=env)
-    return result.returncode, _read_summary(summary_path), output_path
+    with _SPAWN_LOCK:
+        with output_path.open("wb") as output:
+            process = subprocess.Popen(
+                [sys.executable, str(suite)], cwd=ROOT,
+                stdin=subprocess.DEVNULL, stdout=output,
+                stderr=subprocess.STDOUT, env=env)
+    returncode = process.wait()
+    return returncode, _read_summary(summary_path), output_path
 
 
 def main() -> int:
