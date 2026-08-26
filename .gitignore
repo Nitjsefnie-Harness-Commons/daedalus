@@ -43,6 +43,7 @@
 !/command_queue.py
 !/delivery_stripes.py
 !/env_config.py
+!/log_safe.py
 !/mcp_server.py
 !/mcp_transport.py
 !/path_safety.py
