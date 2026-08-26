@@ -694,38 +694,27 @@ def test_mcp_and_bridge_config_use_one_env_parser(tmp):
                     os.environ[name] = previous
 
 
-def test_mcp_log_safe_copy_satisfies_the_shared_contract(tmp):
-    """The MCP helper is a third copy; hold it to the one shared table.
-
-    The copies cannot import one another (importing server.py requires its
-    env and runs module-level config, and server.py imports THIS module at
-    startup), so the drift control is this: the same cases every other copy
-    is held to, run against mcp_server._log_safe, with ordinary ASCII and
-    non-ASCII required to pass through in full.
-    """
+def test_mcp_uses_the_shared_log_safe_function(tmp):
+    """The MCP entry point must use the contract-tested shared renderer."""
     del tmp
     _need_deps()
     mod = _load_mcp('http://127.0.0.1:1')
-    for value, expected in _util.log_safe_cases():
-        assert mod._log_safe(value) == expected, (
-            f'_log_safe({type(value).__name__}) disagrees')
-    assert mod._log_safe('plain ascii') == 'plain ascii'
-    assert mod._log_safe('héllo — 世界') == 'héllo — 世界'
+    assert mod.log_safe is sys.modules['log_safe'].log_safe
 
 
 def test_the_shared_contract_catches_a_divergent_copy(tmp):
     """Proof the anti-drift control has teeth: a divergent helper must fail it.
 
-    The divergence that used to sail through the uncovered MCP copy:
-    ordinary non-ASCII discarded instead of passed through in full. The
-    divergent helper below keeps the contract's exact shape (so it passes
-    every table entry) and swaps one decode for ascii/replace (so it
-    diverges ONLY on ordinary non-ASCII) — the same shape the reviewer hid
-    behind the missing coverage.
+    The generator must keep a standalone implementation because its script
+    import path excludes the repository root, so it is the surviving copy
+    that can drift independently. The divergent helper below keeps the
+    contract's exact shape and swaps one decode for ascii/replace, diverging
+    only on ordinary non-ASCII.
     """
     del tmp
-    _need_deps()
-    mod = _load_mcp('http://127.0.0.1:1')
+    generator = _util.load(
+        _util.ROOT / 'scripts' / 'gen_gitignore.py',
+        'divergent_gen_gitignore_log_safe')
 
     def divergent(value):
         try:
@@ -738,11 +727,11 @@ def test_the_shared_contract_catches_a_divergent_copy(tmp):
             return '<unprintable value>'
         return rendered
 
-    mod._log_safe = divergent
+    generator._log_safe = divergent
     try:
         for value, expected in _util.log_safe_cases():
-            assert mod._log_safe(value) == expected
-        assert mod._log_safe('héllo — 世界') == 'héllo — 世界'
+            assert generator._log_safe(value) == expected
+        assert generator._log_safe('héllo — 世界') == 'héllo — 世界'
     except AssertionError:
         return
     raise AssertionError('a divergent _log_safe passed the shared contract')
