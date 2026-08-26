@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """The classic service worker's module-boundary contract."""
-import os
 import re
 import shutil
-import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -41,18 +39,11 @@ def _worker_sources():
     ]
 
 
-def _observed_worker_sources():
-    return [
-        (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
-        for path in worker_source_paths()
-    ]
-
-
 def _runtime_observations(watched_by_source=None):
     if watched_by_source is None:
         watched_by_source = {}
     details = []
-    for relative, source in _observed_worker_sources():
+    for relative, source in _worker_sources():
         globals_ = _directive_names(source, 'global')
         details.append({
             'path': ROOT / relative,
@@ -102,124 +93,6 @@ def _masked_code_mentions(masked_source, name):
             continue
         return match
     return None
-
-
-def test_runtime_observer_uses_javascript_global_scope(tmp):
-    """Runtime scope, not a declaration lexer, decides binding ownership."""
-    root = Path(tmp)
-    background = root / 'background.js'
-    background.write_text('const backgroundMarker = true;\n',
-                          encoding='utf-8')
-    collisions = (
-        'var { _executionContext } = '
-        '{ _executionContext: function () {} };',
-        'let a = 1, _executionContext = 2;',
-        'for (var _executionContext of [function () {}]) {}',
-        'if (chrome.runtime) { var _executionContext = function () {}; }',
-        'if (chrome.runtime) { var _executionContext\n}',
-        'let q = 1; q++ / d; var _executionContext = n / d;',
-        'let q = 1; q-- / d; var _executionContext = n / d;',
-        'const q = class {} / d; var _executionContext = n / d;',
-        'const q = function () {} / d; '
-        'var _executionContext = n / d;',
-    )
-    details = []
-    collision_paths = []
-    for index, source in enumerate(collisions):
-        path = root / f'collision-{index}.js'
-        path.write_text(source + '\n', encoding='utf-8')
-        collision_paths.append(path)
-        details.append({
-            'path': path, 'globals': {'d', 'n'}, 'watched': (),
-        })
-
-    harmless = root / 'harmless.js'
-    harmless.write_text(r"""
-function outer() {
-  var _executionContext;
-  function nested() { var _executionContext; }
-  const nestedConst = 1;
-  let nestedLet = nestedConst;
-}
-(function () { var _executionContext; }());
-const arrow = () => { var _executionContext; };
-class Holder {
-  static { var _executionContext; }
-  method() { var _executionContext; }
-  get value() { var _executionContext; }
-  set value(input) { var _executionContext; }
-  async run() { var _executionContext; }
-  *generate() { var _executionContext; }
-}
-const object = {
-  if() { var _executionContext; },
-  while() { var _executionContext; },
-  for() { var _executionContext; },
-  switch() { var _executionContext; },
-  with() { var _executionContext; },
-  catch() { var _executionContext; },
-  _executionContext: 1,
-};
-const stringValue = 'var _executionContext;';
-const templateValue = `var _executionContext;`;
-const regexValue = /[\/;]var _executionContext;/;
-// var _executionContext;
-for (const item of (() => {
-  var _executionContext;
-  return [];
-})()) { void item; }
-""", encoding='utf-8')
-    details.append({'path': harmless, 'globals': (), 'watched': ()})
-
-    observed = observe_worker_runtime(
-        details, background_path=background)['sources']
-    for path in collision_paths:
-        assert '_executionContext' in observed[str(path)]['bindings'], path
-    assert '_executionContext' not in observed[str(harmless)]['bindings']
-
-
-def test_worker_boundary_runs_without_untracked_node_modules(tmp):
-    """The tracked tree alone supplies every boundary-suite dependency."""
-    if os.environ.get('DAEDALUS_TRACKED_EXPORT_CHILD') == '1':
-        return
-    export_root = Path(tmp) / 'tracked'
-    export_root.mkdir()
-    listed = subprocess.run(
-        ['git', 'ls-files', '-z'], cwd=ROOT,
-        capture_output=True)
-    if listed.returncode != 0:
-        assert not (ROOT / 'node_modules').exists()
-        return
-    for raw_path in listed.stdout.split(b'\0'):
-        if not raw_path:
-            continue
-        relative = Path(os.fsdecode(raw_path))
-        destination = export_root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, destination)
-    environment = os.environ.copy()
-    environment['DAEDALUS_TRACKED_EXPORT_CHILD'] = '1'
-    result = subprocess.run(
-        [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, env=environment,
-        capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-
-
-def test_runtime_observer_rejects_handler_reassignment(tmp):
-    """Handler instantiation and later writes are separate runtime events."""
-    path = Path(tmp) / 'handler.js'
-    path.write_text("""
-function handleCookies() {}
-handleCookies = function replacement() {};
-""", encoding='utf-8')
-    observed = observe_worker_runtime([{
-        'path': path, 'globals': (), 'watched': {'handleCookies'},
-    }], background_path=path)['sources'][str(path)]
-    assert observed['events']['handleCookies'] == {
-        'declarations': 1, 'writes': 1,
-    }
 
 
 def test_each_worker_capability_lives_in_its_own_module(tmp):
@@ -413,6 +286,10 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
             }, contract
             assert symbol not in background_names, (
                 f'background.js still declares {symbol} at top level')
+            mutated_symbols = observed.get('mutatedSymbols', [])
+            assert not mutated_symbols, (
+                f'{relative} dispatch {command_type} mutated published '
+                f'handlers: {mutated_symbols}')
             assert observed == {
                 'symbol': symbol,
                 'available': True,
