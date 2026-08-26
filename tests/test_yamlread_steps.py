@@ -11,7 +11,6 @@ from _yamlread import (  # noqa: E402
     YAMLReadError, _comment, job_scalar, step_scalar, step_scalars,
 )
 from _yamlscalar import decode_inline_scalar  # noqa: E402
-from _yamlsteps import step_mappings  # noqa: E402
 
 
 def _raises(source, detail):
@@ -255,7 +254,7 @@ def test_step_mappings_decode_every_field_and_nested_mapping(tmp):
         '        run: |\n'
         '          echo "$HEAD_SHA"\n'
         '        continue-on-error: false\n')
-    assert step_mappings(source, 'sample') == [{
+    assert _yamlsteps.step_mappings(source, 'sample') == [{
         'name': 'target',
         'id': 'chosen',
         'if': 'success() && true',
