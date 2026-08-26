@@ -198,6 +198,23 @@ export async function runCommand() {}
     assert '[phase] dashboard module import started' in failure, failure
 
 
+def test_a_dashboard_call_that_never_settles_names_the_call(tmp):
+    """A pending API call reports its own bound, not the import bound."""
+    module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
+export function runCommand() {
+  return new Promise(() => {});
+}
+""")
+    failure = _harness_failure(
+        behaviour._DASHBOARD_CONSUME_HARNESS, module,
+        bounded_steps=2, step_timeout=0.5)
+    assert 'timed out waiting for dashboard call' in failure, failure
+    assert 'timed out waiting for dashboard module import' not in failure
+    assert 'outer backstop' not in failure, failure
+    assert '[phase] dashboard module imported' in failure, failure
+    assert '[phase] dashboard call started' in failure, failure
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 
