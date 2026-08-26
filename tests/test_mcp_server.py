@@ -699,52 +699,6 @@ def test_mcp_and_bridge_use_one_env_parser(tmp):
                     os.environ[name] = previous
 
 
-def test_the_mcp_env_parser_matches_the_bridges(tmp):
-    """The copy and the original answer the same way, or they have drifted.
-
-    mcp_server cannot import server.py — server.py requires its environment,
-    runs module-level configuration, and imports mcp_server itself — so the
-    parser is duplicated and this is the drift control.
-    """
-    _need_deps()
-    mod = _load_mcp('http://127.0.0.1:1')
-    # server.py reads its data root and port at import; give it a throwaway
-    # one rather than the ambient environment, which may have neither.
-    previous_dir = os.environ.get('DAEDALUS_DIR')
-    previous_port = os.environ.get('DAEDALUS_PORT')
-    os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
-    os.environ['DAEDALUS_PORT'] = '0'
-    Path(os.environ['DAEDALUS_DIR']).mkdir(parents=True, exist_ok=True)
-    try:
-        server = _util.load(_util.ROOT / 'server.py', 'server_for_env_contract')
-    finally:
-        for key, value in (('DAEDALUS_DIR', previous_dir),
-                           ('DAEDALUS_PORT', previous_port)):
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-    for name, default, minimum, maximum in (
-            ('DAEDALUS_CONTRACT_A', 5, 0, None),
-            ('DAEDALUS_CONTRACT_B', 8086, 0, 65535)):
-        for value in (None, '7', 'nonsense', '-1', '70000'):
-            previous = os.environ.pop(name, None)
-            if value is not None:
-                os.environ[name] = value
-            try:
-                results = []
-                for parser in (server._env_int, mod._env_int):
-                    try:
-                        results.append(('ok', parser(name, default, minimum, maximum)))
-                    except SystemExit as exit_error:
-                        results.append(('exit', str(exit_error)))
-                assert results[0] == results[1], (name, value, results)
-            finally:
-                os.environ.pop(name, None)
-                if previous is not None:
-                    os.environ[name] = previous
-
-
 def test_mcp_log_safe_copy_satisfies_the_shared_contract(tmp):
     """The MCP helper is a third copy; hold it to the one shared table.
 
