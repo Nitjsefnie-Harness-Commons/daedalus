@@ -38,6 +38,38 @@ def test_checkout_reader_returns_structured_checkout_refs(tmp):
         ('aligned', '${{ steps.baseline.outputs.ref }}')]
 
 
+def test_checkout_reader_matches_action_name_case_insensitively(tmp):
+    """Checkout owner/repository spelling follows GitHub case rules."""
+    del tmp
+    workflow = (
+        'name: checkout identity oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  lower:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@lower-version\n'
+        '        with:\n'
+        '          ref: lower-ref\n'
+        '  mixed:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: Actions/Checkout@Mixed-Version\n'
+        '        with:\n'
+        '          ref: Mixed-Ref\n'
+        '  upper:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: ACTIONS/CHECKOUT@UPPER-VERSION\n'
+        '        with:\n'
+        '          ref: UPPER-REF\n')
+    assert _wfcheckout.checkout_refs(workflow) == [
+        ('lower', 'lower-ref'),
+        ('mixed', 'Mixed-Ref'),
+        ('upper', 'UPPER-REF'),
+    ]
+
+
 def test_checkout_reader_accepts_only_one_leading_bom(tmp):
     """One stream marker is accepted; every other BOM is refused."""
     del tmp

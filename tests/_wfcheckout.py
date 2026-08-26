@@ -308,7 +308,10 @@ class _WorkflowReader(_ScalarReaderMixin):
                                           f'{context} uses')
             elif key == 'with':
                 with_entry = (rest, line, entry_indent, value_end)
-        if uses is None or not uses.startswith('actions/checkout@'):
+        if uses is None:
+            return []
+        action_name, separator, _action_ref = uses.partition('@')
+        if not separator or action_name.casefold() != 'actions/checkout':
             return []
         if with_entry is None:
             return []
