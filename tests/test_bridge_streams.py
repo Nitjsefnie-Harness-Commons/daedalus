@@ -193,6 +193,55 @@ def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
         assert status == 200 and health['ok'] is True, (status, health)
 
 
+def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
+    """The collector keeps fresh work and expires work past the exact TTL."""
+    fault_dir = Path(tmp) / 'controlled-command-gc'
+    fault_dir.mkdir()
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import pathlib\n'
+        'import sys\n'
+        'import time\n'
+        f'sys.path.insert(0, {str(_util.ROOT)!r})\n'
+        'import command_queue\n'
+        'def gc_loop(cmd_dir, ttl):\n'
+        '    trigger = pathlib.Path(cmd_dir) / ".gc-trigger"\n'
+        '    done = pathlib.Path(cmd_dir) / ".gc-done"\n'
+        '    while not trigger.exists():\n'
+        '        time.sleep(0.01)\n'
+        '    command_queue.collect_expired(cmd_dir, ttl)\n'
+        '    done.write_text("done", encoding="utf-8")\n'
+        '    while True:\n'
+        '        time.sleep(60)\n'
+        'command_queue.gc_loop = gc_loop\n',
+        encoding='utf-8')
+    env = {
+        'DAEDALUS_CMD_TTL': '10',
+        'PYTHONPATH': str(fault_dir),
+    }
+    served = []
+    with _util.bridge(tmp, env=env, output=served) as (_base, docroot):
+        command_root = Path(docroot) / 'commands'
+        queue = command_root / TOK
+        queue.mkdir()
+        fresh = queue / 'fresh.json'
+        expired = queue / 'expired.json'
+        fresh.write_text('{"id":"fresh"}', encoding='utf-8')
+        expired.write_text('{"id":"expired"}', encoding='utf-8')
+        now = time.time()
+        os.utime(fresh, (now - 1, now - 1))
+        os.utime(expired, (now - 15, now - 15))
+        (command_root / '.gc-trigger').touch()
+        done = command_root / '.gc-done'
+        deadline = time.time() + 5
+        while not done.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert done.exists(), (
+            'the controlled command sweep did not finish: '
+            + ''.join(served))
+        assert fresh.exists(), 'configured TTL expired a fresh command'
+        assert not expired.exists(), expired
+
+
 def test_stream_derived_queue_name_matches_command_enqueue(tmp):
     token = '123e4567-e89b-12d3-a456-426614174000'
     with _util.bridge(
