@@ -13,7 +13,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
@@ -34,11 +33,8 @@ async function dispatchCommand(command) {
 """
 
 _STALLED_CONFIG_WORKER = """
-chrome.runtime.getPlatformInfo.constructor(`
-  const hold = setInterval(() => {
-    if (process.exitCode) clearInterval(hold);
-  }, 10);
-`)();
+chrome.runtime.getPlatformInfo.constructor(
+  'setInterval(() => {}, 10)')();
 
 function loadConfig() {
   return new Promise(() => {});
@@ -48,11 +44,8 @@ function dispatchCommand() {}
 """
 
 _STALLED_DISPATCH_WORKER = """
-chrome.runtime.getPlatformInfo.constructor(`
-  const hold = setInterval(() => {
-    if (process.exitCode) clearInterval(hold);
-  }, 10);
-`)();
+chrome.runtime.getPlatformInfo.constructor(
+  'setInterval(() => {}, 10)')();
 
 async function loadConfig() {}
 
@@ -96,6 +89,13 @@ def _worker(tmp, source):
     return path
 
 
+def _wait_for_path(path):
+    deadline = time.monotonic() + 5
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert path.exists(), f'{path.name} was not published'
+
+
 @contextlib.contextmanager
 def _slow_result_server():
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -115,6 +115,7 @@ def _slow_result_server():
             try:
                 self.wfile.write(body)
             except BrokenPipeError:
+                # The bounded fetch closes before this delayed reply is sent.
                 pass
 
         # pylint: disable-next=redefined-builtin
@@ -197,15 +198,11 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
         {'id': '_cookies', 'domain': 'owner-a'},
         {'id': '_cookies', 'domain': 'owner-b'},
     ]
-    source = _overlap._BACKGROUND_OVERLAP_HARNESS.replace(
-        'process.exitCode = 1;', 'process.exit(1);')
-    assert source != _overlap._BACKGROUND_OVERLAP_HARNESS
-    with mock.patch.object(_overlap, '_BACKGROUND_OVERLAP_HARNESS', source):
-        with _slow_result_server() as base:
-            failure = _harness_failure(
-                _worker(tmp, _SETTLING_WORKER), commands=commands,
-                order=['owner-a', 'owner-b'], result_base=base,
-                wait_between=True)
+    with _slow_result_server() as base:
+        failure = _harness_failure(
+            _worker(tmp, _SETTLING_WORKER), commands=commands,
+            order=['owner-a', 'owner-b'], result_base=base,
+            wait_between=True)
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure
@@ -213,12 +210,20 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
 
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
     """A client that misses its grace is diagnostic data, not an exception."""
-    del tmp
+    ready_path = Path(tmp) / 'client.ready'
+    client = (
+        'import sys, time\n'
+        'from pathlib import Path\n'
+        'time.sleep(0.25)\n'
+        'print("started", flush=True)\n'
+        'Path(sys.argv[1]).write_text("ready", encoding="ascii")\n'
+        'time.sleep(60)\n'
+    )
     process = subprocess.Popen(
-        [sys.executable, '-c',
-         'import time; print("started", flush=True); time.sleep(60)'],
+        [sys.executable, '-c', client, str(ready_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
+        _wait_for_path(ready_path)
         states = _overlap.client_states({'slow-owner': process}, grace=0.1)
     finally:
         if process.poll() is None:
@@ -250,10 +255,7 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     grandchild_pid = None
     try:
-        deadline = time.monotonic() + 5
-        while not pid_path.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert pid_path.exists(), 'client did not record its grandchild pid'
+        _wait_for_path(pid_path)
         grandchild_pid = int(pid_path.read_text(encoding='ascii'))
         states = _overlap.client_states({'pipe-owner': process}, grace=0.1)
     finally:
