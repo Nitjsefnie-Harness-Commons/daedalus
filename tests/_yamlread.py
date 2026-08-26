@@ -85,6 +85,21 @@ def job_mapping(workflow, job, key):
         lines, *mapping_body, mapping_entry.indent, key)
 
 
+def top_level_mapping(workflow, key):
+    """Return one decoded scalar mapping at the workflow's top level."""
+    lines = _lines(workflow)
+    mapping_entry = _decoded_mapping_entry(
+        lines, 0, len(lines), -1, key)
+    if mapping_entry is None:
+        return None
+    if mapping_entry.rest.strip(' '):
+        raise YAMLReadError(f'{key} is not a mapping')
+    mapping_body = _section(
+        lines, mapping_entry.index, mapping_entry.indent)
+    return _scalar_mapping(
+        lines, *mapping_body, mapping_entry.indent, key)
+
+
 def step_scalar(workflow, job, step, key):
     """Return a complete scalar named `key` on a named step in `job`."""
     lines = _lines(workflow)
