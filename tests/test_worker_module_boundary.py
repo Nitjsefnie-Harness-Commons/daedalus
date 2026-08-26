@@ -33,12 +33,24 @@ _WORKER_PLATFORM_GLOBALS = frozenset({
 _WORKER_NON_HANDLER_EXPORTS = (
     # Add one reviewed non-handler export per line.
 )
+_WORKER_REDECLARATION_EXCEPTIONS = (
+    # Add one reviewed intentional top-level redeclaration per line.
+)
 
 
 def _worker_sources():
     return [
         (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
         for path in worker_source_paths()
+    ]
+
+
+def _observed_worker_sources():
+    background = ROOT / 'extension' / 'background.js'
+    paths = (background, *observe_extension_worker_paths())
+    return [
+        (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
+        for path in paths
     ]
 
 
@@ -402,6 +414,45 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
             unconsumed[relative] = sorted(missing)
     assert not unconsumed, (
         f'classic worker sources export unconsumed names: {unconsumed}')
+
+
+def test_classic_worker_top_level_declarations_are_unique(tmp):
+    """Reject collisions in the classic worker's shared global namespace.
+
+    The exception tuple is narrow, duplicate-sensitive reviewed input. This
+    statement reader inherits `js_mask`'s regex-literal limit (issue 198).
+    """
+    del tmp
+    duplicate_exceptions = sorted(
+        name for name, count
+        in Counter(_WORKER_REDECLARATION_EXCEPTIONS).items()
+        if count > 1
+    )
+    assert not duplicate_exceptions, (
+        'worker redeclaration exceptions contain duplicate entries: '
+        f'{duplicate_exceptions}')
+
+    declaration_sources = {}
+    for relative, source in _observed_worker_sources():
+        for name, _kind, _start in _top_level_declarations(source):
+            declaration_sources.setdefault(name, []).append(relative)
+    collisions = {
+        name: sources
+        for name, sources in sorted(declaration_sources.items())
+        if len(sources) > 1
+    }
+    exceptions = set(_WORKER_REDECLARATION_EXCEPTIONS)
+    stale_exceptions = sorted(exceptions - collisions.keys())
+    assert not stale_exceptions, (
+        'worker redeclaration exceptions no longer collide: '
+        f'{stale_exceptions}')
+    unexpected = {
+        name: sources
+        for name, sources in collisions.items()
+        if name not in exceptions
+    }
+    assert not unexpected, (
+        f'classic worker top-level declarations collide: {unexpected}')
 
 
 def test_worker_imports_match_worker_modules(tmp):
