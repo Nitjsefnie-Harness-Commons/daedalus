@@ -81,23 +81,47 @@ def _directive_names(source, directive):
 
 
 def _dispatch_routes_to(source, command_type, symbol):
+    """Whether the unique direct case calls `symbol(cmd)` by that spelling.
+
+    A behavior-preserving alias is deliberately rejected. This guard checks
+    the routing shape this refactor uses, not semantic equivalence between
+    arbitrary JavaScript expressions.
+    """
     mask = js_mask(source)
     declaration = re.search(r'\bfunction\s+dispatchCommand\s*\(', mask)
     assert declaration, 'dispatchCommand declaration not found'
     body_start = mask.index('{', declaration.end())
     body_end = js_bracket_end(mask, body_start)
-    body = source[body_start:body_end]
+    body = source[body_start + 1:body_end - 1]
+    switch_pattern = re.compile(r'\bswitch\s*\(\s*type\s*\)')
+    switches = _top_level_matches(body, switch_pattern)
+    assert len(switches) == 1, (
+        f'expected one top-level switch (type), found {len(switches)}')
+    body_mask = js_mask(body)
+    switch_start = body_mask.index('{', switches[0].end())
+    switch_end = js_bracket_end(body_mask, switch_start)
+    switch_body = body[switch_start + 1:switch_end - 1]
+
+    label_pattern = re.compile(
+        rf"\bcase\s+'{re.escape(command_type)}'\s*:")
+    labels = []
+    for case in _top_level_matches(switch_body, re.compile(r'\bcase\b')):
+        label = label_pattern.match(switch_body, case.start())
+        if label:
+            labels.append(label)
+    if len(labels) != 1:
+        return False
     route = re.compile(
-        rf"case\s+'{re.escape(command_type)}'\s*:\s*"
-        rf'return\s+{re.escape(symbol)}\s*\(\s*cmd\s*\)\s*;')
-    for match in route.finditer(body):
-        offset = body_start + match.start()
-        if mask[offset:offset + len('case')] == 'case':
-            return True
-    return False
+        rf'\s*return\s+{re.escape(symbol)}\s*\(\s*cmd\s*\)\s*;')
+    return route.match(switch_body, labels[0].end()) is not None
 
 
 def test_each_worker_capability_lives_in_its_own_module(tmp):
+    """Each module owns its symbol and the outer dispatch calls it directly.
+
+    What is NOT enforced: `js_mask` does not parse regex literals, so regex
+    text can still masquerade as a top-level declaration.
+    """
     del tmp
     background = (ROOT / 'extension' / 'background.js').read_text(
         encoding='utf-8')
@@ -116,7 +140,53 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
             f'to {symbol}')
 
 
+def test_dispatch_guard_ignores_nested_switch_cases(tmp):
+    del tmp
+    source = """
+function dispatchCommand(receivedCommand) {
+  const cmd = receivedCommand;
+  const type = cmd.type;
+  if (type === '__never__') {
+    switch (type) {
+      case 'cookies': return handleCookies(cmd);
+      default: break;
+    }
+  }
+  switch (type) {
+    case 'cookies': return handleCookiesReal(cmd);
+    default: return null;
+  }
+}
+"""
+    assert not _dispatch_routes_to(source, 'cookies', 'handleCookies'), (
+        'a nested switch case satisfied the outer dispatch guard')
+
+
+def test_dispatch_guard_rejects_duplicate_outer_cases(tmp):
+    del tmp
+    source = """
+function dispatchCommand(receivedCommand) {
+  const cmd = receivedCommand;
+  const type = cmd.type;
+  switch (type) {
+    case 'cookies': return handleCookiesReal(cmd);
+    case 'cookies': return handleCookies(cmd);
+    default: return null;
+  }
+}
+"""
+    assert not _dispatch_routes_to(source, 'cookies', 'handleCookies'), (
+        'a later duplicate case hid the first runtime route')
+
+
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
+    """Every module directive names a real worker or trusted platform name.
+
+    The platform allowlist is trusted input: adding an entry does not prove it
+    is a real platform global. This catches unresolved names and typos, not a
+    dishonest allowlist edit. What is NOT enforced: `js_mask` does not parse
+    regex literals, so regex text can masquerade as a declaration.
+    """
     del tmp
     worker_sources = _worker_sources()
     declarations = {
@@ -197,6 +267,10 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
     response bodies, so its size is a memory budget. `cmd.maxRequests || 1000`
     kept whatever arrived: -1 evicted the only event on arrival, leaving an
     empty capture, and 1e9 buffered everything.
+
+    What is NOT enforced: `js_mask` does not parse regex literals, so a
+    harmless regex containing `const NET_CAPTURE_MAX = 19999;` is counted as
+    a declaration and produces a false positive.
     """
     del tmp
     worker_sources = _worker_sources()
