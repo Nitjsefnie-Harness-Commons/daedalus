@@ -15,16 +15,21 @@ and a fix whose test lives behind an optional dependency all produce a low
 patch figure for reasons a reviewer should judge rather than a threshold
 should block on.
 
-Lines the diff added that do NOT appear in the coverage report are excluded
-rather than counted as missed: blank lines, comments, docstrings and `else:`
-are not statements coverage measures, and counting them would make the
-percentage depend on formatting.
+Lines the diff added that coverage.py does not consider executable are
+excluded: blank lines, comments, docstrings and `else:` are not measured
+statements, and counting them would make the percentage depend on formatting.
+For any changed Python source the XML does measure, every added executable
+statement must have an XML record; an absent record is an invalid report,
+never a smaller denominator.
 """
 import argparse
 import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+from coverage import Coverage
+from coverage.exceptions import CoverageException
 
 # `+++ b/path`, with git's optional quoting and the /dev/null of a deletion.
 _TARGET = re.compile(r'^\+\+\+ (.*)$')
@@ -90,6 +95,10 @@ def executable_lines(coverage_xml):
             except ValueError as error:
                 raise ValueError(
                     f'invalid line number for {filename}: {number!r}') from error
+            if number_value <= 0:
+                raise ValueError(
+                    f'invalid line number for {filename}: {number!r} '
+                    '(must be positive)')
             if hits is None:
                 raise ValueError(
                     f'missing hits for {filename}:{number_value}')
@@ -156,6 +165,26 @@ def added_lines(diff_text):
         if old_remaining == 0 and new_remaining == 0:
             in_hunk = False
     return added
+
+
+def validate_statement_records(measured, added):
+    """Reject a measured source whose added statements are absent from XML.
+
+    Absence is a hard error: it must never silently remove an executable line
+    from the denominator and turn incomplete measurement into flattering news.
+    """
+    analyzer = Coverage(config_file=True)
+    for path in sorted(set(measured) & set(added)):
+        if not path.lower().endswith('.py'):
+            continue
+        _source, statements, _excluded, _missing, _formatted = (
+            analyzer.analysis2(path))
+        required = set(statements) & added[path]
+        absent = required.difference(measured[path])
+        if absent:
+            raise ValueError(
+                f'missing executable statement records for {path}: '
+                f'{_ranges(absent)}')
 
 
 def _ranges(numbers):
@@ -274,7 +303,8 @@ def main():
         # and outside it that died as a traceback.
         measured = executable_lines(args.coverage)
         added = added_lines(diff_text)
-    except (ET.ParseError, ValueError) as error:
+        validate_statement_records(measured, added)
+    except (CoverageException, ET.ParseError, ValueError) as error:
         print(f'coverage report invalid: {error}', file=sys.stderr)
         return 1
     if not measured:

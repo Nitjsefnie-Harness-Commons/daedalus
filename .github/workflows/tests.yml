@@ -396,6 +396,9 @@ jobs:
         with:
           name: coverage-xml
 
+      - name: Install the pinned statement analyzer
+        run: python3 -m pip install --requirement requirements-test.txt
+
       - name: Measure the coverage of this change
         # HEAD is the merge tree checked out above and HEAD^1 is, by
         # construction, the base tip that was merged into it. The event
