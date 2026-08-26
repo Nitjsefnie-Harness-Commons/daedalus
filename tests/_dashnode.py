@@ -128,6 +128,8 @@ def run_dashboard_node(harness, *arguments,
             try:
                 process.wait(timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
             except subprocess.TimeoutExpired:
+                # Preserve the recorded drain failure instead of replacing
+                # it with another exception from this diagnostic helper.
                 pass
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
         last_phase = phases[-1] if phases else 'none recorded'

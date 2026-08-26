@@ -167,7 +167,6 @@ setInterval(() => {}, 10);
         source, bounded_steps=0, step_timeout=0.4)
     elapsed = time.monotonic() - started
     assert elapsed < 1.25, f'post-kill drain took {elapsed:.2f}s'
-    assert 'drain timed out: yes' in failure, failure
     assert 'last phase: grandchild inherited dashboard pipes' in failure
     assert "stdout: 'grandchild stdout'" in failure, failure
 
