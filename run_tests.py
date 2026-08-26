@@ -38,17 +38,20 @@ def _report_safely():
         else:
             reconfigure(encoding="utf-8", errors="replace")
     except (OSError, ValueError):
+        # The stream still works without the safety net, so keep running.
         pass
 
 
 def _run_suite(suite, summaries):
     summary_path = Path(summaries) / f"{suite.stem}.json"
+    output_path = Path(summaries) / f"{suite.stem}.output"
     env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
-    result = subprocess.run([sys.executable, str(suite)], cwd=ROOT,
-                            stdin=subprocess.DEVNULL, check=False, env=env,
-                            capture_output=True, text=True, encoding="utf-8",
-                            errors="replace")
-    return result, _read_summary(summary_path)
+    with output_path.open("wb") as output:
+        result = subprocess.run(
+            [sys.executable, str(suite)], cwd=ROOT,
+            stdin=subprocess.DEVNULL, stdout=output,
+            stderr=subprocess.STDOUT, check=False, env=env)
+    return result.returncode, _read_summary(summary_path), output_path
 
 
 def main() -> int:
@@ -67,13 +70,19 @@ def main() -> int:
             results = {}
             for future in as_completed(futures):
                 suite = futures[future]
-                result, summary = future.result()
-                output = result.stdout + result.stderr
+                try:
+                    returncode, summary, output_path = future.result()
+                    output = output_path.read_text(
+                        encoding="utf-8", errors="replace")
+                except Exception as exc:
+                    returncode, summary = 1, None
+                    output = (
+                        f"LAUNCH FAILED: {type(exc).__name__}: {exc}\n")
                 block = f"=== {suite.name} ===\n{output}"
                 if not block.endswith("\n"):
                     block += "\n"
                 print(block, end="", flush=True)
-                results[suite] = result.returncode, summary
+                results[suite] = returncode, summary
 
     failed, empty, unrun = [], [], []
     passed = skipped = 0
