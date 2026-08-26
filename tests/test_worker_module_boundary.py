@@ -33,6 +33,7 @@ _WORKER_PLATFORM_GLOBALS = frozenset({
 })
 _WORKER_NON_HANDLER_EXPORTS = (
     # Add one reviewed non-handler export per line.
+    '_netCaptures',
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
@@ -250,10 +251,28 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     background = (ROOT / 'extension' / 'background.js').read_text(
         encoding='utf-8')
     routes = [
+        ('worker/capture.js', 'handleScreenshot', 'screenshot'),
         ('worker/cookies.js', 'handleCookies', 'cookies'),
         ('worker/cookies.js', 'handleSetCookie', 'set-cookie'),
         ('worker/cookies.js', 'handleRemoveCookie', 'remove-cookie'),
         ('worker/cookies.js', 'handleClearCookies', 'clear-cookies'),
+        ('worker/blocking.js', 'handleBlockRequests', 'block-requests'),
+        ('worker/blocking.js', 'handleUnblockRequests', 'unblock-requests'),
+        ('worker/blocking.js', 'handleListBlockRules', 'list-block-rules'),
+        ('worker/tabs.js', 'handleCloseTab', 'close-tab'),
+        ('worker/tabs.js', 'handleOpenTab', 'open-tab'),
+        ('worker/tabs.js', 'handleOpenTabs', 'open-tabs'),
+        ('worker/tabs.js', 'handleFocusTab', 'focus-tab'),
+        ('worker/tabs.js', 'handleNavigate', 'navigate'),
+        ('worker/tabs.js', 'handleReload', 'reload'),
+        ('worker/tabs.js', 'handleInjectCss', 'inject-css'),
+        ('worker/tabs.js', 'handleRemoveCss', 'remove-css'),
+        ('worker/tabs.js', 'handleExtReload', 'ext-reload'),
+        ('worker/tabs.js', 'handleFetchTimings', 'fetch-timings'),
+        ('worker/tabs.js', 'handleExtTabs', 'tabs'),
+        ('worker/netcapture.js', 'handleNetCapture', 'net-capture'),
+        ('worker/netcapture.js', 'handleNetCaptureStop', 'net-capture-stop'),
+        ('worker/netcapture.js', 'handleNetCaptureGet', 'net-capture-get'),
     ]
     background_names = {
         name for name, _, _ in _top_level_declarations(background)
