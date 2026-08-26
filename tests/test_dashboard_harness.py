@@ -5,6 +5,7 @@ Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
 import sys
+import subprocess
 import time
 from pathlib import Path
 
@@ -21,6 +22,8 @@ def _harness_failure(source, *arguments, **options):
         _dashnode.run_dashboard_node(source, *arguments, **options)
     except AssertionError as failure:
         return str(failure)
+    except subprocess.TimeoutExpired as failure:
+        return f'bare TimeoutExpired after {failure.timeout}s'
     raise AssertionError('the failing dashboard harness unexpectedly passed')
 
 
@@ -109,6 +112,24 @@ def test_backstop_grows_with_the_bounded_step_count(tmp):
     three_steps = _dashnode.dashboard_child_timeout(3, step_timeout=0.25)
     assert one_step > 0.25, one_step
     assert three_steps > one_step, (one_step, three_steps)
+
+
+def test_completed_steps_that_do_not_exit_report_the_last_phase(tmp):
+    """The outer backstop distinguishes finished work from a hung step."""
+    del tmp
+    source = _HOST_REALM_KEEPALIVE + r"""
+phase('dashboard harness started');
+phase('dashboard module imported');
+phase('dashboard call settled');
+process.stdout.write('completed dashboard output');
+phase('dashboard harness finished');
+"""
+    failure = _harness_failure(
+        source, bounded_steps=1, step_timeout=0.1)
+    assert 'outer backstop timed out after 0.2s' in failure, failure
+    assert 'last phase: dashboard harness finished' in failure, failure
+    assert 'completed dashboard output' in failure, failure
+    assert '[phase] dashboard module imported' in failure, failure
 
 
 def main():

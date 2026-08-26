@@ -5,6 +5,7 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 The dashboard behaviour suite runs shipped JavaScript modules in short Node
 processes. This helper keeps process setup and captured failures consistent.
 """
+import re
 import shutil
 import subprocess
 
@@ -68,10 +69,16 @@ def run_dashboard_node(source, *arguments, module=False, bounded_steps=1,
     timeout = dashboard_child_timeout(bounded_steps, step_timeout)
     try:
         stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as failure:
         process.kill()
-        process.communicate()
-        raise
+        stdout, stderr = process.communicate()
+        phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
+        last_phase = phases[-1] if phases else ''
+        raise AssertionError(
+            f'dashboard harness outer backstop timed out after {timeout}s; '
+            f'last phase: {last_phase}; stdout: {stdout!r}; '
+            f'stderr: {stderr!r}'
+        ) from failure
     if process.returncode != 0:
         raise AssertionError((process.returncode, stdout, stderr))
     return subprocess.CompletedProcess(
