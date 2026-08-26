@@ -30,12 +30,13 @@ _DASHBOARD_DRAIN_TIMEOUT_S = 0.2
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
 _REGEX_PREFIX_WORDS = frozenset({
     'await', 'case', 'default', 'delete', 'do', 'else', 'in',
-    'instanceof', 'new', 'of', 'return', 'throw', 'typeof', 'void',
-    'yield',
+    'extends', 'instanceof', 'new', 'of', 'return', 'throw', 'typeof',
+    'void', 'yield',
 })
 _CONTROL_PAREN_WORDS = frozenset({
     'catch', 'for', 'if', 'switch', 'while', 'with',
 })
+_STATEMENT_BODY_WORDS = frozenset({'do', 'else', 'finally', 'try'})
 
 _DASHBOARD_PRELUDE = r"""
 const _dashnodeSetTimeout = globalThis.setTimeout;
@@ -70,8 +71,11 @@ def _unsupported_bound_shape(source):
     last_word = None
     last_word_is_member = False
     next_word_is_member = False
+    declaration_prefix = False
+    pending_body = None
     control_parens = []
     block_braces = []
+    bracket_depth = 0
     while index < end:
         char = source[index]
         pair = source[index:index + 2]
@@ -130,12 +134,26 @@ def _unsupported_bound_shape(source):
                    and (source[stop].isalnum() or source[stop] in '_$')):
                 stop += 1
             word = source[index:stop]
+            started_statement = statement_start
             last_word = word
             last_word_is_member = next_word_is_member
             expect_expression = (
                 not last_word_is_member and word in _REGEX_PREFIX_WORDS)
             statement_start = False
             next_word_is_member = False
+            if not last_word_is_member:
+                if started_statement and word in {'async', 'export'}:
+                    declaration_prefix = True
+                if word in {'class', 'function'}:
+                    declaration = started_statement or declaration_prefix
+                    pending_body = (
+                        declaration, len(control_parens), bracket_depth)
+                    declaration_prefix = False
+                elif word in _STATEMENT_BODY_WORDS:
+                    pending_body = (
+                        True, len(control_parens), bracket_depth)
+                elif word not in {'async', 'default', 'export'}:
+                    declaration_prefix = False
             index = stop
             continue
         if char.isdigit():
@@ -144,6 +162,14 @@ def _unsupported_bound_shape(source):
                    and (source[index].isalnum() or source[index] in '._')):
                 index += 1
             expect_expression = False
+            statement_start = False
+            last_word = None
+            last_word_is_member = False
+            next_word_is_member = False
+            continue
+        if source[index:index + 3] == '...':
+            index += 3
+            expect_expression = True
             statement_start = False
             last_word = None
             last_word_is_member = False
@@ -160,31 +186,54 @@ def _unsupported_bound_shape(source):
                 control_parens.pop() if control_parens else False)
             statement_start = expect_expression
         elif char == '{':
-            block = statement_start
-            block_braces.append(block)
+            depth = (len(control_parens), bracket_depth)
+            if pending_body is not None and pending_body[1:] == depth:
+                close_allows_regex = pending_body[0]
+                pending_body = None
+            else:
+                close_allows_regex = statement_start
+            block_braces.append(close_allows_regex)
             expect_expression = True
-            statement_start = block
+            statement_start = close_allows_regex
         elif char == '}':
-            block = block_braces.pop() if block_braces else True
-            expect_expression = block
-            statement_start = block
+            close_allows_regex = (
+                block_braces.pop() if block_braces else True)
+            expect_expression = close_allows_regex
+            statement_start = close_allows_regex
+        elif char == '[':
+            bracket_depth += 1
+            expect_expression = True
+            statement_start = False
         elif char == ']':
+            bracket_depth = max(0, bracket_depth - 1)
             expect_expression = False
             statement_start = False
         elif char == '.':
             expect_expression = False
             statement_start = False
             next_word_is_member = True
+        elif char == '#':
+            expect_expression = False
+            statement_start = False
+            next_word_is_member = True
+        elif pair == '=>':
+            pending_body = (
+                False, len(control_parens), bracket_depth)
+            expect_expression = True
+            statement_start = False
+            index += 1
         elif char in '+-' and pair == char * 2:
             index += 1
             statement_start = False
         elif char == ';':
             expect_expression = True
             statement_start = True
+            declaration_prefix = False
+            pending_body = None
         else:
             expect_expression = True
             statement_start = False
-        if char != '.':
+        if char not in '.#':
             next_word_is_member = False
         last_word_is_member = False
         last_word = None
