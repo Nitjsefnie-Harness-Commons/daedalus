@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _worker_sources import import_scripts_stub  # noqa: E402
 
 
 _EVAL_RELAY_OVERLAP_HARNESS = r"""
@@ -200,6 +201,7 @@ const backgroundContext = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
+""" + import_scripts_stub('backgroundContext') + r"""
 
 const windowObject = {
   addEventListener(type, listener) {
