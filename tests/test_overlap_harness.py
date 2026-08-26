@@ -370,17 +370,18 @@ def test_real_overlap_failure_keeps_harness_and_live_client_states(tmp):
     assert "'owner-b': {'stillRunning': True" in message, message
 
 
-def test_killed_client_pipe_release_is_not_less_patient_than_normal_exit(tmp):
-    """Pipe release gets at least the patience of a healthy client exit.
+def test_killed_client_pipe_release_keeps_an_independent_floor(tmp):
+    """Pipe release keeps enough slack to distinguish load from a broken drain.
 
-    Once the client is killed, releasing its inherited pipes is less work than
-    letting a healthy client finish and exit. A shorter release bound could
-    mistake a busy runner for a broken drain, defeating the bound's purpose.
+    An ordinary kill releases pipes in milliseconds, yet a 0.1-second bound
+    already failed on a busy runner. Five seconds is the minimum below which
+    the bound cannot distinguish the reproduced slow release from a broken
+    drain. This floor stands alone so tuning another timeout cannot weaken it.
     """
     del tmp
-    release = _overlap._KILLED_CLIENT_PIPE_RELEASE_S
-    healthy_exit = _overlap._SUCCESSFUL_CLIENT_GRACE_S
-    assert release >= healthy_exit, (release, healthy_exit)
+    minimum_release = 5
+    actual = _overlap._KILLED_CLIENT_PIPE_RELEASE_S
+    assert actual >= minimum_release, (actual, minimum_release)
 
 
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
