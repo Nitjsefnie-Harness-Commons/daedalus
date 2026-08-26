@@ -133,6 +133,28 @@ bounded(Promise.resolve('settled'), 'successful work', 1500).then(
     assert elapsed < 0.75, f'settled bound held Node open for {elapsed:.2f}s'
 
 
+def test_outer_backstop_bounds_a_grandchild_held_pipe_drain(tmp):
+    """An inherited pipe writer cannot defeat the process backstop."""
+    del tmp
+    source = r"""
+const { spawn } = require('child_process');
+spawn(process.execPath, ['--eval', 'setTimeout(() => {}, 2000)'], {
+  stdio: ['ignore', 'inherit', 'inherit'],
+});
+phase('grandchild inherited dashboard pipes');
+process.stdout.write('grandchild stdout');
+setInterval(() => {}, 10);
+"""
+    started = time.monotonic()
+    failure = _harness_failure(
+        source, bounded_steps=0, step_timeout=0.4)
+    elapsed = time.monotonic() - started
+    assert elapsed < 1.25, f'post-kill drain took {elapsed:.2f}s'
+    assert 'drain timed out: yes' in failure, failure
+    assert 'last phase: grandchild inherited dashboard pipes' in failure
+    assert "stdout: 'grandchild stdout'" in failure, failure
+
+
 def test_leave_flushes_the_error_before_exiting(tmp):
     """A delayed pipe write completes before leave terminates the child."""
     del tmp
