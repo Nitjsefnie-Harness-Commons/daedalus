@@ -29,8 +29,9 @@ _DASHBOARD_STEP_TIMEOUT_S = 5
 _DASHBOARD_DRAIN_TIMEOUT_S = 0.2
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
 _REGEX_PREFIX_WORDS = frozenset({
-    'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new',
-    'of', 'return', 'throw', 'typeof', 'void', 'yield',
+    'await', 'case', 'default', 'delete', 'do', 'else', 'in',
+    'instanceof', 'new', 'of', 'return', 'throw', 'typeof', 'void',
+    'yield',
 })
 _CONTROL_PAREN_WORDS = frozenset({
     'catch', 'for', 'if', 'switch', 'while', 'with',
@@ -65,8 +66,12 @@ def _unsupported_bound_shape(source):
     """Return the first JavaScript shape comment blanking cannot model."""
     index, end = 0, len(source)
     expect_expression = True
+    statement_start = True
     last_word = None
+    last_word_is_member = False
+    next_word_is_member = False
     control_parens = []
+    block_braces = []
     while index < end:
         char = source[index]
         pair = source[index:index + 2]
@@ -80,7 +85,10 @@ def _unsupported_bound_shape(source):
                 index += 2 if source[index] == '\\' else 1
             index += index < end
             expect_expression = False
+            statement_start = False
             last_word = None
+            last_word_is_member = False
+            next_word_is_member = False
             continue
         if char == '`':
             index += 1
@@ -93,7 +101,10 @@ def _unsupported_bound_shape(source):
                     index += 1
             index += index < end
             expect_expression = False
+            statement_start = False
             last_word = None
+            last_word_is_member = False
+            next_word_is_member = False
             continue
         if pair == '//':
             newline = source.find('\n', index + 2)
@@ -108,15 +119,23 @@ def _unsupported_bound_shape(source):
                 return 'regex literal'
             index += 2 if pair == '/=' else 1
             expect_expression = True
+            statement_start = False
             last_word = None
+            last_word_is_member = False
+            next_word_is_member = False
             continue
         if char.isalpha() or char in '_$':
             stop = index + 1
             while (stop < end
                    and (source[stop].isalnum() or source[stop] in '_$')):
                 stop += 1
-            last_word = source[index:stop]
-            expect_expression = last_word in _REGEX_PREFIX_WORDS
+            word = source[index:stop]
+            last_word = word
+            last_word_is_member = next_word_is_member
+            expect_expression = (
+                not last_word_is_member and word in _REGEX_PREFIX_WORDS)
+            statement_start = False
+            next_word_is_member = False
             index = stop
             continue
         if char.isdigit():
@@ -125,22 +144,49 @@ def _unsupported_bound_shape(source):
                    and (source[index].isalnum() or source[index] in '._')):
                 index += 1
             expect_expression = False
+            statement_start = False
             last_word = None
+            last_word_is_member = False
+            next_word_is_member = False
             continue
         if char == '(':
-            control_parens.append(last_word in _CONTROL_PAREN_WORDS)
+            control_parens.append(
+                not last_word_is_member
+                and last_word in _CONTROL_PAREN_WORDS)
             expect_expression = True
+            statement_start = False
         elif char == ')':
             expect_expression = (
                 control_parens.pop() if control_parens else False)
-        elif char in ']}':
+            statement_start = expect_expression
+        elif char == '{':
+            block = statement_start
+            block_braces.append(block)
+            expect_expression = True
+            statement_start = block
+        elif char == '}':
+            block = block_braces.pop() if block_braces else True
+            expect_expression = block
+            statement_start = block
+        elif char == ']':
             expect_expression = False
+            statement_start = False
         elif char == '.':
             expect_expression = False
+            statement_start = False
+            next_word_is_member = True
         elif char in '+-' and pair == char * 2:
             index += 1
+            statement_start = False
+        elif char == ';':
+            expect_expression = True
+            statement_start = True
         else:
             expect_expression = True
+            statement_start = False
+        if char != '.':
+            next_word_is_member = False
+        last_word_is_member = False
         last_word = None
         index += 1
     return None
