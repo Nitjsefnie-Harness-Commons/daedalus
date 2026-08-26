@@ -287,10 +287,10 @@ def _enqueue_command(token, tab, cmd):
         qdir.mkdir(parents=True, exist_ok=True)
         seq = _next_seq()
         cmd = {**cmd, '_did': seq}
-        tmp = qdir / f'.{seq}.tmp'
+        tmp, destination = qdir / f'.{seq}.tmp', qdir / f'{seq}.json'
         try:
             tmp.write_text(json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
-            result_store.replace_atomically(tmp, qdir / f'{seq}.json')
+            result_store.replace_atomically(str(tmp), str(destination))
         except (OSError, UnicodeEncodeError):
             # A refused enqueue must not leave its hidden temp behind: the
             # zero-byte artifact would sit in the queue until the background
