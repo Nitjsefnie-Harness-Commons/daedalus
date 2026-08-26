@@ -145,7 +145,7 @@ def test_successful_bound_clears_its_real_timeout(tmp):
     del tmp
     source = r"""
 globalThis.clearTimeout = () => {};
-bounded(Promise.resolve('settled'), 'successful work', 1500).then(
+bounded(Promise.resolve('settled'), 'successful work', 4000).then(
   (value) => process.stdout.write(value),
 );
 """
@@ -153,7 +153,9 @@ bounded(Promise.resolve('settled'), 'successful work', 1500).then(
     result = _dashnode.run_dashboard_node(_harness(source))
     elapsed = time.monotonic() - started
     assert result.stdout == 'settled', result
-    assert elapsed < 0.75, f'settled bound held Node open for {elapsed:.2f}s'
+    # Loaded startup has two seconds of room, while an uncleared timer still
+    # misses the ceiling by another two seconds.
+    assert elapsed < 2.0, f'settled bound held Node open for {elapsed:.2f}s'
 
 
 def test_outer_backstop_bounds_a_grandchild_held_pipe_drain(tmp):
