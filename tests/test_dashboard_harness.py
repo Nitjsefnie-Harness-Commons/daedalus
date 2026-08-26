@@ -80,7 +80,7 @@ def test_phase_records_a_harness_checkpoint(tmp):
     """A phase reaches captured stderr in its stable diagnostic format."""
     del tmp
     result = _dashnode.run_dashboard_node(
-        "phase('dashboard harness started');")
+        "phase('dashboard harness started');", bounded_steps=0)
     assert result.stderr == '[phase] dashboard harness started\n', result
 
 
@@ -148,7 +148,7 @@ try {
   leave(error);
 }
 """
-    failure = _harness_failure(source)
+    failure = _harness_failure(source, bounded_steps=0)
     assert 'flushed dashboard failure' in failure, failure
 
 
@@ -165,19 +165,17 @@ def test_backstop_grows_with_the_bounded_step_count(tmp):
 
 def test_completed_steps_that_do_not_exit_report_the_last_phase(tmp):
     """The outer backstop distinguishes finished work from a hung step."""
-    del tmp
-    source = _HOST_REALM_KEEPALIVE + r"""
-phase('dashboard harness started');
-phase('dashboard module imported');
-phase('dashboard call settled');
-process.stdout.write('completed dashboard output');
-phase('dashboard harness finished');
-"""
+    module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
+export function formatEvalWorld(value) {
+  return value;
+}
+""")
     failure = _harness_failure(
-        source, bounded_steps=1, step_timeout=0.1)
-    assert 'outer backstop timed out after 0.2s' in failure, failure
+        behaviour._DASHBOARD_WORLD_HARNESS, module,
+        bounded_steps=1, step_timeout=0.5)
+    assert 'outer backstop timed out after 1.0s' in failure, failure
     assert 'last phase: dashboard harness finished' in failure, failure
-    assert 'completed dashboard output' in failure, failure
+    assert '"cdp"' in failure, failure
     assert '[phase] dashboard module imported' in failure, failure
 
 
@@ -196,17 +194,19 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
     runs = {
         'content': _dashnode.run_dashboard_node(
             behaviour._CONTENT_KEEPALIVE_HARNESS,
-            behaviour.ROOT / 'extension' / 'content.js'),
+            behaviour.ROOT / 'extension' / 'content.js',
+            bounded_steps=0),
         'consume': _dashnode.run_dashboard_node(
             behaviour._DASHBOARD_CONSUME_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'api.js'),
+            behaviour.ROOT / 'dashboard' / 'api.js', bounded_steps=2),
         'world': _dashnode.run_dashboard_node(
             behaviour._DASHBOARD_WORLD_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js'),
+            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js',
+            bounded_steps=1),
         'selector': _dashnode.run_dashboard_node(
             behaviour._TAB_SELECTOR_HARNESS,
             behaviour.ROOT / 'dashboard' / 'sections' / '_util.js',
-            module=True),
+            module=True, bounded_steps=5),
     }
     expected = [
         'dashboard harness started',
