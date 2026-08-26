@@ -34,6 +34,13 @@ def worker_source_paths(background_path=BACKGROUND_PATH):
 
 
 def import_scripts_stub(context_name, trace_map_name=None):
+    """Build the classic-script loader and its honest-worker path trace.
+
+    Node's vm is not a security boundary: a host function installed in its
+    context exposes host-realm intrinsics, so deliberately hostile worker
+    source can forge the array this trace appends through. The trace proves
+    which modules an honest split asks to load, not resistance to its author.
+    """
     trace_registration = ''
     if trace_map_name is not None:
         trace_registration = (

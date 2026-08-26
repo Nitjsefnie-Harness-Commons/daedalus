@@ -19,59 +19,84 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 SCENARIOS = r"""
 async function runCapabilityRoutes() {
-  const observations = [];
-  for (const route of JSON.parse(commandText)) {
+  const routes = JSON.parse(commandText);
+  const probedOriginals = new Map();
+  for (const route of routes) {
     const publishedSymbol = route.symbol;
     if (!/^[A-Za-z_$][\w$]*$/.test(publishedSymbol)) {
       throw new Error('invalid published symbol: ' + publishedSymbol);
     }
     const available = vm.runInContext(
       'typeof ' + publishedSymbol + ' === "function"', context);
-    if (!available) {
-      observations.push({
-        symbol: publishedSymbol, available: false, replaceable: false,
-      });
-      continue;
+    if (available) {
+      probedOriginals.set(
+        publishedSymbol, vm.runInContext(publishedSymbol, context));
     }
-    const original = vm.runInContext(publishedSymbol, context);
-    const calls = [];
-    const sentinelAnswer = Object.freeze({ sentinel: publishedSymbol });
-    context.capabilitySentinel = (cmd) => {
-      calls.push(cmd);
-      return sentinelAnswer;
-    };
-    try {
-      vm.runInContext(
-        publishedSymbol + ' = capabilitySentinel', context);
-    } catch (error) {
-      delete context.capabilitySentinel;
+  }
+  const verificationOriginals = new Map(probedOriginals);
+  const observations = [];
+  const replacedSymbols = new Set();
+  try {
+    for (const route of routes) {
+      const publishedSymbol = route.symbol;
+      if (!probedOriginals.has(publishedSymbol)) {
+        observations.push({
+          symbol: publishedSymbol, available: false, replaceable: false,
+        });
+        continue;
+      }
+      const calls = [];
+      const sentinelAnswer = Object.freeze({ sentinel: publishedSymbol });
+      context.capabilitySentinel = (cmd) => {
+        calls.push(cmd);
+        return sentinelAnswer;
+      };
+      try {
+        vm.runInContext(
+          publishedSymbol + ' = capabilitySentinel', context);
+        replacedSymbols.add(publishedSymbol);
+      } catch (error) {
+        delete context.capabilitySentinel;
+        observations.push({
+          symbol: publishedSymbol, available: true, replaceable: false,
+          assignmentError: error.message,
+        });
+        continue;
+      }
+      context.capabilityCommand = route.command;
+      let answer;
+      try {
+        answer = await vm.runInContext(
+          'dispatchCommand(capabilityCommand)', context);
+      } finally {
+        delete context.capabilityCommand;
+        delete context.capabilitySentinel;
+      }
       observations.push({
-        symbol: publishedSymbol, available: true, replaceable: false,
-        assignmentError: error.message,
+        symbol: publishedSymbol,
+        available: true,
+        replaceable: true,
+        callCount: calls.length,
+        calledType: calls.length ? calls[0].type : null,
+        answered: answer === sentinelAnswer,
       });
-      continue;
     }
-    context.capabilityCommand = route.command;
-    let answer;
-    try {
-      answer = await vm.runInContext(
-        'dispatchCommand(capabilityCommand)', context);
-    } finally {
-      context.capabilityOriginal = original;
+  } finally {
+    for (const publishedSymbol of replacedSymbols) {
+      context.capabilityOriginal = probedOriginals.get(publishedSymbol);
       vm.runInContext(
         publishedSymbol + ' = capabilityOriginal', context);
-      delete context.capabilityCommand;
-      delete context.capabilityOriginal;
-      delete context.capabilitySentinel;
     }
-    observations.push({
-      symbol: publishedSymbol,
-      available: true,
-      replaceable: true,
-      callCount: calls.length,
-      calledType: calls.length ? calls[0].type : null,
-      answered: answer === sentinelAnswer,
-    });
+    delete context.capabilityOriginal;
+    delete context.capabilityCommand;
+    delete context.capabilitySentinel;
+  }
+  if (routes.some((route) => route.verifyBatchRestoration)) {
+    const restored = {};
+    for (const [symbol, original] of verificationOriginals) {
+      restored[symbol] = vm.runInContext(symbol, context) === original;
+    }
+    return { observations, restored };
   }
   return observations;
 }
@@ -459,13 +484,15 @@ def run_extension_result_boundary(scenario):
     return json.loads(result.stdout)
 
 
-def run_extension_capability_routes(routes):
+def run_extension_capability_routes(routes, background_path=None):
     """Probe a module's published command routes in one worker process."""
     node = shutil.which('node')
     assert node, 'node is required to execute the extension command route'
+    if background_path is None:
+        background_path = EXTENSION_ROOT / 'background.js'
     result = subprocess.run(
         [node, '-e', HARNESS,
-         str(EXTENSION_ROOT / 'background.js'), 'capability-routes',
+         str(background_path), 'capability-routes',
          json.dumps(routes)],
         cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (
@@ -474,7 +501,13 @@ def run_extension_capability_routes(routes):
 
 
 def observe_extension_worker_paths():
-    """Return the module paths the shipped worker actually asks to load."""
+    """Return the honest worker's loader trace of requested module paths.
+
+    This consumes a Node vm trace, not a security boundary. Host functions
+    expose host-realm intrinsics to deliberately hostile worker source, which
+    can therefore forge the recorded array. The inventory guard uses this to
+    catch honest split drift only.
+    """
     node = shutil.which('node')
     assert node, 'node is required to observe extension worker modules'
     result = subprocess.run(

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The classic service worker's module-boundary contract."""
 import re
+import shutil
 import sys
 from collections import Counter
 from pathlib import Path
@@ -9,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary import (observe_extension_worker_paths,  # noqa: E402
                        run_extension_capability_routes)
-from _jsread import js_bracket_end, js_mask  # noqa: E402
+from _jsread import (js_bracket_end, js_mask,  # noqa: E402
+                     js_split_top_level)
 from _repo import ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
 
@@ -17,8 +19,7 @@ _JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
 _TOP_LEVEL_DECLARATION = re.compile(
     rf'(?P<function>(?:async\s+)?function\s+'
     rf'(?P<function_name>{_JS_IDENTIFIER})\s*\()'
-    rf'|(?P<binding>(?:const|let|var)\s+'
-    rf'(?P<binding_name>{_JS_IDENTIFIER})\b)'
+    rf'|(?P<binding>(?:const|let|var)\b)'
     rf'|(?P<class>class\s+(?P<class_name>{_JS_IDENTIFIER})\b)')
 _CONTROL_HEADER = re.compile(
     r'(?<![\w$.])(?:if|for|while|with)\s*\(')
@@ -93,6 +94,63 @@ def _starts_statement(mask, start):
     return mask[previous] not in _STATEMENT_CONTINUATION
 
 
+def _first_top_level(mask, start, end, wanted):
+    depth = 0
+    for index in range(start, end):
+        char = mask[index]
+        if char in '([{':
+            depth += 1
+        elif char in ')]}':
+            depth -= 1
+        elif depth == 0 and char in wanted:
+            return index
+    return None
+
+
+def _binding_pattern_names(mask, start, end):
+    while start < end and mask[start].isspace():
+        start += 1
+    while end > start and mask[end - 1].isspace():
+        end -= 1
+    if mask.startswith('...', start):
+        return _binding_pattern_names(mask, start + 3, end)
+    default = _first_top_level(mask, start, end, '=')
+    if default is not None:
+        end = default
+        while end > start and mask[end - 1].isspace():
+            end -= 1
+    identifier = re.fullmatch(_JS_IDENTIFIER, mask[start:end])
+    if identifier:
+        return [(identifier.group(), start)]
+    if start >= end or mask[start] not in '[{':
+        return []
+
+    closing = js_bracket_end(mask, start) - 1
+    names = []
+    for item_start, item_end in js_split_top_level(
+            mask, mask, start + 1, closing):
+        if mask[start] == '{':
+            colon = _first_top_level(
+                mask, item_start, item_end, ':')
+            if colon is not None:
+                item_start = colon + 1
+        names.extend(_binding_pattern_names(mask, item_start, item_end))
+    return names
+
+
+def _binding_declarations(mask, declaration_start):
+    statement_end = _first_top_level(
+        mask, declaration_start, len(mask), ';')
+    if statement_end is None:
+        statement_end = len(mask)
+    declarations = []
+    for start, end in js_split_top_level(
+            mask, mask, declaration_start, statement_end):
+        for name, name_start in _binding_pattern_names(mask, start, end):
+            declarations.append((name, 'binding', name_start))
+    return declarations
+
+
 def _top_level_declarations(source):
     mask = js_mask(source)
     top_level = _top_level_positions(mask)
@@ -101,6 +159,10 @@ def _top_level_declarations(source):
         if not top_level[match.start()]:
             continue
         if not _starts_statement(mask, match.start()):
+            continue
+        if match.lastgroup == 'binding':
+            declarations.extend(
+                _binding_declarations(mask, match.end()))
             continue
         kind = match.lastgroup.removesuffix('_name')
         name = match.group(f'{kind}_name')
@@ -332,6 +394,39 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
                 f'{observed}')
 
 
+def test_capability_batch_restores_every_original_handler(tmp):
+    """An earlier route cannot redefine what a later probe restores."""
+    extension = Path(tmp) / 'extension'
+    shutil.copytree(ROOT / 'extension', extension)
+    background_path = extension / 'background.js'
+    background = background_path.read_text(encoding='utf-8')
+    route = "    case 'cookies': return handleCookies(cmd);"
+    mutated = """    case 'cookies':
+      handleSetCookie = function corruptedSetCookie() { return false; };
+      return handleCookies(cmd);"""
+    assert background.count(route) == 1
+    background_path.write_text(
+        background.replace(route, mutated), encoding='utf-8')
+
+    result = run_extension_capability_routes([
+        {
+            'symbol': 'handleCookies',
+            'command': {'id': 'batch-first', 'type': 'cookies'},
+            'verifyBatchRestoration': True,
+        },
+        {
+            'symbol': 'handleSetCookie',
+            'command': {'id': 'batch-later', 'type': 'set-cookie'},
+            'verifyBatchRestoration': True,
+        },
+    ], background_path=background_path)
+
+    assert result['restored'] == {
+        'handleCookies': True,
+        'handleSetCookie': True,
+    }, result
+
+
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
     """Best-effort text check for classic-worker directive typos.
 
@@ -416,6 +511,60 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
         f'classic worker sources export unconsumed names: {unconsumed}')
 
 
+def test_top_level_declarations_enumerate_every_pattern_binding(tmp):
+    """Every identifier bound by each declarator enters the inventory."""
+    del tmp
+    source = """
+const {
+  property: alias,
+  shorthand,
+  nested: [first, { deep = fallback }, ...tail],
+  [computed]: computedAlias = defaultValue,
+  ...rest
+} = input, after = 2;
+let one = 1, [two, , ...three] = list;
+var four;
+"""
+    declarations = [
+        (name, kind)
+        for name, kind, _start in _top_level_declarations(source)
+    ]
+    assert declarations == [
+        ('alias', 'binding'),
+        ('shorthand', 'binding'),
+        ('first', 'binding'),
+        ('deep', 'binding'),
+        ('tail', 'binding'),
+        ('computedAlias', 'binding'),
+        ('rest', 'binding'),
+        ('after', 'binding'),
+        ('one', 'binding'),
+        ('two', 'binding'),
+        ('three', 'binding'),
+        ('four', 'binding'),
+    ]
+
+
+def test_top_level_declarations_ignore_keys_and_nested_declarations(tmp):
+    """Property text and declarations in a container are not collisions."""
+    del tmp
+    source = """
+const propertyHolder = { propertyKey: 1 };
+function uniqueContainer() {
+  const nestedDeclaration = { propertyKey: 2 };
+  return nestedDeclaration;
+}
+"""
+    declarations = [
+        (name, kind)
+        for name, kind, _start in _top_level_declarations(source)
+    ]
+    assert declarations == [
+        ('propertyHolder', 'binding'),
+        ('uniqueContainer', 'function'),
+    ]
+
+
 def test_classic_worker_top_level_declarations_are_unique(tmp):
     """Reject collisions in the classic worker's shared global namespace.
 
@@ -456,6 +605,13 @@ def test_classic_worker_top_level_declarations_are_unique(tmp):
 
 
 def test_worker_imports_match_worker_modules(tmp):
+    """The honest worker loads every shipped module exactly once.
+
+    The loader inventory comes from Node vm and is not a security boundary:
+    host functions expose their realm intrinsics, so deliberately hostile
+    worker source can forge the trace. This guard catches honest split drift;
+    it does not prove resistance to the worker's author.
+    """
     del tmp
     imported = [path.resolve() for path in observe_extension_worker_paths()]
     duplicates = sorted(
