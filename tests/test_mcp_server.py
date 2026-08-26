@@ -1619,7 +1619,7 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     the queue. Returns (what the tool returned, the payload the bridge got).
     """
     qdir = Path(docroot) / 'commands' / f'{TOK}_{tab}'
-    clear_command_queue(qdir)
+    ignored_names = clear_command_queue(qdir)
     box = {}
 
     def run():
@@ -1636,7 +1636,7 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     worker.start()
     try:
         queued = wait_for_command(
-            qdir, timeout=20, producer_alive=worker.is_alive)
+            qdir, 20, worker.is_alive, ignored_names)
         if queued is None:
             worker.join(timeout=5)
             if 'error' in box:
