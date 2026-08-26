@@ -22,8 +22,15 @@ def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
     github_access = rf'github(?:\.{identifier})+'
     access_pattern = re.compile(
         rf'(?<![A-Za-z0-9_-]){access}(?![A-Za-z0-9_-])')
+    string_literal = r"'(?:[^']|'')*'"
+    number_literal = (
+        r'-?(?:0[xX][0-9A-Fa-f]+'
+        r'|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)'
+        r'(?:[eE][+-]?[0-9]+)?)')
+    literal = rf'(?:{string_literal}|true|false|null|{number_literal})'
+    operator = r'(?:&&|\|\||==|!=|<=|>=|[()!<>])'
     github_only = re.compile(
-        rf'{github_access}(?:\s*\|\|\s*{github_access})*')
+        rf'(?:{github_access}|{literal}|{operator}|\s+)+')
     try:
         refs = _wfcheckout.checkout_refs(workflow)
     except _wfcheckout.YAMLReadError as error:
@@ -37,7 +44,10 @@ def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
         for match in matches:
             expression = match.group(1).strip()
             if github_only.fullmatch(expression):
-                continue
+                unquoted = re.sub(string_literal, '', expression)
+                if any(dotted.startswith('github.') for dotted in
+                       access_pattern.findall(unquoted)):
+                    continue
             expression_offenders = []
             for dotted in access_pattern.findall(expression):
                 segments = dotted.split('.')
@@ -185,6 +195,41 @@ def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
                 failures.append((expression, message))
         else:
             failures.append((expression, 'pin accepted the checkout ref'))
+    assert failures == [], failures
+
+
+def test_checkout_pin_allows_github_access_with_literal_fallback(tmp):
+    """A literal is safe, but it cannot hide a non-GitHub ref access."""
+    del tmp
+    safe_expression = "${{ github.head_ref || 'main' }}"
+    workflow = (
+        'name: literal fallback oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - id: baseline\n'
+        '        run: echo "ref=main" >> "$GITHUB_OUTPUT"\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        f'          ref: {safe_expression}\n')
+    failures = []
+    try:
+        _assert_checkout_refs_safe(workflow)
+    except AssertionError as error:
+        failures.append(('safe literal fallback', str(error)))
+    for unsafe in (
+            '${{ github.sha || steps.baseline.outputs.ref }}',
+            '${{ steps.baseline.outputs.ref || github.sha }}'):
+        candidate = workflow.replace(safe_expression, unsafe)
+        try:
+            _assert_checkout_refs_safe(candidate)
+        except AssertionError as error:
+            if 'ref' not in str(error):
+                failures.append((unsafe, str(error)))
+        else:
+            failures.append((unsafe, 'pin accepted the checkout ref'))
     assert failures == [], failures
 
 
