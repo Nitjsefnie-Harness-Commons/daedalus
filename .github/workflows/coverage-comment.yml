@@ -186,6 +186,24 @@ jobs:
                 "<!-- daedalus-diff-coverage -->")))) |
               .[0].id // empty' comments.json
           )"
+          revalidate_head() {
+            if ! current_sha="$(gh api -H 'Cache-Control: no-cache' \
+              "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+            then
+              echo "reading the current head of pull request $PR_NUMBER" \
+                "failed" >&2
+              exit 1
+            fi
+            if [ -z "$current_sha" ]; then
+              echo "pull request $PR_NUMBER has no current head SHA" >&2
+              exit 1
+            fi
+            if [ "$current_sha" != "$HEAD_SHA" ]; then
+              echo "run $HEAD_SHA is stale; current pull request head is " \
+                "$current_sha"
+              return 1
+            fi
+          }
           case "$existing" in
             '') echo 'no patch-coverage marker to update' ;;
             *[!0-9]*)
@@ -193,6 +211,9 @@ jobs:
               exit 1
               ;;
             *)
+              if ! revalidate_head; then
+                exit 0
+              fi
               gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
                 -F body=@comment.md >/dev/null
               echo "marked patch coverage as unavailable for $HEAD_SHA"
@@ -218,6 +239,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
@@ -243,7 +265,11 @@ jobs:
           fi
 
           marker='<!-- daedalus-diff-coverage -->'
-          { printf '%s\n' "$marker"; cat body.md; } > comment.md
+          {
+            printf '%s\n\n' "$marker"
+            printf 'Patch coverage for commit %s.\n\n' "$HEAD_SHA"
+            cat body.md
+          } > comment.md
           if ! gh api -H 'Cache-Control: no-cache' --paginate \
             "repos/$REPO/issues/$PR_NUMBER/comments" \
             --jq '.[]' > comments.json
@@ -259,8 +285,29 @@ jobs:
                 "<!-- daedalus-diff-coverage -->")))) |
               .[0].id // empty' comments.json
           )"
+          revalidate_head() {
+            if ! current_sha="$(gh api -H 'Cache-Control: no-cache' \
+              "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+            then
+              echo "reading the current head of pull request $PR_NUMBER" \
+                "failed" >&2
+              exit 1
+            fi
+            if [ -z "$current_sha" ]; then
+              echo "pull request $PR_NUMBER has no current head SHA" >&2
+              exit 1
+            fi
+            if [ "$current_sha" != "$HEAD_SHA" ]; then
+              echo "run $HEAD_SHA is stale; current pull request head is " \
+                "$current_sha"
+              return 1
+            fi
+          }
           case "$existing" in
             '')
+              if ! revalidate_head; then
+                exit 0
+              fi
               gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" \
                 -F body=@comment.md >/dev/null
               echo 'posted a new comment'
@@ -270,6 +317,9 @@ jobs:
               exit 1
               ;;
             *)
+              if ! revalidate_head; then
+                exit 0
+              fi
               gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
                 -F body=@comment.md >/dev/null
               echo "updated comment $existing"
