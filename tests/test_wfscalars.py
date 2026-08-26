@@ -260,6 +260,42 @@ def test_checkout_reader_folds_plain_scalar_blank_line_to_newline(tmp):
     assert _wfcheckout.checkout_refs(workflow) == [('build', 'first\nsecond')]
 
 
+def test_checkout_reader_refuses_invalid_plain_scalar_continuations(tmp):
+    """A comment ends a plain scalar, and a tab cannot continue one."""
+    del tmp
+    prefix = (
+        'jobs:\n'
+        '  build:\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: safe')
+    cases = (
+        (
+            'comment resume',
+            prefix + '\n'
+            '            # comment\n'
+            '            forbidden-ref\n',
+            'content after plain scalar comment',
+        ),
+        (
+            'tab continuation',
+            prefix + '\tforbidden-ref\n',
+            'tab in plain scalar',
+        ),
+    )
+    failures = []
+    for name, workflow, wording in cases:
+        try:
+            actual = _wfcheckout.checkout_refs(workflow)
+        except _wfcheckout.YAMLReadError as error:
+            if wording not in str(error):
+                failures.append((name, str(error)))
+        else:
+            failures.append((name, actual))
+    assert failures == [], failures
+
+
 def test_checkout_reader_decodes_multiline_quoted_scalars(tmp):
     """Root values and checkout refs use YAML quoted-line folding."""
     del tmp
