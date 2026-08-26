@@ -19,7 +19,7 @@ from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-_CONTENT_KEEPALIVE_HARNESS = r"""
+_CONTENT_KEEPALIVE_HARNESS = _dashnode.DashboardNodeHarness(r"""
 phase('dashboard harness started');
 const fs = require('fs');
 const vm = require('vm');
@@ -105,15 +105,14 @@ process.stdout.write(JSON.stringify({
   retryTimers: timers.filter((item) => item.delay === 500).length,
 }));
 phase('dashboard harness finished');
-"""
+""", bounded_steps=0)
 
 
 def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
     """A retired port callback cannot clear or replace the current port."""
     del tmp
     result = _dashnode.run_dashboard_node(
-        _CONTENT_KEEPALIVE_HARNESS, ROOT / 'extension' / 'content.js',
-        bounded_steps=0)
+        _CONTENT_KEEPALIVE_HARNESS, ROOT / 'extension' / 'content.js')
     actual = json.loads(result.stdout)
     assert actual == {
         'portCount': 2,
@@ -123,7 +122,7 @@ def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
     }, actual
 
 
-_DASHBOARD_CONSUME_HARNESS = r"""
+_DASHBOARD_CONSUME_HARNESS = _dashnode.DashboardNodeHarness(r"""
 phase('dashboard harness started');
 const fs = require('fs');
 
@@ -190,18 +189,17 @@ function response(status, data) {
   phase('dashboard call settled');
   phase('dashboard harness finished');
 })().catch(leave);
-"""
+""", bounded_steps=2)
 
 
 def test_dashboard_failed_consume_is_not_a_success(tmp):
     """The dashboard must reject when its matching-result consume fails."""
     del tmp
     _dashnode.run_dashboard_node(
-        _DASHBOARD_CONSUME_HARNESS, ROOT / 'dashboard' / 'api.js',
-        bounded_steps=2)
+        _DASHBOARD_CONSUME_HARNESS, ROOT / 'dashboard' / 'api.js')
 
 
-_DASHBOARD_WORLD_HARNESS = r"""
+_DASHBOARD_WORLD_HARNESS = _dashnode.DashboardNodeHarness(r"""
 phase('dashboard harness started');
 const fs = require('fs');
 
@@ -224,7 +222,7 @@ const fs = require('fs');
   phase('dashboard call settled');
   phase('dashboard harness finished');
 })().catch(leave);
-"""
+""", bounded_steps=1)
 
 
 def test_dashboard_labels_eval_world_as_a_channel(tmp):
@@ -232,7 +230,7 @@ def test_dashboard_labels_eval_world_as_a_channel(tmp):
     del tmp
     result = _dashnode.run_dashboard_node(
         _DASHBOARD_WORLD_HARNESS,
-        ROOT / 'dashboard' / 'sections' / '_util.js', bounded_steps=1)
+        ROOT / 'dashboard' / 'sections' / '_util.js')
     assert json.loads(result.stdout) == [
         'channel=cdp',
         'channel=page-main',
@@ -302,7 +300,7 @@ def test_dashboard_never_builds_markup_from_a_value(tmp):
     assert not violations, '\n'.join(violations)
 
 
-_TAB_SELECTOR_HARNESS = r"""
+_TAB_SELECTOR_HARNESS = _dashnode.DashboardNodeHarness(r"""
 import { pathToFileURL } from 'node:url';
 
 phase('dashboard harness started');
@@ -397,14 +395,13 @@ process.stdout.write(JSON.stringify({
 }));
 phase('dashboard harness finished');
 })().catch(leave);
-"""
+""", bounded_steps=5, module=True)
 
 
 def _run_tab_selector_harness():
     result = _dashnode.run_dashboard_node(
         _TAB_SELECTOR_HARNESS,
-        ROOT / 'dashboard' / 'sections' / '_util.js', module=True,
-        bounded_steps=5)
+        ROOT / 'dashboard' / 'sections' / '_util.js')
     return json.loads(result.stdout)
 
 
