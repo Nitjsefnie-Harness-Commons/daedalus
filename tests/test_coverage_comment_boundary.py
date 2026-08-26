@@ -8,7 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _yamlread import YAMLReadError, step_scalar, step_scalars  # noqa: E402
+from _yamlread import (  # noqa: E402
+    YAMLReadError, step_scalar, step_scalars, top_level_mapping,
+)
 import test_coverage_comment_workflow as commenter  # noqa: E402
 
 
@@ -24,6 +26,7 @@ _EXPECTED_STEPS = (
     ('Post or update the pull request comment', 'run', None),
 )
 _MARKER = '<!-- daedalus-diff-coverage -->\n'
+_PERMISSIONS = {'pull-requests': 'write', 'actions': 'read'}
 _SENTINEL = 'PRIVILEGED_TOKEN_SENTINEL'
 _HOSTILE_BODIES = {
     'bash': (
@@ -71,6 +74,22 @@ def _assert_allowlist_refuses(workflow):
     except (AssertionError, YAMLReadError):
         return
     raise AssertionError('unsafe privileged step mutation was accepted')
+
+
+def _assert_privileged_permissions(workflow):
+    """Require the complete decoded privileged permission mapping."""
+    permissions = top_level_mapping(workflow, 'permissions')
+    assert permissions == _PERMISSIONS, (
+        f'unsafe privileged permissions: {permissions!r}')
+
+
+def _assert_permissions_refused(workflow):
+    """Require one hostile permission mutation to fail closed."""
+    try:
+        _assert_privileged_permissions(workflow)
+    except (AssertionError, YAMLReadError):
+        return
+    raise AssertionError('unsafe privileged permission mutation was accepted')
 
 
 def _run_hostile_post(tmp, label, body):
@@ -141,6 +160,28 @@ def test_privileged_steps_are_an_exact_allowlist(tmp):
         _assert_allowlist_refuses(mutated)
     assert changed_action != workflow, _DOWNLOAD
     _assert_allowlist_refuses(changed_action)
+
+
+def test_privileged_permissions_are_exactly_allowlisted(tmp):
+    """No additional or widened scope can enter the privileged token."""
+    del tmp
+    workflow = _workflow()
+    _assert_privileged_permissions(workflow)
+    mutations = (
+        workflow.replace(
+            '  actions: read\n',
+            '  actions: read\n  contents: write\n', 1),
+        workflow.replace('  actions: read\n', '  actions: write\n', 1),
+        workflow.replace(
+            '  actions: read\n',
+            '  actions: read\n  "cont\\x65nts": "wr\\x69te"\n', 1),
+        workflow.replace(
+            'permissions:\n  pull-requests: write\n  actions: read\n',
+            'permissions: write-all\n', 1),
+    )
+    for mutated in mutations:
+        assert mutated != workflow, 'real permission mapping was not mutated'
+        _assert_permissions_refused(mutated)
 
 
 if __name__ == '__main__':
