@@ -1,9 +1,10 @@
-"""Non-executing resolvers, tables, and isolated CLI dispatch controls.
-DECLARED covers stored action destinations and parser defaults; GUARANTEED
-adds required and non-suppressed values. A required mutually exclusive group
-guarantees a destination only when every member stores that same non-SUPPRESS
-destination.
+"""Resolver tables and isolated CLI dispatch controls. DECLARED covers stored
+action destinations and parser defaults; GUARANTEED adds required and
+non-suppressed values. A required mutually exclusive group guarantees a
+destination only when every member stores that same non-SUPPRESS destination.
 Guarded or defaulted reads require DECLARED; direct reads require GUARANTEED.
+Direct plain and annotated namespace stores are neither reads nor escapes;
+stores never satisfy reads.
 Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
 enumerated expression node types | every other ``ast.expr`` node type is
 ``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
@@ -21,10 +22,8 @@ Current named known-gap control families are non-exact descriptors, partial
 callables, traceback frames, other containers and iterators, comprehension
 results, instance attributes, attribute getters, runtime-built names,
 mapping-proxy reads, call-produced indices, and external frame acquisition.
-Each named family has a known-gap control, and every known-gap control belongs
-to exactly one named family. The executable consistency check is
-bidirectional: contract prose and control tables cover each other.
-"""
+Each named family maps once; contract prose and control tables cover each
+other."""
 import argparse
 import ast
 import builtins
@@ -76,27 +75,27 @@ SHADOWING_DEFAULT_CASES = (
     'def inner(args=args):\n    return args.undeclared_probe\ninner()',
     'f = lambda args=args: args.undeclared_probe\nf()',)
 PERMITTED_NAMESPACE_READ_CASES = (
-    ('args.json', 'args.undeclared_probe', True),
-    ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')", True),
+    ('args.json', 'args.undeclared_probe'),
+    ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')"),
     ("getattr(args, 'json', False)",
-     "getattr(args, 'undeclared_probe', None)", False),
-    ("vars(args)['json']", "vars(args)['undeclared_probe']", True),
-    ("args.__dict__['json']", "args.__dict__['undeclared_probe']", True),
+     "getattr(args, 'undeclared_probe', None)"),
+    ("vars(args)['json']", "vars(args)['undeclared_probe']"),
+    ("args.__dict__['json']", "args.__dict__['undeclared_probe']"),
     ("vars(args).get('json')",
-     "vars(args).get('undeclared_probe')", False),
+     "vars(args).get('undeclared_probe')"),
     ("args.__dict__.get('json')",
-     "args.__dict__.get('undeclared_probe')", False),
+     "args.__dict__.get('undeclared_probe')"),
     ("vars(args).get('json', False)",
-     "vars(args).get('undeclared_probe', None)", False),
+     "vars(args).get('undeclared_probe', None)"),
     ("args.__dict__.get('json', False)",
-     "args.__dict__.get('undeclared_probe', None)", False),
-    ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')", False),
+     "args.__dict__.get('undeclared_probe', None)"),
+    ("hasattr(args, 'json')", "hasattr(args, 'undeclared_probe')"),
     ("builtins.getattr(args, 'json', False)",
-     "builtins.getattr(args, 'undeclared_probe', None)", False),
+     "builtins.getattr(args, 'undeclared_probe', None)"),
     ("builtins.hasattr(args, 'json')",
-     "builtins.hasattr(args, 'undeclared_probe')", False),
+     "builtins.hasattr(args, 'undeclared_probe')"),
     ("builtins.vars(args).get('json')",
-     "builtins.vars(args).get('undeclared_probe')", False),)
+     "builtins.vars(args).get('undeclared_probe')"),)
 NAMESPACE_ESCAPE_CASES = (
     ('other = args', 'other = args'),
     ('other = args\nthird = other\nthird.x', 'other = args'),
@@ -464,6 +463,7 @@ DOCSTRING_RULE_PHRASES = (
     'Not converts any resolved literal to bool',
     ('A required mutually exclusive group guarantees a destination only '
      'when every member stores that same non-SUPPRESS destination'),
+    'stores never satisfy reads',
     'contract prose and control tables cover each other',)
 SEMANTIC_CONTRACT_CLAIMS = (
     ("``DECIDED`` consists only of the resolver's explicitly enumerated "
