@@ -171,40 +171,17 @@ jobs:
         id: measure
         env:
           COVERAGE_PROCESS_START: ${{ github.workspace }}/pyproject.toml
-        # Each suite in its OWN subprocess with --parallel-mode, then
-        # combined -- because that is exactly what run_tests.py does, and
-        # measuring a different execution shape than CI actually runs would
-        # report coverage for a program nobody executes. A failing suite
-        # does not fail this job: the matrix above owns that verdict, and the
-        # gate below is about how much code was reached.
+        # Each suite stays in its OWN subprocess with --parallel-mode, matching
+        # the matrix's execution shape, but they are measured concurrently now
+        # that this job is the workflow's critical path. The guards and group
+        # framing live in the script where a suite can test them.
+        #
+        # A FAILING suite is fine here — the matrix owns that verdict, and a
+        # test that fails still executed the lines it reached. Every suite
+        # failing is a different thing: it means nothing ran, and the number
+        # would describe no program at all rather than low coverage.
         run: |
-          shopt -s nullglob
-          suites=(tests/test_*.py)
-          if [ "${#suites[@]}" -eq 0 ]; then
-            echo "no suites found — refusing to report 0% as a pass" >&2
-            exit 1
-          fi
-          failed=0
-          for suite in "${suites[@]}"; do
-            echo "::group::$suite"
-            if ! python -m coverage run --parallel-mode "$suite"; then
-              echo "  (suite did not pass; its coverage still counts)"
-              failed=$(( failed + 1 ))
-            fi
-            echo "::endgroup::"
-          done
-
-          # A FAILING suite is fine here — the matrix owns that verdict, and a
-          # test that fails still executed the lines it reached. Every suite
-          # failing is a different thing: it means nothing ran, and the number
-          # below would describe no program at all. That is not a low coverage
-          # result to gate on, it is a broken job.
-          if [ "$failed" -eq "${#suites[@]}" ]; then
-            echo "every one of the ${#suites[@]} suites failed — refusing to" >&2
-            echo "report a coverage number for a program that did not run." >&2
-            exit 1
-          fi
-
+          python scripts/ci/coverage_suites.py
           python -m coverage combine
 
       - name: Coverage summary
