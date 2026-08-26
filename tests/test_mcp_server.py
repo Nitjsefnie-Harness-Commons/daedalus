@@ -659,8 +659,8 @@ def test_mcp_and_bridge_use_one_env_parser(tmp):
     os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
     os.environ['DAEDALUS_PORT'] = '0'
     try:
-        server = _util.load(
-            _util.ROOT / 'server.py', 'server_for_env_contract')
+        bridge_config = _util.load(_util.ROOT / 'bridge_config.py')
+        _util.load(_util.ROOT / 'server.py', 'server_for_env_contract')
     finally:
         for key, value in saved.items():
             if value is None:
@@ -668,7 +668,7 @@ def test_mcp_and_bridge_use_one_env_parser(tmp):
             else:
                 os.environ[key] = value
 
-    assert mod.env_int is server.env_int is env_config.env_int
+    assert mod.env_int is bridge_config.env_int is env_config.env_int
     cases = (
         ('DAEDALUS_CONTRACT_A', 5, 0, None),
         ('DAEDALUS_CONTRACT_B', 8086, 0, 65535),
