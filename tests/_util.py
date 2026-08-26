@@ -50,16 +50,16 @@ def load(path, name=None):
 
 
 def log_safe_cases():
-    """The contract every _log_safe copy in this tree must satisfy.
+    """The contract both log-safe implementations in this tree must satisfy.
 
-    The helper ships as three behavior-identical copies (server.py,
-    scripts/gen_gitignore.py, mcp_server.py) that cannot import one another,
-    so each copy's suite — test_bridge_startup, test_gitignore_generator
-    and test_mcp_server — runs this one table against it, and a meta-test in the
-    MCP suite proves a deliberately divergent copy fails it: values that must
-    pass through in full, values that must be backslash-escaped, and values
-    whose rendering must hit the fixed fallback rather than raise or escape
-    to the caller as a non-string.
+    The shared log_safe.py module serves the bridge and MCP entry points. The
+    standalone scripts/gen_gitignore.py keeps a behavior-identical copy because
+    the repository root is not on its import path. Their suites run this one
+    table against both implementations, and an MCP-suite meta-test proves a
+    deliberately divergent standalone copy fails it: values that must pass
+    through in full, values that must be backslash-escaped, and values whose
+    rendering must hit the fixed fallback rather than raise or escape to the
+    caller as a non-string.
     """
     class BrokenStr(Exception):
         def __str__(self):

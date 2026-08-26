@@ -42,10 +42,9 @@ def _log_safe(value):
     caller's interpolation must not see a caller-controlled __format__. The
     fallback is a fixed ASCII string that never interpolates the object that
     just failed — interpolating it would reopen the hole. Kept
-    behavior-identical to the server.py copy; the script cannot import it
-    (server.py requires its env and runs module-level config). except
-    Exception is deliberate: KeyboardInterrupt and SystemExit still
-    propagate.
+    behavior-identical to log_safe.log_safe; this standalone script must run
+    without the repository root on its import path. except Exception is
+    deliberate: KeyboardInterrupt and SystemExit still propagate.
     """
     try:
         rendered = str(value).encode('utf-8', 'backslashreplace').decode('utf-8')
