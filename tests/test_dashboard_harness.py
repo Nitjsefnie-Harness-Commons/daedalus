@@ -345,7 +345,6 @@ await bounded(work, 'work', 1);
 
 
 def test_harness_metadata_accepts_division_after_a_keyword_method(tmp):
-    """A control-keyword property name does not turn division into regex."""
     del tmp
     source = 'const half = obj.if(value) / 2;'
     harness = _dashnode.DashboardNodeHarness(
@@ -354,21 +353,18 @@ def test_harness_metadata_accepts_division_after_a_keyword_method(tmp):
 
 
 def test_harness_metadata_refuses_a_regex_after_a_block(tmp):
-    """A regex expression after a statement block fails loudly."""
     del tmp
     source = "{} /abc/; await bounded(work, 'work', 1);"
     _assert_regex_refused(source, bounded_steps=1)
 
 
 def test_harness_metadata_refuses_an_exported_regex(tmp):
-    """A regex introduced by `export default` fails loudly."""
     del tmp
     source = 'export default /abc/;'
     _assert_regex_refused(source)
 
 
 def test_harness_metadata_refuses_regex_after_statement_bodies(tmp):
-    """Statement bodies keep the regex lexical goal after their close."""
     del tmp
     sources = (
         'function f() {} /await bounded(foo)/;',
@@ -380,7 +376,6 @@ def test_harness_metadata_refuses_regex_after_statement_bodies(tmp):
 
 
 def test_harness_metadata_refuses_regex_expression_operands(tmp):
-    """Spread and `extends` introduce expressions that may be regexes."""
     del tmp
     sources = (
         'const values = [... /await bounded(foo)/];',
@@ -390,7 +385,6 @@ def test_harness_metadata_refuses_regex_expression_operands(tmp):
 
 
 def test_harness_metadata_accepts_private_keyword_method_division(tmp):
-    """A private keyword-named method cannot create control syntax."""
     del tmp
     source = (
         'class C { #if(value) { return value; } '
@@ -401,7 +395,6 @@ def test_harness_metadata_accepts_private_keyword_method_division(tmp):
 
 
 def test_harness_metadata_keeps_nested_declaration_body_goals(tmp):
-    """Nested bodies cannot replace an enclosing declaration goal."""
     del tmp
     sources = (
         'function f(cb = () => {}) {} /await bounded(foo)/;',
@@ -487,11 +480,18 @@ def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
         behaviour._DASHBOARD_WORLD_HARNESS,
         behaviour._TAB_SELECTOR_HARNESS,
     )
-    rebuilt = tuple(
-        _dashnode.DashboardNodeHarness(
-            harness.source, harness.bounded_steps, harness.module)
-        for harness in shipped
-    )
+    parser = _dashnode._source_has_regex
+
+    def unexpected_parser(_source):
+        raise AssertionError('shipped harness reached the slash parser')
+    _dashnode._source_has_regex = unexpected_parser
+    try:
+        rebuilt = tuple(
+            _dashnode.DashboardNodeHarness(
+                harness.source, harness.bounded_steps, harness.module)
+            for harness in shipped)
+    finally:
+        _dashnode._source_has_regex = parser
     assert rebuilt == shipped
 
 
