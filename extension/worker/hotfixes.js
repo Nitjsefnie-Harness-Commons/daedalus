@@ -26,7 +26,8 @@ async function _eligibleHotfixes() {
 async function _replayViaCdp(chromeTabId, code) {
   // A capture or a kept session already owns the attachment; reuse it and
   // leave it in place, because detaching would end that capture or session.
-  const held = Boolean(_cdpSessions[chromeTabId]) || Boolean(_netCaptures[chromeTabId]);
+  const held = Boolean(_cdpSessions[chromeTabId])
+    || Boolean(_netCaptures[chromeTabId]);
   try {
     if (!held) await chrome.debugger.attach({ tabId: chromeTabId }, '1.3');
   } catch (error) {
@@ -43,7 +44,9 @@ async function _replayViaCdp(chromeTabId, code) {
     return error && (error.message || String(error));
   } finally {
     if (!held) {
-      try { await chrome.debugger.detach({ tabId: chromeTabId }); } catch (_) {}
+      try {
+        await chrome.debugger.detach({ tabId: chromeTabId });
+      } catch (_) {}
     }
   }
 }
@@ -122,7 +125,8 @@ const _withHotfixLock = _serializer();
 
 async function handleStoreHotfix(cmd) {
   try {
-    if (!cmd.fixId || !cmd.code) return postResult(cmd._execution, null, 'Missing fixId or code', 'extension');
+    if (!cmd.fixId || !cmd.code) return postResult(
+      cmd._execution, null, 'Missing fixId or code', 'extension');
     const outcome = await _withHotfixLock(async () => {
       const data = await chrome.storage.local.get([HOTFIX_KEY]);
       const stored = data[HOTFIX_KEY] || { version: VERSION, fixes: [] };
@@ -132,7 +136,9 @@ async function handleStoreHotfix(cmd) {
                       : (cmd.permanent === false) ? false
                       : (existing ? existing.permanent === true : false);
       stored.fixes = stored.fixes.filter(f => f.id !== cmd.fixId);
-      stored.fixes.push({ id: cmd.fixId, code: cmd.code, ts: Date.now(), permanent });
+      stored.fixes.push({
+        id: cmd.fixId, code: cmd.code, ts: Date.now(), permanent,
+      });
       await chrome.storage.local.set({ [HOTFIX_KEY]: stored });
       return { stored: cmd.fixId, total: stored.fixes.length, permanent };
     });
@@ -144,14 +150,17 @@ async function handleStoreHotfix(cmd) {
 
 async function handleClearHotfix(cmd) {
   try {
-    if (!cmd.fixId) return postResult(cmd._execution, null, 'Missing fixId', 'extension');
+    if (!cmd.fixId) return postResult(
+      cmd._execution, null, 'Missing fixId', 'extension');
     const outcome = await _withHotfixLock(async () => {
       const data = await chrome.storage.local.get([HOTFIX_KEY]);
       const stored = data[HOTFIX_KEY];
       if (!stored) return { cleared: cmd.fixId, found: false };
       stored.fixes = stored.fixes.filter(f => f.id !== cmd.fixId);
       await chrome.storage.local.set({ [HOTFIX_KEY]: stored });
-      return { cleared: cmd.fixId, found: true, remaining: stored.fixes.length };
+      return {
+        cleared: cmd.fixId, found: true, remaining: stored.fixes.length,
+      };
     });
     await postResult(cmd._execution, outcome, null, 'extension');
   } catch (e) {
@@ -188,14 +197,20 @@ async function handleClearAllHotfixes(cmd) {
 async function handleSetPermanent(cmd) {
   try {
     if (!cmd.fixId || typeof cmd.permanent !== 'boolean') {
-      return postResult(cmd._execution, null, 'Missing fixId or permanent (bool)', 'extension');
+      return postResult(
+        cmd._execution, null, 'Missing fixId or permanent (bool)',
+        'extension');
     }
     const outcome = await _withHotfixLock(async () => {
       const data = await chrome.storage.local.get([HOTFIX_KEY]);
       const stored = data[HOTFIX_KEY];
-      if (!stored) return { id: cmd.fixId, permanent: cmd.permanent, found: false };
+      if (!stored) return {
+        id: cmd.fixId, permanent: cmd.permanent, found: false,
+      };
       const fix = stored.fixes.find(f => f.id === cmd.fixId);
-      if (!fix) return { id: cmd.fixId, permanent: cmd.permanent, found: false };
+      if (!fix) return {
+        id: cmd.fixId, permanent: cmd.permanent, found: false,
+      };
       fix.permanent = cmd.permanent;
       await chrome.storage.local.set({ [HOTFIX_KEY]: stored });
       return { id: cmd.fixId, permanent: cmd.permanent, found: true };
