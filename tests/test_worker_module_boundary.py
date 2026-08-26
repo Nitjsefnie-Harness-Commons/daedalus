@@ -28,6 +28,7 @@ _WORKER_NON_HANDLER_EXPORTS = (
     '_cdpError',
     '_cdpSessions',
     '_cdpSettle',
+    'handleHotfixReplay',
     '_netCaptures',
     '_releaseCdpObjects',
 )
@@ -152,6 +153,12 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         ('worker/netcapture.js', 'handleNetCapture', 'net-capture'),
         ('worker/netcapture.js', 'handleNetCaptureStop', 'net-capture-stop'),
         ('worker/netcapture.js', 'handleNetCaptureGet', 'net-capture-get'),
+        ('worker/hotfixes.js', 'handleStoreHotfix', 'store-hotfix'),
+        ('worker/hotfixes.js', 'handleClearHotfix', 'clear-hotfix'),
+        ('worker/hotfixes.js', 'handleClearAllHotfixes',
+         'clear-all-hotfixes'),
+        ('worker/hotfixes.js', 'handleListHotfixes', 'list-hotfixes'),
+        ('worker/hotfixes.js', 'handleSetPermanent', 'set-permanent'),
     ]
     duplicate_routes = sorted(
         route for route, count in Counter(routes).items() if count > 1)
