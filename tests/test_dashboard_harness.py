@@ -102,6 +102,12 @@ def _backstop_seconds(failure):
     return float(match.group(1))
 
 
+def _drain_seconds(failure):
+    match = re.search(r'drain took ([0-9.]+)s;', failure)
+    assert match, failure
+    return float(match.group(1))
+
+
 def test_phase_records_a_harness_checkpoint(tmp):
     """A phase reaches captured stderr in its stable diagnostic format."""
     del tmp
@@ -166,23 +172,45 @@ def test_outer_backstop_bounds_a_grandchild_held_pipe_drain(tmp):
     del tmp
     source = r"""
 const { spawn } = require('child_process');
-spawn(process.execPath, ['--eval', 'setTimeout(() => {}, 2000)'], {
+spawn(process.execPath, ['--eval', 'setTimeout(() => {}, 5000)'], {
   stdio: ['ignore', 'inherit', 'inherit'],
 });
 phase('grandchild inherited dashboard pipes');
 process.stdout.write('grandchild stdout');
 setInterval(() => {}, 10);
 """
-    started = time.monotonic()
     failure = _harness_failure(
         source, bounded_steps=0,
         process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
-    elapsed = time.monotonic() - started
-    post_kill_elapsed = elapsed - _PROCESS_STARTUP_ALLOWANCE_S
-    assert post_kill_elapsed < 0.85, (
-        f'post-kill drain took {post_kill_elapsed:.2f}s')
+    drain_seconds = _drain_seconds(failure)
+    assert drain_seconds < 0.5, (
+        f'dashboard drain took {drain_seconds:.3f}s')
+    assert 'drain timed out: yes' in failure, failure
     assert 'last phase: grandchild inherited dashboard pipes' in failure
     assert "stdout: 'grandchild stdout'" in failure, failure
+
+
+def test_process_creation_delay_does_not_inflate_drain_time(tmp):
+    """Drain timing begins only after a delayed child reaches its backstop."""
+    del tmp
+    real_popen = _dashnode.subprocess.Popen
+
+    def delayed_popen(*args, **kwargs):
+        time.sleep(0.7)
+        return real_popen(*args, **kwargs)
+
+    _dashnode.subprocess.Popen = delayed_popen
+    try:
+        failure = _harness_failure(
+            "phase('delayed process started'); setInterval(() => {}, 10);",
+            process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
+    finally:
+        _dashnode.subprocess.Popen = real_popen
+    drain_seconds = _drain_seconds(failure)
+    assert drain_seconds < 0.5, (
+        f'dashboard drain took {drain_seconds:.3f}s')
+    assert 'drain timed out: no' in failure, failure
+    assert 'last phase: delayed process started' in failure, failure
 
 
 def test_node_output_is_decoded_as_utf8_under_an_ascii_locale(tmp):
@@ -255,18 +283,19 @@ def test_backstop_grows_with_the_bounded_step_count(tmp):
     assert (zero_steps, one_step, three_steps) == (0.4, 0.65, 1.15)
 
 
-def test_shipped_harnesses_pin_their_exact_bounded_step_counts(tmp):
-    """Each shipped source carries its one validated timeout count."""
+def test_shipped_harnesses_pin_their_process_metadata(tmp):
+    """Each shipped source carries its validated timeout and module mode."""
     del tmp
     expected = {
-        'content': (behaviour._CONTENT_KEEPALIVE_HARNESS, 0),
-        'consume': (behaviour._DASHBOARD_CONSUME_HARNESS, 2),
-        'world': (behaviour._DASHBOARD_WORLD_HARNESS, 1),
-        'selector': (behaviour._TAB_SELECTOR_HARNESS, 5),
+        'content': (behaviour._CONTENT_KEEPALIVE_HARNESS, 0, False),
+        'consume': (behaviour._DASHBOARD_CONSUME_HARNESS, 2, False),
+        'world': (behaviour._DASHBOARD_WORLD_HARNESS, 1, False),
+        'selector': (behaviour._TAB_SELECTOR_HARNESS, 5, True),
     }
-    for name, (harness, bounded_steps) in expected.items():
+    for name, (harness, bounded_steps, module) in expected.items():
         assert isinstance(harness, _dashnode.DashboardNodeHarness), name
-        assert harness.bounded_steps == bounded_steps, name
+        actual = (harness.bounded_steps, harness.module)
+        assert actual == (bounded_steps, module), (name, actual)
 
 
 def test_harness_metadata_rejects_an_under_declared_bound_count(tmp):
@@ -413,36 +442,21 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
     assert 'last phase: none recorded' in failure, failure
 
 
-def test_last_phase_preserves_regex_metacharacters(tmp):
-    """Phase extraction treats a diagnostic label as arbitrary text."""
-    del tmp
-    failure = _harness_failure(
-        "phase('selector [update] (2/3) .*'); setInterval(() => {}, 10);",
-        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
-    assert 'last phase: selector [update] (2/3) .*;' in failure, failure
-
-
-def test_last_phase_accepts_an_unterminated_final_line(tmp):
-    """A killed child's final phase does not require a trailing newline."""
-    del tmp
-    failure = _harness_failure(
-        "process.stderr.write('[phase] final partial line'); "
-        "setInterval(() => {}, 10);",
-        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
-    assert 'last phase: final partial line;' in failure, failure
-
-
-def test_outer_backstop_preserves_named_output_fields(tmp):
-    """Captured stdout and stderr keep independently named fields."""
+def test_outer_backstop_preserves_phase_and_named_output_fields(tmp):
+    """One stalled child preserves phase syntax, EOF and named streams."""
     del tmp
     source = r"""
 process.stdout.write('OUT');
-process.stderr.write('[phase] output fields\nERR');
+process.stderr.write('ERR\n[phase] selector [update] (2/3) .*');
 setInterval(() => {}, 10);
 """
     failure = _harness_failure(
         source, process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
-    assert "stdout: 'OUT'; stderr: '[phase] output fields\\nERR'" in failure
+    assert 'last phase: selector [update] (2/3) .*;' in failure, failure
+    assert (
+        "stdout: 'OUT'; stderr: 'ERR\\n[phase] selector [update] (2/3) .*'"
+        in failure
+    ), failure
 
 
 def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
