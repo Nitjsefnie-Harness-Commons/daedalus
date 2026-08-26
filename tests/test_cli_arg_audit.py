@@ -683,6 +683,51 @@ def test_cli_audit_docstrings_match_control_tables(tmp):
         audit_support.KNOWN_GAP_FAMILIES,
         audit_support.KNOWN_GAP_FRAME_ROUTE_CASES)
 
+    unsupported_documents = dict(documents)
+    unsupported_documents['_cli_arg_audit_support'] = \
+        audit_support.__doc__.replace(
+            ', and external frame acquisition.',
+            ', comparison routes, and external frame acquisition.')
+    undocumented_families = audit_support.KNOWN_GAP_FAMILIES + (
+        ('comparison routes', ('comparison route control',)),)
+    undocumented_cases = audit_support.KNOWN_GAP_FRAME_ROUTE_CASES + (
+        ('comparison route control', '', ''),)
+    drift_cases = (
+        ('unsupported-prose', unsupported_documents,
+         audit_support.KNOWN_GAP_FAMILIES,
+         audit_support.KNOWN_GAP_FRAME_ROUTE_CASES,
+         {'_cli_arg_audit_support': {
+             'unsupported': ['comparison routes'],
+             'undocumented': [],
+         }}),
+        ('undocumented-control', documents, undocumented_families,
+         undocumented_cases, {
+             'test_cli_arg_audit': {
+                 'unsupported': [],
+                 'undocumented': ['comparison routes'],
+             },
+             '_cli_arg_audit_support': {
+                 'unsupported': [],
+                 'undocumented': ['comparison routes'],
+             },
+         }),
+    )
+    failures = {}
+    for name, drift_documents, families, cases, expected in drift_cases:
+        try:
+            audit_support.resolver.assert_docstrings_match(
+                drift_documents, audit_support.DOCSTRING_RULE_PHRASES,
+                families, cases)
+        except AssertionError as error:
+            if error.args != (expected,):
+                failures[name] = {
+                    'expected': expected,
+                    'actual': error.args,
+                }
+        else:
+            failures[name] = 'drift was accepted'
+    assert failures == {}, failures
+
 
 def test_cli_handlers_read_only_declared_args(tmp):
     from daedalus_cli.cli import DISPATCH

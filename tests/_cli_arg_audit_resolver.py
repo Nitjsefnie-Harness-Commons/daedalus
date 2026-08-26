@@ -778,21 +778,44 @@ def assert_no_dead_imports(path):
     assert unused == [], unused
 
 
+def _documented_outside_families(document):
+    """Return the machine-readable family list in one contract docstring."""
+    normalized = ' '.join(document.split())
+    prefix = 'Outside families are '
+    suffix = '. Each named family'
+    _, marker, remainder = normalized.partition(prefix)
+    if not marker:
+        return frozenset()
+    families, marker, _ = remainder.partition(suffix)
+    if not marker:
+        return frozenset()
+    return frozenset(families.replace(', and ', ', ').split(', '))
+
+
 def assert_docstrings_match(documents, rule_phrases, known_gap_families,
                             known_gap_cases):
-    """Require both contract prose and controls to cover each other."""
+    """Require contract prose and control tables to cover each other."""
     missing_claims = {}
     for module, document in documents.items():
         normalized = ' '.join(document.split())
         missing = [
             phrase for phrase in rule_phrases
             if phrase not in normalized]
-        missing += [
-            family for family, _ in known_gap_families
-            if family not in normalized]
         if missing:
             missing_claims[module] = missing
     assert missing_claims == {}, missing_claims
+    control_families = {family for family, _ in known_gap_families}
+    route_drift = {}
+    for module, document in documents.items():
+        prose_families = _documented_outside_families(document)
+        unsupported = sorted(prose_families - control_families)
+        undocumented = sorted(control_families - prose_families)
+        if unsupported or undocumented:
+            route_drift[module] = {
+                'unsupported': unsupported,
+                'undocumented': undocumented,
+            }
+    assert route_drift == {}, route_drift
     controls = {case[0] for case in known_gap_cases}
     mapped = [
         control for _, family_controls in known_gap_families
