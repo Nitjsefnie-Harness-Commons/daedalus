@@ -170,6 +170,7 @@
 !/tests/_cdpharness.py
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py
+!/tests/_cmdqueue.py
 !/tests/_coverage_comment_steps.py
 !/tests/_evalpages.py
 !/tests/_ghexpr.py
@@ -201,6 +202,7 @@
 !/tests/test_ci_workflows.py
 !/tests/test_cli.py
 !/tests/test_cli_arg_audit.py
+!/tests/test_cmdqueue.py
 !/tests/test_command_queue.py
 !/tests/test_command_queue_unit.py
 !/tests/test_coverage_comment_boundary.py
