@@ -20,9 +20,17 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 SCENARIOS = r"""
 async function runCapabilityRoutes() {
   const routes = JSON.parse(commandText);
-  const probedOriginals = new Map();
+  const publishedSymbols = new Set();
   for (const route of routes) {
-    const publishedSymbol = route.symbol;
+    publishedSymbols.add(route.symbol);
+    for (const symbol of route.publishedSymbols || []) {
+      publishedSymbols.add(symbol);
+    }
+  }
+  const probedOriginals = new Map();
+  const originalDescriptors = new Map();
+  const handlerStates = new Map();
+  for (const publishedSymbol of publishedSymbols) {
     if (!/^[A-Za-z_$][\w$]*$/.test(publishedSymbol)) {
       throw new Error('invalid published symbol: ' + publishedSymbol);
     }
@@ -31,6 +39,22 @@ async function runCapabilityRoutes() {
     if (available) {
       probedOriginals.set(
         publishedSymbol, vm.runInContext(publishedSymbol, context));
+      const descriptor = Object.getOwnPropertyDescriptor(
+        context, publishedSymbol);
+      if (descriptor && descriptor.configurable && descriptor.writable) {
+        const state = { value: descriptor.value, writes: 0 };
+        Object.defineProperty(context, publishedSymbol, {
+          configurable: descriptor.configurable,
+          enumerable: descriptor.enumerable,
+          get() { return state.value; },
+          set(value) {
+            state.writes++;
+            state.value = value;
+          },
+        });
+        originalDescriptors.set(publishedSymbol, descriptor);
+        handlerStates.set(publishedSymbol, state);
+      }
     }
   }
   const verificationOriginals = new Map(probedOriginals);
@@ -64,6 +88,7 @@ async function runCapabilityRoutes() {
         });
         continue;
       }
+      for (const state of handlerStates.values()) state.writes = 0;
       context.capabilityCommand = route.command;
       let answer;
       try {
@@ -74,11 +99,13 @@ async function runCapabilityRoutes() {
         delete context.capabilitySentinel;
       }
       const mutatedSymbols = [];
-      for (const [symbol, expected] of expectedHandlers) {
-        if (symbol !== publishedSymbol
-            && vm.runInContext(symbol, context) !== expected) {
+      for (const [symbol, state] of handlerStates) {
+        if (symbol !== publishedSymbol && state.writes) {
           mutatedSymbols.push(symbol);
         }
+      }
+      for (const [symbol, state] of handlerStates) {
+        state.value = expectedHandlers.get(symbol);
       }
       const observation = {
         symbol: publishedSymbol,
@@ -95,9 +122,15 @@ async function runCapabilityRoutes() {
     }
   } finally {
     for (const [publishedSymbol, original] of probedOriginals) {
-      context.capabilityOriginal = original;
-      vm.runInContext(
-        publishedSymbol + ' = capabilityOriginal', context);
+      if (originalDescriptors.has(publishedSymbol)) {
+        Object.defineProperty(
+          context, publishedSymbol,
+          originalDescriptors.get(publishedSymbol));
+      } else {
+        context.capabilityOriginal = original;
+        vm.runInContext(
+          publishedSymbol + ' = capabilityOriginal', context);
+      }
     }
     delete context.capabilityOriginal;
     delete context.capabilityCommand;

@@ -245,6 +245,7 @@
 !/tests/test_wfcheckout.py
 !/tests/test_wfscalars.py
 !/tests/test_worker_module_boundary.py
+!/tests/test_worker_route_guard.py
 !/tests/test_workflow_parsing.py
 !/tests/test_workflow_triggers.py
 !/tests/test_yamlread.py
