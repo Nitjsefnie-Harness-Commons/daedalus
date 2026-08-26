@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _bridge  # noqa: E402
 import _cmdqueue  # noqa: E402
 import test_cli  # noqa: E402
 import test_mcp_server  # noqa: E402
@@ -83,13 +84,18 @@ def _queued_file(tmp, name='1700000000000_000001.json'):
     return queue, queued
 
 
-def _stale_queue(docroot, token):
-    queue = Path(docroot) / 'commands' / f'{token}_extension'
-    queue.mkdir(parents=True, exist_ok=True)
-    stale = queue / '0000000000000_000000.json'
-    command = {
-        'id': 'stale-command', '_did': 'stale-delivery', 'type': 'reload'}
-    stale.write_text(json.dumps(command), encoding='utf-8')
+def _stale_queue(base, docroot, token):
+    status, body = _bridge.put_command(
+        base, {'token': token, 'tab': 'extension',
+               'id': 'stale-command', 'type': 'reload'})
+    assert status == 200, (status, body)
+    body = json.loads(body)
+    files = _bridge.queue_files(docroot, f'{token}_extension')
+    assert len(files) == 1, files
+    stale = files[0]
+    command = json.loads(stale.read_text(encoding='utf-8'))
+    assert command['_did'] == body['did'], (command, body)
+    queue = stale.parent
     return queue, stale, command
 
 
@@ -237,7 +243,8 @@ def test_the_mcp_answer_helper_survives_a_transient_queue_read_refusal(tmp):
 def test_the_cli_answer_helper_ignores_a_refused_leftover(tmp):
     bridge_env = {'DAEDALUS_TOKEN': test_cli.TOK, 'TOKEN': ''}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
-        queue, stale, stale_command = _stale_queue(docroot, test_cli.TOK)
+        queue, stale, stale_command = _stale_queue(
+            base, docroot, test_cli.TOK)
         env = test_cli.cli_env(DAEDALUS_URL=base,
                                DAEDALUS_TOKEN=test_cli.TOK)
         with _redirect_stale_answer(queue, stale, stale_command):
@@ -258,7 +265,7 @@ def test_the_mcp_answer_helper_ignores_a_refused_leftover(tmp):
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         mod = test_mcp_server._load_mcp(base)
         queue, stale, stale_command = _stale_queue(
-            docroot, test_mcp_server.TOK)
+            base, docroot, test_mcp_server.TOK)
         with _redirect_stale_answer(queue, stale, stale_command):
             with _refuse_path_operation(stale, 'unlink', 1000) as calls:
                 _value, queued = test_mcp_server._answer_mcp_command(
