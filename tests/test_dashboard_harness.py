@@ -16,6 +16,14 @@ import _util  # noqa: E402
 _HOST_REALM_KEEPALIVE = "setInterval(() => {}, 10);\n"
 
 
+def _harness_failure(source, *arguments, **options):
+    try:
+        _dashnode.run_dashboard_node(source, *arguments, **options)
+    except AssertionError as failure:
+        return str(failure)
+    raise AssertionError('the failing dashboard harness unexpectedly passed')
+
+
 def test_phase_records_a_harness_checkpoint(tmp):
     """A phase reaches captured stderr in its stable diagnostic format."""
     del tmp
@@ -71,6 +79,25 @@ bounded(Promise.resolve('settled'), 'successful work', 1500).then(
     elapsed = time.monotonic() - started
     assert result.stdout == 'settled', result
     assert elapsed < 0.75, f'settled bound held Node open for {elapsed:.2f}s'
+
+
+def test_leave_flushes_the_error_before_exiting(tmp):
+    """A delayed pipe write completes before leave terminates the child."""
+    del tmp
+    source = r"""
+const write = process.stderr.write.bind(process.stderr);
+process.stderr.write = (text, callback) => {
+  setTimeout(() => write(text, callback), 50);
+  return false;
+};
+try {
+  throw new Error('flushed dashboard failure');
+} catch (error) {
+  leave(error);
+}
+"""
+    failure = _harness_failure(source)
+    assert 'flushed dashboard failure' in failure, failure
 
 
 def main():
