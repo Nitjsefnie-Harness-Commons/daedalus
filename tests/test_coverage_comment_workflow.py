@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _workflowrun import recorded_writes  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _yamlread import (  # noqa: E402
@@ -447,21 +448,13 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
             output)
 
 
-def _writes(calls):
-    """Return recorded mutating API calls."""
-    return [
-        line for line in calls.read_text(encoding='utf-8').splitlines()
-        if '"-X"' in line and ('"POST"' in line or '"PATCH"' in line)
-    ]
-
-
 def test_trusted_destination_and_body_bound_are_executable(tmp):
     """Artifact claims cannot reroute or bypass the 60,000-byte bound."""
     mismatch, _state, calls, _output = _run_comment_block(
         tmp, 'Post or update the pull request comment', state=[],
         claimed='999')
     assert mismatch.returncode != 0, mismatch.stdout
-    assert _writes(calls) == [], calls.read_text(encoding='utf-8')
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
     assert '/comments' not in calls.read_text(encoding='utf-8'), \
         calls.read_text(encoding='utf-8')
 
@@ -469,7 +462,7 @@ def test_trusted_destination_and_body_bound_are_executable(tmp):
         tmp, 'Post or update the pull request comment', state=[],
         body='x' * 60001)
     assert oversized.returncode != 0, oversized.stdout
-    assert _writes(calls) == [], calls.read_text(encoding='utf-8')
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
     assert '/comments' not in calls.read_text(encoding='utf-8'), \
         calls.read_text(encoding='utf-8')
 
@@ -484,13 +477,14 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
         tmp, 'Post or update the pull request comment', state=[],
         head_sha='A', current_head='A', body='**100.0%**')
     assert posted.returncode == 0, (posted.stdout, posted.stderr)
-    assert len(_writes(calls)) == 1 and \
+    assert len(recorded_writes(calls)) == 1 and \
         'Patch coverage for commit A.' in state[0]['body'], state
     marked, state, calls, _output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=state,
         head_sha='B', current_head='B')
     assert marked.returncode == 0, (marked.stdout, marked.stderr)
-    assert len(_writes(calls)) == 1, calls.read_text(encoding='utf-8')
+    assert len(recorded_writes(calls)) == 1, \
+        calls.read_text(encoding='utf-8')
     assert 'Patch coverage was not measured for commit B.' in \
         state[0]['body'], state
     assert '**100.0%**' not in state[0]['body'], state
@@ -502,8 +496,8 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
         tmp, 'Post or update the pull request comment', state=[],
         head_sha='A', current_head='A', body='**100.0%**')
     assert posted.returncode == 0, (posted.stdout, posted.stderr)
-    assert len(_writes(calls)) == 1, calls.read_text(encoding='utf-8')
-
+    assert len(recorded_writes(calls)) == 1, \
+        calls.read_text(encoding='utf-8')
     artifact, output = _run_artifact_check(
         tmp, {'total_count': 0, 'artifacts': []})
     assert artifact.returncode == 0, (artifact.stdout, artifact.stderr)
@@ -512,7 +506,8 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
         tmp, 'Mark missing patch coverage', state=state,
         head_sha='B', current_head='B')
     assert marked.returncode == 0, (marked.stdout, marked.stderr)
-    assert len(_writes(calls)) == 1, calls.read_text(encoding='utf-8')
+    assert len(recorded_writes(calls)) == 1, \
+        calls.read_text(encoding='utf-8')
     assert 'Patch coverage was not measured for commit B.' in \
         state[0]['body'], state
     assert '**100.0%**' not in state[0]['body'], state
@@ -535,7 +530,7 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
 
 
 def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
-    """Both writers stop if the pull request advances after resolution."""
+    """Every writer branch revalidates and stops after a head advance."""
     resolved, _state, _calls, output = _run_comment_block(
         tmp, 'Resolve the target pull request from the event', state=[],
         head_sha='A' * 40, current_head='A' * 40)
@@ -543,15 +538,20 @@ def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
     assert 'stale=false' in output.read_text(encoding='utf-8')
     current_state = [{'id': 1, 'user': {'login': 'github-actions[bot]'},
                       'body': '<!-- daedalus-diff-coverage -->'}]
-    for step_name in ('Post or update the pull request comment',
-                      'Mark missing patch coverage'):
+    cases = (
+        ('POST', 'Post or update the pull request comment', []),
+        ('PATCH', 'Post or update the pull request comment', current_state),
+        ('missing-marker PATCH', 'Mark missing patch coverage', current_state),
+    )
+    for branch, step_name, state in cases:
         stale, _state, calls, _output = _run_comment_block(
-            tmp, step_name, state=current_state, head_sha='A' * 40,
+            tmp, step_name, state=state, head_sha='A' * 40,
             current_head='B' * 40)
         call_text = calls.read_text(encoding='utf-8')
         assert stale.returncode == 0, (stale.stdout, stale.stderr)
-        assert _writes(calls) == [], call_text
-        assert 'repos/owner/repo/pulls/170' in call_text, call_text
+        pull_reads = call_text.count('"repos/owner/repo/pulls/170"')
+        assert pull_reads == 1, f'{branch} pull-head lookups: {pull_reads}'
+        assert recorded_writes(calls) == [], call_text
 
 
 def test_commenter_runs_every_completed_run_and_orders_stale_gate(

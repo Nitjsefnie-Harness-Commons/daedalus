@@ -24,3 +24,11 @@ def run_step(workdir, step, env):
     return subprocess.run(
         command, cwd=workdir, env=child_env,
         capture_output=True, text=True, timeout=60)
+
+
+def recorded_writes(calls):
+    """Return recorded POST and PATCH calls from a GitHub stub log."""
+    return [
+        line for line in calls.read_text(encoding='utf-8').splitlines()
+        if '"-X"' in line and ('"POST"' in line or '"PATCH"' in line)
+    ]
