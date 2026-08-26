@@ -27,6 +27,10 @@ _EXPECTED_STEPS = (
     ('Post or update the pull request comment', 'run', None),
 )
 _MARKER = '<!-- daedalus-diff-coverage -->\n'
+_HEAD_SHA = 'B' * 40
+_COMMENT_PREFIX = (
+    _MARKER + f'\nPatch coverage for commit {_HEAD_SHA}.\n\n'
+)
 _PERMISSIONS = {'pull-requests': 'write', 'actions': 'read'}
 _SENTINEL = 'PRIVILEGED_TOKEN_SENTINEL'
 _HOSTILE_BODIES = {
@@ -112,6 +116,8 @@ def _run_hostile_post(tmp, label, body):
         'GH_TOKEN': _SENTINEL,
         'REPO': 'owner/repo',
         'PR_NUMBER': '170',
+        'HEAD_SHA': _HEAD_SHA,
+        'CURRENT_HEAD': _HEAD_SHA,
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls_path),
     }
@@ -133,7 +139,7 @@ def test_hostile_artifact_bodies_remain_inert_text(tmp):
         assert not side_effect.exists(), (
             f'{label} artifact executed with the privileged token')
         assert len(state) == 1, state
-        assert state[0]['body'] == _MARKER + body, (
+        assert state[0]['body'] == _COMMENT_PREFIX + body, (
             label, state[0]['body'], body)
         writes = commenter._writes(calls)  # pylint: disable=protected-access
         assert len(writes) == 1, calls.read_text(encoding='utf-8')
