@@ -41,6 +41,23 @@ def test_checkout_reader_returns_structured_checkout_refs(tmp):
         ('aligned', '${{ steps.baseline.outputs.ref }}')]
 
 
+def test_checkout_reader_accepts_only_one_leading_bom(tmp):
+    """One stream marker is accepted; every other BOM is refused."""
+    del tmp
+    workflow = (
+        'jobs:\n  build:\n    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n          ref: safe\n')
+    try:
+        actual = _wfcheckout.checkout_refs('\ufeff' + workflow)
+    except _wfcheckout.YAMLReadError as error:
+        raise AssertionError(str(error)) from error
+    assert actual == [('build', 'safe')]
+    for invalid in ('\ufeff\ufeff' + workflow,
+                    workflow.replace('safe', 'safe\ufeff', 1)):
+        _assert_yaml_refusal(invalid, 'unsupported structural character')
+
+
 def test_checkout_reader_skips_unwalked_flow_values(tmp):
     """Flow syntax outside a checkout path is not inspected."""
     del tmp

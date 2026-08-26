@@ -11,6 +11,8 @@ class _WorkflowReader(_ScalarReaderMixin):
     """Read only the YAML paths needed by the checkout pin."""
 
     def __init__(self, workflow):
+        if workflow[:1] == '\ufeff':
+            workflow = workflow[1:]
         self.lines = workflow.splitlines()
         self.source_ends_with_line_break = workflow.endswith(('\r', '\n'))
         self.jobs_line = None
@@ -362,10 +364,12 @@ class _WorkflowReader(_ScalarReaderMixin):
         root_indent = None
         scalar_until = 0
         for index, line in enumerate(self.lines):
+            if '\ufeff' in line:
+                self._refuse('unsupported structural character', index,
+                             'workflow')
             if index < scalar_until:
                 continue
-            if line and (line[0] == '\ufeff' or (
-                    line[0].isspace() and line[0] not in ' \t')):
+            if line and line[0].isspace() and line[0] not in ' \t':
                 self._refuse('unsupported structural character', index,
                              'workflow')
             stripped = line.strip(' \t')
