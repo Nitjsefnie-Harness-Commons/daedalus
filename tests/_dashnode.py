@@ -44,7 +44,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { source += chunk; });
 process.stdin.on('end', () => {
   const tree = acorn.parse(source, {
-    ecmaVersion: 'latest', sourceType: 'module'
+    ecmaVersion: 'latest', sourceType: process.argv[1]
   });
   function containsRegex(value) {
     if (!value || typeof value !== 'object') return false;
@@ -122,7 +122,7 @@ def _ambiguous_bound_shape(source):
     return None
 
 
-def _source_has_regex(source):
+def _source_has_regex(source, module):
     """Ask Node's existing parser whether source contains a regex."""
     node = shutil.which('node')
     if not node:
@@ -130,7 +130,8 @@ def _source_has_regex(source):
             'node is required to inspect dashboard harness slash tokens')
     try:
         result = subprocess.run(
-            [node, '--eval', _REGEX_TOKEN_PROBE], input=source,
+            [node, '--eval', _REGEX_TOKEN_PROBE,
+             'module' if module else 'script'], input=source,
             capture_output=True, text=True, encoding='utf-8',
             errors='replace', timeout=_DASHBOARD_STEP_TIMEOUT_S)
     except subprocess.TimeoutExpired as failure:
@@ -144,11 +145,11 @@ def _source_has_regex(source):
     return result.stdout == 'regex'
 
 
-def _unsupported_bound_shape(source):
+def _unsupported_bound_shape(source, module):
     """Return the first source shape comment blanking cannot model."""
     shape = _ambiguous_bound_shape(source)
     if shape == 'slash token':
-        return 'regex literal' if _source_has_regex(source) else None
+        return 'regex literal' if _source_has_regex(source, module) else None
     return shape
 
 
@@ -161,7 +162,7 @@ class DashboardNodeHarness:
     module: bool = False
 
     def __post_init__(self):
-        unsupported = _unsupported_bound_shape(self.source)
+        unsupported = _unsupported_bound_shape(self.source, self.module)
         if unsupported:
             raise ValueError(
                 'dashboard harness bound count cannot inspect '
