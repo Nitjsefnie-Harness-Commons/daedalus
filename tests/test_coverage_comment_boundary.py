@@ -11,10 +11,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _workflowrun  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
-from _coverage_comment_steps import EXPECTED_STEP_MAPPINGS  # noqa: E402
+from _coverage_comment_steps import (  # noqa: E402
+    EXPECTED_PRIVILEGED_JOB_MAPPING,
+    EXPECTED_STEP_MAPPINGS,
+    EXPECTED_WORKFLOW_MAPPING,
+)
 from _repo import ROOT  # noqa: E402
 from _yamlread import YAMLReadError, top_level_mapping  # noqa: E402
-from _yamlsteps import step_mappings  # noqa: E402
+from _yamlsteps import (  # noqa: E402
+    complete_job_mapping,
+    step_mappings,
+    workflow_mapping,
+)
 import test_coverage_comment_workflow as commenter  # noqa: E402
 
 
@@ -102,6 +110,65 @@ def test_workflow_step_rejects_an_unresolved_shell(tmp):
     assert not calls, calls
 
 
+def test_workflow_step_composes_container_shell_and_environment(tmp):
+    """Workflow, job, then step containers define effective execution."""
+    calls = []
+    real_run = _workflowrun.subprocess.run
+
+    def capture_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    workflow = {
+        'defaults': {'run': {'shell': 'bash --noprofile {0}'}},
+        'env': {'WORKFLOW_ONLY': 'workflow', 'SHARED': 'workflow'},
+    }
+    job = {
+        'defaults': {'run': {'shell': 'bash --norc {0}'}},
+        'env': {
+            'JOB_ONLY': 'job',
+            'SHARED': 'job',
+            'BASH_ENV': '${{ github.workspace }}/hook.sh',
+        },
+    }
+    step = {'run': 'true', 'env': {'SHARED': '${{ github.token }}'}}
+    env = {**os.environ, 'SHARED': 'step'}
+    _workflowrun.subprocess.run = capture_run
+    try:
+        try:
+            _workflowrun.run_step(
+                tmp, {'run': 'true'}, os.environ,
+                workflow=workflow, job={})
+            _workflowrun.run_step(
+                tmp, step, env, workflow=workflow, job=job)
+            _workflowrun.run_step(
+                tmp, {**step, 'shell': 'bash --posix {0}'}, env,
+                workflow=workflow, job=job)
+        except TypeError as error:
+            raise AssertionError(
+                'workflow/job execution containers are not resolved'
+            ) from error
+    finally:
+        _workflowrun.subprocess.run = real_run
+
+    resolved = shutil.which('bash')
+    assert resolved is not None and os.path.isabs(resolved), resolved
+    script_path = str(Path(tmp) / 'workflow-step.sh')
+    assert [call[0] for call in calls] == [
+        [resolved, '--noprofile', script_path],
+        [resolved, '--norc', script_path],
+        [resolved, '--posix', script_path],
+    ], calls
+    workflow_env = calls[0][1]['env']
+    assert workflow_env['WORKFLOW_ONLY'] == 'workflow', workflow_env
+    assert workflow_env['SHARED'] == 'workflow', workflow_env
+    job_env = calls[1][1]['env']
+    assert job_env['WORKFLOW_ONLY'] == 'workflow', job_env
+    assert job_env['JOB_ONLY'] == 'job', job_env
+    assert job_env['SHARED'] == 'step', job_env
+    assert job_env['BASH_ENV'] == str(Path(tmp) / 'hook.sh'), job_env
+
+
 def _workflow():
     """Read the privileged workflow under test."""
     return (ROOT / '.github/workflows/coverage-comment.yml').read_text(
@@ -130,9 +197,34 @@ def _assert_allowlist_refuses(workflow):
     """Require one hostile topology mutation to fail the allowlist."""
     try:
         _assert_privileged_step_allowlist(workflow)
+        _assert_privileged_container_allowlist(workflow)
     except (AssertionError, YAMLReadError):
         return
-    raise AssertionError('unsafe privileged step mutation was accepted')
+    raise AssertionError('unsafe privileged container mutation was accepted')
+
+
+def _assert_exact_mapping(actual, expected, owner):
+    """Require exact keys and values while naming the differing keys."""
+    if actual == expected:
+        return
+    assert isinstance(actual, dict), (
+        f'unsafe privileged {owner} mapping: {actual!r}')
+    differing = sorted(
+        key for key in set(actual) | set(expected)
+        if key not in actual or key not in expected
+        or actual[key] != expected[key])
+    raise AssertionError(
+        f'unsafe privileged {owner} mapping: differing keys {differing!r}')
+
+
+def _assert_privileged_container_allowlist(workflow):
+    """Require complete decoded job and workflow container mappings."""
+    job = complete_job_mapping(workflow, 'comment')
+    _assert_exact_mapping(
+        job, EXPECTED_PRIVILEGED_JOB_MAPPING, 'job')
+    decoded_workflow = workflow_mapping(workflow)
+    _assert_exact_mapping(
+        decoded_workflow, EXPECTED_WORKFLOW_MAPPING, 'workflow')
 
 
 def _assert_privileged_permissions(workflow):
@@ -151,8 +243,9 @@ def _assert_permissions_refused(workflow):
     raise AssertionError('unsafe privileged permission mutation was accepted')
 
 
-def _run_hostile_post(tmp, label, body):
+def _run_hostile_post(tmp, label, body, workflow=None):
     """Run the real post shell with an executable-looking artifact body."""
+    workflow = _workflow() if workflow is None else workflow
     workdir = Path(tmp) / label
     (workdir / 'bin').mkdir(parents=True)
     commenter._write_executable(  # pylint: disable=protected-access
@@ -175,11 +268,14 @@ def _run_hostile_post(tmp, label, body):
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls_path),
     }
-    steps = step_mappings(_workflow(), 'comment')
+    steps = step_mappings(workflow, 'comment')
     post = next(
         step for step in steps
         if step.get('name') == 'Post or update the pull request comment')
-    result = _workflowrun.run_step(workdir, post, env)
+    decoded_workflow = workflow_mapping(workflow)
+    job = decoded_workflow['jobs']['comment']
+    result = _workflowrun.run_step(
+        workdir, post, env, workflow=decoded_workflow, job=job)
     state = json.loads(state_path.read_text(encoding='utf-8'))
     return result, state, calls_path, workdir
 
@@ -198,6 +294,48 @@ def test_hostile_artifact_bodies_remain_inert_text(tmp):
             label, state[0]['body'], body)
         writes = _workflowrun.recorded_writes(calls)
         assert len(writes) == 1, calls.read_text(encoding='utf-8')
+
+
+def test_hostile_post_resolves_job_shell_and_environment(tmp):
+    """The hostile runtime observes the job's inherited execution state."""
+    workflow = _workflow()
+    anchor = '    timeout-minutes: 10\n'
+    shell_field = (
+        '    defaults:\n'
+        '      run:\n'
+        "        shell: bash -c 'printf \"%s\" \"$GH_TOKEN\" > "
+        'artifact-side-effect; bash "$1"\' -- {0}\n')
+    shell_workflow = workflow.replace(
+        anchor, anchor + shell_field, 1)
+    assert shell_workflow != workflow, shell_workflow
+    try:
+        shell_result = _run_hostile_post(
+            tmp, 'job-shell', 'ordinary coverage body\n',
+            workflow=shell_workflow)
+    except TypeError as error:
+        raise AssertionError(
+            'hostile post harness does not accept decoded containers'
+        ) from error
+    result, state, calls, workdir = shell_result
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert (workdir / 'artifact-side-effect').read_text(
+        encoding='utf-8') == _SENTINEL
+    assert len(state) == 1, state
+    assert len(_workflowrun.recorded_writes(calls)) == 1
+
+    env_field = (
+        '    env:\n'
+        '      BASH_ENV: ${{ github.workspace }}/body.md\n')
+    env_workflow = workflow.replace(anchor, anchor + env_field, 1)
+    assert env_workflow != workflow, env_workflow
+    result, state, calls, workdir = _run_hostile_post(
+        tmp, 'job-env', _HOSTILE_BODIES['bash'],
+        workflow=env_workflow)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert (workdir / 'artifact-side-effect').read_text(
+        encoding='utf-8') == _SENTINEL
+    assert 'bash replaced body\n' in state[0]['body'], state
+    assert len(_workflowrun.recorded_writes(calls)) == 1
 
 
 def test_privileged_steps_are_an_exact_allowlist(tmp):
@@ -242,6 +380,58 @@ def test_privileged_steps_are_an_exact_allowlist(tmp):
     for mutated in mutations:
         assert mutated != workflow, 'real privileged mapping was not mutated'
         _assert_allowlist_refuses(mutated)
+
+
+def test_privileged_workflow_and_job_are_exact_allowlists(tmp):
+    """Every complete workflow and privileged-job key is contracted."""
+    del tmp
+    workflow = _workflow()
+    _assert_privileged_container_allowlist(workflow)
+    job_anchor = '    timeout-minutes: 10\n'
+    job_fields = (
+        ('permissions', (
+            '    permissions:\n'
+            '      contents: write\n'
+            '      pull-requests: write\n'
+            '      actions: read\n')),
+        ('defaults', (
+            '    defaults:\n'
+            '      run:\n'
+            "        shell: bash -c 'bash \"$1\"' -- {0}\n")),
+        ('env', (
+            '    env:\n'
+            '      BASH_ENV: ${{ github.workspace }}/body.md\n')),
+        ('container', '    container: attacker/image\n'),
+        ('services', '    services: {}\n'),
+        ('strategy', '    strategy: {}\n'),
+        ('outputs', '    outputs: {}\n'),
+        ('unknown', '    future-authority: enabled\n'),
+    )
+    mutations = [
+        (f'job {label}', workflow.replace(
+            job_anchor, job_anchor + field, 1))
+        for label, field in job_fields
+    ]
+    workflow_fields = (
+        ('env', 'env:\n  BASH_ENV: body.md\n'),
+        ('defaults', (
+            'defaults:\n'
+            '  run:\n'
+            '    shell: bash\n')),
+        ('unknown', 'future-authority: enabled\n'),
+    )
+    top_anchor = 'name: coverage comment\n'
+    mutations.extend(
+        (f'workflow {label}', workflow.replace(
+            top_anchor, top_anchor + field, 1))
+        for label, field in workflow_fields
+    )
+    for label, mutated in mutations:
+        assert mutated != workflow, f'{label} did not mutate the workflow'
+        try:
+            _assert_allowlist_refuses(mutated)
+        except AssertionError as error:
+            raise AssertionError(f'{label}: {error}') from error
 
 
 def test_privileged_permissions_are_exactly_allowlisted(tmp):
