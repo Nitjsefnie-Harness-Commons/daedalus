@@ -25,6 +25,12 @@ def _set_mtime(path, stamp):
     os.utime(path, (stamp, stamp))
 
 
+def _publish_legacy(path, content):
+    temporary = path.with_name(f'.{path.name}.tmp')
+    temporary.write_text(content, encoding='utf-8')
+    temporary.replace(path)
+
+
 def test_remove_expired_removes_an_expired_json(tmp):
     queue = _load_queue('command_queue_expired')
     path = Path(tmp) / 'queued.json'
@@ -52,7 +58,7 @@ def test_remove_expired_leaves_a_fresh_json(tmp):
 def test_remove_expired_leaves_a_malformed_legacy_file(tmp):
     queue = _load_queue('command_queue_malformed')
     path = Path(tmp) / 'legacy.json'
-    path.write_text('{not-json', encoding='utf-8')
+    _publish_legacy(path, '{not-json')
     now = time.time()
     _set_mtime(path, now - 91)
 
@@ -76,7 +82,7 @@ def test_remove_expired_removes_an_expired_tmp(tmp):
 def test_remove_expired_leaves_a_non_object_legacy_json(tmp):
     queue = _load_queue('command_queue_non_object_legacy')
     path = Path(tmp) / 'legacy.json'
-    path.write_text('["not a command"]', encoding='utf-8')
+    _publish_legacy(path, '["not a command"]')
     now = time.time()
     _set_mtime(path, now - 91)
 
@@ -421,8 +427,7 @@ def test_two_streams_covering_one_legacy_file_deliver_a_command_once(tmp):
             assert tab_response.status == 200, (
                 tab_response.status, ''.join(served))
             legacy = Path(docroot) / 'commands' / f'{TOK}.json'
-            legacy.write_text(
-                '{"id":"legacy-once","code":"1"}', encoding='utf-8')
+            _publish_legacy(legacy, '{"id":"legacy-once","code":"1"}')
             delivered = _read_streams_once(
                 (('extension', ext_response), ('dup', tab_response)))
             _assert_one_delivery(
@@ -473,9 +478,8 @@ def test_two_streams_covering_a_per_tab_legacy_file_deliver_once(tmp):
             assert tab_response.status == 200, (
                 tab_response.status, ''.join(served))
             legacy = Path(docroot) / 'commands' / f'{TOK}_dup.json'
-            legacy.write_text(
-                '{"id":"per-tab-legacy-once","code":"1"}',
-                encoding='utf-8')
+            _publish_legacy(
+                legacy, '{"id":"per-tab-legacy-once","code":"1"}')
             delivered = _read_streams_once(
                 (('extension', ext_response), ('dup', tab_response)))
             _assert_one_delivery(
@@ -521,9 +525,7 @@ def test_a_successful_legacy_delivery_releases_its_claim(tmp):
         legacy = Path(docroot) / 'commands' / f'{TOK}.json'
         try:
             assert response.status == 200, response.status
-            legacy.write_text(
-                '{"id":"legacy-first","code":"1"}',
-                encoding='utf-8')
+            _publish_legacy(legacy, '{"id":"legacy-first","code":"1"}')
             first = next_stream_data(response, timeout=8)
             assert first.get('id') == 'legacy-first', first
             deadline = time.time() + 5
@@ -532,9 +534,7 @@ def test_a_successful_legacy_delivery_releases_its_claim(tmp):
             assert not legacy.exists(), (
                 'the first legacy file was not consumed')
             first_delivery = _wait_for_delivery(trace, key)
-            legacy.write_text(
-                '{"id":"legacy-second","code":"2"}',
-                encoding='utf-8')
+            _publish_legacy(legacy, '{"id":"legacy-second","code":"2"}')
             second = next_stream_data(response, timeout=8)
             assert second.get('id') == 'legacy-second', second
             deadline = time.time() + 5
@@ -607,7 +607,7 @@ def test_legacy_write_failure_keeps_file_and_releases_claim(tmp):
     server = _load_server_for_drain(tmp, 'server_legacy_write_failure')
     server.CMD_DIR.mkdir(parents=True, exist_ok=True)
     command = server.CMD_DIR / 'legacy-write-fail.json'
-    command.write_text('{"id":"write-fail"}', encoding='utf-8')
+    _publish_legacy(command, '{"id":"write-fail"}')
     handler = object.__new__(server.Handler)
     handler._write_frame = _raise_broken_pipe
     key = f'legacy:{command.name}'
