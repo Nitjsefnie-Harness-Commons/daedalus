@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -157,6 +158,11 @@ def _harness_failure(background, inner_wait=1, commands=None, order=None,
     raise AssertionError('the stalled overlap harness unexpectedly succeeded')
 
 
+def _assert_step_trace(failure, labels):
+    expected = ''.join(f'[step] {label}\\n' for label in labels)
+    assert expected in failure, failure
+
+
 def _client_env():
     env = dict(os.environ)
     for key in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID'):
@@ -192,6 +198,10 @@ def test_a_stalled_config_load_names_the_wait(tmp):
     assert ('timed out waiting for the worker to load its config'
             in failure), failure
     assert 'outer backstop' not in failure, failure
+    _assert_step_trace(failure, [
+        'the worker script to initialize',
+        'the worker to load its config',
+    ])
 
 
 def test_posted_results_with_stalled_dispatches_name_the_settle_wait(tmp):
@@ -200,6 +210,14 @@ def test_posted_results_with_stalled_dispatches_name_the_settle_wait(tmp):
     assert ('timed out waiting for both dispatchCommand calls to settle'
             in failure), failure
     assert 'outer backstop' not in failure, failure
+    _assert_step_trace(failure, [
+        'the worker script to initialize',
+        'the worker to load its config',
+        'the dispatchCommand calls to start',
+        'both cookie handlers to start',
+        'result POST for owner-a',
+        'both dispatchCommand calls to settle',
+    ])
 
 
 def test_a_synchronous_stall_reports_the_outer_backstop_and_last_step(tmp):
@@ -207,6 +225,10 @@ def test_a_synchronous_stall_reports_the_outer_backstop_and_last_step(tmp):
     failure = _harness_failure(_worker(tmp, _SYNCHRONOUS_STALL_WORKER))
     assert 'outer backstop' in failure, failure
     assert 'last step: the worker to load its config' in failure, failure
+    _assert_step_trace(failure, [
+        'the worker script to initialize',
+        'the worker to load its config',
+    ])
 
 
 def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
@@ -215,6 +237,11 @@ def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
         _worker(tmp, _SYNCHRONOUS_DISPATCH_STALL_WORKER))
     assert 'outer backstop' in failure, failure
     assert 'last step: the dispatchCommand calls to start' in failure, failure
+    _assert_step_trace(failure, [
+        'the worker script to initialize',
+        'the worker to load its config',
+        'the dispatchCommand calls to start',
+    ])
 
 
 def test_completed_work_that_does_not_exit_reports_the_finished_step(tmp):
@@ -222,6 +249,15 @@ def test_completed_work_that_does_not_exit_reports_the_finished_step(tmp):
     failure = _harness_failure(_worker(tmp, _FINISHED_BUT_RUNNING_WORKER))
     assert 'last step: the overlap harness finished' in failure, failure
     assert '"owner":"owner-a"' in failure, failure
+    _assert_step_trace(failure, [
+        'the worker script to initialize',
+        'the worker to load its config',
+        'the dispatchCommand calls to start',
+        'both cookie handlers to start',
+        'result POST for owner-a',
+        'both dispatchCommand calls to settle',
+        'the overlap harness finished',
+    ])
 
 
 def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
@@ -238,6 +274,40 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure
+    _assert_step_trace(failure, [
+        'the worker script to initialize',
+        'the worker to load its config',
+        'the dispatchCommand calls to start',
+        'both cookie handlers to start',
+        'result POST for owner-a',
+        'the first result to be consumed',
+    ])
+
+
+def test_real_overlap_bridge_defaults_to_the_durable_token_path(tmp):
+    """The relocated driver preserves the existing durable token carrier."""
+    real_bridge = _overlap._util.bridge
+    recorded = None
+
+    @contextlib.contextmanager
+    def recording_bridge(bridge_tmp, env=None, output=None):
+        nonlocal recorded
+        recorded = env
+        with real_bridge(bridge_tmp, env=env, output=output) as running:
+            yield running
+
+    token = 'overlap-client-token'
+    with mock.patch.object(_overlap._util, 'bridge', recording_bridge):
+        try:
+            _overlap.run_same_id_client_overlap(
+                tmp, ['missing-owner'], _cookie_client_argv, _client_env(),
+                token, _util.ROOT / 'extension' / 'background.js')
+        except AssertionError as failure:
+            message = str(failure)
+            assert 'missing cookie completion for missing-owner' in message
+        else:
+            raise AssertionError('the injected harness failure was accepted')
+    assert recorded == {'TOKEN': '', 'DAEDALUS_TOKEN': token}, recorded
 
 
 def test_real_overlap_success_path_reports_a_lingering_client(tmp):
