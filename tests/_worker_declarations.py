@@ -14,6 +14,124 @@ _TOP_LEVEL_DECLARATION = re.compile(
 _CONTROL_HEADER = re.compile(
     r'(?<![\w$.])(?:if|for|while|with)\s*\(')
 _STATEMENT_CONTINUATION = frozenset('([{=,:.?+-*/%&|^!~<>')
+_REGEX_PREFIX_WORDS = frozenset({
+    'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new',
+    'of', 'return', 'throw', 'typeof', 'void', 'yield',
+})
+_CONTROL_WORDS = frozenset({'catch', 'for', 'if', 'switch', 'while', 'with'})
+
+
+def _quoted_end(source, start):
+    quote = source[start]
+    index = start + 1
+    while index < len(source):
+        if source[index] == '\\':
+            index += 2
+        elif source[index] == quote:
+            return index + 1
+        else:
+            index += 1
+    return len(source)
+
+
+def _regex_end(source, start):
+    index = start + 1
+    in_class = False
+    while index < len(source):
+        char = source[index]
+        if char in '\r\n':
+            return None
+        if char == '\\':
+            index += 2
+            continue
+        if char == '[':
+            in_class = True
+        elif char == ']':
+            in_class = False
+        elif char == '/' and not in_class:
+            index += 1
+            while index < len(source) and source[index].isalpha():
+                index += 1
+            return index
+        index += 1
+    return None
+
+
+def _declaration_mask(source):
+    """Blank regex literals for this declaration reader only."""
+    mask = list(js_mask(source))
+    index = 0
+    expression_start = True
+    pending_control = False
+    control_parentheses = []
+    while index < len(source):
+        char = source[index]
+        two = source[index:index + 2]
+        if char.isspace():
+            index += 1
+            continue
+        if two == '//':
+            newline = source.find('\n', index + 2)
+            index = len(source) if newline < 0 else newline
+            continue
+        if two == '/*':
+            closing = source.find('*/', index + 2)
+            index = len(source) if closing < 0 else closing + 2
+            continue
+        if char in '\'"`':
+            index = _quoted_end(source, index)
+            expression_start = False
+            pending_control = False
+            continue
+        identifier = re.match(_JS_IDENTIFIER, source[index:])
+        if identifier:
+            word = identifier.group()
+            index += len(word)
+            pending_control = word in _CONTROL_WORDS
+            expression_start = word in _REGEX_PREFIX_WORDS
+            continue
+        if char.isdigit():
+            number = re.match(r'[\w.]+', source[index:])
+            index += len(number.group())
+            expression_start = False
+            pending_control = False
+            continue
+        if char == '(':
+            control_parentheses.append(pending_control)
+            pending_control = False
+            expression_start = True
+            index += 1
+            continue
+        if char == ')':
+            expression_start = (
+                control_parentheses.pop() if control_parentheses else False)
+            pending_control = False
+            index += 1
+            continue
+        if char == '/' and expression_start:
+            end = _regex_end(source, index)
+            if end is not None:
+                for offset in range(index, end):
+                    if mask[offset] != '\n':
+                        mask[offset] = ' '
+                index = end
+                expression_start = False
+                pending_control = False
+                continue
+        if char == '/':
+            index += 2 if source[index:index + 2] == '/=' else 1
+            expression_start = True
+            pending_control = False
+            continue
+        if char in ')]':
+            expression_start = False
+        elif char == '}':
+            expression_start = True
+        elif char in '([{,;:?=.+-*%&|^!~<>':
+            expression_start = True
+        pending_control = False
+        index += 1
+    return ''.join(mask)
 
 
 def _top_level_positions(mask):
@@ -139,7 +257,7 @@ def _binding_declarations(mask, declaration_start, binding_kind):
 
 def top_level_declarations(source):
     """Return declarations that bind in a classic script's global scope."""
-    mask = js_mask(source)
+    mask = _declaration_mask(source)
     top_level = _top_level_positions(mask)
     local_var_ranges = js_local_var_ranges(mask)
     declarations = []
@@ -171,7 +289,7 @@ def top_level_declarations(source):
 
 def top_level_reassigns(source, name, after):
     """Whether a later worker-global assignment replaces `name`."""
-    mask = js_mask(source)
+    mask = _declaration_mask(source)
     top_level = _top_level_positions(mask)
     assignment = re.compile(
         rf'(?<![\w$.]){re.escape(name)}\s*=(?!=|>)')
