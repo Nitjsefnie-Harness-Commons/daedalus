@@ -98,7 +98,7 @@ raise SystemExit({returncode})
 """
 
 
-def _runner_tree(tmp, suites, under='.'):
+def _runner_tree(tmp, suites, under='.', runner_encoding=None):
     """A copy of run_tests.py over fabricated suites, run where it stands.
 
     `under` names a PARENT directory, so one test can build two trees and
@@ -116,9 +116,12 @@ def _runner_tree(tmp, suites, under='.'):
         (root / 'tests' / name).write_text(source, encoding='utf-8')
     env = dict(os.environ)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
+    if runner_encoding:
+        env['PYTHONIOENCODING'] = runner_encoding
     return subprocess.run(
         [sys.executable, 'run_tests.py'], cwd=str(root), env=env,
-        capture_output=True, text=True, timeout=300)
+        capture_output=True, text=True,
+        encoding=runner_encoding or 'utf-8', timeout=300)
 
 
 def test_a_suite_that_ran_no_coverage_is_not_an_overall_pass(tmp):
@@ -206,6 +209,30 @@ def test_undecodable_output_does_not_hide_a_passing_verdict(tmp):
     assert 'Traceback' not in result.stderr, result.stderr
     assert '=== test_invalid_pass.py ===' in result.stdout, result.stdout
     assert '\ufffd' in result.stdout, result.stdout
+    assert 'OVERALL: PASS' in result.stdout, result.stdout
+    assert result.returncode == 0, (result.returncode, result.stdout)
+
+
+def test_legacy_stdout_does_not_hide_a_failed_verdict(tmp):
+    """A legacy runner stream must degrade invalid child output."""
+    result = _runner_tree(tmp, {
+        'test_invalid_failure.py': _invalid_output_suite(0, 1, 1),
+    }, runner_encoding='cp1252')
+    assert 'Traceback' not in result.stderr, result.stderr
+    assert '=== test_invalid_failure.py ===' in result.stdout, result.stdout
+    assert '\n?\n' in result.stdout, result.stdout
+    assert 'FAILED: test_invalid_failure.py' in result.stdout, result.stdout
+    assert result.returncode != 0, (result.returncode, result.stdout)
+
+
+def test_legacy_stdout_does_not_hide_a_passing_verdict(tmp):
+    """A legacy runner stream must still report an aggregate pass."""
+    result = _runner_tree(tmp, {
+        'test_invalid_pass.py': _invalid_output_suite(1, 0, 0),
+    }, runner_encoding='cp1252')
+    assert 'Traceback' not in result.stderr, result.stderr
+    assert '=== test_invalid_pass.py ===' in result.stdout, result.stdout
+    assert '\n?\n' in result.stdout, result.stdout
     assert 'OVERALL: PASS' in result.stdout, result.stdout
     assert result.returncode == 0, (result.returncode, result.stdout)
 
