@@ -10,21 +10,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary import (observe_extension_worker_paths,  # noqa: E402
                        run_extension_capability_routes)
-from _jsread import (js_bracket_end, js_function_body_ranges,  # noqa: E402
-                     js_mask, js_split_top_level,
-                     js_var_declaration_end)
+from _jsread import js_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _worker_declarations import (  # noqa: E402
+    top_level_declarations as _top_level_declarations,
+    top_level_reassigns as _top_level_reassigns,
+)
 from _worker_sources import worker_source_paths  # noqa: E402
 
 _JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
-_TOP_LEVEL_DECLARATION = re.compile(
-    rf'(?P<function>(?:async\s+)?function\s+'
-    rf'(?P<function_name>{_JS_IDENTIFIER})\s*\()'
-    rf'|(?P<binding>(?:const|let|var)\b)'
-    rf'|(?P<class>class\s+(?P<class_name>{_JS_IDENTIFIER})\b)')
-_CONTROL_HEADER = re.compile(
-    r'(?<![\w$.])(?:if|for|while|with)\s*\(')
-_STATEMENT_CONTINUATION = frozenset('([{=,:.?+-*/%&|^!~<>')
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
     'Promise', 'Set', 'String', 'TextDecoder', 'URL',
@@ -55,147 +49,6 @@ def _observed_worker_sources():
         (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
         for path in paths
     ]
-
-
-def _top_level_positions(mask):
-    top_level = []
-    braces = 0
-    brackets = 0
-    parentheses = 0
-    for char in mask:
-        top_level.append(braces == brackets == parentheses == 0)
-        if char == '{':
-            braces += 1
-        elif char == '}':
-            braces -= 1
-        elif char == '[':
-            brackets += 1
-        elif char == ']':
-            brackets -= 1
-        elif char == '(':
-            parentheses += 1
-        elif char == ')':
-            parentheses -= 1
-    return top_level
-
-
-def _starts_statement(mask, start):
-    previous = start - 1
-    while previous >= 0 and mask[previous].isspace():
-        previous -= 1
-    if previous < 0 or mask[previous] in ';}':
-        return True
-    if mask[previous] == ')':
-        for control in _CONTROL_HEADER.finditer(mask, 0, previous + 1):
-            opening = mask.find('(', control.start(), control.end())
-            if js_bracket_end(mask, opening) == previous + 1:
-                return False
-    line_start = mask.rfind('\n', 0, start) + 1
-    if mask[line_start:start].strip():
-        return False
-    return mask[previous] not in _STATEMENT_CONTINUATION
-
-
-def _first_top_level(mask, start, end, wanted):
-    depth = 0
-    for index in range(start, end):
-        char = mask[index]
-        if char in '([{':
-            depth += 1
-        elif char in ')]}':
-            depth -= 1
-        elif depth == 0 and char in wanted:
-            return index
-    return None
-
-
-def _binding_pattern_names(mask, start, end):
-    while start < end and mask[start].isspace():
-        start += 1
-    while end > start and mask[end - 1].isspace():
-        end -= 1
-    if mask.startswith('...', start):
-        return _binding_pattern_names(mask, start + 3, end)
-    default = _first_top_level(mask, start, end, '=')
-    if default is not None:
-        end = default
-        while end > start and mask[end - 1].isspace():
-            end -= 1
-    identifier = re.fullmatch(_JS_IDENTIFIER, mask[start:end])
-    if identifier:
-        return [(identifier.group(), start)]
-    if start >= end or mask[start] not in '[{':
-        return []
-
-    closing = js_bracket_end(mask, start) - 1
-    names = []
-    for item_start, item_end in js_split_top_level(
-            mask, mask, start + 1, closing):
-        if mask[start] == '{':
-            colon = _first_top_level(
-                mask, item_start, item_end, ':')
-            if colon is not None:
-                item_start = colon + 1
-        names.extend(_binding_pattern_names(mask, item_start, item_end))
-    return names
-
-
-def _binding_declarations(mask, declaration_start, binding_kind):
-    statement_end = js_var_declaration_end(
-        mask, declaration_start) if binding_kind == 'var' else None
-    if statement_end is None:
-        statement_end = _first_top_level(
-            mask, declaration_start, len(mask), ';')
-    if statement_end is None:
-        statement_end = len(mask)
-    declarations = []
-    for start, end in js_split_top_level(
-            mask, mask, declaration_start, statement_end):
-        for name, name_start in _binding_pattern_names(mask, start, end):
-            declarations.append((name, 'binding', name_start))
-    return declarations
-
-
-def _top_level_declarations(source):
-    mask = js_mask(source)
-    top_level = _top_level_positions(mask)
-    function_bodies = js_function_body_ranges(mask)
-    declarations = []
-    for match in _TOP_LEVEL_DECLARATION.finditer(mask):
-        if match.lastgroup == 'binding':
-            binding_kind = match.group('binding')
-            inside_function = any(
-                start < match.start() < end
-                for start, end in function_bodies)
-            if binding_kind == 'var' and inside_function:
-                continue
-            if (binding_kind != 'var'
-                    and (not top_level[match.start()]
-                         or not _starts_statement(mask, match.start()))):
-                continue
-            declarations.extend(
-                _binding_declarations(
-                    mask, match.end(), binding_kind))
-            continue
-        if not top_level[match.start()]:
-            continue
-        if not _starts_statement(mask, match.start()):
-            continue
-        kind = match.lastgroup.removesuffix('_name')
-        name = match.group(f'{kind}_name')
-        declarations.append((name, kind, match.start()))
-    return declarations
-
-
-def _top_level_reassigns(source, name, after):
-    mask = js_mask(source)
-    top_level = _top_level_positions(mask)
-    assignment = re.compile(
-        rf'(?<![\w$.]){re.escape(name)}\s*=(?!=|>)')
-    return any(
-        match.start() > after and top_level[match.start()]
-        for match in assignment.finditer(mask)
-    )
 
 
 def _directive_entries(source, directive):
@@ -549,71 +402,6 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
             unconsumed[relative] = sorted(missing)
     assert not unconsumed, (
         f'classic worker sources export unconsumed names: {unconsumed}')
-
-
-def test_top_level_declarations_enumerate_every_pattern_binding(tmp):
-    """Every identifier bound by each declarator enters the inventory."""
-    del tmp
-    source = """
-const {
-  property: alias,
-  shorthand,
-  nested: [first, { deep = fallback }, ...tail],
-  [computed]: computedAlias = defaultValue,
-  ...rest
-} = input, after = 2;
-let one = 1, [two, , ...three] = list;
-var four;
-for (var forBinding of iterable) {
-  if (forBinding) break;
-}
-if (condition) {
-  var blockBinding = value;
-}
-"""
-    declarations = [
-        (name, kind)
-        for name, kind, _start in _top_level_declarations(source)
-    ]
-    assert declarations == [
-        ('alias', 'binding'),
-        ('shorthand', 'binding'),
-        ('first', 'binding'),
-        ('deep', 'binding'),
-        ('tail', 'binding'),
-        ('computedAlias', 'binding'),
-        ('rest', 'binding'),
-        ('after', 'binding'),
-        ('one', 'binding'),
-        ('two', 'binding'),
-        ('three', 'binding'),
-        ('four', 'binding'),
-        ('forBinding', 'binding'),
-        ('blockBinding', 'binding'),
-    ]
-
-
-def test_top_level_declarations_ignore_keys_and_nested_declarations(tmp):
-    """Property text and declarations in a container are not collisions."""
-    del tmp
-    source = """
-const propertyHolder = { propertyKey: 1 };
-function uniqueContainer() {
-  const nestedDeclaration = { propertyKey: 2 };
-  if (nestedDeclaration) {
-    var nestedFunctionVar = nestedDeclaration;
-  }
-  return nestedDeclaration;
-}
-"""
-    declarations = [
-        (name, kind)
-        for name, kind, _start in _top_level_declarations(source)
-    ]
-    assert declarations == [
-        ('propertyHolder', 'binding'),
-        ('uniqueContainer', 'function'),
-    ]
 
 
 def test_classic_worker_top_level_declarations_are_unique(tmp):
