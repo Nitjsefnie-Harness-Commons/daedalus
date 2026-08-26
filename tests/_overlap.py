@@ -16,7 +16,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
 
 
 _BACKGROUND_OVERLAP_HARNESS = r"""
@@ -131,7 +130,7 @@ const context = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
-""" + import_scripts_stub('context') + r"""
+__IMPORT_SCRIPTS_STUB__
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -245,13 +244,17 @@ def run_background_overlap(background, commands, order, result_base='',
                            token='overlap-token', wait_between=False,
                            inner_wait=_OVERLAP_INNER_WAIT_S):
     """Run same-id cookie commands through the shipped background worker."""
+    from _worker_sources import import_scripts_stub
+
     node = shutil.which('node')
     if not node:
         raise AssertionError(
             'node is required to execute the extension worker')
     timeout = overlap_child_timeout(order, wait_between, inner_wait)
+    harness = _BACKGROUND_OVERLAP_HARNESS.replace(
+        '__IMPORT_SCRIPTS_STUB__', import_scripts_stub('context'))
     process = subprocess.Popen(
-        [node, '-e', _BACKGROUND_OVERLAP_HARNESS, str(background),
+        [node, '-e', harness, str(background),
          json.dumps(commands), json.dumps(order), result_base, token,
          '1' if wait_between else '0', str(round(inner_wait * 1000))],
         cwd=_util.ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

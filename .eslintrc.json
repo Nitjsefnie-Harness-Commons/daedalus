@@ -57,6 +57,23 @@
       "env": {
         "serviceworker": true
       }
+    },
+    {
+      "files": [
+        "extension/worker/*.js"
+      ],
+      "parserOptions": {
+        "sourceType": "script",
+        "ecmaFeatures": {
+          "globalReturn": false
+        }
+      },
+      "env": {
+        "serviceworker": true
+      },
+      "globals": {
+        "chrome": "readonly"
+      }
     }
   ],
   "ignorePatterns": [

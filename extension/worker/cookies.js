@@ -1,3 +1,7 @@
+/* exported handleCookies, handleSetCookie */
+/* exported handleRemoveCookie, handleClearCookies */
+/* global postResult */
+
 async function handleCookies(cmd) {
   try {
     const details = {};

@@ -1,5 +1,7 @@
 // Daedalus Extension — background service worker
 // @version 0.22.0.1
+/* global handleCookies, handleSetCookie */
+/* global handleRemoveCookie, handleClearCookies */
 
 const VERSION = '0.22.0.1';
 // No default server. A bridge URL is deployment-specific, and a build that
