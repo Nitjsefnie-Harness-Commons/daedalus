@@ -11,8 +11,8 @@ must cancel those handles itself. The shipped asynchronous harnesses instead
 pass timeout failures to `leave`, which flushes the error and exits the child.
 
 Bound-count validation blanks comments but preserves string literals. Harness
-sources must therefore avoid the text `await bounded(` inside a string, where
-it would be counted as code.
+sources must therefore avoid string contents with `await`, then whitespace,
+then `bounded`, optional whitespace, and `(`; that text is counted as code.
 """
 import re
 import shutil
