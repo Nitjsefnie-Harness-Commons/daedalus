@@ -2,6 +2,8 @@
 covers stored action destinations and parser defaults; GUARANTEED adds required
 and non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
+Direct plain and annotated namespace stores are neither reads nor escapes;
+stores never satisfy reads.
 Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
 enumerated expression node types | every other ``ast.expr`` node type is
 ``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
@@ -19,9 +21,8 @@ Current named known-gap control families are non-exact descriptors, partial
 callables, traceback frames, other containers and iterators, comprehension
 results, instance attributes, attribute getters, runtime-built names,
 mapping-proxy reads, call-produced indices, and external frame acquisition.
-Each named family has a known-gap control, and every known-gap control belongs
-to exactly one named family. The executable consistency check is
-bidirectional: contract prose and control tables cover each other."""
+Each named family maps once; contract prose and control tables cover each
+other."""
 import argparse
 import ast
 import builtins
@@ -36,9 +37,8 @@ DECIDED_EXPRESSION_TYPES = frozenset((
 
 
 def _expression_node_types():
-    return frozenset(value for value in vars(ast).values()
-                     if isinstance(value, type) and value is not ast.expr
-                     and issubclass(value, ast.expr))
+    return frozenset(value for value in vars(ast).values() if isinstance(
+        value, type) and value is not ast.expr and issubclass(value, ast.expr))
 
 
 def expression_type_disposition(node_type):
@@ -391,8 +391,8 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
                              comprehension_shadows):
     parent = name._parent
     if isinstance(parent, ast.Attribute) and parent.value is name:
-        if (isinstance(parent.ctx, ast.Store)
-                and isinstance(parent._parent, ast.Assign)):
+        if isinstance(parent.ctx, ast.Store) and isinstance(
+                parent._parent, (ast.Assign, ast.AnnAssign)):
             return parent.attr, None, False
         if not isinstance(parent.ctx, ast.Load):
             return None
