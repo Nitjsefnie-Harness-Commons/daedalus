@@ -375,6 +375,63 @@ def test_harness_metadata_refuses_an_exported_regex(tmp):
         raise AssertionError('exported regex harness was accepted')
 
 
+def test_harness_metadata_refuses_regex_after_statement_bodies(tmp):
+    """Statement bodies keep the regex lexical goal after their close."""
+    del tmp
+    sources = (
+        'function f() {} /await bounded(foo)/;',
+        'class C {} /await bounded(foo)/;',
+        'if (ok) {} else {} /await bounded(foo)/;',
+        'try {} finally {} /await bounded(foo)/;',
+    )
+    for source in sources:
+        try:
+            _dashnode.DashboardNodeHarness(
+                source, bounded_steps=0, module=True)
+        except ValueError as failure:
+            expected = (
+                'dashboard harness bound count cannot inspect regex literal')
+            if str(failure) != expected:
+                raise AssertionError(
+                    f'statement-body regex was miscounted: {failure}')
+        else:
+            raise AssertionError(
+                f'statement-body regex harness was accepted: {source}')
+
+
+def test_harness_metadata_refuses_regex_expression_operands(tmp):
+    """Spread and `extends` introduce expressions that may be regexes."""
+    del tmp
+    sources = (
+        'const values = [... /await bounded(foo)/];',
+        'class C extends /await bounded(foo)/ {}',
+    )
+    for source in sources:
+        try:
+            _dashnode.DashboardNodeHarness(
+                source, bounded_steps=0, module=True)
+        except ValueError as failure:
+            expected = (
+                'dashboard harness bound count cannot inspect regex literal')
+            if str(failure) != expected:
+                raise AssertionError(
+                    f'expression regex was miscounted: {failure}')
+        else:
+            raise AssertionError(
+                f'expression-operand regex harness was accepted: {source}')
+
+
+def test_harness_metadata_accepts_private_keyword_method_division(tmp):
+    """A private keyword-named method cannot create control syntax."""
+    del tmp
+    source = (
+        'class C { #if(value) { return value; } '
+        'half() { return this.#if(4) / 2; } }')
+    harness = _dashnode.DashboardNodeHarness(
+        source, bounded_steps=0, module=True)
+    assert harness.source == source
+
+
 def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
     """Supported source shapes in all shipped harnesses remain valid."""
     del tmp
