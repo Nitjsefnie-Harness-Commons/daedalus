@@ -20,6 +20,7 @@ content is preserved and must not match the whitespace-tolerant bound pattern.
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 
 from _jsread import blank_js_comments
@@ -178,11 +179,13 @@ def run_dashboard_node(harness, *arguments,
     except subprocess.TimeoutExpired as failure:
         process.kill()
         drain_timed_out = False
+        drain_started = time.monotonic()
         try:
             stdout, stderr = process.communicate(
                 timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
         except subprocess.TimeoutExpired as drain_failure:
             drain_timed_out = True
+            drain_seconds = time.monotonic() - drain_started
             stdout = _latest_output(drain_failure.stdout, failure.stdout)
             stderr = _latest_output(drain_failure.stderr, failure.stderr)
             if process.stdout is not None:
@@ -195,11 +198,14 @@ def run_dashboard_node(harness, *arguments,
                 # Preserve the recorded drain failure instead of replacing
                 # it with another exception from this diagnostic helper.
                 pass
+        else:
+            drain_seconds = time.monotonic() - drain_started
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
         last_phase = phases[-1] if phases else 'none recorded'
         raise AssertionError(
             f'dashboard harness outer backstop timed out after {timeout}s; '
             f'drain timed out: {"yes" if drain_timed_out else "no"}; '
+            f'drain took {drain_seconds:.3f}s; '
             f'last phase: {last_phase}; stdout: {stdout!r}; '
             f'stderr: {stderr!r}'
         ) from failure
