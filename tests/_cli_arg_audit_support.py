@@ -21,7 +21,7 @@ bool values count as integer indices and slice bounds use that definition.
 Outside families are non-exact descriptors, partial callables, traceback
 frames, other containers and iterators, comprehension results, instance
 attributes, attribute getters, runtime-built names, mapping-proxy reads,
-binary and call-produced indices, and external frame acquisition. Each named
+call-produced indices, and external frame acquisition. Each named
 family has a known-gap control, and every known-gap control belongs to exactly
 one named family.
 """
@@ -41,6 +41,7 @@ resolve_frame_value = resolver.resolve_frame_value
 is_frame_route = resolver.is_frame_route
 reflective_builtin_call = resolver.reflective_builtin_call
 permitted_namespace_read = resolver.permitted_namespace_read
+is_outside_expression = resolver.is_outside_expression
 
 # Keep do_tabs's indirect args.json read explicit beside the resolved reads.
 KNOWN_INDIRECT_ARG_READS = (('tabs', 'json', 'do_tabs'),)
@@ -345,6 +346,21 @@ COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
     'COMPOSITE_ROUTES[:True][-1]',
     'COMPOSITE_ROUTES[:~0][-1]',
     'COMPOSITE_ROUTES[not True:][-1]',)
+OUTSIDE_EXPRESSION_FRAME_ROUTE_CASES = (
+    ('comparison index',
+     'COMPARISON_ROUTES = (None, sys._getframe)',
+     "_ = COMPARISON_ROUTES[0 < 1]()"
+     ".f_locals['args'].undeclared_probe",
+     'COMPARISON_ROUTES[0 < 1]()'),
+    ('tuple-literal key',
+     "TUPLE_ROUTES = {(0, 1): sys._getframe}",
+     "_ = TUPLE_ROUTES[(0, 1)]()"
+     ".f_locals['args'].undeclared_probe",
+     'TUPLE_ROUTES[0, 1]()'),
+    ('binary index',
+     'FRAME_ROUTES = (None, None, sys._getframe)',
+     "_ = FRAME_ROUTES[1 + 1]().f_locals['args'].undeclared_probe",
+     'FRAME_ROUTES[1 + 1]()'),)
 RESOLVER_ONLY_FRAME_ROUTE_CASES = (
     ('exact classmethod route (resolver only)',
      'class FrameRoutes:\n'
@@ -429,9 +445,6 @@ KNOWN_GAP_FRAME_ROUTE_CASES = (
     ('runtime-built name', '',
      "_ = getattr(sys, '_get' + 'frame')()"
      ".f_locals['args'].undeclared_probe"),
-    ('constant binary index',
-     'FRAME_ROUTES = (None, None, sys._getframe)',
-     "_ = FRAME_ROUTES[1 + 1]().f_locals['args'].undeclared_probe"),
     ('call-produced index',
      'FRAME_ROUTES = (None, sys._getframe)',
      "_ = FRAME_ROUTES[len((None,))]()"
@@ -451,8 +464,7 @@ KNOWN_GAP_FAMILIES = (
     ('mapping-proxy reads',
      ('class vars mapping-proxy get',
       'class vars mapping-proxy subscript')),
-    ('binary and call-produced indices',
-     ('constant binary index', 'call-produced index')),
+    ('call-produced indices', ('call-produced index',)),
     ('external frame acquisition',
      ('frame acquisition in another function',
       'frame acquisition in nested helper')),)

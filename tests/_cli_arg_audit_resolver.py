@@ -1,4 +1,12 @@
-"""Static argparse, builtin-identity, and constant-resolution helpers."""
+"""Static argparse, builtin-identity, and constant-resolution helpers.
+
+Expression resolution has a total two-way partition. The explicit
+``DECIDED_EXPRESSION_TYPES`` registry names the syntax this resolver handles;
+every other ``ast.expr`` type is OUTSIDE by definition. Comparisons and tuple
+literals stay OUTSIDE because reproducing their Python semantics would widen
+the trusted evaluator. An OUTSIDE key that could select a canonical frame
+route therefore fails closed.
+"""
 import argparse
 import ast
 import builtins
@@ -8,6 +16,44 @@ from pathlib import Path
 
 
 _FRAME_ROUTE_OBJECTS = (sys._getframe, inspect.currentframe)
+_OUTSIDE_EXPRESSION = object()
+
+EXPRESSION_DECIDED = 'DECIDED'
+EXPRESSION_OUTSIDE = 'OUTSIDE'
+DECIDED_EXPRESSION_TYPES = frozenset({
+    ast.Attribute,
+    ast.Call,
+    ast.Constant,
+    ast.Name,
+    ast.Slice,
+    ast.Subscript,
+    ast.UnaryOp,
+})
+
+
+def _expression_node_types():
+    """Return the expression-type universe exposed by this interpreter."""
+    return frozenset({
+        value for value in vars(ast).values()
+        if isinstance(value, type)
+        and value is not ast.expr
+        and issubclass(value, ast.expr)})
+
+
+def expression_type_disposition(node_type):
+    """Return DECIDED or OUTSIDE for one expression node type."""
+    if (not isinstance(node_type, type)
+            or node_type is ast.expr
+            or not issubclass(node_type, ast.expr)):
+        raise TypeError('expected a concrete ast.expr node type')
+    if node_type in DECIDED_EXPRESSION_TYPES:
+        return EXPRESSION_DECIDED
+    return EXPRESSION_OUTSIDE
+
+
+def is_outside_expression(value):
+    """Return whether resolution refused an OUTSIDE expression."""
+    return value is _OUTSIDE_EXPRESSION
 
 
 def namespace_dests(parser):
@@ -272,6 +318,10 @@ def _constant_value(node, unresolved):
     and ``Not`` converts any resolved literal to ``bool``. Operators recurse;
     unsupported operands and nodes remain unresolved.
     """
+    if (isinstance(node, ast.expr)
+            and expression_type_disposition(type(node))
+            == EXPRESSION_OUTSIDE):
+        return _OUTSIDE_EXPRESSION
     if isinstance(node, ast.Constant):
         return node.value
     if isinstance(node, ast.Slice):
@@ -279,6 +329,8 @@ def _constant_value(node, unresolved):
         for bound in (node.lower, node.upper, node.step):
             value = None if bound is None else _constant_value(
                 bound, unresolved)
+            if is_outside_expression(value):
+                return value
             if (value is unresolved
                     or (value is not None
                         and not _is_integer_index(value))):
@@ -287,8 +339,8 @@ def _constant_value(node, unresolved):
         return slice(*bounds)
     if isinstance(node, ast.UnaryOp):
         value = _constant_value(node.operand, unresolved)
-        if value is unresolved:
-            return unresolved
+        if value is unresolved or is_outside_expression(value):
+            return value
         if isinstance(node.op, ast.Not):
             return not value
         if not _is_integer_index(value):
@@ -337,6 +389,17 @@ def _static_subscript(base, key, unresolved):
     return unresolved
 
 
+def _contains_frame_route(container):
+    """Return whether one exact built-in container holds a frame route."""
+    if type(container) in (list, tuple):
+        values = container
+    elif type(container) is dict:
+        values = container.values()
+    else:
+        return False
+    return any(is_frame_route(value) for value in values)
+
+
 def _static_get(node, function, handler_globals, imports, unresolved,
                 scope_binds, string_resolver):
     if (not isinstance(node, ast.Call)
@@ -346,11 +409,15 @@ def _static_get(node, function, handler_globals, imports, unresolved,
             or node.keywords):
         return unresolved
     key = _constant_value(node.args[0], unresolved)
-    if key is unresolved:
-        return unresolved
     base = resolve_frame_value(
         node.func.value, function, handler_globals, imports, unresolved,
         scope_binds, string_resolver)
+    if is_outside_expression(key):
+        if _contains_frame_route(base):
+            return _OUTSIDE_EXPRESSION
+        return unresolved
+    if key is unresolved:
+        return unresolved
     if type(base) is not dict:
         return unresolved
     if key in base:
@@ -410,6 +477,13 @@ def resolve_frame_value(node, function, handler_globals, imports, unresolved,
         return _static_attribute(base, node.attr, unresolved)
     if isinstance(node, ast.Subscript):
         key = _constant_value(node.slice, unresolved)
+        if is_outside_expression(key):
+            base = resolve_frame_value(
+                node.value, function, handler_globals, imports, unresolved,
+                scope_binds, string_resolver)
+            if _contains_frame_route(base):
+                return _OUTSIDE_EXPRESSION
+            return unresolved
         if key is not unresolved:
             base = resolve_frame_value(
                 node.value, function, handler_globals, imports, unresolved,
@@ -420,6 +494,27 @@ def resolve_frame_value(node, function, handler_globals, imports, unresolved,
             node, function, handler_globals, imports, unresolved,
             scope_binds, string_resolver)
     return unresolved
+
+
+def assert_total_expression_partition():
+    """Exercise the dynamic DECIDED/OUTSIDE expression partition."""
+    universe = _expression_node_types()
+    classified = {
+        node_type: expression_type_disposition(node_type)
+        for node_type in universe}
+    decided = {
+        node_type for node_type, disposition in classified.items()
+        if disposition == EXPRESSION_DECIDED}
+    outside = {
+        node_type for node_type, disposition in classified.items()
+        if disposition == EXPRESSION_OUTSIDE}
+    assert DECIDED_EXPRESSION_TYPES <= universe
+    assert decided == set(DECIDED_EXPRESSION_TYPES)
+    assert decided.isdisjoint(outside)
+    assert decided | outside == set(universe)
+    assert set(classified.values()) == {
+        EXPRESSION_DECIDED, EXPRESSION_OUTSIDE}
+    assert {ast.Compare, ast.Tuple} <= outside
 
 
 def assert_dict_get_default(frame_value):
