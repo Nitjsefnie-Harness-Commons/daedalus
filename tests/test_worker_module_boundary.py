@@ -370,6 +370,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     assert not duplicate_owners, (
         f'worker handlers must have exactly one owning module: '
         f'{duplicate_owners}')
+    published_handlers = sorted(owners)
 
     for details in module_details:
         relative = details['relative']
@@ -390,6 +391,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         observations = run_extension_capability_routes([
             {
                 'symbol': symbol,
+                'publishedSymbols': published_handlers,
                 'command': {
                     'id': 'policy-capability', 'type': command_type,
                 },
