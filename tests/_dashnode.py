@@ -59,8 +59,12 @@ def run_dashboard_node(source, *arguments, module=False, bounded_steps=1,
     if not node:
         raise AssertionError('node is required to execute dashboard harnesses')
     options = ['--input-type=module'] if module else []
+    step_timeout_ms = round(step_timeout * 1000)
+    timeout_source = (
+        f'const _dashnodeStepTimeoutMs = {step_timeout_ms};\n')
     command = [
-        node, *options, '--eval', _DASHBOARD_PRELUDE + source,
+        node, *options, '--eval',
+        _DASHBOARD_PRELUDE + timeout_source + source,
         *map(str, arguments),
     ]
     process = subprocess.Popen(

@@ -19,6 +19,12 @@ import test_dashboard_behaviour as behaviour  # noqa: E402
 _HOST_REALM_KEEPALIVE = "setInterval(() => {}, 10);\n"
 
 
+def _module(tmp, source, name='dashboard-module.js'):
+    path = Path(tmp) / name
+    path.write_text(source, encoding='utf-8')
+    return path
+
+
 def _harness_failure(source, *arguments, **options):
     try:
         _dashnode.run_dashboard_node(source, *arguments, **options)
@@ -175,6 +181,21 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
     ]
     actual = {name: _phase_trace(result) for name, result in runs.items()}
     assert actual == {name: expected for name in runs}, actual
+
+
+def test_a_dashboard_module_import_that_never_settles_names_import(tmp):
+    """A pending module import reports its inner bound before the backstop."""
+    module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
+await new Promise(() => {});
+export async function runCommand() {}
+""")
+    failure = _harness_failure(
+        behaviour._DASHBOARD_CONSUME_HARNESS, module,
+        bounded_steps=2, step_timeout=0.5)
+    assert 'timed out waiting for dashboard module import' in failure, failure
+    assert 'outer backstop' not in failure, failure
+    assert '[phase] dashboard harness started' in failure, failure
+    assert '[phase] dashboard module import started' in failure, failure
 
 
 def main():
