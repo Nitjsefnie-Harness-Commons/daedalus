@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -170,12 +171,14 @@ async function waitForResultConsume() {
 }
 
 (async () => {
+  step('the worker script to initialize');
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
   const configLabel = 'the worker to load its config';
   step(configLabel);
   await bounded(
     vm.runInContext('loadConfig()', context), configLabel, innerWaitMs);
   context.commands = commands;
+  step('the dispatchCommand calls to start');
   const executions = commands.map((_command, index) =>
     vm.runInContext('dispatchCommand(commands[' + index + '])', context));
   await waitFor(
@@ -321,3 +324,66 @@ def assert_clients_exited(states, posted):
         raise AssertionError(
             f'clients still running after grace: {running}; '
             f'harness posted: {posted}; client states: {states}')
+
+
+def _wait_for_client_commands(queue, count):
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if queue.is_dir() and len(list(queue.glob('*.json'))) == count:
+            return
+        time.sleep(0.05)
+    raise AssertionError('timed out waiting for both same-id client commands')
+
+
+def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
+                               token, background,
+                               owners=('owner-a', 'owner-b')):
+    """Drive real same-id CLI clients and preserve both failure surfaces."""
+    bridge_env = {'TOKEN': token, 'DAEDALUS_TOKEN': token}
+    with _util.bridge(tmp, env=bridge_env) as (base, docroot):
+        client_env = dict(env)
+        client_env.update({
+            'DAEDALUS_URL': base,
+            'DAEDALUS_TOKEN': token,
+        })
+        processes = {
+            owner: subprocess.Popen(
+                client_argv(owner), cwd=str(_util.ROOT), env=client_env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding='utf-8')
+            for owner in owners
+        }
+        try:
+            queue = Path(docroot) / 'commands' / f'{token}_extension'
+            _wait_for_client_commands(queue, len(owners))
+            queued = [json.loads(path.read_text(encoding='utf-8'))
+                      for path in sorted(queue.glob('*.json'))]
+            by_owner = {command['domain']: command for command in queued}
+            assert set(by_owner) == set(owners), by_owner
+            commands = [by_owner[owner] for owner in owners]
+            try:
+                posted = run_background_overlap(
+                    background, commands, completion_order,
+                    result_base=base, token=token, wait_between=False)
+            except AssertionError as failure:
+                raise AssertionError(
+                    f'{failure}; clients: '
+                    f'{client_states(processes, grace=1)}'
+                ) from failure
+            states = client_states(processes, grace=20)
+            assert_clients_exited(states, posted)
+            results = {}
+            for owner, state in states.items():
+                foreign = owners[1] if owner == owners[0] else owners[0]
+                results[owner] = {
+                    'returncode': state['returncode'],
+                    'ownResult': owner in state['stdout'],
+                    'foreignResult': foreign in state['stdout'],
+                    'stderr': state['stderr'],
+                }
+            return results
+        finally:
+            for process in processes.values():
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate()

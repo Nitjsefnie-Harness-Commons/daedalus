@@ -610,72 +610,26 @@ def test_typed_command_does_not_return_a_stale_fixed_id_result(tmp):
         assert 'stale.invalid' not in out, out
 
 
-def _run_same_id_client_overlap(tmp, completion_order):
-    owners = ('owner-a', 'owner-b')
-    with _util.bridge(tmp) as (base, docroot):
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
-        processes = {
-            owner: subprocess.Popen(
-                # The client's patience has to cover this fixture's whole
-                # setup -- a node spawn and the harness's own waits -- and the
-                # default ten seconds does not on a loaded Windows runner:
-                # both clients exited with `Timeout (10s)` before the first
-                # result was posted, leaving nobody to consume it.
-                CLI + ['cookies', '--domain', owner, '--timeout', '120'],
-                cwd=str(_util.ROOT), env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding='utf-8')
-            for owner in owners
-        }
-        try:
-            qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-            _wait_for(
-                lambda: qdir.is_dir()
-                and len(list(qdir.glob('*.json'))) == len(owners),
-                what='both same-id client commands')
-            queued = [json.loads(path.read_text(encoding='utf-8'))
-                      for path in sorted(qdir.glob('*.json'))]
-            by_owner = {command['domain']: command for command in queued}
-            assert set(by_owner) == set(owners), by_owner
-            commands = [by_owner[owner] for owner in owners]
-            try:
-                posted = _overlap.run_background_overlap(
-                    _util.ROOT / 'extension' / 'background.js', commands,
-                    completion_order, result_base=base, token=TOK,
-                    wait_between=False)
-            except AssertionError as failure:
-                raise AssertionError(
-                    f'{failure}; clients: '
-                    f'{_overlap.client_states(processes, grace=1)}'
-                ) from failure
-            states = _overlap.client_states(processes, grace=20)
-            _overlap.assert_clients_exited(states, posted)
-            results = {}
-            for owner, state in states.items():
-                foreign = owners[1] if owner == owners[0] else owners[0]
-                results[owner] = {
-                    'returncode': state['returncode'],
-                    'ownResult': owner in state['stdout'],
-                    'foreignResult': foreign in state['stdout'],
-                    'stderr': state['stderr'],
-                }
-            return results
-        finally:
-            for proc in processes.values():
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.communicate()
-
-
 def test_two_same_id_clients_receive_only_their_own_results(tmp):
     """Two CLI callers stay correlated in either completion order."""
+    def client_argv(owner):
+        # The client's patience has to cover this fixture's whole setup -- a
+        # node spawn and the harness's own waits -- and the default ten
+        # seconds does not on a loaded Windows runner: both clients exited
+        # with `Timeout (10s)` before the first result was posted, leaving
+        # nobody to consume it.
+        return CLI + [
+            'cookies', '--domain', owner, '--timeout', '120',
+        ]
+
+    background = _util.ROOT / 'extension' / 'background.js'
     actual = {
-        'a-first': _run_same_id_client_overlap(
-            Path(tmp) / 'a-first',
-            ['owner-a', 'owner-b']),
-        'b-first': _run_same_id_client_overlap(
-            Path(tmp) / 'b-first',
-            ['owner-b', 'owner-a']),
+        'a-first': _overlap.run_same_id_client_overlap(
+            Path(tmp) / 'a-first', ['owner-a', 'owner-b'], client_argv,
+            cli_env(), TOK, background),
+        'b-first': _overlap.run_same_id_client_overlap(
+            Path(tmp) / 'b-first', ['owner-b', 'owner-a'], client_argv,
+            cli_env(), TOK, background),
     }
     per_owner = {
         owner: {
