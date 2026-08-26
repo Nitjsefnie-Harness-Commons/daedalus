@@ -10,6 +10,7 @@ from _yamlread import (  # noqa: E402
     YAMLReadError, _comment, job_scalar, step_scalar, step_scalars,
 )
 from _yamlscalar import decode_inline_scalar  # noqa: E402
+from _yamlsteps import step_mappings  # noqa: E402
 
 
 def _raises(source, detail):
@@ -233,6 +234,38 @@ def test_step_scalar_list_decodes_folded_values(tmp):
         raise AssertionError(
             f'folded step scalar was not decoded: {error}') from error
     assert values == ['owner/action@0123456789abcdef'], values
+
+
+def test_step_mappings_decode_every_field_and_nested_mapping(tmp):
+    """The whole decoded step mapping is returned without selected keys."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: target\n'
+        '        id: chosen\n'
+        '        if: >-\n'
+        '          success()\n'
+        '          && true\n'
+        '        env:\n'
+        '          HEAD_SHA: ${{ github.sha }}\n'
+        '          "QUOT\\x45D": \'decoded\'\n'
+        '        with:\n'
+        '          run-id: ${{ github.run_id }}\n'
+        '        run: |\n'
+        '          echo "$HEAD_SHA"\n'
+        '        continue-on-error: false\n')
+    assert step_mappings(source, 'sample') == [{
+        'name': 'target',
+        'id': 'chosen',
+        'if': 'success() && true',
+        'env': {
+            'HEAD_SHA': '${{ github.sha }}',
+            'QUOTED': 'decoded',
+        },
+        'with': {'run-id': '${{ github.run_id }}'},
+        'run': 'echo "$HEAD_SHA"\n',
+        'continue-on-error': 'false',
+    }]
 
 
 def test_plain_scalar_oracle_corpus_refuses_unsafe_spellings(tmp):
