@@ -22,6 +22,7 @@ from starlette.responses import JSONResponse
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
+from env_config import env_int
 from mcp_transport import BridgeTransport
 
 # Same reason as the bridge: this process prints crash lines carrying values
@@ -37,41 +38,14 @@ LOCAL_URL = os.environ.get(
     f'http://127.0.0.1:{os.environ.get("DAEDALUS_PORT", "8081")}')
 
 
-def _env_int(name, default, minimum, maximum=None):
-    """Read one integer setting and stop startup with a specific error.
-
-    A copy of the bridge's parser rather than an import of it: importing
-    server.py requires its environment and runs its module-level
-    configuration, and server.py imports THIS module at startup, so the
-    dependency cannot run in that direction. The copy is held to the
-    original's behaviour by test_the_mcp_env_parser_matches_the_bridges.
-
-    Bare int() was what stood here, so a malformed value reached the caller
-    as an import-time ValueError traceback, and a negative body size was
-    accepted — which made every non-negative Content-Length exceed the
-    configured maximum and refused every request the front end received.
-    """
-    raw = os.environ.get(name, str(default))
-    requirement = (f'an integer from {minimum} to {maximum}' if maximum is not None
-                   else 'a non-negative integer')
-    try:
-        value = int(raw)
-    except ValueError:
-        raise SystemExit(
-            f'{name} must be {requirement}; got {raw!r}') from None
-    if value < minimum or (maximum is not None and value > maximum):
-        raise SystemExit(f'{name} must be {requirement}; got {raw!r}')
-    return value
-
-
 # Matches NET_CAPTURE_MAX in extension/background.js and the CLI.
 NET_CAPTURE_MAX = 20000
 
-MCP_PORT = _env_int('DAEDALUS_MCP_PORT', 8086, 0, 65535)
+MCP_PORT = env_int('DAEDALUS_MCP_PORT', 8086, 0, 65535)
 # Mirrors the bridge's own DAEDALUS_MAX_BODY_SIZE, default and bound alike.
 # The front end had no bound at all, so one unauthenticated request could
 # make the process hold whatever it chose to send.
-MAX_BODY_SIZE = _env_int(
+MAX_BODY_SIZE = env_int(
     'DAEDALUS_MCP_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
 # The app auto-enables DNS rebinding protection for a localhost bind only when
 # it is given no settings of its own; these are passed explicitly, so the list
