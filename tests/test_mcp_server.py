@@ -1635,8 +1635,8 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     worker = threading.Thread(target=run)
     worker.start()
     try:
-        queued = wait_for_command(
-            qdir, 20, worker.is_alive, ignored_names)
+        queued = wait_for_command(qdir, 20, producer_alive=worker.is_alive,
+                                  ignored_names=ignored_names)
         if queued is None:
             worker.join(timeout=5)
             if 'error' in box:
