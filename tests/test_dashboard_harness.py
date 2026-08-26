@@ -275,6 +275,37 @@ def test_harness_metadata_rejects_an_over_declared_bound_count(tmp):
         raise AssertionError('over-declared dashboard harness was accepted')
 
 
+def test_harness_metadata_counts_a_bound_split_by_a_comment(tmp):
+    """A comment between `await` and `bounded` cannot hide a real bound."""
+    del tmp
+    source = "await /* diagnostic label */ bounded(work, 'work', 1);"
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=0, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness declares 0 bounded steps but performs 1')
+    else:
+        raise AssertionError('comment-split dashboard bound was not counted')
+
+
+def test_harness_metadata_ignores_a_bound_inside_a_comment(tmp):
+    """A commented-out `await bounded` cannot inflate the bound count."""
+    del tmp
+    source = r"""
+await bounded(first, 'first', 1);
+/* await bounded(disabled, 'disabled', 1); */
+"""
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=2, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness declares 2 bounded steps but performs 1')
+    else:
+        raise AssertionError('commented dashboard bound was counted')
+
+
 def test_completed_steps_that_do_not_exit_report_the_last_phase(tmp):
     """The outer backstop distinguishes finished work from a hung step."""
     module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
