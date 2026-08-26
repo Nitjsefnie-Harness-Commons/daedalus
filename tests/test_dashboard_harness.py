@@ -38,6 +38,24 @@ bounded(new Promise(() => {}), 'the dashboard module to import', 20)
         'timed out waiting for the dashboard module to import'), result
 
 
+def test_bounded_keeps_the_real_timeout_after_a_harness_stubs_it(tmp):
+    """A harness timer stub cannot make the diagnostic bound fire now."""
+    del tmp
+    source = r"""
+const hostSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = (callback) => { callback(); return 0; };
+const work = new Promise((resolve) => {
+  hostSetTimeout(() => resolve('settled'), 20);
+});
+bounded(work, 'work using a timer stub', 100).then(
+  (value) => process.stdout.write('resolved: ' + value),
+  (error) => process.stdout.write('rejected: ' + error.message),
+);
+"""
+    result = _dashnode.run_dashboard_node(source)
+    assert result.stdout == 'resolved: settled', result
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 
