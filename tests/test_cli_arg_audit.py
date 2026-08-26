@@ -242,14 +242,14 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 reads.setdefault(attribute, set()).add(rendered)
                 if attribute not in assigned:
                     read_requirements[(attribute, rendered)] = needs_presence
-        for child in ast.iter_child_nodes(node):
+        for child in ((node.value, *node.targets) if isinstance(
+                node, ast.Assign) else ast.iter_child_nodes(node)):
             check(child, inspect_frame_routes)
     for child in ast.iter_child_nodes(function):
         check(child)
     for (attribute, construct), needs_presence in sorted(
             read_requirements.items()):
-        allowed = guaranteed if needs_presence else declared
-        if attribute not in allowed:
+        if attribute not in (guaranteed if needs_presence else declared):
             violations.append(construct)
     return reads, violations
 
@@ -421,9 +421,9 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
                  'args.undeclared_probe = False'):
         assert _audit_fake_handler(body) == [], body
     read = 'args.undeclared_probe'
-    for body in (read, f'{read}\nargs.undeclared_probe = False'):
-        violations = _audit_fake_handler(body)
-        assert violations == [read], (body, violations)
+    for body in (read, f'{read}\nargs.undeclared_probe = False',
+                 f'args.undeclared_probe = {read} or False'):
+        assert _audit_fake_handler(body) == [read], body
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
