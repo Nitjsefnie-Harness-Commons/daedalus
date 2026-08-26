@@ -549,6 +549,56 @@ def test_cli_audit_resolver_resolves_dict_get_default(tmp):
         literal_call, literal_function, {'ROUTES': {}}, {}) is None
 
 
+def test_cli_audit_resolver_logical_not_returns_bool(tmp):
+    unresolved = object()
+    cases = (
+        ('not 1.0', False),
+        ("not ''", True),
+        ('not None', True),)
+    for expression, expected in cases:
+        node = ast.parse(expression, mode='eval').body
+        value = audit_support._constant_value(node, unresolved)
+        assert (type(value), value) == (bool, expected), expression
+
+
+def test_cli_audit_resolver_decides_every_unary_operator(tmp):
+    unresolved = object()
+    operator_cases = (
+        ('+0', ast.UAdd, int, 0),
+        ('-0', ast.USub, int, 0),
+        ('~0', ast.Invert, int, -1),
+        ('not 0', ast.Not, bool, True),)
+    assert {operator for _, operator, _, _ in operator_cases} == \
+        set(ast.unaryop.__subclasses__())
+    combination_cases = (
+        ('~-1', int, 0),
+        ('-~0', int, 1),
+        ('not not 0', bool, False),
+        ('+True', int, 1),
+        ('-True', int, -1),
+        ('~False', int, -1),
+        ('not False', bool, True),)
+    for expression, operator, expected_type, expected in operator_cases:
+        node = ast.parse(expression, mode='eval').body
+        assert isinstance(node.op, operator), expression
+        value = audit_support._constant_value(node, unresolved)
+        assert (type(value), value) == (expected_type, expected), expression
+    for expression, expected_type, expected in combination_cases:
+        node = ast.parse(expression, mode='eval').body
+        value = audit_support._constant_value(node, unresolved)
+        assert (type(value), value) == (expected_type, expected), expression
+
+    slice_cases = (
+        ('routes[:~0]', slice(None, -1, None)),
+        ('routes[-~0:]', slice(1, None, None)),
+        ('routes[:(not 0)]', slice(None, True, None)),
+        ('routes[(not not 0):]', slice(False, None, None)),)
+    for expression, expected in slice_cases:
+        node = ast.parse(expression, mode='eval').body.slice
+        value = audit_support._constant_value(node, unresolved)
+        assert value == expected, expression
+
+
 def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
     class FrameRoutes:
         active = sys._getframe
