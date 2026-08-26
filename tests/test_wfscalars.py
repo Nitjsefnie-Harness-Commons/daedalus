@@ -195,6 +195,26 @@ def test_checkout_reader_keeps_tabs_after_block_scalar_indent(tmp):
     assert failures == [], failures
 
 
+def test_checkout_reader_keeps_double_ampersands_in_expressions(tmp):
+    """The expression conjunction is plain-scalar content, not an anchor."""
+    del tmp
+    workflow = (
+        'name: conjunction oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: ${{ github.sha && github.ref }}\n')
+    try:
+        actual = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError as error:
+        raise AssertionError(str(error)) from error
+    assert actual == [('build', '${{ github.sha && github.ref }}')]
+
+
 def test_checkout_reader_folds_block_scalars_exactly(tmp):
     """Folded breaks and EOF chomping match YAML scalar values."""
     del tmp

@@ -135,10 +135,6 @@ class _ScalarReaderMixin:
             return self._single_quoted(value, index, context)
         if value.startswith('"'):
             return self._double_quoted(value, index, context)
-        if re.search(r'(^|\s)&\S+', value):
-            self._refuse('anchor', index, context)
-        if re.search(r'(^|\s)\*\S+', value):
-            self._refuse('alias', index, context)
         return value
 
     def _single_quoted(self, value, index, context):
