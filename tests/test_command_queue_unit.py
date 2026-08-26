@@ -90,7 +90,8 @@ def test_enqueue_waits_for_the_shared_filesystem_lock(tmp):
         'enqueue stayed blocked after the lock was released')
     worker.join()
     assert failures == []
-    delivery_id, = delivery_ids
+    assert len(delivery_ids) == 1, delivery_ids
+    delivery_id = delivery_ids[0]
     assert (cmd_dir / 'tok_tab' / f'{delivery_id}.json').exists()
 
 
