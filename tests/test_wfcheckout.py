@@ -388,6 +388,13 @@ def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
     """Apply the pin's conservative expression contract to one workflow."""
     offenders = []
     expressions = re.compile(r'\$\{\{(.*?)\}\}', re.DOTALL)
+    identifier = r'[A-Za-z_][A-Za-z0-9_-]*'
+    access = rf'{identifier}(?:\.{identifier})+'
+    github_access = rf'github(?:\.{identifier})+'
+    access_pattern = re.compile(
+        rf'(?<![A-Za-z0-9_-]){access}(?![A-Za-z0-9_-])')
+    github_only = re.compile(
+        rf'{github_access}(?:\s*\|\|\s*{github_access})*')
     try:
         refs = _wfcheckout.checkout_refs(workflow)
     except _wfcheckout.YAMLReadError as error:
@@ -400,28 +407,28 @@ def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
                 f'{ref!r}')
         for match in matches:
             expression = match.group(1).strip()
-            leading = re.match(r'[A-Za-z_][A-Za-z0-9_-]*', expression)
-            if leading and leading.group(0) == 'github':
+            if github_only.fullmatch(expression):
                 continue
-            if not re.fullmatch(
-                    r'[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*',
-                    expression):
-                raise AssertionError(
-                    f'{workflow_name}, job {job}: cannot decompose '
-                    f'expression {expression!r}')
-            segments = expression.split('.')
-            if len(segments) < 2:
-                raise AssertionError(
-                    f'{workflow_name}, job {job}: cannot decompose '
-                    f'expression {expression!r}')
-            for segment in segments[1:]:
-                if segment == 'outputs':
+            expression_offenders = []
+            for dotted in access_pattern.findall(expression):
+                segments = dotted.split('.')
+                if segments[0] == 'github':
                     continue
-                if any(word in spelling
-                       for spelling in (segment, segment.lower())
-                       for word in _FORBIDDEN_CHECKOUT_NAMES):
-                    offenders.append(
-                        f'{workflow_name}, job {job}: {segment}')
+                for segment in segments[1:]:
+                    if segment == 'outputs':
+                        continue
+                    if any(word in spelling
+                           for spelling in (segment, segment.lower())
+                           for word in _FORBIDDEN_CHECKOUT_NAMES):
+                        expression_offenders.append(
+                            f'{workflow_name}, job {job}: {segment}')
+            offenders.extend(expression_offenders)
+            if expression_offenders:
+                continue
+            if not re.fullmatch(access, expression):
+                raise AssertionError(
+                    f'{workflow_name}, job {job}: cannot decompose '
+                    f'expression {expression!r}')
     assert not offenders, (
         'a checkout takes its ref from a non-github expression named '
         f'{offenders}, which an analyser reads as an untrusted head')
@@ -461,6 +468,65 @@ def test_checkout_pin_checks_all_contexts_and_identifier_segments(tmp):
             assert 'job build' in str(error), str(error)
         else:
             raise AssertionError(f'expected refusal for {expression}')
+
+
+def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
+    """A leading GitHub access cannot exempt later dotted accesses."""
+    del tmp
+    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    speed = path.read_text(encoding='utf-8')
+    original = '${{ steps.baseline.outputs.point }}'
+    assert original in speed
+    needs = (
+        'name: mixed contexts\n'
+        'on: push\n'
+        'jobs:\n'
+        '  release_commit:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    outputs:\n'
+        '      point: ${{ steps.value.outputs.point }}\n'
+        '    steps:\n'
+        '      - id: value\n'
+        '        run: echo point=main >> "$GITHUB_OUTPUT"\n'
+        '  build:\n'
+        '    needs: release_commit\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: ${{ github.sha || '
+        'needs.release_commit.outputs.point }}\n')
+    cases = (
+        (
+            '${{ github.sha || steps.baseline.outputs.ref }}',
+            speed.replace(
+                original,
+                '${{ github.sha || steps.baseline.outputs.ref }}', 1),
+            'ref',
+        ),
+        (
+            '${{ github.sha || env.base_ref }}',
+            speed.replace(
+                original, '${{ github.sha || env.base_ref }}', 1),
+            'base_ref',
+        ),
+        (
+            '${{ github.sha || needs.release_commit.outputs.point }}',
+            needs,
+            'release_commit',
+        ),
+    )
+    failures = []
+    for expression, workflow, offender in cases:
+        try:
+            _assert_checkout_refs_safe(workflow)
+        except AssertionError as error:
+            message = str(error)
+            if offender not in message or 'job ' not in message:
+                failures.append((expression, message))
+        else:
+            failures.append((expression, 'pin accepted the checkout ref'))
+    assert failures == [], failures
 
 
 def test_checkout_pin_skips_github_and_rejects_non_reference_expressions(tmp):
