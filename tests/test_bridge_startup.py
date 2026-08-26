@@ -5,6 +5,7 @@ A bridge that cannot start has to say why on its own stdout, because that is
 all a fixture or an operator has to go on; one that starts answers /health,
 and serves the dashboard from the repository without letting a path leave it.
 """
+import importlib
 import json
 import os
 import socket
@@ -15,6 +16,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+
+
+def test_server_uses_the_shared_log_safe_function(tmp):
+    """The bridge entry point must use the contract-tested shared renderer."""
+    settings = {'DAEDALUS_DIR': str(tmp), 'DAEDALUS_PORT': '0'}
+    saved = {key: os.environ.get(key) for key in settings}
+    os.environ.update(settings)
+    root = str(_util.ROOT)
+    added_root = root not in sys.path
+    if added_root:
+        sys.path.insert(0, root)
+    try:
+        shared_log_safe = importlib.import_module('log_safe')
+        mod = _util.load(
+            _util.ROOT / 'server.py', 'server_shared_log_safe_binding')
+    finally:
+        if added_root:
+            sys.path.remove(root)
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    assert mod.log_safe is shared_log_safe.log_safe
 
 
 def test_log_safe_import_has_no_daedalus_configuration_side_effects(tmp):
