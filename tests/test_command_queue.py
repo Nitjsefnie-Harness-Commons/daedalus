@@ -270,6 +270,7 @@ def _claim_trace_dir(tmp):
     trace = trace_dir / 'claims.log'
     (trace_dir / 'sitecustomize.py').write_text(
         'import json\n'
+        'import pathlib\n'
         'import sys\n'
         'import threading\n'
         f'_trace = {str(trace)!r}\n'
@@ -277,13 +278,22 @@ def _claim_trace_dir(tmp):
         'import command_queue\n'
         '_record_lock = threading.Lock()\n'
         '_sequence = 0\n'
-        'def _record(event, key, result=None):\n'
+        '_active = {}\n'
+        'def _record(event, key, result=None, claim_seq=None):\n'
         '    global _sequence\n'
         '    with _record_lock:\n'
         '        _sequence += 1\n'
         '        data = {"seq": _sequence, "event": event, "key": key}\n'
         '        if result is not None:\n'
         '            data["result"] = result\n'
+        '        if claim_seq is not None:\n'
+        '            data["claim_seq"] = claim_seq\n'
+        '        if event == "claim" and result is True:\n'
+        '            _active.setdefault(key, []).append(_sequence)\n'
+        '        if event == "release":\n'
+        '            pending = _active.get(key, [])\n'
+        '            if pending:\n'
+        '                data["claim_seq"] = pending.pop(0)\n'
         '        with open(_trace, "a", encoding="utf-8") as log:\n'
         '            log.write(json.dumps(data) + "\\n")\n'
         '_real_claim = command_queue.claim\n'
@@ -295,6 +305,17 @@ def _claim_trace_dir(tmp):
         'def release(key):\n'
         '    _real_release(key)\n'
         '    _record("release", key)\n'
+        '_real_unlink = pathlib.Path.unlink\n'
+        'def unlink(path, *args, **kwargs):\n'
+        '    key = f"legacy:{path.name}"\n'
+        '    if path.parent.name == "commands" and path.suffix == ".json":\n'
+        '        with _record_lock:\n'
+        '            pending = _active.get(key, [])\n'
+        '            claim_seq = pending[0] if pending else None\n'
+        '        if claim_seq is not None:\n'
+        '            _record("delivery", key, claim_seq=claim_seq)\n'
+        '    return _real_unlink(path, *args, **kwargs)\n'
+        'pathlib.Path.unlink = unlink\n'
         'command_queue.claim = claim\n'
         'command_queue.release = release\n',
         encoding='utf-8')
@@ -311,6 +332,34 @@ def _claim_events(trace):
         except json.JSONDecodeError:
             continue
     return events
+
+
+def _wait_for_delivery(trace, key, after=0):
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        events = _claim_events(trace)
+        deliveries = [
+            event for event in events
+            if event.get('event') == 'delivery'
+            and event.get('key') == key
+            and event.get('claim_seq') is not None
+            and event.get('seq', 0) > after]
+        if deliveries:
+            return deliveries[0]
+        time.sleep(0.01)
+    raise AssertionError(f'no delivery after {after}: {events}')
+
+
+def _assert_no_unreleased_claims(events):
+    successful = {
+        event['seq'] for event in events
+        if event.get('event') == 'claim'
+        and event.get('result') is True}
+    released = {
+        event['claim_seq'] for event in events
+        if event.get('event') == 'release'
+        and event.get('claim_seq') is not None}
+    assert not successful - released, events
 
 
 def _load_server_for_drain(tmp, name):
@@ -482,6 +531,7 @@ def test_a_successful_legacy_delivery_releases_its_claim(tmp):
                 time.sleep(0.01)
             assert not legacy.exists(), (
                 'the first legacy file was not consumed')
+            first_delivery = _wait_for_delivery(trace, key)
             legacy.write_text(
                 '{"id":"legacy-second","code":"2"}',
                 encoding='utf-8')
@@ -491,25 +541,35 @@ def test_a_successful_legacy_delivery_releases_its_claim(tmp):
             pair = None
             while time.time() < deadline:
                 events = _claim_events(trace)
-                claims = [
+                second_deliveries = [
                     event for event in events
-                    if event.get('event') == 'claim'
+                    if event.get('event') == 'delivery'
                     and event.get('key') == key
-                    and event.get('result') is True]
-                if len(claims) >= 2:
-                    claim = claims[1]
-                    index = next(
-                        index for index, event in enumerate(events)
-                        if event.get('seq') == claim.get('seq'))
-                    if index + 1 < len(events):
-                        release = events[index + 1]
-                        if (release.get('event') == 'release'
-                                and release.get('key') == key):
-                            pair = (claim, release)
-                            break
+                    and event.get('claim_seq') is not None
+                    and event.get('seq', 0) > first_delivery['seq']]
+                if second_deliveries:
+                    delivery = second_deliveries[0]
+                    claim = next(
+                        event for event in events
+                        if event.get('seq') == delivery.get('claim_seq')
+                        and event.get('event') == 'claim'
+                        and event.get('key') == key
+                        and event.get('result') is True)
+                    claim_index = events.index(claim)
+                    delivery_index = events.index(delivery)
+                    release = next(
+                        (event for event in events[delivery_index + 1:]
+                         if event.get('event') == 'release'
+                         and event.get('key') == key
+                         and event.get('claim_seq') == claim.get('seq')),
+                        None)
+                    if release is not None:
+                        pair = (claim, delivery, release,
+                                events[claim_index + 1:events.index(release)])
+                        break
                 time.sleep(0.01)
             assert pair is not None, _claim_events(trace)
-            assert pair[1]['seq'] == pair[0]['seq'] + 1, pair
+            assert pair[3] == [pair[1]], pair
             deadline = time.time() + 5
             while legacy.exists() and time.time() < deadline:
                 time.sleep(0.01)
@@ -518,6 +578,7 @@ def test_a_successful_legacy_delivery_releases_its_claim(tmp):
         finally:
             response.close()
             conn.close()
+    _assert_no_unreleased_claims(_claim_events(trace))
 
 
 def test_queue_write_failure_keeps_file_and_releases_claim(tmp):
