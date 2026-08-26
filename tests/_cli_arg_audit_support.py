@@ -1,41 +1,21 @@
-"""Side-effect-free static analysis for the CLI argument audit.
-
-DECLARED contains each non-help/version, non-SUPPRESS destination plus every
-``set_defaults`` key. GUARANTEED PRESENT contains a destination with a
-non-suppressed default, a required action on every successful parse, or a
-positional ``REMAINDER``; parser defaults are guaranteed too. Same-destination
-actions combine. Direct/exact-dict and bare ``getattr`` reads need GUARANTEED;
-guarded reads need DECLARED.
-``getattr``/``hasattr``/``vars`` get builtin semantics only by exact identity
-in the function's effective builtins after callable/comprehension and global
-shadowing at that evaluation point. Exact ``builtins`` attributes qualify.
-Callable headers use outer scope. Bare reflective spellings are refused even
-when shadowed (fail-closed); exact ``builtins`` forms are refused too.
-The resolver follows supplied imports and unshadowed globals by identity. It
-decides module/class attributes, module ``__dict__``, exact list/tuple slices
-and subscripts, and constant-key dict reads. Indices and bounds use
-``isinstance(value, int)``; ``bool`` counts and unary ``+True`` becomes ``1``.
-Exact static/class methods unwrap; other descriptors stay raw. Canonical
-unresolved ``_getframe``/``currentframe`` spellings are refused.
-Resolution never runs handler code. Non-exact descriptors, ``partial``,
-traceback frames, other containers/iterators, comprehension results, instance
-attributes, ``attrgetter``, runtime names, mapping-proxy reads, binary/call
-indices, and external frame acquisition stay outside. Each named family has a
-known-gap control, and every known-gap control belongs to a named family.
-"""
+"""Non-executing audit resolvers, tables, and isolated dispatch controls.
+Known-gap controls and documented outside families map in both directions."""
 import argparse
 import ast
 import builtins
+import contextlib
 import inspect
+import os
 import sys
+from unittest import mock
 
-# ``do_tabs`` reads args.json through getattr(); keep that access documented
-# even though the audit resolves constant indirect reads itself.
+# Keep do_tabs's indirect args.json read explicit beside the resolved reads.
 KNOWN_INDIRECT_ARG_READS = (('tabs', 'json', 'do_tabs'),)
+BRIDGE_ENV_NAMES = ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN')
+DISPATCH_PROBE_ERROR = 'real dispatch did not read undeclared_probe'
 SHADOWING_DEFAULT_CASES = (
     'def inner(args=args):\n    return args.undeclared_probe\ninner()',
-    'f = lambda args=args: args.undeclared_probe\nf()',
-)
+    'f = lambda args=args: args.undeclared_probe\nf()',)
 PERMITTED_NAMESPACE_READ_CASES = (
     ('args.json', 'args.undeclared_probe', True),
     ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')", True),
@@ -57,15 +37,13 @@ PERMITTED_NAMESPACE_READ_CASES = (
     ("builtins.hasattr(args, 'json')",
      "builtins.hasattr(args, 'undeclared_probe')", False),
     ("builtins.vars(args).get('json')",
-     "builtins.vars(args).get('undeclared_probe')", False),
-)
+     "builtins.vars(args).get('undeclared_probe')", False),)
 NAMESPACE_ESCAPE_CASES = (
     ('other = args', 'other = args'),
     ('other = args\nthird = other\nthird.x', 'other = args'),
     ('other, = (args,)', '(args,)'),
     ("getattr(*(args, 'x'))", "(args, 'x')"),
-    ('helper(args)', 'helper(args)'),
-    ('helper([args])', '[args]'),
+    ('helper(args)', 'helper(args)'), ('helper([args])', '[args]'),
     ('helper(*[args])', '[args]'),
     ('getattr(args, some_variable)', 'getattr(args, some_variable)'),
     ('hasattr(args, some_variable)', 'hasattr(args, some_variable)'),
@@ -86,16 +64,14 @@ NAMESPACE_ESCAPE_CASES = (
     ("_ = [getattr(args, 'json', False) for getattr in helpers]",
      "getattr(args, 'json', False)"),
     ("from operator import attrgetter as getattr\n"
-     "getattr(args, 'json', False)", "getattr(args, 'json', False)"),
-)
+     "getattr(args, 'json', False)", "getattr(args, 'json', False)"),)
 BUILTIN_IDENTITY_GLOBAL_CASES = (
     ("getattr(args, 'json', False)", {'getattr': builtins.getattr}, ()),
     ("getattr(args, 'json', False)", {'getattr': len},
      ("namespace escape: getattr(args, 'json', False)",)),
     ("getattr(args, 'json', False)", {'__builtins__': {'getattr': len}},
      ("namespace escape: getattr(args, 'json', False)",)),
-    ("_ = [value for getattr in (getattr(args, 'json', False),)]", None, ()),
-)
+    ("_ = [value for getattr in (getattr(args, 'json', False),)]", None, ()),)
 # Shape, argv, empty result, seeded empty result, result, GUARANTEED.
 ARGPARSE_STORAGE_CASES = (
     ('optional', (), (), 'seed', (), False),
@@ -105,13 +81,11 @@ ARGPARSE_STORAGE_CASES = (
     ('star', (), (), 'seed', (), False),
     ('plus', ('x',), None, None, ['x'], True),
     ('question', (), (), 'seed', (), False),
-    ('positional', ('x',), None, None, 'x', True),
-)
+    ('positional', ('x',), None, None, 'x', True),)
 REFLECTIVE_ESCAPE_CASES = (
     ("_ = locals()['args'].undeclared_probe", 'locals()'),
     ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
-    ('_ = vars()', 'vars()'),
-    ('_ = globals()', 'globals()'),
+    ('_ = vars()', 'vars()'), ('_ = globals()', 'globals()'),
     ("exec('args.undeclared_probe')", "exec('args.undeclared_probe')"),
     ("_ = builtins.locals()['args'].undeclared_probe", 'builtins.locals()'),
     ("_ = builtins.globals()['args'].undeclared_probe",
@@ -148,8 +122,7 @@ REFLECTIVE_ESCAPE_CASES = (
     ('helper(sys._getframe)', 'sys._getframe'),
     ('helper(inspect.currentframe)', 'inspect.currentframe'),
     ('_ = _getframe()', '_getframe()'),
-    ('_ = currentframe()', 'currentframe()'),
-)
+    ('_ = currentframe()', 'currentframe()'),)
 DECIDED_FRAME_ROUTE_CASES = (
     ('from sys import _getframe as get_frame',
      "_ = get_frame().f_locals['args'].undeclared_probe", 'get_frame()'),
@@ -212,8 +185,7 @@ DECIDED_FRAME_ROUTE_CASES = (
      ".f_locals['args'].undeclared_probe",
      "sys.__dict__.get('_getframe')()"),
     ('', "_ = vars(sys)['_getframe']()"
-     ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),
-)
+     ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),)
 COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
     'COMPOSITE_ROUTES[--1]',
     'COMPOSITE_ROUTES[---1]',
@@ -231,8 +203,7 @@ COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
     'COMPOSITE_ROUTES[:+True][-1]',
     'COMPOSITE_ROUTES[-True:][-1]',
     'COMPOSITE_ROUTES[+False:][-1]',
-    'COMPOSITE_ROUTES[:True][-1]',
-)
+    'COMPOSITE_ROUTES[:True][-1]',)
 RESOLVER_ONLY_FRAME_ROUTE_CASES = (
     ('exact classmethod route (resolver only)',
      'class FrameRoutes:\n'
@@ -241,8 +212,7 @@ RESOLVER_ONLY_FRAME_ROUTE_CASES = (
      'FrameRoutes.active()'),
     ('unresolved currentframe spelling (resolver only)', '',
      "_ = currentframe().f_locals['args'].undeclared_probe",
-     'currentframe()'),
-)
+     'currentframe()'),)
 KNOWN_GAP_FRAME_ROUTE_CASES = (
     ('comprehension result',
      'FRAME_ROUTES = [sys._getframe]',
@@ -324,20 +294,52 @@ KNOWN_GAP_FRAME_ROUTE_CASES = (
     ('call-produced index',
      'FRAME_ROUTES = (None, sys._getframe)',
      "_ = FRAME_ROUTES[len((None,))]()"
-     ".f_locals['args'].undeclared_probe"),
-)
-
+     ".f_locals['args'].undeclared_probe"),)
 _FRAME_ROUTE_OBJECTS = (sys._getframe, inspect.currentframe)
+
+
+@contextlib.contextmanager
+def isolated_bridge_environment(values=None):
+    with mock.patch.dict(os.environ, values or {}):
+        for name in (() if values is not None else BRIDGE_ENV_NAMES):
+            os.environ.pop(name, None)
+        yield
+
+
+def assert_real_dispatch_isolated(mutated_cli_tabs, assert_dispatch_crashes):
+    environment = dict.fromkeys(BRIDGE_ENV_NAMES, 'test-live-bridge')
+    body = ("PROBE_ENV.append((os.environ.get('DAEDALUS_URL'), "
+            "os.environ.get('DAEDALUS_TOKEN')))")
+    handler_module = mutated_cli_tabs(
+        'neutralized_dispatch_cli', 'PROBE_ENV = []', body)
+    calls = []
+
+    def record_api(*args, **kwargs):
+        return calls.append((args, kwargs)) or []
+    handler_module.api = record_api
+    try:
+        with isolated_bridge_environment(environment):
+            try:
+                assert_dispatch_crashes(handler_module)
+            except AssertionError as error:
+                assert str(error) == DISPATCH_PROBE_ERROR, error
+            else:
+                assert False, DISPATCH_PROBE_ERROR
+            assert {name: os.environ.get(name)
+                    for name in BRIDGE_ENV_NAMES} == environment
+        assert calls == [], calls
+        assert handler_module.PROBE_ENV == [(None, None)]
+    finally:
+        sys.modules.pop(handler_module.__dict__['__name__'], None)
 
 
 def add_storage_probe(parser, shape, dest='probe'):
     options = {'default': argparse.SUPPRESS}
     if shape in ('optional', 'optional-remainder', 'required-option'):
-        option = f'--{dest.replace("_", "-")}'
         options['required'] = shape == 'required-option'
         if shape == 'optional-remainder':
             options['nargs'] = argparse.REMAINDER
-        return parser.add_argument(option, **options)
+        return parser.add_argument(f'--{dest.replace("_", "-")}', **options)
     nargs = {
         'remainder': argparse.REMAINDER, 'star': '*', 'plus': '+',
         'question': '?', 'positional': None}[shape]
@@ -356,9 +358,8 @@ def assert_argparse_storage_contract(audit_handler):
         parser = argparse.ArgumentParser(add_help=False)
         add_storage_probe(parser, shape)
         declared, guaranteed = namespace_dests(parser)
-        expected_guaranteed = {'probe'} if is_guaranteed else set()
         assert declared == {'probe'}, shape
-        assert guaranteed == expected_guaranteed, shape
+        assert guaranteed == ({'probe'} if is_guaranteed else set()), shape
         expected_read = [] if is_guaranteed else ['args.probe']
         assert audit_handler(
             'args.probe', declared, guaranteed) == expected_read, shape
@@ -545,8 +546,7 @@ def is_frame_route(value):
     """Return True only for the canonical frame-route objects by identity."""
     return any(value is route for route in _FRAME_ROUTE_OBJECTS)
 
-# Exact type checks and direct MRO dictionary lookup avoid handler-defined
-# descriptors while preserving staticmethod and classmethod routes.
+# Exact type/MRO reads avoid descriptors but preserve static/class methods.
 # pylint: disable=unidiomatic-typecheck
 
 
