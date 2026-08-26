@@ -87,7 +87,7 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 
 _SLOW_PASSING_SUITE = """import json, os, time
 
-time.sleep(0.4)
+time.sleep(5)
 summary = {
     'total': 1,
     'passed': 1,
@@ -138,7 +138,8 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
     called `tree`: coverage maps `*/tree` back onto this repository — see the
     `[tool.coverage.paths]` note in pyproject.toml — and a tree by any other
     name is measured under a path that no longer exists when the report is
-    read, which fails the coverage job rather than the suite.
+    read, which fails the coverage job rather than the suite. Generated suites
+    and the startup stub stay under `tests`, which coverage omits.
     """
     root = Path(tmp) / under / 'tree'
     (root / 'tests').mkdir(parents=True)
@@ -147,13 +148,13 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
     for name, source in suites.items():
         (root / 'tests' / name).write_text(source, encoding='utf-8')
     if sitecustomize:
-        (root / 'sitecustomize.py').write_text(sitecustomize,
-                                               encoding='utf-8')
+        (root / 'tests' / 'sitecustomize.py').write_text(
+            sitecustomize, encoding='utf-8')
     env = dict(os.environ)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     if sitecustomize:
         inherited_path = env.get('PYTHONPATH')
-        env['PYTHONPATH'] = str(root)
+        env['PYTHONPATH'] = str(root / 'tests')
         if inherited_path:
             env['PYTHONPATH'] += os.pathsep + inherited_path
     if runner_encoding:
@@ -291,7 +292,7 @@ def test_output_capture_survives_a_low_descriptor_limit(tmp):
 
     suites = {
         f'test_descriptor_{number:02d}.py': _SLOW_PASSING_SUITE
-        for number in range(39)
+        for number in range(60)
     }
     result = _runner_tree(
         tmp, suites, sitecustomize=_HIGH_CPU_SITE,
