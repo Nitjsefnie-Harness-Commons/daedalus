@@ -7,11 +7,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary import run_extension_capability_routes  # noqa: E402
+from _boundary import (observe_extension_worker_paths,  # noqa: E402
+                       run_extension_capability_routes)
 from _jsread import js_bracket_end, js_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _worker_sources import (imported_worker_paths,  # noqa: E402
-                             worker_source_paths)
+from _worker_sources import worker_source_paths  # noqa: E402
 
 _JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
 _TOP_LEVEL_DECLARATION = re.compile(
@@ -30,9 +30,9 @@ _WORKER_PLATFORM_GLOBALS = frozenset({
     'console', 'crypto', 'fetch', 'parseInt', 'performance', 'setInterval',
     'setTimeout',
 })
-_WORKER_NON_HANDLER_EXPORTS = frozenset({
+_WORKER_NON_HANDLER_EXPORTS = (
     # Add one reviewed non-handler export per line.
-})
+)
 
 
 def _worker_sources():
@@ -147,12 +147,15 @@ def _masked_code_mentions(masked_source, name):
 def test_each_worker_capability_lives_in_its_own_module(tmp):
     """Every exported handler has one replaceable runtime dispatch route.
 
-    The loader defines the module inventory. Each module's export directives,
-    apart from explicit non-handler exceptions, define its handlers. An entry
-    in the exception set removes that export from runtime route coverage and
-    therefore requires deliberate review. Before probing, the guard requires
-    unique handler ownership and exact, duplicate-sensitive route coverage.
-    A route row for an unloaded module is also refused.
+    The existing VM harness records the paths the worker actually asks
+    `importScripts` to load; that observation defines the module inventory.
+    Each module's export directives, apart from explicit non-handler
+    exceptions, define its handlers. An entry in the exception tuple removes
+    that export from runtime route coverage and therefore requires deliberate
+    review. Before probing, the guard requires unique handler ownership and
+    exact, duplicate-sensitive route-symbol coverage. A route row for an
+    unloaded module is also refused. Command types are runtime-probe inputs,
+    not an exhaustive inventory of the dispatch surface.
 
     The probe checks replaceability first; afterwards, text checks require one
     statement-position function declaration and reject recognised top-level
@@ -185,11 +188,20 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         route for route, count in Counter(routes).items() if count > 1)
     assert not duplicate_routes, (
         f'worker route table contains duplicate rows: {duplicate_routes}')
+    duplicate_exceptions = sorted(
+        name for name, count
+        in Counter(_WORKER_NON_HANDLER_EXPORTS).items()
+        if count > 1
+    )
+    assert not duplicate_exceptions, (
+        'non-handler export exceptions contain duplicate entries: '
+        f'{duplicate_exceptions}')
+    non_handler_exports = set(_WORKER_NON_HANDLER_EXPORTS)
 
     extension_root = ROOT / 'extension'
     loaded_modules = [
         path.relative_to(extension_root).as_posix()
-        for path in imported_worker_paths()
+        for path in observe_extension_worker_paths()
     ]
     duplicate_modules = sorted(
         relative for relative, count in Counter(loaded_modules).items()
@@ -222,7 +234,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
             'source': module,
             'handlers': [
                 name for name in exported
-                if name not in _WORKER_NON_HANDLER_EXPORTS
+                if name not in non_handler_exports
             ],
         })
     assert not duplicate_exports, (
@@ -233,7 +245,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         for details in module_details
         for name in _directive_names(details['source'], 'exported')
     }
-    stale_exceptions = sorted(_WORKER_NON_HANDLER_EXPORTS - worker_exports)
+    stale_exceptions = sorted(non_handler_exports - worker_exports)
     assert not stale_exceptions, (
         f'non-handler export exceptions no longer exist: {stale_exceptions}')
 
@@ -311,12 +323,13 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
     """Best-effort text check for classic-worker directive typos.
 
-    Export-derived exact table coverage and the per-handler runtime probe are
-    the primary guarantee. This secondary graph catches ordinary typos cheaply,
-    but reassignment detection is position- and spelling-dependent, an object
-    method key can look like a consumer, and `js_mask` does not parse regex
-    literals (issue 198). The platform allowlist is trusted input, not proof of
-    a platform global.
+    Export-derived exact route-symbol coverage and the per-handler runtime
+    probe are the primary guarantee. Command types remain probe input rather
+    than an exhaustive dispatch inventory. This secondary graph catches
+    ordinary typos cheaply, but reassignment detection is position- and
+    spelling-dependent, an object method key can look like a consumer, and
+    `js_mask` does not parse regex literals (issue 198). The platform allowlist
+    is trusted input, not proof of a platform global.
     """
     del tmp
     worker_sources = _worker_sources()
@@ -393,7 +406,7 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
 
 def test_worker_imports_match_worker_modules(tmp):
     del tmp
-    imported = [path.resolve() for path in imported_worker_paths()]
+    imported = [path.resolve() for path in observe_extension_worker_paths()]
     duplicates = sorted(
         path.relative_to(ROOT).as_posix()
         for path, count in Counter(imported).items()
