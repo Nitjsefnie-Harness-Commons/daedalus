@@ -175,9 +175,12 @@ function response(status, data) {
   phase('dashboard call started');
   let rejected = false;
   try {
-    await dashboard.runCommand({
-      type: 'cookies', id: 'dashboard-command', timeout: 1000,
-    });
+    await bounded(
+      dashboard.runCommand({
+        type: 'cookies', id: 'dashboard-command', timeout: 1000,
+      }),
+      'dashboard call', _dashnodeStepTimeoutMs,
+    );
   } catch (error) {
     rejected = true;
     if (!String(error.message).includes('HTTP 500')) throw error;
