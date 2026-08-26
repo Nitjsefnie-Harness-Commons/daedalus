@@ -32,7 +32,8 @@ def _run_suite(suite, summaries):
     env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
     result = subprocess.run([sys.executable, str(suite)], cwd=ROOT,
                             stdin=subprocess.DEVNULL, check=False, env=env,
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace")
     return result, _read_summary(summary_path)
 
 
