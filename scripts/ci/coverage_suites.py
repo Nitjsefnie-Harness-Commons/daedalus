@@ -54,9 +54,14 @@ def main():
             }
             for future in as_completed(futures):
                 suite = futures[future]
-                returncode, output_path = future.result()
-                output = output_path.read_text(
-                    encoding="utf-8", errors="replace")
+                try:
+                    returncode, output_path = future.result()
+                    output = output_path.read_text(
+                        encoding="utf-8", errors="replace")
+                except Exception as exc:
+                    returncode = 1
+                    output = (
+                        f"LAUNCH FAILED: {type(exc).__name__}: {exc}\n")
                 relative = suite.relative_to(ROOT).as_posix()
                 block = f"::group::{relative}\n{output}"
                 if output and not output.endswith("\n"):
