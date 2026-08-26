@@ -227,8 +227,8 @@ def observe_worker_runtime(source_details, background_path=None):
     ]
     result = run_node_program(
         node, OBSERVER,
-        [str(background_path), 'worker-bindings', json.dumps(payload)],
-        cwd=ROOT)
+        [str(background_path), 'worker-bindings'], cwd=ROOT,
+        payload=json.dumps(payload))
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
