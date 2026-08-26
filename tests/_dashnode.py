@@ -13,6 +13,7 @@ from _repo import ROOT
 
 
 _DASHBOARD_STEP_TIMEOUT_S = 5
+_DASHBOARD_DRAIN_TIMEOUT_S = 0.2
 
 _DASHBOARD_PRELUDE = r"""
 const _dashnodeSetTimeout = globalThis.setTimeout;
@@ -52,6 +53,20 @@ def dashboard_child_timeout(bounded_steps,
     return step_timeout * (bounded_steps + 1)
 
 
+def _output_text(value):
+    if value is None:
+        return ''
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace')
+    return value
+
+
+def _latest_output(latest, earlier):
+    if latest not in (None, b'', ''):
+        return _output_text(latest)
+    return _output_text(earlier)
+
+
 def run_dashboard_node(source, *arguments, module=False, bounded_steps=1,
                        step_timeout=_DASHBOARD_STEP_TIMEOUT_S):
     """Run one dashboard JavaScript harness with captured output."""
@@ -75,11 +90,27 @@ def run_dashboard_node(source, *arguments, module=False, bounded_steps=1,
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
         process.kill()
-        stdout, stderr = process.communicate()
+        drain_timed_out = False
+        try:
+            stdout, stderr = process.communicate(
+                timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
+        except subprocess.TimeoutExpired as drain_failure:
+            drain_timed_out = True
+            stdout = _latest_output(drain_failure.stdout, failure.stdout)
+            stderr = _latest_output(drain_failure.stderr, failure.stderr)
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
+            try:
+                process.wait(timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                pass
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
         last_phase = phases[-1] if phases else 'none recorded'
         raise AssertionError(
             f'dashboard harness outer backstop timed out after {timeout}s; '
+            f'drain timed out: {"yes" if drain_timed_out else "no"}; '
             f'last phase: {last_phase}; stdout: {stdout!r}; '
             f'stderr: {stderr!r}'
         ) from failure
