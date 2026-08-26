@@ -28,9 +28,12 @@ _WORKER_NON_HANDLER_EXPORTS = (
     '_cdpError',
     '_cdpSessions',
     '_cdpSettle',
+    '_canUseMainWorldEval',
+    '_executeMainWorldEval',
     'handleHotfixReplay',
     '_netCaptures',
     '_releaseCdpObjects',
+    '_takeEvalRelay',
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
@@ -159,6 +162,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
          'clear-all-hotfixes'),
         ('worker/hotfixes.js', 'handleListHotfixes', 'list-hotfixes'),
         ('worker/hotfixes.js', 'handleSetPermanent', 'set-permanent'),
+        ('worker/evaluate.js', 'handleEval', 'eval'),
     ]
     duplicate_routes = sorted(
         route for route, count in Counter(routes).items() if count > 1)
