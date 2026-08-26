@@ -199,10 +199,14 @@ def test_diff_coverage_action_pin_lines_fit_79_columns(tmp):
         ROOT / '.github' / 'workflows' / 'coverage-comment.yml').read_text(
             encoding='utf-8')
     pins = (
-        (producer, 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'),
-        (producer, 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'),
-        (producer, 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'),
-        (commenter, 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'),
+        (producer, 'actions/checkout@'
+                   '3d3c42e5aac5ba805825da76410c181273ba90b1'),
+        (producer, 'actions/download-artifact@'
+                   '37930b1c2abaa49bbe596cd826c3c89aef350131'),
+        (producer, 'actions/upload-artifact@'
+                   '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'),
+        (commenter, 'actions/download-artifact@'
+                    '37930b1c2abaa49bbe596cd826c3c89aef350131'),
     )
     offenders = []
     for source, pin in pins:

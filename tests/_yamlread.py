@@ -389,7 +389,8 @@ def _sequence_scalar_values(lines, start, end, parent_indent, key):
         if raw_value.strip(' ')[:1] in ('>', '|'):
             entry = _Entry(index, field_indent, raw_value)
             _value_start, value_end = _section(lines, index, field_indent)
-            values.append(_scalar_value(lines, entry, value_end, f'step {key}'))
+            values.append(_scalar_value(
+                lines, entry, value_end, f'step {key}'))
         else:
             values.append(_decode_inline_scalar(raw_value, f'step {key}'))
         seen = True
