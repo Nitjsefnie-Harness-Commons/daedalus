@@ -244,6 +244,7 @@ def run_background_overlap(background, commands, order, result_base='',
                            token='overlap-token', wait_between=False,
                            inner_wait=_OVERLAP_INNER_WAIT_S):
     """Run same-id cookie commands through the shipped background worker."""
+    # Fabricated suite-runner trees copy _util.py without this helper.
     from _worker_sources import import_scripts_stub
 
     node = shutil.which('node')
