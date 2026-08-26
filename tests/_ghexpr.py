@@ -12,7 +12,9 @@ Mappings and sequences are admitted as truthy operands but refused in
 comparisons.  Numeric literals and numeric context values are refused, as are
 non-ASCII comparison strings.  Source length, token count, and nesting depth
 are explicitly bounded.  Everything outside this domain raises
-``ExpressionError`` rather than approximating GitHub Actions semantics.
+``ExpressionError`` rather than approximating GitHub Actions semantics.  The
+one missing-path value admitted is an unset ``steps.<id>.outputs.<name>``;
+Actions resolves that value to the empty string.
 """
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -277,8 +279,17 @@ class _Parser:
 
     def _lookup(self, path):
         value = self._context
-        for part in path:
+        for index, part in enumerate(path):
             if not isinstance(value, Mapping) or part not in value:
+                unset_output = (
+                    isinstance(value, Mapping)
+                    and index == 3
+                    and len(path) == 4
+                    and path[0] == 'steps'
+                    and path[2] == 'outputs'
+                )
+                if unset_output:
+                    return ''
                 raise ExpressionError(
                     'missing context path: ' + '.'.join(path))
             value = value[part]

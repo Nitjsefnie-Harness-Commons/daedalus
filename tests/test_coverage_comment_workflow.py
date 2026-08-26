@@ -217,10 +217,10 @@ def _job_condition(workflow, job):
 
 
 def _step_context(present, stale, run_state='success'):
-    """Build the explicit values used by the commenter step conditions."""
+    """Build condition values, omitting an unset artifact output."""
     return {
         'steps': {
-            'artifact': {'outputs': {'present': present}},
+            'artifact': {'outputs': {'present': present} if present else {}},
             'pr': {'outputs': {'stale': stale}},
         },
         'status': {
@@ -582,11 +582,11 @@ def test_missing_marker_step_owns_its_artifact_and_stale_conditions(tmp):
     """Invalidation is enabled only for a current run missing its artifact."""
     del tmp
     expression = _step_condition(_workflow(), 'Mark missing patch coverage')
-    assert evaluate_if(expression, _step_context('false', 'false')) is True
+    assert evaluate_if(expression, _step_context(None, 'false')) is True
     assert evaluate_if(expression, _step_context('true', 'false')) is False
-    assert evaluate_if(expression, _step_context('false', 'true')) is False
+    assert evaluate_if(expression, _step_context(None, 'true')) is False
     for run_state in ('failure', 'cancelled'):
-        context = _step_context('false', 'false', run_state)
+        context = _step_context(None, 'false', run_state)
         assert evaluate_if(expression, context) is False, (
             'Mark missing patch coverage', run_state, expression)
 
@@ -616,7 +616,7 @@ def test_blank_lines_cannot_hide_condition_terms(tmp):
     assert evaluate(_job_condition(workflow, 'comment'), job_context) is False
     assert evaluate_if(
         _step_condition(workflow, 'Mark missing patch coverage'),
-        _step_context('false', 'false')) is False
+        _step_context(None, 'false')) is False
     stale = _step_context('true', 'true')
     for step_name in ('Download the comment artifact',
                       'Post or update the pull request comment'):
