@@ -23,10 +23,32 @@ if (chrome.runtime) {
 
 
 def test_regex_declaration_text_is_not_a_binding(tmp):
-    """A regex body is not accepted as a declaration position."""
+    """Regex bodies cannot manufacture declaration positions."""
     del tmp
-    assert '_executionContext' not in _names(
-        'const harmlessRegex = /var _executionContext;/;')
+    regex_sources = (
+        'const harmless = /var _executionContext;/;',
+        'const harmless = /[;];var _executionContext;/;',
+        r'const harmless = /foo\/;var _executionContext;/;',
+        r'const harmless = /[\/;]var _executionContext;/gi;',
+        'const harmless =\n  /[;];var _executionContext;/;',
+        'if (ready) /[;];var _executionContext;/.test(value);',
+    )
+    for source in regex_sources:
+        assert '_executionContext' not in _names(source), source
+
+
+def test_division_does_not_hide_a_later_declaration(tmp):
+    """A division operator does not start a regex span."""
+    del tmp
+    source = """
+const quotient = numerator / denominator;
+const parenthesized = (numerator) / denominator;
+const stringRatio = 'value' / denominator;
+var _executionContext;
+"""
+    assert _names(source) == [
+        'quotient', 'parenthesized', 'stringRatio', '_executionContext',
+    ]
 
 
 def test_class_static_block_var_is_not_global(tmp):
@@ -138,6 +160,49 @@ for (const item of (() => { var iterableVar; return values; })()) {
     assert _names(source) == [
         'container', 'arrow', 'Holder', 'object',
     ]
+
+
+def test_function_variants_keep_vars_local(tmp):
+    """Accessors, async functions, and generators introduce local scopes."""
+    del tmp
+    source = """
+async function asyncFunction() { var asyncVar; }
+function* generatorFunction() { var generatorVar; }
+async function* asyncGeneratorFunction() { var asyncGeneratorVar; }
+class VariantHolder {
+  get value() { var classGetterVar; }
+  set value(input) { var classSetterVar; }
+  async method() { var classAsyncVar; }
+  *generate() { var classGeneratorVar; }
+}
+const variants = {
+  get value() { var objectGetterVar; },
+  set value(input) { var objectSetterVar; },
+  async method() { var objectAsyncVar; },
+  *generate() { var objectGeneratorVar; },
+};
+"""
+    declarations = _names(source)
+    local_vars = {
+        'asyncVar', 'generatorVar', 'asyncGeneratorVar',
+        'classGetterVar', 'classSetterVar', 'classAsyncVar',
+        'classGeneratorVar', 'objectGetterVar', 'objectSetterVar',
+        'objectAsyncVar', 'objectGeneratorVar',
+    }
+    assert local_vars.isdisjoint(declarations), declarations
+
+
+def test_nested_lexical_declarations_are_not_global(tmp):
+    """Nested const and let bindings stay out of the global inventory."""
+    del tmp
+    source = """
+function uniqueContainer() {
+  const nestedDeclaration = { propertyKey: 2 };
+  let nestedLet = nestedDeclaration;
+  return nestedLet;
+}
+"""
+    assert _names(source) == ['uniqueContainer']
 
 
 def test_property_keys_are_not_declarations(tmp):
