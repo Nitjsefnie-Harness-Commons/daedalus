@@ -79,7 +79,8 @@ def _scope_binds(function, name):
     reaches_handler = False
     while stack:
         node = stack.pop()
-        if isinstance(node, ast.Nonlocal) and name in node.names:
+        if isinstance(node, (ast.Nonlocal, ast.Global)) \
+                and name in node.names:
             reaches_handler = True
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                                ast.ClassDef)):
@@ -107,6 +108,9 @@ def _scope_binds(function, name):
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.For,
                                ast.AsyncFor)):
             binds = binds or name in _binding_names(node.target)
+        elif isinstance(node, ast.Delete):
+            binds = binds or any(
+                name in _binding_names(target) for target in node.targets)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             binds = binds or any(
                 item.optional_vars is not None
@@ -470,6 +474,13 @@ def test_cli_audit_reports_namespace_escapes(tmp):
 def test_cli_audit_requires_builtin_identity(tmp):
     for body, scope, expected in audit_support.BUILTIN_IDENTITY_GLOBAL_CASES:
         assert _audit_fake_handler(body, scope=scope) == list(expected), body
+
+
+def test_cli_audit_resolves_exact_builtin_aliases(tmp):
+    for case in audit_support.BUILTIN_IDENTITY_LOCAL_CASES:
+        name, body, scope, expected = case
+        assert _audit_fake_handler(
+            body, scope=scope) == list(expected), name
 
 
 def test_cli_audit_respects_inner_scope_bindings(tmp):
