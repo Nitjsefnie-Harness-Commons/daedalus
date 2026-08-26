@@ -288,3 +288,35 @@ EXPECTED_STEP_MAPPINGS = [
         "esac\n",
     },
 ]
+
+EXPECTED_PRIVILEGED_JOB_MAPPING = {
+    'if': "github.event.workflow_run.event == 'pull_request'",
+    'runs-on': 'ubuntu-latest',
+    'timeout-minutes': '10',
+    'steps': EXPECTED_STEP_MAPPINGS,
+}
+
+EXPECTED_WORKFLOW_MAPPING = {
+    'name': 'coverage comment',
+    'on': {
+        'workflow_run': {
+            'workflows': ['tests'],
+            'types': ['completed'],
+        },
+    },
+    'permissions': {
+        'pull-requests': 'write',
+        'actions': 'read',
+    },
+    'concurrency': {
+        'group': (
+            'coverage-comment-${{ '
+            'github.event.workflow_run.head_repository.full_name }}-${{ '
+            'github.event.workflow_run.head_branch }}'
+        ),
+        'cancel-in-progress': 'true',
+    },
+    'jobs': {
+        'comment': EXPECTED_PRIVILEGED_JOB_MAPPING,
+    },
+}

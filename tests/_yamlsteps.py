@@ -5,6 +5,7 @@ import re
 import _yamlread as _reader
 from _yamlscalar import (
     YAMLReadError,
+    _strip_inline_comment,
     decode_inline_scalar,
     split_mapping_field,
 )
@@ -49,6 +50,40 @@ def step_mappings(workflow, job):
     _reader._require_sequence_body(
         lines, *steps_body, steps.indent, f'job {job!r} steps')
     return _decode_step_sequence(lines, *steps_body, steps.indent)
+
+
+def workflow_mapping(workflow):
+    """Return the complete recursively decoded workflow mapping."""
+    lines = _reader._lines(workflow)
+    return _decode_complete_mapping(
+        lines, 0, len(lines), -1, 'workflow')
+
+
+def complete_job_mapping(workflow, job):
+    """Return every recursively decoded field in one named job."""
+    lines = _reader._lines(workflow)
+    jobs = _reader._decoded_mapping_entry(
+        lines, 0, len(lines), -1, 'jobs')
+    if jobs is None:
+        return None
+    if jobs.rest.strip(' '):
+        raise YAMLReadError('jobs is not a mapping')
+    jobs_body = _reader._section(
+        lines, jobs.index, jobs.indent)
+    _reader._require_mapping_body(
+        lines, *jobs_body, jobs.indent, 'jobs')
+    job_entry = _reader._decoded_mapping_entry(
+        lines, *jobs_body, jobs.indent, job)
+    if job_entry is None:
+        return None
+    if job_entry.rest.strip(' '):
+        raise YAMLReadError(f'job {job!r} is not a mapping')
+    job_body = _reader._section(
+        lines, job_entry.index, job_entry.indent)
+    _reader._require_mapping_body(
+        lines, *job_body, job_entry.indent, f'job {job!r}')
+    return _decode_complete_mapping(
+        lines, *job_body, job_entry.indent, f'job {job!r}')
 
 
 def _decode_step_sequence(lines, start, end, parent_indent):
@@ -178,3 +213,171 @@ def _decode_inline_value(raw_value, owner):
             or _PLAIN_WITH_SPACES.fullmatch(value)):
         return value
     return decode_inline_scalar(raw_value, owner)
+
+
+def _decode_complete_mapping(lines, start, end, parent_indent, owner):
+    """Decode every direct field and recursively decode its value."""
+    first = _reader._first_child(lines, start, end, parent_indent)
+    if first is None:
+        raise YAMLReadError(f'{owner} is not a mapping')
+    field_indent = _reader._indent(lines[first])
+    fields = []
+    for index in range(start, end):
+        if not _reader._meaningful(lines[index]):
+            continue
+        indent = _reader._indent(lines[index])
+        if indent < field_indent:
+            raise YAMLReadError(f'{owner} has inconsistent indentation')
+        if indent != field_indent:
+            continue
+        text, _ended = lines[index]
+        field = text[indent:]
+        if field.startswith('- '):
+            raise YAMLReadError(f'{owner} is not a mapping')
+        fields.append((index, field))
+    values = {}
+    for offset, (index, field) in enumerate(fields):
+        field_end = fields[offset + 1][0] if offset + 1 < len(
+            fields) else end
+        raw_key, raw_value = split_mapping_field(field, owner)
+        key = decode_inline_scalar(raw_key, f'{owner} key')
+        if key in values:
+            raise YAMLReadError(f'duplicate mapping key: {key}')
+        values[key] = _decode_complete_value(
+            lines, index, field_end, field_indent, key, raw_value,
+            owner)
+    return values
+
+
+def _decode_complete_value(
+        lines, index, end, indent, key, raw_value, owner):
+    """Decode one scalar, mapping, or sequence value recursively."""
+    value = _strip_inline_comment(raw_value.strip(' '))
+    if value[:1] in ('>', '|'):
+        entry = _reader._Entry(index, indent, raw_value)
+        return _reader._scalar_value(
+            lines, entry, end, f'{owner} {key}')
+    child = _reader._first_child(lines, index + 1, end, indent)
+    if value:
+        if child is not None:
+            raise YAMLReadError(
+                f'{owner} {key} has nested scalar content')
+        return _decode_complete_inline(
+            raw_value, f'{owner} value for {key!r}')
+    if child is None:
+        raise YAMLReadError(f'{owner} {key} has no value')
+    child_indent = _reader._indent(lines[child])
+    text, _ended = lines[child]
+    if text[child_indent:].startswith('- '):
+        return _decode_complete_sequence(
+            lines, index + 1, end, indent, f'{owner} {key}')
+    return _decode_complete_mapping(
+        lines, index + 1, end, indent, f'{owner} {key}')
+
+
+def _decode_complete_sequence(lines, start, end, parent_indent, owner):
+    """Decode every item in one block sequence."""
+    first = _reader._first_child(lines, start, end, parent_indent)
+    if first is None:
+        raise YAMLReadError(f'{owner} is not a sequence')
+    item_indent = _reader._indent(lines[first])
+    items = []
+    for index in range(start, end):
+        if not _reader._meaningful(lines[index]):
+            continue
+        indent = _reader._indent(lines[index])
+        if indent < item_indent:
+            raise YAMLReadError(f'{owner} has inconsistent indentation')
+        if indent != item_indent:
+            continue
+        text, _ended = lines[index]
+        field = text[indent:]
+        if not field.startswith('- '):
+            raise YAMLReadError(f'{owner} contains a non-item')
+        items.append(index)
+    decoded = []
+    for offset, index in enumerate(items):
+        item_end = items[offset + 1] if offset + 1 < len(
+            items) else end
+        text, _ended = lines[index]
+        raw_value = text[item_indent + 2:]
+        try:
+            split_mapping_field(raw_value, owner)
+        except YAMLReadError:
+            mapping_item = False
+        else:
+            mapping_item = True
+        if not mapping_item:
+            child = _reader._first_child(
+                lines, index + 1, item_end, item_indent)
+            if child is not None:
+                raise YAMLReadError(
+                    f'{owner} scalar item has nested content')
+            decoded.append(_decode_complete_inline(
+                raw_value, f'{owner} item'))
+            continue
+        decoded.append(_decode_complete_sequence_mapping(
+            lines, index, item_end, item_indent, owner))
+    return decoded
+
+
+def _decode_complete_sequence_mapping(
+        lines, index, end, item_indent, owner):
+    """Decode one mapping carried by a block-sequence item."""
+    text, _ended = lines[index]
+    field_indent = item_indent + 2
+    fields = [(index, text[field_indent:])]
+    for following in range(index + 1, end):
+        if not _reader._meaningful(lines[following]):
+            continue
+        indent = _reader._indent(lines[following])
+        if indent < field_indent:
+            raise YAMLReadError(
+                f'{owner} mapping has inconsistent indentation')
+        if indent == field_indent:
+            text, _ended = lines[following]
+            fields.append((following, text[indent:]))
+    values = {}
+    for offset, (field_index, field) in enumerate(fields):
+        field_end = fields[offset + 1][0] if offset + 1 < len(
+            fields) else end
+        raw_key, raw_value = split_mapping_field(field, owner)
+        key = decode_inline_scalar(raw_key, f'{owner} key')
+        if key in values:
+            raise YAMLReadError(f'duplicate mapping key: {key}')
+        values[key] = _decode_complete_value(
+            lines, field_index, field_end, field_indent, key,
+            raw_value, owner)
+    return values
+
+
+def _decode_complete_inline(raw_value, owner):
+    """Decode one bounded inline value used by complete mappings."""
+    value = _strip_inline_comment(raw_value.strip(' '))
+    if value == '{}':
+        return {}
+    if value == '[]':
+        return []
+    if value.startswith('['):
+        if not value.endswith(']') or any(
+                char in value[1:-1] for char in '[]{}'):
+            raise YAMLReadError(f'{owner} has an unsupported sequence')
+        body = value[1:-1]
+        if not body.strip(' '):
+            return []
+        items = body.split(',')
+        if any(not item.strip(' ') for item in items):
+            raise YAMLReadError(f'{owner} has an empty sequence item')
+        return [
+            _decode_complete_inline(item, f'{owner} item')
+            for item in items
+        ]
+    if value.startswith(("'", '"')):
+        return decode_inline_scalar(value, owner)
+    if not value or value.startswith(('&', '*', '!', '@', '`')):
+        raise YAMLReadError(f'{owner} has an unsupported plain scalar')
+    if ': ' in value or '\t' in value or any(
+            ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
+            for char in value):
+        raise YAMLReadError(f'{owner} has an unsupported plain scalar')
+    return value
