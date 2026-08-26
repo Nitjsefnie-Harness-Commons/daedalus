@@ -338,6 +338,43 @@ await bounded(work, 'work', 1);
         raise AssertionError('regex-literal harness was accepted')
 
 
+def test_harness_metadata_accepts_division_after_a_keyword_method(tmp):
+    """A control-keyword property name does not turn division into regex."""
+    del tmp
+    source = 'const half = obj.if(value) / 2;'
+    harness = _dashnode.DashboardNodeHarness(
+        source, bounded_steps=0, module=True)
+    assert harness.source == source
+
+
+def test_harness_metadata_refuses_a_regex_after_a_block(tmp):
+    """A regex expression after a statement block fails loudly."""
+    del tmp
+    source = "{} /abc/; await bounded(work, 'work', 1);"
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=1, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness bound count cannot inspect regex literal')
+    else:
+        raise AssertionError('post-block regex harness was accepted')
+
+
+def test_harness_metadata_refuses_an_exported_regex(tmp):
+    """A regex introduced by `export default` fails loudly."""
+    del tmp
+    source = 'export default /abc/;'
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=0, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness bound count cannot inspect regex literal')
+    else:
+        raise AssertionError('exported regex harness was accepted')
+
+
 def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
     """Supported source shapes in all shipped harnesses remain valid."""
     del tmp
