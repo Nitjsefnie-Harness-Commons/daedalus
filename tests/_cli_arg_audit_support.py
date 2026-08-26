@@ -187,9 +187,14 @@ DECIDED_FRAME_ROUTE_CASES = (
     ('', "_ = vars(sys)['_getframe']()"
      ".f_locals['args'].undeclared_probe", "vars(sys)['_getframe']()"),)
 COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
+    'COMPOSITE_ROUTES[~0]',
+    'COMPOSITE_ROUTES[not 0]',
     'COMPOSITE_ROUTES[--1]',
     'COMPOSITE_ROUTES[---1]',
     'COMPOSITE_ROUTES[+-1]',
+    'COMPOSITE_ROUTES[~-1]',
+    'COMPOSITE_ROUTES[-~0]',
+    'COMPOSITE_ROUTES[not not 0]',
     'COMPOSITE_ROUTES[0:2][-1]',
     'COMPOSITE_ROUTES[::2][-1]',
     'COMPOSITE_ROUTES[::-1][-1]',
@@ -199,11 +204,14 @@ COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = (
     'COMPOSITE_ROUTES[+True]',
     'COMPOSITE_ROUTES[-True]',
     'COMPOSITE_ROUTES[+False]',
+    'COMPOSITE_ROUTES[not False]',
     'COMPOSITE_ROUTES[True]',
     'COMPOSITE_ROUTES[:+True][-1]',
     'COMPOSITE_ROUTES[-True:][-1]',
     'COMPOSITE_ROUTES[+False:][-1]',
-    'COMPOSITE_ROUTES[:True][-1]',)
+    'COMPOSITE_ROUTES[:True][-1]',
+    'COMPOSITE_ROUTES[:~0][-1]',
+    'COMPOSITE_ROUTES[not True:][-1]',)
 RESOLVER_ONLY_FRAME_ROUTE_CASES = (
     ('exact classmethod route (resolver only)',
      'class FrameRoutes:\n'
@@ -556,6 +564,12 @@ def _is_integer_index(value):
 
 
 def _constant_value(node, unresolved):
+    """Resolve constants, slices, and all four Python unary operators.
+
+    ``UAdd`` and ``USub`` sign an integer, ``Invert`` complements an integer,
+    and ``Not`` converts any resolved literal to ``bool``. Operators recurse;
+    unsupported operands and nodes remain unresolved.
+    """
     if isinstance(node, ast.Constant):
         return node.value
     if isinstance(node, ast.Slice):
@@ -569,14 +583,20 @@ def _constant_value(node, unresolved):
                 return unresolved
             bounds.append(value)
         return slice(*bounds)
-    if (isinstance(node, ast.UnaryOp)
-            and isinstance(node.op, (ast.UAdd, ast.USub))):
+    if isinstance(node, ast.UnaryOp):
         value = _constant_value(node.operand, unresolved)
+        if value is unresolved:
+            return unresolved
+        if isinstance(node.op, ast.Not):
+            return not value
         if not _is_integer_index(value):
             return unresolved
         if isinstance(node.op, ast.USub):
             return -value
-        return +value
+        if isinstance(node.op, ast.UAdd):
+            return +value
+        if isinstance(node.op, ast.Invert):
+            return ~int(value)
     return unresolved
 
 
