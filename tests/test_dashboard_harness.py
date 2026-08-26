@@ -25,6 +25,24 @@ def _module(tmp, source, name='dashboard-module.js'):
     return path
 
 
+def _stalling_selector_module(tmp, stall_at):
+    source = _HOST_REALM_KEEPALIVE + f"""
+function stall() {{
+  globalThis.setTimeout = () => 1;
+}}
+
+export function bindTabSelector(_select, options) {{
+  let eventCount = 0;
+  if ({stall_at} === 0) stall();
+  options.bus.on(() => {{
+    eventCount += 1;
+    if (eventCount === {stall_at}) stall();
+  }});
+}}
+"""
+    return _module(tmp, source, name='selector.mjs')
+
+
 def _harness_failure(source, *arguments, **options):
     try:
         _dashnode.run_dashboard_node(source, *arguments, **options)
@@ -241,6 +259,16 @@ export function bindTabSelector() {}
     assert 'timed out waiting for dashboard module import' in failure, failure
     assert 'outer backstop' not in failure, failure
     assert '[phase] dashboard module import started' in failure, failure
+
+
+def test_initial_tab_selector_settle_is_bounded(tmp):
+    """The selector's initial asynchronous render has its own bound."""
+    failure = _harness_failure(
+        behaviour._TAB_SELECTOR_HARNESS,
+        _stalling_selector_module(tmp, 0), module=True,
+        bounded_steps=5, step_timeout=0.3)
+    assert 'timed out waiting for initial tab selector render' in failure, failure
+    assert 'outer backstop' not in failure, failure
 
 
 def main():
