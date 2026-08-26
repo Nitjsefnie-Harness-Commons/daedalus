@@ -3,8 +3,7 @@ DECLARED covers stored action destinations and parser defaults; GUARANTEED adds
 required and non-suppressed values. A required mutually exclusive group
 guarantees a destination only when every member stores that same non-SUPPRESS
 destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
-Direct plain and annotated namespace stores are neither reads nor escapes;
-stores never satisfy reads.
+Namespace stores are refused as namespace store escapes.
 Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
 enumerated expression node types | every other ``ast.expr`` node type is
 ``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
@@ -237,7 +236,7 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                     getattr(node._parent, 'ctx', None), ast.Store)
                     else 'namespace escape')
                 violations.append(f'{kind}: {ast.unparse(node._parent)}')
-            elif permitted[1] is not None:
+            else:
                 attribute, construct, needs_presence = permitted
                 rendered = ast.unparse(construct)
                 reads.setdefault(attribute, set()).add(rendered)
@@ -421,14 +420,16 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
 def test_cli_audit_store_semantics_are_fail_closed(tmp):
     probe = 'args.undeclared_probe'
     store = [f'namespace store escape: {probe}']
-    cases = (
-        (f'if False:\n    {probe} = False\n{probe}', [probe]),
-        (f'{probe}: bool = False', []), (f'{probe} = False', []),
-        (f'{probe} = {probe} or False', [probe]), (probe, [probe]),
-        (f'{probe} += 1', store), (f'{probe}, other = values', store),
-        (f'{probe} = False\n{probe}', [probe]))
-    for body, expected in cases:
-        assert _audit_fake_handler(body) == expected, body
+    inner = f'def inner():\n    global args\n    {probe}%s\ninner()'
+    store_only = (f'{probe} = False', f'{probe}: bool = False',
+                  f'{probe} += 1', f'{probe}, other = values',
+                  inner % ' = False', inner % ': bool = False')
+    for body, expected in tuple((body, store) for body in store_only) + (
+            (f'if False:\n    {probe} = False\n{probe}', store + [probe]),
+            (f'{probe} = {probe} or False', store + [probe]),
+            (probe, [probe]), (f'{probe} = False\n{probe}', store + [probe])):
+        assert (actual := _audit_fake_handler(body)) == expected, body
+        assert not any(' read ' in message for message in actual), body
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
@@ -690,9 +691,8 @@ def test_cli_handlers_read_only_declared_args(tmp):
             f'{command}: {attribute} absent from handler source')
         assert attribute in detail['declared'], (
             f'{command}: {attribute} not declared by parser')
-    details = '\n'.join(
-        f'{name}: {construct} accessed by {handler}'
-        for name, construct, handler in violations)
+    details = '\n'.join(f'{name}: {construct} in {handler}'
+                        for name, construct, handler in violations)
     assert not violations, f'CLI argument audit violations:\n{details}'
 
 
