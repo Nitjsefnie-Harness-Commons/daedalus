@@ -19,26 +19,28 @@ import segment_store
 job = 'unit-job'
 record_path = segment_store.record_path(job)
 record_path.parent.mkdir(parents=True)
-record_path.write_text(json.dumps({
-    'token': 'unit-token',
-    'sig': 'sig-good',
+record = segment_store.new_record('unit-token')
+record.update({
     'max_segment_index': 99,
     'max_segment_count': 7,
     'max_bytes': 4096,
-}), encoding='utf-8')
+})
+record.pop('stored_count')
+record.pop('stored_bytes')
+record_path.write_text(json.dumps(record), encoding='utf-8')
 loaded = segment_store.load_record(job)
-matching = segment_store.record_for_sig(job, 'sig-good')
+matching = segment_store.record_for_sig(job, loaded['sig'])
 wrong = segment_store.record_for_sig(job, 'sig-wrong')
 quota = segment_store.quota(loaded)
 usage_before = segment_store.usage(loaded)
 job_dir = Path(record_path).with_suffix('')
 job_dir.mkdir()
 (job_dir / '000001.ts').write_bytes(b'abcd')
-recounted = segment_store.recount_segments(job_dir)
+recounted = segment_store.recount(job_dir)
 segment_store.write_usage(job, *recounted)
 updated = segment_store.load_record(job)
 print(json.dumps({
-    'loaded_sig': loaded['sig'],
+    'sig_length': len(loaded['sig']),
     'matching_token': matching['token'],
     'wrong': wrong,
     'quota': quota,
@@ -63,7 +65,7 @@ def test_segment_store_owns_record_and_quota_accounting(tmp):
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     answer = json.loads(proc.stdout)
     assert answer == {
-        'loaded_sig': 'sig-good',
+        'sig_length': 43,
         'matching_token': 'unit-token',
         'wrong': None,
         'quota': [99, 7, 4096],
