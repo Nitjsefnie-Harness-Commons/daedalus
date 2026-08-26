@@ -106,24 +106,20 @@ def _comprehension_shadows(comprehension, name, child=None,
     if child in generators:
         end = generators.index(child) + (not before_target)
         generators = generators[:end]
-    return any(
-        name in _binding_names(generator.target)
-        for generator in generators)
+    return any(name in _binding_names(item.target)
+               for item in generators)
 
 
 def _callable_header_nodes(nested):
     yield from getattr(nested, 'decorator_list', ())
     arguments = nested.args
     yield from arguments.defaults
-    yield from (default for default in arguments.kw_defaults
-                if default is not None)
+    yield from filter(None, arguments.kw_defaults)
     parameters = (*arguments.posonlyargs, *arguments.args,
                   *arguments.kwonlyargs, arguments.vararg, arguments.kwarg)
-    yield from (parameter.annotation for parameter in parameters
-                if parameter is not None
-                and parameter.annotation is not None)
-    returns = getattr(nested, 'returns', None)
-    if returns is not None:
+    yield from (item.annotation for item in parameters
+                if item is not None and item.annotation is not None)
+    if (returns := getattr(nested, 'returns', None)) is not None:
         yield returns
 
 
@@ -424,6 +420,10 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
     for body in ('args.undeclared_probe = False\nargs.undeclared_probe',
                  'args.undeclared_probe = False'):
         assert _audit_fake_handler(body) == [], body
+    read = 'args.undeclared_probe'
+    for body in (read, f'{read}\nargs.undeclared_probe = False'):
+        violations = _audit_fake_handler(body)
+        assert violations == [read], (body, violations)
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
