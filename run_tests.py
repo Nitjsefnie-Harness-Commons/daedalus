@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -26,40 +27,60 @@ def _read_summary(path):
     return summary
 
 
+def _run_suite(suite, summaries):
+    summary_path = Path(summaries) / f"{suite.stem}.json"
+    env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
+    result = subprocess.run([sys.executable, str(suite)], cwd=ROOT,
+                            stdin=subprocess.DEVNULL, check=False, env=env,
+                            capture_output=True, text=True)
+    return result, _read_summary(summary_path)
+
+
 def main() -> int:
     suites = sorted((ROOT / "tests").glob("test_*.py"))
     if not suites:
         print("no suites found", file=sys.stderr)
         return 1
+    with tempfile.TemporaryDirectory() as summaries:
+        workers = min(len(suites), os.cpu_count() or 1)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_run_suite, suite, summaries): suite
+                for suite in suites
+            }
+            results = {}
+            for future in as_completed(futures):
+                suite = futures[future]
+                result, summary = future.result()
+                output = result.stdout + result.stderr
+                block = f"=== {suite.name} ===\n{output}"
+                if not block.endswith("\n"):
+                    block += "\n"
+                print(block, end="", flush=True)
+                results[suite] = result.returncode, summary
+
     failed, empty, unrun = [], [], []
     passed = skipped = 0
-    with tempfile.TemporaryDirectory() as summaries:
-        for suite in suites:
-            print(f"=== {suite.name} ===", flush=True)
-            summary_path = Path(summaries) / f"{suite.stem}.json"
-            env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
-            result = subprocess.run([sys.executable, str(suite)], cwd=ROOT,
-                                    stdin=subprocess.DEVNULL, check=False,
-                                    env=env)
-            summary = _read_summary(summary_path)
-            if result.returncode != 0 or summary is None:
-                # A suite that died before reporting its counts is not a
-                # verified one either, whatever its exit code said.
-                failed.append(suite.name)
-                continue
-            passed += summary["passed"]
-            skipped += summary["skipped"]
-            if summary["passed"] == 0:
-                # A suite that named an external dependency it needs is the
-                # one case where nothing running is a fact about the machine
-                # rather than about the suite. It is still not coverage, so
-                # it is reported by name below rather than folded into the
-                # pass line.
-                target = unrun if summary["requires"] else empty
-                target.append(
-                    f'{suite.name} ({summary["skipped"]} skipped'
-                    + (f', needs {summary["requires"]}'
-                       if summary["requires"] else '') + ')')
+    for suite in suites:
+        returncode, summary = results[suite]
+        if returncode != 0 or summary is None:
+            # A suite that died before reporting its counts is not a
+            # verified one either, whatever its exit code said.
+            failed.append(suite.name)
+            continue
+        passed += summary["passed"]
+        skipped += summary["skipped"]
+        if summary["passed"] == 0:
+            # A suite that named an external dependency it needs is the
+            # one case where nothing running is a fact about the machine
+            # rather than about the suite. It is still not coverage, so
+            # it is reported by name below rather than folded into the
+            # pass line.
+            target = unrun if summary["requires"] else empty
+            target.append(
+                f'{suite.name} ({summary["skipped"]} skipped'
+                + (f', needs {summary["requires"]}'
+                   if summary["requires"] else '') + ')')
     print()
     if failed:
         print("FAILED: " + ", ".join(failed))

@@ -58,6 +58,28 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
+_RENDEZVOUS_SUITE = """import os, sys, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _util
+
+
+def test_rendezvous(d):
+    marks = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'marks')
+    os.makedirs(marks, exist_ok=True)
+    marker = os.path.join(marks, os.path.basename(__file__))
+    with open(marker, 'w', encoding='utf-8'):
+        pass
+    deadline = time.monotonic() + 30
+    while len(os.listdir(marks)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if len(os.listdir(marks)) < 2:
+        raise AssertionError('no sibling suite was running concurrently')
+
+
+raise SystemExit(_util.runner(_util.collect(dict(globals()))))
+"""
+
+
 def _runner_tree(tmp, suites, under='.'):
     """A copy of run_tests.py over fabricated suites, run where it stands.
 
@@ -131,6 +153,19 @@ def test_the_aggregate_carries_the_totals_it_verified(tmp):
                                     result.stderr)
     assert 'OVERALL: PASS' in result.stdout, result.stdout
     assert '1 passed' in result.stdout.rsplit('OVERALL', 1)[-1], result.stdout
+
+
+def test_suites_run_concurrently(tmp):
+    """Each suite must observe its sibling while both are still running."""
+    if (os.cpu_count() or 1) < 2:
+        _util.skip('parallel suite test requires at least two CPUs')
+    result = _runner_tree(tmp, {
+        'test_rendezvous_a.py': _RENDEZVOUS_SUITE,
+        'test_rendezvous_b.py': _RENDEZVOUS_SUITE,
+    })
+    assert 'OVERALL: PASS' in result.stdout, result.stdout
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr)
 
 
 def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
