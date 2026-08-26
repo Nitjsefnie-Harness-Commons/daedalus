@@ -306,6 +306,55 @@ await bounded(first, 'first', 1);
         raise AssertionError('commented dashboard bound was counted')
 
 
+def test_harness_metadata_refuses_a_template_expression(tmp):
+    """Template-expression code is outside the comment blanker's model."""
+    del tmp
+    source = "const value = `${/* await bounded(x, 'y', 1) */ 1}`;"
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=1, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness bound count cannot inspect '
+            'template expression')
+    else:
+        raise AssertionError('template-expression harness was accepted')
+
+
+def test_harness_metadata_refuses_a_regex_literal(tmp):
+    """Regex source is outside the comment blanker's lexical model."""
+    del tmp
+    source = r"""
+const slashOrStar = /[/*]/;
+await bounded(work, 'work', 1);
+"""
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=0, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness bound count cannot inspect regex literal')
+    else:
+        raise AssertionError('regex-literal harness was accepted')
+
+
+def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
+    """Supported source shapes in all shipped harnesses remain valid."""
+    del tmp
+    shipped = (
+        behaviour._CONTENT_KEEPALIVE_HARNESS,
+        behaviour._DASHBOARD_CONSUME_HARNESS,
+        behaviour._DASHBOARD_WORLD_HARNESS,
+        behaviour._TAB_SELECTOR_HARNESS,
+    )
+    rebuilt = tuple(
+        _dashnode.DashboardNodeHarness(
+            harness.source, harness.bounded_steps, harness.module)
+        for harness in shipped
+    )
+    assert rebuilt == shipped
+
+
 def test_completed_steps_that_do_not_exit_report_the_last_phase(tmp):
     """The outer backstop distinguishes finished work from a hung step."""
     module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
