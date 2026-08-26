@@ -216,9 +216,9 @@ async function waitForResultConsume() {
 
 _OVERLAP_INNER_WAIT_S = 15
 
-# Publication and successful exit allow normal process work and may move
-# together. Failure cleanup only waits briefly for an ordinary exit, while a
-# killed client's inherited pipes get a full release window.
+# Publication and healthy exits may move together. A killed client's pipes get
+# enough time that expiry means a broken drain, not a busy runner; the explicit
+# parameter exists only to force that diagnostic branch deterministically.
 _CLIENT_COMMAND_WAIT_S = 15
 _SUCCESSFUL_CLIENT_GRACE_S = 20
 _FAILED_CLIENT_GRACE_S = 1
