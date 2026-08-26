@@ -383,6 +383,7 @@ def test_checkout_reader_accepts_schema_string_plain_refs(tmp):
         '1e3', '1E+3', '1.0e3',
         '2026-8-6', '2026-08-6', '2026-08-26T12:30',
         'v1.2.3', 'main', 'release-2026',
+        '-feature', '?query', ':value', 'foo:bar', 'foo#bar',
     )
     failures = []
     for spelling in spellings:
@@ -421,6 +422,7 @@ def test_checkout_reader_refuses_schema_typed_plain_refs(tmp):
         '2026-08-26', '2026-8-6T1:02:03',
         '2026-08-26 12:30:00Z',
         '2026-08-26T12:30:00+02:00',
+        '<<', '=',
     )
     failures = []
     for spelling in spellings:
@@ -432,6 +434,33 @@ def test_checkout_reader_refuses_schema_typed_plain_refs(tmp):
                 failures.append((spelling, str(error)))
         else:
             failures.append((spelling, actual))
+    assert failures == [], failures
+
+
+def test_checkout_reader_refuses_invalid_plain_scalar_syntax(tmp):
+    """YAML-forbidden indicators and colon separators are not refs."""
+    del tmp
+    prefix = (
+        'name: syntax oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n')
+    spellings = (
+        ',value', ']value', '}value', '%value', '@value', '`value',
+        ': value', 'foo: bar', 'foo:',
+    )
+    failures = []
+    for spelling in spellings:
+        workflow = prefix + f'          ref: {spelling}\n'
+        try:
+            actual = _wfcheckout.checkout_refs(workflow)
+        except _wfcheckout.YAMLReadError:
+            continue
+        failures.append((spelling, actual))
     assert failures == [], failures
 
 
