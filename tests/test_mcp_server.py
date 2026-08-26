@@ -650,29 +650,25 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
 
 
 def test_mcp_and_bridge_use_one_env_parser(tmp):
-    """Both front ends expose the one environment parser implementation."""
     _need_deps()
     import env_config
 
     mod = _load_mcp('http://127.0.0.1:1')
-    previous_dir = os.environ.get('DAEDALUS_DIR')
-    previous_port = os.environ.get('DAEDALUS_PORT')
+    saved = {key: os.environ.get(key)
+             for key in ('DAEDALUS_DIR', 'DAEDALUS_PORT')}
     os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
     os.environ['DAEDALUS_PORT'] = '0'
-    Path(os.environ['DAEDALUS_DIR']).mkdir(parents=True, exist_ok=True)
     try:
         server = _util.load(
             _util.ROOT / 'server.py', 'server_for_env_contract')
     finally:
-        for key, value in (('DAEDALUS_DIR', previous_dir),
-                           ('DAEDALUS_PORT', previous_port)):
+        for key, value in saved.items():
             if value is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
 
-    assert mod.env_int is env_config.env_int
-    assert server.env_int is env_config.env_int
+    assert mod.env_int is server.env_int is env_config.env_int
     cases = (
         ('DAEDALUS_CONTRACT_A', 5, 0, None),
         ('DAEDALUS_CONTRACT_B', 8086, 0, 65535),
