@@ -484,7 +484,8 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
         tmp, 'Post or update the pull request comment', state=[],
         head_sha='A', current_head='A', body='**100.0%**')
     assert posted.returncode == 0, (posted.stdout, posted.stderr)
-    assert len(_writes(calls)) == 1, calls.read_text(encoding='utf-8')
+    assert len(_writes(calls)) == 1 and \
+        'Patch coverage for commit A.' in state[0]['body'], state
     marked, state, calls, _output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=state,
         head_sha='B', current_head='B')
@@ -533,21 +534,24 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
     assert evaluate(condition, non_pull_request) is False, condition
 
 
-def test_a_rerun_of_a_cannot_overwrite_newer_b(tmp):
-    """A stale rerun exits before any comment write."""
-    posted, state, calls, _output = _run_comment_block(
-        tmp, 'Post or update the pull request comment', state=[],
-        head_sha='B', current_head='B', body='**50.0%**')
-    assert posted.returncode == 0, (posted.stdout, posted.stderr)
-    stale, _state, calls, output = _run_comment_block(
-        tmp, 'Resolve the target pull request from the event', state=state,
-        head_sha='A', current_head='B')
-    assert stale.returncode == 0, (stale.stdout, stale.stderr)
-    assert 'stale=true' in output.read_text(encoding='utf-8'), \
-        output.read_text(encoding='utf-8')
-    assert 'number=' not in output.read_text(encoding='utf-8'), \
-        output.read_text(encoding='utf-8')
-    assert len(_writes(calls)) == 0, calls.read_text(encoding='utf-8')
+def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
+    """Both writers stop if the pull request advances after resolution."""
+    resolved, _state, _calls, output = _run_comment_block(
+        tmp, 'Resolve the target pull request from the event', state=[],
+        head_sha='A' * 40, current_head='A' * 40)
+    assert resolved.returncode == 0, (resolved.stdout, resolved.stderr)
+    assert 'stale=false' in output.read_text(encoding='utf-8')
+    current_state = [{'id': 1, 'user': {'login': 'github-actions[bot]'},
+                      'body': '<!-- daedalus-diff-coverage -->'}]
+    for step_name in ('Post or update the pull request comment',
+                      'Mark missing patch coverage'):
+        stale, _state, calls, _output = _run_comment_block(
+            tmp, step_name, state=current_state, head_sha='A' * 40,
+            current_head='B' * 40)
+        call_text = calls.read_text(encoding='utf-8')
+        assert stale.returncode == 0, (stale.stdout, stale.stderr)
+        assert _writes(calls) == [], call_text
+        assert 'repos/owner/repo/pulls/170' in call_text, call_text
 
 
 def test_commenter_runs_every_completed_run_and_orders_stale_gate(
