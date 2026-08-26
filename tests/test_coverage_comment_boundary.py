@@ -13,7 +13,6 @@ import _workflowrun  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _coverage_comment_steps import EXPECTED_STEP_MAPPINGS  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _workflowrun import recorded_writes, run_step  # noqa: E402
 from _yamlread import YAMLReadError, top_level_mapping  # noqa: E402
 from _yamlsteps import step_mappings  # noqa: E402
 import test_coverage_comment_workflow as commenter  # noqa: E402
@@ -180,7 +179,7 @@ def _run_hostile_post(tmp, label, body):
     post = next(
         step for step in steps
         if step.get('name') == 'Post or update the pull request comment')
-    result = run_step(workdir, post, env)
+    result = _workflowrun.run_step(workdir, post, env)
     state = json.loads(state_path.read_text(encoding='utf-8'))
     return result, state, calls_path, workdir
 
@@ -197,7 +196,7 @@ def test_hostile_artifact_bodies_remain_inert_text(tmp):
         assert len(state) == 1, state
         assert state[0]['body'] == _COMMENT_PREFIX + body, (
             label, state[0]['body'], body)
-        writes = recorded_writes(calls)
+        writes = _workflowrun.recorded_writes(calls)
         assert len(writes) == 1, calls.read_text(encoding='utf-8')
 
 
