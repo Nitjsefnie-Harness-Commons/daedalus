@@ -11,13 +11,23 @@ import subprocess
 from _repo import ROOT
 
 
+_DASHBOARD_PRELUDE = r"""
+function phase(label) {
+  process.stderr.write('[phase] ' + label + '\n');
+}
+"""
+
+
 def run_dashboard_node(source, *arguments, module=False, timeout=30):
     """Run one dashboard JavaScript harness with captured output."""
     node = shutil.which('node')
     if not node:
         raise AssertionError('node is required to execute dashboard harnesses')
     options = ['--input-type=module'] if module else []
-    command = [node, *options, '--eval', source, *map(str, arguments)]
+    command = [
+        node, *options, '--eval', _DASHBOARD_PRELUDE + source,
+        *map(str, arguments),
+    ]
     process = subprocess.Popen(
         command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True)
