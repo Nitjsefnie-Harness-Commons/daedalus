@@ -12,10 +12,7 @@ from _boundary import (observe_extension_worker_paths,  # noqa: E402
                        run_extension_capability_routes)
 from _jsread import js_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _worker_declarations import (  # noqa: E402
-    top_level_declarations as _top_level_declarations,
-    top_level_reassigns as _top_level_reassigns,
-)
+from _worker_runtime import observe_worker_runtime  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
 
 _JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
@@ -43,12 +40,27 @@ def _worker_sources():
 
 
 def _observed_worker_sources():
-    background = ROOT / 'extension' / 'background.js'
-    paths = (background, *observe_extension_worker_paths())
     return [
         (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
-        for path in paths
+        for path in worker_source_paths()
     ]
+
+
+def _runtime_observations(watched_by_source=None):
+    if watched_by_source is None:
+        watched_by_source = {}
+    details = []
+    for relative, source in _observed_worker_sources():
+        details.append({
+            'path': ROOT / relative,
+            'globals': _directive_names(source, 'global'),
+            'watched': watched_by_source.get(relative, ()),
+        })
+    observed = observe_worker_runtime(details)
+    return {
+        Path(path).relative_to(ROOT).as_posix(): details
+        for path, details in observed['sources'].items()
+    }, observed['shared']
 
 
 def _directive_entries(source, directive):
@@ -88,6 +100,95 @@ def _masked_code_mentions(masked_source, name):
     return None
 
 
+def test_runtime_observer_uses_javascript_global_scope(tmp):
+    """Runtime scope, not a declaration lexer, decides binding ownership."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    collisions = (
+        'var { _executionContext } = '
+        '{ _executionContext: function () {} };',
+        'let a = 1, _executionContext = 2;',
+        'for (var _executionContext of [function () {}]) {}',
+        'if (chrome.runtime) { var _executionContext = function () {}; }',
+        'if (chrome.runtime) { var _executionContext\n}',
+        'let q = 1; q++ / d; var _executionContext = n / d;',
+        'let q = 1; q-- / d; var _executionContext = n / d;',
+        'const q = class {} / d; var _executionContext = n / d;',
+        'const q = function () {} / d; '
+        'var _executionContext = n / d;',
+    )
+    details = []
+    collision_paths = []
+    for index, source in enumerate(collisions):
+        path = root / f'collision-{index}.js'
+        path.write_text(source + '\n', encoding='utf-8')
+        collision_paths.append(path)
+        details.append({
+            'path': path, 'globals': {'d', 'n'}, 'watched': (),
+        })
+
+    harmless = root / 'harmless.js'
+    harmless.write_text(r"""
+function outer() {
+  var _executionContext;
+  function nested() { var _executionContext; }
+  const nestedConst = 1;
+  let nestedLet = nestedConst;
+}
+(function () { var _executionContext; }());
+const arrow = () => { var _executionContext; };
+class Holder {
+  static { var _executionContext; }
+  method() { var _executionContext; }
+  get value() { var _executionContext; }
+  set value(input) { var _executionContext; }
+  async run() { var _executionContext; }
+  *generate() { var _executionContext; }
+}
+const object = {
+  if() { var _executionContext; },
+  while() { var _executionContext; },
+  for() { var _executionContext; },
+  switch() { var _executionContext; },
+  with() { var _executionContext; },
+  catch() { var _executionContext; },
+  _executionContext: 1,
+};
+const stringValue = 'var _executionContext;';
+const templateValue = `var _executionContext;`;
+const regexValue = /[\/;]var _executionContext;/;
+// var _executionContext;
+for (const item of (() => {
+  var _executionContext;
+  return [];
+})()) { void item; }
+""", encoding='utf-8')
+    details.append({'path': harmless, 'globals': (), 'watched': ()})
+
+    observed = observe_worker_runtime(
+        details, background_path=background)['sources']
+    for path in collision_paths:
+        assert '_executionContext' in observed[str(path)]['bindings'], path
+    assert '_executionContext' not in observed[str(harmless)]['bindings']
+
+
+def test_runtime_observer_rejects_handler_reassignment(tmp):
+    """Handler instantiation and later writes are separate runtime events."""
+    path = Path(tmp) / 'handler.js'
+    path.write_text("""
+function handleCookies() {}
+handleCookies = function replacement() {};
+""", encoding='utf-8')
+    observed = observe_worker_runtime([{
+        'path': path, 'globals': (), 'watched': {'handleCookies'},
+    }], background_path=path)['sources'][str(path)]
+    assert observed['events']['handleCookies'] == {
+        'declarations': 1, 'writes': 1,
+    }
+
+
 def test_each_worker_capability_lives_in_its_own_module(tmp):
     """Every exported handler has one replaceable runtime dispatch route.
 
@@ -101,9 +202,9 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     unloaded module is also refused. Command types are runtime-probe inputs,
     not an exhaustive inventory of the dispatch surface.
 
-    The probe checks replaceability first; afterwards, text checks require one
-    statement-position function declaration and reject recognised top-level
-    reassignment.
+    The probe checks replaceability first. A separate runtime observation
+    requires one function-instantiation write before source execution and no
+    later assignment to the published handler.
 
     Routing is observed when the sentinel is called; the original handler's
     promise is deliberately not awaited because this guard checks routing, not
@@ -117,8 +218,6 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     also passes, because the module is genuinely on the runtime route.
     """
     del tmp
-    background = (ROOT / 'extension' / 'background.js').read_text(
-        encoding='utf-8')
     routes = [
         ('worker/capture.js', 'handleScreenshot', 'screenshot'),
         ('worker/cookies.js', 'handleCookies', 'cookies'),
@@ -143,9 +242,6 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         ('worker/netcapture.js', 'handleNetCaptureStop', 'net-capture-stop'),
         ('worker/netcapture.js', 'handleNetCaptureGet', 'net-capture-get'),
     ]
-    background_names = {
-        name for name, _, _ in _top_level_declarations(background)
-    }
     duplicate_routes = sorted(
         route for route, count in Counter(routes).items() if count > 1)
     assert not duplicate_routes, (
@@ -224,16 +320,32 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         f'worker handlers must have exactly one owning module: '
         f'{duplicate_owners}')
     published_handlers = sorted(owners)
+    watched_by_source = {
+        f'extension/{details["relative"]}': details['handlers']
+        for details in module_details
+    }
+    runtime, shared = _runtime_observations(watched_by_source)
+    assert shared['error'] is None, shared
+    isolated_errors = {
+        relative: {
+            'bindings': details['bindingExecutionError'],
+            'handlers': details['handlerExecutionError'],
+        }
+        for relative, details in runtime.items()
+        if (details['bindingExecutionError'] is not None
+            or details['handlerExecutionError'] is not None)
+    }
+    assert not isolated_errors, isolated_errors
+    background_names = set(
+        runtime['extension/background.js']['bindings'])
 
     for details in module_details:
         relative = details['relative']
-        module = details['source']
         module_routes = [
             (symbol, command_type)
             for route_module, symbol, command_type in routes
             if route_module == relative
         ]
-        declarations = _top_level_declarations(module)
         handler_counts = Counter(details['handlers'])
         route_counts = Counter(symbol for symbol, _ in module_routes)
         uncovered = sorted((handler_counts - route_counts).elements())
@@ -255,21 +367,17 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         for (symbol, command_type), observed in zip(
                 module_routes, observations):
             contract = (
-                f'{relative} must publish {symbol} as one unreassigned '
-                'top-level function declaration so the classic-worker route '
-                'probe can replace it')
+                f'{relative} must publish {symbol} through one function '
+                'declaration and must not reassign it during source '
+                'execution so the classic-worker route probe can replace it')
             assert observed['symbol'] == symbol, observed
             assert (observed['available'] and observed['replaceable']), (
                 contract)
-            functions = [
-                start for name, kind, start in declarations
-                if name == symbol and kind == 'function'
-            ]
-            valid_declaration = (
-                len(functions) == 1
-                and not _top_level_reassigns(module, symbol, functions[0])
-            )
-            assert valid_declaration, contract
+            source_runtime = runtime[f'extension/{relative}']
+            assert symbol in source_runtime['bindings'], contract
+            assert source_runtime['events'][symbol] == {
+                'declarations': 1, 'writes': 0,
+            }, contract
             assert symbol not in background_names, (
                 f'background.js still declares {symbol} at top level')
             assert observed == {
@@ -321,18 +429,24 @@ def test_capability_batch_restores_every_original_handler(tmp):
 
 
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
-    """Best-effort text check for classic-worker directive typos.
+    """Best-effort directive check against runtime worker symbols.
 
     Export-derived exact route-symbol coverage and the per-handler runtime
     probe are the primary guarantee. Command types remain probe input rather
     than an exhaustive dispatch inventory. This secondary graph catches
-    ordinary typos cheaply, but reassignment detection is position- and
-    spelling-dependent, an object method key can look like a consumer, and
-    `js_mask` does not parse regex literals (issue 198). The platform allowlist
-    is trusted input, not proof of a platform global.
+    ordinary typos cheaply. Usage remains a best-effort text check: an object
+    method key can look like a consumer, and `js_mask` does not parse regex
+    literals (issue 198). The platform allowlist is trusted input, not proof
+    of a platform global.
     """
     del tmp
     worker_sources = _worker_sources()
+    runtime, shared = _runtime_observations()
+    assert shared['error'] is None, shared
+    assert all(
+        details['bindingExecutionError'] is None
+        and details['handlerExecutionError'] is None
+        for details in runtime.values()), runtime
     source_details = [
         {
             'relative': relative,
@@ -340,9 +454,7 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
             'masked': js_mask(source),
             'consumed': _directive_names(source, 'global'),
             'exported': _directive_names(source, 'exported'),
-            'declared': {
-                name for name, _, _ in _top_level_declarations(source)
-            },
+            'declared': set(runtime[relative]['bindings']),
         }
         for relative, source in worker_sources
     ]
@@ -407,8 +519,9 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
 def test_classic_worker_top_level_declarations_are_unique(tmp):
     """Reject collisions in the classic worker's shared global namespace.
 
-    The exception tuple is narrow, duplicate-sensitive reviewed input. This
-    statement reader inherits `js_mask`'s regex-literal limit (issue 198).
+    The exception tuple is narrow, duplicate-sensitive reviewed input. Source
+    is executed in isolated contexts for ownership and in load order for
+    lexical redeclaration errors; no declaration grammar is maintained here.
     """
     del tmp
     duplicate_exceptions = sorted(
@@ -420,9 +533,10 @@ def test_classic_worker_top_level_declarations_are_unique(tmp):
         'worker redeclaration exceptions contain duplicate entries: '
         f'{duplicate_exceptions}')
 
+    runtime, shared = _runtime_observations()
     declaration_sources = {}
-    for relative, source in _observed_worker_sources():
-        for name, _kind, _start in _top_level_declarations(source):
+    for relative, details in runtime.items():
+        for name in details['bindings']:
             declaration_sources.setdefault(name, []).append(relative)
     collisions = {
         name: sources
@@ -441,6 +555,14 @@ def test_classic_worker_top_level_declarations_are_unique(tmp):
     }
     assert not unexpected, (
         f'classic worker top-level declarations collide: {unexpected}')
+    if shared['error'] is not None:
+        match = re.search(
+            r"Identifier '([^']+)' has already been declared",
+            shared['error']['message'])
+        allowed = match and match.group(1) in exceptions
+        assert allowed, (
+            f'classic worker load failed in {shared["error"]["source"]}: '
+            f'{shared["error"]}')
 
 
 def test_worker_imports_match_worker_modules(tmp):
