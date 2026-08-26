@@ -1,5 +1,6 @@
 """Execute decoded workflow shell steps in contract tests."""
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,12 @@ def run_step(workdir, step, env):
         part.replace('{0}', str(script_path))
         for part in shlex.split(template)
     ]
+    program = command[0]
+    executable = shutil.which(program)
+    if executable is None:
+        raise FileNotFoundError(
+            f'workflow shell executable not found on PATH: {program}')
+    command[0] = executable
     child_env = {
         name: value for name, value in env.items()
         if not name.startswith('COVERAGE_')
