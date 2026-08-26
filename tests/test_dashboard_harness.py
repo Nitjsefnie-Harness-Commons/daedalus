@@ -132,6 +132,15 @@ phase('dashboard harness finished');
     assert '[phase] dashboard module imported' in failure, failure
 
 
+def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
+    """A child blocked before its body reports that no phase was emitted."""
+    del tmp
+    failure = _harness_failure(
+        'for (;;) {}', bounded_steps=0, step_timeout=0.1)
+    assert 'outer backstop timed out after 0.1s' in failure, failure
+    assert 'last phase: none recorded' in failure, failure
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 
