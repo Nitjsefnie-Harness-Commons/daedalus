@@ -22,9 +22,10 @@ def run_node_program(node, program, arguments, *, cwd, payload=None,
     """Run a Node program from a closed, automatically cleaned file."""
     with tempfile.TemporaryDirectory(prefix='daedalus-node-') as directory:
         program_path = Path(directory) / 'program.js'
-        prologue = 'process.argv.splice(1, 1);\n'
+        prologue = 'process.argv.splice(1, 1);'
         if payload is not None:
-            prologue += f'process.argv.push({json.dumps(payload)});\n'
+            prologue += f' process.argv.push({json.dumps(payload)});'
+        prologue += '\n'
         program_path.write_text(
             prologue + program, encoding='utf-8')
         return subprocess.run(
