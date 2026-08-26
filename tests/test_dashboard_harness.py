@@ -215,6 +215,20 @@ export function runCommand() {
     assert '[phase] dashboard call started' in failure, failure
 
 
+def test_world_formatter_import_that_never_settles_names_import(tmp):
+    """The formatter harness bounds its own pending dashboard import."""
+    module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
+await new Promise(() => {});
+export function formatEvalWorld() {}
+""")
+    failure = _harness_failure(
+        behaviour._DASHBOARD_WORLD_HARNESS, module,
+        bounded_steps=1, step_timeout=0.5)
+    assert 'timed out waiting for dashboard module import' in failure, failure
+    assert 'outer backstop' not in failure, failure
+    assert '[phase] dashboard module import started' in failure, failure
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 

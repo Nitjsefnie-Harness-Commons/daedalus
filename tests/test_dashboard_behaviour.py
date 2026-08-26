@@ -209,7 +209,8 @@ const fs = require('fs');
   const source = fs.readFileSync(process.argv[1], 'utf8');
   const moduleUrl = 'data:text/javascript;base64,'
     + Buffer.from(source).toString('base64');
-  const dashboard = await import(moduleUrl);
+  const dashboard = await bounded(
+    import(moduleUrl), 'dashboard module import', _dashnodeStepTimeoutMs);
   phase('dashboard module imported');
   phase('dashboard call started');
   process.stdout.write(JSON.stringify([
@@ -221,10 +222,7 @@ const fs = require('fs');
   ]));
   phase('dashboard call settled');
   phase('dashboard harness finished');
-})().catch(error => {
-  console.error(error && error.stack ? error.stack : error);
-  process.exit(1);
-});
+})().catch(leave);
 """
 
 
@@ -233,7 +231,7 @@ def test_dashboard_labels_eval_world_as_a_channel(tmp):
     del tmp
     result = _dashnode.run_dashboard_node(
         _DASHBOARD_WORLD_HARNESS,
-        ROOT / 'dashboard' / 'sections' / '_util.js')
+        ROOT / 'dashboard' / 'sections' / '_util.js', bounded_steps=1)
     assert json.loads(result.stdout) == [
         'channel=cdp',
         'channel=page-main',
