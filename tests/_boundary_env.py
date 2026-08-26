@@ -15,7 +15,7 @@ ENVIRONMENT = r"""
 const fs = require('fs');
 const vm = require('vm');
 
-const [backgroundPath, scenario, commandText, publishedSymbol]
+const [backgroundPath, scenario, commandText]
   = process.argv.slice(1);
 const changeListeners = [];
 const detachListeners = [];
