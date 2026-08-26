@@ -107,18 +107,22 @@ class _ScalarReaderMixin:
         self._refuse('mapping entry without a colon', index, context)
         return None
 
-    def _mapping_parts(self, index, context, body=None):
+    def _mapping_parts(self, index, context, body=None,
+                       require_string_key=False):
         if body is None:
             body = self.lines[index].lstrip(' ')
         body = self._strip_comment(body).strip(' \t')
         if body.startswith('?') and (len(body) == 1 or body[1] in ' \t'):
             self._refuse('explicit key', index, context)
         position = self._mapping_colon(body, index, context)
-        key = body[:position].strip(' \t')
-        if not key:
+        key_source = body[:position].strip(' \t')
+        if not key_source:
             self._refuse('empty mapping key', index, context)
         value = body[position + 1:].strip(' \t')
-        return self._decode_scalar(key, index, f'{context} key'), value
+        key = self._decode_scalar(key_source, index, f'{context} key')
+        if require_string_key and not key_source.startswith(("'", '"')):
+            self._require_plain_string(key, index, f'{context} key')
+        return key, value
 
     def _decode_scalar(self, text, index, context):
         value = self._strip_comment(text).strip(' \t')
