@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _boundary import run_extension_result_boundary  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
@@ -27,10 +28,10 @@ def test_extension_same_id_overlap_keeps_each_delivery_id(tmp):
          '_did': 'did-b'},
     ]
     actual = {
-        'a-first': _util.run_background_overlap(
+        'a-first': _overlap.run_background_overlap(
             ROOT / 'extension' / 'background.js', commands,
             ['owner-a', 'owner-b']),
-        'b-first': _util.run_background_overlap(
+        'b-first': _overlap.run_background_overlap(
             ROOT / 'extension' / 'background.js', commands,
             ['owner-b', 'owner-a']),
     }
