@@ -62,6 +62,8 @@ def _declaration_mask(source):
     mask = list(js_mask(source))
     index = 0
     expression_start = True
+    brace_expression = False
+    brace_stack = []
     pending_control = False
     control_parentheses = []
     while index < len(source):
@@ -81,6 +83,7 @@ def _declaration_mask(source):
         if char in '\'"`':
             index = _quoted_end(source, index)
             expression_start = False
+            brace_expression = False
             pending_control = False
             continue
         identifier = re.match(_JS_IDENTIFIER, source[index:])
@@ -89,22 +92,26 @@ def _declaration_mask(source):
             index += len(word)
             pending_control = word in _CONTROL_WORDS
             expression_start = word in _REGEX_PREFIX_WORDS
+            brace_expression = expression_start
             continue
         if char.isdigit():
             number = re.match(r'[\w.]+', source[index:])
             index += len(number.group())
             expression_start = False
+            brace_expression = False
             pending_control = False
             continue
         if char == '(':
             control_parentheses.append(pending_control)
             pending_control = False
             expression_start = True
+            brace_expression = True
             index += 1
             continue
         if char == ')':
             expression_start = (
                 control_parentheses.pop() if control_parentheses else False)
+            brace_expression = False
             pending_control = False
             index += 1
             continue
@@ -116,19 +123,35 @@ def _declaration_mask(source):
                         mask[offset] = ' '
                 index = end
                 expression_start = False
+                brace_expression = False
                 pending_control = False
                 continue
         if char == '/':
             index += 2 if source[index:index + 2] == '/=' else 1
             expression_start = True
+            brace_expression = True
             pending_control = False
             continue
-        if char in ')]':
-            expression_start = False
+        if char == '{':
+            brace_stack.append(brace_expression)
+            expression_start = True
+            brace_expression = False
         elif char == '}':
+            expression_start = not (
+                brace_stack.pop() if brace_stack else False)
+            brace_expression = False
+        elif char in ')]':
+            expression_start = False
+            brace_expression = False
+        elif char in '([':
             expression_start = True
-        elif char in '([{,;:?=.+-*%&|^!~<>':
+            brace_expression = True
+        elif char in ',:?=.+-*%&|^!~<>':
             expression_start = True
+            brace_expression = True
+        elif char == ';':
+            expression_start = True
+            brace_expression = False
         pending_control = False
         index += 1
     return ''.join(mask)

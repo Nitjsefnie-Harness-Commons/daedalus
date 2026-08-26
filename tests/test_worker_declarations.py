@@ -49,6 +49,10 @@ var _executionContext;
     assert _names(source) == [
         'quotient', 'parenthesized', 'stringRatio', '_executionContext',
     ]
+    object_source = (
+        'const objectRatio = {} / denominator; '
+        'var _executionContext = total / divisor;')
+    assert _names(object_source) == ['objectRatio', '_executionContext']
 
 
 def test_class_static_block_var_is_not_global(tmp):
