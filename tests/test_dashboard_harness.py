@@ -68,6 +68,19 @@ def _harness(source, bounded_steps=0, module=False):
         source, bounded_steps=bounded_steps, module=module)
 
 
+def _assert_regex_refused(*sources, bounded_steps=0):
+    expected = (
+        'dashboard harness bound count cannot inspect regex literal')
+    for source in sources:
+        try:
+            _dashnode.DashboardNodeHarness(
+                source, bounded_steps=bounded_steps, module=True)
+        except ValueError as failure:
+            assert str(failure) == expected, (source, failure)
+        else:
+            raise AssertionError(f'regex harness was accepted: {source!r}')
+
+
 def _harness_failure(harness, *arguments, **options):
     if isinstance(harness, str):
         bounded_steps = options.pop('bounded_steps', 0)
@@ -328,14 +341,7 @@ def test_harness_metadata_refuses_a_regex_literal(tmp):
 const slashOrStar = /[/*]/;
 await bounded(work, 'work', 1);
 """
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=0, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness bound count cannot inspect regex literal')
-    else:
-        raise AssertionError('regex-literal harness was accepted')
+    _assert_regex_refused(source)
 
 
 def test_harness_metadata_accepts_division_after_a_keyword_method(tmp):
@@ -351,28 +357,14 @@ def test_harness_metadata_refuses_a_regex_after_a_block(tmp):
     """A regex expression after a statement block fails loudly."""
     del tmp
     source = "{} /abc/; await bounded(work, 'work', 1);"
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=1, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness bound count cannot inspect regex literal')
-    else:
-        raise AssertionError('post-block regex harness was accepted')
+    _assert_regex_refused(source, bounded_steps=1)
 
 
 def test_harness_metadata_refuses_an_exported_regex(tmp):
     """A regex introduced by `export default` fails loudly."""
     del tmp
     source = 'export default /abc/;'
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=0, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness bound count cannot inspect regex literal')
-    else:
-        raise AssertionError('exported regex harness was accepted')
+    _assert_regex_refused(source)
 
 
 def test_harness_metadata_refuses_regex_after_statement_bodies(tmp):
@@ -384,20 +376,7 @@ def test_harness_metadata_refuses_regex_after_statement_bodies(tmp):
         'if (ok) {} else {} /await bounded(foo)/;',
         'try {} finally {} /await bounded(foo)/;',
     )
-    for source in sources:
-        try:
-            _dashnode.DashboardNodeHarness(
-                source, bounded_steps=0, module=True)
-        except ValueError as failure:
-            expected = (
-                'dashboard harness bound count cannot inspect regex literal')
-            if str(failure) != expected:
-                raise AssertionError(
-                    f'statement-body regex was miscounted: {failure}') \
-                    from failure
-        else:
-            raise AssertionError(
-                f'statement-body regex harness was accepted: {source}')
+    _assert_regex_refused(*sources)
 
 
 def test_harness_metadata_refuses_regex_expression_operands(tmp):
@@ -407,20 +386,7 @@ def test_harness_metadata_refuses_regex_expression_operands(tmp):
         'const values = [... /await bounded(foo)/];',
         'class C extends /await bounded(foo)/ {}',
     )
-    for source in sources:
-        try:
-            _dashnode.DashboardNodeHarness(
-                source, bounded_steps=0, module=True)
-        except ValueError as failure:
-            expected = (
-                'dashboard harness bound count cannot inspect regex literal')
-            if str(failure) != expected:
-                raise AssertionError(
-                    f'expression regex was miscounted: {failure}') \
-                    from failure
-        else:
-            raise AssertionError(
-                f'expression-operand regex harness was accepted: {source}')
+    _assert_regex_refused(*sources)
 
 
 def test_harness_metadata_accepts_private_keyword_method_division(tmp):
@@ -441,20 +407,7 @@ def test_harness_metadata_keeps_nested_declaration_body_goals(tmp):
         'function f(cb = () => {}) {} /await bounded(foo)/;',
         'class C extends (class {}) {} /await bounded(foo)/;',
     )
-    for source in sources:
-        try:
-            _dashnode.DashboardNodeHarness(
-                source, bounded_steps=0, module=True)
-        except ValueError as failure:
-            expected = (
-                'dashboard harness bound count cannot inspect regex literal')
-            if str(failure) != expected:
-                raise AssertionError(
-                    f'nested-body regex was miscounted: {failure}') \
-                    from failure
-        else:
-            raise AssertionError(
-                f'nested-body regex harness was accepted: {source}')
+    _assert_regex_refused(*sources)
 
 
 def test_harness_metadata_preserves_statement_boundaries(tmp):
@@ -465,20 +418,7 @@ def test_harness_metadata_preserves_statement_boundaries(tmp):
         'debugger\n/await bounded(foo)/;',
         'while (true) { break\n/await bounded(foo)/; }',
     )
-    for source in sources:
-        try:
-            _dashnode.DashboardNodeHarness(
-                source, bounded_steps=0, module=True)
-        except ValueError as failure:
-            expected = (
-                'dashboard harness bound count cannot inspect regex literal')
-            if str(failure) != expected:
-                raise AssertionError(
-                    f'statement regex was miscounted: {failure}') \
-                    from failure
-        else:
-            raise AssertionError(
-                f'statement regex harness was accepted: {source}')
+    _assert_regex_refused(*sources)
 
 
 def test_harness_metadata_limits_async_declaration_prefixes(tmp):
@@ -492,6 +432,50 @@ def test_harness_metadata_limits_async_declaration_prefixes(tmp):
         harness = _dashnode.DashboardNodeHarness(
             source, bounded_steps=0, module=True)
         assert harness.source == source
+
+
+def test_harness_metadata_refuses_modern_statement_regexes(tmp):
+    del tmp
+    sources = (
+        'try {} catch {} /await bounded(foo)/;',
+        'async function f(xs) { for await (const x of xs) {} '
+        '/await bounded(foo)/; }',
+    )
+    _assert_regex_refused(*sources)
+
+
+def test_harness_metadata_refuses_regex_in_expression_bodies(tmp):
+    del tmp
+    sources = (
+        'const f = () => { function g() {} '
+        '/await bounded(foo)/; };',
+        'const f = function() { function g() {} '
+        '/await bounded(foo)/; };',
+    )
+    _assert_regex_refused(*sources)
+
+
+def test_harness_metadata_accepts_contextual_of_division(tmp):
+    del tmp
+    source = 'const of = 4; of / 2;'
+    harness = _dashnode.DashboardNodeHarness(
+        source, bounded_steps=0, module=True)
+    assert harness.source == source
+
+
+def test_harness_metadata_handles_every_line_terminator(tmp):
+    del tmp
+    sources = (
+        'while (true) { break/*\r*/ /await bounded(foo)/; }',
+        'debugger // comment\u2028/await bounded(foo)/;',
+    )
+    _assert_regex_refused(*sources)
+
+
+def test_harness_metadata_refuses_regex_after_named_export(tmp):
+    del tmp
+    source = 'const x = 1; export {x}\n/await bounded(foo)/;'
+    _assert_regex_refused(source)
 
 
 def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
