@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
+from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 from daedalus_cli import __version__  # noqa: E402
@@ -1170,17 +1171,15 @@ def _answer_one_ext_command(base, docroot, argv, result, env):
     # from an earlier case is still sitting in it. Clearing first is what makes
     # the file this case waits for unambiguously its own.
     qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-    if qdir.is_dir():
-        for stale in qdir.glob('*.json'):
-            stale.unlink()
+    clear_command_queue(qdir)
     proc = subprocess.Popen(
         CLI + argv, cwd=str(_util.ROOT), env=env, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, encoding='utf-8')
     try:
-        _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
-                  what=f'the command {argv[0]} enqueues')
-        queued_file = sorted(qdir.glob('*.json'))[0]
-        queued = json.loads(queued_file.read_text(encoding='utf-8'))
+        queued = wait_for_command(qdir, timeout=15)
+        if queued is None:
+            raise AssertionError(
+                f'timed out waiting for the command {argv[0]} enqueues')
         status, _ = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': 'extension', 'id': queued['id'],
             'result': result, 'error': None, 'ts': 1, '_did': queued['_did']})

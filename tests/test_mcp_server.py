@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 
 # find_spec asks whether the dependency is installed without importing it --
 # an import kept only for its truthiness reads as dead code to every linter,
@@ -1618,9 +1619,7 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     the queue. Returns (what the tool returned, the payload the bridge got).
     """
     qdir = Path(docroot) / 'commands' / f'{TOK}_{tab}'
-    if qdir.is_dir():
-        for stale in qdir.glob('*.json'):
-            stale.unlink()
+    clear_command_queue(qdir)
     box = {}
 
     def run():
@@ -1636,16 +1635,8 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     worker = threading.Thread(target=run)
     worker.start()
     try:
-        deadline = time.time() + 20
-        queued = None
-        while time.time() < deadline:
-            files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
-            if files:
-                queued = json.loads(files[0].read_text(encoding='utf-8'))
-                break
-            if not worker.is_alive():
-                break  # it failed before enqueuing; its own error explains it
-            time.sleep(0.05)
+        queued = wait_for_command(
+            qdir, timeout=20, producer_alive=worker.is_alive)
         if queued is None:
             worker.join(timeout=5)
             if 'error' in box:
