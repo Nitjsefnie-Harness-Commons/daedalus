@@ -15,11 +15,54 @@ import _util  # noqa: E402
 from _jsread import (blank_js_comments, js_bracket_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
 from _repo import ROOT  # noqa: E402
+from _worker_sources import (imported_worker_paths,  # noqa: E402
+                             worker_source_paths)
 
 
 # GM.info is metadata about the shim, not a capability it grants, so the
 # install-time warning has nothing to say about it.
 _GM_NON_CAPABILITIES = frozenset({'GM.info'})
+
+
+def _worker_sources():
+    return [
+        (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
+        for path in worker_source_paths()
+    ]
+
+
+def test_each_worker_capability_lives_in_its_own_module(tmp):
+    del tmp
+    background = (ROOT / 'extension' / 'background.js').read_text(
+        encoding='utf-8')
+    capabilities = [('worker/cookies.js', 'handleCookies')]
+
+    for relative, symbol in capabilities:
+        module_path = ROOT / 'extension' / relative
+        assert module_path.is_file(), f'{relative} does not exist'
+        module = module_path.read_text(encoding='utf-8')
+        declaration = re.compile(
+            rf'^(?:async\s+)?function\s+{re.escape(symbol)}\s*\(',
+            re.MULTILINE)
+        assert declaration.search(module), (
+            f'{relative} does not declare {symbol} at top level')
+        assert not declaration.search(background), (
+            f'background.js still declares {symbol} at top level')
+
+
+def test_worker_imports_match_worker_modules(tmp):
+    del tmp
+    named = {path.resolve() for path in imported_worker_paths()}
+    shipped = {
+        path.resolve()
+        for path in (ROOT / 'extension' / 'worker').glob('*.js')
+    }
+    assert named == shipped, {
+        'named but absent': sorted(
+            path.relative_to(ROOT).as_posix() for path in named - shipped),
+        'shipped but unnamed': sorted(
+            path.relative_to(ROOT).as_posix() for path in shipped - named),
+    }
 
 
 def test_the_security_warning_names_every_capability_the_shim_grants(tmp):
@@ -54,8 +97,7 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
     empty capture, and 1e9 buffered everything.
     """
     del tmp
-    background = (_util.ROOT / 'extension' / 'background.js').read_text(
-        encoding='utf-8')
+    worker_sources = _worker_sources()
     # The ceiling may live in any module of the CLI package, so the package is
     # searched rather than one file named by hand. Every declaration found is
     # kept: concatenating the package and taking the first match would let a
@@ -69,23 +111,43 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
     assert len(declared) == 1, f'expected one CLI declaration, found {declared}'
     mcp = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
 
-    ceilings = {
-        'background.js': re.search(r'NET_CAPTURE_MAX = (\d+)', background),
-        'mcp_server.py': re.search(r'NET_CAPTURE_MAX = (\d+)', mcp),
+    extension_declared = [
+        (name, int(match.group(1)))
+        for name, source in worker_sources
+        for match in re.finditer(r'NET_CAPTURE_MAX = (\d+)', source)
+    ]
+    assert len(extension_declared) == 1, (
+        'expected one extension declaration, found '
+        f'{extension_declared}')
+    mcp_match = re.search(r'NET_CAPTURE_MAX = (\d+)', mcp)
+    assert mcp_match, 'no capture ceiling declared in mcp_server.py'
+    values = {
+        extension_declared[0][0]: extension_declared[0][1],
+        'mcp_server.py': int(mcp_match.group(1)),
     }
-    missing = sorted(name for name, m in ceilings.items() if m is None)
-    assert not missing, f'no capture ceiling declared in: {missing}'
-    values = {name: int(m.group(1)) for name, m in ceilings.items()}
     values[f'daedalus_cli/{declared[0][0]}'] = declared[0][1]
     assert len(set(values.values())) == 1, values
 
     # And the buffer is bounded by the validated value rather than by an
     # inline default that accepts whatever it is handed. Comments are blanked
     # first: the ones explaining this change quote the expression it replaced.
-    code = blank_js_comments(background)
-    assert 'maxRequests || 1000' not in code, 'an unvalidated fallback remains'
-    assert '_netCaptureLimit(cmd.maxRequests)' in code, \
-        'the capture allocation does not validate its limit'
+    code_sources = [
+        (name, blank_js_comments(source))
+        for name, source in worker_sources
+    ]
+    unvalidated = [
+        name for name, code in code_sources if 'maxRequests || 1000' in code
+    ]
+    assert not unvalidated, f'an unvalidated fallback remains in {unvalidated}'
+    validated = [
+        name
+        for name, code in code_sources
+        for _ in re.finditer(
+            re.escape('_netCaptureLimit(cmd.maxRequests)'), code)
+    ]
+    assert len(validated) == 1, (
+        'expected one validated capture allocation, found '
+        f'{validated}')
 
 
 def test_every_registry_call_checks_its_http_status(tmp):
@@ -97,24 +159,42 @@ def test_every_registry_call_checks_its_http_status(tmp):
     server's tab registry could sit stale with nothing reported anywhere.
     """
     del tmp
-    source = (_util.ROOT / 'extension' / 'background.js').read_text(
-        encoding='utf-8')
+    worker_sources = _worker_sources()
 
     # No registry route may be fetched outside the one helper.
     direct = []
     for route in ('/register', '/unregister', '/sync-tabs'):
-        for match in re.finditer(
-                r'fetch\(\s*config\.serverUrl\s*\+\s*[\'"]'
-                + re.escape(route) + r'[\'"]', source):
-            direct.append(f'{route} at offset {match.start()}')
+        for name, source in worker_sources:
+            for match in re.finditer(
+                    r'fetch\(\s*config\.serverUrl\s*\+\s*[\'"]'
+                    + re.escape(route) + r'[\'"]', source):
+                direct.append(
+                    f'{route} in {name} at offset {match.start()}')
     assert not direct, direct
 
     for route in ('/register', '/unregister', '/sync-tabs'):
-        assert f"registryPost('{route}'" in source, route
+        calls = [
+            f'{name} at offset {match.start()}'
+            for name, source in worker_sources
+            for match in re.finditer(
+                re.escape(f"registryPost('{route}'"), source)
+        ]
+        assert len(calls) == 1, f'{route}: {calls}'
 
     # And the helper is what actually looks at the status.
+    helper_sources = [
+        (name, source)
+        for name, source in worker_sources
+        if 'async function registryPost(' in source
+    ]
+    assert len(helper_sources) == 1, (
+        f'expected one registryPost definition, found '
+        f'{[name for name, _ in helper_sources]}')
+    helper_name, source = helper_sources[0]
     _, marker, after = source.partition('async function registryPost(')
-    assert marker, 'registryPost is not defined the way this test finds it'
+    assert marker, (
+        f'registryPost in {helper_name} is not defined the way this test '
+        'finds it')
     helper, _, _ = after.partition('\nasync function registerTab')
     assert 'resp.ok' in helper, helper
     assert 'console.error' in helper, helper
@@ -131,8 +211,14 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
     """
     del tmp
     offenders = []
-    for name in ('background.js', 'content.js', 'page.js', 'options.js'):
-        path = _util.ROOT / 'extension' / name
+    paths = [
+        *worker_source_paths(),
+        _util.ROOT / 'extension' / 'content.js',
+        _util.ROOT / 'extension' / 'page.js',
+        _util.ROOT / 'extension' / 'options.js',
+    ]
+    for path in paths:
+        name = path.relative_to(_util.ROOT / 'extension').as_posix()
         if not path.is_file():
             continue
         for number, line in enumerate(
@@ -156,12 +242,25 @@ def test_extension_ships_no_default_server(tmp):
     assert m, 'DEFAULT_SERVER constant not found in background.js'
     assert m.group(1) == '', f'DEFAULT_SERVER ships a URL: {m.group(1)!r}'
     # No hardcoded bridge URL anywhere else in the service worker either.
-    assert 'http://' not in src and 'https://' not in src, \
-        'background.js contains a hardcoded URL'
+    hardcoded = [
+        name
+        for name, source in _worker_sources()
+        if 'http://' in source or 'https://' in source
+    ]
+    assert not hardcoded, (
+        f'worker source contains a hardcoded URL: {hardcoded}')
 
 
 def test_extension_startstream_stays_idle_without_url(tmp):
-    src = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
+    matches = [
+        (name, source)
+        for name, source in _worker_sources()
+        if 'async function startStream()' in source
+    ]
+    assert len(matches) == 1, (
+        f'expected one startStream definition, found '
+        f'{[name for name, _ in matches]}')
+    _, src = matches[0]
     start = src.index('async function startStream()')
     rest = src[start:]
     nxt = rest.find('\nasync function ', 1)
@@ -272,7 +371,15 @@ def test_every_content_script_message_type_has_a_background_branch(tmp):
     """
     del tmp
     content = (ROOT / 'extension' / 'content.js').read_text(encoding='utf-8')
-    background = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
+    listeners = [
+        (name, source)
+        for name, source in _worker_sources()
+        if 'chrome.runtime.onMessage.addListener' in source
+    ]
+    assert len(listeners) == 1, (
+        f'expected one runtime message listener, found '
+        f'{[name for name, _ in listeners]}')
+    _, background = listeners[0]
     violations = _relay_coverage_violations(content, background)
     assert not violations, '\n'.join(violations)
 
