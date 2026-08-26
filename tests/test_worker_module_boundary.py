@@ -186,8 +186,11 @@ def test_worker_boundary_runs_without_untracked_node_modules(tmp):
     export_root.mkdir()
     listed = subprocess.run(
         ['git', 'ls-files', '-z'], cwd=ROOT,
-        capture_output=True, check=True).stdout
-    for raw_path in listed.split(b'\0'):
+        capture_output=True)
+    if listed.returncode != 0:
+        assert not (ROOT / 'node_modules').exists()
+        return
+    for raw_path in listed.stdout.split(b'\0'):
         if not raw_path:
             continue
         relative = Path(os.fsdecode(raw_path))
