@@ -33,15 +33,22 @@ def worker_source_paths(background_path=BACKGROUND_PATH):
     return (background_path, *imported_worker_paths(background_path))
 
 
-def import_scripts_stub(context_name):
+def import_scripts_stub(context_name, trace_map_name=None):
+    trace_registration = ''
+    if trace_map_name is not None:
+        trace_registration = (
+            f'{trace_map_name}.set('
+            f'{context_name}, loadedWorkerSourcePaths);')
     return r"""
-__CONTEXT__.loadedWorkerSourcePaths = [];
+const loadedWorkerSourcePaths = [];
+__TRACE_REGISTRATION__
 __CONTEXT__.importScripts = (...sourceNames) => {
   for (const sourceName of sourceNames) {
     const sourcePath = require('path').resolve(
       require('path').dirname(backgroundPath), sourceName);
-    __CONTEXT__.loadedWorkerSourcePaths.push(sourcePath);
+    loadedWorkerSourcePaths.push(sourcePath);
     vm.runInContext(fs.readFileSync(sourcePath, 'utf8'), __CONTEXT__);
   }
 };
-""".replace('__CONTEXT__', context_name)
+""".replace('__CONTEXT__', context_name).replace(
+        '__TRACE_REGISTRATION__', trace_registration)
