@@ -27,7 +27,7 @@ slice bounds use the same integer definition.
 Outside families are non-exact descriptors, partial callables, traceback
 frames, other containers and iterators, comprehension results, instance
 attributes, attribute getters, runtime-built names, mapping-proxy reads,
-binary and call-produced indices, and external frame acquisition. Each named
+call-produced indices, and external frame acquisition. Each named
 family has a known-gap control, and every known-gap control belongs to exactly
 one named family.
 """
@@ -189,8 +189,10 @@ def _frame_route_access(node, function, handler_globals, imports):
             node, function, handler_globals, imports)):
         return True
     if isinstance(node, ast.Call):
-        if audit_support.is_frame_route(_frame_value(
-                node.func, function, handler_globals, imports)):
+        function_value = _frame_value(
+            node.func, function, handler_globals, imports)
+        if (audit_support.is_frame_route(function_value)
+                or audit_support.is_outside_expression(function_value)):
             return True
         if (isinstance(node.func, ast.Attribute)
                 and audit_support.is_frame_route(_frame_value(
@@ -540,6 +542,13 @@ def test_cli_audit_resolver_decides_every_unary_operator(tmp):
     audit_support.resolver.assert_every_unary_operator()
 
 
+def test_cli_audit_resolver_partitions_every_expression_type(tmp):
+    control = getattr(
+        audit_support.resolver, 'assert_total_expression_partition', None)
+    assert control is not None, 'total expression partition control is absent'
+    control()
+
+
 def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
     audit_support.resolver.assert_exact_class_vars(_frame_value)
 
@@ -571,6 +580,19 @@ def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
             violations = _audit_real_tabs_handler(handler_module)
             assert any(f'{expression}()' in item for item in violations), \
                 (expression, violations)
+            _assert_real_tabs_dispatch_crashes(handler_module)
+        finally:
+            sys.modules.pop(handler_module.__dict__['__name__'], None)
+
+    for index, case in enumerate(
+            audit_support.OUTSIDE_EXPRESSION_FRAME_ROUTE_CASES):
+        case_name, module_prelude, body, construct = case
+        handler_module = _mutated_cli_tabs(
+            f'outside_expression_cli_{index}', module_prelude, body)
+        try:
+            violations = _audit_real_tabs_handler(handler_module)
+            assert any(construct in violation for violation in violations), \
+                (case_name, violations)
             _assert_real_tabs_dispatch_crashes(handler_module)
         finally:
             sys.modules.pop(handler_module.__dict__['__name__'], None)
