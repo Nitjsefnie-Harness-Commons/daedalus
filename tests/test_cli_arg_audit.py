@@ -3,6 +3,8 @@ DECLARED covers stored action destinations and parser defaults; GUARANTEED adds
 required and non-suppressed values. A required mutually exclusive group
 guarantees a destination only when every member stores that same non-SUPPRESS
 destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
+Direct plain and annotated namespace stores are neither reads nor escapes;
+stores never satisfy reads.
 Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
 enumerated expression node types | every other ``ast.expr`` node type is
 ``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
@@ -20,8 +22,7 @@ Current named known-gap control families are non-exact descriptors, partial
 callables, traceback frames, other containers and iterators, comprehension
 results, instance attributes, attribute getters, runtime-built names,
 mapping-proxy reads, call-produced indices, and external frame acquisition.
-Each named family and control maps exactly once. The bidirectional check
-ensures contract prose and control tables cover each other."""
+Each named family maps; contract prose and control tables cover each other."""
 import argparse
 import ast
 import inspect
@@ -204,7 +205,7 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
     if handler_globals is None:
         handler_globals = globals()
     frame_imports = _frame_imports(function)
-    reads, read_requirements, violations, assigned = {}, {}, [], set()
+    reads, read_requirements, violations = {}, {}, []
 
     def check(node, inspect_frame_routes=True):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
@@ -232,18 +233,16 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 node, function, handler_globals, _scope_binds,
                 _comprehension_shadows)
             if permitted is None:
-                violations.append(
-                    f'namespace escape: {ast.unparse(node._parent)}')
-            elif permitted[1] is None:
-                assigned.add(permitted[0])
-            else:
+                kind = ('namespace store escape' if isinstance(
+                    getattr(node._parent, 'ctx', None), ast.Store)
+                    else 'namespace escape')
+                violations.append(f'{kind}: {ast.unparse(node._parent)}')
+            elif permitted[1] is not None:
                 attribute, construct, needs_presence = permitted
                 rendered = ast.unparse(construct)
                 reads.setdefault(attribute, set()).add(rendered)
-                if attribute not in assigned:
-                    read_requirements[(attribute, rendered)] = needs_presence
-        for child in ((node.value, *node.targets) if isinstance(
-                node, ast.Assign) else ast.iter_child_nodes(node)):
+                read_requirements[(attribute, rendered)] = needs_presence
+        for child in ast.iter_child_nodes(node):
             check(child, inspect_frame_routes)
     for child in ast.iter_child_nodes(function):
         check(child)
@@ -414,16 +413,22 @@ def test_cli_audit_includes_parser_set_defaults(tmp):
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
     cases = audit_support.PERMITTED_NAMESPACE_READ_CASES
-    for declared, undeclared, _ in cases:
+    for declared, undeclared in cases:
         assert _audit_fake_handler(declared) == [], declared
         assert _audit_fake_handler(undeclared) == [undeclared], undeclared
-    for body in ('args.undeclared_probe = False\nargs.undeclared_probe',
-                 'args.undeclared_probe = False'):
-        assert _audit_fake_handler(body) == [], body
-    read = 'args.undeclared_probe'
-    for body in (read, f'{read}\nargs.undeclared_probe = False',
-                 f'args.undeclared_probe = {read} or False'):
-        assert _audit_fake_handler(body) == [read], body
+
+
+def test_cli_audit_store_semantics_are_fail_closed(tmp):
+    probe = 'args.undeclared_probe'
+    store = [f'namespace store escape: {probe}']
+    cases = (
+        (f'if False:\n    {probe} = False\n{probe}', [probe]),
+        (f'{probe}: bool = False', []), (f'{probe} = False', []),
+        (f'{probe} = {probe} or False', [probe]), (probe, [probe]),
+        (f'{probe} += 1', store), (f'{probe}, other = values', store),
+        (f'{probe} = False\n{probe}', [probe]))
+    for body, expected in cases:
+        assert _audit_fake_handler(body) == expected, body
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
@@ -512,10 +517,6 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
 
 def test_cli_audit_resolver_resolves_dict_get_default(tmp):
     audit_support.assert_dict_get_default(_frame_value)
-
-
-def test_cli_audit_resolver_logical_not_returns_bool(tmp):
-    audit_support.assert_every_unary_operator()
 
 
 def test_cli_audit_resolver_decides_every_unary_operator(tmp):
@@ -678,9 +679,8 @@ def test_cli_handlers_read_only_declared_args(tmp):
             function, args_name, declared, guaranteed, handler.__globals__)
         handler_details[name] = {'handler': handler.__qualname__,
                                  'declared': declared, 'reads': reads}
-        violations.extend(
-            (name, construct, handler.__qualname__)
-            for construct in handler_violations)
+        violations.extend((name, construct, handler.__qualname__)
+                          for construct in handler_violations)
     for command, attribute, handler_name in \
             audit_support.KNOWN_INDIRECT_ARG_READS:
         detail = handler_details.get(command)
@@ -691,9 +691,9 @@ def test_cli_handlers_read_only_declared_args(tmp):
         assert attribute in detail['declared'], (
             f'{command}: {attribute} not declared by parser')
     details = '\n'.join(
-        f'{name}: {construct} read by {handler}'
+        f'{name}: {construct} accessed by {handler}'
         for name, construct, handler in violations)
-    assert not violations, f'undeclared CLI argument reads:\n{details}'
+    assert not violations, f'CLI argument audit violations:\n{details}'
 
 
 if __name__ == '__main__':
