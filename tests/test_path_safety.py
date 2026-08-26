@@ -363,6 +363,7 @@ import json
 import os
 import sys
 
+import command_queue
 import path_safety
 
 root = sys.argv[1]
@@ -378,7 +379,7 @@ print('PATH_SAFETY ' + json.dumps({
     'unsafe': path_safety.unsafe_component('../escape'),
     'contained': os.path.basename(str(contained)),
     'escape': escape,
-    'targets': path_safety.command_target_names('tok', 'tab'),
+    'targets': command_queue.command_target_names('tok', 'tab'),
 }))
 """
 
@@ -495,10 +496,9 @@ try:
         answer['escape'] = 'refused'
 finally:
     os.path.realpath = _real
-# Marked, and not alone on stdout: importing server.py prints a line there
-# on any platform without glibc -- '[Daedalus] malloc tuning unavailable' --
-# and the bridge's stdout is its log stream by design. Parsing the whole
-# stream as JSON worked only on Linux.
+# Marked, and not alone on stdout: the probe's subprocess protocol keeps the
+# JSON answer distinguishable from any diagnostic the imported code emits.
+# Parsing the whole stream as JSON would make the probe depend on quiet logs.
 sys.stdout.write('\nCONTAINMENT ' + json.dumps(answer) + '\n')
 """
 
@@ -506,7 +506,7 @@ sys.stdout.write('\nCONTAINMENT ' + json.dumps(answer) + '\n')
 def test_containment_survives_two_spellings_of_one_root(tmp):
     """A concurrent writer must not make a contained path look like an escape.
 
-    `_under` resolves the root and the candidate in two separate calls and
+    `under` resolves the root and the candidate in two separate calls and
     compares the results as strings. Those two calls are not obliged to spell
     one directory the same way, and on Windows they do not while something
     else is replacing the file being named: the directory comes back bare and
@@ -514,7 +514,7 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
     check reports an escape and the route answers 400 to a caller that named
     nothing wrong.
 
-    Every filesystem-backed route shares `_under`, so this is checked on the
+    Every filesystem-backed route shares `under`, so this is checked on the
     helper rather than through whichever route happened to expose it.
     """
     docroot = Path(tmp) / 'docroot'
@@ -552,7 +552,7 @@ def test_delivery_stripe_is_keyed_on_the_logical_target(tmp):
     different locks and the serialization the stripe exists to provide is
     silently absent -- which is not a 400 anybody sees, but a lost update.
 
-    This is the same pair of spellings `_under` already has to survive, and it
+    This is the same pair of spellings `under` already has to survive, and it
     was found by a Windows leg where a delivery POST sailed past a stripe
     another thread was holding.
     """
