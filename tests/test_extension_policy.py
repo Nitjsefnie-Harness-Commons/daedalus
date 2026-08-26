@@ -8,6 +8,7 @@ content script sends that the background has no branch for.
 """
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -30,7 +31,8 @@ _TOP_LEVEL_DECLARATION = re.compile(
     rf'|\bclass\s+({_JS_IDENTIFIER})\b'
     rf'|\b(?:const|let|var)\s+({_JS_IDENTIFIER})\b')
 _TOP_LEVEL_FUNCTION_DECLARATION = re.compile(
-    rf'\b(?:async\s+)?function\s+({_JS_IDENTIFIER})\s*\(')
+    rf'(?:^|(?<=[;\x7d]))\s*'
+    rf'(?:async\s+)?function\s+({_JS_IDENTIFIER})\s*\(')
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
     'Promise', 'Set', 'String', 'TextDecoder', 'URL',
@@ -91,6 +93,11 @@ def _directive_names(source, directive):
     return names
 
 
+def _masked_code_mentions(masked_source, name):
+    return re.search(
+        rf'(?<![\w$]){re.escape(name)}(?![\w$])', masked_source)
+
+
 def test_each_worker_capability_lives_in_its_own_module(tmp):
     """Each module owns a replaceable function reached by runtime dispatch.
 
@@ -133,7 +140,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
 
 
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
-    """Every module directive names a real worker or trusted platform name.
+    """Classic-worker directives form a used producer-consumer graph.
 
     The platform allowlist is trusted input: adding an entry does not prove it
     is a real platform global. This catches unresolved names and typos, not a
@@ -142,15 +149,26 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
     """
     del tmp
     worker_sources = _worker_sources()
+    source_details = [
+        {
+            'relative': relative,
+            'source': source,
+            'masked': js_mask(source),
+            'consumed': _directive_names(source, 'global'),
+            'exported': _directive_names(source, 'exported'),
+        }
+        for relative, source in worker_sources
+    ]
     declarations = {
         name
-        for _, source in worker_sources
-        for name in _top_level_declarations(source)
+        for details in source_details
+        for name in _top_level_declarations(details['source'])
     }
-    worker_code = '\n'.join(js_mask(source) for _, source in worker_sources)
+    worker_code = '\n'.join(
+        details['masked'] for details in source_details)
     unused_platform_names = sorted(
         name for name in _WORKER_PLATFORM_GLOBALS
-        if not re.search(rf'\b{re.escape(name)}\b', worker_code)
+        if not _masked_code_mentions(worker_code, name)
     )
     assert not unused_platform_names, (
         'worker platform allowlist contains unused names: '
@@ -158,26 +176,57 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
 
     unresolved = {}
     unpublished = {}
-    for relative, source in worker_sources:
-        if not relative.startswith('extension/worker/'):
-            continue
-        consumed = _directive_names(source, 'global')
+    unused_directives = {}
+    consumers = {}
+    for details in source_details:
+        relative = details['relative']
+        consumed = details['consumed']
+        exported = details['exported']
         missing = consumed - declarations - _WORKER_PLATFORM_GLOBALS
         if missing:
             unresolved[relative] = sorted(missing)
-        exported = _directive_names(source, 'exported')
-        absent = exported - _top_level_declarations(source)
+        absent = exported - _top_level_declarations(details['source'])
         if absent:
             unpublished[relative] = sorted(absent)
+        unused = {
+            name for name in consumed | exported
+            if not _masked_code_mentions(details['masked'], name)
+        }
+        if unused:
+            unused_directives[relative] = sorted(unused)
+        for name in consumed:
+            consumers.setdefault(name, set()).add(relative)
     assert not unresolved, (
-        f'worker modules consume undeclared names: {unresolved}')
+        f'classic worker sources consume undeclared names: {unresolved}')
     assert not unpublished, (
-        f'worker modules export undeclared names: {unpublished}')
+        f'classic worker sources export undeclared names: {unpublished}')
+    assert not unused_directives, (
+        f'classic worker directives name unused symbols: {unused_directives}')
+
+    unconsumed = {}
+    for details in source_details:
+        relative = details['relative']
+        missing = {
+            name for name in details['exported']
+            if not (consumers.get(name, set()) - {relative})
+        }
+        if missing:
+            unconsumed[relative] = sorted(missing)
+    assert not unconsumed, (
+        f'classic worker sources export unconsumed names: {unconsumed}')
 
 
 def test_worker_imports_match_worker_modules(tmp):
     del tmp
-    named = {path.resolve() for path in imported_worker_paths()}
+    imported = [path.resolve() for path in imported_worker_paths()]
+    duplicates = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path, count in Counter(imported).items()
+        if count > 1
+    )
+    assert not duplicates, (
+        f'importScripts names duplicate worker paths: {duplicates}')
+    named = set(imported)
     shipped = {
         path.resolve()
         for path in (ROOT / 'extension' / 'worker').glob('*.js')
