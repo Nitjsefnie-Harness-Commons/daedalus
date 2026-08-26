@@ -81,6 +81,21 @@ class _WorkflowReader(_ScalarReaderMixin):
             index += 1
         return end
 
+    def _indentless_sequence_end(self, start, end, indent, context):
+        index = start
+        while index < end:
+            if self._blank(index):
+                self._indent(index, context)
+                index += 1
+                continue
+            line_indent = self._indent(index, context)
+            body = self.lines[index][line_indent:]
+            if line_indent != indent or not body.startswith('-'):
+                return index
+            index = self._value_end(
+                index + 1, end, indent, context, check_tabs=False)
+        return end
+
     def _looks_like_mapping(self, body):
         try:
             self._mapping_colon(body, 0, 'scalar')
@@ -183,6 +198,16 @@ class _WorkflowReader(_ScalarReaderMixin):
             value_end = self._mapping_value_end(
                 rest, index, end, key_indent, f'job {job}',
                 key == 'steps')
+            if key == 'steps' and not rest and value_end == index + 1:
+                first_value = self._next_nonblank(
+                    value_end, end, f'job {job}')
+                if first_value is not None:
+                    first_indent = self._indent(first_value, f'job {job}')
+                    first_body = self.lines[first_value][first_indent:]
+                    if first_indent == key_indent \
+                            and first_body.startswith('-'):
+                        value_end = self._indentless_sequence_end(
+                            first_value, end, key_indent, f'job {job}')
             if key == '<<':
                 self._refuse('merge key', index, f'job {job}')
             if key == 'steps':
@@ -217,7 +242,7 @@ class _WorkflowReader(_ScalarReaderMixin):
             self._refuse('steps value is not a block sequence', index,
                          context)
         step_indent = self._indent(first, context)
-        if step_indent <= key_indent:
+        if step_indent < key_indent:
             self._refuse('steps value is not a block sequence', first,
                          context)
         if self.lines[first][step_indent:].startswith('['):
@@ -233,7 +258,10 @@ class _WorkflowReader(_ScalarReaderMixin):
                 current += 1
                 continue
             indent = self._indent(current, context)
-            if indent <= key_indent:
+            if indent < step_indent:
+                if indent > key_indent:
+                    self._refuse('inconsistent steps indentation', current,
+                                 context)
                 break
             if indent != step_indent:
                 self._refuse('inconsistent steps indentation', current,
