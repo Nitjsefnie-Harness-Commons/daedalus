@@ -23,6 +23,7 @@ from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
 from env_config import env_int
+from log_safe import log_safe
 from mcp_transport import BridgeTransport
 
 # Same reason as the bridge: this process prints crash lines carrying values
@@ -866,30 +867,6 @@ async def _ext_cmd(cmd_id: str, cmd_type: str, timeout: float = 10.0,
     return out
 
 
-def _log_safe(value):
-    """Render a caught exception safe for a diagnostic line.
-
-    Behavior-identical to the server.py helper, duplicated because importing
-    server.py requires its environment and runs module-level configuration —
-    and server.py imports THIS module at startup. Every step of the
-    rendering is guarded: str() can raise on the caught object, a str
-    subclass can reach encode() carrying one that raises or a decode() that
-    returns a non-string, and a lone surrogate fails a strict stderr encode.
-    The result leaves only when its type is exactly str — never a subclass —
-    because the caller's interpolation must not see a caller-controlled
-    __format__. The fixed ASCII fallback never interpolates the failed
-    object; ordinary messages pass through in full.
-    """
-    try:
-        rendered = str(value).encode('utf-8', 'backslashreplace').decode('utf-8')
-    except Exception:
-        return '<unprintable value>'
-    # Exact type, not isinstance: a str subclass is itself the hostile shape.
-    if type(rendered) is not str:  # pylint: disable=unidiomatic-typecheck
-        return '<unprintable value>'
-    return rendered
-
-
 # The listener's actual port, for whoever started it: with DAEDALUS_MCP_PORT=0
 # the kernel picks, so anything printed or probed must come from the bound
 # socket, never from the configured value. _bound/_serve set these for
@@ -936,7 +913,7 @@ def _serve():
         print(f'[MCP] streamable-http on 127.0.0.1:{bound_port}', flush=True)
         uvicorn.Server(config).run(sockets=[sock])
     except Exception as e:
-        startup_error = f'[MCP] serve crashed: {_log_safe(e)}'
+        startup_error = f'[MCP] serve crashed: {log_safe(e)}'
         print(startup_error, file=sys.stderr, flush=True)
 
 

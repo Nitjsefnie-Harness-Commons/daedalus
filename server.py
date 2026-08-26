@@ -11,6 +11,7 @@ from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
 import atomic_file
 import command_queue
+from log_safe import log_safe
 import result_store
 import segment_store
 from bridge_config import (
@@ -32,40 +33,6 @@ import path_safety
 configure_stdio()
 
 
-def _log_safe(value):
-    """Render a caller-supplied value safe for a log line.
-
-    json.loads accepts lone surrogates (U+D800..U+DFFF), and a filesystem
-    name containing an undecodable byte arrives as U+DC80..U+DCFF via
-    surrogateescape; f-string interpolation passes either straight through,
-    and print() then raises UnicodeEncodeError at the stdout encode wherever
-    sys.stdout.errors is strict — an uncaught ValueError that kills the
-    request thread before any HTTP answer, tears down a live SSE stream, or
-    exits the process at startup. Encoding through backslashreplace escapes
-    them ('\\ud800'), so a log line can carry the value without ever raising
-    on it.
-
-    Every step of the rendering is guarded for the same reason: str() raises
-    on a conversion-limited huge int or an exception object whose __str__
-    fails (broad except clauses pass those objects straight here), and a str
-    subclass can reach the encode step carrying an encode() that raises or a
-    decode() that returns a non-string. The result leaves only when its type
-    is exactly str — never a subclass — because the caller's interpolation
-    must not see a caller-controlled __format__. The fallback is a fixed
-    ASCII string that never interpolates the object that just failed —
-    interpolating it would reopen the hole. except Exception is deliberate:
-    KeyboardInterrupt and SystemExit still propagate.
-    """
-    try:
-        rendered = str(value).encode('utf-8', 'backslashreplace').decode('utf-8')
-    except Exception:
-        return '<unprintable value>'
-    # Exact type, not isinstance: a str subclass is itself the hostile shape.
-    if type(rendered) is not str:  # pylint: disable=unidiomatic-typecheck
-        return '<unprintable value>'
-    return rendered
-
-
 # ─── glibc malloc tuning ───
 # ThreadingMixIn spawns a thread per request; glibc otherwise creates up to
 # 8*nproc memory arenas and never returns their freed memory to the OS, which
@@ -77,7 +44,7 @@ try:
     _LIBC.mallopt(-8, 2)  # M_ARENA_MAX = -8: cap concurrent arenas at 2
 except Exception as _e:  # non-glibc / unavailable
     _LIBC = None
-    print(f'[Daedalus] malloc tuning unavailable: {_log_safe(_e)}', flush=True)
+    print(f'[Daedalus] malloc tuning unavailable: {log_safe(_e)}', flush=True)
 
 
 def _malloc_trim():
@@ -185,7 +152,7 @@ def _notify_dashboard(token, payload):
                 json.dumps(event, ensure_ascii=False))
         _cmd_event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
-        print(f'[DASH-NOTIFY-FAIL] {_log_safe(e)}', flush=True)
+        print(f'[DASH-NOTIFY-FAIL] {log_safe(e)}', flush=True)
 
 # ─── Tab registry ───
 # Authoritative source: /sync-tabs (replaces all). /register only updates existing.
@@ -830,7 +797,9 @@ class Handler(BaseHTTPRequestHandler):
                     # is not delivered either way.
                     try: f.unlink()
                     except OSError: pass  # expired either way
-                    print(f'[STREAM] TTL-DROP {_log_safe(qdir.name)}/{_log_safe(name)}', flush=True)
+                    print(
+                        f'[STREAM] TTL-DROP {log_safe(qdir.name)}/'
+                        f'{log_safe(name)}', flush=True)
                     continue
                 try:
                     data = json.loads(f.read_text(encoding='utf-8'))
@@ -855,7 +824,10 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError: pass  # a redelivery is deduplicated by _did
                 _last_delivery_ts = time.time()
                 count += 1
-                print(f'[STREAM] DELIVERED q={_log_safe(qdir.name)} id={_log_safe(data.get("id", ""))} did={_log_safe(data.get("_did", ""))}', flush=True)
+                print(
+                    f'[STREAM] DELIVERED q={log_safe(qdir.name)} '
+                    f'id={log_safe(data.get("id", ""))} '
+                    f'did={log_safe(data.get("_did", ""))}', flush=True)
         return count
 
     def _drain_legacy_file(self, path, chrome_tab):
@@ -896,7 +868,9 @@ class Handler(BaseHTTPRequestHandler):
             try: path.unlink()
             except OSError: pass  # a redelivery is deduplicated by _did
             _last_delivery_ts = time.time()
-            print(f'[STREAM] DELIVERED legacy={_log_safe(path.name)} id={_log_safe(data.get("id", ""))}', flush=True)
+            print(
+                f'[STREAM] DELIVERED legacy={log_safe(path.name)} '
+                f'id={log_safe(data.get("id", ""))}', flush=True)
             return 1
 
     def _drain_legacy_ext(self, token, extension_legacy_name, killed_event):
@@ -1212,7 +1186,9 @@ class Handler(BaseHTTPRequestHandler):
                     if tab_id else None)
             except ValueError:
                 return self._json(400, {'error': 'invalid path component'})
-            print(f'[RESULT] tab={tab_id[:8] if tab_id else "none"} id={_log_safe(body.get("id", ""))}', flush=True)
+            print(
+                f'[RESULT] tab={tab_id[:8] if tab_id else "none"} '
+                f'id={log_safe(body.get("id", ""))}', flush=True)
             # Full server-observed roundtrip: _did's leading ms is the enqueue
             # instant (same clock as now), so no skew. Skip if _did is absent/malformed.
             # _did remains internal on the extension wire. Surface its value as
@@ -1434,7 +1410,9 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._json(500, {'error': 'command storage failure'})
         target = f'tab={tab[:8]}' if tab else 'broadcast'
-        print(f'[PUT-CMD] {target} id={_log_safe(cmd_id)} did={did}', flush=True)
+        print(
+            f'[PUT-CMD] {target} id={log_safe(cmd_id)} did={did}',
+            flush=True)
         return self._json(200, {'ok': True, 'target': target, 'did': did})
 
     def _handle_get_result(self, params):
@@ -1778,7 +1756,7 @@ class Handler(BaseHTTPRequestHandler):
                 if marks is not None:
                     marks.append(('record', time.perf_counter()))
                     segment_store.log_timing(
-                        _log_safe(job), stored_count, marks)
+                        log_safe(job), stored_count, marks)
             except OSError:
                 return self._json(500, {'error': 'segment storage failure'})
         print(f'[SEGMENT] {job}/{filename} ({len(raw)} bytes)', flush=True)
@@ -2230,7 +2208,7 @@ if __name__ == '__main__':
         # missing extra.
         print('[Daedalus] MCP bootstrap failed, so /mcp is not served - '
               'install its dependencies with: pip install ".[mcp]" - '
-              f'{_log_safe(e)}', flush=True)
+              f'{log_safe(e)}', flush=True)
     # ASCII only, deliberately: this line is the bridge's sole readiness
     # signal, and a console whose code page cannot encode a decorative
     # character raises rather than degrading, so the announcement would be
@@ -2238,5 +2216,5 @@ if __name__ == '__main__':
     # whose port is already open. cp437, still a Windows console default,
     # has no em dash.
     print(f'[Daedalus] Listening on 127.0.0.1:{bridge_port} - '
-          f'base={_log_safe(BASE)}', flush=True)
+          f'base={log_safe(BASE)}', flush=True)
     httpd.serve_forever()
