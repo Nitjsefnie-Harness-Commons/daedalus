@@ -172,6 +172,7 @@
 !/tests/_cli_arg_audit_support.py
 !/tests/_cmdqueue.py
 !/tests/_coverage_comment_steps.py
+!/tests/_dashnode.py
 !/tests/_evalpages.py
 !/tests/_ghexpr.py
 !/tests/_jsread.py
@@ -210,6 +211,7 @@
 !/tests/test_coverage_suites.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
+!/tests/test_dashboard_harness.py
 !/tests/test_delivery_stripes.py
 !/tests/test_diff_coverage.py
 !/tests/test_eval_relay.py
