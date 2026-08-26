@@ -1171,12 +1171,12 @@ def _answer_one_ext_command(base, docroot, argv, result, env):
     # from an earlier case is still sitting in it. Clearing first is what makes
     # the file this case waits for unambiguously its own.
     qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-    clear_command_queue(qdir)
+    ignored_names = clear_command_queue(qdir)
     proc = subprocess.Popen(
         CLI + argv, cwd=str(_util.ROOT), env=env, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, encoding='utf-8')
     try:
-        queued = wait_for_command(qdir, timeout=15)
+        queued = wait_for_command(qdir, 15, ignored_names=ignored_names)
         if queued is None:
             raise AssertionError(
                 f'timed out waiting for the command {argv[0]} enqueues')
