@@ -370,6 +370,19 @@ def test_real_overlap_failure_keeps_harness_and_live_client_states(tmp):
     assert "'owner-b': {'stillRunning': True" in message, message
 
 
+def test_killed_client_pipe_release_is_not_less_patient_than_normal_exit(tmp):
+    """Pipe release gets at least the patience of a healthy client exit.
+
+    Once the client is killed, releasing its inherited pipes is less work than
+    letting a healthy client finish and exit. A shorter release bound could
+    mistake a busy runner for a broken drain, defeating the bound's purpose.
+    """
+    del tmp
+    release = _overlap._KILLED_CLIENT_PIPE_RELEASE_S
+    healthy_exit = _overlap._SUCCESSFUL_CLIENT_GRACE_S
+    assert release >= healthy_exit, (release, healthy_exit)
+
+
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
     """A client that misses its grace is diagnostic data, not an exception."""
     ready_path = Path(tmp) / 'client.ready'
