@@ -100,6 +100,17 @@ try {
     assert 'flushed dashboard failure' in failure, failure
 
 
+def test_backstop_grows_with_the_bounded_step_count(tmp):
+    """The outer timeout leaves every declared inner step time to report."""
+    del tmp
+    assert hasattr(_dashnode, 'dashboard_child_timeout'), (
+        'dashboard_child_timeout did not derive the outer backstop')
+    one_step = _dashnode.dashboard_child_timeout(1, step_timeout=0.25)
+    three_steps = _dashnode.dashboard_child_timeout(3, step_timeout=0.25)
+    assert one_step > 0.25, one_step
+    assert three_steps > one_step, (one_step, three_steps)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 
