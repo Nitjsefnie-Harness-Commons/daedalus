@@ -13,17 +13,20 @@ from _repo import ROOT
 
 _DASHBOARD_PRELUDE = r"""
 const _dashnodeSetTimeout = globalThis.setTimeout;
+const _dashnodeClearTimeout = globalThis.clearTimeout;
 
 function phase(label) {
   process.stderr.write('[phase] ' + label + '\n');
 }
 
 function bounded(work, label, timeoutMs) {
+  let timer;
   const guard = new Promise((_resolve, reject) => {
-    _dashnodeSetTimeout(
+    timer = _dashnodeSetTimeout(
       () => reject(new Error('timed out waiting for ' + label)), timeoutMs);
   });
-  return Promise.race([Promise.resolve(work), guard]);
+  return Promise.race([Promise.resolve(work), guard])
+    .finally(() => _dashnodeClearTimeout(timer));
 }
 """
 
