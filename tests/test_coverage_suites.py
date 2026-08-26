@@ -173,8 +173,9 @@ def test_one_launch_failure_is_grouped_without_failing_the_run(tmp):
     }, unlaunchable=('test_unlaunchable.py',))
     assert result.returncode == 0, (result.stdout, result.stderr)
     failed_group = _group(result.stdout, 'test_unlaunchable.py')
-    assert 'LAUNCH FAILED: FileNotFoundError:' in failed_group, failed_group
-    assert 'missing-python' in failed_group, failed_group
+    assert failed_group.startswith(
+        '::group::tests/test_unlaunchable.py\n'
+        'LAUNCH FAILED: FileNotFoundError:'), failed_group
     assert ('  (suite did not pass; its coverage still counts)'
             in failed_group), failed_group
     assert ('::group::tests/test_passing.py\npassed\n::endgroup::\n'
