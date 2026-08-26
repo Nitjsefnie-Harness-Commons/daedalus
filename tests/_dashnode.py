@@ -12,13 +12,15 @@ from _repo import ROOT
 
 
 _DASHBOARD_PRELUDE = r"""
+const _dashnodeSetTimeout = globalThis.setTimeout;
+
 function phase(label) {
   process.stderr.write('[phase] ' + label + '\n');
 }
 
 function bounded(work, label, timeoutMs) {
   const guard = new Promise((_resolve, reject) => {
-    setTimeout(
+    _dashnodeSetTimeout(
       () => reject(new Error('timed out waiting for ' + label)), timeoutMs);
   });
   return Promise.race([Promise.resolve(work), guard]);
