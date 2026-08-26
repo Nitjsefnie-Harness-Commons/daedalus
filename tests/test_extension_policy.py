@@ -29,6 +29,8 @@ _TOP_LEVEL_DECLARATION = re.compile(
     rf'\b(?:async\s+)?function\s+({_JS_IDENTIFIER})\s*\('
     rf'|\bclass\s+({_JS_IDENTIFIER})\b'
     rf'|\b(?:const|let|var)\s+({_JS_IDENTIFIER})\b')
+_TOP_LEVEL_FUNCTION_DECLARATION = re.compile(
+    rf'\b(?:async\s+)?function\s+({_JS_IDENTIFIER})\s*\(')
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
     'Promise', 'Set', 'String', 'TextDecoder', 'URL',
@@ -68,6 +70,14 @@ def _top_level_declarations(source):
     }
 
 
+def _top_level_function_declarations(source):
+    return {
+        match.group(1)
+        for match in _top_level_matches(
+            source, _TOP_LEVEL_FUNCTION_DECLARATION)
+    }
+
+
 def _directive_names(source, directive):
     names = set()
     pattern = re.compile(rf'/\*\s*{directive}\b([^*]*)\*/')
@@ -82,7 +92,15 @@ def _directive_names(source, directive):
 
 
 def test_each_worker_capability_lives_in_its_own_module(tmp):
-    """Each module owns its symbol and runtime dispatch reaches that symbol.
+    """Each module owns a replaceable function reached by runtime dispatch.
+
+    Routing is observed when the sentinel is called; the original handler's
+    promise is deliberately not awaited because this guard checks routing, not
+    completion. The probe proves dispatch reaches the module, not that the
+    module is the only code doing the work; retained background duplicates are
+    constrained by the final size ratchet. Dispatch through an alias captured
+    at load time is rejected because replacing the published symbol cannot
+    update the captured reference.
 
     What is NOT enforced: `js_mask` does not parse regex literals, so regex
     text can still masquerade as a top-level declaration. A module function
@@ -98,8 +116,9 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         module_path = ROOT / 'extension' / relative
         assert module_path.is_file(), f'{relative} does not exist'
         module = module_path.read_text(encoding='utf-8')
-        assert symbol in _top_level_declarations(module), (
-            f'{relative} does not declare {symbol} at top level')
+        assert symbol in _top_level_function_declarations(module), (
+            f'{relative} must declare {symbol} as a top-level function '
+            'declaration so the classic-worker route probe can replace it')
         assert symbol not in _top_level_declarations(background), (
             f'background.js still declares {symbol} at top level')
         observed = run_extension_capability_route(
