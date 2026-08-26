@@ -27,6 +27,20 @@ def _read_summary(path):
     return summary
 
 
+def _report_safely():
+    """Make sure captured suite output can always be reported."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        if os.environ.get("PYTHONIOENCODING") or sys.stdout.isatty():
+            reconfigure(errors="replace")
+        else:
+            reconfigure(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        pass
+
+
 def _run_suite(suite, summaries):
     summary_path = Path(summaries) / f"{suite.stem}.json"
     env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
@@ -38,6 +52,7 @@ def _run_suite(suite, summaries):
 
 
 def main() -> int:
+    _report_safely()
     suites = sorted((ROOT / "tests").glob("test_*.py"))
     if not suites:
         print("no suites found", file=sys.stderr)
