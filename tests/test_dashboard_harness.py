@@ -7,11 +7,13 @@ exact evidence returned to Python rather than the helpers' source text.
 import sys
 import subprocess
 import time
+import re
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
+import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
 _HOST_REALM_KEEPALIVE = "setInterval(() => {}, 10);\n"
@@ -25,6 +27,10 @@ def _harness_failure(source, *arguments, **options):
     except subprocess.TimeoutExpired as failure:
         return f'bare TimeoutExpired after {failure.timeout}s'
     raise AssertionError('the failing dashboard harness unexpectedly passed')
+
+
+def _phase_trace(result):
+    return re.findall(r'^\[phase\] (.+)$', result.stderr, re.MULTILINE)
 
 
 def test_phase_records_a_harness_checkpoint(tmp):
@@ -139,6 +145,36 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
         'for (;;) {}', bounded_steps=0, step_timeout=0.1)
     assert 'outer backstop timed out after 0.1s' in failure, failure
     assert 'last phase: none recorded' in failure, failure
+
+
+def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
+    """Every shipped harness records all six diagnostic checkpoints."""
+    del tmp
+    runs = {
+        'content': _dashnode.run_dashboard_node(
+            behaviour._CONTENT_KEEPALIVE_HARNESS,
+            behaviour.ROOT / 'extension' / 'content.js'),
+        'consume': _dashnode.run_dashboard_node(
+            behaviour._DASHBOARD_CONSUME_HARNESS,
+            behaviour.ROOT / 'dashboard' / 'api.js'),
+        'world': _dashnode.run_dashboard_node(
+            behaviour._DASHBOARD_WORLD_HARNESS,
+            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js'),
+        'selector': _dashnode.run_dashboard_node(
+            behaviour._TAB_SELECTOR_HARNESS,
+            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js',
+            module=True),
+    }
+    expected = [
+        'dashboard harness started',
+        'dashboard module import started',
+        'dashboard module imported',
+        'dashboard call started',
+        'dashboard call settled',
+        'dashboard harness finished',
+    ]
+    actual = {name: _phase_trace(result) for name, result in runs.items()}
+    assert actual == {name: expected for name in runs}, actual
 
 
 def main():
