@@ -177,16 +177,16 @@ def test_compatibility_consume_retries_are_bounded(tmp):
     patch_gate = Path(tmp) / 'spin-gate'
     patch_gate.mkdir()
     (patch_dir / 'sitecustomize.py').write_text(
-        'import __main__\n'
         'import pathlib\n'
+        'import sys;sys.path.insert(0,".");import result_store\n'
         'import os\n'
         'import threading\n'
         'import time\n'
         'gate = pathlib.Path(os.environ["SPIN_GATE_DIR"])\n'
         'def install():\n'
-        '    while not hasattr(__main__, "_read_result_file"):\n'
+        '    while not hasattr(result_store, "read_result_file"):\n'
         '        time.sleep(0.001)\n'
-        '    real_read = __main__._read_result_file\n'
+        '    real_read = result_store.read_result_file\n'
         '    state = {"reads": 0}\n'
         '    churn_reads = 200000\n'
         '    def spinning_read(path, consume, expected):\n'
@@ -199,7 +199,7 @@ def test_compatibility_consume_retries_are_bounded(tmp):
         '        if consume and isinstance(response, dict):\n'
         '            response["probeReads"] = reads\n'
         '        return response, delivery\n'
-        '    __main__._read_result_file = spinning_read\n'
+        '    result_store.read_result_file = spinning_read\n'
         '    (gate / "ready").write_text("ready", encoding="utf-8")\n'
         'threading.Thread(target=install, daemon=True).start()\n',
         encoding='utf-8')
@@ -239,16 +239,16 @@ def test_bounded_consume_fallback_still_honours_expected(tmp):
     patch_gate = Path(tmp) / 'spin-gate'
     patch_gate.mkdir()
     (patch_dir / 'sitecustomize.py').write_text(
-        'import __main__\n'
         'import pathlib\n'
+        'import sys;sys.path.insert(0,".");import result_store\n'
         'import os\n'
         'import threading\n'
         'import time\n'
         'gate = pathlib.Path(os.environ["SPIN_GATE_DIR"])\n'
         'def install():\n'
-        '    while not hasattr(__main__, "_read_result_file"):\n'
+        '    while not hasattr(result_store, "read_result_file"):\n'
         '        time.sleep(0.001)\n'
-        '    real_read = __main__._read_result_file\n'
+        '    real_read = result_store.read_result_file\n'
         '    state = {"reads": 0}\n'
         '    def spinning_read(path, consume, expected):\n'
         '        state["reads"] += 1\n'
@@ -256,7 +256,7 @@ def test_bounded_consume_fallback_still_honours_expected(tmp):
         '            return {"deliveryId": "churn-" + str(state["reads"]),\n'
         '                    "resultGeneration": "churn-generation"}, ""\n'
         '        return real_read(path, consume, expected)\n'
-        '    __main__._read_result_file = spinning_read\n'
+        '    result_store.read_result_file = spinning_read\n'
         '    (gate / "ready").write_text("ready", encoding="utf-8")\n'
         'threading.Thread(target=install, daemon=True).start()\n',
         encoding='utf-8')
@@ -414,9 +414,9 @@ def test_delivery_write_cannot_race_compatibility_cleanup(tmp):
 
 
 _STRIPE_SITE_CUSTOMIZE = r'''
-import __main__
 import os
 import pathlib
+import sys;sys.path.insert(0,'.');import result_store
 import threading
 import time
 import traceback
@@ -429,18 +429,18 @@ def record_lock_call(target_key, lock):
             handle.write(f"{target_key}\t{id(lock)}\n")
 def install():
     try:
-        while not all(hasattr(__main__, name) for name in (
-                "_delivery_lock_for", "_delivery_result_paths")):
+        while not all(hasattr(result_store, name) for name in (
+                "delivery_lock_for", "delivery_result_paths")):
             time.sleep(0.001)
-        real_lock_for = __main__._delivery_lock_for
+        real_lock_for = result_store.delivery_lock_for
         def recording_lock_for(target_key):
             lock = real_lock_for(target_key)
             record_lock_call(target_key, lock)
             return lock
-        __main__._delivery_lock_for = recording_lock_for
-        target_key = __main__._result_key(
+        result_store.delivery_lock_for = recording_lock_for
+        target_key = result_store.result_key(
             os.environ["DAEDALUS_TOKEN"], held_tab)
-        target_lock = __main__._delivery_lock_for(target_key)
+        target_lock = result_store.delivery_lock_for(target_key)
         (gate / "holder-lock").write_text(
             f"{target_key}\t{id(target_lock)}\n", encoding="utf-8")
         with target_lock:
@@ -802,18 +802,18 @@ def test_failed_delivery_stamp_skips_eviction_with_distinct_stamps(tmp):
     patch_gate = Path(tmp) / 'utime-gate'
     patch_gate.mkdir()
     (patch_dir / 'sitecustomize.py').write_text(
-        'import __main__\n'
         'import os\n'
         'import pathlib\n'
+        'import sys;sys.path.insert(0,".");import result_store\n'
         'import threading\n'
         'import time\n'
         'gate = pathlib.Path(os.environ["UTIME_GATE_DIR"])\n'
         'def install():\n'
-        '    while not hasattr(__main__, "_mark_delivery_result"):\n'
+        '    while not hasattr(result_store, "mark_delivery_result"):\n'
         '        time.sleep(0.001)\n'
         '    def failed_utime(*_args, **_kwargs):\n'
         '        raise OSError("injected utime failure")\n'
-        '    __main__.os.utime = failed_utime\n'
+        '    result_store.os.utime = failed_utime\n'
         '    (gate / "ready").write_text("ready", encoding="utf-8")\n'
         'threading.Thread(target=install, daemon=True).start()\n',
         encoding='utf-8')
@@ -916,25 +916,25 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
         repo = Path(__file__).resolve().parents[1]
         sys.path.insert(0, str(repo))
         try:
-            server = _util.load(repo / 'server.py', name='stripe_server')
+            result_store = _util.load(repo / 'result_store.py', name='rs')
         finally:
             sys.path.pop(0)
-        server.RES_DIR.mkdir(parents=True)
-        original_locks = tuple(server._delivery_locks)
+        result_store.DELIVERY_DIR.parent.mkdir(parents=True)
+        original_locks = tuple(result_store.delivery_locks)
         initial = len(original_locks)
         returned_locks = []
         for index in range(10_000):
-            _dir, delivery_file, tab = server._find_delivery_result(
+            _dir, delivery_file, tab = result_store.find_delivery_result(
                 TOK, f'absent-{index}', 'missing-did')
             assert not delivery_file.exists()
-            returned_locks.append(
-                server._delivery_lock_for(server._result_key(TOK, tab)))
-        assert initial == server._DELIVERY_LOCK_STRIPES
-        assert len(server._delivery_locks) == initial
+            returned_locks.append(result_store.delivery_lock_for(
+                result_store.result_key(TOK, tab)))
+        assert initial == result_store.DELIVERY_LOCK_STRIPES
+        assert len(result_store.delivery_locks) == initial
         assert all(any(lock is original for original in original_locks)
                    for lock in returned_locks)
         assert len({id(lock) for lock in returned_locks}) <= (
-            server._DELIVERY_LOCK_STRIPES)
+            result_store.DELIVERY_LOCK_STRIPES)
     finally:
         for name, value in saved.items():
             if value is None:
