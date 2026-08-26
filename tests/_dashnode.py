@@ -27,6 +27,7 @@ from _repo import ROOT
 
 
 _DASHBOARD_STEP_TIMEOUT_S = 5
+_DASHBOARD_PROCESS_GRACE_S = 5
 _DASHBOARD_DRAIN_TIMEOUT_S = 0.2
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
 
@@ -124,16 +125,17 @@ class DashboardNodeHarness:
 
 
 def dashboard_child_timeout(bounded_steps,
-                            step_timeout=_DASHBOARD_STEP_TIMEOUT_S):
+                            step_timeout=_DASHBOARD_STEP_TIMEOUT_S,
+                            process_grace=_DASHBOARD_PROCESS_GRACE_S):
     """How long to let a dashboard harness run before killing it.
 
     Every awaited step inside a harness is bounded and names what it was
     waiting for. This backstop preserves the child's pipes and last phase,
     but it still has to outlast the worst inner path — one full bound per
-    declared step, plus one bound of process grace — so the more specific
-    inner failure gets to report first.
+    declared step, plus independent process grace. That lets the more specific
+    inner failure report first.
     """
-    return step_timeout * (bounded_steps + 1)
+    return step_timeout * bounded_steps + process_grace
 
 
 def _output_text(value):
@@ -151,7 +153,8 @@ def _latest_output(latest, earlier):
 
 
 def run_dashboard_node(harness, *arguments,
-                       step_timeout=_DASHBOARD_STEP_TIMEOUT_S):
+                       step_timeout=_DASHBOARD_STEP_TIMEOUT_S,
+                       process_grace=_DASHBOARD_PROCESS_GRACE_S):
     """Run one dashboard JavaScript harness with captured output."""
     node = shutil.which('node')
     if not node:
@@ -168,7 +171,8 @@ def run_dashboard_node(harness, *arguments,
     process = subprocess.Popen(
         command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding='utf-8', errors='replace')
-    timeout = dashboard_child_timeout(harness.bounded_steps, step_timeout)
+    timeout = dashboard_child_timeout(
+        harness.bounded_steps, step_timeout, process_grace)
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:

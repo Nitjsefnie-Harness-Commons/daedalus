@@ -170,7 +170,7 @@ setInterval(() => {}, 10);
 """
     started = time.monotonic()
     failure = _harness_failure(
-        source, bounded_steps=0, step_timeout=0.4)
+        source, bounded_steps=0, process_grace=0.4)
     elapsed = time.monotonic() - started
     assert elapsed < 1.25, f'post-kill drain took {elapsed:.2f}s'
     assert 'last phase: grandchild inherited dashboard pipes' in failure
@@ -229,14 +229,21 @@ try {
 
 
 def test_backstop_grows_with_the_bounded_step_count(tmp):
-    """The outer timeout reserves every step plus one full-step grace."""
+    """The outer timeout adds independent step and process allowances."""
     del tmp
     assert hasattr(_dashnode, 'dashboard_child_timeout'), (
         'dashboard_child_timeout did not derive the outer backstop')
-    zero_steps = _dashnode.dashboard_child_timeout(0, step_timeout=0.25)
-    one_step = _dashnode.dashboard_child_timeout(1, step_timeout=0.25)
-    three_steps = _dashnode.dashboard_child_timeout(3, step_timeout=0.25)
-    assert (zero_steps, one_step, three_steps) == (0.25, 0.5, 1.0)
+    try:
+        zero_steps = _dashnode.dashboard_child_timeout(
+            0, step_timeout=0.25, process_grace=0.4)
+        one_step = _dashnode.dashboard_child_timeout(
+            1, step_timeout=0.25, process_grace=0.4)
+        three_steps = _dashnode.dashboard_child_timeout(
+            3, step_timeout=0.25, process_grace=0.4)
+    except TypeError as failure:
+        raise AssertionError(
+            'dashboard backstop has no independent process grace') from failure
+    assert (zero_steps, one_step, three_steps) == (0.4, 0.65, 1.15)
 
 
 def test_shipped_harnesses_pin_their_exact_bounded_step_counts(tmp):
@@ -377,7 +384,7 @@ export function formatEvalWorld(value) {
 """)
     failure = _harness_failure(
         behaviour._DASHBOARD_WORLD_HARNESS, module,
-        step_timeout=0.5)
+        step_timeout=0.5, process_grace=0.5)
     assert _backstop_seconds(failure) == 1.0, failure
     assert 'last phase: dashboard harness finished' in failure, failure
     assert '"cdp"' in failure, failure
@@ -388,7 +395,7 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
     """A child blocked before its body reports that no phase was emitted."""
     del tmp
     failure = _harness_failure(
-        'for (;;) {}', bounded_steps=0, step_timeout=0.1)
+        'for (;;) {}', bounded_steps=0, process_grace=0.1)
     assert _backstop_seconds(failure) == 0.1, failure
     assert 'last phase: none recorded' in failure, failure
 
@@ -398,7 +405,7 @@ def test_last_phase_preserves_regex_metacharacters(tmp):
     del tmp
     failure = _harness_failure(
         "phase('selector [update] (2/3) .*'); setInterval(() => {}, 10);",
-        step_timeout=0.3)
+        process_grace=0.3)
     assert 'last phase: selector [update] (2/3) .*;' in failure, failure
 
 
@@ -407,7 +414,7 @@ def test_last_phase_accepts_an_unterminated_final_line(tmp):
     del tmp
     failure = _harness_failure(
         "process.stderr.write('[phase] final partial line'); "
-        "setInterval(() => {}, 10);", step_timeout=0.3)
+        "setInterval(() => {}, 10);", process_grace=0.3)
     assert 'last phase: final partial line;' in failure, failure
 
 
@@ -419,7 +426,7 @@ process.stdout.write('OUT');
 process.stderr.write('[phase] output fields\nERR');
 setInterval(() => {}, 10);
 """
-    failure = _harness_failure(source, step_timeout=0.3)
+    failure = _harness_failure(source, process_grace=0.3)
     assert "stdout: 'OUT'; stderr: '[phase] output fields\\nERR'" in failure
 
 
