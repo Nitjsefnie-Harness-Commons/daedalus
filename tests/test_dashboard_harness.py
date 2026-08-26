@@ -281,6 +281,16 @@ def test_tab_update_settle_is_bounded(tmp):
     assert 'outer backstop' not in failure, failure
 
 
+def test_tab_unregister_settle_is_bounded(tmp):
+    """A tab-unregistered refresh has its own bound after an update."""
+    failure = _harness_failure(
+        behaviour._TAB_SELECTOR_HARNESS,
+        _stalling_selector_module(tmp, 2), module=True,
+        bounded_steps=5, step_timeout=0.3)
+    assert 'timed out waiting for tab unregister refresh' in failure, failure
+    assert 'outer backstop' not in failure, failure
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 
