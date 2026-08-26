@@ -33,9 +33,14 @@ async function dispatchCommand(command) {
 }
 """
 
-_STALLED_CONFIG_WORKER = """
+# VM timers are stubs, and a pending promise alone does not keep Node alive.
+# Stall workers use this host-realm interval until the tested bound fires.
+_HOST_REALM_KEEPALIVE = """
 chrome.runtime.getPlatformInfo.constructor(
-  'setInterval(() => {}, 10)')();
+  'setInterval(() => {{}}, {interval})')();
+"""
+
+_STALLED_CONFIG_WORKER = _HOST_REALM_KEEPALIVE.format(interval=10) + """
 
 function loadConfig() {
   return new Promise(() => {});
@@ -44,10 +49,7 @@ function loadConfig() {
 function dispatchCommand() {}
 """
 
-_STALLED_DISPATCH_WORKER = """
-chrome.runtime.getPlatformInfo.constructor(
-  'setInterval(() => {}, 10)')();
-
+_STALLED_DISPATCH_WORKER = _HOST_REALM_KEEPALIVE.format(interval=10) + """
 async function loadConfig() {}
 
 async function dispatchCommand(command) {
@@ -76,10 +78,8 @@ function dispatchCommand() {
 }
 """
 
-_FINISHED_BUT_RUNNING_WORKER = """
-chrome.runtime.getPlatformInfo.constructor(
-  'setInterval(() => {}, 1000)')();
-
+_FINISHED_BUT_RUNNING_WORKER = _HOST_REALM_KEEPALIVE.format(
+    interval=1000) + """
 async function loadConfig() {}
 
 async function dispatchCommand(command) {
@@ -221,16 +221,16 @@ def test_a_stalled_config_load_names_the_wait(tmp):
 def test_posted_results_with_stalled_dispatches_name_the_settle_wait(tmp):
     """Posted results do not hide dispatch promises that never settle."""
     failure = _harness_failure(_worker(tmp, _STALLED_DISPATCH_WORKER))
-    assert ('timed out waiting for both dispatchCommand calls to settle'
+    assert ('timed out waiting for all dispatchCommand calls to settle'
             in failure), failure
     assert 'outer backstop' not in failure, failure
     _assert_step_trace(failure, [
         'the worker script to initialize',
         'the worker to load its config',
         'the dispatchCommand calls to start',
-        'both cookie handlers to start',
+        'all cookie handlers to start',
         'result POST for owner-a',
-        'both dispatchCommand calls to settle',
+        'all dispatchCommand calls to settle',
     ])
 
 
@@ -267,9 +267,9 @@ def test_completed_work_that_does_not_exit_reports_the_finished_step(tmp):
         'the worker script to initialize',
         'the worker to load its config',
         'the dispatchCommand calls to start',
-        'both cookie handlers to start',
+        'all cookie handlers to start',
         'result POST for owner-a',
-        'both dispatchCommand calls to settle',
+        'all dispatchCommand calls to settle',
         'the overlap harness finished',
     ])
 
@@ -292,7 +292,7 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
         'the worker script to initialize',
         'the worker to load its config',
         'the dispatchCommand calls to start',
-        'both cookie handlers to start',
+        'all cookie handlers to start',
         'result POST for owner-a',
         'the first result to be consumed',
     ])
