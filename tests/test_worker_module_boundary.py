@@ -30,6 +30,9 @@ _WORKER_PLATFORM_GLOBALS = frozenset({
     'console', 'crypto', 'fetch', 'parseInt', 'performance', 'setInterval',
     'setTimeout',
 })
+_WORKER_NON_HANDLER_EXPORTS = frozenset({
+    # Add one reviewed non-handler export per line.
+})
 
 
 def _worker_sources():
@@ -138,11 +141,13 @@ def _masked_code_mentions(masked_source, name):
 
 
 def test_each_worker_capability_lives_in_its_own_module(tmp):
-    """Every module handler is replaceable and reached by runtime dispatch.
+    """Every exported handler has one replaceable runtime dispatch route.
 
-    A published entry point must remain one statement-position function
-    declaration. Binding forms and later top-level reassignment are refused
-    before the route probe tries to replace the symbol.
+    Export directives define the handler inventory, apart from the explicit
+    non-handler exceptions. Exact table coverage is checked before probing.
+    The probe checks replaceability first; afterwards, text checks require one
+    statement-position function declaration and reject recognised top-level
+    reassignment.
 
     Routing is observed when the sentinel is called; the original handler's
     promise is deliberately not awaited because this guard checks routing, not
@@ -167,12 +172,28 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     background_names = {
         name for name, _, _ in _top_level_declarations(background)
     }
+    worker_exports = {
+        name for _, source in _worker_sources()
+        for name in _directive_names(source, 'exported')
+    }
+    stale_exceptions = sorted(_WORKER_NON_HANDLER_EXPORTS - worker_exports)
+    assert not stale_exceptions, (
+        f'non-handler export exceptions no longer exist: {stale_exceptions}')
 
     for relative, routes in modules:
         module_path = ROOT / 'extension' / relative
         assert module_path.is_file(), f'{relative} does not exist'
         module = module_path.read_text(encoding='utf-8')
         declarations = _top_level_declarations(module)
+        handler_exports = (
+            _directive_names(module, 'exported')
+            - _WORKER_NON_HANDLER_EXPORTS)
+        route_symbols = {symbol for symbol, _ in routes}
+        uncovered = sorted(handler_exports - route_symbols)
+        unexpected = sorted(route_symbols - handler_exports)
+        assert not uncovered and not unexpected, (
+            f'{relative} route table mismatch: uncovered handlers '
+            f'{uncovered}; non-handler or unexported routes {unexpected}')
         observations = run_extension_capability_routes([
             {
                 'symbol': symbol,
@@ -217,11 +238,12 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
     """Best-effort text check for classic-worker directive typos.
 
-    The exhaustive per-handler route table is the primary guarantee. This
-    secondary graph catches ordinary typos cheaply, but reassignment detection
-    is position- and spelling-dependent, an object method key can look like a
-    consumer, and `js_mask` does not parse regex literals (issue 198). The
-    platform allowlist is trusted input, not proof of a platform global.
+    Export-derived exact table coverage and the per-handler runtime probe are
+    the primary guarantee. This secondary graph catches ordinary typos cheaply,
+    but reassignment detection is position- and spelling-dependent, an object
+    method key can look like a consumer, and `js_mask` does not parse regex
+    literals (issue 198). The platform allowlist is trusted input, not proof of
+    a platform global.
     """
     del tmp
     worker_sources = _worker_sources()
