@@ -410,8 +410,9 @@ def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
     for; the bound around the whole child says only that a command timed
     out, and carries the entire harness source with it. A Windows leg
     reported exactly that. So the outer bound has to outlast the worst path
-    through the inner ones: one wait for the handlers to start, one per
-    result, and one per gap when the caller asks to wait between them.
+    through the inner ones: one for config load, one for the handlers to
+    start, one per result, one per requested gap, and one for dispatch
+    settlement.
     """
     del tmp
     inner = _overlap._OVERLAP_INNER_WAIT_S
