@@ -11,8 +11,9 @@ _claimed = set()
 def claim(key):
     """Claim one logical queue key without holding a lock during delivery.
 
-    The key is the logical target name; two spellings cannot take two claims.
-    Hard links and symlinks leave distinct names as two keys; see issue #186.
+    The key is the logical target name; consumers using the same spelling
+    cannot both take a claim. Hard links and symlinks leave distinct names as
+    two keys; see issue #186.
     """
     if not isinstance(key, str) or not key:
         raise TypeError('claim key must be a non-empty string')
