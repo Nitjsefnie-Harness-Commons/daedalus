@@ -408,6 +408,10 @@ def test_cli_audit_excludes_default_suppress_action(tmp):
     assert audit_support.namespace_dests(parser)[1] == {'shared'}
 
 
+def test_cli_audit_models_mutex_group_storage(tmp):
+    audit_support.assert_argparse_mutex_storage_contract(_audit_fake_handler)
+
+
 def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
     from daedalus_cli import cli
     for index, (shape, body, argv, expected) in enumerate(

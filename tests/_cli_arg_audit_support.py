@@ -4,6 +4,7 @@ import argparse
 import ast
 import builtins
 import contextlib
+import io
 import inspect
 import os
 import sys
@@ -82,6 +83,46 @@ ARGPARSE_STORAGE_CASES = (
     ('plus', ('x',), None, None, ['x'], True),
     ('question', (), (), 'seed', (), False),
     ('positional', ('x',), None, None, 'x', True),)
+# Name, required, shared destination, mixed defaults, empty/left/right,
+# DECLARED, GUARANTEED.
+ARGPARSE_MUTEX_STORAGE_CASES = (
+    ('optional-distinct-suppress', False, False, False,
+     {}, {'left': 'left'}, {'right': 'right'}, ('left', 'right'), ()),
+    ('optional-distinct-mixed', False, False, True,
+     {'right': 'right-default'},
+     {'right': 'right-default', 'left': 'left'}, {'right': 'right'},
+     ('left', 'right'), ('right',)),
+    ('optional-shared-suppress', False, True, False,
+     {}, {'probe': 'left'}, {'probe': 'right'}, ('probe',), ()),
+    ('optional-shared-mixed', False, True, True,
+     {'probe': 'right-default'}, {'probe': 'left'}, {'probe': 'right'},
+     ('probe',), ('probe',)),
+    ('required-distinct-suppress', True, False, False,
+     None, {'left': 'left'}, {'right': 'right'}, ('left', 'right'), ()),
+    ('required-distinct-mixed', True, False, True,
+     None, {'right': 'right-default', 'left': 'left'},
+     {'right': 'right'}, ('left', 'right'), ('right',)),
+    ('required-shared-suppress', True, True, False,
+     None, {'probe': 'left'}, {'probe': 'right'},
+     ('probe',), ('probe',)),
+    ('required-shared-mixed', True, True, True,
+     None, {'probe': 'left'}, {'probe': 'right'},
+     ('probe',), ('probe',)),)
+# Name, placement, empty/left/right argv and namespaces, DECLARED, GUARANTEED.
+ARGPARSE_MUTEX_PLACEMENT_CASES = (
+    ('nested-argument-group', 'nested', (), ('--left',), ('--right',),
+     None, {'probe': 'left'}, {'probe': 'right'},
+     ('probe',), ('probe',)),
+    ('top-level-with-subparser', 'top', ('tabs',),
+     ('--left', 'tabs'), ('--right', 'tabs'), None,
+     {'cmd': 'tabs', 'probe': 'left'},
+     {'cmd': 'tabs', 'probe': 'right'},
+     ('cmd', 'probe'), ('cmd', 'probe')),
+    ('on-subparser', 'subparser', ('tabs',),
+     ('tabs', '--left'), ('tabs', '--right'), None,
+     {'cmd': 'tabs', 'probe': 'left'},
+     {'cmd': 'tabs', 'probe': 'right'},
+     ('cmd', 'probe'), ('cmd', 'probe')),)
 REFLECTIVE_ESCAPE_CASES = (
     ("_ = locals()['args'].undeclared_probe", 'locals()'),
     ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
@@ -384,8 +425,82 @@ def assert_argparse_storage_contract(audit_handler):
         assert vars(seeded.parse_args(argv)) == _stored(seeded_minimal), shape
 
 
+def _add_mutex_probe(owner, required, shared, mixed):
+    group = owner.add_mutually_exclusive_group(required=required)
+    left_dest = 'probe' if shared else 'left'
+    right_dest = 'probe' if shared else 'right'
+    group.add_argument(
+        '--left', dest=left_dest, action='store_const', const='left',
+        default=argparse.SUPPRESS)
+    right_default = 'right-default' if mixed else argparse.SUPPRESS
+    group.add_argument(
+        '--right', dest=right_dest, action='store_const', const='right',
+        default=right_default)
+
+
+def _assert_parse_namespace(parser, argv, expected, shape):
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            namespace = vars(parser.parse_args(argv))
+        except SystemExit as error:
+            assert expected is None and error.code == 2, (shape, error)
+            return
+    assert namespace == expected, (shape, argv, namespace)
+
+
+def _assert_mutex_claim(audit_handler, shape, declared, guaranteed):
+    for dest in declared:
+        expression = f'args.{dest}'
+        expected = [] if dest in guaranteed else [expression]
+        assert audit_handler(
+            expression, declared, guaranteed) == expected, (shape, dest)
+
+
+def assert_argparse_mutex_storage_contract(audit_handler):
+    for case in ARGPARSE_MUTEX_STORAGE_CASES:
+        (shape, required, shared, mixed, empty, left, right,
+         expected_declared, expected_guaranteed) = case
+        parser = argparse.ArgumentParser(add_help=False)
+        _add_mutex_probe(parser, required, shared, mixed)
+        declared, guaranteed = namespace_dests(parser)
+        assert declared == set(expected_declared), shape
+        assert guaranteed == set(expected_guaranteed), shape
+        _assert_mutex_claim(
+            audit_handler, shape, declared, guaranteed)
+        for argv, expected in (((), empty), (('--left',), left),
+                               (('--right',), right)):
+            _assert_parse_namespace(parser, argv, expected, shape)
+
+    for case in ARGPARSE_MUTEX_PLACEMENT_CASES:
+        (shape, placement, empty_argv, left_argv, right_argv,
+         empty, left, right, expected_declared, expected_guaranteed) = case
+        parser = argparse.ArgumentParser(add_help=False)
+        if placement == 'nested':
+            owner = parser.add_argument_group('nested')
+            _add_mutex_probe(owner, True, True, False)
+            declared, guaranteed = namespace_dests(parser)
+        else:
+            subparsers = parser.add_subparsers(dest='cmd', required=True)
+            tabs = subparsers.add_parser('tabs', add_help=False)
+            _add_mutex_probe(
+                parser if placement == 'top' else tabs,
+                True, True, False)
+            root_claim = namespace_dests(parser)
+            sub_claim = namespace_dests(tabs)
+            declared = root_claim[0] | sub_claim[0]
+            guaranteed = root_claim[1] | sub_claim[1]
+        assert declared == set(expected_declared), shape
+        assert guaranteed == set(expected_guaranteed), shape
+        _assert_mutex_claim(
+            audit_handler, shape, declared, guaranteed)
+        for argv, expected in (
+                (empty_argv, empty), (left_argv, left),
+                (right_argv, right)):
+            _assert_parse_namespace(parser, argv, expected, shape)
+
+
 def namespace_dests(parser):
-    """Return the declared and guaranteed namespace destinations."""
+    """Return destinations declared and guaranteed on successful parses."""
     never_store = (argparse._HelpAction, argparse._VersionAction)
     actions = [
         action for action in parser._actions
@@ -399,7 +514,16 @@ def namespace_dests(parser):
             or action.required
             or (not action.option_strings
                 and action.nargs == argparse.REMAINDER))}
-    return declared, guaranteed | defaults
+    required_group_dests = set()
+    for group in parser._mutually_exclusive_groups:
+        destinations = {action.dest for action in group._group_actions}
+        if (group.required
+                and len(destinations) == 1
+                and argparse.SUPPRESS not in destinations
+                and not any(isinstance(action, never_store)
+                            for action in group._group_actions)):
+            required_group_dests |= destinations
+    return declared, guaranteed | required_group_dests | defaults
 
 
 def constant_string(node):
