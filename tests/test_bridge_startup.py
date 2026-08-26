@@ -43,16 +43,24 @@ def test_server_uses_the_shared_log_safe_function(tmp):
     assert mod.log_safe is shared_log_safe.log_safe
 
 
-def test_log_safe_import_has_no_daedalus_configuration_side_effects(tmp):
-    """The shared renderer must be importable without bridge configuration."""
+def test_log_safe_import_has_no_daedalus_environment_reads(tmp):
+    """The shared renderer must not inspect bridge configuration."""
     del tmp
     env = {
         key: value for key, value in os.environ.items()
         if not key.startswith('DAEDALUS_') and key != 'TOKEN'
     }
     code = """
+import os
 import pathlib
 import sys
+
+class EnvironmentWithoutDaedalusReads(dict):
+    def get(self, key, default=None):
+        assert not key.startswith('DAEDALUS_'), key
+        return super().get(key, default)
+
+os.environ = EnvironmentWithoutDaedalusReads(os.environ)
 import log_safe
 
 root = pathlib.Path.cwd().resolve()
