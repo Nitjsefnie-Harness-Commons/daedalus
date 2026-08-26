@@ -377,7 +377,8 @@ const afterUpdate = {
 
 tabs = [{ tabId: '11', title: 'first' }];
 emit('tab-unregistered');
-await settle();
+await bounded(
+  settle(), 'tab unregister refresh', _dashnodeStepTimeoutMs);
 const afterUnregister = {
   offered: select.options.map((o) => o.value),
   selected: select.value,
