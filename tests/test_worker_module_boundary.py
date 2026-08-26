@@ -107,8 +107,8 @@ def _top_level_reassigns(source, name, after):
     )
 
 
-def _directive_names(source, directive):
-    names = set()
+def _directive_entries(source, directive):
+    names = []
     pattern = re.compile(rf'/\*\s*{directive}\b([^*]*)\*/')
     for match in pattern.finditer(source):
         for item in match.group(1).split(','):
@@ -116,8 +116,12 @@ def _directive_names(source, directive):
             if name:
                 assert re.fullmatch(_JS_IDENTIFIER, name), (
                     f'unreadable {directive} directive entry {name!r}')
-                names.add(name)
+                names.append(name)
     return names
+
+
+def _directive_names(source, directive):
+    return set(_directive_entries(source, directive))
 
 
 def _masked_code_mentions(masked_source, name):
@@ -143,8 +147,13 @@ def _masked_code_mentions(masked_source, name):
 def test_each_worker_capability_lives_in_its_own_module(tmp):
     """Every exported handler has one replaceable runtime dispatch route.
 
-    Export directives define the handler inventory, apart from the explicit
-    non-handler exceptions. Exact table coverage is checked before probing.
+    The loader defines the module inventory. Each module's export directives,
+    apart from explicit non-handler exceptions, define its handlers. An entry
+    in the exception set removes that export from runtime route coverage and
+    therefore requires deliberate review. Before probing, the guard requires
+    unique handler ownership and exact, duplicate-sensitive route coverage.
+    A route row for an unloaded module is also refused.
+
     The probe checks replaceability first; afterwards, text checks require one
     statement-position function declaration and reject recognised top-level
     reassignment.
@@ -163,34 +172,97 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     del tmp
     background = (ROOT / 'extension' / 'background.js').read_text(
         encoding='utf-8')
-    modules = [('worker/cookies.js', [
-        ('handleCookies', 'cookies'),
-        ('handleSetCookie', 'set-cookie'),
-        ('handleRemoveCookie', 'remove-cookie'),
-        ('handleClearCookies', 'clear-cookies'),
-    ])]
+    routes = [
+        ('worker/cookies.js', 'handleCookies', 'cookies'),
+        ('worker/cookies.js', 'handleSetCookie', 'set-cookie'),
+        ('worker/cookies.js', 'handleRemoveCookie', 'remove-cookie'),
+        ('worker/cookies.js', 'handleClearCookies', 'clear-cookies'),
+    ]
     background_names = {
         name for name, _, _ in _top_level_declarations(background)
     }
+    duplicate_routes = sorted(
+        route for route, count in Counter(routes).items() if count > 1)
+    assert not duplicate_routes, (
+        f'worker route table contains duplicate rows: {duplicate_routes}')
+
+    extension_root = ROOT / 'extension'
+    loaded_modules = [
+        path.relative_to(extension_root).as_posix()
+        for path in imported_worker_paths()
+    ]
+    duplicate_modules = sorted(
+        relative for relative, count in Counter(loaded_modules).items()
+        if count > 1
+    )
+    assert not duplicate_modules, (
+        f'importScripts names duplicate worker modules: {duplicate_modules}')
+    unloaded_routes = sorted(
+        (relative, symbol)
+        for relative, symbol, _ in routes
+        if relative not in loaded_modules
+    )
+    assert not unloaded_routes, (
+        'worker route table names modules not loaded by importScripts: '
+        f'{unloaded_routes}')
+
+    module_details = []
+    duplicate_exports = {}
+    for relative in loaded_modules:
+        module_path = extension_root / relative
+        assert module_path.is_file(), f'{relative} does not exist'
+        module = module_path.read_text(encoding='utf-8')
+        exported = _directive_entries(module, 'exported')
+        duplicates = sorted(
+            name for name, count in Counter(exported).items() if count > 1)
+        if duplicates:
+            duplicate_exports[relative] = duplicates
+        module_details.append({
+            'relative': relative,
+            'source': module,
+            'handlers': [
+                name for name in exported
+                if name not in _WORKER_NON_HANDLER_EXPORTS
+            ],
+        })
+    assert not duplicate_exports, (
+        f'worker modules export names more than once: {duplicate_exports}')
+
     worker_exports = {
-        name for _, source in _worker_sources()
-        for name in _directive_names(source, 'exported')
+        name
+        for details in module_details
+        for name in _directive_names(details['source'], 'exported')
     }
     stale_exceptions = sorted(_WORKER_NON_HANDLER_EXPORTS - worker_exports)
     assert not stale_exceptions, (
         f'non-handler export exceptions no longer exist: {stale_exceptions}')
 
-    for relative, routes in modules:
-        module_path = ROOT / 'extension' / relative
-        assert module_path.is_file(), f'{relative} does not exist'
-        module = module_path.read_text(encoding='utf-8')
+    owners = {}
+    for details in module_details:
+        for handler in details['handlers']:
+            owners.setdefault(handler, []).append(details['relative'])
+    duplicate_owners = {
+        handler: relatives
+        for handler, relatives in sorted(owners.items())
+        if len(relatives) > 1
+    }
+    assert not duplicate_owners, (
+        f'worker handlers must have exactly one owning module: '
+        f'{duplicate_owners}')
+
+    for details in module_details:
+        relative = details['relative']
+        module = details['source']
+        module_routes = [
+            (symbol, command_type)
+            for route_module, symbol, command_type in routes
+            if route_module == relative
+        ]
         declarations = _top_level_declarations(module)
-        handler_exports = (
-            _directive_names(module, 'exported')
-            - _WORKER_NON_HANDLER_EXPORTS)
-        route_symbols = {symbol for symbol, _ in routes}
-        uncovered = sorted(handler_exports - route_symbols)
-        unexpected = sorted(route_symbols - handler_exports)
+        handler_counts = Counter(details['handlers'])
+        route_counts = Counter(symbol for symbol, _ in module_routes)
+        uncovered = sorted((handler_counts - route_counts).elements())
+        unexpected = sorted((route_counts - handler_counts).elements())
         assert not uncovered and not unexpected, (
             f'{relative} route table mismatch: uncovered handlers '
             f'{uncovered}; non-handler or unexported routes {unexpected}')
@@ -201,10 +273,11 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
                     'id': 'policy-capability', 'type': command_type,
                 },
             }
-            for symbol, command_type in routes
+            for symbol, command_type in module_routes
         ])
-        assert len(observations) == len(routes), observations
-        for (symbol, command_type), observed in zip(routes, observations):
+        assert len(observations) == len(module_routes), observations
+        for (symbol, command_type), observed in zip(
+                module_routes, observations):
             contract = (
                 f'{relative} must publish {symbol} as one unreassigned '
                 'top-level function declaration so the classic-worker route '
