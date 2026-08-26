@@ -4,6 +4,7 @@
 Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
+import os
 import re
 import subprocess
 import sys
@@ -153,6 +154,37 @@ setInterval(() => {}, 10);
     assert 'drain timed out: yes' in failure, failure
     assert 'last phase: grandchild inherited dashboard pipes' in failure
     assert "stdout: 'grandchild stdout'" in failure, failure
+
+
+def test_node_output_is_decoded_as_utf8_under_an_ascii_locale(tmp):
+    """Node's UTF-8 pipes do not depend on Python's host locale."""
+    del tmp
+    probe = r'''
+import sys
+sys.path.insert(0, 'tests')
+import _dashnode
+
+source = """
+process.stdout.write(Buffer.from('7374646f757420636166c3a9ff', 'hex'));
+process.stderr.write(Buffer.from('73746465727220636166c3a9ff', 'hex'));
+"""
+result = _dashnode.run_dashboard_node(source, bounded_steps=0)
+assert result.stdout == 'stdout caf\u00e9\ufffd', result
+assert result.stderr == 'stderr caf\u00e9\ufffd', result
+print('decoded utf-8')
+'''
+    environment = dict(os.environ)
+    environment.update({
+        'LC_ALL': 'C',
+        'PYTHONCOERCECLOCALE': '0',
+        'PYTHONUTF8': '0',
+    })
+    result = subprocess.run(
+        [sys.executable, '-c', probe], cwd=behaviour.ROOT,
+        env=environment, capture_output=True, text=True,
+        encoding='utf-8', errors='replace', timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == 'decoded utf-8\n', result
 
 
 def test_leave_flushes_the_error_before_exiting(tmp):

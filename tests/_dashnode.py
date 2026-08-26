@@ -84,7 +84,7 @@ def run_dashboard_node(source, *arguments, module=False, bounded_steps=1,
     ]
     process = subprocess.Popen(
         command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True)
+        text=True, encoding='utf-8', errors='replace')
     timeout = dashboard_child_timeout(bounded_steps, step_timeout)
     try:
         stdout, stderr = process.communicate(timeout=timeout)
