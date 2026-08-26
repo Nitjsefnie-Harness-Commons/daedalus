@@ -368,7 +368,8 @@ const initial = select.options.map((o) => o.value);
 select.value = '22';
 tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'RETITLED' }];
 emit('tab-updated');
-await settle();
+await bounded(
+  settle(), 'tab update refresh', _dashnodeStepTimeoutMs);
 const afterUpdate = {
   labels: select.options.map((o) => o.label),
   selected: select.value,
