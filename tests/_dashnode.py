@@ -4,6 +4,11 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 The dashboard behaviour suite runs shipped JavaScript modules in short Node
 processes. This helper keeps process setup and captured failures consistent.
+
+The JavaScript `bounded` helper races settlement but cannot cancel the losing
+work or any handles that work owns. A caller that recovers from its timeout
+must cancel those handles itself. The shipped asynchronous harnesses instead
+pass timeout failures to `leave`, which flushes the error and exits the child.
 """
 import re
 import shutil
