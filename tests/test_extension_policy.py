@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary import run_extension_capability_route  # noqa: E402
+from _boundary import run_extension_capability_routes  # noqa: E402
 from _jsread import (blank_js_comments, js_bracket_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
 from _repo import ROOT  # noqa: E402
@@ -30,7 +30,10 @@ _TOP_LEVEL_DECLARATION = re.compile(
     rf'(?P<function>(?:async\s+)?function\s+'
     rf'(?P<function_name>{_JS_IDENTIFIER})\s*\()'
     rf'|(?P<binding>(?:const|let|var)\s+'
-    rf'(?P<binding_name>{_JS_IDENTIFIER})\b)')
+    rf'(?P<binding_name>{_JS_IDENTIFIER})\b)'
+    rf'|(?P<class>class\s+(?P<class_name>{_JS_IDENTIFIER})\b)')
+_CONTROL_HEADER = re.compile(
+    r'(?<![\w$.])(?:if|for|while|with)\s*\(')
 _STATEMENT_CONTINUATION = frozenset('([{=,:.?+-*/%&|^!~<>')
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
@@ -76,6 +79,11 @@ def _starts_statement(mask, start):
         previous -= 1
     if previous < 0 or mask[previous] in ';}':
         return True
+    if mask[previous] == ')':
+        for control in _CONTROL_HEADER.finditer(mask, 0, previous + 1):
+            opening = mask.find('(', control.start(), control.end())
+            if js_bracket_end(mask, opening) == previous + 1:
+                return False
     line_start = mask.rfind('\n', 0, start) + 1
     if mask[line_start:start].strip():
         return False
@@ -91,7 +99,7 @@ def _top_level_declarations(source):
             continue
         if not _starts_statement(mask, match.start()):
             continue
-        kind = 'function' if match.group('function') else 'binding'
+        kind = match.lastgroup.removesuffix('_name')
         name = match.group(f'{kind}_name')
         declarations.append((name, kind, match.start()))
     return declarations
@@ -142,7 +150,7 @@ def _masked_code_mentions(masked_source, name):
 
 
 def test_each_worker_capability_lives_in_its_own_module(tmp):
-    """Each module owns a replaceable function reached by runtime dispatch.
+    """Every module handler is replaceable and reached by runtime dispatch.
 
     A published entry point must remain one statement-position function
     declaration. Binding forms and later top-level reassignment are refused
@@ -156,59 +164,76 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     at load time is rejected because replacing the published symbol cannot
     update the captured reference.
 
-    What is NOT enforced: `js_mask` does not parse regex literals, so regex
-    text can still masquerade as a top-level declaration. A module function
-    that delegates back to an implementation in background also passes,
-    because the module is genuinely on the runtime route.
+    A module function that delegates back to an implementation in background
+    also passes, because the module is genuinely on the runtime route.
     """
     del tmp
     background = (ROOT / 'extension' / 'background.js').read_text(
         encoding='utf-8')
-    capabilities = [('worker/cookies.js', 'handleCookies', 'cookies')]
+    modules = [('worker/cookies.js', [
+        ('handleCookies', 'cookies'),
+        ('handleSetCookie', 'set-cookie'),
+        ('handleRemoveCookie', 'remove-cookie'),
+        ('handleClearCookies', 'clear-cookies'),
+    ])]
+    background_names = {
+        name for name, _, _ in _top_level_declarations(background)
+    }
 
-    for relative, symbol, command_type in capabilities:
+    for relative, routes in modules:
         module_path = ROOT / 'extension' / relative
         assert module_path.is_file(), f'{relative} does not exist'
         module = module_path.read_text(encoding='utf-8')
         declarations = _top_level_declarations(module)
-        functions = [
-            start for name, kind, start in declarations
-            if name == symbol and kind == 'function'
-        ]
-        valid_declaration = (
-            len(functions) == 1
-            and not _top_level_reassigns(module, symbol, functions[0])
-        )
-        assert valid_declaration, (
-            f'{relative} must publish {symbol} as one unreassigned '
-            'top-level function declaration so the classic-worker route '
-            'probe can replace it')
-        background_names = {
-            name for name, _, _ in _top_level_declarations(background)
-        }
-        assert symbol not in background_names, (
-            f'background.js still declares {symbol} at top level')
-        observed = run_extension_capability_route(
-            symbol, {'id': 'policy-capability', 'type': command_type})
-        assert observed == {
-            'callCount': 1,
-            'calledType': command_type,
-            'answered': True,
-        }, (
-            f"runtime dispatch for {command_type!r} bypasses {symbol}: "
-            f'{observed}')
+        observations = run_extension_capability_routes([
+            {
+                'symbol': symbol,
+                'command': {
+                    'id': 'policy-capability', 'type': command_type,
+                },
+            }
+            for symbol, command_type in routes
+        ])
+        assert len(observations) == len(routes), observations
+        for (symbol, command_type), observed in zip(routes, observations):
+            contract = (
+                f'{relative} must publish {symbol} as one unreassigned '
+                'top-level function declaration so the classic-worker route '
+                'probe can replace it')
+            assert observed['symbol'] == symbol, observed
+            assert (observed['available'] and observed['replaceable']), (
+                contract)
+            functions = [
+                start for name, kind, start in declarations
+                if name == symbol and kind == 'function'
+            ]
+            valid_declaration = (
+                len(functions) == 1
+                and not _top_level_reassigns(module, symbol, functions[0])
+            )
+            assert valid_declaration, contract
+            assert symbol not in background_names, (
+                f'background.js still declares {symbol} at top level')
+            assert observed == {
+                'symbol': symbol,
+                'available': True,
+                'replaceable': True,
+                'callCount': 1,
+                'calledType': command_type,
+                'answered': True,
+            }, (
+                f"runtime dispatch for {command_type!r} bypasses {symbol}: "
+                f'{observed}')
 
 
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
-    """Classic-worker directives form a used producer-consumer graph.
+    """Best-effort text check for classic-worker directive typos.
 
-    Declarations must begin statements. Property keys and member accesses do
-    not count as consumers of a published global.
-
-    The platform allowlist is trusted input: adding an entry does not prove it
-    is a real platform global. This catches unresolved names and typos, not a
-    dishonest allowlist edit. What is NOT enforced: `js_mask` does not parse
-    regex literals, so regex text can masquerade as a declaration.
+    The exhaustive per-handler route table is the primary guarantee. This
+    secondary graph catches ordinary typos cheaply, but reassignment detection
+    is position- and spelling-dependent, an object method key can look like a
+    consumer, and `js_mask` does not parse regex literals (issue 198). The
+    platform allowlist is trusted input, not proof of a platform global.
     """
     del tmp
     worker_sources = _worker_sources()
