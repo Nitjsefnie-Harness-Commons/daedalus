@@ -397,6 +397,38 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
     assert state['stderr'] == '', state
 
 
+def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
+    """A killed client keeps its output while inherited pipes close."""
+    ready_path = Path(tmp) / 'slow-pipes.ready'
+    client = (
+        'import subprocess, sys, time\n'
+        'from pathlib import Path\n'
+        'print("slow-pipe-marker", flush=True)\n'
+        'grandchild = subprocess.Popen('
+        '[sys.executable, "-c", "import time; time.sleep(3)"])\n'
+        'target = Path(sys.argv[1])\n'
+        'pending = target.with_suffix(".tmp")\n'
+        'pending.write_text("ready", encoding="ascii")\n'
+        'pending.replace(target)\n'
+        'time.sleep(60)\n'
+    )
+    process = subprocess.Popen(
+        [sys.executable, '-c', client, str(ready_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        _wait_for_path(ready_path)
+        states = _overlap.client_states(
+            {'slow-pipe-owner': process}, grace=0.1)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+    state = states['slow-pipe-owner']
+    assert state['stillRunning'] is True, state
+    assert state['drainTimedOut'] is False, state
+    assert state['stdout'] == 'slow-pipe-marker', state
+
+
 def test_client_states_records_a_killed_clients_held_pipes(tmp):
     """A grandchild-held pipe makes the second timeout diagnostic data."""
     ready_path = Path(tmp) / 'grandchild.ready'
@@ -416,7 +448,8 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         _wait_for_path(ready_path)
-        states = _overlap.client_states({'pipe-owner': process}, grace=0.1)
+        states = _overlap.client_states(
+            {'pipe-owner': process}, grace=0.1, killed_pipe_release=0.1)
     finally:
         if process.poll() is None:
             process.kill()

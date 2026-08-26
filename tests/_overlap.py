@@ -217,10 +217,12 @@ async function waitForResultConsume() {
 _OVERLAP_INNER_WAIT_S = 15
 
 # Publication and successful exit allow normal process work and may move
-# together. Failure cleanup only drains diagnostics, so it stays brief.
+# together. Failure cleanup only waits briefly for an ordinary exit, while a
+# killed client's inherited pipes get a full release window.
 _CLIENT_COMMAND_WAIT_S = 15
 _SUCCESSFUL_CLIENT_GRACE_S = 20
 _FAILED_CLIENT_GRACE_S = 1
+_KILLED_CLIENT_PIPE_RELEASE_S = 20
 
 
 def overlap_child_timeout(order, wait_between,
@@ -276,7 +278,8 @@ def _output_text(value):
     return value.strip()
 
 
-def client_states(processes, grace):
+def client_states(processes, grace,
+                  killed_pipe_release=_KILLED_CLIENT_PIPE_RELEASE_S):
     """What each same-id client was doing when the harness gave up.
 
     The harness reports only its own timeout, and the `finally` below kills
@@ -285,8 +288,9 @@ def client_states(processes, grace):
     never came. This is the difference, read at the moment it matters.
 
     Each client gets `grace` seconds to exit normally. A client still running
-    is killed and drained; even a second drain timeout is recorded in that
-    client's state instead of escaping and hiding every diagnostic collected.
+    is killed and gets `killed_pipe_release` seconds for inherited pipes to
+    close; even a second drain timeout is recorded in that client's state
+    instead of escaping and hiding every diagnostic collected.
     """
     states = {}
     for owner, proc in processes.items():
@@ -298,7 +302,7 @@ def client_states(processes, grace):
             still_running = True
             proc.kill()
             try:
-                out, err = proc.communicate(timeout=grace)
+                out, err = proc.communicate(timeout=killed_pipe_release)
             except subprocess.TimeoutExpired as failure:
                 drain_timed_out = True
                 out, err = failure.stdout, failure.stderr
@@ -307,7 +311,7 @@ def client_states(processes, grace):
                 if proc.stderr is not None:
                     proc.stderr.close()
                 try:
-                    proc.wait(timeout=grace)
+                    proc.wait(timeout=killed_pipe_release)
                 except subprocess.TimeoutExpired:
                     # Preserve the recorded drain failure instead of replacing
                     # it with another exception from this diagnostic helper.
