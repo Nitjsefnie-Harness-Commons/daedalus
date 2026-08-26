@@ -169,7 +169,8 @@ function response(status, data) {
   const source = fs.readFileSync(process.argv[1], 'utf8');
   const moduleUrl = 'data:text/javascript;base64,'
     + Buffer.from(source).toString('base64');
-  const dashboard = await import(moduleUrl);
+  const dashboard = await bounded(
+    import(moduleUrl), 'dashboard module import', _dashnodeStepTimeoutMs);
   phase('dashboard module imported');
   phase('dashboard call started');
   let rejected = false;
@@ -184,10 +185,7 @@ function response(status, data) {
   if (!rejected) throw new Error('failed consume surfaced as a successful read');
   phase('dashboard call settled');
   phase('dashboard harness finished');
-})().catch(error => {
-  console.error(error && error.stack ? error.stack : error);
-  process.exit(1);
-});
+})().catch(leave);
 """
 
 
@@ -195,7 +193,8 @@ def test_dashboard_failed_consume_is_not_a_success(tmp):
     """The dashboard must reject when its matching-result consume fails."""
     del tmp
     _dashnode.run_dashboard_node(
-        _DASHBOARD_CONSUME_HARNESS, ROOT / 'dashboard' / 'api.js')
+        _DASHBOARD_CONSUME_HARNESS, ROOT / 'dashboard' / 'api.js',
+        bounded_steps=2)
 
 
 _DASHBOARD_WORLD_HARNESS = r"""
