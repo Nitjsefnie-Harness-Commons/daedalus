@@ -1168,8 +1168,8 @@ def _answer_one_ext_command(base, docroot, argv, result, env):
     `tab` with a browser `tabId`, and this pins the senders themselves.
     """
     # Nothing consumes this queue — there is no extension here — so a command
-    # from an earlier case is still sitting in it. Clearing first is what makes
-    # the file this case waits for unambiguously its own.
+    # from an earlier case may remain. Clearing and excluding refused survivors
+    # makes the file this case waits for unambiguously its own.
     qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
     ignored_names = clear_command_queue(qdir)
     proc = subprocess.Popen(
