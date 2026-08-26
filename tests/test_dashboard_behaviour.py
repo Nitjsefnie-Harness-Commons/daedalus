@@ -361,7 +361,8 @@ phase('dashboard call started');
 bindTabSelector(select, {
   getToken: () => 'tok', api, bus, placeholder: '(active tab)',
 });
-await settle();
+await bounded(
+  settle(), 'initial tab selector render', _dashnodeStepTimeoutMs);
 const initial = select.options.map((o) => o.value);
 
 select.value = '22';
