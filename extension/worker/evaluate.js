@@ -44,14 +44,16 @@ function _takeEvalRelay(relayId, tabId) {
 }
 
 // Evaluate through the debugger's Runtime domain. The V8 inspector compiles
-// source without calling the page's `eval` / `Function` bindings, and REPL mode
-// supplies top-level await. That says how the source ran, not whether its value
-// is trustworthy: page code and page promise machinery can still choose it.
+// source without calling the page's `eval` / `Function` bindings, and REPL
+// mode supplies top-level await. That says how the source ran, not whether its
+// value is trustworthy: page code and page promise machinery can still choose
+// it.
 // Returns true after CDP dispatch, false only before submitted source runs.
 async function _evalViaCdp(cmd, chromeTabId) {
   // A capture or a kept CDP session already owns the attachment; reuse it and
   // leave it in place, because detaching would end that capture or session.
-  const held = Boolean(_cdpSessions[chromeTabId]) || Boolean(_netCaptures[chromeTabId]);
+  const held = Boolean(_cdpSessions[chromeTabId])
+    || Boolean(_netCaptures[chromeTabId]);
   try {
     if (!held) await chrome.debugger.attach({ tabId: chromeTabId }, '1.3');
   } catch (_) {
@@ -62,9 +64,10 @@ async function _evalViaCdp(cmd, chromeTabId) {
     try {
       if (/\breturn\b/.test(cmd.code)) {
         // REPL mode supplies top-level `await`, but `return` still needs a
-        // function around it — and only when the source is a body rather than an
-        // expression that merely contains the word. This parser heuristic is not
-        // a security boundary: submitted text can escape the probe wrapper.
+        // function around it — and only when the source is a body rather than
+        // an expression that merely contains the word. This parser heuristic
+        // is not a security boundary: submitted text can escape the probe
+        // wrapper.
         // Without a successful probe, assume a body.
         const stripped = cmd.code.replace(/[\s;]+$/, '');
         let isExpr = false;
@@ -91,8 +94,8 @@ async function _evalViaCdp(cmd, chromeTabId) {
       // Nothing has been dispatched yet, so falling back repeats no work.
       return false;
     }
-    // Dispatching may start the submitted source, so every outcome from here on
-    // is terminal. Returning false could execute its side effects twice.
+    // Dispatching may start the submitted source, so every outcome from here
+    // on is terminal. Returning false could execute its side effects twice.
     let val;
     let err;
     try {
@@ -118,7 +121,9 @@ async function _evalViaCdp(cmd, chromeTabId) {
     return true;
   } finally {
     if (!held) {
-      try { await chrome.debugger.detach({ tabId: chromeTabId }); } catch (_) {}
+      try {
+        await chrome.debugger.detach({ tabId: chromeTabId });
+      } catch (_) {}
     }
   }
 }
@@ -176,15 +181,19 @@ async function handleEval(cmd) {
   // Find which chrome tab to target
   let chromeTabId = cmd.chromeTab;
   if (!chromeTabId) {
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!active) return postResult(cmd._execution, null, 'No active tab', cmd.tabId);
+    const [active] = await chrome.tabs.query(
+      { active: true, currentWindow: true });
+    if (!active) return postResult(
+      cmd._execution, null, 'No active tab', cmd.tabId);
     chromeTabId = active.id;
   }
-  chromeTabId = typeof chromeTabId === 'number' ? chromeTabId : parseInt(chromeTabId);
+  chromeTabId = typeof chromeTabId === 'number'
+    ? chromeTabId : parseInt(chromeTabId);
 
   // Prefer banner-free MAIN-world injection. A constant, source-free probe
-  // checks whether page CSP permits dynamic compilation; the page can influence
-  // that diagnostic choice, but no submitted source has run at this point.
+  // checks whether page CSP permits dynamic compilation; the page can
+  // influence that diagnostic choice, but no submitted source has run at this
+  // point.
   let useMainWorld = false;
   try {
     const probe = await chrome.scripting.executeScript({
