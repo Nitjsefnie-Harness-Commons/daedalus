@@ -44,6 +44,7 @@ let nextTimerId = 0;
 let resultAttempts = 0;
 let attachCalls = 0;
 let detachCalls = 0;
+const workerSourcePaths = new WeakMap();
 
 // chrome.storage.local hands back a structured clone, so a reader that has not
 // written yet cannot see another writer's in-flight mutation.
@@ -325,7 +326,7 @@ function makeContext() {
     clearInterval: clearScheduled,
     console: { log() {}, warn() {}, error() {} },
   });
-""" + import_scripts_stub('workerContext') + r"""
+""" + import_scripts_stub('workerContext', 'workerSourcePaths') + r"""
   return workerContext;
 }
 

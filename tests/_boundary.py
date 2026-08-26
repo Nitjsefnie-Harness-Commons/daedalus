@@ -33,32 +33,44 @@ async function runCapabilityRoutes() {
       });
       continue;
     }
-    context.capabilityCommand = route.command;
-    context.capabilityCalls = [];
-    context.capabilityAnswer = Object.freeze({ sentinel: publishedSymbol });
+    const original = vm.runInContext(publishedSymbol, context);
+    const calls = [];
+    const sentinelAnswer = Object.freeze({ sentinel: publishedSymbol });
+    context.capabilitySentinel = (cmd) => {
+      calls.push(cmd);
+      return sentinelAnswer;
+    };
     try {
       vm.runInContext(
-        publishedSymbol
-          + ' = (cmd) => { capabilityCalls.push(cmd);'
-          + ' return capabilityAnswer; }',
-        context);
+        publishedSymbol + ' = capabilitySentinel', context);
     } catch (error) {
+      delete context.capabilitySentinel;
       observations.push({
         symbol: publishedSymbol, available: true, replaceable: false,
         assignmentError: error.message,
       });
       continue;
     }
-    const answer = await vm.runInContext(
-      'dispatchCommand(capabilityCommand)', context);
+    context.capabilityCommand = route.command;
+    let answer;
+    try {
+      answer = await vm.runInContext(
+        'dispatchCommand(capabilityCommand)', context);
+    } finally {
+      context.capabilityOriginal = original;
+      vm.runInContext(
+        publishedSymbol + ' = capabilityOriginal', context);
+      delete context.capabilityCommand;
+      delete context.capabilityOriginal;
+      delete context.capabilitySentinel;
+    }
     observations.push({
       symbol: publishedSymbol,
       available: true,
       replaceable: true,
-      callCount: context.capabilityCalls.length,
-      calledType: context.capabilityCalls.length
-        ? context.capabilityCalls[0].type : null,
-      answered: answer === context.capabilityAnswer,
+      callCount: calls.length,
+      calledType: calls.length ? calls[0].type : null,
+      answered: answer === sentinelAnswer,
     });
   }
   return observations;
@@ -406,7 +418,7 @@ async function runFetchBound() {
 
 async function run() {
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
-  if (scenario === 'worker-sources') return context.loadedWorkerSourcePaths;
+  if (scenario === 'worker-sources') return workerSourcePaths.get(context);
   await vm.runInContext('loadConfig()', context);
   if (scenario === 'capability-routes') return runCapabilityRoutes();
   if (scenario === 'capacity') return runCapacity();
