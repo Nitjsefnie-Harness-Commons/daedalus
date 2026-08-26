@@ -6,6 +6,7 @@ the real Node subprocess boundary and the exact evidence returned to Python.
 """
 import contextlib
 import http.server
+import os
 import subprocess
 import sys
 import threading
@@ -65,6 +66,14 @@ function loadConfig() {
 function dispatchCommand() {}
 """
 
+_SYNCHRONOUS_DISPATCH_STALL_WORKER = """
+async function loadConfig() {}
+
+function dispatchCommand() {
+  for (;;) {}
+}
+"""
+
 _FINISHED_BUT_RUNNING_WORKER = """
 chrome.runtime.getPlatformInfo.constructor(
   'setInterval(() => {}, 1000)')();
@@ -105,7 +114,7 @@ def _slow_result_server():
             self.wfile.write(b'{}')
 
         def do_GET(self):
-            time.sleep(30)
+            time.sleep(60)
             body = b'{"pending":false}'
             try:
                 self.send_response(200)
@@ -148,6 +157,22 @@ def _harness_failure(background, inner_wait=1, commands=None, order=None,
     raise AssertionError('the stalled overlap harness unexpectedly succeeded')
 
 
+def _client_env():
+    env = dict(os.environ)
+    for key in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID'):
+        env.pop(key, None)
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    return env
+
+
+def _cookie_client_argv(owner):
+    return [
+        sys.executable, '-c',
+        'from daedalus_cli.cli import main; main()',
+        'cookies', '--domain', owner, '--timeout', '120',
+    ]
+
+
 def test_run_background_overlap_accepts_a_short_inner_bound(tmp):
     """A caller can shorten diagnostic bounds without changing production."""
     actual = _overlap.run_background_overlap(
@@ -184,6 +209,14 @@ def test_a_synchronous_stall_reports_the_outer_backstop_and_last_step(tmp):
     assert 'last step: the worker to load its config' in failure, failure
 
 
+def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
+    """A blocked dispatch call is not blamed on completed config loading."""
+    failure = _harness_failure(
+        _worker(tmp, _SYNCHRONOUS_DISPATCH_STALL_WORKER))
+    assert 'outer backstop' in failure, failure
+    assert 'last step: the dispatchCommand calls to start' in failure, failure
+
+
 def test_completed_work_that_does_not_exit_reports_the_finished_step(tmp):
     """Finished work is distinct from a harness that never completed."""
     failure = _harness_failure(_worker(tmp, _FINISHED_BUT_RUNNING_WORKER))
@@ -201,10 +234,56 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
         failure = _harness_failure(
             _worker(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
-            wait_between=True)
+            wait_between=True, inner_wait=5)
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure
+
+
+def test_real_overlap_success_path_reports_a_lingering_client(tmp):
+    """The real driver diagnoses a client that misses its exit grace."""
+    def client_argv(owner):
+        argv = _cookie_client_argv(owner)
+        if owner != 'owner-b':
+            return argv
+        linger = (
+            'import subprocess, sys, time\n'
+            'result = subprocess.run(sys.argv[1:], check=False)\n'
+            'time.sleep(60)\n'
+            'raise SystemExit(result.returncode)\n'
+        )
+        return [sys.executable, '-c', linger, *argv]
+
+    message = None
+    try:
+        _overlap.run_same_id_client_overlap(
+            tmp, ['owner-a', 'owner-b'], client_argv, _client_env(),
+            'overlap-client-token',
+            _util.ROOT / 'extension' / 'background.js')
+    except AssertionError as failure:
+        message = str(failure)
+    assert message is not None, 'a lingering real client was accepted'
+    assert "clients still running after grace: ['owner-b']" in message, message
+    assert 'harness posted:' in message, message
+    assert 'client states:' in message, message
+    assert "'owner-b': {'stillRunning': True" in message, message
+
+
+def test_real_overlap_failure_keeps_harness_and_live_client_states(tmp):
+    """Client cleanup cannot mask a named failure from the real harness."""
+    message = None
+    try:
+        _overlap.run_same_id_client_overlap(
+            tmp, ['missing-owner'], _cookie_client_argv, _client_env(),
+            'overlap-client-token',
+            _util.ROOT / 'extension' / 'background.js')
+    except AssertionError as failure:
+        message = str(failure)
+    assert message is not None, 'the injected harness failure was accepted'
+    assert 'missing cookie completion for missing-owner' in message, message
+    assert 'clients:' in message, message
+    assert "'owner-a': {'stillRunning': True" in message, message
+    assert "'owner-b': {'stillRunning': True" in message, message
 
 
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
@@ -213,7 +292,6 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
     client = (
         'import sys, time\n'
         'from pathlib import Path\n'
-        'time.sleep(0.25)\n'
         'print("started", flush=True)\n'
         'Path(sys.argv[1]).write_text("ready", encoding="ascii")\n'
         'time.sleep(60)\n'
@@ -237,7 +315,7 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
 
 def test_client_states_records_a_killed_clients_held_pipes(tmp):
     """A grandchild-held pipe makes the second timeout diagnostic data."""
-    pid_path = Path(tmp) / 'grandchild.pid'
+    ready_path = Path(tmp) / 'grandchild.ready'
     client = (
         'import subprocess, sys, time\n'
         'from pathlib import Path\n'
@@ -245,15 +323,15 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
         '[sys.executable, "-c", "import time; time.sleep(10)"])\n'
         'target = Path(sys.argv[1])\n'
         'pending = target.with_suffix(".tmp")\n'
-        'pending.write_text(str(grandchild.pid), encoding="ascii")\n'
+        'pending.write_text("ready", encoding="ascii")\n'
         'pending.replace(target)\n'
         'time.sleep(60)\n'
     )
     process = subprocess.Popen(
-        [sys.executable, '-c', client, str(pid_path)],
+        [sys.executable, '-c', client, str(ready_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        _wait_for_path(pid_path)
+        _wait_for_path(ready_path)
         states = _overlap.client_states({'pipe-owner': process}, grace=0.1)
     finally:
         if process.poll() is None:
