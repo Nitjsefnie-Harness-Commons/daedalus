@@ -8,7 +8,6 @@ each verdict.
 """
 import importlib.util
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +19,7 @@ except ImportError:
     resource = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
@@ -414,14 +414,13 @@ def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
     result, and one per gap when the caller asks to wait between them.
     """
     del tmp
-    inner = re.search(r'timeoutMs = (\d+)', _util._BACKGROUND_OVERLAP_HARNESS)
-    assert inner, 'the harness no longer declares a per-wait bound'
-    inner_ms = int(inner.group(1))
+    inner = _overlap._OVERLAP_INNER_WAIT_S
     for order, wait_between in (
             (['a', 'b'], True), (['a', 'b'], False), (['a'], False)):
-        waits = 1 + len(order) + (len(order) - 1 if wait_between else 0)
-        worst = waits * inner_ms / 1000
-        bound = _util.overlap_child_timeout(order, wait_between)
+        waits = 3 + len(order) + (len(order) - 1 if wait_between else 0)
+        worst = waits * inner
+        bound = _overlap.overlap_child_timeout(
+            order, wait_between, inner)
         assert bound > worst, (
             f'{len(order)} commands, wait_between={wait_between}: the child '
             f'is killed at {bound}s while its own waits can run to {worst}s, '
