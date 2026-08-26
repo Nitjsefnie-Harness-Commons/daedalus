@@ -10,8 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary import (observe_extension_worker_paths,  # noqa: E402
                        run_extension_capability_routes)
-from _jsread import (js_bracket_end, js_mask,  # noqa: E402
-                     js_split_top_level)
+from _jsread import (js_bracket_end, js_function_body_ranges,  # noqa: E402
+                     js_mask, js_split_top_level,
+                     js_var_declaration_end)
 from _repo import ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
 
@@ -139,9 +140,12 @@ def _binding_pattern_names(mask, start, end):
     return names
 
 
-def _binding_declarations(mask, declaration_start):
-    statement_end = _first_top_level(
-        mask, declaration_start, len(mask), ';')
+def _binding_declarations(mask, declaration_start, binding_kind):
+    statement_end = js_var_declaration_end(
+        mask, declaration_start) if binding_kind == 'var' else None
+    if statement_end is None:
+        statement_end = _first_top_level(
+            mask, declaration_start, len(mask), ';')
     if statement_end is None:
         statement_end = len(mask)
     declarations = []
@@ -155,15 +159,27 @@ def _binding_declarations(mask, declaration_start):
 def _top_level_declarations(source):
     mask = js_mask(source)
     top_level = _top_level_positions(mask)
+    function_bodies = js_function_body_ranges(mask)
     declarations = []
     for match in _TOP_LEVEL_DECLARATION.finditer(mask):
+        if match.lastgroup == 'binding':
+            binding_kind = match.group('binding')
+            inside_function = any(
+                start < match.start() < end
+                for start, end in function_bodies)
+            if binding_kind == 'var' and inside_function:
+                continue
+            if (binding_kind != 'var'
+                    and (not top_level[match.start()]
+                         or not _starts_statement(mask, match.start()))):
+                continue
+            declarations.extend(
+                _binding_declarations(
+                    mask, match.end(), binding_kind))
+            continue
         if not top_level[match.start()]:
             continue
         if not _starts_statement(mask, match.start()):
-            continue
-        if match.lastgroup == 'binding':
-            declarations.extend(
-                _binding_declarations(mask, match.end()))
             continue
         kind = match.lastgroup.removesuffix('_name')
         name = match.group(f'{kind}_name')
@@ -546,6 +562,12 @@ const {
 } = input, after = 2;
 let one = 1, [two, , ...three] = list;
 var four;
+for (var forBinding of iterable) {
+  if (forBinding) break;
+}
+if (condition) {
+  var blockBinding = value;
+}
 """
     declarations = [
         (name, kind)
@@ -564,6 +586,8 @@ var four;
         ('two', 'binding'),
         ('three', 'binding'),
         ('four', 'binding'),
+        ('forBinding', 'binding'),
+        ('blockBinding', 'binding'),
     ]
 
 
@@ -574,6 +598,9 @@ def test_top_level_declarations_ignore_keys_and_nested_declarations(tmp):
 const propertyHolder = { propertyKey: 1 };
 function uniqueContainer() {
   const nestedDeclaration = { propertyKey: 2 };
+  if (nestedDeclaration) {
+    var nestedFunctionVar = nestedDeclaration;
+  }
   return nestedDeclaration;
 }
 """
