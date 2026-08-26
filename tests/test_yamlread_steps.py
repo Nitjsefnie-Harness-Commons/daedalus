@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _yamlsteps  # noqa: E402
 from _yamlread import (  # noqa: E402
     YAMLReadError, _comment, job_scalar, step_scalar, step_scalars,
 )
@@ -266,6 +267,70 @@ def test_step_mappings_decode_every_field_and_nested_mapping(tmp):
         'run': 'echo "$HEAD_SHA"\n',
         'continue-on-error': 'false',
     }]
+
+
+def test_complete_workflow_and_job_mappings_decode_every_container(tmp):
+    """Complete maps retain every nested workflow and job value."""
+    del tmp
+    source = (
+        'name: sample\n'
+        'on:\n'
+        '  workflow_run:\n'
+        '    workflows: [tests]\n'
+        '    types: [completed]\n'
+        'env:\n'
+        '  WORKFLOW_ONLY: workflow\n'
+        'defaults:\n'
+        '  run:\n'
+        "    shell: bash -c 'bash \"$1\"' -- {0}\n"
+        'concurrency:\n'
+        '  group: sample\n'
+        '  cancel-in-progress: true\n'
+        'jobs:\n'
+        '  sample:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    timeout-minutes: 10\n'
+        '    services: {}\n'
+        '    env:\n'
+        '      JOB_ONLY: job\n'
+        '    steps:\n'
+        '      - name: target\n'
+        '        run: |\n'
+        '          true\n')
+    workflow_mapping = getattr(_yamlsteps, 'workflow_mapping', None)
+    complete_job_mapping = getattr(
+        _yamlsteps, 'complete_job_mapping', None)
+    assert callable(workflow_mapping), (
+        'complete workflow mapping decoder is missing')
+    assert callable(complete_job_mapping), (
+        'complete job mapping decoder is missing')
+    expected_job = {
+        'runs-on': 'ubuntu-latest',
+        'timeout-minutes': '10',
+        'services': {},
+        'env': {'JOB_ONLY': 'job'},
+        'steps': [{'name': 'target', 'run': 'true\n'}],
+    }
+    expected = {
+        'name': 'sample',
+        'on': {
+            'workflow_run': {
+                'workflows': ['tests'],
+                'types': ['completed'],
+            },
+        },
+        'env': {'WORKFLOW_ONLY': 'workflow'},
+        'defaults': {
+            'run': {'shell': 'bash -c \'bash "$1"\' -- {0}'},
+        },
+        'concurrency': {
+            'group': 'sample',
+            'cancel-in-progress': 'true',
+        },
+        'jobs': {'sample': expected_job},
+    }
+    assert complete_job_mapping(source, 'sample') == expected_job
+    assert workflow_mapping(source) == expected
 
 
 def test_plain_scalar_oracle_corpus_refuses_unsafe_spellings(tmp):
