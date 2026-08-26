@@ -63,9 +63,18 @@ throw new Error({message!r});
     return _module(tmp, source, name=name)
 
 
-def _harness_failure(source, *arguments, **options):
+def _harness(source, bounded_steps=0, module=False):
+    return _dashnode.DashboardNodeHarness(
+        source, bounded_steps=bounded_steps, module=module)
+
+
+def _harness_failure(harness, *arguments, **options):
+    if isinstance(harness, str):
+        bounded_steps = options.pop('bounded_steps', 0)
+        module = options.pop('module', False)
+        harness = _harness(harness, bounded_steps, module)
     try:
-        _dashnode.run_dashboard_node(source, *arguments, **options)
+        _dashnode.run_dashboard_node(harness, *arguments, **options)
     except AssertionError as failure:
         return str(failure)
     except subprocess.TimeoutExpired as failure:
@@ -81,7 +90,7 @@ def test_phase_records_a_harness_checkpoint(tmp):
     """A phase reaches captured stderr in its stable diagnostic format."""
     del tmp
     result = _dashnode.run_dashboard_node(
-        "phase('dashboard harness started');", bounded_steps=0)
+        _harness("phase('dashboard harness started');"))
     assert result.stderr == '[phase] dashboard harness started\n', result
 
 
@@ -95,7 +104,7 @@ bounded(new Promise(() => {}), 'the dashboard module to import', 20)
     process.exit(0);
   });
 """
-    result = _dashnode.run_dashboard_node(source)
+    result = _dashnode.run_dashboard_node(_harness(source))
     assert result.stdout == (
         'timed out waiting for the dashboard module to import'), result
 
@@ -114,7 +123,7 @@ bounded(work, 'work using a timer stub', 100).then(
   (error) => process.stdout.write('rejected: ' + error.message),
 );
 """
-    result = _dashnode.run_dashboard_node(source)
+    result = _dashnode.run_dashboard_node(_harness(source))
     assert result.stdout == 'resolved: settled', result
 
 
@@ -128,7 +137,7 @@ bounded(Promise.resolve('settled'), 'successful work', 1500).then(
 );
 """
     started = time.monotonic()
-    result = _dashnode.run_dashboard_node(source)
+    result = _dashnode.run_dashboard_node(_harness(source))
     elapsed = time.monotonic() - started
     assert result.stdout == 'settled', result
     assert elapsed < 0.75, f'settled bound held Node open for {elapsed:.2f}s'
@@ -168,7 +177,8 @@ source = """
 process.stdout.write(Buffer.from('7374646f757420636166c3a9ff', 'hex'));
 process.stderr.write(Buffer.from('73746465727220636166c3a9ff', 'hex'));
 """
-result = _dashnode.run_dashboard_node(source, bounded_steps=0)
+harness = _dashnode.DashboardNodeHarness(source, bounded_steps=0)
+result = _dashnode.run_dashboard_node(harness)
 assert result.stdout == 'stdout caf\u00e9\ufffd', result
 assert result.stderr == 'stderr caf\u00e9\ufffd', result
 print('decoded utf-8')
@@ -217,6 +227,48 @@ def test_backstop_grows_with_the_bounded_step_count(tmp):
     assert three_steps > one_step, (one_step, three_steps)
 
 
+def test_shipped_harnesses_pin_their_exact_bounded_step_counts(tmp):
+    """Each shipped source carries its one validated timeout count."""
+    del tmp
+    expected = {
+        'content': (behaviour._CONTENT_KEEPALIVE_HARNESS, 0),
+        'consume': (behaviour._DASHBOARD_CONSUME_HARNESS, 2),
+        'world': (behaviour._DASHBOARD_WORLD_HARNESS, 1),
+        'selector': (behaviour._TAB_SELECTOR_HARNESS, 5),
+    }
+    for name, (harness, bounded_steps) in expected.items():
+        assert isinstance(harness, _dashnode.DashboardNodeHarness), name
+        assert harness.bounded_steps == bounded_steps, name
+
+
+def test_harness_metadata_rejects_an_under_declared_bound_count(tmp):
+    """One real bound cannot be declared as zero bounded steps."""
+    del tmp
+    try:
+        _dashnode.DashboardNodeHarness(
+            "await bounded(Promise.resolve(), 'work', 1);",
+            bounded_steps=0, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness declares 0 bounded steps but performs 1')
+    else:
+        raise AssertionError('under-declared dashboard harness was accepted')
+
+
+def test_harness_metadata_rejects_an_over_declared_bound_count(tmp):
+    """One real bound cannot be declared as two bounded steps."""
+    del tmp
+    try:
+        _dashnode.DashboardNodeHarness(
+            "await bounded(Promise.resolve(), 'work', 1);",
+            bounded_steps=2, module=True)
+    except ValueError as failure:
+        assert str(failure) == (
+            'dashboard harness declares 2 bounded steps but performs 1')
+    else:
+        raise AssertionError('over-declared dashboard harness was accepted')
+
+
 def test_completed_steps_that_do_not_exit_report_the_last_phase(tmp):
     """The outer backstop distinguishes finished work from a hung step."""
     module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
@@ -226,7 +278,7 @@ export function formatEvalWorld(value) {
 """)
     failure = _harness_failure(
         behaviour._DASHBOARD_WORLD_HARNESS, module,
-        bounded_steps=1, step_timeout=0.5)
+        step_timeout=0.5)
     assert 'outer backstop timed out after 1.0s' in failure, failure
     assert 'last phase: dashboard harness finished' in failure, failure
     assert '"cdp"' in failure, failure
@@ -248,19 +300,16 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
     runs = {
         'content': _dashnode.run_dashboard_node(
             behaviour._CONTENT_KEEPALIVE_HARNESS,
-            behaviour.ROOT / 'extension' / 'content.js',
-            bounded_steps=0),
+            behaviour.ROOT / 'extension' / 'content.js'),
         'consume': _dashnode.run_dashboard_node(
             behaviour._DASHBOARD_CONSUME_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'api.js', bounded_steps=2),
+            behaviour.ROOT / 'dashboard' / 'api.js'),
         'world': _dashnode.run_dashboard_node(
             behaviour._DASHBOARD_WORLD_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js',
-            bounded_steps=1),
+            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js'),
         'selector': _dashnode.run_dashboard_node(
             behaviour._TAB_SELECTOR_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js',
-            module=True, bounded_steps=5),
+            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js'),
     }
     expected = [
         'dashboard harness started',
@@ -282,7 +331,7 @@ export async function runCommand() {}
 """)
     failure = _harness_failure(
         behaviour._DASHBOARD_CONSUME_HARNESS, module,
-        bounded_steps=2, step_timeout=0.5)
+        step_timeout=0.5)
     assert 'timed out waiting for dashboard module import' in failure, failure
     assert 'outer backstop' not in failure, failure
     assert '[phase] dashboard harness started' in failure, failure
@@ -298,7 +347,7 @@ export function runCommand() {
 """)
     failure = _harness_failure(
         behaviour._DASHBOARD_CONSUME_HARNESS, module,
-        bounded_steps=2, step_timeout=0.5)
+        step_timeout=0.5)
     assert 'timed out waiting for dashboard call' in failure, failure
     assert 'timed out waiting for dashboard module import' not in failure
     assert 'outer backstop' not in failure, failure
@@ -314,7 +363,7 @@ export function formatEvalWorld() {}
 """)
     failure = _harness_failure(
         behaviour._DASHBOARD_WORLD_HARNESS, module,
-        bounded_steps=1, step_timeout=0.5)
+        step_timeout=0.5)
     assert 'timed out waiting for dashboard module import' in failure, failure
     assert 'outer backstop' not in failure, failure
     assert '[phase] dashboard module import started' in failure, failure
@@ -327,8 +376,7 @@ await new Promise(() => {});
 export function bindTabSelector() {}
 """, name='selector.mjs')
     failure = _harness_failure(
-        behaviour._TAB_SELECTOR_HARNESS, module, module=True,
-        bounded_steps=5, step_timeout=0.5)
+        behaviour._TAB_SELECTOR_HARNESS, module, step_timeout=0.5)
     assert 'timed out waiting for dashboard module import' in failure, failure
     assert 'outer backstop' not in failure, failure
     assert '[phase] dashboard module import started' in failure, failure
@@ -338,8 +386,7 @@ def test_initial_tab_selector_settle_is_bounded(tmp):
     """The selector's initial asynchronous render has its own bound."""
     failure = _harness_failure(
         behaviour._TAB_SELECTOR_HARNESS,
-        _stalling_selector_module(tmp, 0), module=True,
-        bounded_steps=5, step_timeout=0.3)
+        _stalling_selector_module(tmp, 0), step_timeout=0.3)
     assert (
         'timed out waiting for initial tab selector render' in failure
     ), failure
@@ -350,8 +397,7 @@ def test_tab_update_settle_is_bounded(tmp):
     """A tab-updated refresh has its own bound after initial render."""
     failure = _harness_failure(
         behaviour._TAB_SELECTOR_HARNESS,
-        _stalling_selector_module(tmp, 1), module=True,
-        bounded_steps=5, step_timeout=0.3)
+        _stalling_selector_module(tmp, 1), step_timeout=0.3)
     assert 'timed out waiting for tab update refresh' in failure, failure
     assert 'outer backstop' not in failure, failure
 
@@ -360,8 +406,7 @@ def test_tab_unregister_settle_is_bounded(tmp):
     """A tab-unregistered refresh has its own bound after an update."""
     failure = _harness_failure(
         behaviour._TAB_SELECTOR_HARNESS,
-        _stalling_selector_module(tmp, 2), module=True,
-        bounded_steps=5, step_timeout=0.3)
+        _stalling_selector_module(tmp, 2), step_timeout=0.3)
     assert 'timed out waiting for tab unregister refresh' in failure, failure
     assert 'outer backstop' not in failure, failure
 
@@ -370,8 +415,7 @@ def test_tab_sync_settle_is_bounded(tmp):
     """A tabs-synced refresh has its own bound after unregistering a tab."""
     failure = _harness_failure(
         behaviour._TAB_SELECTOR_HARNESS,
-        _stalling_selector_module(tmp, 3), module=True,
-        bounded_steps=5, step_timeout=0.3)
+        _stalling_selector_module(tmp, 3), step_timeout=0.3)
     assert 'timed out waiting for tab sync refresh' in failure, failure
     assert 'outer backstop' not in failure, failure
 
@@ -379,17 +423,16 @@ def test_tab_sync_settle_is_bounded(tmp):
 def test_shipped_catch_tails_flush_through_leave(tmp):
     """Every asynchronous harness waits for a delayed failure write."""
     cases = (
-        ('consume', behaviour._DASHBOARD_CONSUME_HARNESS, False, 2),
-        ('world', behaviour._DASHBOARD_WORLD_HARNESS, False, 1),
-        ('selector', behaviour._TAB_SELECTOR_HARNESS, True, 5),
+        ('consume', behaviour._DASHBOARD_CONSUME_HARNESS),
+        ('world', behaviour._DASHBOARD_WORLD_HARNESS),
+        ('selector', behaviour._TAB_SELECTOR_HARNESS),
     )
-    for name, harness, module_mode, steps in cases:
+    for name, harness in cases:
         message = f'flushed {name} harness failure'
         module = _delayed_failure_module(
             tmp, message, f'{name}.mjs')
         failure = _harness_failure(
-            harness, module, module=module_mode, bounded_steps=steps,
-            step_timeout=0.5)
+            harness, module, step_timeout=0.5)
         assert message in failure, (name, failure)
 
 
