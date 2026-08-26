@@ -42,12 +42,12 @@ TEST_CEILING = 700
 # Every file over its ceiling, at the size it was measured. Issues #97,
 # #127 and #129 are the standing work to empty this table.
 BASELINE = {
-    'server.py': 2242,
+    'server.py': 2220,
     'extension/background.js': 1943,
-    'tests/test_mcp_server.py': 1743,
+    'tests/test_mcp_server.py': 1732,
     'tests/test_cli.py': 1269,
     'tests/test_bridge_results.py': 1343,
-    'mcp_server.py': 958,
+    'mcp_server.py': 935,
 }
 
 _ENTRY = re.compile(r"^(?P<indent>\s*)'(?P<path>[^']+)': (?P<size>\d+),\s*$")

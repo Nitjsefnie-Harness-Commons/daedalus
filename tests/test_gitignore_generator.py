@@ -328,9 +328,9 @@ def test_gitignore_log_safe_never_raises_and_stays_useful(tmp):
     outside any fallback, so a conversion-limited huge int, an exception
     object with a failing __str__, or a str subclass with a raising encode
     or a non-string decode turned the diagnostic into the failure. The
-    copies cannot share an implementation (importing server.py requires its
-    env and runs module-level config), so they are kept behavior-identical —
-    this test holds the generator's copy to the same shared contract.
+    standalone script runs without the repository root on its import path,
+    so it keeps a behavior-identical copy; this test holds that copy to the
+    shared contract.
     """
     del tmp
     generator = _util.load(
