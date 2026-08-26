@@ -183,7 +183,7 @@ async function waitForResultConsume() {
     vm.runInContext('dispatchCommand(commands[' + index + '])', context));
   await waitFor(
     () => pendingCookies.size === commands.length,
-    'both cookie handlers to start');
+    'all cookie handlers to start');
 
   for (let index = 0; index < completionOrder.length; index++) {
     const owner = completionOrder[index];
@@ -198,7 +198,7 @@ async function waitForResultConsume() {
       await waitForResultConsume();
     }
   }
-  const settleLabel = 'both dispatchCommand calls to settle';
+  const settleLabel = 'all dispatchCommand calls to settle';
   step(settleLabel);
   await bounded(Promise.all(executions), settleLabel, innerWaitMs);
   process.stdout.write(JSON.stringify(postedResults.map((item) => ({
@@ -215,6 +215,12 @@ async function waitForResultConsume() {
 
 
 _OVERLAP_INNER_WAIT_S = 15
+
+# Publication and successful exit allow normal process work and may move
+# together. Failure cleanup only drains diagnostics, so it stays brief.
+_CLIENT_COMMAND_WAIT_S = 15
+_SUCCESSFUL_CLIENT_GRACE_S = 20
+_FAILED_CLIENT_GRACE_S = 1
 
 
 def overlap_child_timeout(order, wait_between,
@@ -327,7 +333,7 @@ def assert_clients_exited(states, posted):
 
 
 def _wait_for_client_commands(queue, count):
-    deadline = time.time() + 15
+    deadline = time.time() + _CLIENT_COMMAND_WAIT_S
     while time.time() < deadline:
         if queue.is_dir() and len(list(queue.glob('*.json'))) == count:
             return
@@ -336,9 +342,9 @@ def _wait_for_client_commands(queue, count):
 
 
 def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
-                               token, background,
-                               owners=('owner-a', 'owner-b')):
+                               token, background):
     """Drive real same-id CLI clients and preserve both failure surfaces."""
+    owners = ('owner-a', 'owner-b')
     bridge_env = {'TOKEN': '', 'DAEDALUS_TOKEN': token}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         client_env = dict(env)
@@ -368,9 +374,10 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
             except AssertionError as failure:
                 raise AssertionError(
                     f'{failure}; clients: '
-                    f'{client_states(processes, grace=1)}'
+                    f'{client_states(processes, grace=_FAILED_CLIENT_GRACE_S)}'
                 ) from failure
-            states = client_states(processes, grace=20)
+            states = client_states(
+                processes, grace=_SUCCESSFUL_CLIENT_GRACE_S)
             assert_clients_exited(states, posted)
             results = {}
             for owner, state in states.items():
