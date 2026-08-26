@@ -418,6 +418,7 @@ def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
         'import subprocess, sys, time\n'
         'from pathlib import Path\n'
         'print("slow-pipe-marker", flush=True)\n'
+        'print("slow-pipe-error", file=sys.stderr, flush=True)\n'
         'grandchild = subprocess.Popen('
         '[sys.executable, "-c", "import time; time.sleep(3)"])\n'
         'target = Path(sys.argv[1])\n'
@@ -441,6 +442,7 @@ def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
     assert state['stillRunning'] is True, state
     assert state['drainTimedOut'] is False, state
     assert state['stdout'] == 'slow-pipe-marker', state
+    assert state['stderr'] == 'slow-pipe-error', state
 
 
 def test_client_states_records_a_killed_clients_held_pipes(tmp):
@@ -474,6 +476,47 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
     assert state['stdout'] == '', state
     assert state['stderr'] == '', state
     assert state['drainTimedOut'] is True, state
+
+
+def test_client_states_bounds_fallback_wait_after_drain_timeout(tmp):
+    """A failed drain cannot turn its last-resort reap into an unbounded hang.
+
+    The fallback wait runs only after the killed client's drain has already
+    timed out. If that wait were unbounded, the diagnostic helper would hang
+    precisely when the process was already known to be broken.
+    """
+    del tmp
+
+    class NeverReapedProcess:
+        """A killed client whose communicate and reap never complete."""
+
+        stdout = None
+        stderr = None
+        returncode = None
+
+        def communicate(self, timeout):
+            del self
+            raise subprocess.TimeoutExpired('fake-client', timeout)
+
+        def kill(self):
+            del self
+
+        def wait(self, timeout=None):
+            del self
+            if timeout is None:
+                raise AssertionError('fallback wait was unbounded')
+            raise subprocess.TimeoutExpired('fake-client', timeout)
+
+    state = _overlap.client_states(
+        {'stuck-owner': NeverReapedProcess()}, grace=0.1,
+        killed_pipe_release=0.1)['stuck-owner']
+    assert state == {
+        'stillRunning': True,
+        'returncode': None,
+        'stdout': '',
+        'stderr': '',
+        'drainTimedOut': True,
+    }, state
 
 
 def test_running_clients_report_the_owner_posted_results_and_states(tmp):
