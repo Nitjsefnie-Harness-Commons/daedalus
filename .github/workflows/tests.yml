@@ -56,10 +56,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # Without these the MCP suite skips, and a run where every MCP test
-      # skipped is indistinguishable from one where they passed.
-      - name: Install the MCP server's dependencies
-        run: python -m pip install --upgrade pip . ".[mcp]"
+      # Without the MCP extra that suite skips; test_diff_coverage imports the
+      # statement analyzer pinned in requirements-test.txt.
+      - name: Install the test dependencies and project
+        run: |
+          python -m pip install --upgrade pip . ".[mcp]"
+          python -m pip install -r requirements-test.txt
 
       - name: Run every suite
         env:

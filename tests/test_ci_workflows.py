@@ -240,28 +240,37 @@ def test_diff_coverage_permissions_are_exactly_read_only(tmp):
     _assert_diff_coverage_permissions(_tests_workflow())
 
 
-def test_diff_coverage_installs_the_pinned_statement_analyzer(tmp):
-    """The untrusted job installs coverage.py from its sole pin file."""
+def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
+    """Every import environment installs coverage.py from its sole pin."""
     del tmp
-    pins = [
-        line for line in (ROOT / 'requirements-test.txt').read_text(
-            encoding='utf-8').splitlines()
-        if line.startswith('coverage==')
-    ]
+    pins = re.findall(r'^coverage==.*$',
+                      (ROOT / 'requirements-test.txt').read_text(
+                          encoding='utf-8'), re.MULTILINE)
     assert len(pins) == 1, pins
-    workflow = _tests_workflow()
-    _before, marker, producer = workflow.partition('\n  diff-coverage:\n')
-    assert marker, 'tests workflow has no diff-coverage job'
-    producer, marker, _after = producer.partition('\n  aggregate:\n')
-    assert marker, 'diff-coverage job has no following aggregate job'
-    install = (
-        'python3 -m pip install --requirement requirements-test.txt')
-    assert install in producer, (
-        'diff-coverage does not install coverage.py from '
-        'requirements-test.txt')
-    assert 'coverage==' not in producer, 'workflow duplicated the version pin'
-    assert producer.index(install) < producer.index(
-        '- name: Measure the coverage of this change')
+    workflow_dir = ROOT / '.github' / 'workflows'
+    tests = _tests_workflow()
+    lint = (workflow_dir / 'lint.yml').read_text(encoding='utf-8')
+    release = (workflow_dir / 'release.yml').read_text(encoding='utf-8')
+
+    def before(source, job, consumer):
+        section = source.partition(f'\n  {job}:\n')[2].partition(consumer)
+        return section[0] if section[1] else ''
+    jobs = (
+        ('diff-coverage', before(tests, 'diff-coverage',
+                                 '- name: Measure the coverage')),
+        ('suites', before(tests, 'suites', '- name: Run every suite')),
+        ('pylint', before(lint, 'pylint', '- name: pylint')),
+        ('release', before(release, 'publish',
+                           '- name: Run every suite before publishing')),
+    )
+    install = re.compile(
+        r'pip install (?:-r|--requirement) requirements-test[.]txt')
+    missing = [name for name, job in jobs if not install.search(job)]
+    assert not missing, (
+        'jobs that import diff_coverage do not install coverage.py from '
+        f'requirements-test.txt: {", ".join(missing)}')
+    for name, job in jobs:
+        assert 'coverage==' not in job, f'{name} duplicated the version pin'
 
 
 def test_permission_whitespace_mutation_is_refused(tmp):
