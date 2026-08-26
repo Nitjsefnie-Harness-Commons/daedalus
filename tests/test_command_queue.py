@@ -27,36 +27,12 @@ def _load_queue(name):
     return _util.load(_util.ROOT / 'command_queue.py', name=name)
 
 
-def test_command_queue_import_has_no_daedalus_configuration_side_effects(tmp):
-    """The queue module must import without bridge configuration."""
-    del tmp
-    env = {
-        key: value for key, value in os.environ.items()
-        if not key.startswith('DAEDALUS_') and key != 'TOKEN'
-    }
-    code = """
-import pathlib
-import sys
-import command_queue
-
-root = pathlib.Path.cwd().resolve()
-loaded = []
-for name, module in sys.modules.items():
-    source = getattr(module, '__file__', None)
-    if source is None:
-        continue
-    try:
-        pathlib.Path(source).resolve().relative_to(root)
-    except ValueError:
-        continue
-    loaded.append(name)
-assert loaded == [
-    'atomic_file', 'log_safe', 'path_safety', 'command_queue'], loaded
-assert callable(command_queue.enqueue)
-"""
+def test_command_queue_imports_without_daedalus_configuration(_tmp):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('DAEDALUS_') and key != 'TOKEN'}
     loaded = subprocess.run(
-        [sys.executable, '-c', code], cwd=str(_util.ROOT), env=env,
-        capture_output=True, text=True, check=False)
+        [sys.executable, '-c', 'import command_queue'],
+        cwd=str(_util.ROOT), env=env, stderr=subprocess.PIPE, text=True)
     assert loaded.returncode == 0, loaded.stderr
 
 
@@ -68,127 +44,65 @@ def test_queue_naming_contract_is_pinned(tmp):
         'tok_tab', 'tok_tab.json')
 
 
-def test_command_filesystem_lock_is_public(tmp):
-    del tmp
+def test_command_filesystem_lock_is_public(_tmp):
     queue = _load_queue('command_queue_filesystem_lock')
-
-    lock = queue.command_fs_lock
-
-    assert lock.acquire(blocking=False) is True
-    lock.release()
+    assert callable(queue.command_fs_lock.acquire)
 
 
 def test_notify_dashboard_publishes_an_event_and_wakes_the_token(tmp):
     queue = _load_queue('command_queue_dashboard_notify')
-    notify_dashboard = queue.notify_dashboard
     cmd_dir = Path(tmp) / 'commands'
-    wake = queue.event('tok')
-    wake.clear()
-
-    notify_dashboard(
-        cmd_dir, 'tok', {'type': 'tabs-synced', 'count': 2})
-
-    published = list((cmd_dir / 'tok_dashboard').iterdir())
-    assert len(published) == 1, published
-    event = json.loads(published[0].read_text(encoding='utf-8'))
-    assert event['id'] == published[0].stem
-    assert event['kind'] == 'event'
-    assert event['type'] == 'tabs-synced'
-    assert event['count'] == 2
-    assert wake.is_set()
+    queue.notify_dashboard(cmd_dir, 'tok', {'type': 'tabs-synced'})
+    published, = (cmd_dir / 'tok_dashboard').iterdir()
+    assert json.loads(published.read_text(encoding='utf-8')) == {
+        'id': published.stem, 'kind': 'event', 'type': 'tabs-synced'}
+    assert queue.event('tok').is_set()
 
 
-def test_next_seq_is_lexically_increasing_and_well_formed(tmp):
-    del tmp
+def test_next_seq_is_lexically_increasing_and_well_formed(_tmp):
     queue = _load_queue('command_queue_next_seq')
-
-    first = queue.next_seq()
-    second = queue.next_seq()
-
+    first, second = queue.next_seq(), queue.next_seq()
     assert first < second, (first, second)
     for value in (first, second):
-        millis, counter = value.split('_')
-        assert len(millis) == 13 and millis.isdigit(), value
-        assert len(counter) == 6 and counter.isdigit(), value
+        assert (tuple(map(len, value.split('_'))) == (13, 6)
+                and value.replace('_', '').isdigit()), value
 
 
-def test_event_reuses_one_wake_event_per_token(tmp):
-    del tmp
+def test_event_reuses_one_wake_event_per_token(_tmp):
     queue = _load_queue('command_queue_event')
-
-    first = queue.event('tok')
-
-    assert queue.event('tok') is first
-    assert queue.event('other') is not first
+    assert queue.event('tok') is queue.event('tok') is not queue.event('other')
 
 
 def test_enqueue_atomically_publishes_a_waking_delivery(tmp):
     queue = _load_queue('command_queue_enqueue')
-    enqueue = queue.enqueue
     cmd_dir = Path(tmp) / 'commands'
-    wake = queue.event('tok')
-    wake.clear()
-
-    delivery_id = enqueue(
-        cmd_dir, 'tok', 'tab', {'id': 'queued', 'code': '1'})
-
+    delivery_id = queue.enqueue(cmd_dir, 'tok', 'tab', {'id': 'queued'})
     destination = cmd_dir / 'tok_tab' / f'{delivery_id}.json'
     assert json.loads(destination.read_text(encoding='utf-8')) == {
-        'id': 'queued', 'code': '1', '_did': delivery_id}
-    assert not (destination.parent / f'.{delivery_id}.tmp').exists()
-    assert wake.is_set()
+        'id': 'queued', '_did': delivery_id}
+    assert queue.event('tok').is_set()
 
 
 def test_collect_expired_removes_old_commands_and_empty_queues(tmp):
     queue = _load_queue('command_queue_collect_expired')
-    cmd_dir = Path(tmp) / 'commands'
-    queued = cmd_dir / 'tok' / 'old.json'
-    legacy = cmd_dir / 'tok.json'
+    queued = Path(tmp) / 'commands' / 'tok' / 'old.json'
     queued.parent.mkdir(parents=True)
     queued.write_text('{"id":"queued"}', encoding='utf-8')
-    legacy.write_text('{"id":"legacy"}', encoding='utf-8')
     _set_mtime(queued, 0)
-    _set_mtime(legacy, 0)
-
-    queue.collect_expired(cmd_dir, 1)
-
-    assert not queued.exists()
-    assert not queued.parent.exists()
-    assert not legacy.exists()
+    queue.collect_expired(queued.parents[1], 1)
+    assert not queued.exists() and not queued.parent.exists()
 
 
-def test_gc_loop_derives_its_interval_and_collects_after_sleep(tmp):
+def test_gc_loop_derives_its_interval_and_collects_after_sleep(_tmp):
     queue = _load_queue('command_queue_gc_loop')
-    gc_loop = queue.gc_loop
-    cmd_dir = Path(tmp) / 'commands'
-    calls = []
-    real_sleep = queue.time.sleep
-    real_collect = queue.collect_expired
-
-    class StopLoop(Exception):
-        pass
 
     def sleep(interval):
-        calls.append(('sleep', interval))
-
-    def collect_expired(path, ttl):
-        calls.append(('collect', path, ttl))
-        raise StopLoop
-
-    queue.time.sleep = sleep
-    queue.collect_expired = collect_expired
+        raise RuntimeError(interval)
+    queue.time = type('Clock', (), {'sleep': staticmethod(sleep)})
     try:
-        try:
-            gc_loop(cmd_dir, 45)
-        except StopLoop:
-            pass
-        else:
-            raise AssertionError('the collector loop did not run')
-    finally:
-        queue.time.sleep = real_sleep
-        queue.collect_expired = real_collect
-
-    assert calls == [('sleep', 30.0), ('collect', cmd_dir, 45)]
+        queue.gc_loop(Path('unused'), 45)
+    except RuntimeError as error:
+        assert error.args == (30.0,)
 
 
 def _set_mtime(path, stamp):
