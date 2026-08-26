@@ -140,7 +140,8 @@ class _WorkflowReader(_ScalarReaderMixin):
             if body.startswith('-'):
                 self._refuse('block sequence where jobs mapping was required',
                              index, 'jobs mapping')
-            job, rest = self._mapping_parts(index, 'jobs mapping')
+            job, rest = self._mapping_parts(
+                index, 'jobs mapping', require_string_key=True)
             if job == '<<':
                 self._refuse('merge key', index, 'jobs mapping')
             if job in seen_jobs:
