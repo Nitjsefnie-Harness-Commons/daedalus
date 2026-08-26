@@ -11,7 +11,6 @@ import _util  # noqa: E402
 import _cmdqueue  # noqa: E402
 import test_cli  # noqa: E402
 import test_mcp_server  # noqa: E402
-from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 
 
 @contextlib.contextmanager
@@ -88,21 +87,43 @@ def _stale_queue(docroot, token):
     queue = Path(docroot) / 'commands' / f'{token}_extension'
     queue.mkdir(parents=True, exist_ok=True)
     stale = queue / '0000000000000_000000.json'
-    stale.write_text(json.dumps({'type': 'stale'}), encoding='utf-8')
-    return queue, stale
+    command = {
+        'id': 'stale-command', '_did': 'stale-delivery', 'type': 'reload'}
+    stale.write_text(json.dumps(command), encoding='utf-8')
+    return queue, stale, command
+
+
+@contextlib.contextmanager
+def _redirect_stale_answer(queue, stale, stale_command):
+    original = _util.post_json
+
+    def redirected(url, body, **kwargs):
+        if (url.endswith('/result') and body.get('id') == stale_command['id']
+                and body.get('_did') == stale_command['_did']):
+            current = _cmdqueue.wait_for_command(
+                queue, timeout=1, ignored_names={stale.name})
+            assert current is not None, 'the current command never appeared'
+            body = dict(body, id=current['id'], _did=current['_did'])
+        return original(url, body, **kwargs)
+
+    _util.post_json = redirected
+    try:
+        yield
+    finally:
+        _util.post_json = original
 
 
 def test_a_transient_read_refusal_returns_the_queued_command(tmp):
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'read_text', 1):
-        command = wait_for_command(queue, timeout=1)
+        command = _cmdqueue.wait_for_command(queue, timeout=1)
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
 
 def test_a_present_queue_file_outlives_its_finished_producer(tmp):
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'read_text', 1):
-        command = wait_for_command(
+        command = _cmdqueue.wait_for_command(
             queue, timeout=1, producer_alive=lambda: False)
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
@@ -120,7 +141,7 @@ def test_a_queue_file_that_disappears_during_read_is_retried(tmp):
 
     Path.read_text = missing
     try:
-        command = wait_for_command(queue, timeout=1)
+        command = _cmdqueue.wait_for_command(queue, timeout=1)
     finally:
         Path.read_text = original
     assert command == {'id': 'queued', 'type': 'reload'}, command
@@ -131,7 +152,7 @@ def test_wait_ignores_a_surviving_leftover_by_filename(tmp):
     current = queue / '1700000000000_000001.json'
     current.write_text(json.dumps({'id': 'current', 'type': 'reload'}),
                        encoding='utf-8')
-    command = wait_for_command(
+    command = _cmdqueue.wait_for_command(
         queue, timeout=1, ignored_names={stale.name})
     assert command == {'id': 'current', 'type': 'reload'}, command
 
@@ -139,7 +160,7 @@ def test_wait_ignores_a_surviving_leftover_by_filename(tmp):
 def test_a_transient_removal_refusal_still_clears_the_queue(tmp):
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'unlink', 1):
-        survivors = clear_command_queue(queue)
+        survivors = _cmdqueue.clear_command_queue(queue)
     assert survivors == set(), survivors
     assert list(queue.glob('*.json')) == []
 
@@ -147,7 +168,7 @@ def test_a_transient_removal_refusal_still_clears_the_queue(tmp):
 def test_a_queue_file_already_gone_during_clear_is_not_an_error(tmp):
     queue, queued = _queued_file(tmp)
     with _vanish_during_unlink(queued):
-        survivors = clear_command_queue(queue)
+        survivors = _cmdqueue.clear_command_queue(queue)
     assert survivors == set(), survivors
     assert list(queue.glob('*.json')) == []
 
@@ -156,7 +177,7 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     queue, queued = _queued_file(tmp)
     started = time.monotonic()
     with _refuse_path_operation(queued, 'read_text', 1000):
-        command = wait_for_command(queue, timeout=0.1)
+        command = _cmdqueue.wait_for_command(queue, timeout=0.1)
     elapsed = time.monotonic() - started
     assert command is None, command
     assert elapsed < 1, elapsed
@@ -165,7 +186,7 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
 def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'unlink', 1000) as calls:
-        survivors = clear_command_queue(queue)
+        survivors = _cmdqueue.clear_command_queue(queue)
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
     assert survivors == {queued.name}, survivors
     assert queued.is_file()
@@ -173,13 +194,14 @@ def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
 
 def test_wait_returns_none_when_the_timeout_expires(tmp):
     queue = Path(tmp) / 'missing-queue'
-    assert wait_for_command(queue, timeout=0.01) is None
+    assert _cmdqueue.wait_for_command(queue, timeout=0.01) is None
 
 
 def test_wait_ends_early_when_the_producer_is_gone(tmp):
     queue = Path(tmp) / 'missing-queue'
     started = time.monotonic()
-    command = wait_for_command(queue, timeout=10, producer_alive=lambda: False)
+    command = _cmdqueue.wait_for_command(
+        queue, timeout=10, producer_alive=lambda: False)
     assert command is None, command
     assert time.monotonic() - started < 1
 
@@ -215,14 +237,17 @@ def test_the_mcp_answer_helper_survives_a_transient_queue_read_refusal(tmp):
 def test_the_cli_answer_helper_ignores_a_refused_leftover(tmp):
     bridge_env = {'DAEDALUS_TOKEN': test_cli.TOK, 'TOKEN': ''}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
-        queue, stale = _stale_queue(docroot, test_cli.TOK)
+        queue, stale, stale_command = _stale_queue(docroot, test_cli.TOK)
         env = test_cli.cli_env(DAEDALUS_URL=base,
                                DAEDALUS_TOKEN=test_cli.TOK)
-        with _refuse_path_operation(stale, 'unlink', 1000) as calls:
-            code, out, err, queued = test_cli._answer_one_ext_command(
-                base, docroot, ['ext-reload'], {}, env)
+        with _redirect_stale_answer(queue, stale, stale_command):
+            with _refuse_path_operation(stale, 'unlink', 1000) as calls:
+                code, out, err, queued = test_cli._answer_one_ext_command(
+                    base, docroot, ['ext-reload'], {}, env)
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
     assert code == 0, (code, out, err)
+    assert queued['id'] != stale_command['id'], queued
+    assert queued['_did'] != stale_command['_did'], queued
     assert queued['type'] == 'reload', (queue, queued)
 
 
@@ -232,11 +257,15 @@ def test_the_mcp_answer_helper_ignores_a_refused_leftover(tmp):
                   'DAEDALUS_MCP_PORT': '0'}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         mod = test_mcp_server._load_mcp(base)
-        queue, stale = _stale_queue(docroot, test_mcp_server.TOK)
-        with _refuse_path_operation(stale, 'unlink', 1000) as calls:
-            _value, queued = test_mcp_server._answer_mcp_command(
-                base, docroot, mod, mod.ext_reload, {})
+        queue, stale, stale_command = _stale_queue(
+            docroot, test_mcp_server.TOK)
+        with _redirect_stale_answer(queue, stale, stale_command):
+            with _refuse_path_operation(stale, 'unlink', 1000) as calls:
+                _value, queued = test_mcp_server._answer_mcp_command(
+                    base, docroot, mod, mod.ext_reload, {})
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
+    assert queued['id'] != stale_command['id'], queued
+    assert queued['_did'] != stale_command['_did'], queued
     assert queued['type'] == 'reload', (queue, queued)
 
 
