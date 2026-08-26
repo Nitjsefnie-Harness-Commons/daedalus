@@ -236,6 +236,21 @@ def test_checkout_reader_folds_block_scalars_exactly(tmp):
             '            feature',
             'feature',
         ),
+        (
+            'all-blank literal clip',
+            '          ref: |\n\n',
+            '',
+        ),
+        (
+            'all-blank folded clip',
+            '          ref: >\n\n',
+            '',
+        ),
+        (
+            'all-blank folded keep',
+            '          ref: >+\n\n',
+            '\n',
+        ),
     )
     failures = []
     for name, scalar, expected in cases:

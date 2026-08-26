@@ -438,6 +438,8 @@ class _ScalarReaderMixin:
             parts.append(raw[content_indent:])
         if not parts:
             return ''
+        if not any(parts):
+            return '\n' * len(parts) if chomping == '+' else ''
         has_terminal_break = (body_end < len(self.lines)
                               or self.source_ends_with_line_break)
         if style == '|':
