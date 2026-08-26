@@ -18,26 +18,50 @@ from _boundary_env import ENVIRONMENT  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 SCENARIOS = r"""
-async function runCapabilityRoute() {
-  if (!/^[A-Za-z_$][\w$]*$/.test(publishedSymbol)) {
-    throw new Error('invalid published symbol: ' + publishedSymbol);
+async function runCapabilityRoutes() {
+  const observations = [];
+  for (const route of JSON.parse(commandText)) {
+    const publishedSymbol = route.symbol;
+    if (!/^[A-Za-z_$][\w$]*$/.test(publishedSymbol)) {
+      throw new Error('invalid published symbol: ' + publishedSymbol);
+    }
+    const available = vm.runInContext(
+      'typeof ' + publishedSymbol + ' === "function"', context);
+    if (!available) {
+      observations.push({
+        symbol: publishedSymbol, available: false, replaceable: false,
+      });
+      continue;
+    }
+    context.capabilityCommand = route.command;
+    context.capabilityCalls = [];
+    context.capabilityAnswer = Object.freeze({ sentinel: publishedSymbol });
+    try {
+      vm.runInContext(
+        publishedSymbol
+          + ' = (cmd) => { capabilityCalls.push(cmd);'
+          + ' return capabilityAnswer; }',
+        context);
+    } catch (error) {
+      observations.push({
+        symbol: publishedSymbol, available: true, replaceable: false,
+        assignmentError: error.message,
+      });
+      continue;
+    }
+    const answer = await vm.runInContext(
+      'dispatchCommand(capabilityCommand)', context);
+    observations.push({
+      symbol: publishedSymbol,
+      available: true,
+      replaceable: true,
+      callCount: context.capabilityCalls.length,
+      calledType: context.capabilityCalls.length
+        ? context.capabilityCalls[0].type : null,
+      answered: answer === context.capabilityAnswer,
+    });
   }
-  context.capabilityCommand = JSON.parse(commandText);
-  context.capabilityCalls = [];
-  context.capabilityAnswer = Object.freeze({ sentinel: true });
-  vm.runInContext(
-    publishedSymbol
-      + ' = (cmd) => { capabilityCalls.push(cmd);'
-      + ' return capabilityAnswer; }',
-    context);
-  const answer = await vm.runInContext(
-    'dispatchCommand(capabilityCommand)', context);
-  return {
-    callCount: context.capabilityCalls.length,
-    calledType: context.capabilityCalls.length
-      ? context.capabilityCalls[0].type : null,
-    answered: answer === context.capabilityAnswer,
-  };
+  return observations;
 }
 
 async function runCapacity() {
@@ -383,7 +407,7 @@ async function runFetchBound() {
 async function run() {
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
   await vm.runInContext('loadConfig()', context);
-  if (scenario === 'capability-route') return runCapabilityRoute();
+  if (scenario === 'capability-routes') return runCapabilityRoutes();
   if (scenario === 'capacity') return runCapacity();
   if (scenario === 'expiry') return runExpiry();
   if (scenario === 'route') return runRouteSnapshot();
@@ -422,14 +446,14 @@ def run_extension_result_boundary(scenario):
     return json.loads(result.stdout)
 
 
-def run_extension_capability_route(symbol, command):
-    """Dispatch one command after replacing a published worker function."""
+def run_extension_capability_routes(routes):
+    """Probe a module's published command routes in one worker process."""
     node = shutil.which('node')
     assert node, 'node is required to execute the extension command route'
     result = subprocess.run(
         [node, '-e', HARNESS,
-         str(EXTENSION_ROOT / 'background.js'), 'capability-route',
-         json.dumps(command), symbol],
+         str(EXTENSION_ROOT / 'background.js'), 'capability-routes',
+         json.dumps(routes)],
         cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
