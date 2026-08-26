@@ -329,6 +329,38 @@ def test_checkout_reader_refuses_a_multiline_quoted_root_value(tmp):
         _assert_yaml_refusal('on: push\n' + prefix + suffix, wording)
 
 
+def test_checkout_reader_accepts_schema_string_plain_refs(tmp):
+    """Plain refs outside PyYAML's typed boundary remain strings."""
+    del tmp
+    prefix = (
+        'name: schema oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n')
+    spellings = (
+        'y', 'Y', 'n', 'N', 'yEs', 'tRuE', 'nUlL',
+        '0B10', '0o17', '0XFF', '08',
+        '1e3', '1E+3', '1.0e3',
+        '2026-8-6', '2026-08-6', '2026-08-26T12:30',
+        'v1.2.3', 'main', 'release-2026',
+    )
+    failures = []
+    for spelling in spellings:
+        workflow = prefix + f'          ref: {spelling}\n'
+        try:
+            actual = _wfcheckout.checkout_refs(workflow)
+        except _wfcheckout.YAMLReadError as error:
+            failures.append((spelling, str(error)))
+        else:
+            if actual != [('build', spelling)]:
+                failures.append((spelling, actual))
+    assert failures == [], failures
+
+
 def test_checkout_reader_refuses_schema_typed_plain_refs(tmp):
     """A plain checkout ref must be provably a YAML string."""
     del tmp
@@ -342,11 +374,17 @@ def test_checkout_reader_refuses_schema_typed_plain_refs(tmp):
         '      - uses: actions/checkout@v4\n'
         '        with:\n')
     spellings = (
-        'true', 'FALSE', 'yes', 'No', 'on', 'OFF', 'y', 'N',
-        'null', '~', '0', '-17', '+1_000', '0b10', '0o17',
-        '0xFF', '077', '1:20', '1.5', '.5', '1e3', '1:20.5',
-        '.inf', '-.Inf', '.nan', '2026-08-26',
-        '2026-08-26 12:30:00Z', '',
+        'yes', 'Yes', 'YES', 'no', 'No', 'NO',
+        'true', 'True', 'TRUE', 'false', 'False', 'FALSE',
+        'on', 'On', 'ON', 'off', 'Off', 'OFF',
+        'null', 'Null', 'NULL', '~', '',
+        '0', '-17', '+1_000', '0b10', '077', '0xFF', '1:20',
+        '1.5', '.5', '1.', '1.0e+3', '1:20.5',
+        '.inf', '.Inf', '.INF', '-.Inf', '+.INF',
+        '.nan', '.NaN', '.NAN',
+        '2026-08-26', '2026-8-6T1:02:03',
+        '2026-08-26 12:30:00Z',
+        '2026-08-26T12:30:00+02:00',
     )
     failures = []
     for spelling in spellings:
