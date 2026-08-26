@@ -15,6 +15,14 @@ _DASHBOARD_PRELUDE = r"""
 function phase(label) {
   process.stderr.write('[phase] ' + label + '\n');
 }
+
+function bounded(work, label, timeoutMs) {
+  const guard = new Promise((_resolve, reject) => {
+    setTimeout(
+      () => reject(new Error('timed out waiting for ' + label)), timeoutMs);
+  });
+  return Promise.race([Promise.resolve(work), guard]);
+}
 """
 
 
