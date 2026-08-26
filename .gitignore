@@ -184,6 +184,7 @@
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_workflows.py
 !/tests/test_cli.py
+!/tests/test_cli_arg_audit.py
 !/tests/test_command_queue.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
