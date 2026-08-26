@@ -171,10 +171,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install the build backend and the MCP dependencies
-        # The MCP suite skips without them, so a release could otherwise
-        # publish after every MCP behaviour test quietly skipped.
-        run: python -m pip install --upgrade pip build . ".[mcp]"
+      - name: Install the build backend and test dependencies
+        # The MCP suite skips without its extra, and test_diff_coverage needs
+        # the statement analyzer pinned by requirements-test.txt.
+        run: |
+          python -m pip install --upgrade pip build . ".[mcp]"
+          python -m pip install -r requirements-test.txt
 
       # A mistagged release publishes a wheel whose version contradicts the
       # tag, and the checksums then make the wrong pairing authoritative.
