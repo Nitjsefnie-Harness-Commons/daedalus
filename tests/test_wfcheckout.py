@@ -214,6 +214,30 @@ def test_checkout_reader_skips_balanced_multiline_flow_values(tmp):
     assert failures == [], failures
 
 
+def test_checkout_reader_skips_compact_step_flow_value_in_item_scan(tmp):
+    """A compact first value is skipped before scanning step siblings."""
+    del tmp
+    workflow = (
+        'name: compact flow oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - env: {\n'
+        '          SAFE: "value",\n'
+        '        }\n'
+        '        run: echo "$SAFE"\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: safe\n')
+    try:
+        actual = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError as error:
+        raise AssertionError(str(error)) from error
+    assert actual == [('build', 'safe')]
+
+
 def test_checkout_reader_never_omits_indented_jobs_for_a_quoted_decoy(tmp):
     """An unsupported root shape must not make a real checkout disappear."""
     del tmp
