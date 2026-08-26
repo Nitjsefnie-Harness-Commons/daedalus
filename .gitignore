@@ -168,6 +168,7 @@
 !/tests/_cdpharness.py
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py
+!/tests/_coverage_comment_steps.py
 !/tests/_evalpages.py
 !/tests/_ghexpr.py
 !/tests/_jsread.py
@@ -181,9 +182,11 @@
 !/tests/_util.py
 !/tests/_wfcheckout.py
 !/tests/_wfscalars.py
+!/tests/_workflowrun.py
 !/tests/_workflows.py
 !/tests/_yamlread.py
 !/tests/_yamlscalar.py
+!/tests/_yamlsteps.py
 !/tests/test_bridge_credentials.py
 !/tests/test_bridge_requests.py
 !/tests/test_bridge_results.py
