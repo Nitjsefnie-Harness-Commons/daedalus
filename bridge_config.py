@@ -1,4 +1,4 @@
-"""Environment-derived configuration for the Daedalus bridge."""
+"""Bridge startup paths and environment-derived settings."""
 import os
 import pathlib
 
@@ -83,18 +83,6 @@ MAX_SEGMENTS_PER_JOB = env_int(
     'DAEDALUS_MAX_SEGMENTS_PER_JOB', 10000, 0)
 MAX_SEGMENT_JOB_SIZE = env_int(
     'DAEDALUS_MAX_SEGMENT_JOB_SIZE', 4 * 1024 * 1024 * 1024, 0)
-
-# One table for every place a screenshot format is decided: what /upload
-# accepts, what /screenshot will discover on disk, and what content type it is
-# served with. They were three separate lists, and `webp` was in the first
-# only -- so the upload stored a file and answered 200 that /screenshot then
-# reported as absent.
-SCREENSHOT_TYPES = {
-    'png': 'image/png',
-    'jpeg': 'image/jpeg',
-    'jpg': 'image/jpeg',
-    'webp': 'image/webp',
-}
 
 # Command files expire when no SSE reader claims them. The queue itself lives
 # in server.py; this value is shared by its producer and expiry worker.

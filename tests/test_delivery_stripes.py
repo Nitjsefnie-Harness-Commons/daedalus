@@ -16,7 +16,7 @@ def _load_stripes(name):
     return _util.load(_util.ROOT / 'delivery_stripes.py', name=name)
 
 
-def _load_server(tmp):
+def _load_result_store(tmp):
     global _SERVER
     if _SERVER is not None:
         return _SERVER
@@ -30,7 +30,7 @@ def _load_server(tmp):
     sys.path.insert(0, str(_util.ROOT))
     try:
         _SERVER = _util.load(
-            _util.ROOT / 'server.py', name='delivery_stripes_server')
+            _util.ROOT / 'result_store.py', name='delivery_stripes_store')
     finally:
         sys.path.pop(0)
         for name, value in saved.items():
@@ -62,32 +62,32 @@ def test_same_key_is_stable_and_server_reuses_lock(tmp):
     key = os.fsencode('stripe-token_tab-01')
     assert stripes.stripe_index(key, 64) == stripes.stripe_index(key, 64)
 
-    server = _load_server(tmp)
-    target_key = server._result_key('stripe-token', 'tab-01')
-    assert (server._delivery_lock_for(target_key)
-            is server._delivery_lock_for(target_key))
+    result_store = _load_result_store(tmp)
+    target_key = result_store.result_key('stripe-token', 'tab-01')
+    assert (result_store.delivery_lock_for(target_key)
+            is result_store.delivery_lock_for(target_key))
 
 
 def test_server_wiring_rejects_crc_collisions(tmp):
-    server = _load_server(tmp)
+    result_store = _load_result_store(tmp)
     token = 'stripe-token'
     target = zlib.crc32(b'crc-collision-seed') & 63
     tabs = []
     for number in itertools.count():
         tab = f'crc-collision-{number:06d}'
-        key = server._result_key(token, tab)
+        key = result_store.result_key(token, tab)
         if zlib.crc32(key.encode()) & 63 == target:
             tabs.append(tab)
             if len(tabs) == 128:
                 break
 
     crc_stripes = {
-        zlib.crc32(server._result_key(token, tab).encode()) & 63
+        zlib.crc32(result_store.result_key(token, tab).encode()) & 63
         for tab in tabs
     }
     assert len(crc_stripes) == 1
     locks = [
-        server._delivery_lock_for(server._result_key(token, tab))
+        result_store.delivery_lock_for(result_store.result_key(token, tab))
         for tab in tabs
     ]
     # With 64 stripes and 128 names, an accidental one-stripe result is

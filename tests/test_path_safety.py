@@ -412,7 +412,7 @@ _STRIPE_PROBE = r"""
 import json
 import os
 
-import server
+import result_store
 
 # The same delivery directory, spelled the two ways `realpath` can answer.
 # On Windows the extended-length prefix survives exactly when a concurrent
@@ -420,12 +420,13 @@ import server
 # rather than waited for: an idle box never produces the pair.
 # One logical target selects one stripe, and a filesystem path is refused
 # outright: keying on a spelling is what silently removed the serialization.
-key = server._result_key('tok', 'tab')
-same_lock = server._delivery_lock_for(key) is server._delivery_lock_for(key)
+key = result_store.result_key('tok', 'tab')
+same_lock = (result_store.delivery_lock_for(key)
+             is result_store.delivery_lock_for(key))
 
 refused = False
 try:
-    server._delivery_lock_for(
+    result_store.delivery_lock_for(
         os.path.join('C:' + os.sep, 'x', 'results', 'deliveries', 'tok_tab'))
 except TypeError:
     refused = True
@@ -435,7 +436,7 @@ except TypeError:
 import pathlib
 refused_path = False
 try:
-    server._delivery_lock_for(pathlib.Path('tok_tab'))
+    result_store.delivery_lock_for(pathlib.Path('tok_tab'))
 except TypeError:
     refused_path = True
 
@@ -546,7 +547,8 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
 def test_delivery_stripe_is_keyed_on_the_logical_target(tmp):
     """One target must select one stripe, and a path must not choose one.
 
-    `_delivery_lock_for` chooses a stripe from a hash of the directory, and
+    `result_store.delivery_lock_for` chooses a stripe from a hash of the
+    directory, and
     two `realpath` results for one directory are not obliged to be spelled the
     same way. When they are not, two callers for the same target take two
     different locks and the serialization the stripe exists to provide is

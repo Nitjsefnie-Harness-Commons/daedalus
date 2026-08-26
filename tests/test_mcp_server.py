@@ -649,7 +649,7 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
     assert not failures, '\n'.join(failures)
 
 
-def test_mcp_and_bridge_use_one_env_parser(tmp):
+def test_mcp_and_bridge_config_use_one_env_parser(tmp):
     _need_deps()
     import env_config
 
@@ -660,7 +660,6 @@ def test_mcp_and_bridge_use_one_env_parser(tmp):
     os.environ['DAEDALUS_PORT'] = '0'
     try:
         bridge_config = _util.load(_util.ROOT / 'bridge_config.py')
-        _util.load(_util.ROOT / 'server.py', 'server_for_env_contract')
     finally:
         for key, value in saved.items():
             if value is None:
