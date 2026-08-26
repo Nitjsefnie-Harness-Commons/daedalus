@@ -18,6 +18,9 @@ import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
 _HOST_REALM_KEEPALIVE = "setInterval(() => {}, 10);\n"
+# Loaded Node startup peaked at 1.126s across 120 samples; a 1.33x
+# safety factor rounds the shared allowance to 1.5s.
+_PROCESS_STARTUP_ALLOWANCE_S = 1.5
 
 
 def _module(tmp, source, name='dashboard-module.js'):
@@ -172,9 +175,12 @@ setInterval(() => {}, 10);
 """
     started = time.monotonic()
     failure = _harness_failure(
-        source, bounded_steps=0, process_grace=0.4)
+        source, bounded_steps=0,
+        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
     elapsed = time.monotonic() - started
-    assert elapsed < 1.25, f'post-kill drain took {elapsed:.2f}s'
+    post_kill_elapsed = elapsed - _PROCESS_STARTUP_ALLOWANCE_S
+    assert post_kill_elapsed < 0.85, (
+        f'post-kill drain took {post_kill_elapsed:.2f}s')
     assert 'last phase: grandchild inherited dashboard pipes' in failure
     assert "stdout: 'grandchild stdout'" in failure, failure
 
@@ -206,7 +212,8 @@ print('decoded utf-8')
     result = subprocess.run(
         [sys.executable, '-c', probe], cwd=behaviour.ROOT,
         env=environment, capture_output=True, text=True,
-        encoding='utf-8', errors='replace', timeout=10)
+        encoding='utf-8', errors='replace',
+        timeout=10 + _PROCESS_STARTUP_ALLOWANCE_S)
     assert result.returncode == 0, result.stderr
     assert result.stdout == 'decoded utf-8\n', result
 
@@ -386,8 +393,10 @@ export function formatEvalWorld(value) {
 """)
     failure = _harness_failure(
         behaviour._DASHBOARD_WORLD_HARNESS, module,
-        step_timeout=0.5, process_grace=0.5)
-    assert _backstop_seconds(failure) == 1.0, failure
+        step_timeout=0.5,
+        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
+    assert _backstop_seconds(failure) == (
+        0.5 + _PROCESS_STARTUP_ALLOWANCE_S), failure
     assert 'last phase: dashboard harness finished' in failure, failure
     assert '"cdp"' in failure, failure
     assert '[phase] dashboard module imported' in failure, failure
@@ -397,8 +406,10 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
     """A child blocked before its body reports that no phase was emitted."""
     del tmp
     failure = _harness_failure(
-        'for (;;) {}', bounded_steps=0, process_grace=0.1)
-    assert _backstop_seconds(failure) == 0.1, failure
+        'for (;;) {}', bounded_steps=0,
+        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
+    assert _backstop_seconds(failure) == (
+        _PROCESS_STARTUP_ALLOWANCE_S), failure
     assert 'last phase: none recorded' in failure, failure
 
 
@@ -407,7 +418,7 @@ def test_last_phase_preserves_regex_metacharacters(tmp):
     del tmp
     failure = _harness_failure(
         "phase('selector [update] (2/3) .*'); setInterval(() => {}, 10);",
-        process_grace=0.3)
+        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
     assert 'last phase: selector [update] (2/3) .*;' in failure, failure
 
 
@@ -416,7 +427,8 @@ def test_last_phase_accepts_an_unterminated_final_line(tmp):
     del tmp
     failure = _harness_failure(
         "process.stderr.write('[phase] final partial line'); "
-        "setInterval(() => {}, 10);", process_grace=0.3)
+        "setInterval(() => {}, 10);",
+        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
     assert 'last phase: final partial line;' in failure, failure
 
 
@@ -428,7 +440,8 @@ process.stdout.write('OUT');
 process.stderr.write('[phase] output fields\nERR');
 setInterval(() => {}, 10);
 """
-    failure = _harness_failure(source, process_grace=0.3)
+    failure = _harness_failure(
+        source, process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
     assert "stdout: 'OUT'; stderr: '[phase] output fields\\nERR'" in failure
 
 
