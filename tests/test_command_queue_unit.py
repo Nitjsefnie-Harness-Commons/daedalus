@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -31,9 +32,60 @@ def test_queue_naming_contract_is_pinned(tmp):
         'tok_tab', 'tok_tab.json')
 
 
-def test_command_filesystem_lock_is_public(_tmp):
+def test_enqueue_waits_for_the_shared_filesystem_lock(tmp):
     queue = _load_queue('command_queue_filesystem_lock')
-    assert callable(queue.command_fs_lock.acquire)
+    cmd_dir = Path(tmp) / 'commands'
+    finished = threading.Event()
+    delivery_ids = []
+    failures = []
+
+    class ObservedLock:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self.attempted = threading.Event()
+
+        def acquire(self):
+            self.attempted.set()
+            return self._lock.acquire()
+
+        def release(self):
+            self._lock.release()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, _kind, _value, _traceback):
+            self.release()
+
+    observed = ObservedLock()
+    queue.command_fs_lock = observed
+    observed.acquire()
+    observed.attempted.clear()
+
+    def publish():
+        try:
+            delivery_ids.append(
+                queue.enqueue(cmd_dir, 'tok', 'tab', {'id': 'queued'}))
+        except Exception as error:  # preserve a worker assertion failure
+            failures.append(error)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=publish)
+    worker.start()
+    try:
+        assert observed.attempted.wait(5), (
+            'enqueue never attempted the shared command filesystem lock')
+        assert not (cmd_dir / 'tok_tab').exists()
+    finally:
+        observed.release()
+    assert finished.wait(5), (
+        'enqueue stayed blocked after the lock was released')
+    worker.join()
+    assert failures == []
+    delivery_id, = delivery_ids
+    assert (cmd_dir / 'tok_tab' / f'{delivery_id}.json').exists()
 
 
 def test_notify_dashboard_publishes_an_event_and_wakes_the_token(tmp):
@@ -72,24 +124,42 @@ def test_enqueue_atomically_publishes_a_waking_delivery(tmp):
 
 def test_collect_expired_removes_old_commands_and_empty_queues(tmp):
     queue = _load_queue('command_queue_collect_expired')
-    queued = Path(tmp) / 'commands' / 'tok' / 'old.json'
+    cmd_dir = Path(tmp) / 'commands'
+    queued = cmd_dir / 'tok' / 'old.json'
+    legacy = cmd_dir / 'tok.json'
     queued.parent.mkdir(parents=True)
     queued.write_text('{"id":"queued"}', encoding='utf-8')
+    legacy.write_text('{"id":"legacy"}', encoding='utf-8')
     os.utime(queued, (0, 0))
-    queue.collect_expired(queued.parents[1], 1)
-    assert not queued.exists() and not queued.parent.exists()
+    os.utime(legacy, (0, 0))
+    queue.collect_expired(cmd_dir, 1)
+    assert not queued.exists(), queued
+    assert not queued.parent.exists(), queued.parent
+    assert not legacy.exists(), legacy
 
 
-def test_gc_loop_derives_its_sleep_interval(_tmp):
+def test_gc_loop_forwards_directory_and_ttl_after_sleep(_tmp):
     queue = _load_queue('command_queue_gc_loop')
+    cmd_dir = Path('commands')
+    calls = []
 
     def sleep(interval):
-        raise RuntimeError(interval)
+        calls.append(('sleep', interval))
+
+    def collect(directory, ttl):
+        calls.append(('collect', directory, ttl))
+        raise RuntimeError('one iteration complete')
+
     queue.time = type('Clock', (), {'sleep': staticmethod(sleep)})
+    queue.collect_expired = collect
     try:
-        queue.gc_loop(Path('unused'), 45)
+        queue.gc_loop(cmd_dir, 45)
     except RuntimeError as error:
-        assert error.args == (30.0,)
+        assert error.args == ('one iteration complete',)
+    assert calls == [
+        ('sleep', 30.0),
+        ('collect', cmd_dir, 45),
+    ]
 
 
 if __name__ == '__main__':
