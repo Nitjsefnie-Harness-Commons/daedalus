@@ -28,6 +28,11 @@ function bounded(work, label, timeoutMs) {
   return Promise.race([Promise.resolve(work), guard])
     .finally(() => _dashnodeClearTimeout(timer));
 }
+
+function leave(error) {
+  const text = (error.stack || String(error)) + '\n';
+  process.stderr.write(text, () => process.exit(1));
+}
 """
 
 
