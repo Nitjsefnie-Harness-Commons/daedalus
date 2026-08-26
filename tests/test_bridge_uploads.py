@@ -264,7 +264,7 @@ def test_an_unhashable_upload_format_is_refused_not_dropped(tmp):
 def test_an_upload_path_that_escapes_through_a_symlink_is_refused(tmp):
     """Component validation cannot answer where a path ended up.
 
-    `_unsafe_component` is a shape check on one string: `escape` passes it,
+    `unsafe_component` is a shape check on one string: `escape` passes it,
     because there is nothing wrong with the name. If `escape` is a symlink out
     of the token's directory, every component is harmless and the path still
     leaves the namespace — which is the one thing the check exists to prevent.
