@@ -270,8 +270,10 @@ class _WorkflowReader(_ScalarReaderMixin):
             if not body.startswith('-'):
                 self._refuse('step is not a mapping sequence item', current,
                              context)
+            value_end = self._line_scalar_end(current, end, context)
+            value_end = current + 1 if value_end is None else value_end
             item_end = self._value_end(
-                current + 1, end, step_indent, context, check_tabs=False)
+                value_end, end, step_indent, context, check_tabs=False)
             results.extend(self._step(job, current, item_end, step_indent))
             current = item_end
         return results
