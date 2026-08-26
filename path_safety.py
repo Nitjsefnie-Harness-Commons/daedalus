@@ -133,25 +133,8 @@ def bad_token(token):
             or '.' in token or '_' in token)
 
 
-def normalized_tab_id(value):
-    """Normalize string or integer tab-id JSON values; return None
-    otherwise."""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, int) and not isinstance(value, bool):
-        return str(value)
-    return None
-
-
 def derived_component(value):
     """Return a checked derived path component, or raise ValueError."""
     if unsafe_component(value):
         raise ValueError('unsafe derived path component')
     return value
-
-
-def command_target_names(token, tab=''):
-    """Return the checked queue directory and bounded legacy filename."""
-    queue_name = derived_component(
-        f'{token}_{tab}' if tab else token)
-    return queue_name, f'{queue_name}.json'

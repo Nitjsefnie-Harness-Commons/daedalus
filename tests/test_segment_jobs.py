@@ -87,7 +87,7 @@ def test_segment_job_mint_idempotent_and_owned(tmp):
         status, body = mint_job(base, TOK, foreign_job)
         assert status == 409 and 'sig' not in body, (status, body)
         # Validation: the job name, and the token check of the shared JSON
-        # POST path (_bad_token runs before the handler).
+        # POST path (bad_token runs before the handler).
         status, _ = mint_job(base, TOK, 'a/b')
         assert status == 400, status
         status, _ = mint_job(base, 'a/b', seg_job())

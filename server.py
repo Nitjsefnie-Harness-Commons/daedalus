@@ -12,9 +12,7 @@ from daedalus_cli.transport import token as _configured_token
 import command_queue
 from delivery_stripes import stripe_index
 from env_config import env_int, env_positive_float
-from path_safety import (
-    WINDOWS_INVALID_PATH_CHARS, bad_token, command_target_names,
-    derived_component, normalized_tab_id, path_key, under, unsafe_component)
+import path_safety
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
 # whose encoding it did not choose either: under a C locale a result id
@@ -117,7 +115,7 @@ def _stored_uploads(token_dir, upload_id):
     meaningful if the sequence it slices is stable between requests.
     """
     if upload_id:
-        id_dirs = [under(token_dir, upload_id)]
+        id_dirs = [path_safety.under(token_dir, upload_id)]
     else:
         with os.scandir(token_dir) as entries:
             dirs = [entry for entry in entries if entry.is_dir()]
@@ -181,11 +179,11 @@ _command_fs_lock = threading.Lock()
 
 def _notify_dashboard(token, payload):
     """Enqueue a dashboard SSE event. No-op if its queue cannot be named."""
-    if bad_token(token):
+    if path_safety.bad_token(token):
         return
     try:
-        queue_name, _ = command_target_names(token, 'dashboard')
-        dash_dir = under(CMD_DIR, queue_name)
+        queue_name, _ = command_queue.command_target_names(token, 'dashboard')
+        dash_dir = path_safety.under(CMD_DIR, queue_name)
     except ValueError:
         return
     try:
@@ -251,7 +249,8 @@ def _delivery_lock_for(target_key):
     # `unsafe_component` already rejects every one of them in either half.
     if not isinstance(target_key, str):
         raise TypeError('delivery stripe key must be the logical target')
-    if any(char in WINDOWS_INVALID_PATH_CHARS for char in target_key):
+    if any(char in path_safety.WINDOWS_INVALID_PATH_CHARS
+           for char in target_key):
         raise TypeError('delivery stripe key must be the logical target')
     key = os.fsencode(target_key)
     index = stripe_index(key, _DELIVERY_LOCK_STRIPES)
@@ -312,18 +311,20 @@ def _result_key(token, tab=''):
 
 def _delivery_result_paths(token, tab, did):
     """Return the per-target delivery directory and one checked result file."""
-    if not isinstance(did, str) or not did or unsafe_component(did):
+    if (not isinstance(did, str) or not did
+            or path_safety.unsafe_component(did)):
         raise ValueError('invalid delivery id')
-    key = derived_component(_result_key(token, tab))
+    key = path_safety.derived_component(_result_key(token, tab))
     resolved_delivery_root = pathlib.Path(os.path.realpath(DELIVERY_DIR))
-    delivery_dir = under(DELIVERY_DIR, key)
+    delivery_dir = path_safety.under(DELIVERY_DIR, key)
     # The stripe is keyed on `key`, so the resolved directory must be the
     # one-to-one namespace entry that key names, not an alias to another one.
-    if (path_key(delivery_dir.parent) != path_key(resolved_delivery_root)
+    if (path_safety.path_key(delivery_dir.parent)
+            != path_safety.path_key(resolved_delivery_root)
             or delivery_dir.name != key):
         raise ValueError('delivery target is an alias')
-    delivery_file = under(
-        delivery_dir, derived_component(f'{did}.json'))
+    delivery_file = path_safety.under(
+        delivery_dir, path_safety.derived_component(f'{did}.json'))
     return delivery_dir, delivery_file
 
 
@@ -343,9 +344,10 @@ def _find_delivery_result(token, tab, did):
         names = []
     for name in names:
         try:
-            candidate_dir = under(DELIVERY_DIR, derived_component(name))
-            candidate_file = under(
-                candidate_dir, derived_component(f'{did}.json'))
+            candidate_dir = path_safety.under(
+                DELIVERY_DIR, path_safety.derived_component(name))
+            candidate_file = path_safety.under(
+                candidate_dir, path_safety.derived_component(f'{did}.json'))
         except ValueError:
             continue
         if candidate_file.exists():
@@ -617,10 +619,10 @@ def _enqueue_command(token, tab, cmd):
     single place the value becomes a directory name, and the handler that used
     to be its only caller did not check it.
     """
-    if tab and unsafe_component(tab):
+    if tab and path_safety.unsafe_component(tab):
         raise ValueError(f'unsafe tab component: {tab!r}')
-    queue_name, _ = command_target_names(token, tab)
-    qdir = under(CMD_DIR, queue_name)
+    queue_name, _ = command_queue.command_target_names(token, tab)
+    qdir = path_safety.under(CMD_DIR, queue_name)
     with _command_fs_lock:
         qdir.mkdir(parents=True, exist_ok=True)
         seq = _next_seq()
@@ -662,7 +664,7 @@ def _segment_record_path(job):
     answered for a bad job name, so a containment failure joins that answer
     rather than becoming a storage error.
     """
-    return under(SEG_DIR, f'{job}.json')
+    return path_safety.under(SEG_DIR, f'{job}.json')
 
 
 class _SegmentRecordError(Exception):
@@ -984,6 +986,16 @@ def _log_segment_timing(job, stored, marks):
           flush=True)
 
 
+def _normalized_tab_id(value):
+    """Normalize string or integer tab-id JSON values; return None
+    otherwise."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
     # socketserver applies this to the connection, so it bounds the request
     # line, the headers and the body alike. It is per socket operation: a
@@ -1092,7 +1104,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _require_bridge_token(self, token):
         """Answer an error unless `token` matches the configured bridge secret."""
-        if bad_token(token):
+        if path_safety.bad_token(token):
             self._json(400, {'error': 'bad token'})
             return False
         try:
@@ -1204,21 +1216,22 @@ class Handler(BaseHTTPRequestHandler):
         if token is None:
             print('[STREAM] REJECTED unauthorized token', flush=True)
             return None
-        if tab and unsafe_component(tab):
+        if tab and path_safety.unsafe_component(tab):
             print(f'[STREAM] REJECTED unsafe tab: {tab!r}', flush=True)
             return self._json(400, {'error': 'invalid path component'})
         # Resolved once, here, rather than per tick: the loop below runs
         # for the life of the connection, and the namespace a stream reads
         # from is decided when it is admitted, not re-decided every second.
         try:
-            target_queue_name, target_legacy_name = command_target_names(
-                token, tab)
+            target_queue_name, target_legacy_name = (
+                command_queue.command_target_names(token, tab))
             broadcast_queue_name, broadcast_legacy_name = (
-                command_target_names(token))
-            target_queue = under(CMD_DIR, target_queue_name)
-            target_legacy = under(CMD_DIR, target_legacy_name)
-            broadcast_queue = under(CMD_DIR, broadcast_queue_name)
-            broadcast_legacy = under(CMD_DIR, broadcast_legacy_name)
+                command_queue.command_target_names(token))
+            target_queue = path_safety.under(CMD_DIR, target_queue_name)
+            target_legacy = path_safety.under(CMD_DIR, target_legacy_name)
+            broadcast_queue = path_safety.under(CMD_DIR, broadcast_queue_name)
+            broadcast_legacy = path_safety.under(
+                CMD_DIR, broadcast_legacy_name)
         except ValueError:
             print('[STREAM] REJECTED unsafe derived target', flush=True)
             return self._json(400, {'error': 'invalid path component'})
@@ -1637,7 +1650,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == '/register':
             raw_tab_id = body.get('tabId', '')
-            tab_id = normalized_tab_id(raw_tab_id)
+            tab_id = _normalized_tab_id(raw_tab_id)
             url = body.get('url', '')
             title = body.get('title', '')
             if tab_id == '':
@@ -1669,7 +1682,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {'error': 'invalid tabs'})
             normalized_tabs = []
             for tab_info in tabs_list:
-                tab_id = normalized_tab_id(tab_info.get('tabId', ''))
+                tab_id = _normalized_tab_id(tab_info.get('tabId', ''))
                 if tab_id is None:
                     return self._json(400, {'error': 'invalid tabs'})
                 if tab_id:
@@ -1701,8 +1714,8 @@ class Handler(BaseHTTPRequestHandler):
             # component or a path that leaves the queue root, and this route
             # had no guard for the first of them either.
             try:
-                _, legacy_name = command_target_names(token)
-                cmd_file = under(CMD_DIR, legacy_name)
+                _, legacy_name = command_queue.command_target_names(token)
+                cmd_file = path_safety.under(CMD_DIR, legacy_name)
             except ValueError:
                 return self._json(400, {'error': 'invalid path component'})
             data = {}
@@ -1729,14 +1742,17 @@ class Handler(BaseHTTPRequestHandler):
 
         elif self.path == '/result':
             tab_id = body.get('tabId', '')
-            if tab_id and unsafe_component(tab_id):
+            if tab_id and path_safety.unsafe_component(tab_id):
                 return self._json(400, {'error': 'invalid path component'})
             try:
-                token_result_slot = under(
-                    RES_DIR, derived_component(f'{token}.json'))
-                tab_result_slot = under(
-                    RES_DIR, derived_component(f'{token}_{tab_id}.json')
-                ) if tab_id else None
+                token_result_slot = path_safety.under(
+                    RES_DIR, path_safety.derived_component(f'{token}.json'))
+                tab_result_slot = (
+                    path_safety.under(
+                        RES_DIR,
+                        path_safety.derived_component(
+                            f'{token}_{tab_id}.json'))
+                    if tab_id else None)
             except ValueError:
                 return self._json(400, {'error': 'invalid path component'})
             print(f'[RESULT] tab={tab_id[:8] if tab_id else "none"} id={_log_safe(body.get("id", ""))}', flush=True)
@@ -1862,7 +1878,7 @@ class Handler(BaseHTTPRequestHandler):
         upload_id = body.get('id', '')
         filename = body.get('filename', '')
         for val in (upload_id, filename):
-            if unsafe_component(val):
+            if path_safety.unsafe_component(val):
                 return self._json(400, {'error': 'invalid path component'})
         # A filename names a file inside an id, so without one it matches
         # neither the file branch nor the id branch below and used to reach the
@@ -1876,19 +1892,20 @@ class Handler(BaseHTTPRequestHandler):
         # check above gives, reached by the other route.
         try:
             if filename and upload_id:
-                target = under(UPLOAD_DIR, token, upload_id, filename)
+                target = path_safety.under(
+                    UPLOAD_DIR, token, upload_id, filename)
                 if not target.is_file():
                     return self._json(404, {'error': 'file not found'})
                 target.unlink()
                 print(f'[DELETE] {token}/{upload_id}/{filename}', flush=True)
             elif upload_id:
-                target = under(UPLOAD_DIR, token, upload_id)
+                target = path_safety.under(UPLOAD_DIR, token, upload_id)
                 if not target.is_dir():
                     return self._json(404, {'error': 'id not found'})
                 shutil.rmtree(target)
                 print(f'[DELETE] {token}/{upload_id}/', flush=True)
             else:
-                target = under(UPLOAD_DIR, token)
+                target = path_safety.under(UPLOAD_DIR, token)
                 if not target.is_dir():
                     return self._json(404, {'error': 'token not found'})
                 shutil.rmtree(target)
@@ -1931,7 +1948,7 @@ class Handler(BaseHTTPRequestHandler):
         cmd_id = body.get('id', '')
         code = body.get('code', '')
         cmd_type = body.get('type', '')
-        if tab and unsafe_component(tab):
+        if tab and path_safety.unsafe_component(tab):
             return self._json(400, {'error': 'invalid path component'})
         if not cmd_id or (not code and not cmd_type):
             return self._json(400, {'error': 'missing id or code/type'})
@@ -1965,7 +1982,7 @@ class Handler(BaseHTTPRequestHandler):
         expected = params.get('expected', [''])[0]
         if token is None:
             return None
-        if tab and unsafe_component(tab):
+        if tab and path_safety.unsafe_component(tab):
             return self._json(400, {'error': 'invalid path component'})
         delivery_tab = ''
         delivery_dir = None
@@ -1975,8 +1992,10 @@ class Handler(BaseHTTPRequestHandler):
                     token, tab, delivery)
             else:
                 # A requested tab selects its own slot; otherwise use the token slot.
-                res_file = under(RES_DIR, derived_component(
-                    f'{_result_key(token, tab)}.json'))
+                res_file = path_safety.under(
+                    RES_DIR,
+                    path_safety.derived_component(
+                        f'{_result_key(token, tab)}.json'))
         except ValueError:
             return self._json(400, {'error': 'invalid path component'})
         try:
@@ -1997,8 +2016,10 @@ class Handler(BaseHTTPRequestHandler):
                                     slot_names.append(
                                         f'{token}_{delivery_tab}.json')
                                 for slot_name in slot_names:
-                                    slot = under(
-                                        RES_DIR, derived_component(slot_name))
+                                    slot = path_safety.under(
+                                        RES_DIR,
+                                        path_safety.derived_component(
+                                            slot_name))
                                     _remove_matching_result_file(
                                         slot, generation)
             elif consume:
@@ -2010,7 +2031,7 @@ class Handler(BaseHTTPRequestHandler):
                                         if isinstance(preview, dict) else '')
                     if (not isinstance(preview_delivery, str)
                             or not preview_delivery
-                            or unsafe_component(preview_delivery)):
+                            or path_safety.unsafe_component(preview_delivery)):
                         with _result_lock:
                             current, _current_delivery = _read_result_file(
                                 res_file, False, '')
@@ -2085,7 +2106,7 @@ class Handler(BaseHTTPRequestHandler):
         offset_p = params.get('offset', [None])[0]
         if token is None:
             return None
-        if upload_id and unsafe_component(upload_id):
+        if upload_id and path_safety.unsafe_component(upload_id):
             return self._json(400, {'error': 'invalid path component'})
         # Before the directory is looked at, so that whether a query is well
         # formed does not depend on whether anything has been uploaded yet:
@@ -2103,7 +2124,7 @@ class Handler(BaseHTTPRequestHandler):
             lim = max(1, min(lim, 1000))
             off = max(0, off)
         try:
-            token_dir = under(UPLOAD_DIR, token)
+            token_dir = path_safety.under(UPLOAD_DIR, token)
         except ValueError:
             return self._json(400, {'error': 'invalid path component'})
         if not token_dir.is_dir():
@@ -2176,7 +2197,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
             return None
         for val in (job, seg, total):
-            if unsafe_component(val):
+            if path_safety.unsafe_component(val):
                 self._json(400, {'error': 'invalid param'})
                 return None
         if not seg.isascii() or not seg.isdecimal():
@@ -2191,7 +2212,7 @@ class Handler(BaseHTTPRequestHandler):
         # `total` is untrusted progress metadata supplied by the page on every
         # request. Only the server-minted record controls storage.
         try:
-            seg_dir = under(SEG_DIR, job)
+            seg_dir = path_safety.under(SEG_DIR, job)
             with _seg_lock:
                 record = _segment_record_for_sig(job, sig)
                 quota = _segment_quota(record) if record is not None else None
@@ -2314,13 +2335,13 @@ class Handler(BaseHTTPRequestHandler):
         sig = self._segment_capability(params)
         if sig is None:
             return None
-        if not job or unsafe_component(job):
+        if not job or path_safety.unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
         # Both path uses inside one guard: the directory and the record the
         # sig is checked against are separate joins, and either can be the one
         # that leaves the namespace.
         try:
-            seg_dir = under(SEG_DIR, job)
+            seg_dir = path_safety.under(SEG_DIR, job)
             authorized = _segment_sig_ok(job, sig)
         except ValueError:
             return self._json(400, {'error': 'bad job'})
@@ -2352,7 +2373,7 @@ class Handler(BaseHTTPRequestHandler):
         job = params.get('job', [''])[0]
         if token is None:
             return None
-        if not job or unsafe_component(job):
+        if not job or path_safety.unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
         with _seg_lock:
             try:
@@ -2381,13 +2402,13 @@ class Handler(BaseHTTPRequestHandler):
         """
         token = body['token']
         job = body.get('job', '')
-        if not job or unsafe_component(job):
+        if not job or path_safety.unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
         with _seg_lock:
             try:
                 record = _load_segment_record(job)
-                job_dir = under(SEG_DIR, job)
-                tmp = under(SEG_DIR, f'.{job}.json.tmp')
+                job_dir = path_safety.under(SEG_DIR, job)
+                tmp = path_safety.under(SEG_DIR, f'.{job}.json.tmp')
                 record_path = _segment_record_path(job)
             except ValueError:
                 return self._json(400, {'error': 'bad job'})
@@ -2546,7 +2567,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {'error': 'missing data'})
         # Sanitize path components
         for val in (token, upload_id, filename):
-            if unsafe_component(val):
+            if path_safety.unsafe_component(val):
                 return self._json(400, {'error': 'invalid path component'})
         import base64
         try:
@@ -2554,12 +2575,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._json(400, {'error': 'invalid base64'})
         try:
-            dest_dir = under(UPLOAD_DIR, token, upload_id)
+            dest_dir = path_safety.under(UPLOAD_DIR, token, upload_id)
             if filename:
-                dest = under(dest_dir, filename)
+                dest = path_safety.under(dest_dir, filename)
             else:
                 ts = int(time.time() * 1000)
-                dest = under(dest_dir, f'{ts}.{fmt}')
+                dest = path_safety.under(dest_dir, f'{ts}.{fmt}')
         except ValueError:
             return self._json(400, {'error': 'invalid path component'})
         try:
@@ -2590,7 +2611,7 @@ class Handler(BaseHTTPRequestHandler):
         one token's paths never name another's storage.
         """
         parts = named.split('/')
-        if any(unsafe_component(part) for part in parts):
+        if any(path_safety.unsafe_component(part) for part in parts):
             return self._json(400, {'error': 'invalid path component'})
         if parts[0] != token:
             return self._json(404, {'error': 'no screenshot'})
@@ -2609,10 +2630,10 @@ class Handler(BaseHTTPRequestHandler):
             return None
         if named:
             return self._serve_named_upload(token, named)
-        if upload_id and unsafe_component(upload_id):
+        if upload_id and path_safety.unsafe_component(upload_id):
             return self._json(400, {'error': 'invalid path component'})
         try:
-            token_dir = under(UPLOAD_DIR, token)
+            token_dir = path_safety.under(UPLOAD_DIR, token)
         except ValueError:
             return self._json(400, {'error': 'invalid path component'})
         if not token_dir.is_dir():
@@ -2638,14 +2659,14 @@ class Handler(BaseHTTPRequestHandler):
         rel = path[len('/dashboard'):].lstrip('/')
         if not rel:
             rel = 'index.html'
-        if any(unsafe_component(part) for part in rel.split('/')):
+        if any(path_safety.unsafe_component(part) for part in rel.split('/')):
             return self._json(400, {'error': 'bad path'})
         # Same containment as every other root, through the same helper:
         # this route grew its own resolve-and-contain before there was one,
         # and two spellings of one rule is one more than anybody will keep
         # in step.
         try:
-            target = under(DASHBOARD_DIR, *rel.split('/'))
+            target = path_safety.under(DASHBOARD_DIR, *rel.split('/'))
         except (ValueError, OSError):
             return self._json(400, {'error': 'bad path'})
         if not target.is_file():
