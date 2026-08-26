@@ -25,7 +25,11 @@ _WORKER_PLATFORM_GLOBALS = frozenset({
 })
 _WORKER_NON_HANDLER_EXPORTS = (
     # Add one reviewed non-handler export per line.
+    '_cdpError',
+    '_cdpSessions',
+    '_cdpSettle',
     '_netCaptures',
+    '_releaseCdpObjects',
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
@@ -144,6 +148,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         ('worker/tabs.js', 'handleExtReload', 'ext-reload'),
         ('worker/tabs.js', 'handleFetchTimings', 'fetch-timings'),
         ('worker/tabs.js', 'handleExtTabs', 'tabs'),
+        ('worker/cdp.js', 'handleCdp', 'cdp'),
         ('worker/netcapture.js', 'handleNetCapture', 'net-capture'),
         ('worker/netcapture.js', 'handleNetCaptureStop', 'net-capture-stop'),
         ('worker/netcapture.js', 'handleNetCaptureGet', 'net-capture-get'),

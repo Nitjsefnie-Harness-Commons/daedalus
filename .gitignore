@@ -153,6 +153,7 @@
 !/extension/worker/
 !/extension/worker/blocking.js
 !/extension/worker/capture.js
+!/extension/worker/cdp.js
 !/extension/worker/cookies.js
 !/extension/worker/netcapture.js
 !/extension/worker/tabs.js
