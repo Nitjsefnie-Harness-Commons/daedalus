@@ -32,6 +32,12 @@ def test_queue_naming_contract_is_pinned(tmp):
         'tok_tab', 'tok_tab.json')
 
 
+def test_path_safety_helpers_stay_under_the_module_namespace(_tmp):
+    queue = _load_queue('command_queue_path_safety_namespace')
+    assert queue.path_safety.derived_component is not None
+    assert 'derived_component' not in vars(queue)
+
+
 def test_enqueue_waits_for_the_shared_filesystem_lock(tmp):
     queue = _load_queue('command_queue_filesystem_lock')
     cmd_dir = Path(tmp) / 'commands'

@@ -9,7 +9,6 @@ import uuid
 import atomic_file
 from log_safe import log_safe
 import path_safety
-from path_safety import derived_component
 
 
 _lock = threading.Lock()
@@ -22,7 +21,7 @@ _cmd_events_lock = threading.Lock()
 
 def command_target_names(token, tab=''):
     """Return the checked queue directory and bounded legacy filename."""
-    queue_name = derived_component(
+    queue_name = path_safety.derived_component(
         f'{token}_{tab}' if tab else token)
     return queue_name, f'{queue_name}.json'
 
