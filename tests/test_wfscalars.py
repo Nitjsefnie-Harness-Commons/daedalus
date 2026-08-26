@@ -97,6 +97,22 @@ def test_checkout_reader_consumes_doubled_quote_before_hash(tmp):
     assert refs == []
 
 
+def test_checkout_reader_strips_comment_after_plain_scalar_quote(tmp):
+    """A quote inside a plain scalar does not quote the following comment."""
+    del tmp
+    workflow = (
+        'name: plain quote oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        "          ref: a' # ${{ steps.baseline.outputs.ref }}\n")
+    assert _wfcheckout.checkout_refs(workflow) == [('build', "a'")]
+
+
 def test_checkout_reader_consumes_doubled_quote_before_key_colon(tmp):
     """A colon after an escaped apostrophe remains inside a quoted key."""
     del tmp

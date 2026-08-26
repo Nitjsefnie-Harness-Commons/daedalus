@@ -65,7 +65,9 @@ class _ScalarReaderMixin:
                 continue
             if char in ('"', "'"):
                 if quote is None:
-                    quote = char
+                    prefix = text[:index].rstrip(' \t')
+                    if not prefix or prefix[-1] in '[{,:?-':
+                        quote = char
                 elif quote == char:
                     if quote == "'" and index + 1 < len(text) \
                             and text[index + 1] == "'":
