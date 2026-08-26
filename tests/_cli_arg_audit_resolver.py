@@ -1,8 +1,7 @@
-"""Static argparse, builtin-identity, and constant-resolution helpers.
-DECLARED covers stored action destinations and parser defaults; GUARANTEED adds
-required and non-suppressed values. A required mutually exclusive group
-guarantees a destination only when every member stores that same non-SUPPRESS
-destination.
+"""Static argparse, builtin-identity, and constant-resolution helpers. DECLARED
+covers stored action destinations and parser defaults; GUARANTEED adds required
+and non-suppressed values. A required mutually exclusive group guarantees a
+destination only when every member stores that same non-SUPPRESS destination.
 Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
 enumerated expression node types | every other ``ast.expr`` node type is
 ``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
@@ -46,9 +45,8 @@ def expression_type_disposition(node_type):
     if (not isinstance(node_type, type) or node_type is ast.expr
             or not issubclass(node_type, ast.expr)):
         raise TypeError('expected a concrete ast.expr node type')
-    if node_type in DECIDED_EXPRESSION_TYPES:
-        return EXPRESSION_DECIDED
-    return EXPRESSION_OUTSIDE
+    return (EXPRESSION_DECIDED if node_type in DECIDED_EXPRESSION_TYPES
+            else EXPRESSION_OUTSIDE)
 
 
 def is_outside_expression(value):
@@ -80,9 +78,8 @@ def namespace_dests(parser):
 
 
 def constant_string(node):
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
+    return (node.value if isinstance(node, ast.Constant)
+            and isinstance(node.value, str) else None)
 
 
 def _constant_mapping_read(node):
@@ -394,6 +391,9 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
                              comprehension_shadows):
     parent = name._parent
     if isinstance(parent, ast.Attribute) and parent.value is name:
+        if (isinstance(parent.ctx, ast.Store)
+                and isinstance(parent._parent, ast.Assign)):
+            return parent.attr, None, False
         if not isinstance(parent.ctx, ast.Load):
             return None
         if parent.attr != '__dict__':

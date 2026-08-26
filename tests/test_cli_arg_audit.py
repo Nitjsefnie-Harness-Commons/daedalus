@@ -20,10 +20,8 @@ Current named known-gap control families are non-exact descriptors, partial
 callables, traceback frames, other containers and iterators, comprehension
 results, instance attributes, attribute getters, runtime-built names,
 mapping-proxy reads, call-produced indices, and external frame acquisition.
-Each named family has a known-gap control, and every known-gap control belongs
-to exactly one named family. The executable consistency check is
-bidirectional: contract prose and control tables cover each other.
-"""
+Each named family and control maps exactly once. The bidirectional check
+ensures contract prose and control tables cover each other."""
 import argparse
 import ast
 import inspect
@@ -210,7 +208,7 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
     if handler_globals is None:
         handler_globals = globals()
     frame_imports = _frame_imports(function)
-    reads, read_requirements, violations = {}, {}, []
+    reads, read_requirements, violations, assigned = {}, {}, [], set()
 
     def check(node, inspect_frame_routes=True):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
@@ -240,11 +238,14 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
             if permitted is None:
                 violations.append(
                     f'namespace escape: {ast.unparse(node._parent)}')
+            elif permitted[1] is None:
+                assigned.add(permitted[0])
             else:
                 attribute, construct, needs_presence = permitted
                 rendered = ast.unparse(construct)
                 reads.setdefault(attribute, set()).add(rendered)
-                read_requirements[(attribute, rendered)] = needs_presence
+                if attribute not in assigned:
+                    read_requirements[(attribute, rendered)] = needs_presence
         for child in ast.iter_child_nodes(node):
             check(child, inspect_frame_routes)
     for child in ast.iter_child_nodes(function):
@@ -302,9 +303,8 @@ def _audit_real_tabs_handler(handler_module, parser=None):
     declared, guaranteed = _tabs_namespace_dests(parser)
     handler = handler_module.do_tabs
     tree = ast.parse(handler_module.__source__)
-    function = next(
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    function = next(node for node in tree.body if isinstance(
+        node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name == 'do_tabs')
     args_name = (function.args.posonlyargs + function.args.args)[0].arg
     _, violations = _handler_arg_violations(
@@ -417,16 +417,19 @@ def test_cli_audit_includes_parser_set_defaults(tmp):
 
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
-    for declared, undeclared, _ in \
-            audit_support.PERMITTED_NAMESPACE_READ_CASES:
+    cases = audit_support.PERMITTED_NAMESPACE_READ_CASES
+    for declared, undeclared, _ in cases:
         assert _audit_fake_handler(declared) == [], declared
         assert _audit_fake_handler(undeclared) == [undeclared], undeclared
+    for body in ('args.undeclared_probe = False\nargs.undeclared_probe',
+                 'args.undeclared_probe = False'):
+        assert _audit_fake_handler(body) == [], body
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
     for body, construct in audit_support.NAMESPACE_ESCAPE_CASES:
-        assert _audit_fake_handler(body) == [
-            f'namespace escape: {construct}'], (body, construct)
+        expected = [f'namespace escape: {construct}']
+        assert _audit_fake_handler(body) == expected, (body, construct)
 
 
 def test_cli_audit_requires_builtin_identity(tmp):
@@ -661,19 +664,16 @@ def test_cli_handlers_read_only_declared_args(tmp):
         f'dispatch without parser: '
         f'{sorted(set(DISPATCH) - set(subparsers.choices))}; parser without '
         f'dispatch: {sorted(set(subparsers.choices) - set(DISPATCH))}')
-    violations = []
-    handler_details = {}
+    violations, handler_details = [], {}
     for name, handler in DISPATCH.items():
         subparser = subparsers.choices[name]
         declared, guaranteed = resolver.namespace_dests(subparser)
         declared |= global_declared
         guaranteed |= global_guaranteed
         tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
-        function = next(
-            node for node in ast.walk(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
-        positional = function.args.posonlyargs + function.args.args
-        args_name = positional[0].arg
+        function = next(node for node in ast.walk(tree) if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+        args_name = (function.args.posonlyargs + function.args.args)[0].arg
         reads, handler_violations = _handler_arg_violations(
             function, args_name, declared, guaranteed, handler.__globals__)
         handler_details[name] = {'handler': handler.__qualname__,
