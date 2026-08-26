@@ -9,12 +9,11 @@ what the worker did as JSON.
 """
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _boundary_env import ENVIRONMENT  # noqa: E402
+from _boundary_env import ENVIRONMENT, run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 SCENARIOS = r"""
@@ -547,10 +546,9 @@ HARNESS = ENVIRONMENT + SCENARIOS
 def run_extension_result_boundary(scenario):
     node = shutil.which('node')
     assert node, 'node is required to execute the extension result path'
-    result = subprocess.run(
-        [node, '-e', HARNESS,
-         str(EXTENSION_ROOT / 'background.js'), scenario],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    result = run_node_program(
+        node, HARNESS,
+        [str(EXTENSION_ROOT / 'background.js'), scenario], cwd=ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
@@ -562,11 +560,10 @@ def run_extension_capability_routes(routes, background_path=None):
     assert node, 'node is required to execute the extension command route'
     if background_path is None:
         background_path = EXTENSION_ROOT / 'background.js'
-    result = subprocess.run(
-        [node, '-e', HARNESS,
-         str(background_path), 'capability-routes',
-         json.dumps(routes)],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    result = run_node_program(
+        node, HARNESS,
+        [str(background_path), 'capability-routes', json.dumps(routes)],
+        cwd=ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
@@ -582,10 +579,9 @@ def observe_extension_worker_paths():
     """
     node = shutil.which('node')
     assert node, 'node is required to observe extension worker modules'
-    result = subprocess.run(
-        [node, '-e', HARNESS,
-         str(EXTENSION_ROOT / 'background.js'), 'worker-sources'],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    result = run_node_program(
+        node, HARNESS,
+        [str(EXTENSION_ROOT / 'background.js'), 'worker-sources'], cwd=ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return tuple(Path(item) for item in json.loads(result.stdout))

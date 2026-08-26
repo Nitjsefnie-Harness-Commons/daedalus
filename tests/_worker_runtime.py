@@ -1,12 +1,11 @@
 """Runtime observations for classic scripts sharing one worker global."""
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _boundary_env import ENVIRONMENT  # noqa: E402
+from _boundary_env import ENVIRONMENT, run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
@@ -226,10 +225,10 @@ def observe_worker_runtime(source_details, background_path=None):
         }
         for details in source_details
     ]
-    result = subprocess.run(
-        [node, '-e', OBSERVER, str(background_path), 'worker-bindings',
-         json.dumps(payload)],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    result = run_node_program(
+        node, OBSERVER,
+        [str(background_path), 'worker-bindings', json.dumps(payload)],
+        cwd=ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
