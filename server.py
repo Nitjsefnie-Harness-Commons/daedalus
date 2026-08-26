@@ -10,8 +10,15 @@ from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
 import command_queue
+from bridge_config import (
+    BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR, DEBUG_TIMING, DELIVERY_DIR,
+    MAX_BODY_SIZE, MAX_DELIVERY_RESULTS, MAX_JSON_DEPTH,
+    MAX_REQUEST_WORKERS, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
+    MAX_SEGMENTS_PER_JOB, MAX_UNAUTHENTICATED_BODY, PORT, REQUEST_TIMEOUT,
+    RES_DIR, SCREENSHOT_TYPES, SEG_DIR, STREAM_KEEPALIVE, STREAM_MAX_AGE,
+    UPLOAD_DIR,
+)
 from delivery_stripes import stripe_index
-from env_config import env_int, env_positive_float
 import path_safety
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
@@ -81,25 +88,6 @@ def _malloc_trim():
             # attempt. A libc without the symbol, or one that refuses the
             # call, leaves the heap where it is and the bridge keeps serving.
             pass
-
-
-if 'DAEDALUS_DIR' not in os.environ:
-    raise SystemExit('DAEDALUS_DIR env var required (e.g. /srv/daedalus)')
-if 'DAEDALUS_PORT' not in os.environ:
-    raise SystemExit('DAEDALUS_PORT env var required (e.g. 8081)')
-
-
-BASE = pathlib.Path(os.environ['DAEDALUS_DIR'])
-CMD_DIR = BASE / 'commands'
-RES_DIR = BASE / 'results'
-DELIVERY_DIR = RES_DIR / 'deliveries'
-UPLOAD_DIR = BASE / 'uploads'
-SEG_DIR = BASE / 'segments'
-DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent / 'dashboard'
-# 0 lets the kernel pick a free port; the startup line always prints the
-# port actually bound, so an ephemeral deployment (and the test fixture)
-# never has to choose a number another process could take first.
-PORT = env_int('DAEDALUS_PORT', 0, 0, 65535)
 
 
 def _stored_uploads(token_dir, upload_id):
@@ -472,65 +460,6 @@ def _record_delivery(did):
         del _accepted_deliveries[next(iter(_accepted_deliveries))]
 
 
-# Stream lifetime ceiling. A stream's liveness is policed by the keepalive write
-# (a dead peer raises on the next one) and by replacement-on-reconnect, so this
-# is only a last-resort ceiling on a wedged connection — not a rollover timer.
-STREAM_MAX_AGE = env_positive_float('DAEDALUS_STREAM_MAX_AGE', 3600)
-STREAM_KEEPALIVE = env_positive_float('DAEDALUS_STREAM_KEEPALIVE', 15)
-# Maximum bytes read from any HTTP request body; override for larger relays.
-MAX_BODY_SIZE = env_int('DAEDALUS_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
-
-# Per-target delivery results are retained until consumed or evicted. This is
-# separate from the in-memory retry-dedup bound: a delivery may be evicted
-# from disk while its id remains remembered as accepted.
-MAX_DELIVERY_RESULTS = env_int(
-    'DAEDALUS_MAX_DELIVERY_RESULTS', 1024, 0)
-
-# How deeply a JSON request body may nest containers. Without this the depth
-# actually enforced was whatever the running interpreter's recursion limit
-# happened to be, so one body got two answers: refused as too deeply nested on
-# 3.11 through 3.13, parsed on 3.14. The bound is checked against the raw bytes
-# before json.loads is asked to build anything, so the answer is this
-# repository's and the same everywhere. The ceiling is far below any
-# interpreter's recursion limit; nothing this bridge accepts nests near it.
-MAX_JSON_DEPTH = env_int('DAEDALUS_MAX_JSON_DEPTH', 100, 1, 500)
-
-# How large a body the bridge will read from a request that has not
-# authenticated before sending it. A body token cannot be checked without
-# reading the body, so every JSON route used to materialize and parse whatever
-# was declared -- up to MAX_BODY_SIZE -- on its way to answering 401, and
-# concurrent workers multiplied that. The Bearer header decides first; this is
-# the window in which the older body-token form still works, sized so that a
-# request nobody has authenticated is never the expensive one.
-MAX_UNAUTHENTICATED_BODY = env_int(
-    'DAEDALUS_MAX_UNAUTHENTICATED_BODY', 64 * 1024, 0)
-
-# Per-phase timing for the segment write path, read once at import and inert
-# when off. Committed with the fix rather than removed after measuring it: the
-# next regression on this path needs the same attribution, and rebuilding it by
-# hand in a REPL measures something other than what the bridge runs.
-DEBUG_TIMING = os.environ.get('DAEDALUS_DEBUG_TIMING') == '1'
-
-
-# Per-operation socket deadline for a request. A peer that declares a body and
-# then stops sending held its worker for as long as it kept the socket open,
-# so opening connections was enough to grow the thread count without ever
-# authenticating. It bounds each read and write rather than the request as a
-# whole, so an upload that keeps arriving is never cut off for being large.
-REQUEST_TIMEOUT = env_positive_float('DAEDALUS_REQUEST_TIMEOUT', 60)
-
-# Hard ceiling on concurrently-served connections. The deadline above bounds
-# how long one worker lives; this bounds how many exist at once, which the
-# deadline alone cannot do — a fast enough arrival rate outruns any deadline.
-MAX_REQUEST_WORKERS = env_int(
-    'DAEDALUS_MAX_REQUEST_WORKERS', 256, 1, 4096)
-# Fixed HLS quotas copied into each trusted job record when its capability is
-# minted. A page-visible job signature cannot alter these per-request.
-MAX_SEGMENT_INDEX = env_int('DAEDALUS_MAX_SEGMENT_INDEX', 99999, 0)
-MAX_SEGMENTS_PER_JOB = env_int(
-    'DAEDALUS_MAX_SEGMENTS_PER_JOB', 10000, 0)
-MAX_SEGMENT_JOB_SIZE = env_int(
-    'DAEDALUS_MAX_SEGMENT_JOB_SIZE', 4 * 1024 * 1024 * 1024, 0)
 _SEGMENT_DECIMAL_MAX_DIGITS = 20
 
 # ─── Command queue (directory-per-target, FIFO) ───
@@ -539,19 +468,6 @@ _SEGMENT_DECIMAL_MAX_DIGITS = 20
 # commands to the same target queue instead of overwriting a single file.
 # Legacy single-file drops (commands/{token}[_{tab}].json) are still delivered
 # for the documented raw-write escape hatch.
-CMD_TTL = env_positive_float('DAEDALUS_CMD_TTL', 90)
-
-# One table for every place a screenshot format is decided: what /upload
-# accepts, what /screenshot will discover on disk, and what content type it is
-# served with. They were three separate lists, and `webp` was in the first
-# only -- so the upload stored a file and answered 200 that /screenshot then
-# reported as absent.
-SCREENSHOT_TYPES = {
-    'png': 'image/png',
-    'jpeg': 'image/jpeg',
-    'jpg': 'image/jpeg',
-    'webp': 'image/webp',
-}
 _COMMAND_GC_INTERVAL = max(0.05, min(30.0, CMD_TTL))
 _seq_counter = itertools.count(1)
 

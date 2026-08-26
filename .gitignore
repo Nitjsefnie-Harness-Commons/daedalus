@@ -38,6 +38,7 @@
 !/LICENSE
 !/README.md
 !/SECURITY.md
+!/bridge_config.py
 !/command_queue.py
 !/delivery_stripes.py
 !/env_config.py
