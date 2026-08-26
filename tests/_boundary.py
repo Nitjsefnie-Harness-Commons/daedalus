@@ -20,6 +20,15 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 SCENARIOS = r"""
 async function runCapabilityRoutes() {
   const routes = JSON.parse(commandText);
+  const sameDescriptor = (left, right) => {
+    if (!left || !right) return left === right;
+    return left.configurable === right.configurable
+      && left.enumerable === right.enumerable
+      && left.writable === right.writable
+      && left.value === right.value
+      && left.get === right.get
+      && left.set === right.set;
+  };
   const publishedSymbols = new Set();
   for (const route of routes) {
     publishedSymbols.add(route.symbol);
@@ -89,24 +98,42 @@ async function runCapabilityRoutes() {
         continue;
       }
       for (const state of handlerStates.values()) state.writes = 0;
+      const expectedDescriptors = new Map();
+      for (const symbol of probedOriginals.keys()) {
+        expectedDescriptors.set(
+          symbol, Object.getOwnPropertyDescriptor(context, symbol));
+      }
       context.capabilityCommand = route.command;
       let answer;
+      let dispatchError;
       try {
         answer = await vm.runInContext(
           'dispatchCommand(capabilityCommand)', context);
+      } catch (error) {
+        dispatchError = error;
       } finally {
         delete context.capabilityCommand;
         delete context.capabilitySentinel;
       }
       const mutatedSymbols = [];
-      for (const [symbol, state] of handlerStates) {
-        if (symbol !== publishedSymbol && state.writes) {
+      for (const [symbol, expectedDescriptor] of expectedDescriptors) {
+        const descriptor = Object.getOwnPropertyDescriptor(context, symbol);
+        const state = handlerStates.get(symbol);
+        const wrote = state && state.writes;
+        const sameIdentity = descriptor
+          && vm.runInContext(symbol, context) === expectedHandlers.get(symbol);
+        if (symbol !== publishedSymbol
+            && (wrote || !sameIdentity
+                || !sameDescriptor(descriptor, expectedDescriptor))) {
           mutatedSymbols.push(symbol);
         }
       }
-      for (const [symbol, state] of handlerStates) {
-        state.value = expectedHandlers.get(symbol);
+      for (const [symbol, descriptor] of expectedDescriptors) {
+        Object.defineProperty(context, symbol, descriptor);
+        const state = handlerStates.get(symbol);
+        if (state) state.value = expectedHandlers.get(symbol);
       }
+      if (dispatchError) throw dispatchError;
       const observation = {
         symbol: publishedSymbol,
         available: true,
