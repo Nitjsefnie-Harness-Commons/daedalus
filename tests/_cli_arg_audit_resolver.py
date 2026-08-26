@@ -2,8 +2,7 @@
 covers stored action destinations and parser defaults; GUARANTEED adds required
 and non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
-Direct plain and annotated namespace stores are neither reads nor escapes;
-stores never satisfy reads.
+Namespace stores are refused as namespace store escapes.
 Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
 enumerated expression node types | every other ``ast.expr`` node type is
 ``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
@@ -391,9 +390,6 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
                              comprehension_shadows):
     parent = name._parent
     if isinstance(parent, ast.Attribute) and parent.value is name:
-        if isinstance(parent.ctx, ast.Store) and isinstance(
-                parent._parent, (ast.Assign, ast.AnnAssign)):
-            return parent.attr, None, False
         if not isinstance(parent.ctx, ast.Load):
             return None
         if parent.attr != '__dict__':

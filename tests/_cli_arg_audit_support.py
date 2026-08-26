@@ -3,8 +3,7 @@ action destinations and parser defaults; GUARANTEED adds required and
 non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
 Guarded or defaulted reads require DECLARED; direct reads require GUARANTEED.
-Direct plain and annotated namespace stores are neither reads nor escapes;
-stores never satisfy reads.
+Namespace stores are refused as namespace store escapes.
 Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
 enumerated expression node types | every other ``ast.expr`` node type is
 ``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
@@ -463,7 +462,7 @@ DOCSTRING_RULE_PHRASES = (
     'Not converts any resolved literal to bool',
     ('A required mutually exclusive group guarantees a destination only '
      'when every member stores that same non-SUPPRESS destination'),
-    'stores never satisfy reads',
+    'Namespace stores are refused as namespace store escapes',
     'contract prose and control tables cover each other',)
 SEMANTIC_CONTRACT_CLAIMS = (
     ("``DECIDED`` consists only of the resolver's explicitly enumerated "
