@@ -315,7 +315,8 @@ def test_non_finite_command_ttl_cannot_disable_the_collector(tmp):
         })
         probe = (
             'import server\n'
-            'server._collect_expired_commands()\n'
+            'server.command_queue.collect_expired('
+            'server.CMD_DIR, server.CMD_TTL)\n'
             'artifact = server.CMD_DIR / "queue" / "old.json"\n'
             'print(f"collector-returned retained={artifact.exists()}")\n'
         )
