@@ -58,7 +58,6 @@ print(json.dumps({
     'max_segments_per_job': config.MAX_SEGMENTS_PER_JOB,
     'max_segment_job_size': config.MAX_SEGMENT_JOB_SIZE,
     'cmd_ttl': config.CMD_TTL,
-    'screenshot_types': config.SCREENSHOT_TYPES,
 }, sort_keys=True))
 """
     loaded = subprocess.run(
@@ -88,10 +87,6 @@ print(json.dumps({
         'max_segments_per_job': 10000,
         'max_segment_job_size': 4 * 1024 * 1024 * 1024,
         'cmd_ttl': 90.0,
-        'screenshot_types': {
-            'png': 'image/png', 'jpeg': 'image/jpeg',
-            'jpg': 'image/jpeg', 'webp': 'image/webp',
-        },
     }
 
     missing_env = dict(env)

@@ -10,15 +10,15 @@ from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
 import command_queue
+import result_store
 from bridge_config import (
-    BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR, DEBUG_TIMING, DELIVERY_DIR,
-    MAX_BODY_SIZE, MAX_DELIVERY_RESULTS, MAX_JSON_DEPTH,
+    BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR, DEBUG_TIMING,
+    MAX_BODY_SIZE, MAX_JSON_DEPTH,
     MAX_REQUEST_WORKERS, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
     MAX_SEGMENTS_PER_JOB, MAX_UNAUTHENTICATED_BODY, PORT, REQUEST_TIMEOUT,
-    RES_DIR, SCREENSHOT_TYPES, SEG_DIR, STREAM_KEEPALIVE, STREAM_MAX_AGE,
+    RES_DIR, SEG_DIR, STREAM_KEEPALIVE, STREAM_MAX_AGE,
     UPLOAD_DIR,
 )
-from delivery_stripes import stripe_index
 import path_safety
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
@@ -203,263 +203,7 @@ _active_streams = {}
 _stream_ids = itertools.count(1)
 _stream_lock = threading.Lock()
 
-# Result files are single-value delivery slots. POST replacement and
-# conditional GET consumption share this lock so a newer result cannot land
-# between the consumer's generation check and unlink.
-_result_lock = threading.Lock()
-_DELIVERY_LOCK_STRIPES = 64
-_delivery_locks = tuple(
-    threading.Lock() for _ in range(_DELIVERY_LOCK_STRIPES))
-
-
-def _delivery_lock_for(target_key):
-    r"""Return the lock that serializes one target's delivery files.
-
-    Keyed on the logical target -- the `<token>_<tab>` component that names the
-    directory -- and never on a filesystem spelling. Two `realpath` results for
-    one directory are not obliged to agree: on Windows the `\\?\` prefix
-    survives exactly when a concurrent writer makes the stripping check fail,
-    and a non-strict resolution can leave an 8.3 name, a junction or a mapped
-    drive unresolved where a later call returns the canonical spelling.
-    Normalising the spelling only closes the cases somebody enumerated; the
-    logical key has no spellings to enumerate. A stripe chosen from a spelling
-    puts two callers for the same target on two different locks, which is
-    silently no serialization at all.
-    """
-    # A path-like key is the exact mistake this function was written with, and
-    # it failed silently: two spellings of one directory chose two stripes and
-    # the serialization simply was not there. Refusing it makes that loud.
-    #
-    # A string spelling counts. The spelling that actually shipped was
-    # `\\?\C:\...\tok_tab`, a str, so a check that only refused path
-    # OBJECTS would not have caught the bug it was written for. No legitimate
-    # key can contain one of these characters: a key is `<token>_<tab>` and
-    # `unsafe_component` already rejects every one of them in either half.
-    if not isinstance(target_key, str):
-        raise TypeError('delivery stripe key must be the logical target')
-    if any(char in path_safety.WINDOWS_INVALID_PATH_CHARS
-           for char in target_key):
-        raise TypeError('delivery stripe key must be the logical target')
-    key = os.fsencode(target_key)
-    index = stripe_index(key, _DELIVERY_LOCK_STRIPES)
-    return _delivery_locks[index]
-
-
-_REPLACE_ATTEMPTS = 5
-_REPLACE_RETRY_DELAY = 0.02
 _COMPAT_CONSUME_RETRY_ATTEMPTS = 8
-
-
-def _replace_atomically(src, dst):
-    """Publish `src` over `dst`, retrying a transient sharing violation.
-
-    Windows refuses a replace while any handle is open on the target, and that
-    handle need not be the bridge's -- a scanner that opens a file the moment
-    it appears is enough. It clears on its own within milliseconds, so without
-    a retry the bridge answers 500 for a write that was about to succeed and
-    discards data a caller already produced.
-
-    Only PermissionError is retried. A replace refused because the volume is
-    read-only or the disk is full is not going to start working, and waiting
-    on it would delay the error that explains what happened instead of fixing
-    anything.
-    """
-    for remaining in range(_REPLACE_ATTEMPTS - 1, -1, -1):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError:
-            if not remaining:
-                raise
-            time.sleep(_REPLACE_RETRY_DELAY)
-
-
-def _atomic_result_write(path, data):
-    """Replace one result slot only after its temp file is fully written."""
-    tmp = path.parent / f'.result-{uuid.uuid4().hex}.tmp'
-    try:
-        tmp.write_bytes(data)
-        _replace_atomically(tmp, path)
-    except OSError:
-        try:
-            tmp.unlink()
-        except OSError:
-            # The write already failed and is re-raised below. A temp that
-            # will not unlink is part of the same partial state the caller is
-            # about to be told about, and raising it here would replace the
-            # error that explains what happened.
-            pass
-        raise
-
-
-def _result_key(token, tab=''):
-    """The checked target component used by result slots and deliveries."""
-    return f'{token}_{tab}' if tab else token
-
-
-def _delivery_result_paths(token, tab, did):
-    """Return the per-target delivery directory and one checked result file."""
-    if (not isinstance(did, str) or not did
-            or path_safety.unsafe_component(did)):
-        raise ValueError('invalid delivery id')
-    key = path_safety.derived_component(_result_key(token, tab))
-    resolved_delivery_root = pathlib.Path(os.path.realpath(DELIVERY_DIR))
-    delivery_dir = path_safety.under(DELIVERY_DIR, key)
-    # The stripe is keyed on `key`, so the resolved directory must be the
-    # one-to-one namespace entry that key names, not an alias to another one.
-    if (path_safety.path_key(delivery_dir.parent)
-            != path_safety.path_key(resolved_delivery_root)
-            or delivery_dir.name != key):
-        raise ValueError('delivery target is an alias')
-    delivery_file = path_safety.under(
-        delivery_dir, path_safety.derived_component(f'{did}.json'))
-    return delivery_dir, delivery_file
-
-
-def _find_delivery_result(token, tab, did):
-    """Find a delivery file and the tab component that owns its slot."""
-    delivery_dir, delivery_file = _delivery_result_paths(token, tab, did)
-    if tab or delivery_file.exists():
-        return delivery_dir, delivery_file, tab
-    prefix = f'{token}_'
-    try:
-        with os.scandir(DELIVERY_DIR) as entries:
-            names = sorted(
-                entry.name for entry in entries
-                if entry.name.startswith(prefix)
-                and entry.is_dir(follow_symlinks=False))
-    except OSError:
-        names = []
-    for name in names:
-        try:
-            candidate_dir = path_safety.under(
-                DELIVERY_DIR, path_safety.derived_component(name))
-            candidate_file = path_safety.under(
-                candidate_dir, path_safety.derived_component(f'{did}.json'))
-        except ValueError:
-            continue
-        if candidate_file.exists():
-            return candidate_dir, candidate_file, name[len(prefix):]
-    return delivery_dir, delivery_file, ''
-
-
-_delivery_order = {'stamp': 0}
-_delivery_order_lock = threading.Lock()
-
-
-def _scan_delivery_results(delivery_dir):
-    """Read the acceptance stamps for one target's delivery files."""
-    entries = []
-    try:
-        with os.scandir(delivery_dir) as directory:
-            for entry in directory:
-                if not entry.name.endswith('.json'):
-                    continue
-                try:
-                    if not entry.is_file(follow_symlinks=False):
-                        continue
-                    stamp = entry.stat(follow_symlinks=False).st_mtime_ns
-                except OSError:
-                    continue
-                entries.append((stamp, entry.name))
-    except (FileNotFoundError, NotADirectoryError):
-        return []
-    except OSError:
-        return None
-    return entries
-
-
-def _mark_delivery_result(path, entries):
-    """Stamp a delivery after incorporating persisted acceptance order."""
-    highest = (max((stamp for stamp, _name in entries), default=0)
-               if entries is not None else 0)
-    with _delivery_order_lock:
-        stamp = max(time.time_ns(), _delivery_order['stamp'] + 1,
-                    highest + 1)
-        try:
-            os.utime(path, ns=(stamp, stamp))
-        except OSError:
-            return None
-        _delivery_order['stamp'] = stamp
-    return stamp
-
-
-def _evict_delivery_results(delivery_dir, entries):
-    """Drop files older than the configured stamp boundary."""
-    if not MAX_DELIVERY_RESULTS or len(entries) <= MAX_DELIVERY_RESULTS:
-        return
-    ordered = sorted(entries, key=lambda item: item[0])
-    boundary = ordered[-MAX_DELIVERY_RESULTS][0]
-    names = [name for stamp, name in entries if stamp < boundary]
-    for name in names:
-        try:
-            (delivery_dir / name).unlink()
-        except FileNotFoundError:
-            # A consumer took this delivery between the scan and here.
-            # Eviction wanted it gone and it is gone, so there is nothing to
-            # report and nothing to retry.
-            pass
-
-
-def _read_result_file(path, consume, expected):
-    """Read one slot with the shared peek/conditional-consume semantics."""
-    if not path.exists():
-        return {'pending': True}, ''
-    data = json.loads(path.read_text(encoding='utf-8'))
-    if not isinstance(data, dict):
-        raise ValueError('result slot is not a JSON object')
-    generation = data.get('resultGeneration', '')
-    if consume and expected and generation != expected:
-        return {'consumed': False}, ''
-    if consume:
-        path.unlink()
-        response = ({'consumed': True, 'resultGeneration': generation}
-                    if expected else data)
-        return response, data.get('deliveryId', '')
-    return data, ''
-
-
-def _remove_matching_result_file(path, generation):
-    """Remove a result file only when it still names this generation."""
-    try:
-        data = json.loads(path.read_text(encoding='utf-8'))
-    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
-        return
-    if isinstance(data, dict) and data.get('resultGeneration') == generation:
-        try:
-            path.unlink()
-        except OSError:
-            # Removing the mirrored copy is best effort on both paths: the
-            # response is already determined by the copy that was consumed, so
-            # a failure here must not turn that success into a reported error.
-            # FileNotFoundError is the ordinary case — the other path's consume
-            # or an eviction already reached the state this call wanted.
-            pass
-
-
-# Delivery ids of results already accepted, newest last. background.js retries
-# a result POST whose response it never saw, and that retry carries the same
-# delivery id as the accepted original — so without this the retry would
-# republish a finished result over whatever landed after it. Bounded because
-# the bridge runs for weeks: past the bound the oldest delivery is forgotten,
-# which is safe as its retries are long over.
-_accepted_deliveries = {}
-_ACCEPTED_DELIVERY_LIMIT = 4096
-
-
-def _record_delivery(did):
-    """Remember `did` as stored, dropping the oldest once past the bound.
-
-    Recorded only after both slots are written, and under _result_lock with
-    the membership test that guards them — so a delivery is never treated as
-    stored on the strength of a write that failed, and two retries racing
-    each other cannot both find it absent.
-    """
-    _accepted_deliveries[did] = None
-    while len(_accepted_deliveries) > _ACCEPTED_DELIVERY_LIMIT:
-        del _accepted_deliveries[next(iter(_accepted_deliveries))]
-
-
 _SEGMENT_DECIMAL_MAX_DIGITS = 20
 
 # ─── Command queue (directory-per-target, FIFO) ───
@@ -546,11 +290,11 @@ def _enqueue_command(token, tab, cmd):
         tmp = qdir / f'.{seq}.tmp'
         try:
             tmp.write_text(json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
-            _replace_atomically(str(tmp), str(qdir / f'{seq}.json'))
+            result_store.replace_atomically(tmp, qdir / f'{seq}.json')
         except (OSError, UnicodeEncodeError):
             # A refused enqueue must not leave its hidden temp behind: the
             # zero-byte artifact would sit in the queue until the background
-            # collector's TTL sweep. Same rollback as _atomic_result_write,
+            # collector's TTL sweep; rollback as result_store's atomic write,
             # plus the encode failure write_text raises after creating it.
             try:
                 tmp.unlink()
@@ -750,7 +494,7 @@ def _write_segment_usage(job, count, stored):
     tmp = path.with_name(f'.{path.name}.tmp')
     try:
         tmp.write_text(json.dumps(record), encoding='utf-8')
-        _replace_atomically(tmp, path)
+        result_store.replace_atomically(tmp, path)
     except OSError:
         # The segment itself is already stored, so a usage update that cannot
         # be written leaves the record at its previous totals rather than
@@ -910,6 +654,19 @@ def _normalized_tab_id(value):
     if isinstance(value, int) and not isinstance(value, bool):
         return str(value)
     return None
+
+
+# One table for every place a screenshot format is decided: what /upload
+# accepts, what /screenshot will discover on disk, and what content type it is
+# served with. They were three separate lists, and `webp` was in the first
+# only -- so the upload stored a file and answered 200 that /screenshot then
+# reported as absent.
+SCREENSHOT_TYPES = {
+    'png': 'image/png',
+    'jpeg': 'image/jpeg',
+    'jpg': 'image/jpeg',
+    'webp': 'image/webp',
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1274,8 +1031,8 @@ class Handler(BaseHTTPRequestHandler):
             name = f.name
             if name.startswith('.') or not name.endswith('.json'):
                 continue  # skip .tmp in-flight writes
-            # Use logical names: path spellings can differ between realpath
-            # and directory enumeration, as `_delivery_lock_for` documents.
+            # Use logical names: path spellings can differ between realpath and
+            # directory enumeration; see result_store.delivery_lock_for.
             with command_queue.claimed(
                     f'queue:{qdir.name}/{name}') as owned:
                 if not owned:
@@ -1325,8 +1082,8 @@ class Handler(BaseHTTPRequestHandler):
         deleting it would discard the writer's eventual complete command.
         """
         global _last_delivery_ts
-        # Use the logical filename: path spellings can differ between routes,
-        # as `_delivery_lock_for` documents for its logical target key.
+        # Use the logical filename: path spellings can differ between routes;
+        # result_store.delivery_lock_for documents its logical target key.
         with command_queue.claimed(f'legacy:{path.name}') as owned:
             if not owned:
                 return 0
@@ -1682,8 +1439,9 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(did, str):
                 did = ''
             try:
-                delivery_dir, delivery_file = _delivery_result_paths(
-                    token, tab_id, did) if did else (None, None)
+                delivery_dir, delivery_file = (
+                    result_store.delivery_result_paths(
+                        token, tab_id, did) if did else (None, None))
             except ValueError:
                 return self._json(400, {'error': 'invalid path component'})
             body.pop('deliveryId', None)
@@ -1707,26 +1465,30 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if delivery_dir is not None:
                     assert delivery_file is not None
-                    with _delivery_lock_for(_result_key(token, tab_id)):
-                        with _result_lock:
-                            duplicate = did in _accepted_deliveries
+                    with result_store.delivery_lock_for(
+                            result_store.result_key(token, tab_id)):
+                        with result_store.result_lock:
+                            duplicate = result_store.delivery_recorded(did)
                         if not duplicate:
                             delivery_dir.mkdir(parents=True, exist_ok=True)
-                            entries = _scan_delivery_results(delivery_dir)
-                            with _result_lock:
-                                duplicate = did in _accepted_deliveries
+                            entries = result_store.scan_delivery_results(
+                                delivery_dir)
+                            with result_store.result_lock:
+                                duplicate = (
+                                    result_store.delivery_recorded(did))
                                 if not duplicate:
                                     if tab_result_slot is not None:
-                                        _atomic_result_write(
+                                        result_store.atomic_result_write(
                                             tab_result_slot, serialized)
-                                    _atomic_result_write(
+                                    result_store.atomic_result_write(
                                         token_result_slot, serialized)
                             if not duplicate:
-                                _atomic_result_write(delivery_file, serialized)
-                                stamp = _mark_delivery_result(
+                                result_store.atomic_result_write(
+                                    delivery_file, serialized)
+                                stamp = result_store.mark_delivery_result(
                                     delivery_file, entries)
-                                with _result_lock:
-                                    _record_delivery(did)
+                                with result_store.result_lock:
+                                    result_store.record_delivery(did)
                                 if stamp is not None and entries is not None:
                                     entries = [
                                         (old_stamp, name)
@@ -1734,7 +1496,7 @@ class Handler(BaseHTTPRequestHandler):
                                         if name != delivery_file.name]
                                     entries.append((stamp, delivery_file.name))
                                     try:
-                                        _evict_delivery_results(
+                                        result_store.evict_delivery_results(
                                             delivery_dir, entries)
                                     except OSError:
                                         # The result is stored and its caller
@@ -1744,10 +1506,12 @@ class Handler(BaseHTTPRequestHandler):
                                         # evicts what this one could not.
                                         pass
                 else:
-                    with _result_lock:
+                    with result_store.result_lock:
                         if tab_result_slot is not None:
-                            _atomic_result_write(tab_result_slot, serialized)
-                        _atomic_result_write(token_result_slot, serialized)
+                            result_store.atomic_result_write(
+                                tab_result_slot, serialized)
+                        result_store.atomic_result_write(
+                            token_result_slot, serialized)
             except OSError:
                 return self._json(500, {'error': 'result storage failure'})
             if duplicate:
@@ -1904,22 +1668,25 @@ class Handler(BaseHTTPRequestHandler):
         delivery_dir = None
         try:
             if delivery:
-                delivery_dir, res_file, delivery_tab = _find_delivery_result(
-                    token, tab, delivery)
+                delivery_dir, res_file, delivery_tab = (
+                    result_store.find_delivery_result(
+                        token, tab, delivery)
+                )
             else:
                 # A requested tab selects its own slot; otherwise use the token slot.
                 res_file = path_safety.under(
                     RES_DIR,
                     path_safety.derived_component(
-                        f'{_result_key(token, tab)}.json'))
+                        f'{result_store.result_key(token, tab)}.json'))
         except ValueError:
             return self._json(400, {'error': 'invalid path component'})
         try:
             if delivery:
                 assert delivery_dir is not None
-                with _delivery_lock_for(_result_key(token, delivery_tab)):
-                    with _result_lock:
-                        response, _result_delivery = _read_result_file(
+                with result_store.delivery_lock_for(
+                        result_store.result_key(token, delivery_tab)):
+                    with result_store.result_lock:
+                        response, _ = result_store.read_result_file(
                             res_file, consume, expected)
                         if consume:
                             consumed = (response.get('consumed') is True
@@ -1936,46 +1703,54 @@ class Handler(BaseHTTPRequestHandler):
                                         RES_DIR,
                                         path_safety.derived_component(
                                             slot_name))
-                                    _remove_matching_result_file(
+                                    result_store.remove_matching_result_file(
                                         slot, generation)
             elif consume:
                 for _attempt in range(_COMPAT_CONSUME_RETRY_ATTEMPTS):
-                    with _result_lock:
-                        preview, _preview_delivery = _read_result_file(
+                    with result_store.result_lock:
+                        preview, _ = result_store.read_result_file(
                             res_file, False, '')
                     preview_delivery = (preview.get('deliveryId', '')
                                         if isinstance(preview, dict) else '')
                     if (not isinstance(preview_delivery, str)
                             or not preview_delivery
                             or path_safety.unsafe_component(preview_delivery)):
-                        with _result_lock:
-                            current, _current_delivery = _read_result_file(
-                                res_file, False, '')
+                        with result_store.result_lock:
+                            current, _current_delivery = (
+                                result_store.read_result_file(
+                                    res_file, False, '')
+                            )
                             current_delivery = (current.get('deliveryId', '')
                                                 if isinstance(current, dict)
                                                 else '')
                             if current_delivery != preview_delivery:
                                 continue
-                            response, _result_delivery = _read_result_file(
-                                res_file, True, expected)
+                            response, _result_delivery = (
+                                result_store.read_result_file(
+                                    res_file, True, expected)
+                            )
                         break
                     try:
                         candidate_dir, candidate_file, candidate_tab = (
-                            _find_delivery_result(
+                            result_store.find_delivery_result(
                                 token, tab, preview_delivery))
                     except ValueError:
                         candidate_dir = None
                     if candidate_dir is None:
-                        with _result_lock:
-                            response, _result_delivery = _read_result_file(
-                                res_file, True, expected)
+                        with result_store.result_lock:
+                            response, _result_delivery = (
+                                result_store.read_result_file(
+                                    res_file, True, expected)
+                            )
                         break
                     changed = False
-                    with _delivery_lock_for(
-                            _result_key(token, candidate_tab)):
-                        with _result_lock:
-                            current, _current_delivery = _read_result_file(
-                                res_file, False, '')
+                    with result_store.delivery_lock_for(
+                            result_store.result_key(token, candidate_tab)):
+                        with result_store.result_lock:
+                            current, _current_delivery = (
+                                result_store.read_result_file(
+                                    res_file, False, '')
+                            )
                             current_delivery = (current.get('deliveryId', '')
                                                 if isinstance(current, dict)
                                                 else '')
@@ -1983,7 +1758,7 @@ class Handler(BaseHTTPRequestHandler):
                                 changed = True
                             else:
                                 response, _result_delivery = (
-                                    _read_result_file(
+                                    result_store.read_result_file(
                                         res_file, True, expected))
                                 consumed = (
                                     response.get('consumed') is True
@@ -1992,7 +1767,7 @@ class Handler(BaseHTTPRequestHandler):
                                 if consumed:
                                     generation = response.get(
                                         'resultGeneration', '')
-                                    _remove_matching_result_file(
+                                    result_store.remove_matching_result_file(
                                         candidate_file, generation)
                     if not changed:
                         break
@@ -2001,12 +1776,12 @@ class Handler(BaseHTTPRequestHandler):
                     # the caller's own terms and leave the mirrored copy for
                     # eviction: cross-copy cleanup is best effort, but the
                     # caller's generation precondition is not.
-                    with _result_lock:
-                        response, _result_delivery = _read_result_file(
+                    with result_store.result_lock:
+                        response, _ = result_store.read_result_file(
                             res_file, True, expected)
             else:
-                with _result_lock:
-                    response, _result_delivery = _read_result_file(
+                with result_store.result_lock:
+                    response, _ = result_store.read_result_file(
                         res_file, consume, expected)
         except (OSError, json.JSONDecodeError, ValueError):
             return self._json(500, {'error': 'result storage failure'})
@@ -2200,7 +1975,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(413, {'error': 'job byte limit exceeded'})
                 try:
                     tmp.write_bytes(raw)
-                    _replace_atomically(tmp, final)
+                    result_store.replace_atomically(tmp, final)
                 finally:
                     try:
                         tmp.unlink()
@@ -2402,7 +2177,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 try:
                     tmp.write_text(json.dumps(record), encoding='utf-8')
-                    _replace_atomically(tmp, record_path)
+                    result_store.replace_atomically(tmp, record_path)
                 except OSError:
                     try:
                         tmp.unlink()
@@ -2434,7 +2209,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
                 tmp.write_text(json.dumps(record), encoding='utf-8')
-                _replace_atomically(tmp, record_path)  # atomic publish
+                result_store.replace_atomically(tmp, record_path)  # publish
             except OSError:
                 # Job names may contain dots, so the flat namespace collides
                 # in EITHER minting order: with job 'a' taken, this mkdir for
