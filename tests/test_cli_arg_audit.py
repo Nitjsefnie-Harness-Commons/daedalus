@@ -1,22 +1,35 @@
 #!/usr/bin/env python3
 """Static proof that CLI handlers read only parser-declared attributes.
+
 The main control scans every dispatched handler; focused controls exercise each
 classifier and resolver boundary, including transport-isolated real dispatch.
-DECLARED is every non-help/version, non-SUPPRESS action destination plus parser
+DECLARED contains non-help/version, non-SUPPRESS action destinations and parser
 defaults. GUARANTEED adds non-suppressed defaults, required actions, positional
-REMAINDER, and parser defaults. Direct, exact-dict, and bare ``getattr`` reads
-require GUARANTEED; guarded reads require DECLARED. Builtin forms qualify only
-by exact identity in their effective scope. Callable headers use outer scope;
-every other live parameter use escapes. Frame resolution follows supplied
-imports/globals, exact module/class attributes and static/class methods,
-literal containers, indices, slices, and names without executing handler code;
-unresolved canonical frame spellings are refused. Integer indices include bool
-and unary signs.
-Outside are non-exact descriptors, partial, traceback frames, other
-containers/iterators, comprehension results, instance attributes, attrgetter,
-runtime names, mapping-proxy reads, binary/call indices, and external frame
-acquisition. Each named family has a known-gap control, and every known-gap
-control belongs to a named family.
+REMAINDER, parser defaults, and one measured group rule. A required mutually
+exclusive group guarantees a destination only when every member stores that
+same non-SUPPRESS destination. Direct attributes, exact-dict subscripts, and
+bare ``getattr`` reads require GUARANTEED; guarded reads require DECLARED.
+
+Builtin names, module attributes, and aliases qualify only when static
+resolution proves the exact builtin object at the call site. Straight-line
+handler imports establish exact local aliases; earlier rebindings or deletions
+invalidate them, and Python's local/global scope rules remain authoritative.
+Callable headers use outer scope; every other live parameter use escapes.
+
+Frame resolution follows supplied imports and globals by identity, exact
+module/class attributes and static/class methods, exact list/tuple/dict values,
+constant indices and slices, and constant-key dictionary reads without running
+handler code. Unresolved canonical frame spellings are refused. UAdd and USub
+sign integer operands. Invert complements integer operands. Not converts any
+resolved literal to bool. All four recurse; bool values are integer indices and
+slice bounds use the same integer definition.
+
+Outside families are non-exact descriptors, partial callables, traceback
+frames, other containers and iterators, comprehension results, instance
+attributes, attribute getters, runtime-built names, mapping-proxy reads,
+binary and call-produced indices, and external frame acquisition. Each named
+family has a known-gap control, and every known-gap control belongs to exactly
+one named family.
 """
 import argparse
 import ast
@@ -31,17 +44,6 @@ import _util  # noqa: E402
 import _cli_arg_audit_support as audit_support  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
-
-_REAL_STORAGE_DISPATCH_CASES = (
-    ('optional',
-     "PROBE_READS.append(getattr(args, 'undeclared_probe', None)); return",
-     (), (None,)),
-    ('remainder',
-     'PROBE_READS.append(args.undeclared_probe); return', (), ([],)),
-    ('required-option',
-     'PROBE_READS.append(args.undeclared_probe); return',
-     ('--undeclared-probe', 'present'), ('present',)),
-)
 
 
 def _binding_names(target):
@@ -421,7 +423,7 @@ def test_cli_audit_models_mutex_group_storage(tmp):
 def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
     from daedalus_cli import cli
     for index, (shape, body, argv, expected) in enumerate(
-            _REAL_STORAGE_DISPATCH_CASES):
+            audit_support.REAL_STORAGE_DISPATCH_CASES):
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers(dest='cmd', required=True)
         tabs = sub.add_parser('tabs')
@@ -486,15 +488,7 @@ def test_cli_audit_resolves_exact_builtin_aliases(tmp):
 
 
 def test_cli_audit_respects_inner_scope_bindings(tmp):
-    shadowed = (
-        'def inner(args):\n'
-        '    args.undeclared_probe\n'
-        'shadow = lambda args: args.undeclared_probe')
-    assert _audit_fake_handler(shadowed) == []
-    closure = (
-        'def inner():\n'
-        '    args.undeclared_probe')
-    assert _audit_fake_handler(closure) == ['args.undeclared_probe']
+    audit_support.resolver.assert_inner_scope_bindings(_audit_fake_handler)
 
 
 def test_cli_audit_sees_shadowing_callable_defaults(tmp):
@@ -535,99 +529,19 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
 
 
 def test_cli_audit_resolver_resolves_dict_get_default(tmp):
-    unresolved = object()
-    for expression, expected in (('+True', 1), ('-True', -1), ('+False', 0)):
-        value = audit_support._constant_value(
-            ast.parse(expression, mode='eval').body, unresolved)
-        assert (type(value), value) == (int, expected), expression
-    resolved = audit_support._constant_value(
-        ast.parse('routes[:+True]', mode='eval').body.slice, unresolved)
-    assert (type(resolved.stop), resolved.stop) == (int, 1)
-    invalid = ast.parse("routes['not-an-index':]", mode='eval').body.slice
-    assert audit_support._constant_value(invalid, unresolved) is unresolved
-    function = ast.parse(
-        "def do_tabs(args):\n"
-        "    return ROUTES.get('active', DEFAULT_ROUTE)\n").body[0]
-    call = function.body[0].value
-    handler_globals = {
-        'ROUTES': {'active': sys._getframe},
-        'DEFAULT_ROUTE': inspect.currentframe,
-    }
-    assert _frame_value(
-        call, function, handler_globals, {}) is sys._getframe
-    handler_globals['ROUTES'] = {}
-    assert _frame_value(
-        call, function, handler_globals, {}) is inspect.currentframe
-    literal_function = ast.parse(
-        "def do_tabs(args):\n"
-        "    return ROUTES.get('active', None)\n").body[0]
-    literal_call = literal_function.body[0].value
-    assert _frame_value(
-        literal_call, literal_function, {'ROUTES': {}}, {}) is None
+    audit_support.resolver.assert_dict_get_default(_frame_value)
 
 
 def test_cli_audit_resolver_logical_not_returns_bool(tmp):
-    unresolved = object()
-    cases = (
-        ('not 1.0', False),
-        ("not ''", True),
-        ('not None', True),)
-    for expression, expected in cases:
-        node = ast.parse(expression, mode='eval').body
-        value = audit_support._constant_value(node, unresolved)
-        assert (type(value), value) == (bool, expected), expression
+    audit_support.resolver.assert_logical_not_returns_bool()
 
 
 def test_cli_audit_resolver_decides_every_unary_operator(tmp):
-    unresolved = object()
-    operator_cases = (
-        ('+0', ast.UAdd, int, 0),
-        ('-0', ast.USub, int, 0),
-        ('~0', ast.Invert, int, -1),
-        ('not 0', ast.Not, bool, True),)
-    assert {operator for _, operator, _, _ in operator_cases} == \
-        set(ast.unaryop.__subclasses__())
-    combination_cases = (
-        ('~-1', int, 0),
-        ('-~0', int, 1),
-        ('not not 0', bool, False),
-        ('+True', int, 1),
-        ('-True', int, -1),
-        ('~False', int, -1),
-        ('not False', bool, True),)
-    for expression, operator, expected_type, expected in operator_cases:
-        node = ast.parse(expression, mode='eval').body
-        assert isinstance(node.op, operator), expression
-        value = audit_support._constant_value(node, unresolved)
-        assert (type(value), value) == (expected_type, expected), expression
-    for expression, expected_type, expected in combination_cases:
-        node = ast.parse(expression, mode='eval').body
-        value = audit_support._constant_value(node, unresolved)
-        assert (type(value), value) == (expected_type, expected), expression
-
-    slice_cases = (
-        ('routes[:~0]', slice(None, -1, None)),
-        ('routes[-~0:]', slice(1, None, None)),
-        ('routes[:(not 0)]', slice(None, True, None)),
-        ('routes[(not not 0):]', slice(False, None, None)),)
-    for expression, expected in slice_cases:
-        node = ast.parse(expression, mode='eval').body.slice
-        value = audit_support._constant_value(node, unresolved)
-        assert value == expected, expression
+    audit_support.resolver.assert_every_unary_operator()
 
 
 def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
-    class FrameRoutes:
-        active = sys._getframe
-
-    function = ast.parse(
-        "def do_tabs(args):\n"
-        "    return vars(FrameRoutes)\n").body[0]
-    call = function.body[0].value
-    value = _frame_value(
-        call, function, {'FrameRoutes': FrameRoutes}, {})
-    assert isinstance(value, type(FrameRoutes.__dict__))
-    assert value['active'] is sys._getframe
+    audit_support.resolver.assert_exact_class_vars(_frame_value)
 
 
 def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
@@ -706,21 +620,18 @@ def test_cli_audit_respects_nested_local_bindings(tmp):
 
 
 def test_cli_audit_module_has_no_dead_imports(tmp):
-    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
-    imported = set()
-    for statement in tree.body:
-        if isinstance(statement, ast.Import):
-            imported |= {
-                alias.asname or alias.name.split('.')[0]
-                for alias in statement.names}
-        elif isinstance(statement, ast.ImportFrom):
-            imported |= {
-                alias.asname or alias.name for alias in statement.names}
-    loaded = {
-        node.id for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
-    unused = sorted(imported - loaded)
-    assert unused == [], unused
+    audit_support.resolver.assert_no_dead_imports(__file__)
+
+
+def test_cli_audit_docstrings_match_control_tables(tmp):
+    documents = {
+        'test_cli_arg_audit': __doc__,
+        '_cli_arg_audit_support': audit_support.__doc__,
+    }
+    audit_support.resolver.assert_docstrings_match(
+        documents, audit_support.DOCSTRING_RULE_PHRASES,
+        audit_support.KNOWN_GAP_FAMILIES,
+        audit_support.KNOWN_GAP_FRAME_ROUTE_CASES)
 
 
 def test_cli_handlers_read_only_declared_args(tmp):
