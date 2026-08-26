@@ -64,5 +64,54 @@ def test_route_reports_a_transient_handler_write(tmp):
     ], observations
 
 
+def test_route_reports_a_descriptor_replacement(tmp):
+    """Replacing the accessor descriptor still mutates the sibling."""
+    route = "    case 'block-requests': return handleBlockRequests(cmd);"
+    mutated = """    case 'block-requests':
+      Object.defineProperty(globalThis, 'handleUnblockRequests', {
+        value: function corruptedUnblock() { return false; },
+        writable: true, enumerable: true, configurable: true,
+      });
+      return handleBlockRequests(cmd);"""
+    background = _background_with_route(tmp, route, mutated)
+
+    observations = run_extension_capability_routes([{
+        'symbol': 'handleBlockRequests',
+        'publishedSymbols': [
+            'handleBlockRequests', 'handleUnblockRequests',
+        ],
+        'command': {'id': 'descriptor', 'type': 'block-requests'},
+    }], background_path=background)
+
+    assert observations[0].get('mutatedSymbols') == [
+        'handleUnblockRequests',
+    ], observations
+
+
+def test_route_reports_delete_then_recreate(tmp):
+    """Deleting an accessor cannot erase the sibling mutation."""
+    route = "    case 'block-requests': return handleBlockRequests(cmd);"
+    mutated = """    case 'block-requests': {
+      delete globalThis.handleUnblockRequests;
+      globalThis.handleUnblockRequests = function corruptedUnblock() {
+        return false;
+      };
+      return handleBlockRequests(cmd);
+    }"""
+    background = _background_with_route(tmp, route, mutated)
+
+    observations = run_extension_capability_routes([{
+        'symbol': 'handleBlockRequests',
+        'publishedSymbols': [
+            'handleBlockRequests', 'handleUnblockRequests',
+        ],
+        'command': {'id': 'delete-recreate', 'type': 'block-requests'},
+    }], background_path=background)
+
+    assert observations[0].get('mutatedSymbols') == [
+        'handleUnblockRequests',
+    ], observations
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
