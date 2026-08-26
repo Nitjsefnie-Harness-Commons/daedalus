@@ -302,7 +302,10 @@ def test_dashboard_never_builds_markup_from_a_value(tmp):
 
 
 _TAB_SELECTOR_HARNESS = r"""
+import { pathToFileURL } from 'node:url';
+
 phase('dashboard harness started');
+(async () => {
 // Enough DOM for `h` and `clear`; the controller under test is real.
 class El {
   constructor(tag) {
@@ -337,8 +340,10 @@ globalThis.document = {
 // URLs, and on Windows an absolute path starts with a drive letter it reads
 // as an unsupported URL scheme ('d:').
 phase('dashboard module import started');
-const { pathToFileURL } = await import('node:url');
-const { bindTabSelector } = await import(pathToFileURL(process.argv[1]).href);
+const { bindTabSelector } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
 phase('dashboard module imported');
 
 let tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'second' }];
@@ -386,13 +391,15 @@ process.stdout.write(JSON.stringify({
   initial, afterUpdate, afterUnregister, afterSync,
 }));
 phase('dashboard harness finished');
+})().catch(leave);
 """
 
 
 def _run_tab_selector_harness():
     result = _dashnode.run_dashboard_node(
         _TAB_SELECTOR_HARNESS,
-        ROOT / 'dashboard' / 'sections' / '_util.js', module=True)
+        ROOT / 'dashboard' / 'sections' / '_util.js', module=True,
+        bounded_steps=5)
     return json.loads(result.stdout)
 
 
