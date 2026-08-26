@@ -1,49 +1,27 @@
 #!/usr/bin/env python3
 """Static proof that CLI handlers read only parser-declared attributes.
-
-``test_cli_handlers_read_only_declared_args`` scans every dispatched handler;
-the focused controls make each classifier rule and resolver boundary
-executable.
-
-DECLARED contains each non-help/version action whose destination is not
-``argparse.SUPPRESS``, plus every ``set_defaults`` key. GUARANTEED PRESENT
-contains a destination when an action has a non-suppressed default, is required
-on every successful parse, or is a positional ``REMAINDER``; parser defaults
-are guaranteed too. Same-destination actions combine those properties.
-
-Direct attributes, exact ``vars(args)``/``args.__dict__`` subscripts, and bare
-``getattr`` without a default require GUARANTEED. ``hasattr``, defaulted
-``getattr``, and constant-key mapping ``.get`` require DECLARED. These calls
-receive builtin semantics only by identity: no enclosing callable or
-comprehension may bind the bare name at that evaluation point. A module global
-or the function's effective builtins must resolve to the exact builtin.
-Attribute calls require the exact ``builtins`` module. Callable headers use
-outer scope; every other live use of the parameter escapes. Bare reflective
-names are refused even when shadowed; exact ``builtins`` forms are refused too.
-
-Frame routes resolve through supplied imports, unshadowed globals, exact
-module/class attributes, module ``__dict__``, exact list/tuple subscripts and
-slices, constant-key dict reads/``.get``, and bare constant-name ``getattr``.
-One-argument ``vars`` resolves exact modules/classes; class mapping-proxy reads
-stay outside. Exact static/class methods unwrap; other descriptors stay raw.
-Canonical unresolved ``_getframe``/``currentframe`` spellings are refused.
-
-An integer index is an ``isinstance(value, int)`` value, including ``bool``.
-Unary ``+``/``-`` executes through arbitrary stacks, so ``+True`` is integer
-``1``. Slice bounds use the same definition and exact sliced sequences remain
-eligible for another subscript.
-
-Resolution never runs handler code. Outside are non-exact descriptors,
-``partial``, traceback frames, other containers/iterators, comprehension
-results, instance attributes, ``attrgetter``, runtime names, mapping-proxy
-reads, binary/call indices, and external frame acquisition. Each named family
-has a known-gap control, and every known-gap control belongs to a named family.
+The main control scans every dispatched handler; focused controls exercise each
+classifier and resolver boundary, including transport-isolated real dispatch.
+DECLARED is every non-help/version, non-SUPPRESS action destination plus parser
+defaults. GUARANTEED adds non-suppressed defaults, required actions, positional
+REMAINDER, and parser defaults. Direct, exact-dict, and bare ``getattr`` reads
+require GUARANTEED; guarded reads require DECLARED. Builtin forms qualify only
+by exact identity in their effective scope. Callable headers use outer scope;
+every other live parameter use escapes. Frame resolution follows supplied
+imports/globals, exact module/class attributes and static/class methods,
+literal containers, indices, slices, and names without executing handler code;
+unresolved canonical frame spellings are refused. Integer indices include bool
+and unary signs.
+Outside are non-exact descriptors, partial, traceback frames, other
+containers/iterators, comprehension results, instance attributes, attrgetter,
+runtime names, mapping-proxy reads, binary/call indices, and external frame
+acquisition. Each named family has a known-gap control, and every known-gap
+control belongs to a named family.
 """
 import argparse
 import ast
 import builtins  # pylint: disable=unused-import
 import inspect
-import os
 import sys
 import textwrap
 import types
@@ -65,7 +43,6 @@ _REAL_STORAGE_DISPATCH_CASES = (
      'PROBE_READS.append(args.undeclared_probe); return',
      ('--undeclared-probe', 'present'), ('present',)),
 )
-_BRIDGE_ENV_NAMES = ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN')
 
 
 def _binding_names(target):
@@ -381,69 +358,30 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
     original_handler = cli.DISPATCH['tabs']
     original_argv = sys.argv
     original_api = handler_module.api
-    original_environment = {
-        name: os.environ.pop(name, None) for name in _BRIDGE_ENV_NAMES}
 
     def refuse_api(*_args, **_kwargs):
-        raise AssertionError('real dispatch did not read undeclared_probe')
+        raise AssertionError(audit_support.DISPATCH_PROBE_ERROR)
 
     cli.DISPATCH['tabs'] = handler_module.do_tabs
     sys.argv = ['daedalus', 'tabs']
     handler_module.api = refuse_api
     try:
-        cli.main()
+        with audit_support.isolated_bridge_environment():
+            cli.main()
     except AttributeError as error:
         assert str(error) == \
             "'Namespace' object has no attribute 'undeclared_probe'", error
     else:
-        assert False, 'real dispatch did not read undeclared_probe'
+        assert False, audit_support.DISPATCH_PROBE_ERROR
     finally:
         cli.DISPATCH['tabs'] = original_handler
         sys.argv = original_argv
         handler_module.api = original_api
-        for name, value in original_environment.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
 
 
 def test_cli_real_dispatch_helper_neutralizes_bridge(tmp):
-    bridge_environment = {
-        name: f'test-{name}' for name in _BRIDGE_ENV_NAMES}
-    original_environment = {
-        name: os.environ.get(name) for name in _BRIDGE_ENV_NAMES}
-    os.environ.update(bridge_environment)
-    body = ("PROBE_ENV.append((os.environ.get('DAEDALUS_URL'), "
-            "os.environ.get('DAEDALUS_TOKEN')))")
-    handler_module = _mutated_cli_tabs(
-        'neutralized_dispatch_cli', 'PROBE_ENV = []', body)
-    calls = []
-
-    def record_api(*args, **kwargs):
-        calls.append((args, kwargs))
-        return []
-
-    handler_module.api = record_api
-    try:
-        try:
-            _assert_real_tabs_dispatch_crashes(handler_module)
-        except AssertionError as error:
-            assert str(error) == \
-                'real dispatch did not read undeclared_probe', error
-        else:
-            assert False, 'helper accepted a mutation without the probe read'
-        assert calls == [], calls
-        assert handler_module.PROBE_ENV == [(None, None)]
-        assert {name: os.environ.get(name) for name in _BRIDGE_ENV_NAMES} == \
-            bridge_environment
-    finally:
-        for name, value in original_environment.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-        sys.modules.pop(handler_module.__dict__['__name__'], None)
+    audit_support.assert_real_dispatch_isolated(
+        _mutated_cli_tabs, _assert_real_tabs_dispatch_crashes)
 
 
 def test_cli_audit_excludes_dest_suppress_action(tmp):
