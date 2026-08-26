@@ -94,7 +94,8 @@ def executable_lines(coverage_xml):
                 number_value = int(number)
             except ValueError as error:
                 raise ValueError(
-                    f'invalid line number for {filename}: {number!r}') from error
+                    f'invalid line number for {filename}: {number!r}'
+                ) from error
             if number_value <= 0:
                 raise ValueError(
                     f'invalid line number for {filename}: {number!r} '
