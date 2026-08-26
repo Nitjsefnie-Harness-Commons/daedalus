@@ -1,0 +1,33 @@
+"""The dashboard suites' Node harness process boundary.
+
+Not a suite itself — run_tests.py only loads `test_*.py`.
+
+The dashboard behaviour suite runs shipped JavaScript modules in short Node
+processes. This helper keeps process setup and captured failures consistent.
+"""
+import shutil
+import subprocess
+
+from _repo import ROOT
+
+
+def run_dashboard_node(source, *arguments, module=False, timeout=30):
+    """Run one dashboard JavaScript harness with captured output."""
+    node = shutil.which('node')
+    if not node:
+        raise AssertionError('node is required to execute dashboard harnesses')
+    options = ['--input-type=module'] if module else []
+    command = [node, *options, '--eval', source, *map(str, arguments)]
+    process = subprocess.Popen(
+        command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        raise
+    if process.returncode != 0:
+        raise AssertionError((process.returncode, stdout, stderr))
+    return subprocess.CompletedProcess(
+        command, process.returncode, stdout, stderr)
