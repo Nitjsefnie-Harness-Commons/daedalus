@@ -26,6 +26,14 @@ def _load_queue(name):
     return _util.load(_util.ROOT / 'command_queue.py', name=name)
 
 
+def test_queue_naming_contract_is_pinned(tmp):
+    del tmp
+    queue = _load_queue('command_queue_names')
+
+    assert queue.command_target_names('tok', 'tab') == (
+        'tok_tab', 'tok_tab.json')
+
+
 def _set_mtime(path, stamp):
     os.utime(path, (stamp, stamp))
 
