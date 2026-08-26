@@ -1,37 +1,28 @@
-#!/usr/bin/env python3
 """Static proof that CLI handlers read only parser-declared attributes.
-
-The main control scans every dispatched handler; focused controls exercise each
-classifier and resolver boundary, including transport-isolated real dispatch.
-DECLARED contains non-help/version, non-SUPPRESS action destinations and parser
-defaults. GUARANTEED adds non-suppressed defaults, required actions, positional
-REMAINDER, parser defaults, and one measured group rule. A required mutually
-exclusive group guarantees a destination only when every member stores that
-same non-SUPPRESS destination. Direct attributes, exact-dict subscripts, and
-bare ``getattr`` reads require GUARANTEED; guarded reads require DECLARED.
-
-Builtin names, module attributes, and aliases qualify only when static
-resolution proves the exact builtin object at the call site. Enclosing
-statement prefixes establish exact local aliases; earlier name or attribute
-rebindings and deletions invalidate them, and Python's local/global scope
-rules remain authoritative. Captured local aliases also require exact identity
-at every proven direct invocation.
-Callable headers use outer scope; every other live parameter use escapes.
-
-Frame resolution follows supplied imports and globals by identity, exact
-module/class attributes and static/class methods, exact list/tuple/dict values,
-constant indices and slices, and constant-key dictionary reads without running
-handler code. Unresolved canonical frame spellings are refused. UAdd and USub
-sign integer operands. Invert complements integer operands. Not converts any
-resolved literal to bool. All four recurse; bool values are integer indices and
-slice bounds use the same integer definition.
-
-Outside families are non-exact descriptors, partial callables, traceback
-frames, other containers and iterators, comprehension results, instance
-attributes, attribute getters, runtime-built names, mapping-proxy reads,
-call-produced indices, and external frame acquisition. Each named
-family has a known-gap control, and every known-gap control belongs to exactly
-one named family.
+DECLARED covers stored action destinations and parser defaults; GUARANTEED adds
+required and non-suppressed values. A required mutually exclusive group
+guarantees a destination only when every member stores that same non-SUPPRESS
+destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
+Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
+enumerated expression node types | every other ``ast.expr`` node type is
+``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
+automatically and no third bucket exists | comparisons and tuple-literal keys
+stay ``OUTSIDE`` because reproducing their Python semantics would widen the
+trusted evaluator | builtin aliases are trusted only with exact builtin
+identity at the specific call site | uncertain, rebound, closure-dependent,
+or conditional bindings fail closed | captured local aliases require exact
+identity at every proven direct invocation. Semantic claims end.
+Aliases follow prefixes; headers use outer scope. Other parameters escape;
+unresolved frame spellings are refused. UAdd and USub sign integer operands.
+Invert complements integer operands. Not converts any resolved literal to
+bool. All four recurse; bool values are integer indices and slice bounds.
+Current named known-gap control families are non-exact descriptors, partial
+callables, traceback frames, other containers and iterators, comprehension
+results, instance attributes, attribute getters, runtime-built names,
+mapping-proxy reads, call-produced indices, and external frame acquisition.
+Each named family has a known-gap control, and every known-gap control belongs
+to exactly one named family. The executable consistency check is
+bidirectional: contract prose and control tables cover each other.
 """
 import argparse
 import ast
@@ -40,51 +31,37 @@ import sys
 import textwrap
 import types
 from pathlib import Path
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _cli_arg_audit_support as audit_support  # noqa: E402
-
 sys.path.insert(0, str(_util.ROOT))
+resolver = audit_support.resolver
 
 
 def _binding_names(target):
-    """Return the names a binding target assigns."""
     if isinstance(target, ast.Name):
         return {target.id}
     if isinstance(target, (ast.Tuple, ast.List)):
-        names = set()
-        for element in target.elts:
-            names |= _binding_names(element)
-        return names
+        return set().union(*map(_binding_names, target.elts))
     if isinstance(target, ast.Starred):
         return _binding_names(target.value)
     return set()
 
 
-def _rebinds(function, name):
-    """Return True when a nested function's own parameters bind ``name``."""
-    arguments = function.args
-    parameters = (arguments.posonlyargs + arguments.args
-                  + arguments.kwonlyargs
-                  + [arguments.vararg, arguments.kwarg])
-    return name in {
-        parameter.arg for parameter in parameters if parameter is not None}
-
-
 def _scope_binds(function, name):
-    """Return True when a nested callable's own scope binds ``name``."""
-    if _rebinds(function, name):
+    arguments = function.args
+    parameters = (*arguments.posonlyargs, *arguments.args,
+                  *arguments.kwonlyargs, arguments.vararg, arguments.kwarg)
+    if name in {item.arg for item in parameters if item is not None}:
         return True
-    body = function.body
-    stack = list(body) if isinstance(body, list) else [body]
+    stack = (list(function.body) if isinstance(function.body, list)
+             else [function.body])
     binds = False
-    reaches_handler = False
     while stack:
         node = stack.pop()
         if isinstance(node, (ast.Nonlocal, ast.Global)) \
                 and name in node.names:
-            reaches_handler = True
+            return False
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                                ast.ClassDef)):
             binds = binds or node.name == name
@@ -93,12 +70,9 @@ def _scope_binds(function, name):
             continue                        # so is a lambda's
         elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
                                ast.GeneratorExp)):
-            # A comprehension's targets bind inside it; a walrus elsewhere
-            # in one binds out here.
-            if isinstance(node, ast.DictComp):
-                stack.extend((node.key, node.value))
-            else:
-                stack.append(node.elt)
+            values = ((node.key, node.value) if isinstance(node, ast.DictComp)
+                      else (node.elt,))
+            stack.extend(values)
             for generator in node.generators:
                 stack.append(generator.iter)
                 stack.extend(generator.ifs)
@@ -116,8 +90,7 @@ def _scope_binds(function, name):
                 name in _binding_names(target) for target in node.targets)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             binds = binds or any(
-                item.optional_vars is not None
-                and name in _binding_names(item.optional_vars)
+                name in _binding_names(item.optional_vars)
                 for item in node.items)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             binds = binds or any(
@@ -126,12 +99,11 @@ def _scope_binds(function, name):
         elif isinstance(node, ast.ExceptHandler):
             binds = binds or node.name == name
         stack.extend(ast.iter_child_nodes(node))
-    return binds and not reaches_handler
+    return binds
 
 
 def _comprehension_shadows(comprehension, name, child=None,
                            before_target=False):
-    """Return whether a target has bound ``name`` at one child."""
     generators = comprehension.generators
     if child in generators:
         end = generators.index(child) + (not before_target)
@@ -141,13 +113,28 @@ def _comprehension_shadows(comprehension, name, child=None,
         for generator in generators)
 
 
+def _callable_header_nodes(nested):
+    yield from getattr(nested, 'decorator_list', ())
+    arguments = nested.args
+    yield from arguments.defaults
+    yield from (default for default in arguments.kw_defaults
+                if default is not None)
+    parameters = (*arguments.posonlyargs, *arguments.args,
+                  *arguments.kwonlyargs, arguments.vararg, arguments.kwarg)
+    yield from (parameter.annotation for parameter in parameters
+                if parameter is not None
+                and parameter.annotation is not None)
+    returns = getattr(nested, 'returns', None)
+    if returns is not None:
+        yield returns
+
+
 _FRAME_ROUTE_ATTRS = {'sys': '_getframe', 'inspect': 'currentframe'}
 _FRAME_ROUTE_MODULES = {'sys': sys, 'inspect': inspect}
 _UNRESOLVED = object()
 
 
 def _frame_imports(function):
-    """Return frame modules and routes imported inside ``function``."""
     bindings = {}
     for node in ast.walk(function):
         if isinstance(node, ast.Import):
@@ -167,14 +154,12 @@ def _frame_imports(function):
 
 
 def _frame_value(node, function, handler_globals, imports):
-    """Resolve constant access without executing handler source."""
-    return audit_support.resolve_frame_value(
+    return resolver.resolve_frame_value(
         node, function, handler_globals, imports, _UNRESOLVED,
-        _scope_binds, audit_support.constant_string)
+        _scope_binds, resolver.constant_string)
 
 
 def _unknown_frame_route(node, function, handler_globals, imports):
-    """Refuse an unresolved canonical frame-route spelling."""
     if isinstance(node, ast.Name):
         return (node.id in _FRAME_ROUTE_ATTRS.values()
                 and _frame_value(node, function, handler_globals, imports)
@@ -186,62 +171,52 @@ def _unknown_frame_route(node, function, handler_globals, imports):
 
 
 def _frame_route_access(node, function, handler_globals, imports):
-    """Return True when ``node`` names or accesses a frame route."""
-    if audit_support.is_frame_route(_frame_value(
-            node, function, handler_globals, imports)):
+    resolved = _frame_value(node, function, handler_globals, imports)
+    if resolver.is_frame_route(resolved):
         return True
     if isinstance(node, ast.Call):
         function_value = _frame_value(
             node.func, function, handler_globals, imports)
-        if (audit_support.is_frame_route(function_value)
-                or audit_support.is_outside_expression(function_value)):
-            return True
-        if (isinstance(node.func, ast.Attribute)
-                and audit_support.is_frame_route(_frame_value(
-                    node.func.value, function, handler_globals, imports))):
-            return True
-        return _unknown_frame_route(
-            node.func, function, handler_globals, imports)
+        return (resolver.is_frame_route(function_value)
+                or resolver.is_outside_expression(function_value)
+                or (isinstance(node.func, ast.Attribute)
+                    and resolver.is_frame_route(_frame_value(
+                        node.func.value, function, handler_globals, imports)))
+                or _unknown_frame_route(
+                    node.func, function, handler_globals, imports))
     if not isinstance(node, (ast.Name, ast.Attribute)):
         return False
-    if audit_support.is_frame_route(_frame_value(
-            node, function, handler_globals, imports)):
-        return True
-    if (isinstance(node, ast.Attribute)
-            and audit_support.is_frame_route(_frame_value(
-                node.value, function, handler_globals, imports))):
-        return True
-    return _unknown_frame_route(node, function, handler_globals, imports)
+    return ((isinstance(node, ast.Attribute)
+             and resolver.is_frame_route(_frame_value(
+                 node.value, function, handler_globals, imports)))
+            or _unknown_frame_route(
+                node, function, handler_globals, imports))
 
 
 def _reflective_call(node, function, handler_globals, imports,
                      inspect_frame_routes=True):
-    if audit_support.reflective_builtin_call(
+    return (resolver.reflective_builtin_call(
             node, function, handler_globals, _scope_binds,
-            _comprehension_shadows):
-        return True
-    return inspect_frame_routes and _frame_route_access(
-        node, function, handler_globals, imports)
+            _comprehension_shadows)
+            or inspect_frame_routes and _frame_route_access(
+            node, function, handler_globals, imports))
 
 
 def _handler_arg_violations(function, args_name, declared, guaranteed,
                             handler_globals=None):
-    """Return (reads, violations) for one handler's namespace use."""
     for node in ast.walk(function):
         for child in ast.iter_child_nodes(node):
             child._parent = node
     if handler_globals is None:
         handler_globals = globals()
     frame_imports = _frame_imports(function)
-    reads = {}
-    read_requirements = {}
-    violations = []
+    reads, read_requirements, violations = {}, {}, []
 
     def check(node, inspect_frame_routes=True):
-        # One node evaluated where the parameter name is live.
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                              ast.Lambda)):
-            visit_header(node, inspect_frame_routes)
+            for header in _callable_header_nodes(node):
+                check(header, inspect_frame_routes)
             if not _scope_binds(node, args_name):
                 body = (node.body if isinstance(node.body, list)
                         else [node.body])
@@ -259,7 +234,7 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
-            permitted = audit_support.permitted_namespace_read(
+            permitted = resolver.permitted_namespace_read(
                 node, function, handler_globals, _scope_binds,
                 _comprehension_shadows)
             if permitted is None:
@@ -270,34 +245,10 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 rendered = ast.unparse(construct)
                 reads.setdefault(attribute, set()).add(rendered)
                 read_requirements[(attribute, rendered)] = needs_presence
-        visit(node, inspect_frame_routes)
-
-    def visit(node, inspect_frame_routes=True):
         for child in ast.iter_child_nodes(node):
             check(child, inspect_frame_routes)
-
-    def visit_header(nested, inspect_frame_routes):
-        # Decorators, defaults, annotations and the return annotation are
-        # evaluated where the callable is defined, not where its body runs.
-        for decorator in getattr(nested, 'decorator_list', []):
-            check(decorator, inspect_frame_routes)
-        arguments = nested.args
-        for default in arguments.defaults:
-            check(default, inspect_frame_routes)
-        for kw_default in arguments.kw_defaults:
-            if kw_default is not None:
-                check(kw_default, inspect_frame_routes)
-        parameters = (arguments.posonlyargs + arguments.args
-                      + arguments.kwonlyargs
-                      + [arguments.vararg, arguments.kwarg])
-        for parameter in parameters:
-            if parameter is not None and parameter.annotation is not None:
-                check(parameter.annotation, inspect_frame_routes)
-        returns = getattr(nested, 'returns', None)
-        if returns is not None:
-            check(returns, inspect_frame_routes)
-
-    visit(function)
+    for child in ast.iter_child_nodes(function):
+        check(child)
     for (attribute, construct), needs_presence in sorted(
             read_requirements.items()):
         allowed = guaranteed if needs_presence else declared
@@ -309,8 +260,7 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
 def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None):
     present = dests if present is None else present
     if scope is None:
-        scope = dict(globals())
-        scope['builtins'] = sys.modules['builtins']
+        scope = {**globals(), 'builtins': sys.modules['builtins']}
     function = ast.parse(
         'def fake(args):\n' + textwrap.indent(body, '    ')).body[0]
     _, violations = _handler_arg_violations(
@@ -318,8 +268,16 @@ def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None):
     return violations
 
 
+def _tabs_namespace_dests(parser):
+    subparsers = next(action for action in parser._actions
+                      if isinstance(action, argparse._SubParsersAction))
+    declared, guaranteed = resolver.namespace_dests(parser)
+    sub_declared, sub_guaranteed = resolver.namespace_dests(
+        subparsers.choices['tabs'])
+    return declared | sub_declared, guaranteed | sub_guaranteed
+
+
 def _mutated_cli_tabs(package_name, module_prelude, body):
-    """Compile one real handler module in memory with a mutation."""
     source = (_util.ROOT / 'daedalus_cli' / 'commands_eval.py').read_text(
         encoding='utf-8')
     source = source.replace(
@@ -329,29 +287,19 @@ def _mutated_cli_tabs(package_name, module_prelude, body):
     filename = f'<mutated daedalus cli handler {package_name}>'
     module_name = f'{package_name}.commands_eval'
     module = types.ModuleType(module_name)
-    module.__file__ = filename
-    module.__package__ = 'daedalus_cli'
-    module.__source__ = source
+    module.__dict__.update(
+        __file__=filename, __package__='daedalus_cli', __source__=source)
     sys.modules[module_name] = module
-    # pylint: disable=exec-used
+    # pylint: disable-next=exec-used  # This mutation executes altered source.
     exec(compile(source, filename, 'exec'), module.__dict__)
     return module
 
 
 def _audit_real_tabs_handler(handler_module, parser=None):
-    """Audit an in-memory module's actual dispatched ``do_tabs`` handler."""
     if parser is None:
         from daedalus_cli.parser import build_parser
-
         parser = build_parser()
-    subparsers = next(
-        action for action in parser._actions
-        if isinstance(action, argparse._SubParsersAction))
-    declared, guaranteed = audit_support.namespace_dests(parser)
-    sub_declared, sub_guaranteed = audit_support.namespace_dests(
-        subparsers.choices['tabs'])
-    declared |= sub_declared
-    guaranteed |= sub_guaranteed
+    declared, guaranteed = _tabs_namespace_dests(parser)
     handler = handler_module.do_tabs
     tree = ast.parse(handler_module.__source__)
     function = next(
@@ -365,15 +313,11 @@ def _audit_real_tabs_handler(handler_module, parser=None):
 
 
 def _assert_real_tabs_dispatch_crashes(handler_module):
-    """The same mutation must fail real dispatch, not just the audit."""
     from daedalus_cli import cli
-    original_handler = cli.DISPATCH['tabs']
-    original_argv = sys.argv
-    original_api = handler_module.api
+    original = cli.DISPATCH['tabs'], sys.argv, handler_module.api
 
     def refuse_api(*_args, **_kwargs):
         raise AssertionError(audit_support.DISPATCH_PROBE_ERROR)
-
     cli.DISPATCH['tabs'] = handler_module.do_tabs
     sys.argv = ['daedalus', 'tabs']
     handler_module.api = refuse_api
@@ -386,9 +330,27 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
     else:
         assert False, audit_support.DISPATCH_PROBE_ERROR
     finally:
-        cli.DISPATCH['tabs'] = original_handler
-        sys.argv = original_argv
-        handler_module.api = original_api
+        cli.DISPATCH['tabs'], sys.argv, handler_module.api = original
+
+
+def _assert_real_frame_case(package_name, prelude, body, label,
+                            expected_construct=None, dispatch=True):
+    """Audit a temporary handler and optionally prove its runtime read."""
+    handler_module = _mutated_cli_tabs(package_name, prelude, body)
+    try:
+        violations = _audit_real_tabs_handler(handler_module)
+        matched = (violations == [] if expected_construct is None else any(
+            expected_construct in item for item in violations))
+        assert matched, (label, violations)
+        if dispatch:
+            _assert_real_tabs_dispatch_crashes(handler_module)
+    finally:
+        sys.modules.pop(handler_module.__dict__['__name__'], None)
+
+
+def _contract_drift(unsupported=(), undocumented=()):
+    return {'unsupported': list(unsupported),
+            'undocumented': list(undocumented)}
 
 
 def test_cli_real_dispatch_helper_neutralizes_bridge(tmp):
@@ -399,15 +361,8 @@ def test_cli_real_dispatch_helper_neutralizes_bridge(tmp):
 def test_cli_audit_excludes_dest_suppress_action(tmp):
     from daedalus_cli.parser import build_parser
     parser = build_parser()
-    subparsers = next(
-        action for action in parser._actions
-        if isinstance(action, argparse._SubParsersAction))
-    declared, guaranteed = audit_support.namespace_dests(parser)
-    sub_declared, sub_guaranteed = audit_support.namespace_dests(
-        subparsers.choices['tabs'])
-    violations = _audit_fake_handler(
-        'args.version', declared | sub_declared,
-        guaranteed | sub_guaranteed)
+    declared, guaranteed = _tabs_namespace_dests(parser)
+    violations = _audit_fake_handler('args.version', declared, guaranteed)
     assert violations == ['args.version'], violations
 
 
@@ -417,7 +372,7 @@ def test_cli_audit_excludes_default_suppress_action(tmp):
     parser.add_argument('--present', dest='shared', default=False)
     parser.add_argument(
         '--suppressed', dest='shared', default=argparse.SUPPRESS)
-    assert audit_support.namespace_dests(parser)[1] == {'shared'}
+    assert resolver.namespace_dests(parser)[1] == {'shared'}
 
 
 def test_cli_audit_models_mutex_group_storage(tmp):
@@ -435,13 +390,10 @@ def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
         audit_support.add_storage_probe(tabs, shape, 'undeclared_probe')
         handler_module = _mutated_cli_tabs(
             f'storage_dispatch_cli_{index}', 'PROBE_READS = []', body)
-        original_handler = cli.DISPATCH['tabs']
-        original_build_parser = cli.build_parser
-        original_argv = sys.argv
+        original = cli.DISPATCH['tabs'], cli.build_parser, sys.argv
 
         def build_storage_parser(parser=parser):
             return parser
-
         try:
             assert _audit_real_tabs_handler(handler_module, parser) == []
             cli.DISPATCH['tabs'] = handler_module.__dict__['do_tabs']
@@ -450,9 +402,7 @@ def test_cli_audit_accepts_guarded_suppress_in_real_dispatch(tmp):
             cli.main()
             assert handler_module.__dict__['PROBE_READS'] == list(expected)
         finally:
-            cli.DISPATCH['tabs'] = original_handler
-            cli.build_parser = original_build_parser
-            sys.argv = original_argv
+            cli.DISPATCH['tabs'], cli.build_parser, sys.argv = original
             sys.modules.pop(handler_module.__dict__['__name__'], None)
 
 
@@ -460,7 +410,7 @@ def test_cli_audit_includes_parser_set_defaults(tmp):
     parser = argparse.ArgumentParser(add_help=False)
     parser.set_defaults(from_defaults=False)
     assert vars(parser.parse_args([])) == {'from_defaults': False}
-    declared, guaranteed = audit_support.namespace_dests(parser)
+    declared, guaranteed = resolver.namespace_dests(parser)
     violations = _audit_fake_handler(
         'args.from_defaults', declared, guaranteed)
     assert violations == [], violations
@@ -496,7 +446,7 @@ def test_cli_audit_rechecks_builtin_identity_at_call_site(tmp):
 
 def test_cli_audit_rechecks_builtin_identity_in_real_handler(tmp):
     body = (
-        "sys.modules[__name__].G = (\n"
+        "setattr(sys.modules[__name__], 'G',\n"
         "        lambda namespace, *_: namespace.undeclared_probe)\n"
         "    G(args, 'json', False)")
     handler_module = _mutated_cli_tabs(
@@ -518,7 +468,7 @@ def test_cli_audit_resolves_exact_builtin_aliases(tmp):
 
 
 def test_cli_audit_respects_inner_scope_bindings(tmp):
-    audit_support.resolver.assert_inner_scope_bindings(_audit_fake_handler)
+    audit_support.assert_inner_scope_bindings(_audit_fake_handler)
 
 
 def test_cli_audit_sees_shadowing_callable_defaults(tmp):
@@ -539,7 +489,6 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
     for body, construct in audit_support.REFLECTIVE_ESCAPE_CASES:
         assert _audit_fake_handler(body) == [
             f'namespace escape: {construct}'], body
-
     calls = []
 
     class Descriptor:
@@ -559,94 +508,56 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
 
 
 def test_cli_audit_resolver_resolves_dict_get_default(tmp):
-    audit_support.resolver.assert_dict_get_default(_frame_value)
+    audit_support.assert_dict_get_default(_frame_value)
 
 
 def test_cli_audit_resolver_logical_not_returns_bool(tmp):
-    audit_support.resolver.assert_logical_not_returns_bool()
+    audit_support.assert_every_unary_operator()
 
 
 def test_cli_audit_resolver_decides_every_unary_operator(tmp):
-    audit_support.resolver.assert_every_unary_operator()
+    audit_support.assert_every_unary_operator()
 
 
 def test_cli_audit_resolver_partitions_every_expression_type(tmp):
-    control = getattr(
-        audit_support.resolver, 'assert_total_expression_partition', None)
-    assert control is not None, 'total expression partition control is absent'
-    control()
+    resolver.assert_total_expression_partition()
 
 
 def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
-    audit_support.resolver.assert_exact_class_vars(_frame_value)
+    resolver.assert_exact_class_vars(_frame_value)
 
 
 def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
-    """Real ``do_tabs`` mutations prove audit refusal and dispatch hazards."""
     for index, (module_prelude, body, construct) in enumerate(
             audit_support.DECIDED_FRAME_ROUTE_CASES):
-        package_name = f'mutated_cli_{index}'
-        handler_module = _mutated_cli_tabs(
-            package_name, module_prelude, body)
-        try:
-            violations = _audit_real_tabs_handler(handler_module)
-            assert any(construct in violation for violation in violations), \
-                (module_prelude, body, violations)
-            _assert_real_tabs_dispatch_crashes(handler_module)
-        finally:
-            sys.modules.pop(handler_module.__dict__['__name__'], None)
-
-    composite_routes = (
-        'COMPOSITE_ROUTES = '
-        '(sys._getframe, sys._getframe, sys._getframe)')
+        _assert_real_frame_case(
+            f'mutated_cli_{index}', module_prelude, body,
+            (module_prelude, body), construct)
+    composite_routes = 'COMPOSITE_ROUTES = (sys._getframe,) * 3'
     for index, expression in enumerate(
             audit_support.COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES):
         body = f"_ = {expression}().f_locals['args'].undeclared_probe"
-        handler_module = _mutated_cli_tabs(
-            f'composite_subscript_cli_{index}', composite_routes, body)
-        try:
-            violations = _audit_real_tabs_handler(handler_module)
-            assert any(f'{expression}()' in item for item in violations), \
-                (expression, violations)
-            _assert_real_tabs_dispatch_crashes(handler_module)
-        finally:
-            sys.modules.pop(handler_module.__dict__['__name__'], None)
-
+        _assert_real_frame_case(
+            f'composite_subscript_cli_{index}', composite_routes, body,
+            expression, f'{expression}()')
     for index, case in enumerate(
             audit_support.OUTSIDE_EXPRESSION_FRAME_ROUTE_CASES):
         case_name, module_prelude, body, construct = case
-        handler_module = _mutated_cli_tabs(
-            f'outside_expression_cli_{index}', module_prelude, body)
-        try:
-            violations = _audit_real_tabs_handler(handler_module)
-            assert any(construct in violation for violation in violations), \
-                (case_name, violations)
-            _assert_real_tabs_dispatch_crashes(handler_module)
-        finally:
-            sys.modules.pop(handler_module.__dict__['__name__'], None)
-
+        _assert_real_frame_case(
+            f'outside_expression_cli_{index}', module_prelude, body,
+            case_name, construct)
+    ordinary = {'ROUTES': {True: [((len,),)]}}
+    assert _audit_fake_handler(
+        '_ = ROUTES[0 < 1][0][0][0]()', scope=ordinary) == []
     for index, (case_name, module_prelude, body, construct) in enumerate(
             audit_support.RESOLVER_ONLY_FRAME_ROUTE_CASES):
-        handler_module = _mutated_cli_tabs(
-            f'resolver_only_cli_{index}', module_prelude, body)
-        try:
-            violations = _audit_real_tabs_handler(handler_module)
-            assert any(construct in violation for violation in violations), \
-                (case_name, violations)
-        finally:
-            sys.modules.pop(handler_module.__dict__['__name__'], None)
-
-    # Documented gaps, not oversights: these routes stay unresolved.
+        _assert_real_frame_case(
+            f'resolver_only_cli_{index}', module_prelude, body,
+            case_name, construct, dispatch=False)
     for index, (case_name, module_prelude, body) in enumerate(
             audit_support.KNOWN_GAP_FRAME_ROUTE_CASES):
-        handler_module = _mutated_cli_tabs(
-            f'known_gap_cli_{index}', module_prelude, body)
-        try:
-            violations = _audit_real_tabs_handler(handler_module)
-            assert violations == [], (case_name, violations)
-            _assert_real_tabs_dispatch_crashes(handler_module)
-        finally:
-            sys.modules.pop(handler_module.__dict__['__name__'], None)
+        _assert_real_frame_case(
+            f'known_gap_cli_{index}', module_prelude, body, case_name)
 
 
 def test_cli_audit_respects_comprehension_shadowing(tmp):
@@ -670,83 +581,91 @@ def test_cli_audit_respects_nested_local_bindings(tmp):
 
 
 def test_cli_audit_module_has_no_dead_imports(tmp):
-    audit_support.resolver.assert_no_dead_imports(__file__)
+    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    imported = {
+        alias.asname or (alias.name.split('.')[0]
+                         if isinstance(statement, ast.Import)
+                         else alias.name)
+        for statement in tree.body
+        if isinstance(statement, (ast.Import, ast.ImportFrom))
+        for alias in statement.names}
+    loaded = {
+        node.id for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+    assert imported <= loaded, sorted(imported - loaded)
 
 
 def test_cli_audit_docstrings_match_control_tables(tmp):
     documents = {
         'test_cli_arg_audit': __doc__,
         '_cli_arg_audit_support': audit_support.__doc__,
-    }
-    audit_support.resolver.assert_docstrings_match(
+        '_cli_arg_audit_resolver': resolver.__doc__}
+    known_families = audit_support.KNOWN_GAP_FAMILIES
+    known_cases = audit_support.KNOWN_GAP_FRAME_ROUTE_CASES
+    resolver.assert_docstrings_match(
         documents, audit_support.DOCSTRING_RULE_PHRASES,
-        audit_support.KNOWN_GAP_FAMILIES,
-        audit_support.KNOWN_GAP_FRAME_ROUTE_CASES)
-
+        audit_support.SEMANTIC_CONTRACT_CLAIMS, known_families, known_cases)
     unsupported_documents = dict(documents)
     unsupported_documents['_cli_arg_audit_support'] = \
         audit_support.__doc__.replace(
             ', and external frame acquisition.',
             ', comparison routes, and external frame acquisition.')
+    contradictory_documents = dict(documents)
+    contradictory_documents['_cli_arg_audit_resolver'] = (
+        resolver.__doc__
+        + ' Semantic claims are Comparisons and tuple-literal keys are '
+        'DECIDED. Semantic claims end.')
+    missing_documents = dict(documents)
+    missing_documents.pop('_cli_arg_audit_resolver')
     undocumented_families = audit_support.KNOWN_GAP_FAMILIES + (
         ('comparison routes', ('comparison route control',)),)
     undocumented_cases = audit_support.KNOWN_GAP_FRAME_ROUTE_CASES + (
         ('comparison route control', '', ''),)
     drift_cases = (
-        ('unsupported-prose', unsupported_documents,
-         audit_support.KNOWN_GAP_FAMILIES,
-         audit_support.KNOWN_GAP_FRAME_ROUTE_CASES,
-         {'_cli_arg_audit_support': {
-             'unsupported': ['comparison routes'],
-             'undocumented': [],
-         }}),
+        ('missing-module', missing_documents, known_families, known_cases,
+         {'missing': ['_cli_arg_audit_resolver'], 'unknown': []}),
+        ('contradictory-semantic-claim', contradictory_documents,
+         known_families, known_cases,
+         {'_cli_arg_audit_resolver': _contract_drift(unsupported=(
+             'Comparisons and tuple-literal keys are DECIDED',))}),
+        ('unsupported-prose', unsupported_documents, known_families,
+         known_cases,
+         {'_cli_arg_audit_support': _contract_drift(
+             unsupported=('comparison routes',))}),
         ('undocumented-control', documents, undocumented_families,
          undocumented_cases, {
-             'test_cli_arg_audit': {
-                 'unsupported': [],
-                 'undocumented': ['comparison routes'],
-             },
-             '_cli_arg_audit_support': {
-                 'unsupported': [],
-                 'undocumented': ['comparison routes'],
-             },
-         }),
-    )
-    failures = {}
+             module: _contract_drift(undocumented=('comparison routes',))
+             for module in ('test_cli_arg_audit', '_cli_arg_audit_support',
+                            '_cli_arg_audit_resolver')}),)
     for name, drift_documents, families, cases, expected in drift_cases:
         try:
-            audit_support.resolver.assert_docstrings_match(
+            resolver.assert_docstrings_match(
                 drift_documents, audit_support.DOCSTRING_RULE_PHRASES,
+                audit_support.SEMANTIC_CONTRACT_CLAIMS,
                 families, cases)
         except AssertionError as error:
-            if error.args != (expected,):
-                failures[name] = {
-                    'expected': expected,
-                    'actual': error.args,
-                }
+            assert error.args == (expected,), {
+                'case': name, 'expected': expected, 'actual': error.args}
         else:
-            failures[name] = 'drift was accepted'
-    assert failures == {}, failures
+            assert False, f'{name}: drift was accepted'
 
 
 def test_cli_handlers_read_only_declared_args(tmp):
     from daedalus_cli.cli import DISPATCH
     from daedalus_cli.parser import build_parser
     parser = build_parser()
-    subparsers = next(
-        action for action in parser._actions
-        if isinstance(action, argparse._SubParsersAction))
-    global_declared, global_guaranteed = audit_support.namespace_dests(parser)
-    dispatch_only = sorted(set(DISPATCH) - set(subparsers.choices))
-    parser_only = sorted(set(subparsers.choices) - set(DISPATCH))
-    assert not dispatch_only and not parser_only, (
-        f'dispatch without parser: {dispatch_only}; '
-        f'parser without dispatch: {parser_only}')
+    subparsers = next(action for action in parser._actions
+                      if isinstance(action, argparse._SubParsersAction))
+    global_declared, global_guaranteed = resolver.namespace_dests(parser)
+    assert set(DISPATCH) == set(subparsers.choices), (
+        f'dispatch without parser: '
+        f'{sorted(set(DISPATCH) - set(subparsers.choices))}; parser without '
+        f'dispatch: {sorted(set(subparsers.choices) - set(DISPATCH))}')
     violations = []
     handler_details = {}
     for name, handler in DISPATCH.items():
         subparser = subparsers.choices[name]
-        declared, guaranteed = audit_support.namespace_dests(subparser)
+        declared, guaranteed = resolver.namespace_dests(subparser)
         declared |= global_declared
         guaranteed |= global_guaranteed
         tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
@@ -762,23 +681,15 @@ def test_cli_handlers_read_only_declared_args(tmp):
         violations.extend(
             (name, construct, handler.__qualname__)
             for construct in handler_violations)
-
-    stale_reads = []
     for command, attribute, handler_name in \
             audit_support.KNOWN_INDIRECT_ARG_READS:
         detail = handler_details.get(command)
-        if detail is None or detail['handler'] != handler_name:
-            stale_reads.append(
-                f'{command}: known indirect read refers to no handler')
-            continue
-        if attribute not in detail['reads']:
-            stale_reads.append(
-                f'{command}: {attribute} absent from handler source')
-        if attribute not in detail['declared']:
-            stale_reads.append(
-                f'{command}: {attribute} not declared by parser')
-    assert not stale_reads, '\n'.join(stale_reads)
-
+        assert detail is not None and detail['handler'] == handler_name, (
+            f'{command}: known indirect read refers to no handler')
+        assert attribute in detail['reads'], (
+            f'{command}: {attribute} absent from handler source')
+        assert attribute in detail['declared'], (
+            f'{command}: {attribute} not declared by parser')
     details = '\n'.join(
         f'{name}: {construct} read by {handler}'
         for name, construct, handler in violations)
