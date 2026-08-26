@@ -6,7 +6,7 @@ class YAMLReadError(ValueError):
     """The requested YAML value is malformed or outside the reader's scope."""
 
 
-_PLAIN_INLINE = re.compile(r'^[-A-Za-z0-9_.@/+:$()]+$')
+_PLAIN_INLINE = re.compile(r'^[A-Za-z0-9_.][-A-Za-z0-9_.@/+$()]*$')
 _DOUBLE_ESCAPES = {
     '0': '\0', 'a': '\a', 'b': '\b', 't': '\t', 'n': '\n',
     'v': '\v', 'f': '\f', 'r': '\r', 'e': '\x1b', ' ': ' ',
