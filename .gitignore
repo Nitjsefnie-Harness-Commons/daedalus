@@ -155,6 +155,7 @@
 !/scripts/
 !/scripts/ci/
 !/scripts/ci/compare_durations.py
+!/scripts/ci/coverage_suites.py
 !/scripts/ci/diff_coverage.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
@@ -202,6 +203,7 @@
 !/tests/test_command_queue.py
 !/tests/test_coverage_comment_boundary.py
 !/tests/test_coverage_comment_workflow.py
+!/tests/test_coverage_suites.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
 !/tests/test_delivery_stripes.py
