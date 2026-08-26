@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _boundary import run_extension_capability_route  # noqa: E402
 from _jsread import (blank_js_comments, js_bracket_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
 from _repo import ROOT  # noqa: E402
@@ -80,47 +81,13 @@ def _directive_names(source, directive):
     return names
 
 
-def _dispatch_routes_to(source, command_type, symbol):
-    """Whether the unique direct case calls `symbol(cmd)` by that spelling.
-
-    A behavior-preserving alias is deliberately rejected. This guard checks
-    the routing shape this refactor uses, not semantic equivalence between
-    arbitrary JavaScript expressions.
-    """
-    mask = js_mask(source)
-    declaration = re.search(r'\bfunction\s+dispatchCommand\s*\(', mask)
-    assert declaration, 'dispatchCommand declaration not found'
-    body_start = mask.index('{', declaration.end())
-    body_end = js_bracket_end(mask, body_start)
-    body = source[body_start + 1:body_end - 1]
-    switch_pattern = re.compile(r'\bswitch\s*\(\s*type\s*\)')
-    switches = _top_level_matches(body, switch_pattern)
-    assert len(switches) == 1, (
-        f'expected one top-level switch (type), found {len(switches)}')
-    body_mask = js_mask(body)
-    switch_start = body_mask.index('{', switches[0].end())
-    switch_end = js_bracket_end(body_mask, switch_start)
-    switch_body = body[switch_start + 1:switch_end - 1]
-
-    label_pattern = re.compile(
-        rf"\bcase\s+'{re.escape(command_type)}'\s*:")
-    labels = []
-    for case in _top_level_matches(switch_body, re.compile(r'\bcase\b')):
-        label = label_pattern.match(switch_body, case.start())
-        if label:
-            labels.append(label)
-    if len(labels) != 1:
-        return False
-    route = re.compile(
-        rf'\s*return\s+{re.escape(symbol)}\s*\(\s*cmd\s*\)\s*;')
-    return route.match(switch_body, labels[0].end()) is not None
-
-
 def test_each_worker_capability_lives_in_its_own_module(tmp):
-    """Each module owns its symbol and the outer dispatch calls it directly.
+    """Each module owns its symbol and runtime dispatch reaches that symbol.
 
     What is NOT enforced: `js_mask` does not parse regex literals, so regex
-    text can still masquerade as a top-level declaration.
+    text can still masquerade as a top-level declaration. A module function
+    that delegates back to an implementation in background also passes,
+    because the module is genuinely on the runtime route.
     """
     del tmp
     background = (ROOT / 'extension' / 'background.js').read_text(
@@ -135,48 +102,15 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
             f'{relative} does not declare {symbol} at top level')
         assert symbol not in _top_level_declarations(background), (
             f'background.js still declares {symbol} at top level')
-        assert _dispatch_routes_to(background, command_type, symbol), (
-            f"background.js dispatch for {command_type!r} does not route "
-            f'to {symbol}')
-
-
-def test_dispatch_guard_ignores_nested_switch_cases(tmp):
-    del tmp
-    source = """
-function dispatchCommand(receivedCommand) {
-  const cmd = receivedCommand;
-  const type = cmd.type;
-  if (type === '__never__') {
-    switch (type) {
-      case 'cookies': return handleCookies(cmd);
-      default: break;
-    }
-  }
-  switch (type) {
-    case 'cookies': return handleCookiesReal(cmd);
-    default: return null;
-  }
-}
-"""
-    assert not _dispatch_routes_to(source, 'cookies', 'handleCookies'), (
-        'a nested switch case satisfied the outer dispatch guard')
-
-
-def test_dispatch_guard_rejects_duplicate_outer_cases(tmp):
-    del tmp
-    source = """
-function dispatchCommand(receivedCommand) {
-  const cmd = receivedCommand;
-  const type = cmd.type;
-  switch (type) {
-    case 'cookies': return handleCookiesReal(cmd);
-    case 'cookies': return handleCookies(cmd);
-    default: return null;
-  }
-}
-"""
-    assert not _dispatch_routes_to(source, 'cookies', 'handleCookies'), (
-        'a later duplicate case hid the first runtime route')
+        observed = run_extension_capability_route(
+            symbol, {'id': 'policy-capability', 'type': command_type})
+        assert observed == {
+            'callCount': 1,
+            'calledType': command_type,
+            'answered': True,
+        }, (
+            f"runtime dispatch for {command_type!r} bypasses {symbol}: "
+            f'{observed}')
 
 
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):

@@ -18,6 +18,28 @@ from _boundary_env import ENVIRONMENT  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 SCENARIOS = r"""
+async function runCapabilityRoute() {
+  if (!/^[A-Za-z_$][\w$]*$/.test(publishedSymbol)) {
+    throw new Error('invalid published symbol: ' + publishedSymbol);
+  }
+  context.capabilityCommand = JSON.parse(commandText);
+  context.capabilityCalls = [];
+  context.capabilityAnswer = Object.freeze({ sentinel: true });
+  vm.runInContext(
+    publishedSymbol
+      + ' = (cmd) => { capabilityCalls.push(cmd);'
+      + ' return capabilityAnswer; }',
+    context);
+  const answer = await vm.runInContext(
+    'dispatchCommand(capabilityCommand)', context);
+  return {
+    callCount: context.capabilityCalls.length,
+    calledType: context.capabilityCalls.length
+      ? context.capabilityCalls[0].type : null,
+    answered: answer === context.capabilityAnswer,
+  };
+}
+
 async function runCapacity() {
   context.prefill = Array.from({ length: 1000 }, (_unused, index) => ({
     id: 'existing-' + index,
@@ -361,6 +383,7 @@ async function runFetchBound() {
 async function run() {
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
   await vm.runInContext('loadConfig()', context);
+  if (scenario === 'capability-route') return runCapabilityRoute();
   if (scenario === 'capacity') return runCapacity();
   if (scenario === 'expiry') return runExpiry();
   if (scenario === 'route') return runRouteSnapshot();
@@ -393,6 +416,20 @@ def run_extension_result_boundary(scenario):
     result = subprocess.run(
         [node, '-e', HARNESS,
          str(EXTENSION_ROOT / 'background.js'), scenario],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def run_extension_capability_route(symbol, command):
+    """Dispatch one command after replacing a published worker function."""
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension command route'
+    result = subprocess.run(
+        [node, '-e', HARNESS,
+         str(EXTENSION_ROOT / 'background.js'), 'capability-route',
+         json.dumps(command), symbol],
         cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
