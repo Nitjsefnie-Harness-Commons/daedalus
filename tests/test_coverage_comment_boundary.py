@@ -8,23 +8,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
+from _coverage_comment_steps import EXPECTED_STEP_MAPPINGS  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _yamlread import (  # noqa: E402
-    YAMLReadError, step_scalar, step_scalars, top_level_mapping,
-)
+from _workflowrun import run_step  # noqa: E402
+from _yamlread import YAMLReadError, top_level_mapping  # noqa: E402
+from _yamlsteps import step_mappings  # noqa: E402
 import test_coverage_comment_workflow as commenter  # noqa: E402
 
 
 _DOWNLOAD = (
     'actions/download-artifact@'
     '37930b1c2abaa49bbe596cd826c3c89aef350131'
-)
-_EXPECTED_STEPS = (
-    ('Check for the comment artifact', 'run', None),
-    ('Resolve the target pull request from the event', 'run', None),
-    ('Mark missing patch coverage', 'run', None),
-    ('Download the comment artifact', 'uses', _DOWNLOAD),
-    ('Post or update the pull request comment', 'run', None),
 )
 _MARKER = '<!-- daedalus-diff-coverage -->\n'
 _HEAD_SHA = 'B' * 40
@@ -55,21 +49,21 @@ def _workflow():
 
 
 def _assert_privileged_step_allowlist(workflow):
-    """Require the complete decoded step topology and action identity."""
-    runs = step_scalars(workflow, 'comment', 'run')
-    assert runs is not None and len(runs) == 4, (
-        f'unsafe privileged shell count: {runs!r}')
-    uses = step_scalars(workflow, 'comment', 'uses')
-    assert uses == [_DOWNLOAD], f'unsafe privileged actions: {uses!r}'
-    for name, kind, identity in _EXPECTED_STEPS:
-        run = step_scalar(workflow, 'comment', name, 'run')
-        uses_value = step_scalar(workflow, 'comment', name, 'uses')
-        if kind == 'run':
-            assert run is not None and uses_value is None, (
-                f'unsafe privileged step kind: {name!r}')
-        else:
-            assert run is None and uses_value == identity, (
-                f'unsafe privileged step action: {name!r}')
+    """Require every decoded key and value of every privileged step."""
+    steps = step_mappings(workflow, 'comment')
+    assert isinstance(steps, list), 'privileged steps were not decoded'
+    assert len(steps) == len(EXPECTED_STEP_MAPPINGS), (
+        f'unsafe privileged step count: {len(steps)}')
+    for actual, expected in zip(steps, EXPECTED_STEP_MAPPINGS):
+        if actual == expected:
+            continue
+        differing = sorted(
+            key for key in set(actual) | set(expected)
+            if key not in actual or key not in expected
+            or actual[key] != expected[key])
+        raise AssertionError(
+            f'unsafe privileged step mapping for {expected["name"]!r}: '
+            f'differing keys {differing!r}')
 
 
 def _assert_allowlist_refuses(workflow):
@@ -121,10 +115,11 @@ def _run_hostile_post(tmp, label, body):
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls_path),
     }
-    script = commenter._run_block(  # pylint: disable=protected-access
-        _workflow(), 'Post or update the pull request comment')
-    result = commenter._run_shell_block(  # pylint: disable=protected-access
-        workdir, script, env)
+    steps = step_mappings(_workflow(), 'comment')
+    post = next(
+        step for step in steps
+        if step.get('name') == 'Post or update the pull request comment')
+    result = run_step(workdir, post, env)
     state = json.loads(state_path.read_text(encoding='utf-8'))
     return result, state, calls_path, workdir
 
@@ -146,27 +141,47 @@ def test_hostile_artifact_bodies_remain_inert_text(tmp):
 
 
 def test_privileged_steps_are_an_exact_allowlist(tmp):
-    """No additional shell or action can enter the privileged job."""
+    """Every field and unknown key is part of the privileged contract."""
     del tmp
     workflow = _workflow()
     _assert_privileged_step_allowlist(workflow)
-    extra_action = (
-        '      - name: Unexpected action\n'
-        '        uses: actions/upload-artifact@'
-        '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a\n'
+    post_run = (
+        '          PR_NUMBER: ${{ steps.pr.outputs.number }}\n'
+        '        run: |\n')
+    field_mutations = (
+        '        shell: bash\n',
+        '        working-directory: /tmp\n',
+        '        continue-on-error: true\n',
+        '        future-authority: enabled\n',
     )
-    extra_shell = (
+    mutations = [
+        workflow.replace(
+            '          test -f body.md\n',
+            '          bash body.md\n          test -f body.md\n', 1),
+        workflow.replace(_DOWNLOAD, 'owner/other@' + '0' * 40, 1),
+        workflow.replace(
+            '          run-id: ${{ github.event.workflow_run.id }}\n',
+            '          run-id: ${{ github.run_id }}\n', 1),
+        workflow.replace(
+            '          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}\n',
+            '          HEAD_SHA: ${{ github.sha }}\n', 1),
+        workflow.replace('        id: artifact\n', '        id: other\n', 1),
+        workflow.replace(
+            "          steps.artifact.outputs.present == 'true'\n",
+            '          always()\n', 1),
+    ]
+    mutations.extend(
+        workflow.replace(post_run, post_run.replace(
+            '        run: |\n', field), 1)
+        for field in field_mutations)
+    extra_step = (
         '      - name: Unexpected artifact consumer\n'
-        '        run: wc -c body.md\n'
-    )
-    changed_action = workflow.replace(_DOWNLOAD, 'owner/other@' + '0' * 40)
-    for addition in (extra_action, extra_shell):
-        mutated = workflow.replace('    steps:\n', '    steps:\n' + addition,
-                                   1)
-        assert mutated != workflow, addition
+        '        run: wc -c body.md\n')
+    mutations.append(workflow.replace(
+        '    steps:\n', '    steps:\n' + extra_step, 1))
+    for mutated in mutations:
+        assert mutated != workflow, 'real privileged mapping was not mutated'
         _assert_allowlist_refuses(mutated)
-    assert changed_action != workflow, _DOWNLOAD
-    _assert_allowlist_refuses(changed_action)
 
 
 def test_privileged_permissions_are_exactly_allowlisted(tmp):
