@@ -86,6 +86,7 @@ def _queued_file(tmp, name='1700000000000_000001.json'):
 
 @contextlib.contextmanager
 def _redirect_stale_answer(queue, stale, stale_command):
+    """Redirect a stale result so the current producer can finish."""
     original = _util.post_json
 
     def redirected(url, body, **kwargs):
@@ -230,6 +231,8 @@ def test_the_cli_answer_helper_ignores_a_refused_leftover(tmp):
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         env = test_cli.cli_env(DAEDALUS_URL=base,
                                DAEDALUS_TOKEN=test_cli.TOK)
+        # The real helper preserves exact payload and delivery-id shape;
+        # constructed leftovers repeatedly let reader changes evade it.
         first_code, first_out, first_err, stale_command = (
             test_cli._answer_one_ext_command(
                 base, docroot, ['ext-reload'], {}, env))
@@ -255,6 +258,8 @@ def test_the_mcp_answer_helper_ignores_a_refused_leftover(tmp):
                   'DAEDALUS_MCP_PORT': '0'}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         mod = test_mcp_server._load_mcp(base)
+        # The real helper preserves exact payload and delivery-id shape;
+        # constructed leftovers repeatedly let reader changes evade it.
         _first_value, stale_command = test_mcp_server._answer_mcp_command(
             base, docroot, mod, mod.ext_reload, {})
         files = _bridge.queue_files(
