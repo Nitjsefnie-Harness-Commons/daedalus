@@ -11,14 +11,15 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
 OBSERVER = ENVIRONMENT + r"""
-const espree = require('espree');
 const sourceDetails = JSON.parse(commandText);
 
-function identifierCandidates(source) {
-  return [...new Set(espree.tokenize(source, {
-    ecmaVersion: 'latest', sourceType: 'script',
-  }).filter((token) => token.type === 'Identifier')
-    .map((token) => token.value))];
+function observationContext(details) {
+  const workerContext = makeContext();
+  workerContext.importScripts = () => {};
+  for (const name of details.globals) {
+    workerContext[name] = dependencyStub();
+  }
+  return workerContext;
 }
 
 function readBinding(workerContext, name) {
@@ -59,34 +60,35 @@ function dependencyStub() {
   return stub;
 }
 
-function observeBindings(details) {
-  const source = fs.readFileSync(details.path, 'utf8');
-  const candidates = identifierCandidates(source);
-  const workerContext = makeContext();
-  workerContext.importScripts = () => {};
-  for (const name of details.globals) {
-    workerContext[name] = dependencyStub();
-  }
-  const before = new Map(candidates.map((name) => [
-    name, readBinding(workerContext, name),
+function ownDescriptors(workerContext) {
+  return new Map(Object.getOwnPropertyNames(workerContext).map((name) => [
+    name, Object.getOwnPropertyDescriptor(workerContext, name),
   ]));
+}
+
+function observeBindingState(details) {
+  const source = fs.readFileSync(details.path, 'utf8');
+  const baselineContext = observationContext(details);
+  const workerContext = observationContext(details);
+  const before = ownDescriptors(workerContext);
   let executionError = null;
   try {
     vm.runInContext(source, workerContext, { filename: details.path });
   } catch (error) {
     executionError = { name: error.name, message: error.message };
   }
-  const bindings = [];
-  for (const name of candidates) {
+  const propertyBindings = new Set();
+  for (const name of Object.getOwnPropertyNames(workerContext)) {
     const prior = before.get(name);
-    const after = readBinding(workerContext, name);
-    if (after.available && (!prior.available
-        || after.value !== prior.value
-        || descriptorChanged(prior.descriptor, after.descriptor))) {
-      bindings.push(name);
+    const after = Object.getOwnPropertyDescriptor(workerContext, name);
+    if (!prior || descriptorChanged(prior, after)) {
+      propertyBindings.add(name);
     }
   }
-  return { bindings: bindings.sort(), bindingExecutionError: executionError };
+  return {
+    details, baselineContext, workerContext, propertyBindings,
+    bindingExecutionError: executionError,
+  };
 }
 
 function observeHandlerWrites(details) {
@@ -159,14 +161,47 @@ function observeSharedLoad() {
   }
 }
 
-const observations = {};
+function observedBindings(states, shared) {
+  const candidates = new Set();
+  for (const state of states) {
+    for (const name of state.propertyBindings) candidates.add(name);
+    for (const name of state.details.probes) candidates.add(name);
+  }
+  if (shared.error) {
+    const match = /Identifier '([^']+)' has already been declared/.exec(
+      shared.error.message);
+    if (match) candidates.add(match[1]);
+  }
+  const identifier = /^[A-Za-z_$][\w$]*$/;
+  const observations = {};
+  for (const state of states) {
+    const bindings = [];
+    for (const name of candidates) {
+      if (!identifier.test(name)) continue;
+      const before = readBinding(state.baselineContext, name);
+      const after = readBinding(state.workerContext, name);
+      if (state.propertyBindings.has(name)
+          || (!before.available && after.available)) {
+        bindings.push(name);
+      }
+    }
+    observations[state.details.path] = {
+      bindings: bindings.sort(),
+      bindingExecutionError: state.bindingExecutionError,
+    };
+  }
+  return observations;
+}
+
+const shared = observeSharedLoad();
+const states = sourceDetails.map(observeBindingState);
+const observations = observedBindings(states, shared);
 for (const details of sourceDetails) {
-  observations[details.path] = Object.assign(
-    observeBindings(details), observeHandlerWrites(details));
+  Object.assign(observations[details.path], observeHandlerWrites(details));
 }
 process.stdout.write(JSON.stringify({
   sources: observations,
-  shared: observeSharedLoad(),
+  shared,
 }));
 """
 
@@ -186,6 +221,7 @@ def observe_worker_runtime(source_details, background_path=None):
         {
             'path': str(Path(details['path']).resolve()),
             'globals': sorted(details.get('globals', ())),
+            'probes': sorted(details.get('probes', ())),
             'watched': sorted(details.get('watched', ())),
         }
         for details in source_details
