@@ -42,6 +42,7 @@
 !/delivery_stripes.py
 !/mcp_server.py
 !/mcp_transport.py
+!/path_safety.py
 !/pyproject.toml
 !/pyrightconfig.json
 !/requirements-dev.txt

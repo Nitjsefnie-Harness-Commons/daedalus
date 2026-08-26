@@ -484,7 +484,8 @@ os.path.realpath = one_side_prefixed
 answer = {}
 try:
     try:
-        answer['contained'] = os.path.basename(str(path_safety.under(root, name)))
+        answer['contained'] = os.path.basename(
+            str(path_safety.under(root, name)))
     except ValueError as failure:
         answer['contained'] = 'REFUSED: ' + str(failure)
     try:
