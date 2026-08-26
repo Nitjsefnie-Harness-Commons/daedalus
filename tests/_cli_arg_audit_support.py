@@ -73,6 +73,57 @@ BUILTIN_IDENTITY_GLOBAL_CASES = (
     ("getattr(args, 'json', False)", {'__builtins__': {'getattr': len}},
      ("namespace escape: getattr(args, 'json', False)",)),
     ("_ = [value for getattr in (getattr(args, 'json', False),)]", None, ()),)
+BUILTIN_IDENTITY_LOCAL_CASES = (
+    ('local from-import',
+     "from builtins import getattr\ngetattr(args, 'json', False)", {}, ()),
+    ('local module import',
+     "import builtins\nbuiltins.getattr(args, 'json', False)", {}, ()),
+    ('local from-import alias',
+     "from builtins import getattr as g\ng(args, 'json', False)", {}, ()),
+    ('module alias', "G(args, 'json', False)",
+     {'G': builtins.getattr}, ()),
+    ('local import rebound after use',
+     "from builtins import getattr as g\n"
+     "g(args, 'json', False)\ng = len", {}, ()),
+    ('local import rebound before use',
+     "from builtins import getattr as g\ng = len\n"
+     "g(args, 'json', False)", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('local import conditionally rebound before use',
+     "from builtins import getattr as g\nif True:\n    g = len\n"
+     "g(args, 'json', False)", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('module alias made local after use',
+     "G(args, 'json', False)\nG = len", {'G': builtins.getattr},
+     ("namespace escape: G(args, 'json', False)",)),
+    ('global module alias',
+     "global G\nG(args, 'json', False)", {'G': builtins.getattr}, ()),
+    ('local import deleted after use',
+     "from builtins import getattr as g\n"
+     "g(args, 'json', False)\ndel g", {}, ()),
+    ('local import deleted before use',
+     "from builtins import getattr as g\ndel g\n"
+     "g(args, 'json', False)", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('local import conditionally deleted before use',
+     "from builtins import getattr as g\nif True:\n    del g\n"
+     "g(args, 'json', False)", {},
+     ("namespace escape: g(args, 'json', False)",)),
+    ('module alias made local by delete',
+     "G(args, 'json', False)\ndel G", {'G': builtins.getattr},
+     ("namespace escape: G(args, 'json', False)",)),
+    ('global alias deleted after use',
+     "global G\nG(args, 'json', False)\ndel G",
+     {'G': builtins.getattr}, ()),
+    ('global alias deleted before use',
+     "global G\ndel G\nG(args, 'json', False)",
+     {'G': builtins.getattr},
+     ("namespace escape: G(args, 'json', False)",)),
+    ('bare builtin made local by delete',
+     "getattr(args, 'json', False)\ndel getattr", {},
+     ("namespace escape: getattr(args, 'json', False)",)),
+    ('unproven module alias', "G(args, 'json', False)", {'G': len},
+     ("namespace escape: G(args, 'json', False)",)),)
 # Shape, argv, empty result, seeded empty result, result, GUARANTEED.
 ARGPARSE_STORAGE_CASES = (
     ('optional', (), (), 'seed', (), False),
@@ -566,7 +617,7 @@ def _callable_body_contains(scope, child):
 
 
 def _builtin_name_is_shadowed(node, name, function, scope_binds,
-                              comprehension_shadows):
+                              comprehension_shadows, ignore_root=False):
     current = node
     generator, before_target = None, False
     callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
@@ -584,24 +635,86 @@ def _builtin_name_is_shadowed(node, name, function, scope_binds,
             generator = None
         if (isinstance(parent, callables)
                 and _callable_body_contains(parent, current)
+                and not (ignore_root and parent is function)
                 and scope_binds(parent, name)):
             return True
         current = parent
     return False
 
 
+def _statement_bound_names(statement):
+    names = set()
+    stack = [statement]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            names.add(node.name)
+            continue
+        if isinstance(node, ast.Lambda):
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names |= {
+                alias.asname or alias.name.split('.')[0]
+                for alias in node.names}
+            continue
+        if isinstance(node, ast.ExceptHandler) and node.name is not None:
+            names.add(node.name)
+        if isinstance(node, ast.Name) \
+                and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        stack.extend(ast.iter_child_nodes(node))
+    return names
+
+
+def _update_builtin_bindings(statement, bindings, unresolved):
+    if isinstance(statement, ast.Import):
+        for alias in statement.names:
+            name = alias.asname or alias.name.split('.')[0]
+            bindings[name] = (
+                builtins if alias.name == 'builtins' else unresolved)
+        return
+    if isinstance(statement, ast.ImportFrom):
+        for alias in statement.names:
+            name = alias.asname or alias.name
+            bindings[name] = (
+                builtins.__dict__.get(alias.name, unresolved)
+                if statement.module == 'builtins' else unresolved)
+        return
+    for name in _statement_bound_names(statement):
+        bindings[name] = unresolved
+
+
+def _builtin_bindings_before(node, function, unresolved):
+    """Return straight-line builtin imports and invalidations before node."""
+    bindings = {}
+    for statement in function.body:
+        if any(candidate is node for candidate in ast.walk(statement)):
+            break
+        _update_builtin_bindings(statement, bindings, unresolved)
+    return bindings
+
+
 def is_builtin_reference(node, name, function, handler_globals,
                          scope_binds, comprehension_shadows):
     """Return whether ``node`` provably names one exact builtin."""
     expected = getattr(builtins, name)
+    unresolved = object()
+    bindings = _builtin_bindings_before(node, function, unresolved)
     if isinstance(node, ast.Name):
-        if (node.id != name
-                or _builtin_name_is_shadowed(
-                    node, name, function, scope_binds,
-                    comprehension_shadows)):
+        reference_name = node.id
+        exact_local = bindings.get(reference_name) is expected
+        if _builtin_name_is_shadowed(
+                node, reference_name, function, scope_binds,
+                comprehension_shadows, exact_local):
             return False
-        if name in handler_globals:
-            return handler_globals[name] is expected
+        value = resolve_frame_value(
+            node, function, handler_globals, bindings, unresolved,
+            scope_binds, constant_string)
+        if value is not unresolved:
+            return value is expected
+        if reference_name != name:
+            return False
         namespace = handler_globals.get('__builtins__', builtins)
         namespace = (namespace if isinstance(namespace, dict) else
                      namespace.__dict__
@@ -612,11 +725,15 @@ def is_builtin_reference(node, name, function, handler_globals,
             or not isinstance(node.value, ast.Name)):
         return False
     module_name = node.value.id
+    exact_local = bindings.get(module_name) is builtins
     if _builtin_name_is_shadowed(
             node, module_name, function, scope_binds,
-            comprehension_shadows):
+            comprehension_shadows, exact_local):
         return False
-    return handler_globals.get(module_name) is builtins
+    value = resolve_frame_value(
+        node, function, handler_globals, bindings, unresolved,
+        scope_binds, constant_string)
+    return value is expected
 
 
 def reflective_builtin_call(node, function, handler_globals, scope_binds,
