@@ -128,32 +128,6 @@ def _json_nests_deeper_than(raw, limit):
     return False
 
 
-# ─── Dashboard event queue ───
-# Directory-per-token queue: commands/{token}_dashboard/<ts>_<uuid>.json
-# Directory form (not single file) because concurrent writes to one file truncate each other.
-_command_fs_lock = threading.Lock()
-
-
-def _notify_dashboard(token, payload):
-    """Enqueue a dashboard SSE event. No-op if its queue cannot be named."""
-    if path_safety.bad_token(token):
-        return
-    try:
-        queue_name, _ = command_queue.command_target_names(token, 'dashboard')
-        dash_dir = path_safety.under(CMD_DIR, queue_name)
-    except ValueError:
-        return
-    try:
-        with _command_fs_lock:
-            dash_dir.mkdir(parents=True, exist_ok=True)
-            event_id = f'{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}'
-            event = {'id': event_id, 'kind': 'event', **payload}
-            (dash_dir / f'{event_id}.json').write_text(
-                json.dumps(event, ensure_ascii=False))
-        _cmd_event(token).set()  # wake the dashboard stream immediately
-    except Exception as e:
-        print(f'[DASH-NOTIFY-FAIL] {log_safe(e)}', flush=True)
-
 # ─── Tab registry ───
 # Authoritative source: /sync-tabs (replaces all). /register only updates existing.
 
@@ -174,108 +148,6 @@ _stream_lock = threading.Lock()
 
 _COMPAT_CONSUME_RETRY_ATTEMPTS = 8
 _SEGMENT_DECIMAL_MAX_DIGITS = 20
-
-# ─── Command queue (directory-per-target, FIFO) ───
-# PUT /command enqueues into commands/{token}_{tab}/<seq>.json (per-tab) or
-# commands/{token}/<seq>.json (broadcast). Directory form so back-to-back
-# commands to the same target queue instead of overwriting a single file.
-# Legacy single-file drops (commands/{token}[_{tab}].json) are still delivered
-# for the documented raw-write escape hatch.
-_COMMAND_GC_INTERVAL = max(0.05, min(30.0, CMD_TTL))
-_seq_counter = itertools.count(1)
-
-
-def _collect_expired_commands():
-    """Expire command files and empty queue directories without an SSE reader."""
-    now = time.time()
-    with _command_fs_lock:
-        try:
-            entries = list(CMD_DIR.iterdir())
-        except OSError:
-            return
-        for entry in entries:
-            if entry.is_symlink():
-                continue
-            if not entry.is_dir():
-                command_queue.remove_expired(entry, now, CMD_TTL, legacy=True)
-                continue
-            try:
-                children = list(entry.iterdir())
-            except OSError:
-                continue
-            for child in children:
-                command_queue.remove_expired(child, now, CMD_TTL)
-            try:
-                entry.rmdir()
-            except OSError:
-                # Not empty, or a producer wrote into it between the scan and
-                # this call — either way the namespace is not expired after
-                # all, and the next sweep will look again.
-                pass
-
-
-def _command_gc_loop():
-    """Run command expiry independently of producers and SSE consumers."""
-    while True:
-        time.sleep(_COMMAND_GC_INTERVAL)
-        _collect_expired_commands()
-
-
-def _next_seq():
-    """Monotonic, lexically-sortable queue filename stem: <ms>_<counter>."""
-    return f'{int(time.time() * 1000):013d}_{next(_seq_counter):06d}'
-
-# ─── Per-token wake events: writers signal, SSE streams wait (near-zero latency) ───
-
-
-_cmd_events = {}  # {token: threading.Event}
-_cmd_events_lock = threading.Lock()
-
-
-def _cmd_event(token):
-    with _cmd_events_lock:
-        ev = _cmd_events.get(token)
-        if ev is None:
-            ev = threading.Event()
-            _cmd_events[token] = ev
-        return ev
-
-
-def _enqueue_command(token, tab, cmd):
-    """Append a command to the target's directory queue. Returns the delivery id.
-
-    Refuses an unsafe `tab` itself rather than trusting the caller: this is the
-    single place the value becomes a directory name, and the handler that used
-    to be its only caller did not check it.
-    """
-    if tab and path_safety.unsafe_component(tab):
-        raise ValueError(f'unsafe tab component: {tab!r}')
-    queue_name, _ = command_queue.command_target_names(token, tab)
-    qdir = path_safety.under(CMD_DIR, queue_name)
-    with _command_fs_lock:
-        qdir.mkdir(parents=True, exist_ok=True)
-        seq = _next_seq()
-        cmd = {**cmd, '_did': seq}
-        tmp, destination = qdir / f'.{seq}.tmp', qdir / f'{seq}.json'
-        try:
-            tmp.write_text(json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
-            atomic_file.replace_atomically(str(tmp), str(destination))
-        except (OSError, UnicodeEncodeError):
-            # A refused enqueue must not leave its hidden temp behind: the
-            # zero-byte artifact would sit in the queue until the background
-            # collector's TTL sweep; rollback as result_store's atomic write,
-            # plus the encode failure write_text raises after creating it.
-            try:
-                tmp.unlink()
-            except OSError:
-                # Best effort, and the enqueue failure re-raised below is the
-                # error the caller needs. A temp left behind is collected by
-                # the TTL sweep.
-                pass
-            raise
-    _cmd_event(token).set()
-    return seq
-
 
 # ─── Health / observability ───
 
@@ -700,7 +572,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 # Clear the wake event before scanning: event.set is sticky, so a
                 # signal that lands during/after the scan is observed on the next wait.
-                ev = _cmd_event(token)
+                ev = command_queue.event(token)
                 ev.clear()
                 delivered = 0
                 if tab == 'dashboard':
@@ -1096,7 +968,10 @@ class Handler(BaseHTTPRequestHandler):
                     tabs[tab_id] = {'url': url, 'title': title, 'ts': time.time()}
                     updated = True
             if updated:
-                _notify_dashboard(token, {'type': 'tab-updated', 'tabId': tab_id, 'url': url, 'title': title})
+                command_queue.notify_dashboard(
+                    CMD_DIR, token,
+                    {'type': 'tab-updated', 'tabId': tab_id,
+                     'url': url, 'title': title})
             # This route is update-only, so a tab the registry has never seen
             # is a no-op — and answering it {'ok': True} told the caller its
             # state had been refreshed when nothing had. `updated` is what
@@ -1127,7 +1002,8 @@ class Handler(BaseHTTPRequestHandler):
                         'ts': time.time(),
                     }
             count = len(_tab_registry.get(token, {}))
-            _notify_dashboard(token, {'type': 'tabs-synced', 'count': count})
+            command_queue.notify_dashboard(
+                CMD_DIR, token, {'type': 'tabs-synced', 'count': count})
             return self._json(200, {'ok': True, 'count': count})
 
         elif self.path == '/unregister':
@@ -1137,7 +1013,9 @@ class Handler(BaseHTTPRequestHandler):
             with _tab_lock:
                 tabs = _tab_registry.get(token, {})
                 removed = tabs.pop(str(tab_id), None)
-            _notify_dashboard(token, {'type': 'tab-unregistered', 'tabId': str(tab_id)})
+            command_queue.notify_dashboard(
+                CMD_DIR, token,
+                {'type': 'tab-unregistered', 'tabId': str(tab_id)})
             return self._json(200, {'ok': True, 'removed': removed is not None})
 
         elif self.path == '/poll':
@@ -1150,7 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._json(400, {'error': 'invalid path component'})
             data = {}
-            with _command_fs_lock:
+            with command_queue.command_fs_lock:
                 if cmd_file.exists():
                     try:
                         candidate = json.loads(cmd_file.read_text(encoding='utf-8'))
@@ -1280,7 +1158,7 @@ class Handler(BaseHTTPRequestHandler):
                 # what would lose a newer result, so this does the first and
                 # not the second, and publishes no second dashboard event.
                 return self._json(200, {'ok': True, 'duplicate': True})
-            _notify_dashboard(token, {
+            command_queue.notify_dashboard(CMD_DIR, token, {
                 'type': 'result',
                 'tabId': str(tab_id) if tab_id else '',
                 'resultId': body.get('id', ''),
@@ -1399,7 +1277,7 @@ class Handler(BaseHTTPRequestHandler):
         # overwrote the routing value: both silently hit the active tab.
         cmd = {k: v for k, v in body.items() if k not in ('token', 'tab')}
         try:
-            did = _enqueue_command(token, tab, cmd)
+            did = command_queue.enqueue(CMD_DIR, token, tab, cmd)
         except UnicodeEncodeError:
             # A lone surrogate in a body value fails the queue-file encode;
             # that is an unencodable body, not a bad path component. Must
@@ -2195,7 +2073,8 @@ if __name__ == '__main__':
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     SEG_DIR.mkdir(parents=True, exist_ok=True)
     threading.Thread(
-        target=_command_gc_loop, name='command-gc', daemon=True).start()
+        target=command_queue.gc_loop, args=(CMD_DIR, CMD_TTL),
+        name='command-gc', daemon=True).start()
     httpd = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
     bridge_port = httpd.server_address[1]
     try:
