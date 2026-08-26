@@ -416,6 +416,15 @@ class _ScalarReaderMixin:
                 self._indent(line, context)
                 if self._scalar_blank(line):
                     blank_lines += 1
+                else:
+                    follower = self._next_nonblank(
+                        line + 1, value_end, context)
+                    if follower is not None and self._indent(
+                            follower, context) > key_indent:
+                        self._refuse(
+                            'content after plain scalar comment', follower,
+                            context)
+                    break
                 line += 1
                 continue
             indent = self._indent(line, context)
@@ -427,6 +436,8 @@ class _ScalarReaderMixin:
                 text += continuation
                 blank_lines = 0
             line += 1
+        if '\t' in text:
+            self._refuse('tab in plain scalar', index, context)
         return self._require_plain_string(text, index, context)
 
     def _require_plain_string(self, value, index, context):
