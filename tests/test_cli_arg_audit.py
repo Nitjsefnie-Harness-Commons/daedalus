@@ -488,6 +488,12 @@ def test_cli_audit_respects_inner_scope_bindings(tmp):
     assert _audit_fake_handler(closure) == ['args.undeclared_probe']
 
 
+def test_cli_audit_sees_shadowing_callable_defaults(tmp):
+    for body in audit_support.SHADOWING_DEFAULT_CASES:
+        assert _audit_fake_handler(body) == [
+            'namespace escape: args=args'], body
+
+
 def test_cli_audit_sees_shadowing_decorators_and_annotations(tmp):
     decorated = '@consume(args)\ndef inner(args):\n    pass'
     assert _audit_fake_handler(decorated) == [
