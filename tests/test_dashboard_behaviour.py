@@ -20,6 +20,7 @@ from _repo import ROOT  # noqa: E402
 
 
 _CONTENT_KEEPALIVE_HARNESS = r"""
+phase('dashboard harness started');
 const fs = require('fs');
 const vm = require('vm');
 
@@ -86,12 +87,16 @@ const context = vm.createContext({
   console: { log() {}, error() {} },
 });
 
+phase('dashboard module import started');
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+phase('dashboard module imported');
+phase('dashboard call started');
 const firstProactive = timers.find((item) => item.delay === 4 * 60 * 1000);
 firstProactive.callback();
 const secondInterval = intervals[intervals.length - 1];
 for (const listener of ports[0].disconnectListeners) listener();
 secondInterval.callback();
+phase('dashboard call settled');
 
 process.stdout.write(JSON.stringify({
   portCount: ports.length,
@@ -99,6 +104,7 @@ process.stdout.write(JSON.stringify({
   interval2Cleared: secondInterval.cleared,
   retryTimers: timers.filter((item) => item.delay === 500).length,
 }));
+phase('dashboard harness finished');
 """
 
 
@@ -117,6 +123,7 @@ def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
 
 
 _DASHBOARD_CONSUME_HARNESS = r"""
+phase('dashboard harness started');
 const fs = require('fs');
 
 function response(status, data) {
@@ -158,10 +165,13 @@ function response(status, data) {
     });
   };
 
+  phase('dashboard module import started');
   const source = fs.readFileSync(process.argv[1], 'utf8');
   const moduleUrl = 'data:text/javascript;base64,'
     + Buffer.from(source).toString('base64');
   const dashboard = await import(moduleUrl);
+  phase('dashboard module imported');
+  phase('dashboard call started');
   let rejected = false;
   try {
     await dashboard.runCommand({
@@ -172,6 +182,8 @@ function response(status, data) {
     if (!String(error.message).includes('HTTP 500')) throw error;
   }
   if (!rejected) throw new Error('failed consume surfaced as a successful read');
+  phase('dashboard call settled');
+  phase('dashboard harness finished');
 })().catch(error => {
   console.error(error && error.stack ? error.stack : error);
   process.exit(1);
@@ -187,13 +199,17 @@ def test_dashboard_failed_consume_is_not_a_success(tmp):
 
 
 _DASHBOARD_WORLD_HARNESS = r"""
+phase('dashboard harness started');
 const fs = require('fs');
 
 (async () => {
+  phase('dashboard module import started');
   const source = fs.readFileSync(process.argv[1], 'utf8');
   const moduleUrl = 'data:text/javascript;base64,'
     + Buffer.from(source).toString('base64');
   const dashboard = await import(moduleUrl);
+  phase('dashboard module imported');
+  phase('dashboard call started');
   process.stdout.write(JSON.stringify([
     dashboard.formatEvalWorld('cdp'),
     dashboard.formatEvalWorld('page-main'),
@@ -201,6 +217,8 @@ const fs = require('fs');
     dashboard.formatEvalWorld('extension'),
     dashboard.formatEvalWorld('module-main'),
   ]));
+  phase('dashboard call settled');
+  phase('dashboard harness finished');
 })().catch(error => {
   console.error(error && error.stack ? error.stack : error);
   process.exit(1);
@@ -284,6 +302,7 @@ def test_dashboard_never_builds_markup_from_a_value(tmp):
 
 
 _TAB_SELECTOR_HARNESS = r"""
+phase('dashboard harness started');
 // Enough DOM for `h` and `clear`; the controller under test is real.
 class El {
   constructor(tag) {
@@ -317,8 +336,10 @@ globalThis.document = {
 // pathToFileURL, not the bare path: Node's ESM loader accepts only file://
 // URLs, and on Windows an absolute path starts with a drive letter it reads
 // as an unsupported URL scheme ('d:').
+phase('dashboard module import started');
 const { pathToFileURL } = await import('node:url');
 const { bindTabSelector } = await import(pathToFileURL(process.argv[1]).href);
+phase('dashboard module imported');
 
 let tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'second' }];
 const listeners = [];
@@ -331,6 +352,7 @@ function emit(type) {
 }
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
+phase('dashboard call started');
 bindTabSelector(select, {
   getToken: () => 'tok', api, bus, placeholder: '(active tab)',
 });
@@ -358,10 +380,12 @@ tabs = [{ tabId: '11', title: 'first' }, { tabId: '33', title: 'third' }];
 emit('tabs-synced');
 await settle();
 const afterSync = select.options.map((o) => o.value);
+phase('dashboard call settled');
 
 process.stdout.write(JSON.stringify({
   initial, afterUpdate, afterUnregister, afterSync,
 }));
+phase('dashboard harness finished');
 """
 
 
