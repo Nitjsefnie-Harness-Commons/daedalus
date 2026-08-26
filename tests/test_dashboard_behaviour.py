@@ -112,7 +112,8 @@ def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
     """A retired port callback cannot clear or replace the current port."""
     del tmp
     result = _dashnode.run_dashboard_node(
-        _CONTENT_KEEPALIVE_HARNESS, ROOT / 'extension' / 'content.js')
+        _CONTENT_KEEPALIVE_HARNESS, ROOT / 'extension' / 'content.js',
+        bounded_steps=0)
     actual = json.loads(result.stdout)
     assert actual == {
         'portCount': 2,
