@@ -649,6 +649,56 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
     assert not failures, '\n'.join(failures)
 
 
+def test_mcp_and_bridge_use_one_env_parser(tmp):
+    """Both front ends expose the one environment parser implementation."""
+    _need_deps()
+    import env_config
+
+    mod = _load_mcp('http://127.0.0.1:1')
+    previous_dir = os.environ.get('DAEDALUS_DIR')
+    previous_port = os.environ.get('DAEDALUS_PORT')
+    os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
+    os.environ['DAEDALUS_PORT'] = '0'
+    Path(os.environ['DAEDALUS_DIR']).mkdir(parents=True, exist_ok=True)
+    try:
+        server = _util.load(
+            _util.ROOT / 'server.py', 'server_for_env_contract')
+    finally:
+        for key, value in (('DAEDALUS_DIR', previous_dir),
+                           ('DAEDALUS_PORT', previous_port)):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    assert mod.env_int is env_config.env_int
+    assert server.env_int is env_config.env_int
+    cases = (
+        ('DAEDALUS_CONTRACT_A', 5, 0, None),
+        ('DAEDALUS_CONTRACT_B', 8086, 0, 65535),
+    )
+    for name, default, minimum, maximum in cases:
+        for value in (None, '7', 'nonsense', '-1', '70000'):
+            previous = os.environ.pop(name, None)
+            if value is not None:
+                os.environ[name] = value
+            try:
+                should_fail = (value == 'nonsense' or value == '-1'
+                               or (maximum is not None and value == '70000'))
+                try:
+                    result = env_config.env_int(
+                        name, default, minimum, maximum)
+                except SystemExit as error:
+                    assert should_fail, (name, value, error)
+                else:
+                    assert not should_fail, (name, value, result)
+                    assert result == (default if value is None else int(value))
+            finally:
+                os.environ.pop(name, None)
+                if previous is not None:
+                    os.environ[name] = previous
+
+
 def test_the_mcp_env_parser_matches_the_bridges(tmp):
     """The copy and the original answer the same way, or they have drifted.
 
