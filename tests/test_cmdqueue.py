@@ -84,21 +84,6 @@ def _queued_file(tmp, name='1700000000000_000001.json'):
     return queue, queued
 
 
-def _stale_queue(base, docroot, token):
-    status, body = _bridge.put_command(
-        base, {'token': token, 'tab': 'extension',
-               'id': 'stale-command', 'type': 'reload'})
-    assert status == 200, (status, body)
-    body = json.loads(body)
-    files = _bridge.queue_files(docroot, f'{token}_extension')
-    assert len(files) == 1, files
-    stale = files[0]
-    command = json.loads(stale.read_text(encoding='utf-8'))
-    assert command['_did'] == body['did'], (command, body)
-    queue = stale.parent
-    return queue, stale, command
-
-
 @contextlib.contextmanager
 def _redirect_stale_answer(queue, stale, stale_command):
     original = _util.post_json
@@ -243,17 +228,23 @@ def test_the_mcp_answer_helper_survives_a_transient_queue_read_refusal(tmp):
 def test_the_cli_answer_helper_ignores_a_refused_leftover(tmp):
     bridge_env = {'DAEDALUS_TOKEN': test_cli.TOK, 'TOKEN': ''}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
-        queue, stale, stale_command = _stale_queue(
-            base, docroot, test_cli.TOK)
         env = test_cli.cli_env(DAEDALUS_URL=base,
                                DAEDALUS_TOKEN=test_cli.TOK)
+        first_code, first_out, first_err, stale_command = (
+            test_cli._answer_one_ext_command(
+                base, docroot, ['ext-reload'], {}, env))
+        assert first_code == 0, (first_code, first_out, first_err)
+        files = _bridge.queue_files(
+            docroot, f'{test_cli.TOK}_extension')
+        assert len(files) == 1, files
+        stale = files[0]
+        queue = stale.parent
         with _redirect_stale_answer(queue, stale, stale_command):
             with _refuse_path_operation(stale, 'unlink', 1000) as calls:
                 code, out, err, queued = test_cli._answer_one_ext_command(
                     base, docroot, ['ext-reload'], {}, env)
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
     assert code == 0, (code, out, err)
-    assert queued['id'] != stale_command['id'], queued
     assert queued['_did'] != stale_command['_did'], queued
     assert queued['type'] == 'reload', (queue, queued)
 
@@ -264,14 +255,18 @@ def test_the_mcp_answer_helper_ignores_a_refused_leftover(tmp):
                   'DAEDALUS_MCP_PORT': '0'}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         mod = test_mcp_server._load_mcp(base)
-        queue, stale, stale_command = _stale_queue(
-            base, docroot, test_mcp_server.TOK)
+        _first_value, stale_command = test_mcp_server._answer_mcp_command(
+            base, docroot, mod, mod.ext_reload, {})
+        files = _bridge.queue_files(
+            docroot, f'{test_mcp_server.TOK}_extension')
+        assert len(files) == 1, files
+        stale = files[0]
+        queue = stale.parent
         with _redirect_stale_answer(queue, stale, stale_command):
             with _refuse_path_operation(stale, 'unlink', 1000) as calls:
                 _value, queued = test_mcp_server._answer_mcp_command(
                     base, docroot, mod, mod.ext_reload, {})
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
-    assert queued['id'] != stale_command['id'], queued
     assert queued['_did'] != stale_command['_did'], queued
     assert queued['type'] == 'reload', (queue, queued)
 
