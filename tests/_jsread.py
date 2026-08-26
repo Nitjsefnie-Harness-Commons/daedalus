@@ -107,6 +107,75 @@ def js_bracket_end(mask, open_pos):
     return len(mask)
 
 
+def _word_before(mask, end):
+    end -= 1
+    while end >= 0 and mask[end].isspace():
+        end -= 1
+    match = re.search(r'[A-Za-z_$][\w$]*$', mask[:end + 1])
+    if match is None:
+        return '', end + 1
+    return match.group(), match.start()
+
+
+def js_function_body_ranges(mask):
+    """Return brace ranges that introduce JavaScript function bodies."""
+    parenthesis_opens = []
+    matching_open = {}
+    for index, char in enumerate(mask):
+        if char == '(':
+            parenthesis_opens.append(index)
+        elif char == ')' and parenthesis_opens:
+            matching_open[index] = parenthesis_opens.pop()
+
+    controls = {'catch', 'for', 'if', 'switch', 'while', 'with'}
+    ranges = []
+    for opening, char in enumerate(mask):
+        if char != '{':
+            continue
+        previous = opening - 1
+        while previous >= 0 and mask[previous].isspace():
+            previous -= 1
+        function_body = mask[previous - 1:previous + 1] == '=>'
+        if previous in matching_open:
+            word, word_start = _word_before(
+                mask, matching_open[previous])
+            if word == 'await':
+                word, _unused = _word_before(mask, word_start)
+            function_body = function_body or word not in controls
+        if function_body:
+            ranges.append((opening, js_bracket_end(mask, opening)))
+    return ranges
+
+
+def js_var_declaration_end(mask, start):
+    """Return the end of a var declaration, including for-in/of headers."""
+    in_for_header = False
+    for match in re.compile(
+            r'(?<![\w$.])for(?:\s+await)?\s*\(').finditer(
+                mask, 0, start):
+        opening = mask.find('(', match.start(), match.end())
+        if start < js_bracket_end(mask, opening):
+            in_for_header = True
+
+    depth = 0
+    for index in range(start, len(mask)):
+        char = mask[index]
+        if char in '([{':
+            depth += 1
+        elif char in ')]}':
+            if in_for_header and depth == 0 and char == ')':
+                return index
+            depth -= 1
+        elif depth == 0 and char == ';':
+            return index
+        elif (in_for_header and depth == 0 and char in 'io'
+              and index > start and mask[index - 1].isspace()):
+            separator = re.match(r'(?:in|of)\b', mask[index:])
+            if separator:
+                return index
+    return len(mask)
+
+
 def js_split_top_level(mask, text, start, end):
     """Split mask[start:end] on depth-0 commas. Emptiness is judged on the
     ORIGINAL text: a blanked string is a real argument, not a gap."""
