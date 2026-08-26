@@ -27,12 +27,11 @@ _GM_NON_CAPABILITIES = frozenset({'GM.info'})
 
 _JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
 _TOP_LEVEL_DECLARATION = re.compile(
-    rf'\b(?:async\s+)?function\s+({_JS_IDENTIFIER})\s*\('
-    rf'|\bclass\s+({_JS_IDENTIFIER})\b'
-    rf'|\b(?:const|let|var)\s+({_JS_IDENTIFIER})\b')
-_TOP_LEVEL_FUNCTION_DECLARATION = re.compile(
-    rf'(?:^|(?<=[;\x7d]))\s*'
-    rf'(?:async\s+)?function\s+({_JS_IDENTIFIER})\s*\(')
+    rf'(?P<function>(?:async\s+)?function\s+'
+    rf'(?P<function_name>{_JS_IDENTIFIER})\s*\()'
+    rf'|(?P<binding>(?:const|let|var)\s+'
+    rf'(?P<binding_name>{_JS_IDENTIFIER})\b)')
+_STATEMENT_CONTINUATION = frozenset('([{=,:.?+-*/%&|^!~<>')
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
     'Promise', 'Set', 'String', 'TextDecoder', 'URL',
@@ -49,35 +48,64 @@ def _worker_sources():
     ]
 
 
-def _top_level_matches(source, pattern):
-    mask = js_mask(source)
+def _top_level_positions(mask):
     top_level = []
-    depth = 0
+    braces = 0
+    brackets = 0
+    parentheses = 0
     for char in mask:
-        top_level.append(depth == 0)
+        top_level.append(braces == brackets == parentheses == 0)
         if char == '{':
-            depth += 1
+            braces += 1
         elif char == '}':
-            depth -= 1
-    return [
-        match for match in pattern.finditer(mask)
-        if top_level[match.start()]
-    ]
+            braces -= 1
+        elif char == '[':
+            brackets += 1
+        elif char == ']':
+            brackets -= 1
+        elif char == '(':
+            parentheses += 1
+        elif char == ')':
+            parentheses -= 1
+    return top_level
+
+
+def _starts_statement(mask, start):
+    previous = start - 1
+    while previous >= 0 and mask[previous].isspace():
+        previous -= 1
+    if previous < 0 or mask[previous] in ';}':
+        return True
+    line_start = mask.rfind('\n', 0, start) + 1
+    if mask[line_start:start].strip():
+        return False
+    return mask[previous] not in _STATEMENT_CONTINUATION
 
 
 def _top_level_declarations(source):
-    return {
-        next(group for group in match.groups() if group is not None)
-        for match in _top_level_matches(source, _TOP_LEVEL_DECLARATION)
-    }
+    mask = js_mask(source)
+    top_level = _top_level_positions(mask)
+    declarations = []
+    for match in _TOP_LEVEL_DECLARATION.finditer(mask):
+        if not top_level[match.start()]:
+            continue
+        if not _starts_statement(mask, match.start()):
+            continue
+        kind = 'function' if match.group('function') else 'binding'
+        name = match.group(f'{kind}_name')
+        declarations.append((name, kind, match.start()))
+    return declarations
 
 
-def _top_level_function_declarations(source):
-    return {
-        match.group(1)
-        for match in _top_level_matches(
-            source, _TOP_LEVEL_FUNCTION_DECLARATION)
-    }
+def _top_level_reassigns(source, name, after):
+    mask = js_mask(source)
+    top_level = _top_level_positions(mask)
+    assignment = re.compile(
+        rf'(?<![\w$.]){re.escape(name)}\s*=(?!=|>)')
+    return any(
+        match.start() > after and top_level[match.start()]
+        for match in assignment.finditer(mask)
+    )
 
 
 def _directive_names(source, directive):
@@ -94,12 +122,31 @@ def _directive_names(source, directive):
 
 
 def _masked_code_mentions(masked_source, name):
-    return re.search(
-        rf'(?<![\w$]){re.escape(name)}(?![\w$])', masked_source)
+    pattern = re.compile(
+        rf'(?<![\w$]){re.escape(name)}(?![\w$])')
+    for match in pattern.finditer(masked_source):
+        previous = match.start() - 1
+        while previous >= 0 and masked_source[previous].isspace():
+            previous -= 1
+        following = match.end()
+        while (following < len(masked_source)
+               and masked_source[following].isspace()):
+            following += 1
+        if previous >= 0 and masked_source[previous] == '.':
+            continue
+        if (following < len(masked_source)
+                and masked_source[following] == ':'):
+            continue
+        return match
+    return None
 
 
 def test_each_worker_capability_lives_in_its_own_module(tmp):
     """Each module owns a replaceable function reached by runtime dispatch.
+
+    A published entry point must remain one statement-position function
+    declaration. Binding forms and later top-level reassignment are refused
+    before the route probe tries to replace the symbol.
 
     Routing is observed when the sentinel is called; the original handler's
     promise is deliberately not awaited because this guard checks routing, not
@@ -123,10 +170,23 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         module_path = ROOT / 'extension' / relative
         assert module_path.is_file(), f'{relative} does not exist'
         module = module_path.read_text(encoding='utf-8')
-        assert symbol in _top_level_function_declarations(module), (
-            f'{relative} must declare {symbol} as a top-level function '
-            'declaration so the classic-worker route probe can replace it')
-        assert symbol not in _top_level_declarations(background), (
+        declarations = _top_level_declarations(module)
+        functions = [
+            start for name, kind, start in declarations
+            if name == symbol and kind == 'function'
+        ]
+        valid_declaration = (
+            len(functions) == 1
+            and not _top_level_reassigns(module, symbol, functions[0])
+        )
+        assert valid_declaration, (
+            f'{relative} must publish {symbol} as one unreassigned '
+            'top-level function declaration so the classic-worker route '
+            'probe can replace it')
+        background_names = {
+            name for name, _, _ in _top_level_declarations(background)
+        }
+        assert symbol not in background_names, (
             f'background.js still declares {symbol} at top level')
         observed = run_extension_capability_route(
             symbol, {'id': 'policy-capability', 'type': command_type})
@@ -142,6 +202,9 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
 def test_worker_module_directives_resolve_to_worker_symbols(tmp):
     """Classic-worker directives form a used producer-consumer graph.
 
+    Declarations must begin statements. Property keys and member accesses do
+    not count as consumers of a published global.
+
     The platform allowlist is trusted input: adding an entry does not prove it
     is a real platform global. This catches unresolved names and typos, not a
     dishonest allowlist edit. What is NOT enforced: `js_mask` does not parse
@@ -156,13 +219,16 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
             'masked': js_mask(source),
             'consumed': _directive_names(source, 'global'),
             'exported': _directive_names(source, 'exported'),
+            'declared': {
+                name for name, _, _ in _top_level_declarations(source)
+            },
         }
         for relative, source in worker_sources
     ]
     declarations = {
         name
         for details in source_details
-        for name in _top_level_declarations(details['source'])
+        for name in details['declared']
     }
     worker_code = '\n'.join(
         details['masked'] for details in source_details)
@@ -185,16 +251,17 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
         missing = consumed - declarations - _WORKER_PLATFORM_GLOBALS
         if missing:
             unresolved[relative] = sorted(missing)
-        absent = exported - _top_level_declarations(details['source'])
+        absent = exported - details['declared']
         if absent:
             unpublished[relative] = sorted(absent)
-        unused = {
+        used = {
             name for name in consumed | exported
-            if not _masked_code_mentions(details['masked'], name)
+            if _masked_code_mentions(details['masked'], name)
         }
+        unused = (consumed | exported) - used
         if unused:
             unused_directives[relative] = sorted(unused)
-        for name in consumed:
+        for name in consumed & used:
             consumers.setdefault(name, set()).add(relative)
     assert not unresolved, (
         f'classic worker sources consume undeclared names: {unresolved}')
