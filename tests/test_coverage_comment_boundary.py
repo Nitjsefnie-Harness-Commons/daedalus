@@ -10,7 +10,7 @@ import _util  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _coverage_comment_steps import EXPECTED_STEP_MAPPINGS  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _workflowrun import run_step  # noqa: E402
+from _workflowrun import recorded_writes, run_step  # noqa: E402
 from _yamlread import YAMLReadError, top_level_mapping  # noqa: E402
 from _yamlsteps import step_mappings  # noqa: E402
 import test_coverage_comment_workflow as commenter  # noqa: E402
@@ -136,7 +136,7 @@ def test_hostile_artifact_bodies_remain_inert_text(tmp):
         assert len(state) == 1, state
         assert state[0]['body'] == _COMMENT_PREFIX + body, (
             label, state[0]['body'], body)
-        writes = commenter._writes(calls)  # pylint: disable=protected-access
+        writes = recorded_writes(calls)
         assert len(writes) == 1, calls.read_text(encoding='utf-8')
 
 
