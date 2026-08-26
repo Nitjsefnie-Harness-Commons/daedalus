@@ -6,11 +6,14 @@ the real Node subprocess boundary and the exact evidence returned to Python.
 """
 import contextlib
 import http.server
+import os
+import signal
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
@@ -104,7 +107,7 @@ def _slow_result_server():
             self.wfile.write(b'{}')
 
         def do_GET(self):
-            time.sleep(4)
+            time.sleep(30)
             body = b'{"pending":false}'
             self.send_response(200)
             self.send_header('Content-Length', str(len(body)))
@@ -161,13 +164,17 @@ def test_run_background_overlap_accepts_a_short_inner_bound(tmp):
 def test_a_stalled_config_load_names_the_wait(tmp):
     """A never-settling loadConfig promise identifies the config-load step."""
     failure = _harness_failure(_worker(tmp, _STALLED_CONFIG_WORKER))
-    assert 'the worker to load its config' in failure, failure
+    assert ('timed out waiting for the worker to load its config'
+            in failure), failure
+    assert 'outer backstop' not in failure, failure
 
 
 def test_posted_results_with_stalled_dispatches_name_the_settle_wait(tmp):
     """Posted results do not hide dispatch promises that never settle."""
     failure = _harness_failure(_worker(tmp, _STALLED_DISPATCH_WORKER))
-    assert 'both dispatchCommand calls to settle' in failure, failure
+    assert ('timed out waiting for both dispatchCommand calls to settle'
+            in failure), failure
+    assert 'outer backstop' not in failure, failure
 
 
 def test_a_synchronous_stall_reports_the_outer_backstop_and_last_step(tmp):
@@ -190,12 +197,18 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
         {'id': '_cookies', 'domain': 'owner-a'},
         {'id': '_cookies', 'domain': 'owner-b'},
     ]
-    with _slow_result_server() as base:
-        failure = _harness_failure(
-            _worker(tmp, _SETTLING_WORKER), commands=commands,
-            order=['owner-a', 'owner-b'], result_base=base,
-            wait_between=True)
-    assert 'the first result to be consumed' in failure, failure
+    source = _overlap._BACKGROUND_OVERLAP_HARNESS.replace(
+        'process.exitCode = 1;', 'process.exit(1);')
+    assert source != _overlap._BACKGROUND_OVERLAP_HARNESS
+    with mock.patch.object(_overlap, '_BACKGROUND_OVERLAP_HARNESS', source):
+        with _slow_result_server() as base:
+            failure = _harness_failure(
+                _worker(tmp, _SETTLING_WORKER), commands=commands,
+                order=['owner-a', 'owner-b'], result_base=base,
+                wait_between=True)
+    assert ('timed out waiting for the first result to be consumed'
+            in failure), failure
+    assert 'outer backstop' not in failure, failure
 
 
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
@@ -216,6 +229,48 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
     assert state['returncode'] is not None, state
     assert state['stdout'] == 'started', state
     assert state['stderr'] == '', state
+
+
+def test_client_states_records_a_killed_clients_held_pipes(tmp):
+    """A grandchild-held pipe makes the second timeout diagnostic data."""
+    pid_path = Path(tmp) / 'grandchild.pid'
+    client = (
+        'import subprocess, sys, time\n'
+        'from pathlib import Path\n'
+        'grandchild = subprocess.Popen('
+        '[sys.executable, "-c", "import time; time.sleep(60)"])\n'
+        'target = Path(sys.argv[1])\n'
+        'pending = target.with_suffix(".tmp")\n'
+        'pending.write_text(str(grandchild.pid), encoding="ascii")\n'
+        'pending.replace(target)\n'
+        'time.sleep(60)\n'
+    )
+    process = subprocess.Popen(
+        [sys.executable, '-c', client, str(pid_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    grandchild_pid = None
+    try:
+        deadline = time.monotonic() + 5
+        while not pid_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pid_path.exists(), 'client did not record its grandchild pid'
+        grandchild_pid = int(pid_path.read_text(encoding='ascii'))
+        states = _overlap.client_states({'pipe-owner': process}, grace=0.1)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+        if grandchild_pid is not None:
+            try:
+                os.kill(grandchild_pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+    state = states['pipe-owner']
+    assert state['stillRunning'] is True, state
+    assert state['returncode'] is not None, state
+    assert state['stdout'] == '', state
+    assert state['stderr'] == '', state
+    assert state['drainTimedOut'] is True, state
 
 
 def test_running_clients_report_the_owner_posted_results_and_states(tmp):
