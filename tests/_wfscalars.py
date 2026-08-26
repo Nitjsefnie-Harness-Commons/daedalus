@@ -11,12 +11,14 @@ _DOUBLE_ESCAPES = {
     'L': '\u2028', 'P': '\u2029',
 }
 
-_SCHEMA_TYPED_WORDS = frozenset((
+_SCHEMA_NON_STRING_WORDS = frozenset((
     'yes', 'Yes', 'YES', 'no', 'No', 'NO',
     'true', 'True', 'TRUE', 'false', 'False', 'FALSE',
     'on', 'On', 'ON', 'off', 'Off', 'OFF',
     'null', 'Null', 'NULL', '~',
+    '<<', '=', '!', '&', '*',
 ))
+_PLAIN_FORBIDDEN_INITIAL = frozenset(',[]{}#&*!|>\'"%@`')
 _SCHEMA_TYPED_NUMBER_OR_TIME = re.compile(
     r'(?:'
     r'[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?'
@@ -502,8 +504,13 @@ class _ScalarReaderMixin:
         return self._require_plain_string(text, index, context)
 
     def _require_plain_string(self, value, index, context):
-        if (not value or value in _SCHEMA_TYPED_WORDS
-                or _SCHEMA_TYPED_NUMBER_OR_TIME.fullmatch(value)):
+        invalid_indicator = value and (
+            value[0] in _PLAIN_FORBIDDEN_INITIAL
+            or (value[0] in '-?:'
+                and (len(value) == 1 or value[1] in ' \t')))
+        if (not value or value in _SCHEMA_NON_STRING_WORDS
+                or _SCHEMA_TYPED_NUMBER_OR_TIME.fullmatch(value)
+                or invalid_indicator or re.search(r':(?:[ \t]|$)', value)):
             self._refuse(
                 'plain scalar is not provably a string', index, context)
         return value
