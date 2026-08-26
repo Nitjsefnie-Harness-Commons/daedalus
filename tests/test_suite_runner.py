@@ -80,6 +80,24 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
+def _invalid_output_suite(passed, failed, returncode):
+    return f"""import json, os
+
+os.write(2, bytes([255, 10]))
+summary = {{
+    'total': 1,
+    'passed': {passed},
+    'skipped': 0,
+    'failed': {failed},
+    'requires': None,
+}}
+with open(os.environ['DAEDALUS_TEST_SUMMARY'], 'w',
+          encoding='utf-8') as destination:
+    json.dump(summary, destination)
+raise SystemExit({returncode})
+"""
+
+
 def _runner_tree(tmp, suites, under='.'):
     """A copy of run_tests.py over fabricated suites, run where it stands.
 
@@ -166,6 +184,30 @@ def test_suites_run_concurrently(tmp):
     assert 'OVERALL: PASS' in result.stdout, result.stdout
     assert result.returncode == 0, (result.returncode, result.stdout,
                                     result.stderr)
+
+
+def test_undecodable_output_does_not_hide_a_failed_verdict(tmp):
+    """Raw child bytes must not prevent the aggregate failure report."""
+    result = _runner_tree(tmp, {
+        'test_invalid_failure.py': _invalid_output_suite(0, 1, 1),
+    })
+    assert 'Traceback' not in result.stderr, result.stderr
+    assert '=== test_invalid_failure.py ===' in result.stdout, result.stdout
+    assert '\ufffd' in result.stdout, result.stdout
+    assert 'FAILED: test_invalid_failure.py' in result.stdout, result.stdout
+    assert result.returncode != 0, (result.returncode, result.stdout)
+
+
+def test_undecodable_output_does_not_hide_a_passing_verdict(tmp):
+    """Raw child bytes must not prevent the aggregate passing report."""
+    result = _runner_tree(tmp, {
+        'test_invalid_pass.py': _invalid_output_suite(1, 0, 0),
+    })
+    assert 'Traceback' not in result.stderr, result.stderr
+    assert '=== test_invalid_pass.py ===' in result.stdout, result.stdout
+    assert '\ufffd' in result.stdout, result.stdout
+    assert 'OVERALL: PASS' in result.stdout, result.stdout
+    assert result.returncode == 0, (result.returncode, result.stdout)
 
 
 def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
