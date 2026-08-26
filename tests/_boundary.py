@@ -406,6 +406,7 @@ async function runFetchBound() {
 
 async function run() {
   vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
+  if (scenario === 'worker-sources') return context.loadedWorkerSourcePaths;
   await vm.runInContext('loadConfig()', context);
   if (scenario === 'capability-routes') return runCapabilityRoutes();
   if (scenario === 'capacity') return runCapacity();
@@ -458,3 +459,16 @@ def run_extension_capability_routes(routes):
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
+
+
+def observe_extension_worker_paths():
+    """Return the module paths the shipped worker actually asks to load."""
+    node = shutil.which('node')
+    assert node, 'node is required to observe extension worker modules'
+    result = subprocess.run(
+        [node, '-e', HARNESS,
+         str(EXTENSION_ROOT / 'background.js'), 'worker-sources'],
+        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return tuple(Path(item) for item in json.loads(result.stdout))

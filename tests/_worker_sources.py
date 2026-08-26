@@ -35,10 +35,12 @@ def worker_source_paths(background_path=BACKGROUND_PATH):
 
 def import_scripts_stub(context_name):
     return r"""
+__CONTEXT__.loadedWorkerSourcePaths = [];
 __CONTEXT__.importScripts = (...sourceNames) => {
   for (const sourceName of sourceNames) {
     const sourcePath = require('path').resolve(
       require('path').dirname(backgroundPath), sourceName);
+    __CONTEXT__.loadedWorkerSourcePaths.push(sourcePath);
     vm.runInContext(fs.readFileSync(sourcePath, 'utf8'), __CONTEXT__);
   }
 };
