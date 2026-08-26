@@ -339,7 +339,7 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
                                token, background,
                                owners=('owner-a', 'owner-b')):
     """Drive real same-id CLI clients and preserve both failure surfaces."""
-    bridge_env = {'TOKEN': token, 'DAEDALUS_TOKEN': token}
+    bridge_env = {'TOKEN': '', 'DAEDALUS_TOKEN': token}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         client_env = dict(env)
         client_env.update({
