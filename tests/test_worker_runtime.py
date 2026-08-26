@@ -9,10 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _boundary  # noqa: E402
+import _boundary_env  # noqa: E402
 import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _worker_runtime import observe_worker_runtime  # noqa: E402
 
 
 def _tracked_tree(tmp):
@@ -98,7 +98,7 @@ for (const item of (() => {
 """, encoding='utf-8')
     details.append({'path': harmless, 'globals': (), 'watched': ()})
 
-    observed = observe_worker_runtime(
+    observed = _worker_runtime.observe_worker_runtime(
         details, background_path=background)['sources']
     for path in collision_paths:
         assert '_executionContext' in observed[str(path)]['bindings'], path
@@ -112,7 +112,7 @@ def test_runtime_observer_rejects_handler_reassignment(tmp):
 function handleCookies() {}
 handleCookies = function replacement() {};
 """, encoding='utf-8')
-    observed = observe_worker_runtime([{
+    observed = _worker_runtime.observe_worker_runtime([{
         'path': path, 'globals': (), 'watched': {'handleCookies'},
     }], background_path=path)['sources'][str(path)]
     assert observed['events']['handleCookies'] == {
@@ -187,6 +187,53 @@ throw new Error('forced harness failure');
     program_path = Path(marker.read_text(encoding='utf-8'))
     assert program_path.name == 'program.js', program_path
     assert not program_path.exists(), program_path
+
+
+def test_worker_harness_command_line_is_module_count_independent(tmp):
+    """Serialized module records never make Node's argv grow."""
+    counts = (1, 4, 7, 10)
+    measurements = {'HARNESS': {}, 'OBSERVER': {}}
+    active = {'label': None, 'count': None}
+    real_run = _boundary_env.subprocess.run
+
+    def measured_run(argv, **kwargs):
+        del kwargs
+        measurements[active['label']][active['count']] = len(
+            subprocess.list2cmdline(argv))
+        return subprocess.CompletedProcess(argv, 0, '{}', '')
+
+    _boundary_env.subprocess.run = measured_run
+    try:
+        for count in counts:
+            routes = [
+                {
+                    'symbol': f'handleRoute{index}',
+                    'command': {'type': f'route-{index}'},
+                    'publishedSymbols': [f'handleRoute{item}'
+                                         for item in range(count)],
+                }
+                for index in range(count)
+            ]
+            active.update(label='HARNESS', count=count)
+            _boundary.run_extension_capability_routes(routes)
+
+            details = [
+                {
+                    'path': Path(tmp) / f'worker-{index}.js',
+                    'globals': {f'global{index}'},
+                    'probes': {f'probe{index}'},
+                    'watched': {f'handler{index}'},
+                }
+                for index in range(count)
+            ]
+            active.update(label='OBSERVER', count=count)
+            _worker_runtime.observe_worker_runtime(
+                details, background_path=Path(tmp) / 'background.js')
+    finally:
+        _boundary_env.subprocess.run = real_run
+
+    assert all(len(set(values.values())) == 1
+               for values in measurements.values()), measurements
 
 
 def test_sibling_mutation_failure_names_module_type_and_handlers(tmp):

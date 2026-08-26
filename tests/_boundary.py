@@ -562,8 +562,8 @@ def run_extension_capability_routes(routes, background_path=None):
         background_path = EXTENSION_ROOT / 'background.js'
     result = run_node_program(
         node, HARNESS,
-        [str(background_path), 'capability-routes', json.dumps(routes)],
-        cwd=ROOT)
+        [str(background_path), 'capability-routes'], cwd=ROOT,
+        payload=json.dumps(routes))
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)

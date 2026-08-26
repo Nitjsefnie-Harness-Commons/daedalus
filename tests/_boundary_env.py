@@ -9,6 +9,7 @@ context standing in for the worker Chrome restarts after idle suspension.
 The scenarios that drive it are in _boundary.
 """
 
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -16,12 +17,16 @@ from pathlib import Path
 from _worker_sources import import_scripts_stub
 
 
-def run_node_program(node, program, arguments, *, cwd, timeout=30):
+def run_node_program(node, program, arguments, *, cwd, payload=None,
+                     timeout=30):
     """Run a Node program from a closed, automatically cleaned file."""
     with tempfile.TemporaryDirectory(prefix='daedalus-node-') as directory:
         program_path = Path(directory) / 'program.js'
+        prologue = 'process.argv.splice(1, 1);\n'
+        if payload is not None:
+            prologue += f'process.argv.push({json.dumps(payload)});\n'
         program_path.write_text(
-            'process.argv.splice(1, 1);\n' + program, encoding='utf-8')
+            prologue + program, encoding='utf-8')
         return subprocess.run(
             [node, str(program_path), *arguments], cwd=cwd,
             capture_output=True, text=True, timeout=timeout)
