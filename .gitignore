@@ -38,6 +38,7 @@
 !/LICENSE
 !/README.md
 !/SECURITY.md
+!/atomic_file.py
 !/bridge_config.py
 !/command_queue.py
 !/delivery_stripes.py
@@ -51,6 +52,7 @@
 !/requirements-test.txt
 !/result_store.py
 !/run_tests.py
+!/segment_store.py
 !/server.py
 !/setup.cfg
 
@@ -209,6 +211,7 @@
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
 !/tests/test_segment_storage.py
+!/tests/test_segment_store.py
 !/tests/test_speed_measurement.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_suite_runner.py
