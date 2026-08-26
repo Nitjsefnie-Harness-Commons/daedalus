@@ -69,10 +69,12 @@ def _unsupported_bound_shape(source):
     expect_expression = True
     statement_start = True
     last_word = None
+    last_word_started_statement = False
     last_word_is_member = False
     next_word_is_member = False
     declaration_prefix = False
-    pending_body = None
+    pending_bodies = []
+    line_break_starts_statement = False
     control_parens = []
     block_braces = []
     bracket_depth = 0
@@ -80,6 +82,12 @@ def _unsupported_bound_shape(source):
         char = source[index]
         pair = source[index:index + 2]
         if char.isspace():
+            if (char in '\r\n' and line_break_starts_statement):
+                expect_expression = True
+                statement_start = True
+                last_word = None
+                last_word_started_statement = False
+                line_break_starts_statement = False
             index += 1
             continue
         if char in "'\"":
@@ -91,6 +99,7 @@ def _unsupported_bound_shape(source):
             expect_expression = False
             statement_start = False
             last_word = None
+            last_word_started_statement = False
             last_word_is_member = False
             next_word_is_member = False
             continue
@@ -107,6 +116,7 @@ def _unsupported_bound_shape(source):
             expect_expression = False
             statement_start = False
             last_word = None
+            last_word_started_statement = False
             last_word_is_member = False
             next_word_is_member = False
             continue
@@ -116,7 +126,15 @@ def _unsupported_bound_shape(source):
             continue
         if pair == '/*':
             close = source.find('*/', index + 2)
-            index = end if close < 0 else close + 2
+            comment_end = end if close < 0 else close + 2
+            if ('\n' in source[index:comment_end]
+                    and line_break_starts_statement):
+                expect_expression = True
+                statement_start = True
+                last_word = None
+                last_word_started_statement = False
+                line_break_starts_statement = False
+            index = comment_end
             continue
         if char == '/':
             if expect_expression:
@@ -125,6 +143,7 @@ def _unsupported_bound_shape(source):
             expect_expression = True
             statement_start = False
             last_word = None
+            last_word_started_statement = False
             last_word_is_member = False
             next_word_is_member = False
             continue
@@ -136,24 +155,37 @@ def _unsupported_bound_shape(source):
             word = source[index:stop]
             started_statement = statement_start
             last_word = word
+            last_word_started_statement = started_statement
             last_word_is_member = next_word_is_member
             expect_expression = (
                 not last_word_is_member and word in _REGEX_PREFIX_WORDS)
             statement_start = False
             next_word_is_member = False
             if not last_word_is_member:
-                if started_statement and word in {'async', 'export'}:
-                    declaration_prefix = True
+                if word == 'export' and started_statement:
+                    declaration_prefix = 'export'
+                elif (word == 'default'
+                      and declaration_prefix == 'export'):
+                    pass
+                elif (word == 'async'
+                      and (started_statement or declaration_prefix)):
+                    declaration_prefix = 'async'
                 if word in {'class', 'function'}:
                     declaration = started_statement or declaration_prefix
-                    pending_body = (
-                        declaration, len(control_parens), bracket_depth)
+                    pending_bodies.append((
+                        bool(declaration), len(control_parens),
+                        bracket_depth, False))
                     declaration_prefix = False
                 elif word in _STATEMENT_BODY_WORDS:
-                    pending_body = (
-                        True, len(control_parens), bracket_depth)
+                    pending_bodies.append((
+                        True, len(control_parens), bracket_depth, True))
                 elif word not in {'async', 'default', 'export'}:
                     declaration_prefix = False
+                if word in {'break', 'continue'}:
+                    line_break_starts_statement = True
+                elif word == 'debugger':
+                    expect_expression = True
+                    statement_start = True
             index = stop
             continue
         if char.isdigit():
@@ -164,6 +196,7 @@ def _unsupported_bound_shape(source):
             expect_expression = False
             statement_start = False
             last_word = None
+            last_word_started_statement = False
             last_word_is_member = False
             next_word_is_member = False
             continue
@@ -172,9 +205,14 @@ def _unsupported_bound_shape(source):
             expect_expression = True
             statement_start = False
             last_word = None
+            last_word_started_statement = False
             last_word_is_member = False
             next_word_is_member = False
             continue
+        if (pending_bodies and pending_bodies[-1][3]
+                and char != '{'):
+            pending_bodies.pop()
+        declaration_prefix = False
         if char == '(':
             control_parens.append(
                 not last_word_is_member
@@ -187,9 +225,9 @@ def _unsupported_bound_shape(source):
             statement_start = expect_expression
         elif char == '{':
             depth = (len(control_parens), bracket_depth)
-            if pending_body is not None and pending_body[1:] == depth:
-                close_allows_regex = pending_body[0]
-                pending_body = None
+            if (pending_bodies
+                    and pending_bodies[-1][1:3] == depth):
+                close_allows_regex = pending_bodies.pop()[0]
             else:
                 close_allows_regex = statement_start
             block_braces.append(close_allows_regex)
@@ -217,8 +255,8 @@ def _unsupported_bound_shape(source):
             statement_start = False
             next_word_is_member = True
         elif pair == '=>':
-            pending_body = (
-                False, len(control_parens), bracket_depth)
+            pending_bodies.append((
+                False, len(control_parens), bracket_depth, True))
             expect_expression = True
             statement_start = False
             index += 1
@@ -228,8 +266,10 @@ def _unsupported_bound_shape(source):
         elif char == ';':
             expect_expression = True
             statement_start = True
-            declaration_prefix = False
-            pending_body = None
+            line_break_starts_statement = False
+        elif char == ':' and last_word_started_statement:
+            expect_expression = True
+            statement_start = True
         else:
             expect_expression = True
             statement_start = False
@@ -237,6 +277,7 @@ def _unsupported_bound_shape(source):
             next_word_is_member = False
         last_word_is_member = False
         last_word = None
+        last_word_started_statement = False
         index += 1
     return None
 
