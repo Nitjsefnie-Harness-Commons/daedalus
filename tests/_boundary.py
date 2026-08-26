@@ -34,8 +34,8 @@ async function runCapabilityRoutes() {
     }
   }
   const verificationOriginals = new Map(probedOriginals);
+  const expectedHandlers = new Map(probedOriginals);
   const observations = [];
-  const replacedSymbols = new Set();
   try {
     for (const route of routes) {
       const publishedSymbol = route.symbol;
@@ -54,7 +54,8 @@ async function runCapabilityRoutes() {
       try {
         vm.runInContext(
           publishedSymbol + ' = capabilitySentinel', context);
-        replacedSymbols.add(publishedSymbol);
+        expectedHandlers.set(
+          publishedSymbol, vm.runInContext(publishedSymbol, context));
       } catch (error) {
         delete context.capabilitySentinel;
         observations.push({
@@ -72,18 +73,29 @@ async function runCapabilityRoutes() {
         delete context.capabilityCommand;
         delete context.capabilitySentinel;
       }
-      observations.push({
+      const mutatedSymbols = [];
+      for (const [symbol, expected] of expectedHandlers) {
+        if (symbol !== publishedSymbol
+            && vm.runInContext(symbol, context) !== expected) {
+          mutatedSymbols.push(symbol);
+        }
+      }
+      const observation = {
         symbol: publishedSymbol,
         available: true,
         replaceable: true,
         callCount: calls.length,
         calledType: calls.length ? calls[0].type : null,
         answered: answer === sentinelAnswer,
-      });
+      };
+      if (mutatedSymbols.length) {
+        observation.mutatedSymbols = mutatedSymbols;
+      }
+      observations.push(observation);
     }
   } finally {
-    for (const publishedSymbol of replacedSymbols) {
-      context.capabilityOriginal = probedOriginals.get(publishedSymbol);
+    for (const [publishedSymbol, original] of probedOriginals) {
+      context.capabilityOriginal = original;
       vm.runInContext(
         publishedSymbol + ' = capabilityOriginal', context);
     }

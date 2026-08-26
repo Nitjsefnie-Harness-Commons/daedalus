@@ -414,7 +414,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
 
 
 def test_capability_batch_restores_every_original_handler(tmp):
-    """An earlier route cannot redefine what a later probe restores."""
+    """An earlier route's sibling mutation is reported, then restored."""
     extension = Path(tmp) / 'extension'
     shutil.copytree(ROOT / 'extension', extension)
     background_path = extension / 'background.js'
@@ -440,6 +440,9 @@ def test_capability_batch_restores_every_original_handler(tmp):
         },
     ], background_path=background_path)
 
+    assert result['observations'][0].get('mutatedSymbols') == [
+        'handleSetCookie',
+    ], result
     assert result['restored'] == {
         'handleCookies': True,
         'handleSetCookie': True,
