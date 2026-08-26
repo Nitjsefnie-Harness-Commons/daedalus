@@ -8,12 +8,14 @@ processes. This helper keeps process setup and captured failures consistent.
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 from _repo import ROOT
 
 
 _DASHBOARD_STEP_TIMEOUT_S = 5
 _DASHBOARD_DRAIN_TIMEOUT_S = 0.2
+_BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
 
 _DASHBOARD_PRELUDE = r"""
 const _dashnodeSetTimeout = globalThis.setTimeout;
@@ -38,6 +40,22 @@ function leave(error) {
   process.stderr.write(text, () => process.exit(1));
 }
 """
+
+
+@dataclass(frozen=True)
+class DashboardNodeHarness:
+    """One Node harness source and its validated process-bound metadata."""
+
+    source: str
+    bounded_steps: int
+    module: bool = False
+
+    def __post_init__(self):
+        actual = len(_BOUNDED_AWAIT.findall(self.source))
+        if actual != self.bounded_steps:
+            raise ValueError(
+                f'dashboard harness declares {self.bounded_steps} bounded '
+                f'steps but performs {actual}')
 
 
 def dashboard_child_timeout(bounded_steps,
@@ -67,25 +85,25 @@ def _latest_output(latest, earlier):
     return _output_text(earlier)
 
 
-def run_dashboard_node(source, *arguments, module=False, bounded_steps=1,
+def run_dashboard_node(harness, *arguments,
                        step_timeout=_DASHBOARD_STEP_TIMEOUT_S):
     """Run one dashboard JavaScript harness with captured output."""
     node = shutil.which('node')
     if not node:
         raise AssertionError('node is required to execute dashboard harnesses')
-    options = ['--input-type=module'] if module else []
+    options = ['--input-type=module'] if harness.module else []
     step_timeout_ms = round(step_timeout * 1000)
     timeout_source = (
         f'const _dashnodeStepTimeoutMs = {step_timeout_ms};\n')
     command = [
         node, *options, '--eval',
-        _DASHBOARD_PRELUDE + timeout_source + source,
+        _DASHBOARD_PRELUDE + timeout_source + harness.source,
         *map(str, arguments),
     ]
     process = subprocess.Popen(
         command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding='utf-8', errors='replace')
-    timeout = dashboard_child_timeout(bounded_steps, step_timeout)
+    timeout = dashboard_child_timeout(harness.bounded_steps, step_timeout)
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
