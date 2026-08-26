@@ -236,6 +236,30 @@ def test_diff_coverage_permissions_are_exactly_read_only(tmp):
     _assert_diff_coverage_permissions(_tests_workflow())
 
 
+def test_diff_coverage_installs_the_pinned_statement_analyzer(tmp):
+    """The untrusted job installs coverage.py from its sole pin file."""
+    del tmp
+    pins = [
+        line for line in (ROOT / 'requirements-test.txt').read_text(
+            encoding='utf-8').splitlines()
+        if line.startswith('coverage==')
+    ]
+    assert len(pins) == 1, pins
+    workflow = _tests_workflow()
+    _before, marker, producer = workflow.partition('\n  diff-coverage:\n')
+    assert marker, 'tests workflow has no diff-coverage job'
+    producer, marker, _after = producer.partition('\n  aggregate:\n')
+    assert marker, 'diff-coverage job has no following aggregate job'
+    install = (
+        'python3 -m pip install --requirement requirements-test.txt')
+    assert install in producer, (
+        'diff-coverage does not install coverage.py from '
+        'requirements-test.txt')
+    assert 'coverage==' not in producer, 'workflow duplicated the version pin'
+    assert producer.index(install) < producer.index(
+        '- name: Measure the coverage of this change')
+
+
 def test_permission_whitespace_mutation_is_refused(tmp):
     """Whitespace before the colon cannot hide pull-request write access."""
     del tmp

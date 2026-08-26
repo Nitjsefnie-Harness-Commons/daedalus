@@ -414,6 +414,9 @@ def test_missed_lines_are_collapsed_into_spans(tmp):
 
 def test_the_cli_reports_the_percentage_and_the_misses(tmp):
     """End to end: the script reads both inputs and prints the table."""
+    package = Path(tmp) / 'pkg'
+    package.mkdir()
+    _write(package, 'mod.py', 'one = 1\ntwo = 2\nthree = 3\n\n\n\nseven = 7\n')
     coverage_xml = _write(tmp, 'coverage.xml', _COVERAGE_XML)
     diff = _write(tmp, 'patch.diff',
                   '--- a/pkg/mod.py\n'
@@ -425,7 +428,7 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        capture_output=True, text=True, timeout=60)
+        cwd=tmp, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert '**33.3%** of added lines covered (1/3).' in done.stdout, (
         done.stdout)
@@ -434,6 +437,8 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
 
 def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
     """Hunk counts end one file before the next plain file header."""
+    _write(tmp, 'a.py', 'covered_a = 1\n')
+    _write(tmp, 'b.py', 'untested_b = 1\n')
     coverage_xml = _write(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
     diff = _write(
         tmp, 'plain.diff',
@@ -448,7 +453,7 @@ def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        capture_output=True, text=True, timeout=60)
+        cwd=tmp, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
     assert done.stdout == _HALF_COVERED_OUTPUT, done.stdout
@@ -456,6 +461,8 @@ def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
 
 def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
     """A tab-delimited header timestamp is metadata, not the path."""
+    _write(tmp, 'a.py', 'covered_a = 1\n')
+    _write(tmp, 'b.py', 'untested_b = 1\n')
     coverage_xml = _write(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
     diff = _write(
         tmp, 'timestamp.diff',
@@ -472,7 +479,7 @@ def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        capture_output=True, text=True, timeout=60)
+        cwd=tmp, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
     assert done.stdout == _HALF_COVERED_OUTPUT, done.stdout
@@ -480,6 +487,7 @@ def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
 
 def test_the_cli_names_an_unmeasured_uppercase_python_file(tmp):
     """Python source suffix matching is case-insensitive."""
+    _write(tmp, 'present.py', 'reached = 1\n')
     coverage_xml = _write(
         tmp, 'coverage.xml',
         '<coverage><class filename="present.py"><lines>'
@@ -500,10 +508,58 @@ def test_the_cli_names_an_unmeasured_uppercase_python_file(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        capture_output=True, text=True, timeout=60)
+        cwd=tmp, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
     assert done.stdout == _UPPERCASE_UNMEASURED_OUTPUT, done.stdout
+
+
+def test_the_cli_refuses_missing_or_nonpositive_statement_coordinates(tmp):
+    """Every added source statement needs one positive XML coordinate."""
+    _write(tmp, 'sample.py', 'covered = 1\nuncovered = 2\n')
+    diff = _write(
+        tmp, 'sample.diff',
+        'diff --git a/sample.py b/sample.py\n'
+        '--- /dev/null\n'
+        '+++ b/sample.py\n'
+        '@@ -0,0 +1,2 @@\n'
+        '+covered = 1\n'
+        '+uncovered = 2\n')
+    records = {
+        'omitted': (
+            '<line number="1" hits="1"/>',
+            'coverage report invalid: missing executable statement records '
+            'for sample.py: 2\n'),
+        'zero': ((
+            '<line number="1" hits="1"/>'
+            '<line number="0" hits="0"/>'
+        ), "coverage report invalid: invalid line number for sample.py: '0' "
+            '(must be positive)\n'),
+    }
+    for label, (lines, expected) in records.items():
+        coverage_xml = _write(
+            tmp, f'{label}.xml',
+            '<coverage><class filename="sample.py"><lines>'
+            f'{lines}</lines></class></coverage>\n')
+        done = subprocess.run(
+            [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
+             '--diff', str(diff)], cwd=tmp,
+            capture_output=True, text=True, timeout=60)
+        assert done.returncode == 1, (
+            label, done.returncode, done.stdout, done.stderr)
+        assert done.stdout == '', (label, done.stdout)
+        assert done.stderr == expected, (label, done.stderr)
+
+
+def test_the_cli_fails_loudly_without_the_statement_analyzer(tmp):
+    """An unavailable coverage.py cannot look like validation passed."""
+    del tmp
+    done = subprocess.run(
+        [sys.executable, '-S', str(_SCRIPT), '--help'],
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode != 0, (
+        'diff coverage silently ran without coverage.py')
+    assert "No module named 'coverage'" in done.stderr, done.stderr
 
 
 def test_the_cli_refuses_a_non_integer_coverage_hit_count(tmp):
