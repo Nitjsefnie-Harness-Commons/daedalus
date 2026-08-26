@@ -10,13 +10,12 @@ work or any handles that work owns. A caller that recovers from its timeout
 must cancel those handles itself. The shipped asynchronous harnesses instead
 pass timeout failures to `leave`, which flushes the error and exits the child.
 
-Bound-count validation refuses template expressions and regex literals before
-blanking comments because `blank_js_comments` intentionally does not model
-those shapes. A shallow scan keeps ordinary comments and plain template
-strings on the fast path; sources with an ambiguous slash ask Node's existing
-parser whether it is a regex. A possibly desynchronised blanking must fail
-loudly. Other string content is preserved and must not match the
-whitespace-tolerant bound pattern.
+Bound-count validation refuses unmodelled shapes before blanking comments. A
+shallow scan keeps ordinary comments and plain template strings on the fast
+path, but refuses template expressions and slash tokens. This is the correct
+direction because `blank_js_comments` requires a consumer that meets an
+unmodelled shape to report a violation rather than stay silent. Other string
+content is preserved and must not match the whitespace-tolerant bound pattern.
 """
 import re
 import shutil
@@ -30,32 +29,6 @@ from _repo import ROOT
 _DASHBOARD_STEP_TIMEOUT_S = 5
 _DASHBOARD_DRAIN_TIMEOUT_S = 0.2
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
-
-_REGEX_TOKEN_PROBE = r"""
-const Module = module.constructor;
-const natives = process.binding('natives');
-const acornSource = natives['internal/deps/acorn/acorn/dist/acorn'];
-if (!acornSource) throw new Error('Node did not expose its Acorn parser');
-const acornModule = new Module('dashnode-acorn');
-acornModule._compile(acornSource, 'dashnode-acorn.js');
-const acorn = acornModule.exports;
-let source = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => { source += chunk; });
-process.stdin.on('end', () => {
-  const tree = acorn.parse(source, {
-    ecmaVersion: 'latest', sourceType: process.argv[1]
-  });
-  function containsRegex(value) {
-    if (!value || typeof value !== 'object') return false;
-    if (value.regex) return true;
-    if (Array.isArray(value)) return value.some(containsRegex);
-    return Object.values(value).some(containsRegex);
-  }
-  const hasRegex = containsRegex(tree);
-  process.stdout.write(hasRegex ? 'regex' : 'clear');
-});
-"""
 
 _DASHBOARD_PRELUDE = r"""
 const _dashnodeSetTimeout = globalThis.setTimeout;
@@ -122,37 +95,6 @@ def _ambiguous_bound_shape(source):
     return None
 
 
-def _source_has_regex(source, module):
-    """Ask Node's existing parser whether source contains a regex."""
-    node = shutil.which('node')
-    if not node:
-        raise ValueError(
-            'node is required to inspect dashboard harness slash tokens')
-    try:
-        result = subprocess.run(
-            [node, '--eval', _REGEX_TOKEN_PROBE,
-             'module' if module else 'script'], input=source,
-            capture_output=True, text=True, encoding='utf-8',
-            errors='replace', timeout=_DASHBOARD_STEP_TIMEOUT_S)
-    except subprocess.TimeoutExpired as failure:
-        raise ValueError(
-            'dashboard harness slash inspection timed out after '
-            f'{_DASHBOARD_STEP_TIMEOUT_S}s') from failure
-    if result.returncode or result.stdout not in {'clear', 'regex'}:
-        detail = result.stderr.strip() or repr(result.stdout)
-        raise ValueError(
-            f'dashboard harness slash inspection failed: {detail}')
-    return result.stdout == 'regex'
-
-
-def _unsupported_bound_shape(source, module):
-    """Return the first source shape comment blanking cannot model."""
-    shape = _ambiguous_bound_shape(source)
-    if shape == 'slash token':
-        return 'regex literal' if _source_has_regex(source, module) else None
-    return shape
-
-
 @dataclass(frozen=True)
 class DashboardNodeHarness:
     """One Node harness source and its validated process-bound metadata."""
@@ -162,11 +104,17 @@ class DashboardNodeHarness:
     module: bool = False
 
     def __post_init__(self):
-        unsupported = _unsupported_bound_shape(self.source, self.module)
+        unsupported = _ambiguous_bound_shape(self.source)
         if unsupported:
+            detail = ''
+            if unsupported == 'slash token':
+                detail = (
+                    '; slash tokens include division and regex literals, '
+                    'so hoist the expression out of the harness source or '
+                    'restructure it')
             raise ValueError(
                 'dashboard harness bound count cannot inspect '
-                f'{unsupported}')
+                f'{unsupported} in dashboard harness source{detail}')
         source = blank_js_comments(self.source)
         actual = len(_BOUNDED_AWAIT.findall(source))
         if actual != self.bounded_steps:

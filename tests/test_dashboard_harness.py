@@ -68,17 +68,10 @@ def _harness(source, bounded_steps=0, module=False):
         source, bounded_steps=bounded_steps, module=module)
 
 
-def _assert_regex_refused(*sources, bounded_steps=0):
-    expected = (
-        'dashboard harness bound count cannot inspect regex literal')
-    for source in sources:
-        try:
-            _dashnode.DashboardNodeHarness(
-                source, bounded_steps=bounded_steps, module=True)
-        except ValueError as failure:
-            assert str(failure) == expected, (source, failure)
-        else:
-            raise AssertionError(f'regex harness was accepted: {source!r}')
+_SLASH_REFUSAL = (
+    'dashboard harness bound count cannot inspect slash token in dashboard '
+    'harness source; slash tokens include division and regex literals, so '
+    'hoist the expression out of the harness source or restructure it')
 
 
 def _harness_failure(harness, *arguments, **options):
@@ -327,7 +320,7 @@ def test_harness_metadata_refuses_a_template_expression(tmp):
     except ValueError as failure:
         assert str(failure) == (
             'dashboard harness bound count cannot inspect '
-            'template expression')
+            'template expression in dashboard harness source')
     else:
         raise AssertionError('template-expression harness was accepted')
 
@@ -338,137 +331,25 @@ def test_harness_metadata_refuses_a_regex_literal(tmp):
 const slashOrStar = /[/*]/;
 await bounded(work, 'work', 1);
 """
-    _assert_regex_refused(source)
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=1, module=True)
+    except ValueError as failure:
+        assert str(failure) == _SLASH_REFUSAL
+    else:
+        raise AssertionError('regex-literal harness was accepted')
 
 
-def test_harness_metadata_accepts_division_after_a_keyword_method(tmp):
+def test_harness_metadata_refuses_a_division_slash(tmp):
     del tmp
-    source = 'const half = obj.if(value) / 2;'
-    harness = _dashnode.DashboardNodeHarness(
-        source, bounded_steps=0, module=True)
-    assert harness.source == source
-
-
-def test_harness_metadata_refuses_a_regex_after_a_block(tmp):
-    del tmp
-    source = "{} /abc/; await bounded(work, 'work', 1);"
-    _assert_regex_refused(source, bounded_steps=1)
-
-
-def test_harness_metadata_refuses_an_exported_regex(tmp):
-    del tmp
-    source = 'export default /abc/;'
-    _assert_regex_refused(source)
-
-
-def test_harness_metadata_refuses_regex_after_statement_bodies(tmp):
-    del tmp
-    sources = (
-        'function f() {} /await bounded(foo)/;',
-        'class C {} /await bounded(foo)/;',
-        'if (ok) {} else {} /await bounded(foo)/;',
-        'try {} finally {} /await bounded(foo)/;',
-    )
-    _assert_regex_refused(*sources)
-
-
-def test_harness_metadata_refuses_regex_expression_operands(tmp):
-    del tmp
-    sources = (
-        'const values = [... /await bounded(foo)/];',
-        'class C extends /await bounded(foo)/ {}',
-    )
-    _assert_regex_refused(*sources)
-
-
-def test_harness_metadata_accepts_private_keyword_method_division(tmp):
-    del tmp
-    source = (
-        'class C { #if(value) { return value; } '
-        'half() { return this.#if(4) / 2; } }')
-    harness = _dashnode.DashboardNodeHarness(
-        source, bounded_steps=0, module=True)
-    assert harness.source == source
-
-
-def test_harness_metadata_keeps_nested_declaration_body_goals(tmp):
-    del tmp
-    sources = (
-        'function f(cb = () => {}) {} /await bounded(foo)/;',
-        'class C extends (class {}) {} /await bounded(foo)/;',
-    )
-    _assert_regex_refused(*sources)
-
-
-def test_harness_metadata_preserves_statement_boundaries(tmp):
-    del tmp
-    sources = (
-        'label: {} /await bounded(foo)/;',
-        'debugger\n/await bounded(foo)/;',
-        'while (true) { break\n/await bounded(foo)/; }',
-    )
-    _assert_regex_refused(*sources)
-
-
-def test_harness_metadata_limits_async_declaration_prefixes(tmp):
-    del tmp
-    sources = (
-        'async => function() {} / 2;',
-        'const async = 1; async + function() {} / 2;',
-    )
-    for source in sources:
-        harness = _dashnode.DashboardNodeHarness(
+    source = 'const half = value / 2;'
+    try:
+        _dashnode.DashboardNodeHarness(
             source, bounded_steps=0, module=True)
-        assert harness.source == source
-
-
-def test_harness_metadata_refuses_modern_statement_regexes(tmp):
-    del tmp
-    sources = (
-        'try {} catch {} /await bounded(foo)/;',
-        'async function f(xs) { for await (const x of xs) {} '
-        '/await bounded(foo)/; }',
-    )
-    _assert_regex_refused(*sources)
-
-
-def test_harness_metadata_refuses_regex_in_expression_bodies(tmp):
-    del tmp
-    sources = (
-        'const f = () => { function g() {} '
-        '/await bounded(foo)/; };',
-        'const f = function() { function g() {} '
-        '/await bounded(foo)/; };',
-    )
-    _assert_regex_refused(*sources)
-
-
-def test_harness_metadata_accepts_valid_division_contexts(tmp):
-    del tmp
-    sources = (
-        ('const of = 4; of / 2;', True),
-        ('with ({value: 4}) { value / 2; }', False),
-        ('var await = 4; await / 2;', False), ('const x = 010 / 2;', False),
-    )
-    for source, module in sources:
-        harness = _dashnode.DashboardNodeHarness(
-            source, bounded_steps=0, module=module)
-        assert harness.source == source
-
-
-def test_harness_metadata_handles_every_line_terminator(tmp):
-    del tmp
-    sources = (
-        'while (true) { break/*\r*/ /await bounded(foo)/; }',
-        'debugger // comment\u2028/await bounded(foo)/;',
-    )
-    _assert_regex_refused(*sources)
-
-
-def test_harness_metadata_refuses_regex_after_named_export(tmp):
-    del tmp
-    source = 'const x = 1; export {x}\n/await bounded(foo)/;'
-    _assert_regex_refused(source)
+    except ValueError as failure:
+        assert str(failure) == _SLASH_REFUSAL
+    else:
+        raise AssertionError('division slash was accepted')
 
 
 def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
@@ -480,18 +361,10 @@ def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
         behaviour._DASHBOARD_WORLD_HARNESS,
         behaviour._TAB_SELECTOR_HARNESS,
     )
-    parser = _dashnode._source_has_regex
-
-    def unexpected_parser(_source, _module):
-        raise AssertionError('shipped harness reached the slash parser')
-    _dashnode._source_has_regex = unexpected_parser
-    try:
-        rebuilt = tuple(
-            _dashnode.DashboardNodeHarness(
-                harness.source, harness.bounded_steps, harness.module)
-            for harness in shipped)
-    finally:
-        _dashnode._source_has_regex = parser
+    rebuilt = tuple(
+        _dashnode.DashboardNodeHarness(
+            harness.source, harness.bounded_steps, harness.module)
+        for harness in shipped)
     assert rebuilt == shipped
 
 
