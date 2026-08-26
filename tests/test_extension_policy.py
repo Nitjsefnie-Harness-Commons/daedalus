@@ -23,6 +23,19 @@ from _worker_sources import (imported_worker_paths,  # noqa: E402
 # install-time warning has nothing to say about it.
 _GM_NON_CAPABILITIES = frozenset({'GM.info'})
 
+_JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
+_TOP_LEVEL_DECLARATION = re.compile(
+    rf'\b(?:async\s+)?function\s+({_JS_IDENTIFIER})\s*\('
+    rf'|\bclass\s+({_JS_IDENTIFIER})\b'
+    rf'|\b(?:const|let|var)\s+({_JS_IDENTIFIER})\b')
+_WORKER_PLATFORM_GLOBALS = frozenset({
+    'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
+    'Promise', 'Set', 'String', 'TextDecoder', 'URL',
+    'Uint8Array', 'atob', 'btoa', 'chrome', 'clearInterval', 'clearTimeout',
+    'console', 'crypto', 'fetch', 'parseInt', 'performance', 'setInterval',
+    'setTimeout',
+})
+
 
 def _worker_sources():
     return [
@@ -31,23 +44,112 @@ def _worker_sources():
     ]
 
 
+def _top_level_matches(source, pattern):
+    mask = js_mask(source)
+    top_level = []
+    depth = 0
+    for char in mask:
+        top_level.append(depth == 0)
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            depth -= 1
+    return [
+        match for match in pattern.finditer(mask)
+        if top_level[match.start()]
+    ]
+
+
+def _top_level_declarations(source):
+    return {
+        next(group for group in match.groups() if group is not None)
+        for match in _top_level_matches(source, _TOP_LEVEL_DECLARATION)
+    }
+
+
+def _directive_names(source, directive):
+    names = set()
+    pattern = re.compile(rf'/\*\s*{directive}\b([^*]*)\*/')
+    for match in pattern.finditer(source):
+        for item in match.group(1).split(','):
+            name = item.strip().partition(':')[0]
+            if name:
+                assert re.fullmatch(_JS_IDENTIFIER, name), (
+                    f'unreadable {directive} directive entry {name!r}')
+                names.add(name)
+    return names
+
+
+def _dispatch_routes_to(source, command_type, symbol):
+    mask = js_mask(source)
+    declaration = re.search(r'\bfunction\s+dispatchCommand\s*\(', mask)
+    assert declaration, 'dispatchCommand declaration not found'
+    body_start = mask.index('{', declaration.end())
+    body_end = js_bracket_end(mask, body_start)
+    body = source[body_start:body_end]
+    route = re.compile(
+        rf"case\s+'{re.escape(command_type)}'\s*:\s*"
+        rf'return\s+{re.escape(symbol)}\s*\(\s*cmd\s*\)\s*;')
+    for match in route.finditer(body):
+        offset = body_start + match.start()
+        if mask[offset:offset + len('case')] == 'case':
+            return True
+    return False
+
+
 def test_each_worker_capability_lives_in_its_own_module(tmp):
     del tmp
     background = (ROOT / 'extension' / 'background.js').read_text(
         encoding='utf-8')
-    capabilities = [('worker/cookies.js', 'handleCookies')]
+    capabilities = [('worker/cookies.js', 'handleCookies', 'cookies')]
 
-    for relative, symbol in capabilities:
+    for relative, symbol, command_type in capabilities:
         module_path = ROOT / 'extension' / relative
         assert module_path.is_file(), f'{relative} does not exist'
         module = module_path.read_text(encoding='utf-8')
-        declaration = re.compile(
-            rf'^(?:async\s+)?function\s+{re.escape(symbol)}\s*\(',
-            re.MULTILINE)
-        assert declaration.search(module), (
+        assert symbol in _top_level_declarations(module), (
             f'{relative} does not declare {symbol} at top level')
-        assert not declaration.search(background), (
+        assert symbol not in _top_level_declarations(background), (
             f'background.js still declares {symbol} at top level')
+        assert _dispatch_routes_to(background, command_type, symbol), (
+            f"background.js dispatch for {command_type!r} does not route "
+            f'to {symbol}')
+
+
+def test_worker_module_directives_resolve_to_worker_symbols(tmp):
+    del tmp
+    worker_sources = _worker_sources()
+    declarations = {
+        name
+        for _, source in worker_sources
+        for name in _top_level_declarations(source)
+    }
+    worker_code = '\n'.join(js_mask(source) for _, source in worker_sources)
+    unused_platform_names = sorted(
+        name for name in _WORKER_PLATFORM_GLOBALS
+        if not re.search(rf'\b{re.escape(name)}\b', worker_code)
+    )
+    assert not unused_platform_names, (
+        'worker platform allowlist contains unused names: '
+        f'{unused_platform_names}')
+
+    unresolved = {}
+    unpublished = {}
+    for relative, source in worker_sources:
+        if not relative.startswith('extension/worker/'):
+            continue
+        consumed = _directive_names(source, 'global')
+        missing = consumed - declarations - _WORKER_PLATFORM_GLOBALS
+        if missing:
+            unresolved[relative] = sorted(missing)
+        exported = _directive_names(source, 'exported')
+        absent = exported - _top_level_declarations(source)
+        if absent:
+            unpublished[relative] = sorted(absent)
+    assert not unresolved, (
+        f'worker modules consume undeclared names: {unresolved}')
+    assert not unpublished, (
+        f'worker modules export undeclared names: {unpublished}')
 
 
 def test_worker_imports_match_worker_modules(tmp):
@@ -111,18 +213,30 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
     assert len(declared) == 1, f'expected one CLI declaration, found {declared}'
     mcp = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
 
-    extension_declared = [
-        (name, int(match.group(1)))
+    declaration_pattern = re.compile(
+        r'\b(?:const|let|var)\s+NET_CAPTURE_MAX\b')
+    extension_declarations = [
+        (name, source, match)
         for name, source in worker_sources
-        for match in re.finditer(r'NET_CAPTURE_MAX = (\d+)', source)
+        for match in declaration_pattern.finditer(js_mask(source))
     ]
-    assert len(extension_declared) == 1, (
-        'expected one extension declaration, found '
-        f'{extension_declared}')
+    declaration_sites = [name for name, _, _ in extension_declarations]
+    assert len(extension_declarations) == 1, (
+        'expected one extension NET_CAPTURE_MAX declaration, found '
+        f'{declaration_sites}')
+    extension_name, extension_source, declaration = (
+        extension_declarations[0])
+    literal = re.match(
+        r'\b(?:const|let|var)\s+NET_CAPTURE_MAX\s*=\s*(\d+)\s*;',
+        js_mask(extension_source)[declaration.start():])
+    assert literal, (
+        f'{extension_name} NET_CAPTURE_MAX declaration is not a decimal '
+        'literal')
+    extension_declared = (extension_name, int(literal.group(1)))
     mcp_match = re.search(r'NET_CAPTURE_MAX = (\d+)', mcp)
     assert mcp_match, 'no capture ceiling declared in mcp_server.py'
     values = {
-        extension_declared[0][0]: extension_declared[0][1],
+        extension_declared[0]: extension_declared[1],
         'mcp_server.py': int(mcp_match.group(1)),
     }
     values[f'daedalus_cli/{declared[0][0]}'] = declared[0][1]
