@@ -13,6 +13,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    import resource
+except ImportError:
+    resource = None
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -80,6 +85,32 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
+_SLOW_PASSING_SUITE = """import json, os, time
+
+time.sleep(0.4)
+summary = {
+    'total': 1,
+    'passed': 1,
+    'skipped': 0,
+    'failed': 0,
+    'requires': None,
+}
+with open(os.environ['DAEDALUS_TEST_SUMMARY'], 'w',
+          encoding='utf-8') as destination:
+    json.dump(summary, destination)
+"""
+
+
+_HIGH_CPU_SITE = """import os
+os.cpu_count = lambda: 64
+"""
+
+
+_BAD_EXECUTABLE_SITE = """import os, sys
+sys.executable = os.path.dirname(__file__)
+"""
+
+
 def _invalid_output_suite(passed, failed, returncode):
     return f"""import json, os
 
@@ -98,7 +129,8 @@ raise SystemExit({returncode})
 """
 
 
-def _runner_tree(tmp, suites, under='.', runner_encoding=None):
+def _runner_tree(tmp, suites, under='.', runner_encoding=None,
+                 sitecustomize=None, before_exec=None):
     """A copy of run_tests.py over fabricated suites, run where it stands.
 
     `under` names a PARENT directory, so one test can build two trees and
@@ -114,14 +146,23 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None):
     shutil.copy2(ROOT / 'tests' / '_util.py', root / 'tests' / '_util.py')
     for name, source in suites.items():
         (root / 'tests' / name).write_text(source, encoding='utf-8')
+    if sitecustomize:
+        (root / 'sitecustomize.py').write_text(sitecustomize,
+                                               encoding='utf-8')
     env = dict(os.environ)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
+    if sitecustomize:
+        inherited_path = env.get('PYTHONPATH')
+        env['PYTHONPATH'] = str(root)
+        if inherited_path:
+            env['PYTHONPATH'] += os.pathsep + inherited_path
     if runner_encoding:
         env['PYTHONIOENCODING'] = runner_encoding
     return subprocess.run(
         [sys.executable, 'run_tests.py'], cwd=str(root), env=env,
         capture_output=True, text=True,
-        encoding=runner_encoding or 'utf-8', timeout=300)
+        encoding=runner_encoding or 'utf-8', timeout=300,
+        preexec_fn=before_exec)
 
 
 def test_a_suite_that_ran_no_coverage_is_not_an_overall_pass(tmp):
@@ -235,6 +276,41 @@ def test_legacy_stdout_does_not_hide_a_passing_verdict(tmp):
     assert '\n?\n' in result.stdout, result.stdout
     assert 'OVERALL: PASS' in result.stdout, result.stdout
     assert result.returncode == 0, (result.returncode, result.stdout)
+
+
+def test_output_capture_survives_a_low_descriptor_limit(tmp):
+    """Healthy concurrent suites must fit under a modest descriptor limit."""
+    if resource is None or not hasattr(resource, 'RLIMIT_NOFILE'):
+        _util.skip('RLIMIT_NOFILE is unavailable on this platform')
+    hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+    if hard_limit != resource.RLIM_INFINITY and hard_limit < 64:
+        _util.skip('RLIMIT_NOFILE hard limit is below the test limit')
+
+    def limit_descriptors():
+        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+
+    suites = {
+        f'test_descriptor_{number:02d}.py': _SLOW_PASSING_SUITE
+        for number in range(39)
+    }
+    result = _runner_tree(
+        tmp, suites, sitecustomize=_HIGH_CPU_SITE,
+        before_exec=limit_descriptors)
+    assert 'Traceback' not in result.stderr, result.stderr
+    assert 'OVERALL: PASS' in result.stdout, result.stdout
+    assert result.returncode == 0, (result.returncode, result.stdout)
+
+
+def test_a_launch_failure_is_aggregated(tmp):
+    """One child launch error must not erase the aggregate failure verdict."""
+    result = _runner_tree(
+        tmp, {'test_minimal.py': _PASSING_SUITE},
+        sitecustomize=_BAD_EXECUTABLE_SITE)
+    assert 'Traceback' not in result.stderr, result.stderr
+    assert '=== test_minimal.py ===' in result.stdout, result.stdout
+    assert 'LAUNCH FAILED:' in result.stdout, result.stdout
+    assert 'FAILED: test_minimal.py' in result.stdout, result.stdout
+    assert result.returncode != 0, (result.returncode, result.stdout)
 
 
 def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
