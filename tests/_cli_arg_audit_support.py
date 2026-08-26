@@ -32,6 +32,10 @@ import sys
 # ``do_tabs`` reads args.json through getattr(); keep that access documented
 # even though the audit resolves constant indirect reads itself.
 KNOWN_INDIRECT_ARG_READS = (('tabs', 'json', 'do_tabs'),)
+SHADOWING_DEFAULT_CASES = (
+    'def inner(args=args):\n    return args.undeclared_probe\ninner()',
+    'f = lambda args=args: args.undeclared_probe\nf()',
+)
 PERMITTED_NAMESPACE_READ_CASES = (
     ('args.json', 'args.undeclared_probe', True),
     ("getattr(args, 'json')", "getattr(args, 'undeclared_probe')", True),
@@ -67,9 +71,6 @@ NAMESPACE_ESCAPE_CASES = (
     ('hasattr(args, some_variable)', 'hasattr(args, some_variable)'),
     ('helper(vars(args))', 'vars(args)'),
     ('args.__dict__', 'args.__dict__'),
-    ('def inner(args=args):\n    return args.undeclared_probe\ninner()',
-     'args=args'),
-    ('f = lambda args=args: args.undeclared_probe\nf()', 'args=args'),
     ("getattr = helper\ngetattr(args, 'json', False)",
      "getattr(args, 'json', False)"),
     ("hasattr = helper\nhasattr(args, 'json')", "hasattr(args, 'json')"),
