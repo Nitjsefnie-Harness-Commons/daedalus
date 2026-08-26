@@ -7,6 +7,7 @@ the real Node subprocess boundary and the exact evidence returned to Python.
 import contextlib
 import http.server
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -159,8 +160,21 @@ def _harness_failure(background, inner_wait=1, commands=None, order=None,
 
 
 def _assert_step_trace(failure, labels):
-    expected = ''.join(f'[step] {label}\\n' for label in labels)
-    assert expected in failure, failure
+    marker = '[step] '
+    trace_start = failure.find(marker)
+    trace_text = failure[trace_start:] if trace_start >= 0 else ''
+    trace_text = trace_text.replace('\\n', '\n')
+    actual = re.findall(r'^\[step\] (.+)$', trace_text, re.MULTILINE)
+    position = 0
+    for expected in labels:
+        try:
+            position = actual.index(expected, position) + 1
+        except ValueError as mismatch:
+            reason = 'out of order' if expected in actual else 'missing'
+            raise AssertionError(
+                f'expected step {expected!r} was {reason}; '
+                f'actual step labels: {actual}'
+            ) from mismatch
 
 
 def _client_env():
