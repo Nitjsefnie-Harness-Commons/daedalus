@@ -12,9 +12,11 @@ pass timeout failures to `leave`, which flushes the error and exits the child.
 
 Bound-count validation refuses template expressions and regex literals before
 blanking comments because `blank_js_comments` intentionally does not model
-those shapes. A possibly desynchronised blanking must fail loudly. Plain
-template strings and ordinary comments remain supported. Other string content
-is preserved and must not match the whitespace-tolerant bound pattern.
+those shapes. A shallow scan keeps ordinary comments and plain template
+strings on the fast path; sources with an ambiguous slash ask Node's existing
+parser whether it is a regex. A possibly desynchronised blanking must fail
+loudly. Other string content is preserved and must not match the
+whitespace-tolerant bound pattern.
 """
 import re
 import shutil
@@ -28,15 +30,32 @@ from _repo import ROOT
 _DASHBOARD_STEP_TIMEOUT_S = 5
 _DASHBOARD_DRAIN_TIMEOUT_S = 0.2
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
-_REGEX_PREFIX_WORDS = frozenset({
-    'await', 'case', 'default', 'delete', 'do', 'else', 'in',
-    'extends', 'instanceof', 'new', 'of', 'return', 'throw', 'typeof',
-    'void', 'yield',
-})
-_CONTROL_PAREN_WORDS = frozenset({
-    'catch', 'for', 'if', 'switch', 'while', 'with',
-})
-_STATEMENT_BODY_WORDS = frozenset({'do', 'else', 'finally', 'try'})
+
+_REGEX_TOKEN_PROBE = r"""
+const Module = module.constructor;
+const natives = process.binding('natives');
+const acornSource = natives['internal/deps/acorn/acorn/dist/acorn'];
+if (!acornSource) throw new Error('Node did not expose its Acorn parser');
+const acornModule = new Module('dashnode-acorn');
+acornModule._compile(acornSource, 'dashnode-acorn.js');
+const acorn = acornModule.exports;
+let source = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { source += chunk; });
+process.stdin.on('end', () => {
+  const tree = acorn.parse(source, {
+    ecmaVersion: 'latest', sourceType: 'module'
+  });
+  function containsRegex(value) {
+    if (!value || typeof value !== 'object') return false;
+    if (value.regex) return true;
+    if (Array.isArray(value)) return value.some(containsRegex);
+    return Object.values(value).some(containsRegex);
+  }
+  const hasRegex = containsRegex(tree);
+  process.stdout.write(hasRegex ? 'regex' : 'clear');
+});
+"""
 
 _DASHBOARD_PRELUDE = r"""
 const _dashnodeSetTimeout = globalThis.setTimeout;
@@ -63,45 +82,18 @@ function leave(error) {
 """
 
 
-def _unsupported_bound_shape(source):
-    """Return the first JavaScript shape comment blanking cannot model."""
+def _ambiguous_bound_shape(source):
+    """Return a shape needing more than comment blanking can provide."""
     index, end = 0, len(source)
-    expect_expression = True
-    statement_start = True
-    last_word = None
-    last_word_started_statement = False
-    last_word_is_member = False
-    next_word_is_member = False
-    declaration_prefix = False
-    pending_bodies = []
-    line_break_starts_statement = False
-    control_parens = []
-    block_braces = []
-    bracket_depth = 0
     while index < end:
         char = source[index]
         pair = source[index:index + 2]
-        if char.isspace():
-            if (char in '\r\n' and line_break_starts_statement):
-                expect_expression = True
-                statement_start = True
-                last_word = None
-                last_word_started_statement = False
-                line_break_starts_statement = False
-            index += 1
-            continue
         if char in "'\"":
             quote = char
             index += 1
             while index < end and source[index] != quote:
                 index += 2 if source[index] == '\\' else 1
             index += index < end
-            expect_expression = False
-            statement_start = False
-            last_word = None
-            last_word_started_statement = False
-            last_word_is_member = False
-            next_word_is_member = False
             continue
         if char == '`':
             index += 1
@@ -113,173 +105,51 @@ def _unsupported_bound_shape(source):
                 else:
                     index += 1
             index += index < end
-            expect_expression = False
-            statement_start = False
-            last_word = None
-            last_word_started_statement = False
-            last_word_is_member = False
-            next_word_is_member = False
             continue
         if pair == '//':
-            newline = source.find('\n', index + 2)
-            index = end if newline < 0 else newline
+            terminators = [
+                position for marker in ('\r', '\n', '\u2028', '\u2029')
+                if (position := source.find(marker, index + 2)) >= 0]
+            index = min(terminators, default=end)
             continue
         if pair == '/*':
             close = source.find('*/', index + 2)
-            comment_end = end if close < 0 else close + 2
-            if ('\n' in source[index:comment_end]
-                    and line_break_starts_statement):
-                expect_expression = True
-                statement_start = True
-                last_word = None
-                last_word_started_statement = False
-                line_break_starts_statement = False
-            index = comment_end
+            index = end if close < 0 else close + 2
             continue
         if char == '/':
-            if expect_expression:
-                return 'regex literal'
-            index += 2 if pair == '/=' else 1
-            expect_expression = True
-            statement_start = False
-            last_word = None
-            last_word_started_statement = False
-            last_word_is_member = False
-            next_word_is_member = False
-            continue
-        if char.isalpha() or char in '_$':
-            stop = index + 1
-            while (stop < end
-                   and (source[stop].isalnum() or source[stop] in '_$')):
-                stop += 1
-            word = source[index:stop]
-            started_statement = statement_start
-            last_word = word
-            last_word_started_statement = started_statement
-            last_word_is_member = next_word_is_member
-            expect_expression = (
-                not last_word_is_member and word in _REGEX_PREFIX_WORDS)
-            statement_start = False
-            next_word_is_member = False
-            if not last_word_is_member:
-                if word == 'export' and started_statement:
-                    declaration_prefix = 'export'
-                elif (word == 'default'
-                      and declaration_prefix == 'export'):
-                    pass
-                elif (word == 'async'
-                      and (started_statement or declaration_prefix)):
-                    declaration_prefix = 'async'
-                if word in {'class', 'function'}:
-                    declaration = started_statement or declaration_prefix
-                    pending_bodies.append((
-                        bool(declaration), len(control_parens),
-                        bracket_depth, False))
-                    declaration_prefix = False
-                elif word in _STATEMENT_BODY_WORDS:
-                    pending_bodies.append((
-                        True, len(control_parens), bracket_depth, True))
-                elif word not in {'async', 'default', 'export'}:
-                    declaration_prefix = False
-                if word in {'break', 'continue'}:
-                    line_break_starts_statement = True
-                elif word == 'debugger':
-                    expect_expression = True
-                    statement_start = True
-            index = stop
-            continue
-        if char.isdigit():
-            index += 1
-            while (index < end
-                   and (source[index].isalnum() or source[index] in '._')):
-                index += 1
-            expect_expression = False
-            statement_start = False
-            last_word = None
-            last_word_started_statement = False
-            last_word_is_member = False
-            next_word_is_member = False
-            continue
-        if source[index:index + 3] == '...':
-            index += 3
-            expect_expression = True
-            statement_start = False
-            last_word = None
-            last_word_started_statement = False
-            last_word_is_member = False
-            next_word_is_member = False
-            continue
-        if (pending_bodies and pending_bodies[-1][3]
-                and char != '{'):
-            pending_bodies.pop()
-        declaration_prefix = False
-        if char == '(':
-            control_parens.append(
-                not last_word_is_member
-                and last_word in _CONTROL_PAREN_WORDS)
-            expect_expression = True
-            statement_start = False
-        elif char == ')':
-            expect_expression = (
-                control_parens.pop() if control_parens else False)
-            statement_start = expect_expression
-        elif char == '{':
-            depth = (len(control_parens), bracket_depth)
-            if (pending_bodies
-                    and pending_bodies[-1][1:3] == depth):
-                close_allows_regex = pending_bodies.pop()[0]
-            else:
-                close_allows_regex = statement_start
-            block_braces.append(close_allows_regex)
-            expect_expression = True
-            statement_start = close_allows_regex
-        elif char == '}':
-            close_allows_regex = (
-                block_braces.pop() if block_braces else True)
-            expect_expression = close_allows_regex
-            statement_start = close_allows_regex
-        elif char == '[':
-            bracket_depth += 1
-            expect_expression = True
-            statement_start = False
-        elif char == ']':
-            bracket_depth = max(0, bracket_depth - 1)
-            expect_expression = False
-            statement_start = False
-        elif char == '.':
-            expect_expression = False
-            statement_start = False
-            next_word_is_member = True
-        elif char == '#':
-            expect_expression = False
-            statement_start = False
-            next_word_is_member = True
-        elif pair == '=>':
-            pending_bodies.append((
-                False, len(control_parens), bracket_depth, True))
-            expect_expression = True
-            statement_start = False
-            index += 1
-        elif char in '+-' and pair == char * 2:
-            index += 1
-            statement_start = False
-        elif char == ';':
-            expect_expression = True
-            statement_start = True
-            line_break_starts_statement = False
-        elif char == ':' and last_word_started_statement:
-            expect_expression = True
-            statement_start = True
-        else:
-            expect_expression = True
-            statement_start = False
-        if char not in '.#':
-            next_word_is_member = False
-        last_word_is_member = False
-        last_word = None
-        last_word_started_statement = False
+            return 'slash token'
         index += 1
     return None
+
+
+def _source_has_regex(source):
+    """Ask Node's existing parser whether source contains a regex."""
+    node = shutil.which('node')
+    if not node:
+        raise ValueError(
+            'node is required to inspect dashboard harness slash tokens')
+    try:
+        result = subprocess.run(
+            [node, '--eval', _REGEX_TOKEN_PROBE], input=source,
+            capture_output=True, text=True, encoding='utf-8',
+            errors='replace', timeout=_DASHBOARD_STEP_TIMEOUT_S)
+    except subprocess.TimeoutExpired as failure:
+        raise ValueError(
+            'dashboard harness slash inspection timed out after '
+            f'{_DASHBOARD_STEP_TIMEOUT_S}s') from failure
+    if result.returncode or result.stdout not in {'clear', 'regex'}:
+        detail = result.stderr.strip() or repr(result.stdout)
+        raise ValueError(
+            f'dashboard harness slash inspection failed: {detail}')
+    return result.stdout == 'regex'
+
+
+def _unsupported_bound_shape(source):
+    """Return the first source shape comment blanking cannot model."""
+    shape = _ambiguous_bound_shape(source)
+    if shape == 'slash token':
+        return 'regex literal' if _source_has_regex(source) else None
+    return shape
 
 
 @dataclass(frozen=True)
