@@ -43,6 +43,7 @@ import argparse
 import ast
 import builtins  # pylint: disable=unused-import
 import inspect
+import os
 import sys
 import textwrap
 import types
@@ -64,6 +65,7 @@ _REAL_STORAGE_DISPATCH_CASES = (
      'PROBE_READS.append(args.undeclared_probe); return',
      ('--undeclared-probe', 'present'), ('present',)),
 )
+_BRIDGE_ENV_NAMES = ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN')
 
 
 def _binding_names(target):
@@ -378,8 +380,16 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
     from daedalus_cli import cli
     original_handler = cli.DISPATCH['tabs']
     original_argv = sys.argv
+    original_api = handler_module.api
+    original_environment = {
+        name: os.environ.pop(name, None) for name in _BRIDGE_ENV_NAMES}
+
+    def refuse_api(*_args, **_kwargs):
+        raise AssertionError('real dispatch did not read undeclared_probe')
+
     cli.DISPATCH['tabs'] = handler_module.do_tabs
     sys.argv = ['daedalus', 'tabs']
+    handler_module.api = refuse_api
     try:
         cli.main()
     except AttributeError as error:
@@ -390,6 +400,50 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
     finally:
         cli.DISPATCH['tabs'] = original_handler
         sys.argv = original_argv
+        handler_module.api = original_api
+        for name, value in original_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def test_cli_real_dispatch_helper_neutralizes_bridge(tmp):
+    bridge_environment = {
+        name: f'test-{name}' for name in _BRIDGE_ENV_NAMES}
+    original_environment = {
+        name: os.environ.get(name) for name in _BRIDGE_ENV_NAMES}
+    os.environ.update(bridge_environment)
+    body = ("PROBE_ENV.append((os.environ.get('DAEDALUS_URL'), "
+            "os.environ.get('DAEDALUS_TOKEN')))")
+    handler_module = _mutated_cli_tabs(
+        'neutralized_dispatch_cli', 'PROBE_ENV = []', body)
+    calls = []
+
+    def record_api(*args, **kwargs):
+        calls.append((args, kwargs))
+        return []
+
+    handler_module.api = record_api
+    try:
+        try:
+            _assert_real_tabs_dispatch_crashes(handler_module)
+        except AssertionError as error:
+            assert str(error) == \
+                'real dispatch did not read undeclared_probe', error
+        else:
+            assert False, 'helper accepted a mutation without the probe read'
+        assert calls == [], calls
+        assert handler_module.PROBE_ENV == [(None, None)]
+        assert {name: os.environ.get(name) for name in _BRIDGE_ENV_NAMES} == \
+            bridge_environment
+    finally:
+        for name, value in original_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        sys.modules.pop(handler_module.__dict__['__name__'], None)
 
 
 def test_cli_audit_excludes_dest_suppress_action(tmp):
