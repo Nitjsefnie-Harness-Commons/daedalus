@@ -205,8 +205,8 @@ async function waitForResultConsume() {
   }))));
   step('the overlap harness finished');
 })().catch((error) => {
-  process.stderr.write((error.stack || String(error)) + '\n');
-  process.exitCode = 1;
+  const text = (error.stack || String(error)) + '\n';
+  process.stderr.write(text, () => process.exit(1));
 });
 """
 
@@ -300,6 +300,8 @@ def client_states(processes, grace):
                 try:
                     proc.wait(timeout=grace)
                 except subprocess.TimeoutExpired:
+                    # Preserve the recorded drain failure instead of replacing
+                    # it with another exception from this diagnostic helper.
                     pass
         states[owner] = {
             'stillRunning': still_running,
