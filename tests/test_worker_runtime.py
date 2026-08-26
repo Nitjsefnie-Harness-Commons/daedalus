@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Focused runtime-observer and clean-tree worker controls."""
+import json
 import os
 import shutil
 import subprocess
@@ -7,7 +8,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boundary  # noqa: E402
 import _util  # noqa: E402
+import _worker_runtime  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_runtime import observe_worker_runtime  # noqa: E402
 
@@ -115,6 +118,75 @@ handleCookies = function replacement() {};
     assert observed['events']['handleCookies'] == {
         'declarations': 1, 'writes': 1,
     }
+
+
+def test_worker_harness_programs_use_cleaned_temporary_files(tmp):
+    """Every Node harness keeps its program out of argv and cleans its file."""
+    root = Path(tmp)
+    log_path = root / 'node-programs.jsonl'
+    probe = f"""
+const fs = require('fs');
+fs.appendFileSync({json.dumps(str(log_path))}, JSON.stringify({{
+  filename: __filename,
+  dirname: __dirname,
+  argv: process.argv.slice(1),
+}}) + '\\n');
+const scenario = process.argv[2];
+if (scenario === 'worker-sources') process.stdout.write('[]');
+else if (scenario === 'worker-bindings') {{
+  process.stdout.write(JSON.stringify({{
+    sources: {{}}, shared: {{ loaded: [], error: null }},
+  }}));
+}} else process.stdout.write('{{}}');
+"""
+    boundary_program = _boundary.HARNESS
+    observer_program = _worker_runtime.OBSERVER
+    _boundary.HARNESS = probe
+    _worker_runtime.OBSERVER = probe
+    try:
+        _boundary.run_extension_result_boundary('capacity')
+        _boundary.run_extension_capability_routes([])
+        _boundary.observe_extension_worker_paths()
+        _worker_runtime.observe_worker_runtime([])
+    finally:
+        _boundary.HARNESS = boundary_program
+        _worker_runtime.OBSERVER = observer_program
+
+    records = [json.loads(line) for line in log_path.read_text(
+        encoding='utf-8').splitlines()]
+    assert len(records) == 4, records
+    assert [record['argv'][1] for record in records] == [
+        'capacity', 'capability-routes', 'worker-sources', 'worker-bindings',
+    ]
+    for record in records:
+        program_path = Path(record['filename'])
+        assert program_path.name == 'program.js', record
+        assert record['dirname'] == str(program_path.parent), record
+        assert not program_path.exists(), record
+
+
+def test_failing_worker_harness_cleans_its_temporary_file(tmp):
+    """A Node failure cannot leak the file that carried its program."""
+    marker = Path(tmp) / 'failed-program-path.txt'
+    program = _boundary.HARNESS
+    _boundary.HARNESS = f"""
+require('fs').writeFileSync(
+  {json.dumps(str(marker))}, __filename, 'utf8');
+throw new Error('forced harness failure');
+"""
+    try:
+        try:
+            _boundary.run_extension_result_boundary('capacity')
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError('forced harness failure unexpectedly passed')
+    finally:
+        _boundary.HARNESS = program
+
+    program_path = Path(marker.read_text(encoding='utf-8'))
+    assert program_path.name == 'program.js', program_path
+    assert not program_path.exists(), program_path
 
 
 def test_sibling_mutation_failure_names_module_type_and_handlers(tmp):
