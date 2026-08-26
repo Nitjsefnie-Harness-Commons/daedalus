@@ -6,6 +6,7 @@ pass is the one thing the aggregate line must never do — it is what a reader
 and CI both key on. These tests run the runner over trees built to produce
 each verdict.
 """
+import importlib.util
 import os
 import re
 import shutil
@@ -88,6 +89,22 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 _SLOW_PASSING_SUITE = """import json, os, time
 
 time.sleep(5)
+summary = {
+    'total': 1,
+    'passed': 1,
+    'skipped': 0,
+    'failed': 0,
+    'requires': None,
+}
+with open(os.environ['DAEDALUS_TEST_SUMMARY'], 'w',
+          encoding='utf-8') as destination:
+    json.dump(summary, destination)
+"""
+
+
+_LONG_PASSING_SUITE = """import json, os, time
+
+time.sleep(60)
 summary = {
     'total': 1,
     'passed': 1,
@@ -312,6 +329,78 @@ def test_a_launch_failure_is_aggregated(tmp):
     assert 'LAUNCH FAILED:' in result.stdout, result.stdout
     assert 'FAILED: test_minimal.py' in result.stdout, result.stdout
     assert result.returncode != 0, (result.returncode, result.stdout)
+
+
+def test_output_close_failure_reaps_the_spawned_suite(tmp):
+    """A post-spawn output error must not leave its child alive."""
+    tree = Path(tmp) / 'tree'
+    suite = tree / 'tests' / 'test_long_pass.py'
+    suite.parent.mkdir(parents=True)
+    suite.write_text(_LONG_PASSING_SUITE, encoding='utf-8')
+    summaries = tree / 'summaries'
+    summaries.mkdir()
+    spec = importlib.util.spec_from_file_location(
+        'runner_with_close_failure', ROOT / 'run_tests.py')
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+
+    original_open = runner.Path.open
+    original_popen = runner.subprocess.Popen
+    spawned = []
+
+    class CloseFailure:
+        """Close the real handle, then reproduce its failing context exit."""
+
+        def __init__(self, output):
+            self.output = output
+
+        def __enter__(self):
+            return self.output
+
+        def __exit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            self.output.close()
+            raise OSError('injected output close failure')
+
+    def failing_output_open(path, *args, **kwargs):
+        output = original_open(path, *args, **kwargs)
+        if path.suffix == '.output':
+            return CloseFailure(output)
+        return output
+
+    def recording_popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    error = None
+    reaped = None
+    runner.Path.open = failing_output_open
+    runner.subprocess.Popen = recording_popen
+    try:
+        try:
+            runner._run_suite(suite, summaries)
+        except OSError as exc:
+            error = exc
+    finally:
+        runner.Path.open = original_open
+        runner.subprocess.Popen = original_popen
+        if spawned:
+            try:
+                spawned[0].wait(timeout=0)
+                reaped = True
+            except subprocess.TimeoutExpired:
+                reaped = False
+                spawned[0].terminate()
+                try:
+                    spawned[0].wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    spawned[0].kill()
+                    spawned[0].wait(timeout=10)
+
+    assert error is not None, 'the injected close failure was not raised'
+    assert reaped, 'spawned suite survived the output close failure'
 
 
 def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):

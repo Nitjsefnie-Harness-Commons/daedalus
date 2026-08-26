@@ -44,17 +44,32 @@ def _report_safely():
         pass
 
 
+def _terminate_and_reap(process):
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def _run_suite(suite, summaries):
     summary_path = Path(summaries) / f"{suite.stem}.json"
     output_path = Path(summaries) / f"{suite.stem}.output"
     env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
-    with _SPAWN_LOCK:
-        with output_path.open("wb") as output:
-            process = subprocess.Popen(
-                [sys.executable, str(suite)], cwd=ROOT,
-                stdin=subprocess.DEVNULL, stdout=output,
-                stderr=subprocess.STDOUT, env=env)
-    returncode = process.wait()
+    process = None
+    try:
+        with _SPAWN_LOCK:
+            with output_path.open("wb") as output:
+                process = subprocess.Popen(
+                    [sys.executable, str(suite)], cwd=ROOT,
+                    stdin=subprocess.DEVNULL, stdout=output,
+                    stderr=subprocess.STDOUT, env=env)
+        returncode = process.wait()
+    except BaseException:
+        if process is not None:
+            _terminate_and_reap(process)
+        raise
     return returncode, _read_summary(summary_path), output_path
 
 
