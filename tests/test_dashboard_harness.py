@@ -4,10 +4,10 @@
 Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
-import sys
-import subprocess
-import time
 import re
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -41,6 +41,25 @@ export function bindTabSelector(_select, options) {{
 }}
 """
     return _module(tmp, source, name='selector.mjs')
+
+
+def _delayed_failure_module(tmp, message, name):
+    source = f"""
+const write = process.stderr.write.bind(process.stderr);
+process.stderr.write = (text, callback) => {{
+  const timer = setInterval(() => {{
+    clearInterval(timer);
+    write(text, callback);
+  }}, 50);
+  return false;
+}};
+console.error = (error) => {{
+  const text = (error.stack || String(error)) + '\\n';
+  process.stderr.write(text);
+}};
+throw new Error({message!r});
+"""
+    return _module(tmp, source, name=name)
 
 
 def _harness_failure(source, *arguments, **options):
@@ -267,7 +286,9 @@ def test_initial_tab_selector_settle_is_bounded(tmp):
         behaviour._TAB_SELECTOR_HARNESS,
         _stalling_selector_module(tmp, 0), module=True,
         bounded_steps=5, step_timeout=0.3)
-    assert 'timed out waiting for initial tab selector render' in failure, failure
+    assert (
+        'timed out waiting for initial tab selector render' in failure
+    ), failure
     assert 'outer backstop' not in failure, failure
 
 
@@ -299,6 +320,23 @@ def test_tab_sync_settle_is_bounded(tmp):
         bounded_steps=5, step_timeout=0.3)
     assert 'timed out waiting for tab sync refresh' in failure, failure
     assert 'outer backstop' not in failure, failure
+
+
+def test_shipped_catch_tails_flush_through_leave(tmp):
+    """Every asynchronous harness waits for a delayed failure write."""
+    cases = (
+        ('consume', behaviour._DASHBOARD_CONSUME_HARNESS, False, 2),
+        ('world', behaviour._DASHBOARD_WORLD_HARNESS, False, 1),
+        ('selector', behaviour._TAB_SELECTOR_HARNESS, True, 5),
+    )
+    for name, harness, module_mode, steps in cases:
+        message = f'flushed {name} harness failure'
+        module = _delayed_failure_module(
+            tmp, message, f'{name}.mjs')
+        failure = _harness_failure(
+            harness, module, module=module_mode, bounded_steps=steps,
+            step_timeout=0.5)
+        assert message in failure, (name, failure)
 
 
 def main():
