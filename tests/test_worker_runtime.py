@@ -120,6 +120,86 @@ handleCookies = function replacement() {};
     }
 
 
+def test_runtime_observer_reports_unicode_binding_collisions(tmp):
+    """Runtime probing keeps valid Unicode binding names observable."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    paths = [root / 'first.js', root / 'second.js']
+    declarations = (
+        r'var caf\u00e9 = 1;',
+        r'var \u{10400} = 1;',
+        r'var joiner\u200Cname = 1;',
+        r'var joiner\u200Dname = 1;',
+    )
+    paths[0].write_text('\n'.join(declarations) + '\n', encoding='utf-8')
+    paths[1].write_text('\n'.join(declarations) + '\n', encoding='utf-8')
+
+    observed = _worker_runtime.observe_worker_runtime([
+        {'path': path, 'globals': (), 'watched': ()}
+        for path in paths
+    ], background_path=background)['sources']
+
+    expected = sorted(['café', '\U00010400', 'joiner\u200cname',
+                       'joiner\u200dname'])
+    assert [observed[str(path)]['bindings'] for path in paths] == [
+        expected, expected,
+    ]
+
+
+def test_runtime_observer_skips_unprobeable_property_names(tmp):
+    """Reserved-word properties do not turn into binding probe failures."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'reserved.js'
+    worker.write_text(
+        'globalThis.class = 1;\n'
+        'globalThis.if = 1;\n'
+        'globalThis.for = 1;\n'
+        'globalThis.with = 1;\n'
+        'globalThis.yield = 1;\n'
+        'globalThis.await = 1;\n',
+        encoding='utf-8')
+
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker, 'globals': (), 'watched': (),
+    }], background_path=background)['sources'][str(worker)]
+
+    assert observed['bindingExecutionError'] is None
+    assert observed['bindings'] == ['await', 'yield']
+
+
+def test_runtime_observer_tracks_probeable_global_properties(tmp):
+    """A global property write can overwrite another classic-script binding."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text('globalThis.sharedName = 1;\n', encoding='utf-8')
+
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker, 'globals': (), 'watched': (),
+    }], background_path=background)['sources'][str(worker)]
+
+    assert observed['bindings'] == ['sharedName']
+
+
+def test_payload_keeps_harness_source_on_the_second_line(tmp):
+    """A serialized payload does not shift program stack locations."""
+    node = shutil.which('node')
+    assert node, 'node is required to check harness source locations'
+    result = _boundary_env.run_node_program(
+        node, '      missingName;\n', [],
+        cwd=ROOT, payload='{}')
+
+    assert result.returncode != 0, result
+    assert 'program.js:2:7' in result.stderr, result.stderr
+
+
 def test_worker_harness_programs_use_cleaned_temporary_files(tmp):
     """Every Node harness keeps its program out of argv and cleans its file."""
     root = Path(tmp)
