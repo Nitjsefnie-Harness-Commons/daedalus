@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _worker_sources import import_scripts_stub  # noqa: E402
 
 
 _BACKGROUND_OVERLAP_HARNESS = r"""
@@ -130,6 +131,7 @@ const context = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
+""" + import_scripts_stub('context') + r"""
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -9,6 +9,8 @@ context standing in for the worker Chrome restarts after idle suspension.
 The scenarios that drive it are in _boundary.
 """
 
+from _worker_sources import import_scripts_stub
+
 ENVIRONMENT = r"""
 const fs = require('fs');
 const vm = require('vm');
@@ -307,7 +309,7 @@ let relaySequence = 0;
 // One contextified worker. A second one models the service worker Chrome
 // restarts after idle suspension: fresh script state, same browser-side stores.
 function makeContext() {
-  return vm.createContext({
+  const workerContext = vm.createContext({
     chrome,
     fetch: bridgeFetch,
     crypto: { randomUUID: () => 'relay-' + (++relaySequence) },
@@ -322,6 +324,8 @@ function makeContext() {
     clearInterval: clearScheduled,
     console: { log() {}, warn() {}, error() {} },
   });
+""" + import_scripts_stub('workerContext') + r"""
+  return workerContext;
 }
 
 const context = makeContext();
