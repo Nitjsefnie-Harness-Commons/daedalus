@@ -57,6 +57,17 @@ def test_context_paths_and_expression_wrapper(tmp):
     assert evaluate("github.event.name != 'push'", context)
 
 
+def test_unset_step_output_is_the_actions_empty_string(tmp):
+    """An omitted step output resolves to empty text, not a path error."""
+    del tmp
+    context = {'steps': {'artifact': {'outputs': {}}}}
+    try:
+        actual = evaluate("steps.artifact.outputs.present != 'true'", context)
+    except ExpressionError as error:
+        actual = f'error: {error}'
+    assert actual is True, actual
+
+
 def test_always_is_unconditional(tmp):
     """Caller context cannot turn Actions' constant status function off."""
     del tmp
