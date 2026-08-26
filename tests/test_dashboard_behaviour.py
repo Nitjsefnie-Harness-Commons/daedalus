@@ -386,7 +386,8 @@ const afterUnregister = {
 
 tabs = [{ tabId: '11', title: 'first' }, { tabId: '33', title: 'third' }];
 emit('tabs-synced');
-await settle();
+await bounded(
+  settle(), 'tab sync refresh', _dashnodeStepTimeoutMs);
 const afterSync = select.options.map((o) => o.value);
 phase('dashboard call settled');
 
