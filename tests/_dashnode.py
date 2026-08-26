@@ -9,12 +9,17 @@ The JavaScript `bounded` helper races settlement but cannot cancel the losing
 work or any handles that work owns. A caller that recovers from its timeout
 must cancel those handles itself. The shipped asynchronous harnesses instead
 pass timeout failures to `leave`, which flushes the error and exits the child.
+
+Bound-count validation blanks comments but preserves string literals. Harness
+sources must therefore avoid the text `await bounded(` inside a string, where
+it would be counted as code.
 """
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 
+from _jsread import blank_js_comments
 from _repo import ROOT
 
 
@@ -56,7 +61,8 @@ class DashboardNodeHarness:
     module: bool = False
 
     def __post_init__(self):
-        actual = len(_BOUNDED_AWAIT.findall(self.source))
+        source = blank_js_comments(self.source)
+        actual = len(_BOUNDED_AWAIT.findall(source))
         if actual != self.bounded_steps:
             raise ValueError(
                 f'dashboard harness declares {self.bounded_steps} bounded '
