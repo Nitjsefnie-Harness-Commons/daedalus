@@ -70,6 +70,28 @@ def test_checkout_reader_matches_action_name_case_insensitively(tmp):
     ]
 
 
+def test_checkout_reader_accepts_indentless_step_sequences(tmp):
+    """A mapping value may use a same-indent block sequence."""
+    del tmp
+    workflow = (
+        'name: indentless sequence oracle\n'
+        'on: push\n'
+        'jobs:\n'
+        '  build:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '    - run: echo prepare\n'
+        '    - uses: actions/checkout@v4\n'
+        '      with:\n'
+        '        ref: safe\n'
+        '    timeout-minutes: 5\n')
+    try:
+        actual = _wfcheckout.checkout_refs(workflow)
+    except _wfcheckout.YAMLReadError as error:
+        raise AssertionError(str(error)) from error
+    assert actual == [('build', 'safe')]
+
+
 def test_checkout_reader_accepts_only_one_leading_bom(tmp):
     """One stream marker is accepted; every other BOM is refused."""
     del tmp
