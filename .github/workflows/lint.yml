@@ -77,10 +77,12 @@ jobs:
       # types.yml: pylint resolves imports, so without them every httpx, mcp,
       # starlette and uvicorn line in mcp_server.py (and httpx in
       # scripts/mcp_probe.py) reports as import-error instead of being checked.
-      - name: Install linters and the MCP server's dependencies
+      # diff_coverage.py likewise imports the pinned statement analyzer.
+      - name: Install linters and import dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+          pip install -r requirements-test.txt
           pip install ".[mcp]"
 
       - name: pylint

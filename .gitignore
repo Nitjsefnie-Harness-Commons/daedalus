@@ -179,6 +179,8 @@
 !/tests/_repo.py
 !/tests/_segments.py
 !/tests/_util.py
+!/tests/_wfcheckout.py
+!/tests/_wfscalars.py
 !/tests/_workflows.py
 !/tests/_yamlread.py
 !/tests/_yamlscalar.py
@@ -189,6 +191,7 @@
 !/tests/test_bridge_streams.py
 !/tests/test_bridge_tabs.py
 !/tests/test_bridge_uploads.py
+!/tests/test_checkout_pin.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_workflows.py
 !/tests/test_cli.py
@@ -224,6 +227,8 @@
 !/tests/test_suite_runner.py
 !/tests/test_tab_routing.py
 !/tests/test_version_contract.py
+!/tests/test_wfcheckout.py
+!/tests/test_wfscalars.py
 !/tests/test_workflow_parsing.py
 !/tests/test_workflow_triggers.py
 !/tests/test_yamlread.py
