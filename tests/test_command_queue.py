@@ -93,7 +93,7 @@ def test_collect_expired_removes_old_commands_and_empty_queues(tmp):
     assert not queued.exists() and not queued.parent.exists()
 
 
-def test_gc_loop_derives_its_interval_and_collects_after_sleep(_tmp):
+def test_gc_loop_derives_its_sleep_interval(_tmp):
     queue = _load_queue('command_queue_gc_loop')
 
     def sleep(interval):
