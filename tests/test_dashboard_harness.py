@@ -229,6 +229,20 @@ export function formatEvalWorld() {}
     assert '[phase] dashboard module import started' in failure, failure
 
 
+def test_tab_selector_import_that_never_settles_names_import(tmp):
+    """The selector harness bounds its pending dashboard module import."""
+    module = _module(tmp, _HOST_REALM_KEEPALIVE + r"""
+await new Promise(() => {});
+export function bindTabSelector() {}
+""", name='selector.mjs')
+    failure = _harness_failure(
+        behaviour._TAB_SELECTOR_HARNESS, module, module=True,
+        bounded_steps=5, step_timeout=0.5)
+    assert 'timed out waiting for dashboard module import' in failure, failure
+    assert 'outer backstop' not in failure, failure
+    assert '[phase] dashboard module import started' in failure, failure
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 
