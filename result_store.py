@@ -1,6 +1,7 @@
 """Atomic result slots and retained delivery-result files."""
 import os, json, pathlib, threading, time, uuid
 
+import atomic_file
 from bridge_config import DELIVERY_DIR, MAX_DELIVERY_RESULTS
 from delivery_stripes import stripe_index
 import path_safety
@@ -49,40 +50,12 @@ def delivery_lock_for(target_key):
     return delivery_locks[index]
 
 
-_REPLACE_ATTEMPTS = 5
-_REPLACE_RETRY_DELAY = 0.02
-
-
-def replace_atomically(src, dst):
-    """Publish `src` over `dst`, retrying a transient sharing violation.
-
-    Windows refuses a replace while any handle is open on the target, and that
-    handle need not be the bridge's -- a scanner that opens a file the moment
-    it appears is enough. It clears on its own within milliseconds, so without
-    a retry the bridge answers 500 for a write that was about to succeed and
-    discards data a caller already produced.
-
-    Only PermissionError is retried. A replace refused because the volume is
-    read-only or the disk is full is not going to start working, and waiting
-    on it would delay the error that explains what happened instead of fixing
-    anything.
-    """
-    for remaining in range(_REPLACE_ATTEMPTS - 1, -1, -1):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError:
-            if not remaining:
-                raise
-            time.sleep(_REPLACE_RETRY_DELAY)
-
-
 def atomic_result_write(path, data):
     """Replace one result slot only after its temp file is fully written."""
     tmp = path.parent / f'.result-{uuid.uuid4().hex}.tmp'
     try:
         tmp.write_bytes(data)
-        replace_atomically(tmp, path)
+        atomic_file.replace_atomically(tmp, path)
     except OSError:
         try:
             tmp.unlink()
@@ -146,8 +119,8 @@ def find_delivery_result(token, tab, did):
     return delivery_dir, delivery_file, ''
 
 
-delivery_order = {'stamp': 0}
-delivery_order_lock = threading.Lock()
+_delivery_order = {'stamp': 0}
+_delivery_order_lock = threading.Lock()
 
 
 def scan_delivery_results(delivery_dir):
@@ -176,14 +149,14 @@ def mark_delivery_result(path, entries):
     """Stamp a delivery after incorporating persisted acceptance order."""
     highest = (max((stamp for stamp, _name in entries), default=0)
                if entries is not None else 0)
-    with delivery_order_lock:
-        stamp = max(time.time_ns(), delivery_order['stamp'] + 1,
+    with _delivery_order_lock:
+        stamp = max(time.time_ns(), _delivery_order['stamp'] + 1,
                     highest + 1)
         try:
             os.utime(path, ns=(stamp, stamp))
         except OSError:
             return None
-        delivery_order['stamp'] = stamp
+        _delivery_order['stamp'] = stamp
     return stamp
 
 

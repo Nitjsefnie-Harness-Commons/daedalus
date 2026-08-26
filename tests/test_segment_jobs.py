@@ -343,15 +343,15 @@ def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
     is about the path, so it is asked of the path.
     """
     probe = (
-        'import os, server\n'
+        'import os, segment_store, server\n'
         'os.makedirs(server.SEG_DIR / "collide.json", exist_ok=True)\n'
-        'print("collision:", server._load_segment_record("collide"))\n'
+        'print("collision:", segment_store.load_record("collide"))\n'
         '(server.SEG_DIR / "broken.json").write_text("{", encoding="utf-8")\n'
         'try:\n'
-        '    server._load_segment_record("broken")\n'
-        'except server._SegmentRecordError:\n'
+        '    segment_store.load_record("broken")\n'
+        'except segment_store.SegmentRecordError:\n'
         '    print("corrupt: raised")\n'
-        'print("absent:", server._load_segment_record("nothing"))\n')
+        'print("absent:", segment_store.load_record("nothing"))\n')
     env = dict(os.environ)
     env.update({
         'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),

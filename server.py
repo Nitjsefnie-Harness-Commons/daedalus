@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Daedalus debug server — SSE command bridge + tab registry."""
-import hmac, itertools, json, os, pathlib, secrets, shutil, threading, time, uuid
+import hmac, itertools, json, os, pathlib, shutil, threading, time, uuid
 import ctypes, ctypes.util
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import TCPServer, ThreadingMixIn
@@ -9,10 +9,12 @@ from urllib.parse import urlparse, parse_qs
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
+import atomic_file
 import command_queue
 import result_store
+import segment_store
 from bridge_config import (
-    BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR, DEBUG_TIMING,
+    BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR,
     MAX_BODY_SIZE, MAX_JSON_DEPTH,
     MAX_REQUEST_WORKERS, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
     MAX_SEGMENTS_PER_JOB, MAX_UNAUTHENTICATED_BODY, PORT, REQUEST_TIMEOUT,
@@ -290,7 +292,7 @@ def _enqueue_command(token, tab, cmd):
         tmp, destination = qdir / f'.{seq}.tmp', qdir / f'{seq}.json'
         try:
             tmp.write_text(json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
-            result_store.replace_atomically(str(tmp), str(destination))
+            atomic_file.replace_atomically(str(tmp), str(destination))
         except (OSError, UnicodeEncodeError):
             # A refused enqueue must not leave its hidden temp behind: the
             # zero-byte artifact would sit in the queue until the background
@@ -306,203 +308,6 @@ def _enqueue_command(token, tab, cmd):
             raise
     _cmd_event(token).set()
     return seq
-
-
-# ─── HLS segment relay ───
-# One flat job namespace under the data root: segments/<job>/ holds the .ts
-# files, and segments/<job>.json beside the directory records the owning token,
-# minted capability, and fixed index/count/byte quotas. The page-JavaScript
-# relay presents the capability (sig) rather than the bridge token, because
-# anything that script carries the visited page can read.
-_seg_lock = threading.Lock()
-
-
-def _segment_record_path(job):
-    """The record beside a job's directory, refused if it lands outside.
-
-    Raises ValueError like `under`. Every route reaching here has already
-    answered for a bad job name, so a containment failure joins that answer
-    rather than becoming a storage error.
-    """
-    return path_safety.under(SEG_DIR, f'{job}.json')
-
-
-class _SegmentRecordError(Exception):
-    """A job record exists but could not be read as one."""
-
-
-def _load_segment_record(job):
-    """Return `job`'s JSON object, or None when there is no record at all.
-
-    A record that exists and cannot be read raises instead of arriving as
-    None: the mint reads None as "this job does not exist yet" and writes a
-    fresh owner and capability over whatever is there, so collapsing the two
-    turned local corruption into a destroyed resume identity reported as a
-    successful mint.
-    """
-    path = _segment_record_path(job)
-    if not path.is_file():
-        # No record file here: nothing at that name, or the dotted-name
-        # collision where this job's record path is another job's directory
-        # (or sits below its record file), which the mint answers as an
-        # unavailable name. Asked as a question about the path rather than
-        # by exception type, because the type differs per platform: reading
-        # a directory raises IsADirectoryError on Linux and PermissionError
-        # on Windows, and a check that names types turns one platform's
-        # spelling into a storage failure on another.
-        return None
-    try:
-        raw = path.read_text(encoding='utf-8')
-    except FileNotFoundError:
-        return None
-    except OSError as why:
-        raise _SegmentRecordError('record unreadable') from why
-    try:
-        record = json.loads(raw)
-    except (json.JSONDecodeError, ValueError, RecursionError) as why:
-        raise _SegmentRecordError('record is not JSON') from why
-    if not isinstance(record, dict):
-        raise _SegmentRecordError('record is not an object')
-    return record
-
-
-def _segment_record_for_sig(job, sig):
-    """Return `job` metadata when `sig` matches its minted capability.
-
-    compare_digest raises TypeError on non-ASCII str input, and the sig arrives
-    as a query string, so both sides are gated before the comparison.
-    """
-    try:
-        record = _load_segment_record(job)
-    except _SegmentRecordError:
-        # Fail closed: without a readable record nothing can be authorized,
-        # and this path never writes one, so the corrupt record survives for
-        # the mint to answer for.
-        return None
-    expected = record.get('sig', '') if record else ''
-    if not isinstance(expected, str) or not expected or not expected.isascii():
-        return None
-    if not sig or not sig.isascii():
-        return None
-    return record if hmac.compare_digest(expected, sig) else None
-
-
-def _segment_sig_ok(job, sig):
-    """Constant-time check of `sig` against the capability minted for `job`."""
-    return _segment_record_for_sig(job, sig) is not None
-
-
-def _segment_quota(record):
-    """Return trusted (max index, file count, bytes), or None if malformed."""
-    max_index = record.get('max_segment_index')
-    max_count = record.get('max_segment_count')
-    max_bytes = record.get('max_bytes')
-    if (not isinstance(max_index, int) or isinstance(max_index, bool)
-            or max_index < 0):
-        return None
-    if (not isinstance(max_count, int) or isinstance(max_count, bool)
-            or max_count < 0):
-        return None
-    if (not isinstance(max_bytes, int) or isinstance(max_bytes, bool)
-            or max_bytes < 0):
-        return None
-    return max_index, max_count, max_bytes
-
-
-def _segment_usage(record):
-    """Return the record's (count, bytes) totals, or None when absent.
-
-    None means "not recorded yet", which is the lazy-migration signal: a job
-    minted before totals were kept has none, and one recount converts it. It
-    is deliberately not zero, because zero is also what an empty job records
-    and the two must not be confused.
-    """
-    count = record.get('stored_count')
-    stored = record.get('stored_bytes')
-    # Checked one at a time rather than in a loop over both, matching
-    # _segment_quota above: a loop hides the narrowing from a type checker,
-    # which then reads the returned pair as possibly None all the way into
-    # the arithmetic that spends it.
-    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
-        return None
-    if not isinstance(stored, int) or isinstance(stored, bool) or stored < 0:
-        return None
-    return count, stored
-
-
-def _recount_segments(seg_dir):
-    """Count and measure a job's stored segments by reading the directory.
-
-    The expensive path, kept for exactly two callers: converting a job whose
-    record predates the totals, and the sweep that removes temps a crash left
-    behind. It is off the per-segment path, which is the whole point.
-
-    Returns None when the directory cannot be enumerated, so every caller
-    answers that in its own terms rather than letting the exception escape.
-    """
-    count = 0
-    stored = 0
-    try:
-        entries = list(seg_dir.iterdir())
-    except FileNotFoundError:
-        return 0, 0
-    except OSError:
-        # Not a directory at all, or unreadable. A job name may contain a
-        # dot, so one job's directory is another's record file: enumerating
-        # it raises, and the answer to that is the caller's existing refusal,
-        # not an exception escaping into a dropped connection.
-        return None
-    for path in entries:
-        if path.name.startswith('.') and path.name.endswith('.ts.tmp'):
-            try:
-                path.unlink()
-            except OSError:
-                # A temp that will not go is not worth failing a write over;
-                # it is invisible to the .ts accounting either way.
-                pass
-            continue
-        if path.suffix != '.ts':
-            continue
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        if not stat.st_mode & 0o170000 == 0o100000:
-            continue
-        count += 1
-        stored += stat.st_size
-    return count, stored
-
-
-def _write_segment_usage(job, count, stored):
-    """Persist a job's totals, leaving every other field of its record alone.
-
-    Read-modify-write under the caller's lock. A record that has become
-    unreadable is left alone rather than replaced: the mint is the only
-    writer allowed to answer for corruption, and overwriting here would
-    destroy the owner and capability a resume depends on.
-    """
-    try:
-        record = _load_segment_record(job)
-    except _SegmentRecordError:
-        return
-    if record is None:
-        return
-    record['stored_count'] = count
-    record['stored_bytes'] = stored
-    path = _segment_record_path(job)
-    tmp = path.with_name(f'.{path.name}.tmp')
-    try:
-        tmp.write_text(json.dumps(record), encoding='utf-8')
-        result_store.replace_atomically(tmp, path)
-    except OSError:
-        # The segment itself is already stored, so a usage update that cannot
-        # be written leaves the record at its previous totals rather than
-        # failing the write that succeeded; the next one corrects it.
-        try:
-            tmp.unlink()
-        except OSError:
-            pass  # the next write of this record reuses the same temp name
 
 
 # ─── Health / observability ───
@@ -624,26 +429,6 @@ class _JSONObject(dict):
             return (super().__eq__(other)
                     and self.duplicate_carrier == other.duplicate_carrier)
         return super().__eq__(other)
-
-
-def _log_segment_timing(job, stored, marks):
-    """Print one per-phase line for a segment write, when DEBUG_TIMING is on.
-
-    The measured total is printed beside the sum of the named parts. A gap
-    between them is an unmeasured phase, and that arithmetic is the only thing
-    that makes instrumentation with holes visible.
-    """
-    # Each mark is named for the phase that ENDS at it, so an interval is
-    # reported under what it did. Naming intervals after the mark they start
-    # from reads plausibly and is off by one, which is how a first pass here
-    # blamed the byte sum for the directory scans' cost.
-    parts = [(name, (ts - marks[i][1]) * 1000)
-             for i, (name, ts) in enumerate(marks[1:])]
-    total_ms = (marks[-1][1] - marks[0][1]) * 1000
-    print(f'[SEGMENT-TIMING] {_log_safe(job)} stored={stored} '
-          + ' '.join(f'{name}={ms:.2f}' for name, ms in parts)
-          + f' parts={sum(ms for _n, ms in parts):.2f} total={total_ms:.2f}',
-          flush=True)
 
 
 def _normalized_tab_id(value):
@@ -1904,9 +1689,10 @@ class Handler(BaseHTTPRequestHandler):
         # request. Only the server-minted record controls storage.
         try:
             seg_dir = path_safety.under(SEG_DIR, job)
-            with _seg_lock:
-                record = _segment_record_for_sig(job, sig)
-                quota = _segment_quota(record) if record is not None else None
+            with segment_store.seg_lock:
+                record = segment_store.record_for_sig(job, sig)
+                quota = (segment_store.quota(record)
+                         if record is not None else None)
         except ValueError:
             self._json(400, {'error': 'invalid param'})
             return None
@@ -1926,12 +1712,13 @@ class Handler(BaseHTTPRequestHandler):
 
         The capability, the parameter shapes and the quota were settled by
         _segment_admission. What is left has to be atomic: the file listing,
-        the byte sum and the write happen under one hold of _seg_lock, so two
+        the byte sum and the write happen under one hold of
+        segment_store.seg_lock, so two
         segments arriving together cannot both spend the same remaining bytes.
         """
         _, max_count, max_bytes = quota
-        marks = [('enter', time.perf_counter())] if DEBUG_TIMING else None
-        with _seg_lock:
+        marks = segment_store.timing_marks()
+        with segment_store.seg_lock:
             if marks is not None:
                 marks.append(('acquire', time.perf_counter()))
             filename = f'{segment_index:06d}.ts'
@@ -1944,15 +1731,16 @@ class Handler(BaseHTTPRequestHandler):
                 # quota is fixed at mint, while these change with every write,
                 # so a value read outside this lock could be spent twice.
                 try:
-                    record = _load_segment_record(job)
-                except _SegmentRecordError:
+                    record = segment_store.load_record(job)
+                except segment_store.SegmentRecordError:
                     record = None
-                usage = _segment_usage(record) if record is not None else None
+                usage = (segment_store.usage(record)
+                         if record is not None else None)
                 if usage is None:
                     # A job minted before totals were kept, converted once.
                     # This is the only scan left on this path, and no segment
                     # written afterwards pays for it.
-                    usage = _recount_segments(seg_dir)
+                    usage = segment_store.recount(seg_dir)
                     if usage is None:
                         return self._json(
                             500, {'error': 'segment storage failure'})
@@ -1975,7 +1763,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(413, {'error': 'job byte limit exceeded'})
                 try:
                     tmp.write_bytes(raw)
-                    result_store.replace_atomically(tmp, final)
+                    atomic_file.replace_atomically(tmp, final)
                 finally:
                     try:
                         tmp.unlink()
@@ -1984,13 +1772,13 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 if marks is not None:
                     marks.append(('write', time.perf_counter()))
-                _write_segment_usage(
+                segment_store.write_usage(
                     job,
                     stored_count + (0 if replacing else 1),
                     stored_bytes - replaced_bytes + len(raw))
                 if marks is not None:
                     marks.append(('record', time.perf_counter()))
-                    _log_segment_timing(job, stored_count, marks)
+                    segment_store.log_timing(_log_safe(job), stored_count, marks)
             except OSError:
                 return self._json(500, {'error': 'segment storage failure'})
         print(f'[SEGMENT] {job}/{filename} ({len(raw)} bytes)', flush=True)
@@ -2033,7 +1821,7 @@ class Handler(BaseHTTPRequestHandler):
         # that leaves the namespace.
         try:
             seg_dir = path_safety.under(SEG_DIR, job)
-            authorized = _segment_sig_ok(job, sig)
+            authorized = segment_store.sig_ok(job, sig)
         except ValueError:
             return self._json(400, {'error': 'bad job'})
         if not authorized:
@@ -2066,12 +1854,12 @@ class Handler(BaseHTTPRequestHandler):
             return None
         if not job or path_safety.unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
-        with _seg_lock:
+        with segment_store.seg_lock:
             try:
-                record = _load_segment_record(job)
+                record = segment_store.load_record(job)
             except ValueError:
                 return self._json(400, {'error': 'bad job'})
-            except _SegmentRecordError:
+            except segment_store.SegmentRecordError:
                 return self._json(500, {'error': 'segment storage failure'})
             if record is None:
                 return self._json(404, {'error': 'no such job'})
@@ -2095,15 +1883,15 @@ class Handler(BaseHTTPRequestHandler):
         job = body.get('job', '')
         if not job or path_safety.unsafe_component(job):
             return self._json(400, {'error': 'bad job'})
-        with _seg_lock:
+        with segment_store.seg_lock:
             try:
-                record = _load_segment_record(job)
+                record = segment_store.load_record(job)
                 job_dir = path_safety.under(SEG_DIR, job)
                 tmp = path_safety.under(SEG_DIR, f'.{job}.json.tmp')
-                record_path = _segment_record_path(job)
+                record_path = segment_store.record_path(job)
             except ValueError:
                 return self._json(400, {'error': 'bad job'})
-            except _SegmentRecordError:
+            except segment_store.SegmentRecordError:
                 return self._json(
                     500, {'error': 'segment storage failure'})
             if record is not None:
@@ -2113,7 +1901,7 @@ class Handler(BaseHTTPRequestHandler):
                 sig = record.get('sig', '')
                 if not isinstance(sig, str) or not sig or not sig.isascii():
                     return self._json(409, {'error': 'job record cannot resume'})
-                quota = _segment_quota(record)
+                quota = segment_store.quota(record)
                 if quota is not None:
                     # A resume is the right moment to reconcile: this counts
                     # the directory, refreshes the totals, and sweeps temps a
@@ -2123,11 +1911,11 @@ class Handler(BaseHTTPRequestHandler):
                     #
                     # It also heals the one drift the write path can leave: a
                     # crash between publishing a segment and recording it.
-                    reconciled = _recount_segments(job_dir)
+                    reconciled = segment_store.recount(job_dir)
                     if reconciled is not None and (
                             record.get('stored_count'),
                             record.get('stored_bytes')) != reconciled:
-                        _write_segment_usage(job, *reconciled)
+                        segment_store.write_usage(job, *reconciled)
                     return self._json(200, {'ok': True, 'sig': sig})
 
                 quota_fields = (
@@ -2177,7 +1965,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 try:
                     tmp.write_text(json.dumps(record), encoding='utf-8')
-                    result_store.replace_atomically(tmp, record_path)
+                    atomic_file.replace_atomically(tmp, record_path)
                 except OSError:
                     try:
                         tmp.unlink()
@@ -2189,27 +1977,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(
                         500, {'error': 'segment storage failure'})
                 return self._json(200, {'ok': True, 'sig': sig})
-            sig = secrets.token_urlsafe(32)
             # Counted, not assumed empty: a record can be deleted while its
             # directory survives, and seeding zero there would hand the job a
             # budget it has already spent. This is also where a temp left by a
             # crashed write is swept, which is off the per-segment path.
-            seeded = _recount_segments(job_dir)
+            seeded = segment_store.recount(job_dir)
             seeded_count, seeded_bytes = seeded if seeded is not None else (0, 0)
-            record = {
-                'token': token,
-                'sig': sig,
-                'max_segment_index': MAX_SEGMENT_INDEX,
-                'max_segment_count': MAX_SEGMENTS_PER_JOB,
-                'max_bytes': MAX_SEGMENT_JOB_SIZE,
-                'stored_count': seeded_count,
-                'stored_bytes': seeded_bytes,
-            }
+            record = segment_store.new_record(
+                token, seeded_count, seeded_bytes)
+            sig = record['sig']
             made_dir = not job_dir.exists()
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
                 tmp.write_text(json.dumps(record), encoding='utf-8')
-                result_store.replace_atomically(tmp, record_path)  # publish
+                atomic_file.replace_atomically(tmp, record_path)  # publish
             except OSError:
                 # Job names may contain dots, so the flat namespace collides
                 # in EITHER minting order: with job 'a' taken, this mkdir for
