@@ -33,15 +33,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Documentation-only runs pay for one suite leg and no coverage. The
+  # triggers stay unfiltered so every required check still reports; this
+  # job reads the changed paths and emits the suites matrix and a
+  # docs_only flag instead, and every fallback over-runs.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A job-level block replaces the workflow-level one rather than adding
+    # to it: the pulls/<n>/files read needs pull-requests, nothing more.
+    # The trailing notes are load-bearing, not decoration: without them
+    # this `contents: read` line is byte-identical to diff-coverage's, and
+    # the permission-mutation tests in tests/test_ci_workflows.py anchor
+    # on the first occurrence in the file.
+    permissions:
+      contents: read  # the checkout and the push compare read
+      pull-requests: read  # the pulls/<n>/files read
+    outputs:
+      matrix: ${{ steps.classify.outputs.matrix }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Nothing here pushes, and a token left in .git/config
+          # is reusable by every later step in the job.
+          persist-credentials: false
+
+      - name: Classify the changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: python3 scripts/ci/classify_changes.py
+
   suites:
+    needs: changes
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        # Every stable minor requires-python admits. 3.14 was accepted by
-        # the metadata and executed nowhere, so the oldest and the newest
-        # supported interpreter were both claims rather than results.
-        python: ["3.11", "3.12", "3.13", "3.14"]
+      # The os/python lists live in FULL_MATRIX in
+      # scripts/ci/classify_changes.py, which the changes job renders:
+      # one leg for a documentation-only run, all twelve otherwise.
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
 
@@ -115,6 +149,10 @@ jobs:
           retention-days: 14
 
   coverage:
+    needs: changes
+    # Skipped on a documentation-only run: no coverage number can move, and
+    # a skipped required check reports success rather than going missing.
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     # A JOB of its own, not steps inside the matrix above: the matrix is
     # 3 OSes x 3 Pythons, and coverage of the same code nine times over
     # tells you the same number nine times. One run, on the newest Python
@@ -461,6 +499,7 @@ jobs:
     name: Aggregate workflow checks
     if: ${{ always() }}
     needs:
+      - changes
       - suites
       - wheel
       - coverage
@@ -478,11 +517,18 @@ jobs:
           import os
           import sys
 
+          # The classifier decides the run's shape, so only an exact
+          # success is accepted for it — a failure there must not pass as
+          # the skip a documentation-only run gives suites and coverage.
+          STRICT = {'changes'}
+
           needs = json.loads(os.environ['NEEDS_JSON'])
           unsuccessful = [
               f"{name}={details['result']}"
               for name, details in needs.items()
-              if details['result'] != 'success'
+              if details['result']
+              not in ({'success'} if name in STRICT
+                      else {'success', 'skipped'})
           ]
           if unsuccessful:
               print(
