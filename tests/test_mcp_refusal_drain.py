@@ -155,7 +155,7 @@ def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
         'server': ('127.0.0.1', 8086),
     }
     middleware = CapturingBearerAuth(
-        accepted, token_var=mod._token, max_body_size=mod.MAX_BODY_SIZE)
+        accepted, max_body_size=mod.MAX_BODY_SIZE)
     asyncio.run(middleware(scope, receive, send))
 
     assert outbound[0]['status'] == 401
@@ -222,8 +222,7 @@ def test_disconnect_during_drain_preserves_refusal(tmp):
     }
     try:
         middleware = mod.mcp_auth.BearerAuth(
-            accepted, token_var=mod._token,
-            max_body_size=mod.MAX_BODY_SIZE)
+            accepted, max_body_size=mod.MAX_BODY_SIZE)
         asyncio.run(middleware(scope, receive, send))
     except ClientDisconnect as exc:
         raise AssertionError(
@@ -318,8 +317,7 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         mod.mcp_request_guard.JSONResponse = deciding_response
         try:
             middleware = CapturingBearerAuth(
-                accepted, token_var=mod._token,
-                max_body_size=mod.MAX_BODY_SIZE)
+                accepted, max_body_size=mod.MAX_BODY_SIZE)
             await middleware(scope, receive, send)
         finally:
             mod.mcp_request_guard.JSONResponse = real_response
