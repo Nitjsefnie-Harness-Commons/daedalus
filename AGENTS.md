@@ -86,7 +86,7 @@ The dashboard subscribes to `/stream?tab=dashboard`. Events (not commands) are e
 </directories>
 
 <mcp>
-An MCP server runs in-process alongside `server.py` on `127.0.0.1:8086` (streamable-HTTP transport), fronted by the reverse proxy at `<your-bridge>/mcp`. Source: `mcp_server.py`.
+An MCP server runs in-process alongside `server.py` on `127.0.0.1:8086` (streamable-HTTP transport), fronted by the reverse proxy at `<your-bridge>/mcp`. `mcp_server.py` composes the listener; `mcp_auth.py` supplies its authentication middleware, `mcp_request_guard.py` decides pre-body refusals, `mcp_transport.py` owns bridge HTTP sessions, and the seven `mcp_tools_*.py` modules define and register the tool groups.
 
 Before dispatch it requires `Authorization: Bearer <bridge-token>` to exactly match the token resolved through the CLI's existing configuration path (`TOKEN`, otherwise `DAEDALUS_TOKEN`, including the optional `_settings` provider); no configured token fails closed with `401`. It rejects repeated `Authorization`, `Mcp-Session-Id`, `Host`, and `Origin` headers, and repeated `job` arguments for `segment_job` / `segment_status`, without selecting one value. Credentials are decided before the body is read, so an unauthenticated request is never materialized or parsed; a declared body over `DAEDALUS_MCP_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes) is refused with 413 before reading, and an undeclared one is bounded after.
 
@@ -94,16 +94,16 @@ Before dispatch it requires `Authorization: Bearer <bridge-token>` to exactly ma
 
 The bridge listener is bound before MCP starts, and its actual loopback URL is passed into the MCP HTTP client, including for `DAEDALUS_PORT=0`; `DAEDALUS_LOCAL_URL` remains the explicit standalone override. Remotely callable MCP tools accept inline JavaScript and CSS only: `put`, `inject_css`, `remove_css`, and `store_hotfix` have no server-local path argument. CLI file arguments are read by the CLI process and sent as inline content.
 
-40 tools, by group:
+40 tools, registered by seven group modules:
 - **Tabs**: `list_tabs`, `open_tab`, `open_tabs`, `focus_tab`, `close_tab`, `ext_navigate`, `ext_reload`
 - **Eval / debug**: `exec`, `put`, `result`, `ping`, `navigate`, `reload`, `title`, `url`, `ext_self_reload`
-- **Media**: `screenshot` (optional `include_image=true` to inline bytes), `uploads`, `delete_upload`, `segment_job`, `segment_status`
+- **Media**: `screenshot` (optional `include_image=true` to inline bytes), `segment_job`, `segment_status`, `uploads`, `delete_upload`
 - **Cookies**: `get_cookies`, `set_cookie`, `remove_cookie`, `clear_cookies`
 - **CSS / blocking**: `inject_css`, `remove_css`, `block_requests`, `unblock_requests`, `list_block_rules`
 - **Hotfixes**: `store_hotfix`, `clear_hotfix`, `clear_hotfixes`, `list_hotfixes`, `set_permanent`
 - **Network / CDP**: `net_capture`, `net_capture_stop`, `net_capture_get`, `cdp`, `fetch_timings`
 
-`net_capture`'s `max_requests` is an integer from 1 to 20000 (`NET_CAPTURE_MAX`, the same ceiling the CLI's `--max` and the extension both enforce); the buffer lives in the service worker and grows to hold headers and bodies, so the bound is a memory budget rather than a preference.
+`net_capture`'s `max_requests` is an integer from 1 to 20000 (`mcp_tools_network.py`'s `NET_CAPTURE_MAX`, the same ceiling the CLI's `--max` and the extension both enforce); the buffer lives in the service worker and grows to hold headers and bodies, so the bound is a memory budget rather than a preference.
 
 Manual verification helper: `TOKEN=<tok> python3 scripts/mcp_probe.py list|call <tool> [json-args]`.
 </mcp>

@@ -506,7 +506,11 @@ everything else works.
 | `extension/page.js` | MAIN-world bridge — `window.GM` + eval handler |
 | `extension/options.html` / `options.js` | Token/server settings UI |
 | `server.py` | Debug server (also hosts the MCP daemon thread on 127.0.0.1:8086) |
-| `mcp_server.py` | MCP server — bridges the extension command surface to `server.py` over HTTP |
+| `mcp_server.py` | MCP composition point — registers tool groups and runs the listener |
+| `mcp_auth.py` | MCP authentication middleware and JSON authority-carrier validation |
+| `mcp_request_guard.py` | MCP pre-body authentication, size refusal, and bounded refusal draining |
+| `mcp_transport.py` | MCP HTTP sessions bound to the local bridge |
+| `mcp_tools_*.py` | Seven grouped MCP tool modules for the extension command surface |
 | `scripts/mcp_probe.py` | Minimal MCP client helper for manual verification |
 | `scripts/check_versions.py` | Version-consistency check / bump across every version site |
 | `.githooks/` | pre-commit + pre-push version-consistency gates |
