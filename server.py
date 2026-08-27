@@ -24,6 +24,7 @@ from bridge_config import (
     RES_DIR, SEG_DIR, STREAM_KEEPALIVE, STREAM_MAX_AGE,
     UPLOAD_DIR,
 )
+from env_config import REFUSED_BODY_DRAIN
 import path_safety
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
@@ -146,7 +147,6 @@ _SEGMENT_DECIMAL_MAX_DIGITS = 20
 _server_start_ts = time.time()
 
 
-_REFUSED_BODY_DRAIN = 65536
 _UNDECLARED_BODY_DRAIN_SECONDS = 0.25
 
 
@@ -642,7 +642,7 @@ class Handler(BaseHTTPRequestHandler):
         the bound the early close stands, which is the right trade for a
         caller sending far more than the server will take.
         """
-        remaining = min(clen, _REFUSED_BODY_DRAIN)
+        remaining = min(clen, REFUSED_BODY_DRAIN)
         try:
             while remaining > 0:
                 chunk = self.rfile.read(min(remaining, 8192))
@@ -670,7 +670,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             self.connection.settimeout(_UNDECLARED_BODY_DRAIN_SECONDS)
-            self.rfile.read(_REFUSED_BODY_DRAIN)
+            self.rfile.read(REFUSED_BODY_DRAIN)
         except (OSError, ValueError):
             # Same courtesy as _drain_refused_body, and the same reason it
             # cannot matter: nothing is read out of this body.

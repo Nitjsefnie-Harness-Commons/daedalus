@@ -11,8 +11,7 @@ forwarded to the local bridge. Missing configuration fails closed.
 """
 import contextlib
 import math
-import hmac, json, os, socket, sys, threading
-from contextvars import ContextVar
+import json, os, socket, sys, threading
 from typing import Any
 import httpx
 from mcp.server.mcpserver import MCPServer, Image
@@ -21,9 +20,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
-from daedalus_cli.transport import token as _configured_token
 from env_config import env_int
 from log_safe import log_safe
+import mcp_request_guard
 from mcp_transport import BridgeTransport
 
 # Same reason as the bridge: this process prints crash lines carrying values
@@ -48,6 +47,7 @@ MCP_PORT = env_int('DAEDALUS_MCP_PORT', 8086, 0, 65535)
 # make the process hold whatever it chose to send.
 MAX_BODY_SIZE = env_int(
     'DAEDALUS_MCP_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
+_token = mcp_request_guard._token
 # The app auto-enables DNS rebinding protection for a localhost bind only when
 # it is given no settings of its own; these are passed explicitly, so the list
 # has to include the public hostname the reverse proxy fronts us with or
@@ -56,8 +56,6 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
     'DAEDALUS_MCP_ALLOWED_HOSTS',
     '127.0.0.1:*,localhost:*'
 ).split(',') if h.strip()]
-
-_token: ContextVar[str] = ContextVar('daedalus_token', default='')
 
 mcp = MCPServer('daedalus')
 
@@ -584,57 +582,12 @@ async def ext_self_reload() -> dict:
 
 class _BearerAuth(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        duplicate = ambiguous_request_carrier(
-            name for name, _value in request.scope.get('headers', ()))
-        if duplicate == 'token':
-            return JSONResponse(
-                {'error': 'duplicate Authorization header'}, status_code=400)
-        if duplicate == 'mcp-session-id':
-            return JSONResponse(
-                {'error': 'duplicate Mcp-Session-Id header'}, status_code=400)
-        if duplicate == 'host':
-            return JSONResponse(
-                {'error': 'duplicate Host header'}, status_code=400)
-        if duplicate == 'origin':
-            return JSONResponse(
-                {'error': 'duplicate Origin header'}, status_code=400)
-
-        # Credentials are decided BEFORE the body is touched. Parsing it first
-        # made an unauthenticated caller able to have an arbitrarily large
-        # request materialized on its way to a 401, and handed it body-level
-        # diagnostics about a request it was never allowed to make.
-        authorizations = request.headers.getlist('authorization')
-        auth = authorizations[0] if authorizations else ''
-        if not auth.lower().startswith('bearer '):
-            return JSONResponse({'error': 'missing Bearer token'}, status_code=401)
-        tok = auth[7:].strip()
-        if not tok or '/' in tok or '.' in tok:
-            return JSONResponse({'error': 'bad token'}, status_code=401)
-        try:
-            authorized = _configured_token()
-        except SystemExit:
-            authorized = ''
-        if (not isinstance(authorized, str) or not authorized
-                or not hmac.compare_digest(
-                    tok.encode('utf-8', 'surrogatepass'),
-                    authorized.encode('utf-8', 'surrogatepass'))):
-            return JSONResponse({'error': 'unauthorized'}, status_code=401)
-        _token.set(tok)
+        refusal = mcp_request_guard.early_refusal(request, MAX_BODY_SIZE)
+        if refusal is not None:
+            await mcp_request_guard.drain_refused_body(request)
+            return refusal
 
         if request.method == 'POST':
-            declared = request.headers.get('content-length')
-            if declared is not None:
-                try:
-                    length = int(declared)
-                except ValueError:
-                    return JSONResponse(
-                        {'error': 'invalid Content-Length'}, status_code=400)
-                if length < 0:
-                    return JSONResponse(
-                        {'error': 'invalid Content-Length'}, status_code=400)
-                if length > MAX_BODY_SIZE:
-                    return JSONResponse(
-                        {'error': 'request body too large'}, status_code=413)
             raw = await request.body()
             # A body sent without a declared length is bounded here rather than
             # by the check above; it has still been read, which is why the
