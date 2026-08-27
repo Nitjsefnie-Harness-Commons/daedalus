@@ -80,7 +80,7 @@ export const api = {
 
 // ─── Command execution (PUT /command + poll /result) ───
 //
-// Mirrors mcp_server.py's _ext_cmd / _send_eval flow: write a command, then
+// Mirrors daedalus_mcp/server.py's _ext_cmd / _send_eval flow: write a command, then
 // poll for the result carrying that command delivery id. Field names must
 // match exactly (id, code, type, tab, token).
 

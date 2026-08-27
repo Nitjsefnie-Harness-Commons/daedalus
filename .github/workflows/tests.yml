@@ -192,7 +192,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-test.txt
           # The mcp extra too: without it the MCP suite skips itself entirely
-          # and mcp_server.py contributes a zero to a number that is supposed
+          # and daedalus_mcp/server.py contributes a zero to a number that is supposed
           # to describe the code this repository ships.
           python -m pip install . ".[mcp]"
 

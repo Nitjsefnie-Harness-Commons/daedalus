@@ -75,7 +75,7 @@ jobs:
 
       # The MCP server's dependencies are installed for the same reason as in
       # types.yml: pylint resolves imports, so without them every httpx, mcp,
-      # starlette and uvicorn line in mcp_server.py (and httpx in
+      # starlette and uvicorn line in daedalus_mcp/server.py (and httpx in
       # scripts/mcp_probe.py) reports as import-error instead of being checked.
       # diff_coverage.py likewise imports the pinned statement analyzer.
       - name: Install linters and import dependencies

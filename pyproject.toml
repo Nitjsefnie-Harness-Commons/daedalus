@@ -28,7 +28,7 @@ dependencies = []
 
 # The MCP server is not part of the wheel, but its dependencies are declared
 # so a checkout can install them in one step and the type checker can resolve
-# them in CI. `pip install .[mcp]` when you intend to run mcp_server.py.
+# them in CI. `pip install .[mcp]` when you intend to run `python3 -m daedalus_mcp.server`.
 [project.optional-dependencies]
 # Pinned exactly rather than floored. A floor is a claim about the oldest
 # version that works, and nothing here ever tested one: CI installs the newest
