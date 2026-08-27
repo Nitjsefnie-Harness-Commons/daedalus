@@ -101,6 +101,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           EVENT_NUMBERS: >-
             ${{ toJSON(github.event.workflow_run.pull_requests.*.number) }}
         run: |
@@ -111,10 +112,11 @@ jobs:
           numbers="$(printf '%s' "$EVENT_NUMBERS" | jq -r 'arrays | .[]' \
             | sort -u)"
           if [ -z "$numbers" ]; then
-            # A fork pull request arrives with an empty `pull_requests`, so
-            # ask which pull request owns the head commit instead.
+            # A fork pull request arrives with an empty `pull_requests`, and
+            # the base repository does not associate its head commit with a
+            # pull request, so ask the head repository which one owns it.
             if ! gh api -H 'Cache-Control: no-cache' --paginate \
-              "repos/$REPO/commits/$HEAD_SHA/pulls" \
+              "repos/$HEAD_REPO/commits/$HEAD_SHA/pulls" \
               --jq '.[].number' > pulls.txt
             then
               echo "listing the pull requests for $HEAD_SHA failed" >&2
