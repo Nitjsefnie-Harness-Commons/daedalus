@@ -247,6 +247,12 @@ def measure(measured, added):
     return rows, covered, total
 
 
+def _shipped_javascript(path):
+    """Whether a path is shipped JavaScript the report can name."""
+    return (path.endswith('.js')
+            and path.startswith(_SHIPPED_JAVASCRIPT_ROOTS))
+
+
 def _measured_source(path):
     """Whether some coverage report is expected to name this changed path.
 
@@ -257,8 +263,24 @@ def _measured_source(path):
     """
     if path.lower().endswith('.py'):
         return not path.startswith('tests/')
-    return (path.endswith('.js')
-            and path.startswith(_SHIPPED_JAVASCRIPT_ROOTS))
+    return _shipped_javascript(path)
+
+
+def report_languages(measured):
+    """Name the languages a merged report measured, from its own paths.
+
+    Which flag a report arrived under is not what it measured: the
+    JavaScript XML parses just as well behind --coverage, and the scope
+    note must describe the run that happened — a measured JavaScript row
+    above "added JavaScript lines are not measured" is the failure this
+    exists to rule out.
+    """
+    languages = []
+    if any(path.lower().endswith('.py') for path in measured):
+        languages.append('Python')
+    if any(_shipped_javascript(path) for path in measured):
+        languages.append('JavaScript')
+    return languages
 
 
 def unmeasured_sources(measured, added):
@@ -356,10 +378,8 @@ def main():
         # are not UTF-8 raises UnicodeDecodeError, a ValueError subclass,
         # and outside it that died as a traceback.
         measured = executable_lines(args.coverage)
-        languages = ['Python']
         if args.js_coverage is not None:
             _merge(measured, executable_lines(args.js_coverage))
-            languages.append('JavaScript')
         added = added_lines(diff_text)
         validate_statement_records(measured, added)
     except (CoverageException, ET.ParseError, ValueError) as error:
@@ -373,7 +393,7 @@ def main():
     rows, covered, total = measure(measured, added)
     sys.stdout.write(render(rows, covered, total,
                             unmeasured_sources(measured, added),
-                            languages=languages))
+                            languages=report_languages(measured)))
     return 0
 
 
