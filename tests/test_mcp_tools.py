@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Per-registration bridge binding for every returned MCP tool."""
 import asyncio
+import ast
+import importlib
 import inspect
 import sys
 from pathlib import Path
@@ -9,8 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
-import mcp_tools_eval  # noqa: E402
-import mcp_tools_tabs  # noqa: E402
 
 
 class ToolRegistry:
@@ -66,6 +66,35 @@ REQUIRED_ARGUMENTS = {
 }
 
 
+def _discover_tool_modules():
+    paths = sorted(_util.ROOT.glob('mcp_tools_*.py'))
+    return {
+        path.stem: importlib.import_module(path.stem)
+        for path in paths
+    }
+
+
+def _composed_tool_modules():
+    source = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
+    tree = ast.parse(source, filename='mcp_server.py')
+    composed = set()
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Expr)):
+            continue
+        for node in ast.walk(statement):
+            if not isinstance(node, ast.Call):
+                continue
+            function = node.func
+            if not isinstance(function, ast.Attribute):
+                continue
+            owner = function.value
+            if (function.attr == 'register'
+                    and isinstance(owner, ast.Name)
+                    and owner.id.startswith('mcp_tools_')):
+                composed.add(owner.id)
+    return composed
+
+
 def _required_arguments(tool):
     arguments = {}
     for parameter in inspect.signature(tool).parameters.values():
@@ -94,8 +123,17 @@ async def _reached_bridge(tool, arguments, first_bridge, second_bridge):
 
 def test_every_registered_tool_keeps_its_own_bridge(_tmp):
     """Every returned tool calls the bridge from its own registration."""
-    modules = (mcp_tools_tabs, mcp_tools_eval)
-    for module in modules:
+    modules = _discover_tool_modules()
+    discovered = set(modules)
+    composed = _composed_tool_modules()
+    assert discovered == composed, (
+        'MCP tool module mismatch: '
+        f'not composed={sorted(discovered - composed)}; '
+        f'no module file={sorted(composed - discovered)}')
+
+    returned_callables = set()
+    exercised_callables = set()
+    for module_name, module in modules.items():
         first_mcp = ToolRegistry()
         second_mcp = ToolRegistry()
         first_bridge = BridgeProbe('first')
@@ -111,20 +149,31 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
 
         covered = set()
         for name, first_tool in first_tools.items():
+            qualified_name = f'{module_name}.{name}'
+            returned_callables.add(qualified_name)
             arguments = _required_arguments(first_tool)
             first_reached = asyncio.run(_reached_bridge(
                 first_tool, arguments, first_bridge, second_bridge))
             second_reached = asyncio.run(_reached_bridge(
                 second_tools[name], arguments, first_bridge, second_bridge))
             assert first_reached == 'first', (
-                f'{module.__name__}.{name}: first registered tool reached '
+                f'{qualified_name}: first registered tool reached '
                 f'{first_reached} bridge')
             assert second_reached == 'second', (
-                f'{module.__name__}.{name}: second registered tool reached '
+                f'{qualified_name}: second registered tool reached '
                 f'{second_reached} bridge')
             covered.add(name)
+            exercised_callables.add(qualified_name)
 
-        assert covered == set(first_tools)
+        returned = set(first_tools)
+        assert covered == returned, (
+            f'{module_name}: not exercised={sorted(returned - covered)}; '
+            f'not returned={sorted(covered - returned)}')
+
+    assert exercised_callables == returned_callables, (
+        'registered tool coverage mismatch: '
+        f'not exercised={sorted(returned_callables - exercised_callables)}; '
+        f'not returned={sorted(exercised_callables - returned_callables)}')
 
 
 if __name__ == '__main__':
