@@ -123,6 +123,47 @@ def test_throw_keyword_is_followed_by_a_regex_literal(tmp):
     assert code_lines('throw /boom/;\n') == {1}
 
 
+def test_regex_literal_is_the_body_of_an_if_head(tmp):
+    """A slash after a statement keyword's paren starts a regex."""
+    del tmp
+    source = (
+        'function check(ok, b) {\n'
+        '  if (ok) /a/*b;\n'
+        '  const marker = 1;\n'
+        '  return marker;\n'
+        '}\n'
+        '/* trailing */\n'
+        'const after = 2;\n')
+    assert code_lines(source) == {1, 2, 3, 4, 5, 7}
+
+
+def test_regex_class_holding_a_comment_opener_after_an_if_head(tmp):
+    """A class can hold /* without opening a phantom block comment."""
+    del tmp
+    source = (
+        'function classify(ch) {\n'
+        '  if (ch) /[/*]/.test(ch);\n'
+        '  const marker = 1;\n'
+        '  return marker;\n'
+        '}\n'
+        '/* trailing */\n'
+        'const after = 2;\n')
+    assert code_lines(source) == {1, 2, 3, 4, 5, 7}
+
+
+def test_statement_heads_keep_division_inside_and_regex_after(tmp):
+    """while, for and with heads behave like if; head division stays."""
+    del tmp
+    source = (
+        'if ((a + b) / 2 > limit) /cap/*m;\n'
+        'while (pending) /a/*b;\n'
+        'for (let i = 0; i / 2 < n; i++) /c/*d;\n'
+        'with (scope) /e/*f;\n'
+        '/* tail */\n'
+        'const after = 1;\n')
+    assert code_lines(source) == {1, 2, 3, 4, 6}
+
+
 def test_keywords_used_as_property_names_end_expressions(tmp):
     """Keyword spellings after member access are property names."""
     del tmp
@@ -285,6 +326,21 @@ def test_every_shipped_javascript_file_is_modelled(tmp):
         assert len(found) <= nonblank, (
             f'{relative}: {len(found)} code lines exceed '
             f'{nonblank} non-blank lines')
+
+
+def test_shipped_denominators_are_pinned_for_witness_files(tmp):
+    """A mis-lex that swallows code lines must fail, not quieten."""
+    del tmp
+    pinned = {
+        'dashboard/app.js': 129,
+        'extension/page.js': 280,
+    }
+    for relative, expected in sorted(pinned.items()):
+        source = (ROOT / relative).read_text(encoding='utf-8')
+        found = code_lines(source, relative)
+        assert len(found) == expected, (
+            f'{relative}: {len(found)} code lines where '
+            f'{expected} were pinned')
 
 
 def main():

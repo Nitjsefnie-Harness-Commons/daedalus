@@ -56,7 +56,14 @@ def tracked_sources(root):
     sources = {}
     for rel in sorted(paths):
         with open(root / rel, encoding='utf-8', newline='') as source:
-            sources[rel] = source.read()
+            text = source.read()
+        utf16_units = len(text.encode('utf-16-le')) // 2
+        if utf16_units != len(text):
+            raise ValueError(
+                f'{rel}: UTF-16 length {utf16_units} differs from '
+                f'code-point length {len(text)}; astral characters '
+                f'would misplace V8 offsets')
+        sources[rel] = text
     return sources
 
 
@@ -171,8 +178,9 @@ def _line_spans(source):
 
 def _file_coverage(source, rel, records):
     executable = code_lines(source, rel)
-    # V8 offsets count UTF-16 code units. Shipped files contain no astral
-    # characters, so each offset is also a Python string index.
+    # V8 offsets count UTF-16 code units. tracked_sources refuses any
+    # source whose UTF-16 length differs from its Python length, so each
+    # offset is also a Python string index.
     counts = merge_records(records, len(source))
     covered = {
         line for line, start, end in _line_spans(source)

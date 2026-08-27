@@ -85,6 +85,21 @@ def test_tracked_sources_uses_git_and_the_shipped_directories(tmp):
     }
 
 
+def test_tracked_source_with_astral_characters_is_refused(tmp):
+    """Mapping UTF-16 offsets by code point must fail, not misplace."""
+    root = _repository(tmp, {
+        'extension/astral.js': 'const emoji = "\U0001F600";\n',
+    })
+
+    try:
+        tracked_sources(root)
+    except ValueError as failure:
+        assert 'extension/astral.js' in str(failure), failure
+        assert 'UTF-16' in str(failure), failure
+    else:
+        raise AssertionError('an astral source was measured by code point')
+
+
 def test_absolute_relative_and_file_urls_resolve_to_tracked_files(tmp):
     """Dropping any path-based V8 naming route must fail."""
     root = _repository(tmp, {
@@ -284,6 +299,17 @@ def test_inner_nonzero_range_overrides_outer_zero_range(tmp):
     record = _record('extension/sample.js', [
         {'startOffset': 0, 'endOffset': 6, 'count': 0},
         {'startOffset': 2, 'endOffset': 4, 'count': 1},
+    ])
+
+    assert merge_records([record], 6) == [0, 0, 1, 1, 0, 0]
+
+
+def test_ranges_arriving_inner_first_still_resolve_nesting(tmp):
+    """An unsorted merge would let the outer zero suppress the inner hit."""
+    del tmp
+    record = _record('extension/sample.js', [
+        {'startOffset': 2, 'endOffset': 4, 'count': 1},
+        {'startOffset': 0, 'endOffset': 6, 'count': 0},
     ])
 
     assert merge_records([record], 6) == [0, 0, 1, 1, 0, 0]
