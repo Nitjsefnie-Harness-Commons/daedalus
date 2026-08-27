@@ -235,7 +235,13 @@ def test_check_versions_set_refuses_one_value_spelled_more_than_one_way(tmp):
     for version in ('01.2.3', '1.02.3', '\u0661.\u0662.\u0663'):
         r = _run_checker(copy_root, '--set', version)
         assert r.returncode != 0, (version, r.returncode, r.stdout, r.stderr)
-        assert version in r.stderr, (version, r.stderr)
+        # The constraint is named, and the version itself only where it
+        # survives the round trip: a Windows runner's stderr encoding cannot
+        # hold a non-ASCII digit, so the child backslash-escapes it and the
+        # literal string is absent while the refusal it reports is identical.
+        assert 'ASCII digits' in r.stderr, (version, r.stderr)
+        if version.isascii():
+            assert version in r.stderr, (version, r.stderr)
         for path, text in before.items():
             assert (copy_root / path).read_text(encoding='utf-8') == text, (
                 version, path)
