@@ -14,7 +14,7 @@ _SEGMENT_STORE_PROBE = r'''
 import json
 from pathlib import Path
 
-import segment_store
+from daedalus_bridge import segment_store
 
 job = 'unit-job'
 record_path = segment_store.record_path(job)

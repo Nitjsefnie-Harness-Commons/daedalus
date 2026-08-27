@@ -363,7 +363,7 @@ import json
 import os
 import sys
 
-import path_safety
+from daedalus_bridge import path_safety
 
 root = sys.argv[1]
 contained = path_safety.under(root, 'inside.txt')
@@ -411,7 +411,7 @@ _STRIPE_PROBE = r"""
 import json
 import os
 
-import result_store
+from daedalus_bridge import result_store
 
 # The same delivery directory, spelled the two ways `realpath` can answer.
 # On Windows the extended-length prefix survives exactly when a concurrent
@@ -457,7 +457,7 @@ import os
 import os.path
 import sys
 
-import path_safety
+from daedalus_bridge import path_safety
 
 root = sys.argv[1]
 name = 'tok_extension.json'

@@ -4,8 +4,8 @@ import json
 import threading
 import time
 
-import command_queue
-from log_safe import log_safe
+from daedalus_bridge import command_queue
+from daedalus_bridge.log_safe import log_safe
 
 
 # {stream id: {'key', 'tab', 'killed'}}. The registry is keyed by a
