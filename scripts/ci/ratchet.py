@@ -7,7 +7,7 @@ against reality, so the test pinning the two numbers together cannot tell a
 current measurement from one taken fifteen commits ago. It recorded 73.3 while
 the job measured 75.0, which is a two-point regression budget nobody chose.
 
-  python3 scripts/ci/ratchet.py --measured 75.0   # rewrite if that justifies a raise
+  python3 scripts/ci/ratchet.py --language python --measured 75.0
 
 Writes nothing when the measurement justifies no raise, so the caller decides
 what happened by asking git whether the file moved.
@@ -23,7 +23,7 @@ WORKFLOW = (Path(__file__).resolve().parents[2]
 # How far the floor sits below the measurement. It absorbs run-to-run variation
 # — which suites reach a subprocess before it exits, and which optional
 # dependency set the runner resolved — rather than being a regression budget.
-# test_the_coverage_ratchet_records_what_it_was_calibrated_to refuses a gap
+# test_each_coverage_ratchet_records_what_it_was_calibrated_to refuses a gap
 # over 2.0 points, so this stays under it with room for the rounding.
 BUFFER = 1.5
 
@@ -31,22 +31,55 @@ BUFFER = 1.5
 # writes can be checked against it before the file is touched.
 MAX_GAP = 2.0
 
-_MEASURED = re.compile(r'(#\s*measured:\s*)([0-9]+(?:\.[0-9]+)?)')
-_FLOOR = re.compile(r'(#\s*floor:\s*)([0-9]+(?:\.[0-9]+)?)')
-_FLAG = re.compile(r'(--fail-under=)([0-9]+(?:\.[0-9]+)?)')
+_NUMBER = r'([0-9]+(?:\.[0-9]+)?)'
+_LANGUAGES = {
+    'python': {
+        'label': 'Python',
+        'flag': (
+            r'^([ \t]*run:[ \t]+python[ \t]+-m[ \t]+coverage[ \t]+'
+            r'report[ \t]+--fail-under=)' + _NUMBER
+            + r'([ \t]+--precision=1[ \t]*)$'),
+    },
+    'javascript': {
+        'label': 'JavaScript',
+        'flag': (
+            r'^([ \t]*--xml[ \t]+javascript-coverage\.xml[ \t]+'
+            r'--fail-under=)' + _NUMBER + r'([ \t]*)$'),
+    },
+}
 
 
-def read_calibration(text):
+def _patterns(language):
+    try:
+        settings = _LANGUAGES[language]
+    except KeyError:
+        raise SystemExit(f'unknown coverage language: {language}') from None
+    label = settings['label']
+    measured = (
+        r'^([ \t]*#[ \t]+' + label + r'[ \t]+measured:[ \t]*)'
+        + _NUMBER + r'([ \t]*)$')
+    floor = (
+        r'^([ \t]*#[ \t]+' + label + r'[ \t]+floor:[ \t]*)'
+        + _NUMBER + r'([ \t]*)$')
+    return tuple(
+        re.compile(pattern, re.MULTILINE)
+        for pattern in (measured, floor, settings['flag']))
+
+
+def read_calibration(text, language):
     """(measured, floor) the workflow records, or SystemExit when it records none.
 
     The flag is read too and required to agree with the floor: rewriting a
     file whose gate already disagrees with its own comment would bake that
     disagreement in rather than reporting it.
     """
-    measured, floor, flag = (_MEASURED.search(text), _FLOOR.search(text),
-                             _FLAG.search(text))
+    measured_pattern, floor_pattern, flag_pattern = _patterns(language)
+    measured = measured_pattern.search(text)
+    floor = floor_pattern.search(text)
+    flag = flag_pattern.search(text)
     if not (measured and floor and flag):
-        raise SystemExit('the coverage gate records no calibration')
+        raise SystemExit(
+            f'the {language} coverage gate records no calibration')
     floor_value, flag_value = float(floor.group(2)), float(flag.group(2))
     if floor_value != flag_value:
         raise SystemExit(
@@ -60,14 +93,15 @@ def floor_for(measured):
     return round(measured - BUFFER, 1)
 
 
-def update(text, measured):
+def update(text, measured, language):
     """The rewritten workflow, or None when nothing is justified.
 
     A measurement below the recorded floor plus the buffer changes nothing:
     the floor is a high-water mark, and a run that reached fewer subprocesses
     than the best one is not evidence that the code lost coverage.
     """
-    floor = read_calibration(text)[1]
+    measured_pattern, floor_pattern, flag_pattern = _patterns(language)
+    floor = read_calibration(text, language)[1]
     target = floor_for(measured)
     if target <= floor:
         return None
@@ -78,14 +112,23 @@ def update(text, measured):
         raise SystemExit(
             f'a floor of {target} leaves a {measured - target:.1f} point gap '
             f'below {measured}, over the {MAX_GAP} the pinning test allows')
-    text = _MEASURED.sub(lambda m: f'{m.group(1)}{measured:.1f}', text, count=1)
-    text = _FLOOR.sub(lambda m: f'{m.group(1)}{target:.1f}', text, count=1)
-    return _FLAG.sub(lambda m: f'{m.group(1)}{target:.1f}', text, count=1)
+
+    def replacement(match, value):
+        return f'{match.group(1)}{value:.1f}{match.group(3)}'
+
+    text = measured_pattern.sub(
+        lambda match: replacement(match, measured), text, count=1)
+    text = floor_pattern.sub(
+        lambda match: replacement(match, target), text, count=1)
+    return flag_pattern.sub(
+        lambda match: replacement(match, target), text, count=1)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--language', choices=sorted(_LANGUAGES), required=True,
+                    help='coverage calibration to raise')
     ap.add_argument('--measured', type=float, required=True,
                     help='the total coverage percentage this run measured')
     ap.add_argument('--workflow', type=Path, default=WORKFLOW,
@@ -93,15 +136,16 @@ def main():
     args = ap.parse_args()
 
     text = args.workflow.read_text(encoding='utf-8')
-    rewritten = update(text, args.measured)
-    floor = read_calibration(text)[1]
+    rewritten = update(text, args.measured, args.language)
+    floor = read_calibration(text, args.language)[1]
+    label = _LANGUAGES[args.language]['label']
     if rewritten is None:
-        print(f'coverage {args.measured:.1f}% justifies no raise above the '
-              f'{floor} floor')
+        print(f'{label} coverage {args.measured:.1f}% justifies no raise '
+              f'above the {floor} floor')
         return 0
     args.workflow.write_text(rewritten, encoding='utf-8')
-    print(f'raised the coverage floor {floor} -> {floor_for(args.measured):.1f} '
-          f'(measured {args.measured:.1f}%)')
+    print(f'raised the {label} coverage floor {floor} -> '
+          f'{floor_for(args.measured):.1f} (measured {args.measured:.1f}%)')
     return 0
 
 

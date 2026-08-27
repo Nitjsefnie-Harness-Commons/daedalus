@@ -129,6 +129,9 @@ jobs:
       # data file follows the child's cwd, so its measurements were written
       # inside the tree and deleted with it.
       COVERAGE_FILE: ${{ github.workspace }}/.coverage
+      # Node children inherit NODE_V8_COVERAGE from this job environment,
+      # so V8 writes here directly; no harness plumbing is needed.
+      NODE_V8_COVERAGE: ${{ github.workspace }}/.node-v8-coverage
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -184,7 +187,7 @@ jobs:
           python scripts/ci/coverage_suites.py
           python -m coverage combine
 
-      - name: Coverage summary
+      - name: Python coverage summary
         # Renders whether or not the gate below passes — a coverage
         # regression is only actionable if you can see WHICH file lost
         # lines, and re-reading a scrolled CI log to find that is exactly
@@ -192,21 +195,37 @@ jobs:
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
         run: |
           {
-            echo '### Coverage'
+            echo '### Python coverage'
+            echo
+            printf '%s %s\n' \
+              'Python statement coverage and JavaScript physical code-line' \
+              'coverage are separate metrics; do not add them together.'
             echo
             python -m coverage report --format=markdown --precision=1
           } >> "$GITHUB_STEP_SUMMARY"
           python -m coverage xml -o coverage.xml
 
-      - name: Upload coverage.xml
+      - name: JavaScript coverage summary
+        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
+        run: |
+          {
+            echo '### JavaScript coverage'
+            echo
+            python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \
+              --xml javascript-coverage.xml
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage XML
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: coverage-xml
-          path: coverage.xml
+          path: |
+            coverage.xml
+            javascript-coverage.xml
           if-no-files-found: error
 
-      - name: Coverage gate
+      - name: Python coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
         # A RATCHET, not a target. The floor sits just under what this job
         # actually measures, so ordinary churn stays green and a real
@@ -214,13 +233,25 @@ jobs:
         # measured — never lower it to make a red build green.
         #
         # The two numbers below are checked against each other and against the
-        # flag by test_the_coverage_ratchet_records_what_it_was_calibrated_to.
+        # flag by
+        # test_each_coverage_ratchet_records_what_it_was_calibrated_to.
         # The buffer absorbs measurement variation — which suites reach a
         # subprocess before it exits, and which optional dependency set the
         # runner resolved — not a licence to regress into it.
-        # measured: 86.1
-        # floor: 84.6
+        # Python measured: 86.1
+        # Python floor: 84.6
         run: python -m coverage report --fail-under=84.6 --precision=1
+
+      - name: JavaScript coverage gate
+        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
+        # JavaScript uses physical code lines, so this floor is independent
+        # of the Python statement floor above. It has the same 1.5-point
+        # run-to-run buffer and the same raise-only rule.
+        # JavaScript measured: 34.6
+        # JavaScript floor: 33.1
+        run: |
+          python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \
+            --xml javascript-coverage.xml --fail-under=33.1
 
       - name: Work out the raise this run justifies
         # The floor was raised by hand, so the measurement recorded beside it
@@ -239,8 +270,17 @@ jobs:
                 && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         run: |
-          measured="$(python -m coverage report --format=total --precision=1)"
-          python scripts/ci/ratchet.py --measured "$measured"
+          python_measured="$(
+            python -m coverage report --format=total --precision=1
+          )"
+          javascript_measured="$(
+            python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \
+              --format=total
+          )"
+          python scripts/ci/ratchet.py --language python \
+            --measured "$python_measured"
+          python scripts/ci/ratchet.py --language javascript \
+            --measured "$javascript_measured"
           # The size baseline ratchets the other way: it follows a file down
           # when it shrinks, so the lines cannot come back for free. Growth is
           # never written here — that stays a decision a reviewer sees.
@@ -251,20 +291,23 @@ jobs:
           # shellcheck disable=SC2086  # two known paths, deliberately split
           if git diff --quiet -- $paths; then
             echo "raised=false" >> "$GITHUB_OUTPUT"
-            echo "Coverage ${measured}% justified no raise, and no module shrank." \
+            printf '%s %s\n' \
+              "Python coverage ${python_measured}% and JavaScript coverage" \
+              "${javascript_measured}% justified no raise; no module shrank." \
               >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "raised=true" >> "$GITHUB_OUTPUT"
-            echo "measured=${measured}" >> "$GITHUB_OUTPUT"
-            if git diff --quiet -- scripts/ci/size_baseline.py; then
-              echo "subject=raise the coverage ratchet to ${measured}% measured" \
-                >> "$GITHUB_OUTPUT"
-            elif git diff --quiet -- .github/workflows/tests.yml; then
-              echo 'subject=tighten the module size baseline' >> "$GITHUB_OUTPUT"
-            else
-              echo "subject=raise the coverage ratchet to ${measured}% and tighten module sizes" \
-                >> "$GITHUB_OUTPUT"
-            fi
+            {
+              echo 'raised=true'
+              echo "python_measured=${python_measured}"
+              echo "javascript_measured=${javascript_measured}"
+              if git diff --quiet -- scripts/ci/size_baseline.py; then
+                echo 'subject=tighten the module size baseline'
+              elif git diff --quiet -- .github/workflows/tests.yml; then
+                echo 'subject=raise the coverage ratchets'
+              else
+                echo 'subject=raise coverage ratchets and tighten module sizes'
+              fi
+            } >> "$GITHUB_OUTPUT"
             {
               echo '### Recorded by this run'
               echo

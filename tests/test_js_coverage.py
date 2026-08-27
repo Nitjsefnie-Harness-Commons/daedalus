@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,8 +15,12 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-from js_coverage import (collect_coverage, merge_records,  # noqa: E402
-                         resolve_script, tracked_sources)
+from js_coverage import (_data_source, _file_url_path, collect_coverage,
+                         merge_records, resolve_script,  # noqa: E402
+                         tracked_sources)
+
+
+_SCRIPT = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
 
 
 def _git(root, *args):
@@ -53,6 +58,12 @@ def _write_dump(directory, records, name='coverage-fixture.json'):
     (directory / name).write_text(
         json.dumps({'result': records, 'timestamp': 1}),
         encoding='utf-8')
+
+
+def _run_cli(root, dumps, *args):
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), str(dumps), '--root', str(root),
+         *args], cwd=str(ROOT), capture_output=True, text=True, timeout=60)
 
 
 def test_tracked_sources_uses_git_and_the_shipped_directories(tmp):
@@ -123,6 +134,55 @@ def test_percent_and_base64_data_urls_match_exact_source_text(tmp):
     assert resolve_script(
         base64_url, root, sources
     ) == 'dashboard/base64.js'
+
+
+def test_data_url_without_a_separator_is_rejected(tmp):
+    """Removing the missing-separator guard must fail."""
+    del tmp
+    assert _data_source('data:text/javascript') is None
+
+
+def test_malformed_base64_data_url_is_rejected(tmp):
+    """Letting malformed base64 escape the decode guard must fail."""
+    del tmp
+    assert _data_source('data:text/javascript;base64,%%%') is None
+
+
+def test_base64_data_url_with_invalid_utf8_is_rejected(tmp):
+    """Returning undecodable bytes as source text must fail."""
+    del tmp
+    payload = base64.b64encode(b'\xff').decode('ascii')
+    assert _data_source('data:text/javascript;base64,' + payload) is None
+
+
+def test_empty_data_url_decodes_to_empty_source(tmp):
+    """Treating an empty successful decode as an error must fail."""
+    del tmp
+    assert _data_source('data:text/javascript,') == ''
+
+
+def test_non_file_scheme_has_no_file_path(tmp):
+    """Accepting another URL scheme as a local path must fail."""
+    del tmp
+    assert _file_url_path('https://example.com/extension/a.js') is None
+
+
+def test_foreign_file_host_has_no_file_path(tmp):
+    """Accepting a foreign file host as a local path must fail."""
+    del tmp
+    assert _file_url_path('file://example.com/extension/a.js') is None
+
+
+def test_resolution_stops_when_a_file_url_has_no_candidate(tmp):
+    """Removing the candidate guard must turn this into an exception."""
+    root = _repository(tmp, {
+        'extension/tracked.js': 'const tracked = true;\n',
+    })
+    sources = tracked_sources(root)
+
+    assert resolve_script(
+        'file://example.com/extension/tracked.js', root, sources
+    ) is None
 
 
 def test_data_url_near_match_is_not_resolved(tmp):
@@ -226,6 +286,21 @@ def test_separate_script_records_add_their_counts(tmp):
     assert merge_records([first, second], 3) == [5, 5, 5]
 
 
+def test_coverage_range_past_source_length_is_an_error(tmp):
+    """Dropping the stale-dump overflow guard must fail."""
+    del tmp
+    record = _record('extension/stale.js', [
+        {'startOffset': 0, 'endOffset': 4, 'count': 1},
+    ])
+
+    try:
+        merge_records([record], 3)
+    except ValueError as failure:
+        assert 'coverage range 0:4 outside source length 3' in str(failure)
+    else:
+        raise AssertionError('an offset past the source was accepted')
+
+
 def test_line_coverage_uses_nested_counts_and_keeps_unseen_files(tmp):
     """Loaded outer ranges and omitted zero-coverage files must fail."""
     executed = 'a();\nb();\nc();\n'
@@ -270,6 +345,87 @@ def test_report_counts_builtin_and_other_unattributed_records(tmp):
     assert report.ignored_builtins == 1
     assert report.ignored_other == 2
     assert report.unattributed_records == 3
+
+
+def _cli_fixture(tmp):
+    source = 'run();\nskip();\n'
+    root = _repository(tmp, {
+        'extension/run.js': source,
+        'dashboard/unseen.js': 'unseen();\n',
+    })
+    dumps = Path(tmp) / 'coverage'
+    _write_dump(dumps, [
+        _record('extension/run.js', [
+            {'startOffset': 0, 'endOffset': len(source), 'count': 1},
+            {'startOffset': 7, 'endOffset': 14, 'count': 0},
+        ]),
+        _record('node:fs', []),
+        _record('[eval]', []),
+    ])
+    return root, dumps
+
+
+def test_cli_renders_per_file_total_and_attribution_markdown(tmp):
+    """Dropping a row, total, or attribution count must fail."""
+    root, dumps = _cli_fixture(tmp)
+
+    completed = _run_cli(root, dumps)
+
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+    assert completed.stderr == '', completed.stderr
+    assert completed.stdout == (
+        '| Name | Covered | Total | Cover |\n'
+        '| :--- | ---: | ---: | ---: |\n'
+        '| dashboard/unseen.js | 0 | 1 | 0.0% |\n'
+        '| extension/run.js | 1 | 2 | 50.0% |\n'
+        '| **TOTAL** | **1** | **3** | **33.3%** |\n'
+        '\n'
+        'Unattributed V8 records: 1 built-in, 1 other '
+        '(2 total of 3).\n')
+
+
+def test_cli_fail_under_returns_nonzero_below_measured_total(tmp):
+    """Ignoring a floor above the real total must fail."""
+    root, dumps = _cli_fixture(tmp)
+
+    completed = _run_cli(root, dumps, '--fail-under', '33.4')
+
+    assert completed.returncode != 0, completed.stdout
+    assert 'Coverage failure: total of 33.3 is less than fail-under=33.4' \
+        in completed.stderr, completed.stderr
+
+
+def test_cli_total_format_is_machine_readable(tmp):
+    """Making the ratchet scrape the Markdown table must fail."""
+    root, dumps = _cli_fixture(tmp)
+
+    completed = _run_cli(root, dumps, '--format=total')
+
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+    assert completed.stdout == '33.3\n', completed.stdout
+    assert completed.stderr == '', completed.stderr
+
+
+def test_cli_writes_cobertura_with_repo_paths_and_line_hits(tmp):
+    """Absolute paths, omitted executable lines, or wrong hits must fail."""
+    root, dumps = _cli_fixture(tmp)
+    xml_path = Path(tmp) / 'javascript-coverage.xml'
+
+    completed = _run_cli(root, dumps, '--xml', str(xml_path))
+
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+    tree = ET.parse(xml_path)
+    classes = {
+        node.get('filename'): {
+            int(line.get('number')): int(line.get('hits'))
+            for line in node.findall('./lines/line')
+        }
+        for node in tree.findall('.//class')
+    }
+    assert classes == {
+        'dashboard/unseen.js': {1: 0},
+        'extension/run.js': {1: 1, 2: 0},
+    }
 
 
 def test_real_node_dump_reports_executed_and_skipped_lines(tmp):
