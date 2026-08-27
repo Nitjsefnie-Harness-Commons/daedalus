@@ -128,12 +128,7 @@ def _write_executable(path, content):
 
 def _run_shell_block(workdir, script, env):
     """Run a workflow shell block with coverage disabled in its children."""
-    # The stubs are Python subprocesses in deleted temp dirs; scrub CI's
-    # collector so coverage combine in the coverage job cannot chase them.
-    child_env = {
-        name: value for name, value in env.items()
-        if not name.startswith('COVERAGE_')
-    }
+    child_env = _util.coverage_free_environment(env)
     return subprocess.run(
         [shutil.which('bash'), '-c', script], cwd=workdir, env=child_env,
         capture_output=True, text=True, timeout=60)
