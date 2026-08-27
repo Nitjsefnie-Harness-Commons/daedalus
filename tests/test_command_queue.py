@@ -84,12 +84,24 @@ def test_remove_expired_removes_an_expired_tmp(tmp):
     assert not path.exists(), path
 
 
-def test_remove_expired_leaves_a_non_object_legacy_json(tmp):
-    queue = _load_queue('command_queue_non_object_legacy')
+def test_remove_expired_removes_an_expired_non_object_legacy_json(tmp):
+    queue = _load_queue('command_queue_non_object_legacy_expired')
     path = Path(tmp) / 'legacy.json'
     _publish_legacy(path, '["not a command"]')
     now = time.time()
     _set_mtime(path, now - 91)
+
+    queue.remove_expired(path, now, 90, legacy=True)
+
+    assert not path.exists(), path
+
+
+def test_remove_expired_leaves_a_fresh_non_object_legacy_json(tmp):
+    queue = _load_queue('command_queue_non_object_legacy_fresh')
+    path = Path(tmp) / 'legacy.json'
+    _publish_legacy(path, '["not a command"]')
+    now = time.time()
+    _set_mtime(path, now - 1)
 
     queue.remove_expired(path, now, 90, legacy=True)
 

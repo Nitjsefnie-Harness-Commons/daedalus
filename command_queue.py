@@ -73,9 +73,10 @@ def remove_expired(path, now, ttl, legacy=False):
         if legacy:
             if path.name.startswith('.') or not path.name.endswith('.json'):
                 return
-            data = json.loads(path.read_text(encoding='utf-8'))
-            if not isinstance(data, dict):
-                return
+            # A parse failure means a writer may still hold the file mid-write;
+            # any value that parses completely — dict or not — is not that
+            # case, so it is expired like any other aged command artifact.
+            json.loads(path.read_text(encoding='utf-8'))
         path.unlink()
     except (OSError, json.JSONDecodeError, RecursionError, ValueError):
         # A file that cannot be read or removed is reconsidered on the next
