@@ -23,17 +23,13 @@ _WORKER_PLATFORM_GLOBALS = frozenset({
     'console', 'crypto', 'fetch', 'parseInt', 'performance', 'setInterval',
     'setTimeout',
 })
-_WORKER_NON_HANDLER_EXPORTS = (
-    # Add one reviewed non-handler export per line.
-    '_cdpError',
-    '_cdpSessions',
-    '_cdpSettle',
-    '_canUseMainWorldEval',
-    '_executeMainWorldEval',
-    'handleHotfixReplay',
-    '_netCaptures',
-    '_releaseCdpObjects',
-    '_takeEvalRelay',
+_WORKER_NON_COMMAND_OWNERSHIP = (
+    ('worker/cdp.js', ('_cdpError', '_cdpSessions', '_cdpSettle',
+                       '_releaseCdpObjects'), ()),
+    ('worker/evaluate.js', ('_canUseMainWorldEval', '_executeMainWorldEval',
+                            '_takeEvalRelay'), ()),
+    ('worker/hotfixes.js', ('handleHotfixReplay',), ()),
+    ('worker/netcapture.js', ('_netCaptures',), ()),
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
@@ -103,18 +99,59 @@ def _masked_code_mentions(masked_source, name):
     return None
 
 
+def test_non_command_worker_ownership_is_structural(tmp):
+    """Non-command exports and listener sites have one positive owner."""
+    del tmp
+    modules = [row[0] for row in _WORKER_NON_COMMAND_OWNERSHIP]
+    symbols = [symbol for _, owned, _ in _WORKER_NON_COMMAND_OWNERSHIP
+               for symbol in owned]
+    assert not [item for item, count in Counter(modules).items() if count > 1]
+    assert not [item for item, count in Counter(symbols).items() if count > 1]
+
+    loaded = {
+        path.relative_to(ROOT / 'extension').as_posix()
+        for path in observe_extension_worker_paths()
+    }
+    sources = dict(_worker_sources())
+    runtime, shared = _runtime_observations()
+    assert shared['error'] is None, shared
+    background_names = set(
+        runtime['extension/background.js']['bindings'])
+    failures = {}
+    for module, owned, listener_sites in _WORKER_NON_COMMAND_OWNERSHIP:
+        relative = f'extension/{module}'
+        if module not in loaded:
+            failures[module] = {'not loaded': True}
+            continue
+        details = runtime[relative]
+        exported = _directive_names(sources[relative], 'exported')
+        problem = {
+            'missing bindings': sorted(set(owned) - set(details['bindings'])),
+            'missing exports': sorted(set(owned) - exported),
+            'retained by background': sorted(set(owned) & background_names),
+        }
+        for listener in listener_sites:
+            owners = [name for name, source in sources.items()
+                      if js_mask(source).count(listener)]
+            if owners != [relative]:
+                problem.setdefault('listener owners', {})[listener] = owners
+        problem = {key: value for key, value in problem.items() if value}
+        if problem:
+            failures[module] = problem
+    assert not failures, f'non-command worker ownership mismatch: {failures}'
+
+
 def test_each_worker_capability_lives_in_its_own_module(tmp):
     """Every exported handler has one replaceable runtime dispatch route.
 
     The existing VM harness records the paths the worker actually asks
     `importScripts` to load; that observation defines the module inventory.
-    Each module's export directives, apart from explicit non-handler
-    exceptions, define its handlers. An entry in the exception tuple removes
-    that export from runtime route coverage and therefore requires deliberate
-    review. Before probing, the guard requires unique handler ownership and
-    exact, duplicate-sensitive route-symbol coverage. A route row for an
-    unloaded module is also refused. Command types are runtime-probe inputs,
-    not an exhaustive inventory of the dispatch surface.
+    Each module's export directives, apart from symbols in the positive
+    non-command ownership contract, define its handlers. Before probing, the
+    guard requires unique handler ownership and exact, duplicate-sensitive
+    route-symbol coverage. A route row for an unloaded module is also refused.
+    Command types are runtime-probe inputs, not an exhaustive inventory of the
+    dispatch surface.
 
     The probe checks replaceability first. A separate runtime observation
     requires one function-instantiation write before source execution and no
@@ -168,15 +205,11 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         route for route, count in Counter(routes).items() if count > 1)
     assert not duplicate_routes, (
         f'worker route table contains duplicate rows: {duplicate_routes}')
-    duplicate_exceptions = sorted(
-        name for name, count
-        in Counter(_WORKER_NON_HANDLER_EXPORTS).items()
-        if count > 1
-    )
-    assert not duplicate_exceptions, (
-        'non-handler export exceptions contain duplicate entries: '
-        f'{duplicate_exceptions}')
-    non_handler_exports = set(_WORKER_NON_HANDLER_EXPORTS)
+    non_handler_exports = {
+        name for module, symbols, _ in _WORKER_NON_COMMAND_OWNERSHIP
+        if (ROOT / 'extension' / module).is_file()
+        for name in symbols
+    }
 
     extension_root = ROOT / 'extension'
     loaded_modules = [
@@ -553,6 +586,7 @@ def test_limitation_unknown_lexical_name_is_not_attributed(tmp):
     observed = observe_worker_runtime([{
         'path': worker, 'globals': (), 'watched': (),
     }], background_path=background)['sources'][str(worker)]
+    assert observed['bindingExecutionError'] is None
     assert observed['bindings'] == [], observed
 
 
