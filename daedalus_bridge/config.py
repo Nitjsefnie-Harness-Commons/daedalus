@@ -17,7 +17,7 @@ RES_DIR = BASE / 'results'
 DELIVERY_DIR = RES_DIR / 'deliveries'
 UPLOAD_DIR = BASE / 'uploads'
 SEG_DIR = BASE / 'segments'
-DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent / 'dashboard'
+DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent.parent / 'dashboard'
 # 0 lets the kernel pick a free port; the startup line always prints the
 # port actually bound, so an ephemeral deployment (and the test fixture)
 # never has to choose a number another process could take first.
