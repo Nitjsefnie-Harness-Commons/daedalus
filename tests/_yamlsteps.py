@@ -9,6 +9,7 @@ from _yamlscalar import (
     decode_inline_scalar,
     split_mapping_field,
 )
+from workflow_yaml import workflow_step_items
 
 
 _EXPRESSION = re.compile(r'^\$\{\{ [A-Za-z0-9_.*()[\]]+ \}\}$')
@@ -19,37 +20,13 @@ _PLAIN_WITH_SPACES = re.compile(
 def step_mappings(workflow, job):
     """Return every complete mapping in the named job's step sequence."""
     lines = _reader._lines(workflow)
-    jobs = _reader._decoded_mapping_entry(
-        lines, 0, len(lines), -1, 'jobs')
-    if jobs is None:
+    items = workflow_step_items(workflow, job)
+    if items is None:
         return None
-    if jobs.rest.strip(' '):
-        raise YAMLReadError('jobs is not a mapping')
-    jobs_body = _reader._section(
-        lines, jobs.index, jobs.indent)
-    _reader._require_mapping_body(
-        lines, *jobs_body, jobs.indent, 'jobs')
-    job_entry = _reader._decoded_mapping_entry(
-        lines, *jobs_body, jobs.indent, job)
-    if job_entry is None:
-        return None
-    if job_entry.rest.strip(' '):
-        raise YAMLReadError(f'job {job!r} is not a mapping')
-    job_body = _reader._section(
-        lines, job_entry.index, job_entry.indent)
-    _reader._require_mapping_body(
-        lines, *job_body, job_entry.indent, f'job {job!r}')
-    steps = _reader._decoded_mapping_entry(
-        lines, *job_body, job_entry.indent, 'steps')
-    if steps is None:
-        return None
-    if steps.rest.strip(' '):
-        raise YAMLReadError(f'job {job!r} steps are not a sequence')
-    steps_body = _reader._section(
-        lines, steps.index, steps.indent)
-    _reader._require_sequence_body(
-        lines, *steps_body, steps.indent, f'job {job!r} steps')
-    return _decode_step_sequence(lines, *steps_body, steps.indent)
+    return [
+        _decode_step(lines, item.index, item.end_index, item.indent)
+        for item in items
+    ]
 
 
 def workflow_mapping(workflow):
@@ -84,32 +61,6 @@ def complete_job_mapping(workflow, job):
         lines, *job_body, job_entry.indent, f'job {job!r}')
     return _decode_complete_mapping(
         lines, *job_body, job_entry.indent, f'job {job!r}')
-
-
-def _decode_step_sequence(lines, start, end, parent_indent):
-    """Decode each mapping item in one validated step sequence."""
-    first = _reader._first_child(
-        lines, start, end, parent_indent)
-    item_indent = _reader._indent(lines[first])
-    items = []
-    for index in range(start, end):
-        if not _reader._meaningful(
-                lines[index]):
-            continue
-        indent = _reader._indent(lines[index])
-        text, _ended = lines[index]
-        field = text[indent:]
-        if indent == item_indent:
-            if not field.startswith('- '):
-                raise YAMLReadError('step sequence contains a non-item')
-            items.append(index)
-        elif indent < item_indent:
-            raise YAMLReadError('step sequence has inconsistent indentation')
-    decoded = []
-    for offset, index in enumerate(items):
-        item_end = items[offset + 1] if offset + 1 < len(items) else end
-        decoded.append(_decode_step(lines, index, item_end, item_indent))
-    return decoded
 
 
 def _decode_step(lines, index, end, item_indent):

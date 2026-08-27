@@ -11,6 +11,7 @@ from _yamlread import (  # noqa: E402
     YAMLReadError, _comment, job_scalar, step_scalar, step_scalars,
 )
 from _yamlscalar import decode_inline_scalar  # noqa: E402
+from workflow_yaml import workflow_step_items  # noqa: E402
 
 
 def _raises(source, detail):
@@ -266,6 +267,20 @@ def test_step_mappings_decode_every_field_and_nested_mapping(tmp):
         'run': 'echo "$HEAD_SHA"\n',
         'continue-on-error': 'false',
     }]
+
+
+def test_comment_header_cannot_hide_a_following_step_field(tmp):
+    """A comment that resembles a block header owns no scalar content."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: target\n'
+        '      # note: |\n'
+        '        id: chosen\n')
+    items = workflow_step_items(source, 'sample')
+    assert items is not None
+    assert len(items) == 1, items
+    assert items[0].identity == 'chosen', items[0]
 
 
 def test_complete_workflow_and_job_mappings_decode_every_container(tmp):
