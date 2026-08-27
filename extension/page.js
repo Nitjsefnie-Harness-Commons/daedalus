@@ -340,7 +340,7 @@
       if (typeof opts === 'object') _pending[reqId] = opts;
     },
 
-    info: { script: { version: '0.21.0a' }, scriptHandler: 'Daedalus' },
+    info: { script: { version: '0.22.0' }, scriptHandler: 'Daedalus' },
   };
 
   console.log('[Daedalus] GM bridge v' + window.GM.info.script.version + ' ready');
