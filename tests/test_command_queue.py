@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (TOK, next_stream_data, put_command,  # noqa: E402
-                     stream_response)
+                     read_stream_data, stream_response)
 
 
 def _load_queue(name):
@@ -381,6 +381,53 @@ def _raise_broken_pipe(_data):
     raise BrokenPipeError('injected write failure')
 
 
+def test_stream_queue_drain_forwards_ttl_for_a_fresh_command(tmp):
+    env = {'DAEDALUS_CMD_TTL': '3600'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        qdir = Path(docroot) / 'commands' / TOK
+        qdir.mkdir()
+        command = qdir / '0000000000001_000001.json'
+        command.write_text('{"id":"fresh-forwarded"}', encoding='utf-8')
+        stamp = time.time() - 1
+        os.utime(command, (stamp, stamp))
+
+        delivered = read_stream_data(base, TOK, timeout=5)
+
+        assert delivered['id'] == 'fresh-forwarded', delivered
+
+
+def test_stream_queue_drain_forwards_ttl_for_an_expired_command(tmp):
+    env = {'DAEDALUS_CMD_TTL': '3600'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        qdir = Path(docroot) / 'commands' / TOK
+        qdir.mkdir()
+        expired = qdir / '0000000000001_000001.json'
+        fresh = qdir / '0000000000002_000002.json'
+        expired.write_text('{"id":"expired-forwarded"}', encoding='utf-8')
+        fresh.write_text('{"id":"after-expired"}', encoding='utf-8')
+        now = time.time()
+        old_stamp = now - 5400
+        os.utime(expired, (old_stamp, old_stamp))
+        os.utime(fresh, (now, now))
+
+        delivered = read_stream_data(base, TOK, timeout=5)
+
+        assert delivered['id'] == 'after-expired', delivered
+        assert not expired.exists(), expired
+
+
+def test_extension_legacy_drain_forwards_the_command_directory(tmp):
+    with _util.bridge(tmp) as (base, docroot):
+        command_dir = Path(docroot) / 'commands'
+        legacy = command_dir / f'{TOK}_42.json'
+        legacy.write_text('{"id":"legacy-forwarded"}', encoding='utf-8')
+
+        delivered = read_stream_data(base, TOK, 'extension', timeout=5)
+
+        assert delivered == {
+            'id': 'legacy-forwarded', 'chromeTab': '42'}, delivered
+
+
 def test_two_streams_covering_one_queue_deliver_a_command_once(tmp):
     fault_dir, read_count = _slow_queue_read_dir(tmp)
     served = []
@@ -579,12 +626,12 @@ def test_queue_write_failure_keeps_file_and_releases_claim(tmp):
     qdir.mkdir(parents=True)
     command = qdir / '0000000000001_000001.json'
     command.write_text('{"id":"write-fail"}', encoding='utf-8')
-    handler = object.__new__(server.Handler)
-    handler._write_frame = _raise_broken_pipe
     key = f'queue:{qdir.name}/{command.name}'
     try:
         try:
-            server.Handler._drain_queue(handler, qdir, None, None)
+            server.stream_service.drain_queue(
+                qdir, None, None, command_ttl=server.CMD_TTL,
+                frame_writer=_raise_broken_pipe)
         except BrokenPipeError:
             pass
         else:
@@ -600,12 +647,12 @@ def test_legacy_write_failure_keeps_file_and_releases_claim(tmp):
     server.CMD_DIR.mkdir(parents=True, exist_ok=True)
     command = server.CMD_DIR / 'legacy-write-fail.json'
     _publish_legacy(command, '{"id":"write-fail"}')
-    handler = object.__new__(server.Handler)
-    handler._write_frame = _raise_broken_pipe
     key = f'legacy:{command.name}'
     try:
         try:
-            server.Handler._drain_legacy_file(handler, command, None)
+            server.stream_service.drain_legacy_file(
+                command, None, command_ttl=server.CMD_TTL,
+                frame_writer=_raise_broken_pipe)
         except BrokenPipeError:
             pass
         else:
