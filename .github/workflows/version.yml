@@ -88,7 +88,7 @@ jobs:
                "repos/$REPO/releases/tags/v$version" >/dev/null 2>&1; then
             echo "v$version is already published, and this tree is not that" >&2
             echo "release. Bump every site in one pass before pushing again:" >&2
-            echo "  python3 scripts/check_versions.py --set <next>a" >&2
+            echo "  python3 scripts/check_versions.py --set <released>.1" >&2
             exit 1
           fi
           echo "v$version is unpublished, so this tree is free to claim it."

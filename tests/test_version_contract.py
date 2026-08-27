@@ -174,13 +174,13 @@ def test_check_versions_set_writes_one_string_to_every_site(tmp):
     other site, whatever shape the version has."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
-    r = _run_checker(copy_root, '--set', '9.9.9a')
+    r = _run_checker(copy_root, '--set', '9.9.9.1')
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     for path, desc, pattern in checker.SITES:
         text = (copy_root / path).read_text(encoding='utf-8')
         m = re.search(pattern, text)
         assert m, (path, desc)
-        assert m.group('v') == '9.9.9a', (path, desc, m.group('v'))
+        assert m.group('v') == '9.9.9.1', (path, desc, m.group('v'))
 
 
 def test_a_manifest_spelling_the_version_differently_is_reported(tmp):
@@ -194,17 +194,52 @@ def test_a_manifest_spelling_the_version_differently_is_reported(tmp):
     """
     copy_root = Path(tmp) / 'tree'
     _copy_versioned_tree(copy_root)
-    written = _run_checker(copy_root, '--set', '9.9.9a')
+    written = _run_checker(copy_root, '--set', '9.9.9.1')
     assert written.returncode == 0, (written.stdout, written.stderr)
     manifest = copy_root / 'extension' / 'manifest.json'
     text = manifest.read_text(encoding='utf-8')
     new_text, n = re.subn(r'"version"\s*:\s*"[^"]+"',
-                          '"version": "9.9.9.1"', text)
+                          '"version": "9.9.9.2"', text)
     assert n == 1, text
     manifest.write_text(new_text, encoding='utf-8')
     r = _run_checker(copy_root)
     assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
     assert 'extension/manifest.json' in r.stderr, r.stderr
+
+
+def test_check_versions_set_refuses_a_version_no_site_can_carry(tmp):
+    """Chrome accepts only dot-separated integers in a manifest version, so a
+    letter-suffixed version cannot be spelled the same way at every site.
+    --set is the documented way the tree acquires a version, so it is where
+    that shape has to be refused — before anything is written."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    before = {p: (copy_root / p).read_text(encoding='utf-8')
+              for p, _, _ in checker.SITES}
+    r = _run_checker(copy_root, '--set', '9.9.9a')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert '9.9.9a' in r.stderr, r.stderr
+    for path, text in before.items():
+        assert (copy_root / path).read_text(encoding='utf-8') == text, path
+
+
+def test_a_version_no_site_can_carry_is_reported(tmp):
+    """A tree that acquired such a version some other way is reported rather
+    than handed to the gate, which would otherwise pass a tree whose
+    extension Chrome refuses to load."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    for path, desc, pattern in checker.SITES:
+        target = copy_root / path
+        text = target.read_text(encoding='utf-8')
+        m = re.search(pattern, text)
+        assert m, (path, desc)
+        start, end = m.span('v')
+        target.write_text(text[:start] + '9.9.9a' + text[end:],
+                          encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert '9.9.9a' in r.stderr, r.stderr
 
 
 def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
@@ -353,7 +388,7 @@ def test_the_tree_does_not_claim_a_version_it_already_released(tmp):
     assert tag.stdout.strip() == head.stdout.strip(), (
         f'the tree claims version {version}, which tag v{version} already '
         f'published at {tag.stdout.strip()[:12]}; bump every site with '
-        f'scripts/check_versions.py --set <next>a')
+        f'scripts/check_versions.py --set <released>.1')
 
 
 def test_manifest_version_matches_package(tmp):

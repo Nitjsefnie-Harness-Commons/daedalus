@@ -26,6 +26,27 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
+# Chrome accepts a manifest version of one to four dot-separated integers,
+# each below 65536. Every site carries the same string, so that is the shape
+# the whole tree is limited to: a version outside it cannot be spelled
+# identically everywhere, which is the one thing this script exists to keep
+# true. Refusing it here is what stops a tree passing every gate while the
+# extension it describes is one Chrome will not load.
+_SPELLING = re.compile(r'\d+(?:\.\d+){0,3}')
+
+
+def spelling_error(version):
+    """Why `version` cannot be carried by every site, or None if it can."""
+    if not _SPELLING.fullmatch(version):
+        return (f'{version!r} is not one to four dot-separated integers, so '
+                f'no tree can spell it the same way at every site — Chrome '
+                f'refuses it as a manifest version')
+    if any(int(part) > 65535 for part in version.split('.')):
+        return (f'{version!r} has a segment above 65535, which Chrome '
+                f'refuses as a manifest version')
+    return None
+
+
 # (path, description, regex). Each regex needs a 'v' group holding the version;
 # --set rewrites exactly that group and leaves the rest of the line untouched.
 SITES = [
@@ -84,6 +105,10 @@ def collect(staged=False, rev=None):
 def check(staged=False, rev=None):
     found = collect(staged, rev)
     canonical = next(v for p, d, v in found if (p, d) == CANONICAL)
+    problem = spelling_error(canonical)
+    if problem:
+        print(f'FAIL: {problem}', file=sys.stderr)
+        return 1
 
     bad = [(p, d, v) for p, d, v in found if v != canonical]
     if bad:
@@ -104,6 +129,10 @@ def check(staged=False, rev=None):
 
 def apply(version):
     """Rewrite every site in the working tree to `version`."""
+    problem = spelling_error(version)
+    if problem:
+        raise SystemExit(f'FAIL: {problem}')
+
     by_file = {}
     for path, desc, pattern in SITES:
         by_file.setdefault(path, []).append((desc, pattern))
