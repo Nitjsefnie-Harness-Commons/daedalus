@@ -90,16 +90,26 @@ def test_snapshot_reports_live_count_and_tab_names_including_empty(_tmp):
 
 def test_delivery_clock_records_each_delivery(_tmp):
     service = _load_service('stream_service_delivery_clock')
-    ticks = iter((10.0, 20.0))
-    service.time = type(
-        'Clock', (), {'time': staticmethod(lambda: next(ticks))})
+
+    class Clock:
+        def __init__(self):
+            self.calls = 0
+            self.values = iter((123.456, 789.012))
+
+        def time(self):
+            self.calls += 1
+            return next(self.values)
+
+    clock = Clock()
+    service.time = clock
     assert service.last_delivery_at() is None
 
     service.record_delivery()
-    assert service.last_delivery_at() == 10.0
+    assert service.last_delivery_at() == 123.456
 
     service.record_delivery()
-    assert service.last_delivery_at() == 20.0
+    assert service.last_delivery_at() == 789.012
+    assert clock.calls == 2
 
 
 if __name__ == '__main__':

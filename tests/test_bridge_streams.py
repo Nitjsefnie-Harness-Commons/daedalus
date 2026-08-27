@@ -21,6 +21,17 @@ from _bridge import (TOK, assert_oversize_stream_matches_enqueue,  # noqa: E402
                      read_stream_data, stream_response)
 
 
+def _wait_for_delivery_health(base):
+    deadline = time.monotonic() + 5
+    while True:
+        status, health = _util.get_json(base + '/health')
+        assert status == 200, (status, health)
+        if health['last_delivery_s_ago'] is not None:
+            return health
+        assert time.monotonic() < deadline, health
+        time.sleep(0.01)
+
+
 def test_put_command_broadcast_writes_queue_file(tmp):
     with _util.bridge(tmp) as (base, docroot):
         status, body = put_command(base, {'token': TOK, 'id': 'c1', 'code': '1+1'})
@@ -611,9 +622,7 @@ def test_queue_delivery_updates_the_health_clock(tmp):
             delivered = next_stream_data(response)
             assert delivered['id'] == 'queue-clock', delivered
 
-            status, health = _util.get_json(base + '/health')
-            assert status == 200, (status, health)
-            assert health['last_delivery_s_ago'] is not None, health
+            _wait_for_delivery_health(base)
         finally:
             response.close()
             conn.close()
@@ -633,9 +642,7 @@ def test_legacy_delivery_updates_the_health_clock(tmp):
             delivered = next_stream_data(response)
             assert delivered['id'] == 'legacy-clock', delivered
 
-            status, health = _util.get_json(base + '/health')
-            assert status == 200, (status, health)
-            assert health['last_delivery_s_ago'] is not None, health
+            _wait_for_delivery_health(base)
         finally:
             response.close()
             conn.close()

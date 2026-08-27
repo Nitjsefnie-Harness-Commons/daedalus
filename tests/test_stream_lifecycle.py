@@ -271,7 +271,7 @@ def test_same_key_reconnect_replaces_and_closes_the_first_stream(tmp):
                 raise AssertionError(
                     'same-key reconnect left the first stream open') from error
             except (http.client.IncompleteRead, ConnectionError, OSError):
-                pass
+                pass  # replacement may surface as any of these close errors
             health = _wait_for_stream_count(base, 1)
             assert health['stream_tabs'] == ['same'], health
         finally:
