@@ -238,6 +238,12 @@ def _tool_code_objects(tool):
                     continue
                 if inspect.isfunction(value):
                     pending.append(value)
+        for value in function.__defaults__ or ():
+            if inspect.isfunction(value):
+                pending.append(value)
+        for value in (function.__kwdefaults__ or {}).values():
+            if inspect.isfunction(value):
+                pending.append(value)
         wrapped = getattr(function, '__wrapped__', None)
         if inspect.isfunction(wrapped):
             pending.append(wrapped)
@@ -324,12 +330,13 @@ def _release_composition(composition):
 def test_every_registered_tool_keeps_its_own_bridge(_tmp):
     """No executed tool retains the peer bridge object at teardown.
 
-    After registration and default tool paths run, the first bridge must have
-    no weak alias and its observation weak reference must be dead immediately
-    after collection. The check cannot see independently usable derivatives,
-    such as a cached authentication dictionary or a copied bridge. Cyclic
-    finalization can also resurrect the bridge after clearing that weak
-    reference, so liveness is established only at the teardown observation.
+    All registered tools run once on the harness-selected paths, including
+    ``screenshot(include_image=True)``. The first bridge must have no weak
+    alias, and its observation weak reference must be cleared after collection.
+    The check cannot see independently usable derivatives, such as a cached
+    authentication dictionary or a copied bridge. Cyclic finalization can
+    resurrect the bridge after clearing that weak reference, so the assertion
+    establishes only that the observation weak reference was cleared.
     """
     first_composition = _load_composition('first')
     assert hasattr(first_composition, 'tool_module_inventory'), (
@@ -361,15 +368,32 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
         'first bridge remains alive after harness teardown')
 
 
+def test_screenshot_default_returns_metadata_without_fetching_image(_tmp):
+    """The default screenshot path does not inline image bytes."""
+    composition = _load_composition('screenshot-default')
+    screenshot = composition.mcp.registered['screenshot']
+
+    result = asyncio.run(screenshot())
+
+    expected = {
+        'path': 'screenshot-default/shot.png',
+        'size': len('screenshot-default'),
+    }
+    assert result == expected, (result, expected)
+    assert all(
+        surface != 'get_raw'
+        for surface, _details in composition.bridge.calls)
+
+
 def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     """No registered tool lexically reaches composition-authored behavior.
 
     The check follows the callable's own and nested code, functions in closure
-    cells, and ``__wrapped__`` links. It allows helper-authored handlers and
-    does not detect composition-authored functions found dynamically at call
-    time through globals, imports, module attributes, ``getattr``, or
-    dictionaries. Code objects with deliberately forged origins are also
-    outside the property.
+    cells, positional and keyword defaults, and ``__wrapped__`` links. It
+    allows helper-authored handlers and does not detect composition-authored
+    functions found dynamically at call time through globals, imports, module
+    attributes, ``getattr``, or dictionaries. Code objects with deliberately
+    forged origins are also outside the property.
     """
     composition = _load_composition('composition-origin')
     composition_path = (_util.ROOT / 'mcp_server.py').resolve()

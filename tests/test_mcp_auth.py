@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
-"""Multi-listener regression coverage for the MCP auth middleware."""
+"""Authentication and request-carrier coverage for the MCP middleware."""
+import asyncio
 import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import test_mcp_server  # noqa: E402
+
+
+def _auth_module():
+    test_mcp_server._need_deps()
+    return _util.load(
+        _util.ROOT / 'mcp_auth.py',
+        'mcp_auth_under_test_' + str(time.time_ns()))
 
 
 def _start_listener(base, max_body_size):
@@ -35,6 +44,91 @@ def _initialize_body(padding=0):
         },
     }
     return json.dumps(body).encode() + b' ' * padding
+
+
+def test_undeclared_oversized_body_is_refused_after_read(tmp):
+    """An undeclared body still cannot exceed the listener's body limit."""
+    del tmp
+    auth = _auth_module()
+    outbound = []
+    inbound = [{
+        'type': 'http.request',
+        'body': b'x' * 16,
+        'more_body': False,
+    }]
+
+    async def receive():
+        return inbound.pop(0)
+
+    async def send(message):
+        outbound.append(message)
+
+    async def accepted(_scope, _receive, send_response):
+        await send_response({
+            'type': 'http.response.start',
+            'status': 204,
+            'headers': [],
+        })
+        await send_response({
+            'type': 'http.response.body',
+            'body': b'',
+            'more_body': False,
+        })
+
+    scope = {
+        'type': 'http',
+        'asgi': {'version': '3.0'},
+        'http_version': '1.1',
+        'method': 'POST',
+        'scheme': 'http',
+        'path': '/mcp',
+        'raw_path': b'/mcp',
+        'query_string': b'',
+        'headers': [
+            (b'authorization',
+             f'Bearer {test_mcp_server.TOK}'.encode()),
+        ],
+        'client': ('127.0.0.1', 12345),
+        'server': ('127.0.0.1', 8086),
+    }
+    middleware = auth.BearerAuth(accepted, max_body_size=8)
+    asyncio.run(middleware(scope, receive, send))
+
+    start = next(
+        message for message in outbound
+        if message['type'] == 'http.response.start')
+    body = b''.join(
+        message.get('body', b'') for message in outbound
+        if message['type'] == 'http.response.body')
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        payload = f'non-JSON body: {body!r}'
+    actual = (start['status'], payload)
+    expected = (413, {'error': 'request body too large'})
+    assert actual == expected, (actual, expected)
+
+
+def test_top_level_json_scalar_has_no_job_carrier(tmp):
+    """A scalar JSON request cannot contribute a segment-tool job name."""
+    del tmp
+    auth = _auth_module()
+    try:
+        result = auth.ambiguous_json_carrier(b'0')
+    except Exception as failure:  # noqa: BLE001
+        result = f'raised {type(failure).__name__}: {failure}'
+    assert result is None, result
+
+
+def test_malformed_json_is_not_a_duplicate_carrier(tmp):
+    """Malformed JSON remains the MCP transport's validation concern."""
+    del tmp
+    auth = _auth_module()
+    try:
+        result = auth.ambiguous_json_carrier(b'{')
+    except Exception as failure:  # noqa: BLE001
+        result = f'raised {type(failure).__name__}: {failure}'
+    assert result is None, result
 
 
 def test_live_listeners_keep_auth_state_and_body_limits_separate(tmp):
