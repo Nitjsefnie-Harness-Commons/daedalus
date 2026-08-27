@@ -181,6 +181,8 @@
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/time_tests.py
+!/scripts/ci/workflow_yaml.py
+!/scripts/ci/yamlscalar.py
 
 # ─── tests ───
 !/tests/

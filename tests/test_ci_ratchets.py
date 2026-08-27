@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+
 
 _PYTHON_STEP = '      - name: Python coverage gate\n'
 _JAVASCRIPT_STEP = '      - name: JavaScript coverage gate\n'
@@ -52,16 +54,35 @@ def _assert_duplicate_refused(language, anchor, name):
             f'duplicate {language} {name} was accepted')
 
 
-def _assert_python_decoy_ignored(workflow):
+def _assert_python_gate_raised(workflow):
     ratchet = _ratchet()
     try:
         raised = ratchet.update(workflow, 80.0, 'python')
     except SystemExit as why:
         raise AssertionError(str(why)) from why
     assert raised is not None
+    assert '# Python measured: 80.0' in raised, raised
+    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
+    return raised
+
+
+def _assert_python_decoy_ignored(workflow):
+    raised = _assert_python_gate_raised(workflow)
     assert raised.count('# Python measured: 73.3') == 1, raised
     assert raised.count('# Python measured: 80.0') == 1, raised
-    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
+
+
+def _forged_python_step_payload():
+    return (
+        '      - name: Document the Python gate\n'
+        '        run: |\n'
+        "          cat <<'YAML'\n"
+        '          - name: Python coverage gate\n'
+        '            # Python measured: 73.3\n'
+        '            # Python floor: 72\n'
+        '            run: python -m coverage report '
+        '--fail-under=72 --precision=1\n'
+        '          YAML\n')
 
 
 def test_python_duplicate_measured_marker_is_refused(tmp):
@@ -239,6 +260,75 @@ def test_anchor_decoy_between_gate_steps_is_invisible(tmp):
     _assert_python_decoy_ignored(workflow)
 
 
+def test_forged_step_payload_is_invisible_when_real_gate_exists(tmp):
+    del tmp
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP, _forged_python_step_payload() + _PYTHON_STEP, 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_forged_step_payload_cannot_replace_a_renamed_real_gate(tmp):
+    del tmp
+    ratchet = _ratchet()
+    renamed_step = _PYTHON_STEP.replace(
+        'coverage gate', 'coverage check')
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP, _forged_python_step_payload() + renamed_step, 1)
+    try:
+        ratchet.update(workflow, 80.0, 'python')
+    except SystemExit as why:
+        assert "step named 'Python coverage gate'; found 0" in str(why), why
+    else:
+        raise AssertionError('a forged payload replaced the renamed gate')
+
+
+def test_step_name_decoys_in_other_scalar_styles_are_invisible(tmp):
+    del tmp
+    decoys = (
+        '      - name: Scalar decoys\n'
+        '        env:\n'
+        '          FOLDED: >-\n'
+        '            - name: Python coverage gate\n'
+        '          QUOTED: "before\n'
+        '          - name: Python coverage gate\n'
+        '            after"\n'
+        '        run: "true"\n')
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP, decoys + _PYTHON_STEP, 1)
+    raised = _assert_python_gate_raised(workflow)
+    assert raised.count('- name: Python coverage gate') == 3, raised
+
+
+def test_semantic_gate_name_with_trailing_comment_is_accepted(tmp):
+    del tmp
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP,
+        '      - name: Python coverage gate # managed\n', 1)
+    _assert_python_gate_raised(workflow)
+
+
+def test_quoted_gate_name_with_extra_separation_is_accepted(tmp):
+    del tmp
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP,
+        '      - name :    "Python coverage gate"\n', 1)
+    _assert_python_gate_raised(workflow)
+
+
+def test_trailing_comment_indentation_does_not_change_ownership(tmp):
+    del tmp
+    failures = []
+    for indent in (6, 8, 10):
+        comment = ' ' * indent + '# Python measured: 73.3\n'
+        workflow = _RATCHET_WORKFLOW.replace(
+            _JAVASCRIPT_STEP, comment + _JAVASCRIPT_STEP, 1)
+        try:
+            _assert_python_decoy_ignored(workflow)
+        except AssertionError as error:
+            failures.append(f'{indent}: {error}')
+    assert not failures, '\n'.join(failures)
+
+
 def test_renamed_gate_step_is_refused_by_expected_name(tmp):
     del tmp
     ratchet = _ratchet()
@@ -316,6 +406,20 @@ def test_the_ratchet_refuses_a_file_carrying_no_calibration(tmp):
         assert "step named 'Python coverage gate'" in str(why), why
     else:
         raise AssertionError('a file with no calibration was accepted')
+
+
+def test_present_gate_missing_measured_marker_records_no_calibration(tmp):
+    del tmp
+    ratchet = _ratchet()
+    workflow = _RATCHET_WORKFLOW.replace(
+        '        # Python measured: 73.3\n', '', 1)
+    try:
+        ratchet.update(workflow, 90.0, 'python')
+    except SystemExit as why:
+        assert str(why) == (
+            'the python coverage gate records no calibration'), why
+    else:
+        raise AssertionError('a gate missing its measured marker was accepted')
 
 
 def test_the_ratchet_rewrites_the_file_it_is_pointed_at(tmp):

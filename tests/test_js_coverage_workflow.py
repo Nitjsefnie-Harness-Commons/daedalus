@@ -67,6 +67,26 @@ def _consumer_steps(workflow):
     return consumers
 
 
+def _rename_measure_step(workflow):
+    matches = []
+    for start, end, name in _coverage_steps(workflow):
+        if re.search(r'^        id: measure[ \t]*$',
+                     workflow[start:end], re.MULTILINE):
+            matches.append((start, end, name))
+    assert len(matches) == 1, matches
+    start, end, current = matches[0]
+    assert current is not None, workflow[start:end]
+    temporary = 'Temporary measure label'
+    if current == temporary:
+        temporary = 'Alternate measure label'
+    step = workflow[start:end]
+    first, newline, rest = step.partition('\n')
+    assert newline, step
+    assert first == f'      - name: {current}', first
+    renamed = f'      - name: {temporary}\n{rest}'
+    return workflow[:start] + renamed + workflow[end:]
+
+
 def _without_job_capture(workflow):
     job_start, job_end = _coverage_bounds(workflow)
     steps = workflow.find('    steps:\n', job_start, job_end)
@@ -198,10 +218,7 @@ def test_capture_can_be_scoped_to_every_consumer_step(tmp):
 def test_capture_fixture_uses_step_identity_not_display_name(tmp):
     """A runtime-neutral Measure rename must not constrain the fixture."""
     del tmp
-    renamed = _workflow().replace(
-        '      - name: Measure\n        id: measure\n',
-        '      - name: Collect coverage\n        id: measure\n', 1)
-    assert renamed != _workflow()
+    renamed = _rename_measure_step(_workflow())
     _assert_capture_environment(_step_scoped_capture(renamed))
 
 
