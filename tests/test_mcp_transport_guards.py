@@ -30,13 +30,15 @@ def _session(transport, token='mcptok'):
 
 
 class ResponseProbe:
-    """A complete successful JSON response used below the session boundary."""
+    """A complete JSON response used below the session boundary."""
 
-    def __init__(self, body):
+    def __init__(self, body, status_error=None):
         self.body = body
+        self.status_error = status_error
 
     def raise_for_status(self):
-        return None
+        if self.status_error is not None:
+            raise self.status_error
 
     def json(self):
         return self.body
@@ -45,9 +47,13 @@ class ResponseProbe:
 class ClientProbe:
     """Record shaped HTTP requests and provide deterministic result replies."""
 
-    def __init__(self, replies=()):
+    def __init__(self, replies=(), post_response=None,
+                 delete_response=None):
         self.replies = list(replies)
         self.calls = []
+        self.post_response = post_response or ResponseProbe({'ok': True})
+        self.delete_response = (
+            delete_response or ResponseProbe({'deleted': True}))
 
     async def get(self, path, **kwargs):
         self.calls.append(('get', path, kwargs))
@@ -57,11 +63,11 @@ class ClientProbe:
 
     async def post(self, path, **kwargs):
         self.calls.append(('post', path, kwargs))
-        return ResponseProbe({'ok': True})
+        return self.post_response
 
     async def request(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))
-        return ResponseProbe({'deleted': True})
+        return self.delete_response
 
 
 def _capture(coroutine):
@@ -101,8 +107,8 @@ def test_empty_token_context_is_rejected(tmp):
     assert result == expected, (result, expected)
 
 
-def test_post_adds_token_and_auth_header(tmp):
-    """POST carries the request token in both accepted bridge carriers."""
+def test_post_sends_authorization_header(tmp):
+    """POST authorizes before the bridge reads its JSON body."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -112,17 +118,36 @@ def test_post_adds_token_and_auth_header(tmp):
     result = asyncio.run(session.post('/segment-job', {'job': 'clip'}))
 
     assert result == {'ok': True}
-    expected_calls = [(
-        'post', '/segment-job', {
-            'json': {'job': 'clip', 'token': 'mcptok'},
-            'headers': {'Authorization': 'Bearer mcptok'},
-        },
-    )]
-    assert client.calls == expected_calls, (client.calls, expected_calls)
+    method, path, kwargs = client.calls[0]
+    actual = method, path, kwargs.get('headers')
+    expected = (
+        'post', '/segment-job', {'Authorization': 'Bearer mcptok'})
+    assert actual == expected, (actual, expected)
 
 
-def test_delete_adds_token_and_auth_header(tmp):
-    """DELETE carries the request token in both accepted bridge carriers."""
+def test_post_propagates_http_status_error(tmp):
+    """POST does not turn an HTTP error response into a successful result."""
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    response = ResponseProbe(
+        {'error': 'HTTP 500'}, RuntimeError('HTTP 500'))
+    client = ClientProbe(post_response=response)
+    session.http_client = lambda: client
+
+    result = _capture(session.post('/segment-job', {'job': 'clip'}))
+
+    expected = 'raised RuntimeError: HTTP 500'
+    assert result == expected, (result, expected)
+    method, path, kwargs = client.calls[0]
+    actual = method, path, kwargs.get('headers')
+    expected_call = (
+        'post', '/segment-job', {'Authorization': 'Bearer mcptok'})
+    assert actual == expected_call, (actual, expected_call)
+
+
+def test_delete_sends_authorization_header(tmp):
+    """DELETE authorizes before the bridge reads its JSON body."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -132,13 +157,31 @@ def test_delete_adds_token_and_auth_header(tmp):
     result = asyncio.run(session.delete('/upload', {'id': 'shot'}))
 
     assert result == {'deleted': True}
-    expected_calls = [(
-        'DELETE', '/upload', {
-            'json': {'id': 'shot', 'token': 'mcptok'},
-            'headers': {'Authorization': 'Bearer mcptok'},
-        },
-    )]
-    assert client.calls == expected_calls, (client.calls, expected_calls)
+    method, path, kwargs = client.calls[0]
+    actual = method, path, kwargs.get('headers')
+    expected = 'DELETE', '/upload', {'Authorization': 'Bearer mcptok'}
+    assert actual == expected, (actual, expected)
+
+
+def test_delete_propagates_http_status_error(tmp):
+    """DELETE does not turn an HTTP error response into a successful result."""
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    response = ResponseProbe(
+        {'error': 'HTTP 500'}, RuntimeError('HTTP 500'))
+    client = ClientProbe(delete_response=response)
+    session.http_client = lambda: client
+
+    result = _capture(session.delete('/upload', {'id': 'shot'}))
+
+    expected = 'raised RuntimeError: HTTP 500'
+    assert result == expected, (result, expected)
+    method, path, kwargs = client.calls[0]
+    actual = method, path, kwargs.get('headers')
+    expected_call = 'DELETE', '/upload', {
+        'Authorization': 'Bearer mcptok'}
+    assert actual == expected_call, (actual, expected_call)
 
 
 def test_poll_skips_a_different_delivery(tmp):
