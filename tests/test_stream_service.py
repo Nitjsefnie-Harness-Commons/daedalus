@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Standalone state and lifecycle guarantees for the SSE stream service."""
+import os
+import subprocess
 import threading
+import time
 
 from pathlib import Path
 import sys
@@ -11,6 +14,54 @@ import _util  # noqa: E402
 
 def _load_service(name):
     return _util.load(_util.ROOT / 'stream_service.py', name=name)
+
+
+def test_stream_service_imports_without_daedalus_configuration(_tmp):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('DAEDALUS_') and key != 'TOKEN'}
+    loaded = subprocess.run(
+        [sys.executable, '-c', 'import stream_service'],
+        cwd=str(_util.ROOT), env=env, stderr=subprocess.PIPE, text=True)
+    assert loaded.returncode == 0, loaded.stderr
+
+
+def test_queue_drain_honors_explicit_ttl_and_frame_writer(tmp):
+    service = _load_service('stream_service_queue_drain')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    fresh = qdir / '0000000000001_000001.json'
+    expired = qdir / '0000000000002_000002.json'
+    fresh.write_text('{"id":"fresh"}', encoding='utf-8')
+    expired.write_text('{"id":"expired"}', encoding='utf-8')
+    now = time.time()
+    os.utime(fresh, (now - 50, now - 50))
+    os.utime(expired, (now - 150, now - 150))
+    frames = []
+
+    delivered = service.drain_queue(
+        qdir, None, None, command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'fresh'}], frames
+    assert not fresh.exists(), fresh
+    assert not expired.exists(), expired
+
+
+def test_legacy_extension_drain_uses_explicit_command_directory(tmp):
+    service = _load_service('stream_service_legacy_extension_drain')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    legacy = command_dir / 'tok_42.json'
+    legacy.write_text('{"id":"legacy"}', encoding='utf-8')
+    frames = []
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', 'tok_extension.json', None,
+        command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'legacy', 'chromeTab': '42'}], frames
+    assert not legacy.exists(), legacy
 
 
 def test_register_returns_handles_that_unregister_the_stream(_tmp):
