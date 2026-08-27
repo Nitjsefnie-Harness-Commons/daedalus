@@ -41,6 +41,26 @@ def coverage_free_environment(environment):
     }
 
 
+def child_coverage(mode, environment=None):
+    """Declare whether one subprocess keeps the coverage collector.
+
+    Every launch into a working directory the coverage paths do not map back
+    onto the repository makes this declaration at its `env=`: 'scrub' strips
+    the collector so the child cannot record against paths that vanish with
+    the temporary tree, and 'keep' retains it where the tree is mapped and
+    the child's coverage is wanted. The guard in
+    tests/test_coverage_environment.py reads the declaration syntactically.
+    """
+    if environment is None:
+        environment = os.environ
+    if mode == 'scrub':
+        return coverage_free_environment(environment)
+    if mode == 'keep':
+        return dict(environment)
+    raise ValueError(
+        f"child_coverage mode must be 'scrub' or 'keep': {mode!r}")
+
+
 def startup_timeout():
     """The allowance the next bridge start in this process gets."""
     return WARM_START_TIMEOUT if _bridge_started else COLD_START_TIMEOUT
