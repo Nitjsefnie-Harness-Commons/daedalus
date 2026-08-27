@@ -30,7 +30,7 @@ def run_node_program(node, program, arguments, *, cwd, payload=None,
             prologue + program, encoding='utf-8')
         return subprocess.run(
             [node, str(program_path), *arguments], cwd=cwd,
-            capture_output=True, text=True, timeout=timeout)
+            capture_output=True, text=True, encoding='utf-8', timeout=timeout)
 
 
 ENVIRONMENT = r"""

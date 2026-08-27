@@ -127,9 +127,14 @@ def test_cdp_failure_after_dispatch_never_reruns_the_source(tmp):
 
 
 def test_cdp_eval_releases_every_remote_handle_in_held_sessions(tmp):
-    """Compile, throw, reject, and pending paths release every CDP handle."""
+    """CDP routes preserve transport fields and release every handle."""
     del tmp
     actual = run_cdp_handle_lifecycle()
+    transport = {
+        'replMode': True,
+        'awaitPromise': False,
+        'returnByValuePresent': False,
+    }
     assert actual == {
         'released': [
             'compile-exception',
@@ -142,7 +147,9 @@ def test_cdp_eval_releases_every_remote_handle_in_held_sessions(tmp):
             'throw-exception',
             'throw-result',
         ],
+        'evalTransports': [transport, transport, transport],
         'finalAwaitPromise': [False, False, False],
+        'hotfixTransports': [transport],
         'pendingHasTimeout': True,
         'resultWorlds': ['cdp', 'cdp', 'cdp'],
     }, actual

@@ -26,8 +26,10 @@ const backgroundPath = process.argv[1];
 const released = [];
 const postedResults = [];
 const finalAwaitPromise = [];
+const submittedTransports = { eval: [], hotfix: [] };
 const timers = [];
 let pendingResolve;
+let activeRoute = 'eval';
 
 function response(status, data) {
   return {
@@ -96,7 +98,15 @@ const chrome = {
             },
           };
         }
-        finalAwaitPromise.push(params.awaitPromise);
+        if (activeRoute === 'eval') {
+          finalAwaitPromise.push(params.awaitPromise);
+        }
+        submittedTransports[activeRoute].push({
+          replMode: params.replMode,
+          awaitPromise: params.awaitPromise,
+          returnByValuePresent: Object.prototype.hasOwnProperty.call(
+            params, 'returnByValue'),
+        });
         if (params.expression.includes('throw-case')) {
           return {
             result: { objectId: 'throw-result' },
@@ -202,6 +212,9 @@ async function runEval(id, code) {
   await runEval('compile', 'return compile-case');
   await runEval('throw', 'throw-case');
   await runEval('reject', 'reject-case');
+  activeRoute = 'hotfix';
+  await vm.runInContext("_replayViaCdp(7, 'hotfix-case')", context);
+  activeRoute = 'eval';
 
   context.pendingRemote = {
     objectId: 'pending-original',
@@ -221,7 +234,9 @@ async function runEval(id, code) {
 
   process.stdout.write(JSON.stringify({
     released: [...new Set(released)].sort(),
+    evalTransports: submittedTransports.eval,
     finalAwaitPromise,
+    hotfixTransports: submittedTransports.hotfix,
     pendingHasTimeout,
     resultWorlds: postedResults.map((item) => item.world),
   }));
