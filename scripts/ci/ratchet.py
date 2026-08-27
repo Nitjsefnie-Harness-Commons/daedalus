@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+from workflow_yaml import YAMLReadError, workflow_step_items
+
 WORKFLOW = (Path(__file__).resolve().parents[2]
             / '.github' / 'workflows' / 'tests.yml')
 
@@ -71,40 +73,17 @@ def _patterns(language):
 def _step_region(text, language):
     """Return the source bounds of the language's named gate step."""
     expected = _LANGUAGES[language]['step']
-    pattern = re.compile(
-        r'^(?P<indent> *)-[ \t]+name:[ \t]+'
-        + re.escape(expected) + r'[ \t]*\r?$', re.MULTILINE)
-    matches = list(pattern.finditer(text))
+    try:
+        items = workflow_step_items(text, 'coverage') or []
+    except YAMLReadError as error:
+        raise SystemExit(f'cannot decode workflow YAML: {error}') from None
+    matches = [item for item in items if item.name == expected]
     if len(matches) != 1:
         raise SystemExit(
             f'the {language} coverage ratchet expected exactly one step '
             f"named '{expected}'; found {len(matches)}")
-
     step = matches[0]
-    step_indent = len(step.group('indent'))
-    newline = text.find('\n', step.end())
-    cursor = len(text) if newline < 0 else newline + 1
-    end = len(text)
-    pending_comment = None
-    for line in text[cursor:].splitlines(keepends=True):
-        raw = line.rstrip('\r\n')
-        stripped = raw.lstrip(' ')
-        content = stripped.lstrip('\t')
-        indent = len(raw) - len(stripped)
-        if not content:
-            cursor += len(line)
-            continue
-        if content.startswith('#'):
-            if indent <= step_indent and pending_comment is None:
-                pending_comment = cursor
-            cursor += len(line)
-            continue
-        if indent <= step_indent:
-            end = pending_comment if pending_comment is not None else cursor
-            break
-        pending_comment = None
-        cursor += len(line)
-    return step.start(), end
+    return step.start, step.end
 
 
 def _unique_match(text, pattern, language, name, start, end):
