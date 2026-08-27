@@ -240,8 +240,14 @@ def test_check_versions_set_refuses_one_value_spelled_more_than_one_way(tmp):
         # hold a non-ASCII digit, so the child backslash-escapes it and the
         # literal string is absent while the refusal it reports is identical.
         assert 'ASCII digits' in r.stderr, (version, r.stderr)
-        if version.isascii():
-            assert version in r.stderr, (version, r.stderr)
+        # Normalize both sides through the same escaping before comparing, so
+        # one assertion covers a UTF-8 stderr (the digits pass through
+        # unchanged) and the affected Windows stderr (they arrive already
+        # escaped) alike, instead of skipping the check for the non-ASCII
+        # case entirely.
+        escaped_version = version.encode('ascii', 'backslashreplace').decode('ascii')
+        escaped_stderr = r.stderr.encode('ascii', 'backslashreplace').decode('ascii')
+        assert escaped_version in escaped_stderr, (version, r.stderr)
         for path, text in before.items():
             assert (copy_root / path).read_text(encoding='utf-8') == text, (
                 version, path)
