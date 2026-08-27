@@ -56,6 +56,7 @@
 !/segment_store.py
 !/server.py
 !/setup.cfg
+!/stream_service.py
 
 # ─── .githooks ───
 !/.githooks/
@@ -235,6 +236,7 @@
 !/tests/test_segment_store.py
 !/tests/test_speed_measurement.py
 !/tests/test_stream_lifecycle.py
+!/tests/test_stream_service.py
 !/tests/test_suite_runner.py
 !/tests/test_tab_routing.py
 !/tests/test_version_contract.py

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Daedalus debug server — SSE command bridge + tab registry."""
-import hmac, itertools, json, os, pathlib, shutil, threading, time, uuid
+import hmac, json, os, pathlib, shutil, threading, time, uuid
 import ctypes, ctypes.util
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import TCPServer, ThreadingMixIn
@@ -14,6 +14,7 @@ import command_queue
 from log_safe import log_safe
 import result_store
 import segment_store
+import stream_service
 from bridge_config import (
     BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR,
     MAX_BODY_SIZE, MAX_JSON_DEPTH,
@@ -135,17 +136,6 @@ def _json_nests_deeper_than(raw, limit):
 _tab_registry = {}  # {token: {tabId: {url, title, ts}}}
 _tab_lock = threading.Lock()
 
-# ─── Stream dedup: kill old SSE when same tab reconnects ───
-# {stream id: {'key', 'tab', 'killed'}}. Keyed by a per-connection id rather
-# than by (token, tab), because a stream named no tab got no key at all: it
-# served commands and held a worker while being invisible to health and to
-# replacement. `key` is what reconnect-replacement matches on and is None for
-# a tabless stream, which has no identity another connection could claim.
-# `killed` set() means "die".
-_active_streams = {}
-_stream_ids = itertools.count(1)
-_stream_lock = threading.Lock()
-
 _COMPAT_CONSUME_RETRY_ATTEMPTS = 8
 _SEGMENT_DECIMAL_MAX_DIGITS = 20
 
@@ -153,7 +143,6 @@ _SEGMENT_DECIMAL_MAX_DIGITS = 20
 
 
 _server_start_ts = time.time()
-_last_delivery_ts = 0.0
 
 
 _REFUSED_BODY_DRAIN = 65536
@@ -535,17 +524,7 @@ class Handler(BaseHTTPRequestHandler):
         # registered, tabless ones included: one that is not is a worker and a
         # command consumer that /health cannot see.
         stream_key = (token, tab) if tab else None
-        killed_event = threading.Event()
-        with _stream_lock:
-            if stream_key:
-                for old_id, old in list(_active_streams.items()):
-                    if old['key'] == stream_key:
-                        old['killed'].set()  # signal old thread to die
-                        del _active_streams[old_id]
-                        print(f'[STREAM] REPLACED tab={tab[:8]}', flush=True)
-            stream_id = next(_stream_ids)
-            _active_streams[stream_id] = {
-                'key': stream_key, 'tab': tab, 'killed': killed_event}
+        stream_id, killed_event = stream_service.register(stream_key, tab)
         print(f'[STREAM] CONNECT token={token[:8]} tab={tab[:8] if tab else "none"} from={self.client_address[0]}', flush=True)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
@@ -622,10 +601,7 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionError, OSError) as e:
             print(f'[STREAM] DISCONNECT tab={tab[:8] if tab else "none"} err={type(e).__name__}', flush=True)
         finally:
-            with _stream_lock:
-                entry = _active_streams.get(stream_id)
-                if entry is not None and entry['killed'] is killed_event:
-                    del _active_streams[stream_id]
+            stream_service.unregister(stream_id, killed_event)
         return None
 
     def _write_frame(self, data):
@@ -640,7 +616,6 @@ class Handler(BaseHTTPRequestHandler):
         non-atomic publisher may still be writing them. The socket write happens
         BEFORE unlink, so a failed write leaves the command queued for redelivery
         (a socket error propagates out to tear the stream down)."""
-        global _last_delivery_ts
         if not qdir.is_dir():
             return 0
         count = 0
@@ -694,7 +669,7 @@ class Handler(BaseHTTPRequestHandler):
                 # on the next tick and deduplicated by its `_did`.
                 try: f.unlink()
                 except OSError: pass  # a redelivery is deduplicated by _did
-                _last_delivery_ts = time.time()
+                stream_service.record_delivery()
                 count += 1
                 print(
                     f'[STREAM] DELIVERED q={log_safe(qdir.name)} '
@@ -709,7 +684,6 @@ class Handler(BaseHTTPRequestHandler):
         non-atomic publisher. Leave it in place and retry on the next scan;
         deleting it would discard the writer's eventual complete command.
         """
-        global _last_delivery_ts
         # Use the logical filename: path spellings can differ between routes;
         # result_store.delivery_lock_for documents its logical target key.
         with command_queue.claimed(f'legacy:{path.name}') as owned:
@@ -739,7 +713,7 @@ class Handler(BaseHTTPRequestHandler):
             # finish. A redelivery is deduplicated by the `_did` it carries.
             try: path.unlink()
             except OSError: pass  # a redelivery is deduplicated by _did
-            _last_delivery_ts = time.time()
+            stream_service.record_delivery()
             print(
                 f'[STREAM] DELIVERED legacy={log_safe(path.name)} '
                 f'id={log_safe(data.get("id", ""))}', flush=True)
@@ -1643,23 +1617,20 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_health(self):
         """GET /health — bridge liveness for detecting a silently-dead stream."""
         now = time.time()
-        with _stream_lock:
-            # One entry per live stream. active_streams used to be the number
-            # of DISTINCT tab names, so two tokens streaming the same tab name
-            # counted once and a tabless stream counted not at all.
-            live_streams = len(_active_streams)
-            stream_tabs = sorted(
-                {entry['tab'] for entry in _active_streams.values()})
+        live_streams, stream_tabs = stream_service.snapshot()
         with _tab_lock:
             tokens = len(_tab_registry)
             tabs = sum(len(v) for v in _tab_registry.values())
+        last_delivery_at = stream_service.last_delivery_at()
         return self._json(200, {
             'ok': True,
             'uptime_s': round(now - _server_start_ts, 1),
             'active_streams': live_streams,
             'stream_tabs': stream_tabs,
             'registry': {'tokens': tokens, 'tabs': tabs},
-            'last_delivery_s_ago': round(now - _last_delivery_ts, 1) if _last_delivery_ts else None,
+            'last_delivery_s_ago': (
+                round(now - last_delivery_at, 1)
+                if last_delivery_at else None),
             'cmd_ttl_s': CMD_TTL,
             'stream_max_age_s': STREAM_MAX_AGE,
         })
