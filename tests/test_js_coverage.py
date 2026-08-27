@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _worker_runtime  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -504,6 +506,57 @@ def test_real_node_dump_preserves_crlf_offsets(tmp):
     coverage = report.files['extension/crlf.js']
     assert coverage.executable_lines == {1, 2, 3, 4, 5}
     assert coverage.covered_lines == {1, 5}
+
+
+def _worker_globals(module):
+    """The `/* global ... */` directive names one worker module consumes."""
+    names = set()
+    source = module.read_text(encoding='utf-8')
+    for match in re.finditer(r'/\*\s*global\b([^*]*)\*/', source):
+        for item in match.group(1).split(','):
+            name = item.strip().partition(':')[0]
+            if name:
+                names.add(name)
+    return names
+
+
+def test_filename_naming_vm_loads_run_verbatim_source(tmp):
+    """A filename-naming VM load that runs modified bytes must fail.
+
+    The worker runtime observer names every executed script with the path
+    of the file it claims to be, and V8 measures coverage offsets against
+    the bytes actually handed over. A load that prepends or appends even
+    one byte while naming the shipped path yields a record whose offsets
+    cannot fit the file, and the merger must refuse it rather than
+    publish a number derived from unmappable evidence.
+    """
+    node = shutil.which('node')
+    if node is None:
+        _util.skip('node is not installed')
+    module = ROOT / 'extension' / 'worker' / 'evaluate.js'
+    dumps = Path(tmp) / 'coverage'
+    dumps.mkdir()
+    previous = os.environ.get('NODE_V8_COVERAGE')
+    os.environ['NODE_V8_COVERAGE'] = str(dumps)
+    try:
+        _worker_runtime.observe_worker_runtime([{
+            'path': module,
+            'globals': _worker_globals(module),
+            'watched': {'handleEval'},
+        }])
+    finally:
+        if previous is None:
+            del os.environ['NODE_V8_COVERAGE']
+        else:
+            os.environ['NODE_V8_COVERAGE'] = previous
+    assert list(dumps.glob('coverage-*.json')), 'node wrote no coverage dump'
+
+    report = collect_coverage(dumps, ROOT)
+
+    coverage = report.files['extension/worker/evaluate.js']
+    assert coverage.covered_lines, (
+        'the worker observer ran evaluate.js but no covered line was '
+        'attributed to it')
 
 
 def main():

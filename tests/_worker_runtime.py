@@ -143,11 +143,27 @@ function observeHandlerWrites(details) {
   const workerContext = vm.createContext(proxy);
   let executionError = null;
   try {
+    // V8 instantiates top-level declarations before the first statement
+    // runs, so only a statement inside the observed script can separate
+    // declarations from writes. That marker shifts every byte, so this
+    // counting run must not name details.path: a V8 coverage record is
+    // measured against the bytes actually executed, and offsets taken
+    // from the concatenated source cannot fit the file on disk.
     vm.runInContext(
       '__markWorkerObservationStarted();\n' + source,
-      workerContext, { filename: details.path });
+      workerContext, { filename: '[worker-handler-observation]' });
   } catch (error) {
     executionError = { name: error.name, message: error.message };
+  }
+  const coverageContext = observationContext(details);
+  try {
+    // The verbatim run keeps this observer's coverage contribution: the
+    // bytes executed are exactly the bytes on disk, so every offset in
+    // the record maps onto details.path.
+    vm.runInContext(source, coverageContext, { filename: details.path });
+  } catch {
+    // The counting run above reports execution errors; this run exists
+    // only to execute the shipped bytes under their own name.
   }
   return {
     events: Object.fromEntries(events),
