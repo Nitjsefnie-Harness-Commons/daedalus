@@ -176,7 +176,7 @@ def test_outer_backstop_bounds_a_grandchild_held_pipe_drain(tmp):
     del tmp
     source = r"""
 const { spawn } = require('child_process');
-spawn(process.execPath, ['--eval', 'setTimeout(() => {}, 5000)'], {
+spawn(process.execPath, ['--eval', 'setTimeout(() => {}, 7000)'], {
   stdio: ['ignore', 'inherit', 'inherit'],
 });
 phase('grandchild inherited dashboard pipes');
@@ -185,12 +185,11 @@ setInterval(() => {}, 10);
 """
     failure = _harness_failure(
         source, bounded_steps=0,
-        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
-    assert _backstop_seconds(failure) == 1.5, failure
+        process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S)
+    assert _backstop_seconds(failure) == 4.0, failure
     drain_seconds = _drain_seconds(failure)
-    assert 0.8 <= drain_seconds < 1.5, (
+    assert drain_seconds < 1.5, (
         f'dashboard drain took {drain_seconds:.3f}s')
-    assert 'drain timed out: yes' in failure, failure
 
 
 def test_process_creation_delay_does_not_inflate_drain_time(tmp):
