@@ -50,10 +50,11 @@ def tracked_sources(root):
         if rel.endswith('.js') and rel.split('/', 1)[0] in {
                 'extension', 'dashboard'}:
             paths.append(rel)
-    return {
-        rel: (root / rel).read_text(encoding='utf-8')
-        for rel in sorted(paths)
-    }
+    sources = {}
+    for rel in sorted(paths):
+        with open(root / rel, encoding='utf-8', newline='') as source:
+            sources[rel] = source.read()
+    return sources
 
 
 def _data_source(url):
@@ -198,8 +199,8 @@ def collect_coverage(coverage_dir, root):
             else:
                 ignored_other += 1
     files = {
-        rel: _file_coverage(sources[rel], rel, attributed[rel])
-        for rel in sources
+        rel: _file_coverage(source, rel, attributed[rel])
+        for rel, source in sources.items()
     }
     return CoverageReport(
         files, records_seen, ignored_builtins, ignored_other)
