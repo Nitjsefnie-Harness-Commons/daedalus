@@ -16,12 +16,13 @@ name: version
 # else claiming it is the collision.
 #
 # In practice the discipline is: cut the release, then immediately bump the
-# canonical version to the NEXT one with an `a` suffix — 0.21.0a after
-# releasing 0.20.0. `a` rather than a `.dev` suffix because Chrome rejects a
-# letter-suffixed manifest version and scripts/check_versions.py already
-# translates that one shape (0.21.0a -> 0.21.0.1); and the NEXT version
-# rather than the released one because 0.20.0a sorts BEFORE 0.20.0, which
-# would name post-release work as a pre-release of what it comes after.
+# canonical version by appending a fourth segment to the one just released —
+# 0.22.0.1 after releasing 0.22.0. No letter suffix: Chrome accepts only
+# dot-separated integers in a manifest version, so a suffixed version has to
+# be spelled differently at that one site, and a checker that translates the
+# difference away cannot report it. A fourth segment needs no translation,
+# and it sorts AFTER the release it follows and before the next one, which
+# is where post-release work belongs.
 #
 # The release commit itself is not caught: it sets the version before the tag
 # exists, so the gate passes, and the tag is published after. The first push

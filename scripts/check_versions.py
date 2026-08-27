@@ -12,9 +12,10 @@ releases stale.
   python3 scripts/check_versions.py --set 0.18.0 # rewrite every site
   python3 scripts/check_versions.py --print      # the canonical version alone
 
-Chrome rejects a letter-suffixed version, so the manifest carries the suffix as
-a fourth numeric segment (0.16.0a -> 0.16.0.1). That translation is expected,
-not drift.
+Every site carries the identical string, the manifest included. Chrome accepts
+only dot-separated integers there, so the version the tree carries is spelled
+that way everywhere rather than translated at one site — a checker that
+translates cannot report the disagreement it is translating away.
 """
 import argparse
 import contextlib
@@ -52,15 +53,6 @@ CANONICAL = ('extension/background.js', 'VERSION constant')
 MANIFEST = ('extension/manifest.json', 'manifest version')
 
 
-def manifest_form(version):
-    """Canonical version as the manifest must spell it (0.16.0a -> 0.16.0.1)."""
-    m = re.fullmatch(r'(\d+(?:\.\d+)*)([a-z])', version)
-    if not m:
-        return version
-    base, suffix = m.groups()
-    return f'{base}.{ord(suffix) - ord("a") + 1}'
-
-
 def read_source(path, staged, rev):
     """File content from the worktree, the index, or a revision."""
     if not staged and rev is None:
@@ -92,16 +84,15 @@ def collect(staged=False, rev=None):
 def check(staged=False, rev=None):
     found = collect(staged, rev)
     canonical = next(v for p, d, v in found if (p, d) == CANONICAL)
-    expected = {(p, d): (manifest_form(canonical) if (p, d) == MANIFEST else canonical)
-                for p, d, _ in found}
 
-    bad = [(p, d, v) for p, d, v in found if v != expected[(p, d)]]
+    bad = [(p, d, v) for p, d, v in found if v != canonical]
     if bad:
         where = 'the index' if staged else (f'rev {rev}' if rev else 'the working tree')
         print(f'FAIL: version strings disagree in {where}. '
               f'{CANONICAL[1]} in {CANONICAL[0]} says {canonical!r}:', file=sys.stderr)
         for p, d, v in bad:
-            print(f'  {p}: {d} is {v!r}, expected {expected[(p, d)]!r}', file=sys.stderr)
+            print(f'  {p}: {d} is {v!r}, expected {canonical!r}',
+                  file=sys.stderr)
         print('\nBump every site in one pass: '
               'python3 scripts/check_versions.py --set <version>', file=sys.stderr)
         return 1
@@ -120,16 +111,15 @@ def apply(version):
     for path, entries in by_file.items():
         target = REPO / path
         text = target.read_text(encoding='utf-8')
-        want = manifest_form(version) if path == MANIFEST[0] else version
         for desc, pattern in entries:
             m = re.search(pattern, text)
             if not m:
                 raise SystemExit(f'FAIL: no version found for {desc} in {path}')
             # Replace only the 'v' group so surrounding markup stays byte-identical.
             start, end = m.span('v')
-            text = text[:start] + want + text[end:]
+            text = text[:start] + version + text[end:]
         target.write_text(text, encoding='utf-8')
-        print(f'set {path} -> {want}')
+        print(f'set {path} -> {version}')
     return check()
 
 
