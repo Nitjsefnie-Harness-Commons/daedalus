@@ -299,7 +299,7 @@ def _relay_handled_types(background):
     return handled
 
 
-def _relay_coverage_violations(content, background):
+def _relay_coverage_violations(content, listener, listener_module):
     """Return relay message types that the background listener cannot answer."""
     # One result per call makes an unreadable type fail closed. Object entries
     # are processed in source order, so a duplicate later `type` is the value
@@ -319,15 +319,15 @@ def _relay_coverage_violations(content, background):
             'the relay shape changed and this guard is stale']
     # Only unmasked branches inside the onMessage listener count: comparisons
     # in comments, strings, helpers, or code after the listener are excluded.
-    handled = _relay_handled_types(background)
+    handled = _relay_handled_types(listener)
     missing = sorted(sent - handled)
     if missing:
         return [
             'extension/content.js sends message type(s) '
             + ', '.join(repr(item) for item in missing)
-            + ' but extension/background.js onMessage listener has no branch '
+            + f' but {listener_module} onMessage listener has no branch '
             'for them — the send resolves undefined silently. Add the branch '
-            'in extension/background.js or remove the send in '
+            f'in {listener_module} or remove the send in '
             'extension/content.js.']
     return []
 
@@ -360,8 +360,9 @@ def test_every_content_script_message_type_has_a_background_branch(tmp):
     assert len(listeners) == 1, (
         f'expected one runtime message listener, found '
         f'{[name for name, _ in listeners]}')
-    _, background = listeners[0]
-    violations = _relay_coverage_violations(content, background)
+    listener_module, listener = listeners[0]
+    violations = _relay_coverage_violations(
+        content, listener, listener_module)
     assert not violations, '\n'.join(violations)
 
     reversions = [
@@ -382,12 +383,14 @@ def test_every_content_script_message_type_has_a_background_branch(tmp):
         ),
     ]
     for label, content_mutation, background_mutation, missing_type in reversions:
+        listener_module = 'extension/worker/runtime.js'
         found = _relay_coverage_violations(
-            content_mutation, background_mutation)
+            content_mutation, background_mutation, listener_module)
         assert any(missing_type in item for item in found), (
             f'{label} was NOT caught — the guard asserts a contract it does '
             f'not enforce:\ncontent: {content_mutation}\n'
             f'background: {background_mutation}\nviolations: {found}')
+        assert all(listener_module in item for item in found), found
 
 
 def main():

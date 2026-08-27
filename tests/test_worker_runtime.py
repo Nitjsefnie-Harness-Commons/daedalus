@@ -13,18 +13,46 @@ import _boundary_env  # noqa: E402
 import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _worker_sources import imported_worker_paths  # noqa: E402
 
 
-def _tracked_tree(tmp):
-    export_root = Path(tmp) / 'tracked'
-    export_root.mkdir()
+def _tracked_paths():
     listed = subprocess.run(
         ['git', 'ls-files', '-z'], cwd=ROOT,
         capture_output=True, check=True)
-    for raw_path in listed.stdout.split(b'\0'):
-        if not raw_path:
-            continue
-        relative = Path(os.fsdecode(raw_path))
+    return tuple(
+        Path(os.fsdecode(raw_path))
+        for raw_path in listed.stdout.split(b'\0')
+        if raw_path)
+
+
+def _assert_imported_modules_are_tracked(tracked):
+    background = ROOT / 'extension' / 'background.js'
+    imported = tuple(
+        path.relative_to(ROOT)
+        for path in imported_worker_paths(background))
+    missing = sorted(set(imported) - set(tracked))
+    if not missing:
+        return
+    names = ' '.join(path.as_posix() for path in missing)
+    if len(missing) == 1:
+        description = f'{names} is imported by extension/background.js '
+        description += 'but is not tracked'
+    else:
+        listed = ', '.join(path.as_posix() for path in missing)
+        description = f'{listed} are imported by extension/background.js '
+        description += 'but are not tracked'
+    raise AssertionError(
+        f'{description}; '
+        f'run git add -f {names}, then python3 scripts/gen_gitignore.py')
+
+
+def _tracked_tree(tmp):
+    tracked = _tracked_paths()
+    _assert_imported_modules_are_tracked(tracked)
+    export_root = Path(tmp) / 'tracked'
+    export_root.mkdir()
+    for relative in tracked:
         destination = export_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, destination)
@@ -366,6 +394,52 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
                for values in measurements.values()), measurements
 
 
+def test_tracked_tree_preflight_names_untracked_imported_module(tmp):
+    """An imported worker omitted from Git fails before the export runs."""
+    root = Path(tmp)
+    source_root = root / 'source'
+    worker_root = source_root / 'extension' / 'worker'
+    worker_root.mkdir(parents=True)
+    background = source_root / 'extension' / 'background.js'
+    background.write_text(
+        "importScripts('worker/untracked.js');\n", encoding='utf-8')
+    (worker_root / 'untracked.js').write_text(
+        '// deliberately untracked\n', encoding='utf-8')
+    subprocess.run(
+        ['git', '-C', str(source_root), 'init', '-q'], check=True)
+    subprocess.run(
+        ['git', '-C', str(source_root), 'add', '-f',
+         'extension/background.js'], check=True)
+
+    export_parent = root / 'export'
+    export_parent.mkdir()
+    original_root = globals()['ROOT']
+    globals()['ROOT'] = source_root
+    try:
+        try:
+            _tracked_tree(export_parent)
+        except AssertionError as error:
+            failure = str(error)
+        else:
+            raise AssertionError(
+                'untracked imported worker module passed preflight')
+    finally:
+        globals()['ROOT'] = original_root
+
+    expected = (
+        'extension/worker/untracked.js is imported by '
+        'extension/background.js but is not tracked; run git add -f '
+        'extension/worker/untracked.js, then '
+        'python3 scripts/gen_gitignore.py')
+    assert failure == expected, failure
+
+
+def test_imported_worker_modules_are_tracked(tmp):
+    """Every module loaded by importScripts is present in Git's file set."""
+    del tmp
+    _assert_imported_modules_are_tracked(_tracked_paths())
+
+
 def test_sibling_mutation_failure_names_module_type_and_handlers(tmp):
     """The boundary diagnostic distinguishes mutation from route bypass."""
     export_root = _tracked_tree(tmp)
@@ -403,5 +477,14 @@ def test_worker_boundary_runs_without_untracked_node_modules(tmp):
         result.returncode, result.stdout, result.stderr)
 
 
+def main():
+    tests = _util.collect(globals())
+    try:
+        _assert_imported_modules_are_tracked(_tracked_paths())
+    except AssertionError:
+        tests = [test_imported_worker_modules_are_tracked]
+    return _util.runner(tests)
+
+
 if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))
+    raise SystemExit(main())
