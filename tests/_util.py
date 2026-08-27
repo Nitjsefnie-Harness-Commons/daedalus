@@ -33,6 +33,14 @@ DRAIN_JOIN_TIMEOUT = 1
 _bridge_started = False
 
 
+def coverage_free_environment(environment):
+    """Copy an environment without names consumed by coverage.py."""
+    return {
+        name: value for name, value in environment.items()
+        if not name.startswith('COVERAGE_')
+    }
+
+
 def startup_timeout():
     """The allowance the next bridge start in this process gets."""
     return WARM_START_TIMEOUT if _bridge_started else COLD_START_TIMEOUT
