@@ -171,24 +171,19 @@ Something exploitable goes to [`SECURITY.md`](SECURITY.md), not the tracker.
 
 ### Claim it before you start
 
-Comment `/claim` on an open, unassigned issue. The
-[`claim` workflow](.github/workflows/claim.yml) assigns you; GitHub's built-in
-slash commands cannot, and you do not need write access for this one.
-`/unclaim` — or `/release`, the same command under a second name — hands it
-back.
+Comment `/claim` on an open, unassigned issue and
+[`claim.yml`](.github/workflows/claim.yml) assigns you, no write access needed.
+The assignment is the only thing telling anyone else the issue is taken.
+`/unclaim` — or `/release`, the same command — hands it back.
 
-The body has to be exactly the command after trimming, so "I'll `/claim` this
-one" is a sentence and is ignored. The workflow also declines a closed issue, a
-pull request, a bot comment, and an issue somebody already holds. It answers
-with a comment either way, but re-read the issue and confirm your login is in
-`assignees`: a posted comment is not a claim.
+The body must be exactly the command after trimming, so "I'll `/claim` this
+one" is ignored, as are a closed issue, a pull request, a bot, and an issue
+somebody already holds. Re-read the issue afterwards and confirm your login is
+in `assignees`: a posted comment is not a claim.
 
-Nothing rejects a pull request for an unclaimed issue. The assignment is only a
-signal — and without it a collision is invisible until the second pull request
-opens, which is how #231 drew two independent fixes eleven minutes apart. Give
-the issue back when you stop working it, and do that before the merge that
-closes it: the workflow acts on open issues only, so a stale assignment on a
-closed one can no longer be removed.
+Release an issue you stop working, before the merge that closes it — the
+workflow acts on open issues only, so a stale assignment on a closed one can no
+longer be removed.
 
 ## Pull requests
 
