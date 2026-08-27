@@ -344,6 +344,18 @@ def test_gitignore_log_safe_never_raises_and_stays_useful(tmp):
     assert generator._log_safe('héllo — 世界') == 'héllo — 世界'
 
 
+def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
+    """No repo argument used to reach `max()` on an empty generator and raise
+    ValueError instead of telling the caller what the script needs (#215)."""
+    del tmp
+    result = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts' / 'gen_gitignore.py')],
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert 'ValueError' not in result.stderr, result.stderr
+    assert 'usage' in result.stderr.lower(), result.stderr
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='gitignoregen_')
 
