@@ -7,6 +7,9 @@ that a shipped JavaScript path the report never names is surfaced the way
 an unmeasured Python source is, and that a run given only one report says
 which language its number never measured.
 """
+import contextlib
+import io
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -59,6 +62,29 @@ def _run(tmp, *args):
     return subprocess.run(
         [sys.executable, str(_SCRIPT), *args],
         cwd=tmp, capture_output=True, text=True, timeout=60)
+
+
+def _run_main(tmp, *args):
+    """Run the real entry point in-process and capture its stdout.
+
+    A subprocess proves the wiring but the suite's coverage measurement
+    never sees inside it: the per-change report named main()'s
+    --js-coverage arm and the merge helper as never executed while every
+    subprocess case around them was green. main() parses real argv and
+    reads real files either way, so this is the same entry point the
+    workflow invokes, made visible to the measurement.
+    """
+    out = io.StringIO()
+    argv, cwd = sys.argv, os.getcwd()
+    sys.argv = ['diff_coverage.py', *args]
+    os.chdir(tmp)
+    try:
+        with contextlib.redirect_stdout(out):
+            status = diff_coverage.main()
+    finally:
+        sys.argv = argv
+        os.chdir(cwd)
+    return status, out.getvalue()
 
 
 def _both_reports(tmp):
@@ -261,6 +287,35 @@ def test_an_unmeasured_language_is_not_blamed_on_path_spelling(tmp):
     both = diff_coverage.render([], 0, 0,
                                 unmeasured={'extension/content.js'})
     assert 'spells paths differently' in both, both
+
+
+def test_main_merges_both_reports_for_one_mixed_diff(tmp):
+    """The workflow's invocation: both reports, one mixed-language diff.
+
+    The subprocess cases exercise the pieces; this runs the whole CLI
+    the way the workflow does and asserts on the rendered comment, so
+    the wiring it depends on — main()'s --js-coverage arm, the merge
+    helper, the scope note's call site — is measured, not only green.
+    """
+    package = Path(tmp) / 'pkg'
+    package.mkdir()
+    _write(package, 'mod.py', 'one = 1\n')
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/pkg/mod.py\n'
+                  '+++ b/pkg/mod.py\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+one = 1\n'
+                  '--- a/extension/content.js\n'
+                  '+++ b/extension/content.js\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+reached()\n')
+    status, out = _run_main(tmp, *_both_reports(tmp), '--diff', str(diff))
+    assert status == 0, (status, out)
+    assert '**100.0%** of added lines covered (2/2).' in out, out
+    assert '| `pkg/mod.py` | 1 | 1 | — |' in out, out
+    assert '| `extension/content.js` | 1 | 1 | — |' in out, out
+    assert 'Every added line was reached.' in out, out
+    assert _BOTH_LANGUAGES_NOTE in out, out
 
 
 if __name__ == '__main__':
