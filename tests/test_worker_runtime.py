@@ -250,6 +250,7 @@ Object.defineProperty(globalThis, 'sharedName', {
 });
 """, encoding='utf-8')
 
+    failure = None
     try:
         _worker_runtime.observe_worker_runtime([{
             'path': worker, 'globals': (), 'watched': (),
@@ -414,6 +415,7 @@ def test_tracked_tree_preflight_names_untracked_imported_module(tmp):
     export_parent = root / 'export'
     export_parent.mkdir()
     original_root = globals()['ROOT']
+    failure = None
     globals()['ROOT'] = source_root
     try:
         try:
