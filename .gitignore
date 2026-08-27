@@ -276,6 +276,7 @@
 !/tests/test_path_safety.py
 !/tests/test_real_browser_eval.py
 !/tests/test_release_scan.py
+!/tests/test_repo_layout.py
 !/tests/test_result_store.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
