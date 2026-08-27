@@ -34,30 +34,176 @@ _VM_SOURCE_FILES = (
 )
 
 
-def _vm_file_read_calls():
+def _vm_file_read_calls(source_files=None):
+    comment = re.compile(
+        r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|'
+        r'`(?:\\.|[^`\\])*`)|//[^\r\n]*|/\*.*?\*/', re.DOTALL)
+
+    def without_comments(source):
+        return comment.sub(
+            lambda match: match.group(1) or ' ', source)
+
     pattern = re.compile(
-        r'vm\.runIn(?:Context|NewContext)\(\s*'
-        r'fs\.readFileSync\((?P<expr>[^,]+?),\s*[\'\"]utf8[\'\"]\)'
-        r'(?P<tail>.*?)\);', re.DOTALL)
+        r'vm\s*\.\s*runIn(?:Context|NewContext)\s*\(\s*'
+        r'fs\s*\.\s*readFileSync\s*\(\s*'
+        r'(?P<expr>[^,]+?)\s*,\s*[\'\"]utf8[\'\"]\s*\)'
+        r'(?P<tail>.*?)\s*\)\s*;', re.DOTALL)
     calls = []
-    for path in _VM_SOURCE_FILES:
-        source = path.read_text(encoding='utf-8')
+    paths = _VM_SOURCE_FILES if source_files is None else source_files
+    for path in paths:
+        source = without_comments(path.read_text(encoding='utf-8'))
         for match in pattern.finditer(source):
             calls.append((path, match.group('expr').strip(), match.group(0)))
     return calls
 
 
+def _assert_vm_file_loads_are_named(calls, expected_count):
+    assert len(calls) == expected_count, [
+        (path, expression) for path, expression, _ in calls]
+    for path, expression, call in calls:
+        arguments = _split_js_arguments(call)
+        filename = (_filename_option(arguments[2])
+                    if len(arguments) >= 3 else None)
+        assert filename == ''.join(expression.split()), (
+            path, expression, call)
+
+
+def _skip_js_string(source, index):
+    quote = source[index]
+    index += 1
+    while index < len(source):
+        if source[index] == '\\':
+            index += 2
+        elif source[index] == quote:
+            return index + 1
+        else:
+            index += 1
+    return index
+
+
+def _split_js_arguments(call):
+    start = call.index('(', call.index('runIn')) + 1
+    arguments = []
+    argument_start = start
+    depths = {'(': 0, '[': 0, '{': 0}
+    index = start
+    while index < len(call):
+        char = call[index]
+        if char in '\'"`':
+            index = _skip_js_string(call, index)
+            continue
+        if char in '([{':
+            depths[char] += 1
+        elif char in ')]}':
+            opener = {')': '(', ']': '[', '}': '{'}[char]
+            if depths[opener]:
+                depths[opener] -= 1
+            elif char == ')':
+                arguments.append(call[argument_start:index])
+                return arguments
+        elif char == ',' and not any(depths.values()):
+            arguments.append(call[argument_start:index])
+            argument_start = index + 1
+        index += 1
+    return arguments
+
+
+def _filename_option(options):
+    brace_depth = 0
+    index = 0
+    while index < len(options):
+        char = options[index]
+        if char in '\'"`':
+            index = _skip_js_string(options, index)
+            continue
+        if char == '{':
+            brace_depth += 1
+        elif char == '}':
+            brace_depth -= 1
+        elif brace_depth == 1 and options.startswith('filename', index):
+            before = options[index - 1] if index else ''
+            after = options[index + len('filename')]
+            if (before not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                    'abcdefghijklmnopqrstuvwxyz0123456789_$'
+                    and after not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                    'abcdefghijklmnopqrstuvwxyz0123456789_$'):
+                end = index + len('filename')
+                while end < len(options) and options[end].isspace():
+                    end += 1
+                if end < len(options) and options[end] == ':':
+                    value_start = end + 1
+                    value_end = _filename_value_end(options, value_start)
+                    return ''.join(options[value_start:value_end].split())
+        index += 1
+    return None
+
+
+def _filename_value_end(options, start):
+    depths = {'(': 0, '[': 0, '{': 0}
+    index = start
+    while index < len(options):
+        char = options[index]
+        if char in '\'"`':
+            index = _skip_js_string(options, index)
+            continue
+        if char in '([{':
+            depths[char] += 1
+        elif char in ')]}':
+            opener = {')': '(', ']': '[', '}': '{'}[char]
+            if not depths[opener]:
+                return index
+            depths[opener] -= 1
+        elif char == ',' and not any(depths.values()):
+            return index
+        index += 1
+    return index
+
+
+def _guard_accepts_source(tmp, source):
+    path = Path(tmp) / 'synthetic_harness.py'
+    path.write_text(source, encoding='utf-8')
+    calls = _vm_file_read_calls((path,))
+    try:
+        _assert_vm_file_loads_are_named(calls, 1)
+    except AssertionError:
+        return False
+    return True
+
+
 def test_every_vm_file_load_names_the_shipped_source(tmp):
     """Every VM load of a file supplies that file as V8's filename."""
     del tmp
-    calls = _vm_file_read_calls()
-    assert len(calls) == 19, [
-        (path, expression) for path, expression, _ in calls]
-    for path, expression, call in calls:
-        expected = re.escape(expression)
-        filename_pattern = (r'filename\s*:\s*' + expected
-                            + r'(?![A-Za-z0-9_$])')
-        assert re.search(filename_pattern, call), (path, expression, call)
+    _assert_vm_file_loads_are_named(_vm_file_read_calls(), 19)
+
+
+def test_guard_rejects_a_filename_value_with_a_suffix(tmp):
+    """A filename expression with a suffix is not the read expression."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, { filename: backgroundPath + '.wrong' });")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted a filename value with a suffix')
+
+
+def test_guard_rejects_filename_text_inside_a_comment(tmp):
+    """A comment mentioning filename is not an options property."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "backgroundContext /* filename: backgroundPath */);")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted filename text inside a comment')
+
+
+def test_guard_accepts_whitespace_between_file_load_tokens(tmp):
+    """Whitespace and line breaks do not change a valid file-load call."""
+    source = (
+        'vm.runInContext(\n'
+        '  fs.readFileSync(\n'
+        '    backgroundPath,\n'
+        "    'utf8'\n"
+        '  ),\n'
+        '  context,\n'
+        '  { filename: backgroundPath });')
+    assert _guard_accepts_source(tmp, source), (
+        'guard rejected harmless whitespace and line breaks')
 
 
 def test_v8_coverage_attributes_the_shipped_background_script(tmp):
@@ -84,7 +230,6 @@ def test_v8_coverage_attributes_the_shipped_background_script(tmp):
     shipped_url = background_path.resolve().as_uri()
     shipped = [url for url in urls if url == shipped_url]
     assert shipped, urls
-    assert all(url != 'evalmachine.<anonymous>' for url in shipped), shipped
 
 
 def test_extension_same_id_overlap_keeps_each_delivery_id(tmp):
