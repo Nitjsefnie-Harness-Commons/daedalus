@@ -188,6 +188,22 @@ def test_a_capped_push_file_list_falls_back_to_the_full_matrix(tmp):
     assert matrix == mod.FULL_MATRIX, matrix
 
 
+def test_a_capped_pull_request_file_list_runs_the_full_matrix(tmp):
+    """3000 paths can be a truncated pulls/files list, despite pagination.
+
+    The pulls files endpoint paginates but hard-caps the collection at
+    3000, so a list that long may be missing a code file sorted past the
+    cutoff; classifying it documentation-only would under-run.
+    """
+    del tmp
+    mod = _classifier()
+    stdout = ''.join(f'docs/file{index}.md\n' for index in range(3000))
+    _calls, run = _recorder(stdout)
+    docs_only, matrix, reason = mod.classify(_event(), run)
+    assert docs_only is False, reason
+    assert matrix == mod.FULL_MATRIX, matrix
+
+
 def test_write_outputs_appends_the_two_output_lines(tmp):
     mod = _classifier()
     out = Path(tmp) / 'github_output'
