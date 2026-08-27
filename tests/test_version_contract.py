@@ -169,9 +169,9 @@ def test_check_versions_set_rewrites_every_site(tmp):
         assert m.group('v') == '9.9.9', (path, desc, m.group('v'))
 
 
-def test_check_versions_set_spells_a_suffix_the_way_chrome_accepts_it(tmp):
-    """Chrome refuses a letter suffix, so the manifest carries it as a fourth
-    numeric segment. Every other site keeps the suffix verbatim."""
+def test_check_versions_set_writes_one_string_to_every_site(tmp):
+    """--set translates nothing: the manifest gets the same string as every
+    other site, whatever shape the version has."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     r = _run_checker(copy_root, '--set', '9.9.9a')
@@ -180,8 +180,31 @@ def test_check_versions_set_spells_a_suffix_the_way_chrome_accepts_it(tmp):
         text = (copy_root / path).read_text(encoding='utf-8')
         m = re.search(pattern, text)
         assert m, (path, desc)
-        expected = '9.9.9.1' if path == checker.MANIFEST[0] else '9.9.9a'
-        assert m.group('v') == expected, (path, desc, m.group('v'))
+        assert m.group('v') == '9.9.9a', (path, desc, m.group('v'))
+
+
+def test_a_manifest_spelling_the_version_differently_is_reported(tmp):
+    """A manifest holding a different string from the canonical version is
+    drift, whatever the shape of the difference.
+
+    The manifest used to be compared against a translation of the canonical
+    version rather than against the version itself, so exactly one shape of
+    disagreement was absorbed instead of reported — and it was the shape the
+    tree carried between every pair of releases.
+    """
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    written = _run_checker(copy_root, '--set', '9.9.9a')
+    assert written.returncode == 0, (written.stdout, written.stderr)
+    manifest = copy_root / 'extension' / 'manifest.json'
+    text = manifest.read_text(encoding='utf-8')
+    new_text, n = re.subn(r'"version"\s*:\s*"[^"]+"',
+                          '"version": "9.9.9.1"', text)
+    assert n == 1, text
+    manifest.write_text(new_text, encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert 'extension/manifest.json' in r.stderr, r.stderr
 
 
 def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
@@ -334,15 +357,15 @@ def test_the_tree_does_not_claim_a_version_it_already_released(tmp):
 
 
 def test_manifest_version_matches_package(tmp):
-    # check_versions.py covers this, but the manifest translation rule
-    # (0.16.0a -> 0.16.0.1) is subtle enough to pin directly.
+    # check_versions.py covers this, but the manifest is the site Chrome
+    # reads, so pin directly that it holds the canonical string verbatim.
     checker = _util.load(ROOT / 'scripts' / 'check_versions.py', 'check_versions_mv')
     found = checker.collect()
     versions = {(p, d): v for p, d, v in found}
     canonical = versions[checker.CANONICAL]
-    assert versions[checker.MANIFEST] == checker.manifest_form(canonical)
+    assert versions[checker.MANIFEST] == canonical
     pkg = json.loads((ROOT / 'extension' / 'manifest.json').read_text(encoding='utf-8'))
-    assert pkg['version'] == versions[checker.MANIFEST]
+    assert pkg['version'] == canonical
 
 
 def test_console_scripts_resolve(tmp):
