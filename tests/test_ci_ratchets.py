@@ -15,9 +15,16 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-_RATCHET_WORKFLOW = """        # Python measured: 73.3
+_PYTHON_STEP = '      - name: Python coverage gate\n'
+_JAVASCRIPT_STEP = '      - name: JavaScript coverage gate\n'
+_RATCHET_WORKFLOW = """jobs:
+  coverage:
+    steps:
+      - name: Python coverage gate
+        # Python measured: 73.3
         # Python floor: 72
         run: python -m coverage report --fail-under=72 --precision=1
+      - name: JavaScript coverage gate
         # JavaScript measured: 34.6
         # JavaScript floor: 33.1
         run: |
@@ -32,7 +39,10 @@ def _ratchet():
 
 def _assert_duplicate_refused(language, anchor, name):
     ratchet = _ratchet()
-    duplicate = f'{anchor}\n{_RATCHET_WORKFLOW}'
+    step = (_PYTHON_STEP if language == 'python' else _JAVASCRIPT_STEP)
+    assert _RATCHET_WORKFLOW.count(step) == 1, step
+    duplicate = _RATCHET_WORKFLOW.replace(
+        step, f'{step}{anchor}\n', 1)
     try:
         ratchet.update(duplicate, 90.0, language)
     except SystemExit as why:
@@ -40,6 +50,18 @@ def _assert_duplicate_refused(language, anchor, name):
     else:
         raise AssertionError(
             f'duplicate {language} {name} was accepted')
+
+
+def _assert_python_decoy_ignored(workflow):
+    ratchet = _ratchet()
+    try:
+        raised = ratchet.update(workflow, 80.0, 'python')
+    except SystemExit as why:
+        raise AssertionError(str(why)) from why
+    assert raised is not None
+    assert raised.count('# Python measured: 73.3') == 1, raised
+    assert raised.count('# Python measured: 80.0') == 1, raised
+    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
 
 
 def test_python_duplicate_measured_marker_is_refused(tmp):
@@ -102,18 +124,136 @@ def test_unknown_language_guard_names_the_language(tmp):
         raise AssertionError('an unknown coverage language was accepted')
 
 
-def test_anchor_text_inside_block_scalar_is_not_a_duplicate(tmp):
-    """A comment-shaped shell line is scalar data, not an anchor."""
+def test_explicit_scalar_cannot_hide_the_real_gate_anchor(tmp):
+    """A less-indented YAML comment remains the real step anchor."""
     del tmp
     ratchet = _ratchet()
-    decoy = _RATCHET_WORKFLOW.replace(
-        '          python scripts/ci/js_coverage.py',
-        '          # Python measured: 73.3\n'
-        '          python scripts/ci/js_coverage.py')
+    marker = _PYTHON_STEP + '        # Python measured: 73.3\n'
+    replacement = (
+        '    # Python measured: 73.3\n'
+        + _PYTHON_STEP
+        + '        env:\n'
+        '          RATCHET_NOTE: |2\n'
+        '           # Python measured: 73.3\n'
+        '            scalar content\n')
+    workflow = _RATCHET_WORKFLOW.replace(marker, replacement, 1)
 
-    raised = ratchet.update(decoy, 80.0, 'python')
+    try:
+        raised = ratchet.update(workflow, 80.0, 'python')
+    except SystemExit as why:
+        raise AssertionError(str(why)) from why
     assert raised is not None
+    assert '    # Python measured: 73.3\n' in raised, raised
+    assert '           # Python measured: 80.0\n' in raised, raised
     assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
+
+
+def test_comment_indentation_cannot_hide_the_real_gate_anchor(tmp):
+    del tmp
+    ratchet = _ratchet()
+    marker = _PYTHON_STEP + '        # Python measured: 73.3\n'
+    replacement = _PYTHON_STEP + '      # Python measured: 73.3\n'
+    workflow = _RATCHET_WORKFLOW.replace(marker, replacement, 1)
+    try:
+        raised = ratchet.update(workflow, 80.0, 'python')
+    except SystemExit as why:
+        raise AssertionError(str(why)) from why
+    assert raised is not None
+    assert '      # Python measured: 80.0\n' in raised, raised
+    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
+
+
+def test_anchor_decoy_in_another_job_is_invisible(tmp):
+    del tmp
+    workflow = _RATCHET_WORKFLOW.replace(
+        '  coverage:\n',
+        '  decoy:\n'
+        '    # Python measured: 73.3\n'
+        '    steps: []\n'
+        '  coverage:\n', 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_anchor_decoy_in_another_step_is_invisible(tmp):
+    del tmp
+    decoy = (
+        '      - name: Decoy\n'
+        '        # Python measured: 73.3\n'
+        '        run: "true"\n')
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_anchor_decoy_in_another_run_payload_is_invisible(tmp):
+    del tmp
+    decoy = (
+        '      - name: Decoy\n'
+        '        run:\t|\n'
+        '          # Python measured: 73.3\n')
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_anchor_decoy_in_a_quoted_scalar_is_invisible(tmp):
+    del tmp
+    decoy = (
+        '      - name: Decoy\n'
+        '        env:\n'
+        '          NOTE: "before\n'
+        '          # Python measured: 73.3\n'
+        '            after"\n'
+        '        run: "true"\n')
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_anchor_decoy_in_an_environment_value_is_invisible(tmp):
+    del tmp
+    decoy = (
+        '      - name: Decoy\n'
+        '        env:\n'
+        '          "RATCHET:DECOY": |\n'
+        '            # Python measured: 73.3\n'
+        '        run: "true"\n')
+    workflow = _RATCHET_WORKFLOW.replace(
+        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_anchor_decoy_in_the_other_language_gate_is_invisible(tmp):
+    del tmp
+    workflow = _RATCHET_WORKFLOW.replace(
+        _JAVASCRIPT_STEP,
+        _JAVASCRIPT_STEP + '        # Python measured: 73.3\n', 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_anchor_decoy_between_gate_steps_is_invisible(tmp):
+    del tmp
+    workflow = _RATCHET_WORKFLOW.replace(
+        _JAVASCRIPT_STEP,
+        '      # Python measured: 73.3\n' + _JAVASCRIPT_STEP, 1)
+    _assert_python_decoy_ignored(workflow)
+
+
+def test_renamed_gate_step_is_refused_by_expected_name(tmp):
+    del tmp
+    ratchet = _ratchet()
+    for language, step in (
+            ('python', _PYTHON_STEP),
+            ('javascript', _JAVASCRIPT_STEP)):
+        expected = step.partition('name: ')[2].strip()
+        renamed = _RATCHET_WORKFLOW.replace(
+            step, step.replace('coverage gate', 'coverage check'), 1)
+        try:
+            ratchet.update(renamed, 90.0, language)
+        except SystemExit as why:
+            assert f"step named '{expected}'" in str(why), why
+        else:
+            raise AssertionError(f'a renamed {language} gate was accepted')
 
 
 def test_the_ratchet_raises_the_floor_to_what_a_run_measured(tmp):
@@ -173,7 +313,7 @@ def test_the_ratchet_refuses_a_file_carrying_no_calibration(tmp):
         ratchet.update(
             'run: python -m coverage report\n', 90.0, 'python')
     except SystemExit as why:
-        assert 'records no calibration' in str(why), why
+        assert "step named 'Python coverage gate'" in str(why), why
     else:
         raise AssertionError('a file with no calibration was accepted')
 
