@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """What the service worker owes the bridge, across restarts and overlaps.
 
-A delivery id is spent once even if the worker is restarted between the two
-halves of that promise; a screenshot names the tab it captured; a refused
-upload is an error rather than an envelope with nothing in it; a rule id of
-zero does not widen into remove-all. These run the shipped background script
-in a Node VM with a fake browser under it.
+These run the shipped background script in a Node VM with a fake browser
+under it.
 """
 import json
 import os
