@@ -42,7 +42,8 @@ def _log_safe(value):
     caller's interpolation must not see a caller-controlled __format__. The
     fallback is a fixed ASCII string that never interpolates the object that
     just failed — interpolating it would reopen the hole. Kept
-    behavior-identical to log_safe.log_safe; this standalone script must run
+    behavior-identical to daedalus_bridge.log_safe.log_safe; this standalone
+    script must run
     without the repository root on its import path. except Exception is
     deliberate: KeyboardInterrupt and SystemExit still propagate.
     """
