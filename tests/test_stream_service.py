@@ -47,6 +47,52 @@ def test_queue_drain_honors_explicit_ttl_and_frame_writer(tmp):
     assert not expired.exists(), expired
 
 
+def test_queue_drain_stops_after_stream_is_killed(tmp):
+    service = _load_service('stream_service_queue_killed')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    first = qdir / '0000000000001_000001.json'
+    second = qdir / '0000000000002_000002.json'
+    first.write_text('{"id":"first"}', encoding='utf-8')
+    second.write_text('{"id":"second"}', encoding='utf-8')
+    killed = threading.Event()
+    frames = []
+
+    def capture(frame):
+        frames.append(frame)
+        killed.set()
+
+    delivered = service.drain_queue(
+        qdir, None, killed, command_ttl=100, frame_writer=capture)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'first'}], frames
+    assert not first.exists(), first
+    assert second.exists(), second
+
+
+def test_queue_drain_leaves_hidden_and_non_json_entries_alone(tmp):
+    service = _load_service('stream_service_queue_names')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    hidden = qdir / '.in-flight.json'
+    ready = qdir / '0000000000001_000001.json'
+    non_json = qdir / '0000000000002_000002.tmp'
+    hidden.write_text('{"id":"hidden"}', encoding='utf-8')
+    ready.write_text('{"id":"ready"}', encoding='utf-8')
+    non_json.write_text('{"id":"temporary"}', encoding='utf-8')
+    frames = []
+
+    delivered = service.drain_queue(
+        qdir, None, None, command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'ready'}], frames
+    assert hidden.exists(), hidden
+    assert not ready.exists(), ready
+    assert non_json.exists(), non_json
+
+
 def test_legacy_extension_drain_uses_explicit_command_directory(tmp):
     service = _load_service('stream_service_legacy_extension_drain')
     command_dir = Path(tmp) / 'commands'
@@ -61,6 +107,102 @@ def test_legacy_extension_drain_uses_explicit_command_directory(tmp):
 
     assert delivered == 1, delivered
     assert frames == [{'id': 'legacy', 'chromeTab': '42'}], frames
+    assert not legacy.exists(), legacy
+
+
+def test_legacy_extension_drain_stops_after_stream_is_killed(tmp):
+    service = _load_service('stream_service_legacy_extension_killed')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    first = command_dir / 'tok_41.json'
+    second = command_dir / 'tok_42.json'
+    first.write_text('{"id":"first"}', encoding='utf-8')
+    second.write_text('{"id":"second"}', encoding='utf-8')
+    killed = threading.Event()
+    frames = []
+
+    def capture(frame):
+        frames.append(frame)
+        killed.set()
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', 'tok_extension.json', killed,
+        command_ttl=100, frame_writer=capture)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'first', 'chromeTab': '41'}], frames
+    assert not first.exists(), first
+    assert second.exists(), second
+
+
+def test_legacy_extension_drain_skips_dashboard_name(tmp):
+    service = _load_service('stream_service_legacy_dashboard_skip')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    tab = command_dir / 'tok_42.json'
+    dashboard = command_dir / 'tok_dashboard.json'
+    tab.write_text('{"id":"tab"}', encoding='utf-8')
+    dashboard.write_text('{"id":"dashboard"}', encoding='utf-8')
+    frames = []
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', 'tok_extension.json', None,
+        command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+    assert not tab.exists(), tab
+    assert dashboard.exists(), dashboard
+
+
+def test_legacy_extension_drain_skips_its_own_legacy_name(tmp):
+    service = _load_service('stream_service_legacy_extension_skip')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    tab = command_dir / 'tok_42.json'
+    extension = command_dir / 'tok_extension.json'
+    tab.write_text('{"id":"tab"}', encoding='utf-8')
+    extension.write_text('{"id":"extension"}', encoding='utf-8')
+    frames = []
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', extension.name, None,
+        command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+    assert not tab.exists(), tab
+    assert extension.exists(), extension
+
+
+def test_inherited_legacy_non_object_is_intentionally_retained(tmp):
+    """Pin inherited, intentional retention without delivery."""
+    service = _load_service('stream_service_legacy_non_object')
+    legacy = Path(tmp) / 'tok_42.json'
+    legacy.write_text('["not a command"]', encoding='utf-8')
+    frames = []
+
+    delivered = service.drain_legacy_file(
+        legacy, '42', command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 0, delivered
+    assert frames == [], frames
+    assert legacy.exists(), legacy
+
+
+def test_expired_legacy_file_is_dropped_without_delivery(tmp):
+    service = _load_service('stream_service_legacy_expired')
+    legacy = Path(tmp) / 'tok_42.json'
+    legacy.write_text('{"id":"expired"}', encoding='utf-8')
+    expired_at = time.time() - 150
+    os.utime(legacy, (expired_at, expired_at))
+    frames = []
+
+    delivered = service.drain_legacy_file(
+        legacy, '42', command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 0, delivered
+    assert frames == [], frames
     assert not legacy.exists(), legacy
 
 
