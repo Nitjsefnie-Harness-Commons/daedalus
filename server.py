@@ -523,8 +523,7 @@ class Handler(BaseHTTPRequestHandler):
         # Kill old stream for the same tab, register this one. Every stream is
         # registered, tabless ones included: one that is not is a worker and a
         # command consumer that /health cannot see.
-        stream_key = (token, tab) if tab else None
-        stream_id, killed_event = stream_service.register(stream_key, tab)
+        stream_id, killed_event = stream_service.register(token, tab)
         print(f'[STREAM] CONNECT token={token[:8]} tab={tab[:8] if tab else "none"} from={self.client_address[0]}', flush=True)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
