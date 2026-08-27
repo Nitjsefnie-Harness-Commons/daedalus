@@ -29,6 +29,16 @@ def _load_mcp():
         'mcp_refusal_drain_' + str(time.time_ns()))
 
 
+def test_request_token_is_public_guard_state(tmp):
+    """The guard publishes the same request token state MCP tools consume."""
+    del tmp
+    _need_deps()
+    mod = _load_mcp()
+
+    assert hasattr(mod.mcp_request_guard, 'request_token')
+    assert mod._token is mod.mcp_request_guard.request_token
+
+
 def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
     """Header-decided refusals drain without materializing the request body."""
     del tmp
