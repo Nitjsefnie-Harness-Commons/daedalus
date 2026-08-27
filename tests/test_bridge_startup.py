@@ -35,6 +35,38 @@ def test_child_exit_during_startup_reports_exit_code(tmp):
     assert 'exited with code 23' in failure, failure
 
 
+def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
+    """The first successful bridge start consumes the cold allowance."""
+    assert hasattr(_util, '_bridge_started'), 'fixture has no start state'
+    saved_started = _util._bridge_started
+    try:
+        _util._bridge_started = False
+        assert _util.startup_timeout() == _util.COLD_START_TIMEOUT
+        _util._bridge_started = True
+        assert _util.startup_timeout() == _util.WARM_START_TIMEOUT
+        assert _util.COLD_START_TIMEOUT > _util.WARM_START_TIMEOUT
+
+        real_startup_timeout = _util.startup_timeout
+        _util.startup_timeout = lambda: 0.001
+        try:
+            failure = ''
+            try:
+                with _util.bridge(tmp):
+                    pass
+            except RuntimeError as exc:
+                failure = str(exc)
+            assert 'did not announce its port in 0.001s' in failure, failure
+        finally:
+            _util.startup_timeout = real_startup_timeout
+
+        _util._bridge_started = False
+        with _util.bridge(tmp):
+            pass
+        assert _util._bridge_started is True
+    finally:
+        _util._bridge_started = saved_started
+
+
 def test_live_child_startup_timeout_reports_observations(tmp):
     """A live child timeout reports its state, wait, and captured output."""
     del tmp

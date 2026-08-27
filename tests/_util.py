@@ -25,6 +25,16 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# run_tests.py starts the sorted suites in a process wave, so each process's
+# first bridge start pays its cold import costs alongside the other firsts.
+COLD_START_TIMEOUT = 60
+WARM_START_TIMEOUT = 20
+_bridge_started = False
+
+
+def startup_timeout():
+    """The allowance the next bridge start in this process gets."""
+    return WARM_START_TIMEOUT if _bridge_started else COLD_START_TIMEOUT
 
 
 def load(path, name=None):
@@ -224,7 +234,7 @@ def _startup_observations(proc, drained, waited):
             f'{len(lines)} line(s) captured:\n' + ''.join(lines))
 
 
-def await_listening_line(proc, drained, timeout=20):
+def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
     """Return the port the child actually bound, read from its Listening line.
 
     server.py prints the line only after ThreadingHTTPServer has bound, so
@@ -286,6 +296,8 @@ def bridge(tmp, env=None, output=None):
     output attached; a bridge that dies silently would otherwise show up as an
     unexplained connection error in whichever test ran first.
     """
+    global _bridge_started
+
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
     child_env = dict(os.environ)
@@ -304,7 +316,7 @@ def bridge(tmp, env=None, output=None):
         cwd=str(ROOT), env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     drained = drain_lines(proc, output)
-    timeout = 20
+    timeout = startup_timeout()
     try:
         port = await_listening_line(proc, drained, timeout=timeout)
         base = f'http://127.0.0.1:{port}'
@@ -327,6 +339,7 @@ def bridge(tmp, env=None, output=None):
                             proc, drained,
                             time.time() - started)) from exc
                 time.sleep(0.05)
+        _bridge_started = True
         yield base, docroot
     finally:
         proc.terminate()
