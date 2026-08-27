@@ -916,8 +916,7 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
         repo = Path(__file__).resolve().parents[1]
         sys.path.insert(0, str(repo))
         try:
-            result_store = _util.load(
-                repo / 'daedalus_bridge' / 'result_store.py', name='rs')
+            result_store = _util.load(repo / 'daedalus_bridge' / 'result_store.py', name='rs')
         finally:
             sys.path.pop(0)
         result_store.DELIVERY_DIR.parent.mkdir(parents=True)
