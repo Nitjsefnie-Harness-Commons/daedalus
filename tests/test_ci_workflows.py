@@ -187,14 +187,17 @@ def _tests_workflow():
         encoding='utf-8')
 
 
-def test_coverage_job_publishes_distinct_python_and_javascript_metrics(tmp):
+def test_coverage_job_publishes_distinct_python_and_javascript_metrics(_tmp):
     """Dropping capture, labels, either XML, or either gate must fail."""
-    del tmp
-    coverage = _tests_workflow().split('\n  coverage:\n', 1)[1]
+    workflow = _tests_workflow()
+    coverage = workflow.split('\n  coverage:\n', 1)[1]
     coverage = coverage.split('\n  diff-coverage:\n', 1)[0]
-    capture = 'NODE_V8_COVERAGE: ${{ github.workspace }}/.node-v8-coverage'
-    assert capture in coverage, coverage
-    assert coverage.index(capture) < coverage.index('coverage_suites.py')
+    capture = '${{ github.workspace }}/.node-v8-coverage'
+    env = job_mapping(workflow, 'coverage', 'env')
+    assert env.get('NODE_V8_COVERAGE') == capture, env
+    wrong_scope = 'jobs:\n  coverage:\n    steps:\n      - env:\n' \
+                  f'          NODE_V8_COVERAGE: {capture}\n'
+    assert job_mapping(wrong_scope, 'coverage', 'env') is None
     assert 'inherit NODE_V8_COVERAGE' in coverage, coverage
     assert '- name: Python coverage summary' in coverage, coverage
     assert '- name: Python coverage gate' in coverage, coverage
