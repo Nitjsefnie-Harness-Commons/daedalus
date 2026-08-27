@@ -63,7 +63,10 @@ tool_module_inventory = []
 
 
 def _register_tool_module(module):
-    """Register one tool module and retain its exact runtime result."""
+    """Bind nested tool closures to this composition's bridge.
+
+    Returning the map exposes the exact callables registered with MCP.
+    """
     tools = module.register(mcp, bridge)
     tool_module_inventory.append((module, tools))
     return tools

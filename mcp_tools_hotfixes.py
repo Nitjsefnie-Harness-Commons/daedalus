@@ -2,12 +2,6 @@
 
 
 def register(mcp, bridge):
-    """Define this group's tools against `mcp`, bound to `bridge`.
-
-    Returns {tool name: coroutine function} so the composition point can keep
-    the tools callable as its own attributes.
-    """
-
     @mcp.tool()
     async def store_hotfix(fix_id: str, code: str, permanent: bool = False) -> dict:
         """Store inline JS as a persistent hotfix. Set `permanent=True` to mark the fix as surviving extension version bumps."""
