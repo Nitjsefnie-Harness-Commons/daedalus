@@ -225,6 +225,7 @@ jobs:
             javascript-coverage.xml
           if-no-files-found: error
 
+      # Keep this exact name: ratchet.py scopes the three anchors to this step.
       - name: Python coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
         # A RATCHET, not a target. The floor sits just under what this job
@@ -242,6 +243,7 @@ jobs:
         # Python floor: 84.6
         run: python -m coverage report --fail-under=84.6 --precision=1
 
+      # Keep this exact name: ratchet.py scopes the three anchors to this step.
       - name: JavaScript coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
         # JavaScript uses physical code lines, so this floor is independent

@@ -32,11 +32,10 @@ BUFFER = 1.5
 MAX_GAP = 2.0
 
 _NUMBER = r'([0-9]+(?:\.[0-9]+)?)'
-_BLOCK_HEADER = re.compile(
-    r'^[>|](?:[1-9][+-]?|[+-][1-9]?|[+-]?)(?:[ \t]+#.*)?$')
 _LANGUAGES = {
     'python': {
         'label': 'Python',
+        'step': 'Python coverage gate',
         'flag': (
             r'^([ \t]*run:[ \t]+python[ \t]+-m[ \t]+coverage[ \t]+'
             r'report[ \t]+--fail-under=)' + _NUMBER
@@ -44,6 +43,7 @@ _LANGUAGES = {
     },
     'javascript': {
         'label': 'JavaScript',
+        'step': 'JavaScript coverage gate',
         'flag': (
             r'^([ \t]*--xml[ \t]+javascript-coverage\.xml[ \t]+'
             r'--fail-under=)' + _NUMBER + r'([ \t]*)$'),
@@ -68,33 +68,47 @@ def _patterns(language):
         for pattern in (measured, floor, settings['flag']))
 
 
-def _block_scalar_spans(text):
-    """Return source spans that YAML treats as block-scalar content."""
-    spans = []
-    parent_indent = None
-    offset = 0
-    for line in text.splitlines(keepends=True):
+def _step_region(text, language):
+    """Return the source bounds of the language's named gate step."""
+    expected = _LANGUAGES[language]['step']
+    pattern = re.compile(
+        r'^(?P<indent> *)-[ \t]+name:[ \t]+'
+        + re.escape(expected) + r'[ \t]*\r?$', re.MULTILINE)
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        raise SystemExit(
+            f'the {language} coverage ratchet expected exactly one step '
+            f"named '{expected}'; found {len(matches)}")
+
+    step = matches[0]
+    step_indent = len(step.group('indent'))
+    newline = text.find('\n', step.end())
+    cursor = len(text) if newline < 0 else newline + 1
+    end = len(text)
+    pending_comment = None
+    for line in text[cursor:].splitlines(keepends=True):
         raw = line.rstrip('\r\n')
         stripped = raw.lstrip(' ')
+        content = stripped.lstrip('\t')
         indent = len(raw) - len(stripped)
-        if parent_indent is not None:
-            if not stripped or indent > parent_indent:
-                spans.append((offset, offset + len(line)))
-                offset += len(line)
-                continue
-            parent_indent = None
-        _key, colon, value = stripped.partition(':')
-        if colon and _BLOCK_HEADER.fullmatch(value.strip(' ')):
-            parent_indent = indent
-        offset += len(line)
-    return spans
+        if not content:
+            cursor += len(line)
+            continue
+        if content.startswith('#'):
+            if indent <= step_indent and pending_comment is None:
+                pending_comment = cursor
+            cursor += len(line)
+            continue
+        if indent <= step_indent:
+            end = pending_comment if pending_comment is not None else cursor
+            break
+        pending_comment = None
+        cursor += len(line)
+    return step.start(), end
 
 
-def _unique_match(text, pattern, language, name, ignored=()):
-    matches = [
-        match for match in pattern.finditer(text)
-        if not any(start <= match.start() < end for start, end in ignored)
-    ]
+def _unique_match(text, pattern, language, name, start, end):
+    matches = list(pattern.finditer(text, start, end))
     if not matches:
         raise SystemExit(
             f'the {language} coverage gate records no calibration')
@@ -107,12 +121,13 @@ def _unique_match(text, pattern, language, name, ignored=()):
 
 def _calibration_matches(text, language):
     measured_pattern, floor_pattern, flag_pattern = _patterns(language)
-    scalar_spans = _block_scalar_spans(text)
+    start, end = _step_region(text, language)
     measured = _unique_match(
-        text, measured_pattern, language, 'measured marker', scalar_spans)
+        text, measured_pattern, language, 'measured marker', start, end)
     floor = _unique_match(
-        text, floor_pattern, language, 'floor marker', scalar_spans)
-    flag = _unique_match(text, flag_pattern, language, 'gate flag')
+        text, floor_pattern, language, 'floor marker', start, end)
+    flag = _unique_match(
+        text, flag_pattern, language, 'gate flag', start, end)
     floor_value, flag_value = float(floor.group(2)), float(flag.group(2))
     if floor_value != flag_value:
         raise SystemExit(
