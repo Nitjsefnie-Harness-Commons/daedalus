@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Patch coverage across two languages: Python and shipped JavaScript.
+
+The diff reporter reads one Cobertura report per language. These pin that
+an added shipped-JavaScript line is measured like an added Python one,
+that a shipped JavaScript path the report never names is surfaced the way
+an unmeasured Python source is, and that a run given only one report says
+which language its number never measured.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
+from _repo import ROOT  # noqa: E402
+
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+import diff_coverage  # noqa: E402
+
+_SCRIPT = ROOT / 'scripts' / 'ci' / 'diff_coverage.py'
+
+_PYTHON_XML = (
+    '<?xml version="1.0" ?>\n'
+    '<coverage><packages><package name="pkg"><classes>\n'
+    '  <class filename="pkg/mod.py"><lines>\n'
+    '    <line number="1" hits="1"/>\n'
+    '  </lines></class>\n'
+    '</classes></package></packages></coverage>\n')
+
+_JAVASCRIPT_XML = (
+    '<?xml version="1.0" ?>\n'
+    '<coverage><packages><package name="javascript"><classes>\n'
+    '  <class filename="extension/content.js"><lines>\n'
+    '    <line number="1" hits="1"/>\n'
+    '    <line number="2" hits="0"/>\n'
+    '  </lines></class>\n'
+    '</classes></package></packages></coverage>\n')
+
+_BOTH_LANGUAGES_NOTE = (
+    'This number covers added Python and JavaScript lines.')
+_PYTHON_ONLY_NOTE = (
+    'Only the Python report was given, so added JavaScript lines are '
+    'not measured.')
+
+
+def _write(tmp, name, text):
+    """Write one fixture file under tmp and return its path."""
+    path = Path(tmp) / name
+    path.write_text(text, encoding='utf-8')
+    return path
+
+
+def _run(tmp, *args):
+    """Run the reporter inside the fixture directory."""
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), *args],
+        cwd=tmp, capture_output=True, text=True, timeout=60)
+
+
+def _both_reports(tmp):
+    """Write one report per language and return their CLI arguments."""
+    coverage_xml = _write(tmp, 'coverage.xml', _PYTHON_XML)
+    js_xml = _write(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
+    return '--coverage', str(coverage_xml), '--js-coverage', str(js_xml)
+
+
+def test_a_covered_added_javascript_line_is_counted(tmp):
+    """An added shipped-JavaScript line the run reached counts covered."""
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/extension/content.js\n'
+                  '+++ b/extension/content.js\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+reached()\n')
+    done = _run(tmp, *_both_reports(tmp), '--diff', str(diff))
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '**100.0%** of added lines covered (1/1).' in done.stdout, (
+        done.stdout)
+    assert '| `extension/content.js` | 1 | 1 | — |' in done.stdout, (
+        done.stdout)
+    # A reader must be able to tell which languages the number covers.
+    assert _BOTH_LANGUAGES_NOTE in done.stdout, done.stdout
+
+
+def test_an_uncovered_added_javascript_line_is_counted_missed(tmp):
+    """A zero-hit JavaScript record is a miss, not an absent line."""
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/extension/content.js\n'
+                  '+++ b/extension/content.js\n'
+                  '@@ -1,0 +2 @@\n'
+                  '+unreached()\n')
+    done = _run(tmp, *_both_reports(tmp), '--diff', str(diff))
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '**0.0%** of added lines covered (0/1).' in done.stdout, (
+        done.stdout)
+    assert '| `extension/content.js` | 0 | 1 | 2 |' in done.stdout, (
+        done.stdout)
+
+
+def test_one_diff_can_measure_both_languages(tmp):
+    """One run totals the added statements of Python and JavaScript."""
+    package = Path(tmp) / 'pkg'
+    package.mkdir()
+    _write(package, 'mod.py', 'one = 1\n')
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/pkg/mod.py\n'
+                  '+++ b/pkg/mod.py\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+one = 1\n'
+                  '--- a/extension/content.js\n'
+                  '+++ b/extension/content.js\n'
+                  '@@ -1,0 +2 @@\n'
+                  '+unreached()\n')
+    done = _run(tmp, *_both_reports(tmp), '--diff', str(diff))
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '**50.0%** of added lines covered (1/2).' in done.stdout, (
+        done.stdout)
+    assert '| `pkg/mod.py` | 1 | 1 | — |' in done.stdout, done.stdout
+    assert '| `extension/content.js` | 0 | 1 | 2 |' in done.stdout, (
+        done.stdout)
+
+
+def test_the_guard_demands_shipped_javascript_only(tmp):
+    """Shipped means extension/ and dashboard/; examples/*.js stays out.
+
+    One exact-set assertion pins both directions: a shipped path the
+    report never names MUST be demanded (a path-spelling mismatch is
+    otherwise invisible), and a JavaScript file outside the shipped roots
+    must NOT be (examples and fixtures are not shipped source).
+    """
+    del tmp
+    measured = {'extension/content.js': {1: 1}}
+    added = {
+        'extension/content.js': {1},
+        'extension/options.js': {3},
+        'dashboard/app.js': {7},
+        'examples/kill-hls.js': {2},
+    }
+    missing = diff_coverage.unmeasured_sources(measured, added)
+    assert missing == {'extension/options.js', 'dashboard/app.js'}, missing
+
+
+def test_the_comment_names_an_unmeasured_shipped_javascript_file(tmp):
+    """A partial JavaScript path mismatch is named and cannot claim 100%."""
+    _write(tmp, 'mod.py', 'reached = 1\n')
+    coverage_xml = _write(
+        tmp, 'coverage.xml',
+        '<coverage><class filename="mod.py"><lines>'
+        '<line number="1" hits="1"/>'
+        '</lines></class></coverage>\n')
+    js_xml = _write(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/mod.py\n'
+                  '+++ b/mod.py\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+reached = 1\n'
+                  '--- a/dashboard/app.js\n'
+                  '+++ b/dashboard/app.js\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+never_measured()\n')
+    done = _run(tmp, '--coverage', str(coverage_xml),
+                '--js-coverage', str(js_xml), '--diff', str(diff))
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '`dashboard/app.js`' in done.stdout, done.stdout
+    assert 'did not measure these changed source files' in done.stdout, (
+        done.stdout)
+    assert 'of measured added lines covered' in done.stdout, done.stdout
+    assert '**100.0%** of added lines covered' not in done.stdout, (
+        done.stdout)
+
+
+def test_a_python_only_run_says_javascript_is_not_measured(tmp):
+    """One report must not read as though it measured the whole change."""
+    _write(tmp, 'mod.py', 'reached = 1\n')
+    coverage_xml = _write(
+        tmp, 'coverage.xml',
+        '<coverage><class filename="mod.py"><lines>'
+        '<line number="1" hits="1"/>'
+        '</lines></class></coverage>\n')
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/mod.py\n'
+                  '+++ b/mod.py\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+reached = 1\n')
+    done = _run(tmp, '--coverage', str(coverage_xml),
+                '--diff', str(diff))
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '**100.0%** of added lines covered (1/1).' in done.stdout, (
+        done.stdout)
+    assert _PYTHON_ONLY_NOTE in done.stdout, done.stdout
+    assert _BOTH_LANGUAGES_NOTE not in done.stdout, done.stdout
+
+
+if __name__ == '__main__':
+    sys.exit(_util.runner(_util.collect(dict(locals()))))

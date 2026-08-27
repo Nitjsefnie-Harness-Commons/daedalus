@@ -57,6 +57,8 @@ _HALF_COVERED_OUTPUT = """### Coverage of this change
 | --- | ---: | ---: | --- |
 | `a.py` | 1 | 1 | — |
 | `b.py` | 0 | 1 | 1 |
+
+Only the Python report was given, so added JavaScript lines are not measured.
 """
 
 _UPPERCASE_UNMEASURED_OUTPUT = """### Coverage of this change
@@ -67,10 +69,12 @@ _UPPERCASE_UNMEASURED_OUTPUT = """### Coverage of this change
 | --- | ---: | ---: | --- |
 | `present.py` | 1 | 1 | — |
 
-The coverage report did not measure these changed Python files:
+The coverage reports did not measure these changed source files:
 - `silent.PY`
 
 Every measured added line was reached; the files above were not measured.
+
+Only the Python report was given, so added JavaScript lines are not measured.
 """
 
 
