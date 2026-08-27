@@ -7,7 +7,7 @@ name: types
 # pythonPlatform is "All" rather than the runner's: the bridge branches on
 # platform at runtime, and those branches should be checked wherever this runs.
 #
-# The `mcp` extra is installed for one reason: mcp_server.py imports httpx,
+# The `mcp` extra is installed for one reason: daedalus_mcp/server.py imports httpx,
 # starlette and the MCP SDK, and without them every line that touches them
 # reads as an unresolved import rather than as code anyone checked.
 
