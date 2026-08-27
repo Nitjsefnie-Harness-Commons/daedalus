@@ -140,10 +140,11 @@ other's. The JavaScript number needs no new dependency and no separate
 test run: the suites already execute the shipped extension and
 dashboard source in Node, and `NODE_V8_COVERAGE` is a Node built-in
 their child processes inherit. It also needs one piece of context: no
-suite executes the dashboard UI modules or the extension options page,
-so a large share of the shipped JavaScript reads as zero. That is the
-true state of the tests, not a shortfall in the measurement — the fix
-is tests, not tooling.
+suite executes the dashboard UI modules beyond the shared
+`sections/_util.js` helper, or the extension options page, so a large
+share of the shipped JavaScript reads as zero. That is the true state
+of the tests, not a shortfall in the measurement — the fix is tests,
+not tooling.
 
 The matrix is not ceremony. This code reads paths and decodes bytes, so Windows
 path spellings, the `/var` → `/private/var` aliasing macOS applies to temp
