@@ -23,6 +23,48 @@ def _need_deps():
             'mcp_server dependencies (httpx/mcp/starlette) not installed')
 
 
+def _attached_byte_count(request):
+    def count(value, depth):
+        if isinstance(value, (bytes, bytearray)):
+            return len(value)
+        if depth == 0 or not isinstance(value, (list, tuple, set, dict)):
+            return 0
+        if isinstance(value, dict):
+            return sum(
+                count(key, depth - 1) + count(item, depth - 1)
+                for key, item in value.items())
+        values = value
+        return sum(count(item, depth - 1) for item in values)
+
+    # Bound depth so cyclic or deeply nested state cannot make the control
+    # perform unbounded graph walking.
+    state_values = tuple(request.scope.setdefault('state', {}).values())
+    request_values = tuple(request.__dict__.values())
+    return sum(count(value, 3) for value in state_values + request_values)
+
+
+def test_attached_byte_count_reaches_three_state_container_levels(tmp):
+    del tmp
+    _need_deps()
+    from starlette.requests import Request
+
+    request = Request({'type': 'http'})
+    request.state.nested = [[[b'x' * 8192]]]
+
+    assert _attached_byte_count(request) >= 8192
+
+
+def test_attached_byte_count_visits_dictionary_keys(tmp):
+    del tmp
+    _need_deps()
+    from starlette.requests import Request
+
+    request = Request({'type': 'http'})
+    request.state.mapping = {b'x' * 8192: None}
+
+    assert _attached_byte_count(request) >= 8192
+
+
 def _load_mcp(max_body_size=None):
     setting = 'DAEDALUS_MCP_MAX_BODY_SIZE'
     previous = os.environ.get(setting)
@@ -190,6 +232,8 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         assert all(event == 'receive' for event in events[1:-1]), (
             name, events)
         assert not hasattr(request, '_body'), name
+        retained = _attached_byte_count(request)
+        assert retained < 1024, (name, retained)
 
 
 if __name__ == '__main__':
