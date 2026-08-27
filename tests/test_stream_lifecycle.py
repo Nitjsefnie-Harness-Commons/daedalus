@@ -27,6 +27,27 @@ MAX_AGE = 3.0
 EOF_DEADLINE = MAX_AGE + 3.0
 
 
+def _open_stream(base, tab):
+    port = int(base.rsplit(':', 1)[1])
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=10)
+    conn.request(
+        'GET', f'/stream?token=lifecycle-test&tab={tab}')
+    response = conn.getresponse()
+    assert response.status == 200, f'/stream returned {response.status}'
+    return conn, response
+
+
+def _wait_for_stream_count(base, expected):
+    deadline = time.time() + 5
+    while True:
+        status, health = _util.get_json(base + '/health')
+        assert status == 200, (status, health)
+        if health['active_streams'] == expected:
+            return health
+        assert time.time() < deadline, health
+        time.sleep(0.01)
+
+
 def test_port_zero_binds_an_ephemeral_port_and_announces_it(tmp):
     """DAEDALUS_PORT=0 lets the kernel pick; the Listening line names the port.
 
@@ -216,12 +237,9 @@ def test_an_ended_stream_closes_its_socket(tmp):
         'DAEDALUS_MCP_PORT': '0',
     }
     with _util.bridge(tmp, env=env) as (base, _docroot):
-        port = int(base.rsplit(':', 1)[1])
-        conn = http.client.HTTPConnection('127.0.0.1', port,
-                                          timeout=EOF_DEADLINE + 5)
-        conn.request('GET', '/stream?token=lifecycle-test&tab=probe')
-        resp = conn.getresponse()
-        assert resp.status == 200, f'/stream returned {resp.status}'
+        conn, resp = _open_stream(base, 'probe')
+        resp.fp.raw._sock.settimeout(EOF_DEADLINE + 5)
+        _wait_for_stream_count(base, 1)
 
         started = time.time()
         try:
@@ -232,10 +250,35 @@ def test_an_ended_stream_closes_its_socket(tmp):
             how = type(e).__name__
         elapsed = time.time() - started
         conn.close()
+        _wait_for_stream_count(base, 0)
 
     assert elapsed <= EOF_DEADLINE, (
         f'stream ended at max age {MAX_AGE}s but the client saw no EOF until '
         f'{elapsed:.1f}s ({how}) — the socket was left open')
+
+
+def test_same_key_reconnect_replaces_and_closes_the_first_stream(tmp):
+    env = {'TOKEN': '', 'DAEDALUS_TOKEN': 'lifecycle-test'}
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        first_conn, first = _open_stream(base, 'same')
+        second_conn, second = _open_stream(base, 'same')
+        first.fp.raw._sock.settimeout(5)
+        try:
+            try:
+                while first.read(4096):
+                    pass
+            except socket.timeout as error:
+                raise AssertionError(
+                    'same-key reconnect left the first stream open') from error
+            except (http.client.IncompleteRead, ConnectionError, OSError):
+                pass
+            health = _wait_for_stream_count(base, 1)
+            assert health['stream_tabs'] == ['same'], health
+        finally:
+            first.close()
+            first_conn.close()
+            second.close()
+            second_conn.close()
 
 
 def test_the_bridge_refuses_to_start_without_its_docroot(tmp):
