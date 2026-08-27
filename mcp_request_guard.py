@@ -83,4 +83,5 @@ async def drain_refused_body(request):
             if remaining <= 0:
                 break
     except ClientDisconnect:
+        # Best-effort discard cannot change the already-decided refusal.
         pass
