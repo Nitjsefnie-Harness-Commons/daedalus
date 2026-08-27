@@ -389,11 +389,12 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     """No registered tool lexically reaches composition-authored behavior.
 
     The check follows the callable's own and nested code, functions in closure
-    cells, positional and keyword defaults, and ``__wrapped__`` links. It
-    allows helper-authored handlers and does not detect composition-authored
-    functions found dynamically at call time through globals, imports, module
-    attributes, ``getattr``, or dictionaries. Code objects with deliberately
-    forged origins are also outside the property.
+    cells, direct function-valued positional and keyword defaults, and
+    ``__wrapped__`` links. Functions held inside default containers are outside
+    the property, as are composition-authored functions found dynamically at
+    call time through globals, imports, module attributes, ``getattr``, or
+    dictionaries. Code objects with deliberately forged origins are also
+    outside the property.
     """
     composition = _load_composition('composition-origin')
     composition_path = (_util.ROOT / 'mcp_server.py').resolve()
