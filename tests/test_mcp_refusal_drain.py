@@ -45,7 +45,6 @@ def test_request_token_is_public_guard_state(tmp):
     _need_deps()
     mod = _load_mcp()
 
-    assert hasattr(mod.mcp_request_guard, 'request_token')
     assert mod._token is mod.mcp_request_guard.request_token
 
 
