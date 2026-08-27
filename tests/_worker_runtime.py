@@ -21,33 +21,41 @@ function observationContext(details) {
   return workerContext;
 }
 
+function escapedIdentifier(name) {
+  let escaped = '';
+  for (const point of name) {
+    escaped += `\\u{${point.codePointAt(0).toString(16)}}`;
+  }
+  return escaped;
+}
+
 function readBinding(workerContext, name, source) {
+  const identifier = escapedIdentifier(name);
+  let lexicalProbe;
   try {
-    new vm.Script(`async function* bindingProbe() { let ${name}; }`);
+    new vm.Script(
+      `async function* bindingProbe() { let ${identifier}; }`);
+    lexicalProbe = new vm.Script(`let ${identifier};`);
   } catch {
     return { probeable: false };
   }
   const globalObject = new vm.Script('this').runInContext(workerContext);
   const descriptor = Object.getOwnPropertyDescriptor(globalObject, name);
-  try {
-    if (!descriptor) {
-      const bindingType = new vm.Script(
-        `typeof ${name}`).runInContext(workerContext);
-      if (bindingType === 'undefined') {
-        return { probeable: true, available: false };
-      }
+  if (!descriptor) {
+    try {
+      lexicalProbe.runInContext(workerContext);
+      return { probeable: true, available: false };
+    } catch {
+      return { probeable: true, available: true };
     }
-    return {
-      probeable: true,
-      available: true,
-      value: new vm.Script(name).runInContext(workerContext),
-      descriptor,
-    };
-  } catch (error) {
-    throw new Error(
-      `reading binding ${JSON.stringify(name)} from ${source}: `
-      + String(error));
   }
+  try {
+    new vm.Script(identifier).runInContext(workerContext);
+  } catch {
+    throw new Error(
+      `reading binding ${JSON.stringify(name)} from ${source}`);
+  }
+  return { probeable: true, available: true };
 }
 
 function descriptorChanged(before, after) {

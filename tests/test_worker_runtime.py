@@ -59,7 +59,7 @@ def _tracked_tree(tmp):
     return export_root
 
 
-def _assert_binding_read_failure(tmp, thrown, expected):
+def _assert_binding_read_failure(tmp, thrown):
     root = Path(tmp)
     background = root / 'background.js'
     background.write_text('const backgroundMarker = true;\n',
@@ -80,12 +80,34 @@ Object.defineProperty(globalThis, 'sharedName', {{
     except AssertionError as error:
         failure = str(error)
     else:
-        raise AssertionError(f'{expected} from sharedName was swallowed')
+        raise AssertionError('the sharedName getter failure was swallowed')
 
     assert str(worker) in failure, failure
     assert 'sharedName' in failure, failure
     assert 'Error: reading binding' in failure, failure
-    assert expected in failure, failure
+    return failure
+
+
+def _assert_candidate_does_not_enter_program(tmp, candidate, marker):
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text(
+        'Object.defineProperty(globalThis, '
+        f'{json.dumps(candidate)}, {{ configurable: true, value: 1 }});\n',
+        encoding='utf-8')
+
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker,
+        'globals': (),
+        'probes': {marker},
+        'watched': (),
+    }], background_path=background)['sources'][str(worker)]
+
+    assert observed['bindingExecutionError'] is None
+    assert observed['bindings'] == []
 
 
 def test_runtime_observer_uses_javascript_global_scope(tmp):
@@ -189,6 +211,7 @@ def test_runtime_observer_reports_unicode_binding_collisions(tmp):
         r'var \u{10400} = 1;',
         r'var joiner\u200Cname = 1;',
         r'var joiner\u200Dname = 1;',
+        'var static = 1, arguments = 1, eval = 1, constructor = 1;',
     )
     paths[0].write_text('\n'.join(declarations) + '\n', encoding='utf-8')
     paths[1].write_text('\n'.join(declarations) + '\n', encoding='utf-8')
@@ -198,8 +221,9 @@ def test_runtime_observer_reports_unicode_binding_collisions(tmp):
         for path in paths
     ], background_path=background)['sources']
 
-    expected = sorted(['café', '\U00010400', 'joiner\u200cname',
-                       'joiner\u200dname'])
+    expected = sorted(['arguments', 'café', 'constructor', 'eval',
+                       '\U00010400', 'joiner\u200cname', 'joiner\u200dname',
+                       'static'])
     assert [observed[str(path)]['bindings'] for path in paths] == [
         expected, expected,
     ]
@@ -220,7 +244,10 @@ def test_runtime_observer_skips_non_binding_property_names(tmp):
         'globalThis.yield = 1;\n'
         'globalThis.await = 1;\n'
         "globalThis['not-an-identifier'] = 1;\n"
-        "globalThis['one + two'] = 1;\n",
+        "globalThis['one + two'] = 1;\n"
+        "globalThis['#private'] = 1;\n"
+        "globalThis['line\\nbreak'] = 1;\n"
+        "globalThis['brace}name'] = 1;\n",
         encoding='utf-8')
 
     observed = _worker_runtime.observe_worker_runtime([{
@@ -229,6 +256,20 @@ def test_runtime_observer_skips_non_binding_property_names(tmp):
 
     assert observed['bindingExecutionError'] is None
     assert observed['bindings'] == []
+
+
+def test_candidate_program_text_does_not_enter_probe(tmp):
+    """Statements, closing braces and newlines cannot alter probe grammar."""
+    candidates = (
+        ('undefined; { globalThis.taskThreeInjected = 1; }',
+         'taskThreeInjected'),
+        ('undefined; } globalThis.taskThreeBraceInjected = 1; {',
+         'taskThreeBraceInjected'),
+        ('undefined;\nglobalThis.taskThreeNewlineInjected = 1',
+         'taskThreeNewlineInjected'),
+    )
+    for candidate, marker in candidates:
+        _assert_candidate_does_not_enter_program(tmp, candidate, marker)
 
 
 def test_node_harness_decodes_utf8_independent_of_locale(tmp):
@@ -311,115 +352,126 @@ def test_runtime_observer_skips_missing_probe_property(tmp):
     assert observed['bindings'] == []
 
 
-def test_runtime_observer_surfaces_range_error_from_binding_read(tmp):
-    """A getter's RangeError remains a binding-read failure."""
-    _assert_binding_read_failure(
-        tmp, "new RangeError('range failed')", 'RangeError: range failed')
-
-
-def test_runtime_observer_surfaces_string_from_binding_read(tmp):
-    """A getter's thrown string remains a binding-read failure."""
-    _assert_binding_read_failure(tmp, "'string failed'", 'string failed')
-
-
-def test_runtime_observer_surfaces_syntax_error_from_binding_read(tmp):
-    """A getter's SyntaxError is not mistaken for invalid identifier syntax."""
+def test_runtime_observer_rejects_prototype_proxy_owner(tmp):
+    """A prototype Proxy cannot fabricate a module-owned binding."""
     root = Path(tmp)
     background = root / 'background.js'
     background.write_text('const backgroundMarker = true;\n',
                           encoding='utf-8')
-    worker = root / 'property.js'
+    worker = root / 'prototype.js'
     worker.write_text("""
-Object.defineProperty(globalThis, 'sharedName', {
-  configurable: true,
-  get() { throw new SyntaxError('getter failed'); },
+const prototype = new Proxy({}, {
+  has(_target, name) { return name === 'fabricatedName'; },
+  get(_target, name) {
+    return name === 'fabricatedName' ? 1 : undefined;
+  },
+  getOwnPropertyDescriptor(_target, name) {
+    if (name !== 'fabricatedName') return undefined;
+    return { configurable: true, enumerable: true, value: 1 };
+  },
 });
+Object.setPrototypeOf(this, prototype);
 """, encoding='utf-8')
 
-    failure = None
-    try:
-        _worker_runtime.observe_worker_runtime([{
-            'path': worker, 'globals': (), 'watched': (),
-        }], background_path=background)
-    except AssertionError as error:
-        failure = str(error)
-    else:
-        raise AssertionError(
-            'runtime SyntaxError for sharedName was swallowed')
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker,
+        'globals': (),
+        'probes': {'fabricatedName'},
+        'watched': (),
+    }], background_path=background)['sources'][str(worker)]
 
-    assert str(worker) in failure, failure
-    assert 'sharedName' in failure, failure
-    assert 'Error: reading binding' in failure, failure
-    assert 'SyntaxError: getter failed' in failure, failure
+    assert 'fabricatedName' not in observed['bindings']
 
 
-def test_runtime_observer_surfaces_type_error_from_binding_read(tmp):
-    """A getter's TypeError remains a binding-read failure."""
-    _assert_binding_read_failure(
-        tmp, "new TypeError('type failed')", 'TypeError: type failed')
-
-
-def test_runtime_observer_surfaces_object_named_reference_error(tmp):
-    """A getter object cannot forge the unavailable-binding outcome."""
+def test_runtime_observer_owns_uninitialised_lexical_binding(tmp):
+    """An uninitialised top-level let remains visible to the inventory."""
     root = Path(tmp)
     background = root / 'background.js'
     background.write_text('const backgroundMarker = true;\n',
                           encoding='utf-8')
-    worker = root / 'property.js'
-    worker.write_text("""
-Object.defineProperty(globalThis, 'sharedName', {
-  configurable: true,
-  get() { throw { name: 'ReferenceError', message: 'forged failure' }; },
-});
-""", encoding='utf-8')
+    worker = root / 'lexical.js'
+    worker.write_text('let dormantBinding;\n', encoding='utf-8')
 
-    failure = None
-    try:
-        _worker_runtime.observe_worker_runtime([{
-            'path': worker, 'globals': (), 'watched': (),
-        }], background_path=background)
-    except AssertionError as error:
-        failure = str(error)
-    else:
-        raise AssertionError(
-            'getter object named ReferenceError was swallowed')
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker,
+        'globals': (),
+        'probes': {'dormantBinding'},
+        'watched': (),
+    }], background_path=background)['sources'][str(worker)]
 
-    assert str(worker) in failure, failure
-    assert 'sharedName' in failure, failure
-    assert 'Error: reading binding' in failure, failure
-    assert '[object Object]' in failure, failure
+    assert observed['bindings'] == ['dormantBinding']
 
 
-def test_runtime_observer_does_not_launder_object_named_syntax_error(tmp):
-    """A getter object cannot forge the binding-read error's native type."""
+def test_runtime_observer_owns_lexical_and_property_collision(tmp):
+    """A lexical binding and same-named global property have two owners."""
     root = Path(tmp)
     background = root / 'background.js'
     background.write_text('const backgroundMarker = true;\n',
                           encoding='utf-8')
-    worker = root / 'property.js'
+    lexical = root / 'lexical.js'
+    lexical.write_text('let sharedName;\n', encoding='utf-8')
+    property_source = root / 'property.js'
+    property_source.write_text(
+        'globalThis.sharedName = 1;\n', encoding='utf-8')
+
+    paths = (lexical, property_source)
+    observed = _worker_runtime.observe_worker_runtime([
+        {'path': path, 'globals': (), 'watched': ()}
+        for path in paths
+    ], background_path=background)['sources']
+
+    assert [observed[str(path)]['bindings'] for path in paths] == [
+        ['sharedName'], ['sharedName'],
+    ]
+
+
+def test_runtime_observer_uses_this_with_hostile_global_this(tmp):
+    """Context discovery does not ask a replaced globalThis accessor."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'global-this.js'
     worker.write_text("""
-Object.defineProperty(globalThis, 'sharedName', {
-  configurable: true,
-  get() { throw { name: 'SyntaxError', message: 'forged failure' }; },
+const actualGlobal = this;
+const hostile = new Proxy({}, {
+  get() { throw new Error('hostile globalThis get'); },
+  has() { throw new Error('hostile globalThis has'); },
+  getOwnPropertyDescriptor() {
+    throw new Error('hostile globalThis descriptor');
+  },
 });
+Object.defineProperty(actualGlobal, 'globalThis', {
+  configurable: true,
+  get() { return hostile; },
+});
+var contextualOwner = 1;
 """, encoding='utf-8')
 
-    failure = None
-    try:
-        _worker_runtime.observe_worker_runtime([{
-            'path': worker, 'globals': (), 'watched': (),
-        }], background_path=background)
-    except AssertionError as error:
-        failure = str(error)
-    else:
-        raise AssertionError(
-            'getter object named SyntaxError was swallowed')
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker, 'globals': (), 'watched': (),
+    }], background_path=background)['sources'][str(worker)]
 
-    assert str(worker) in failure, failure
-    assert 'sharedName' in failure, failure
-    assert '[object Object]' in failure, failure
-    assert 'SyntaxError: reading binding' not in failure, failure
-    assert 'Error: reading binding' in failure, failure
+    assert observed['bindings'] == ['contextualOwner', 'globalThis']
+
+
+def test_runtime_observer_surfaces_every_binding_read_failure(tmp):
+    """Thrown values cannot suppress or launder the harness diagnostic."""
+    cases = (
+        ("new RangeError('range failed')", None),
+        ("'string failed'", None),
+        ("new SyntaxError('getter failed')", 'SyntaxError'),
+        ("new TypeError('type failed')", None),
+        ("{ toString() { throw new Error('coercion escaped'); } }", None),
+        ("{ name: 'ReferenceError', message: 'forged failure' }",
+         'ReferenceError'),
+        ("{ name: 'SyntaxError', message: 'forged failure' }",
+         'SyntaxError'),
+    )
+    for thrown, forbidden_name in cases:
+        failure = _assert_binding_read_failure(tmp, thrown)
+        if forbidden_name is not None:
+            assert f'{forbidden_name}: reading binding' not in failure
 
 
 def test_payload_keeps_harness_source_on_the_second_line(tmp):
