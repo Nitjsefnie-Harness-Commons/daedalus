@@ -23,10 +23,20 @@ def _need_deps():
             'mcp_server dependencies (httpx/mcp/starlette) not installed')
 
 
-def _load_mcp():
-    return _util.load(
-        _util.ROOT / 'mcp_server.py',
-        'mcp_refusal_drain_' + str(time.time_ns()))
+def _load_mcp(max_body_size=None):
+    setting = 'DAEDALUS_MCP_MAX_BODY_SIZE'
+    previous = os.environ.get(setting)
+    if max_body_size is not None:
+        os.environ[setting] = str(max_body_size)
+    try:
+        return _util.load(
+            _util.ROOT / 'mcp_server.py',
+            'mcp_refusal_drain_' + str(time.time_ns()))
+    finally:
+        if previous is None:
+            os.environ.pop(setting, None)
+        else:
+            os.environ[setting] = previous
 
 
 def test_request_token_is_public_guard_state(tmp):
@@ -91,7 +101,8 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
     """Header-decided refusals drain without materializing the request body."""
     del tmp
     _need_deps()
-    mod = _load_mcp()
+    mod = _load_mcp(max_body_size=4096)
+    assert mod.MAX_BODY_SIZE + 1 < mod.mcp_request_guard.REFUSED_BODY_DRAIN
     valid_auth = (b'authorization', f'Bearer {TOK}'.encode())
     cases = (
         ('duplicate authorization',
