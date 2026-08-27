@@ -32,6 +32,8 @@ BUFFER = 1.5
 MAX_GAP = 2.0
 
 _NUMBER = r'([0-9]+(?:\.[0-9]+)?)'
+_BLOCK_HEADER = re.compile(
+    r'^[>|](?:[1-9][+-]?|[+-][1-9]?|[+-]?)(?:[ \t]+#.*)?$')
 _LANGUAGES = {
     'python': {
         'label': 'Python',
@@ -66,8 +68,33 @@ def _patterns(language):
         for pattern in (measured, floor, settings['flag']))
 
 
-def _unique_match(text, pattern, language, name):
-    matches = list(pattern.finditer(text))
+def _block_scalar_spans(text):
+    """Return source spans that YAML treats as block-scalar content."""
+    spans = []
+    parent_indent = None
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        raw = line.rstrip('\r\n')
+        stripped = raw.lstrip(' ')
+        indent = len(raw) - len(stripped)
+        if parent_indent is not None:
+            if not stripped or indent > parent_indent:
+                spans.append((offset, offset + len(line)))
+                offset += len(line)
+                continue
+            parent_indent = None
+        _key, colon, value = stripped.partition(':')
+        if colon and _BLOCK_HEADER.fullmatch(value.strip(' ')):
+            parent_indent = indent
+        offset += len(line)
+    return spans
+
+
+def _unique_match(text, pattern, language, name, ignored=()):
+    matches = [
+        match for match in pattern.finditer(text)
+        if not any(start <= match.start() < end for start, end in ignored)
+    ]
     if not matches:
         raise SystemExit(
             f'the {language} coverage gate records no calibration')
@@ -78,23 +105,32 @@ def _unique_match(text, pattern, language, name):
     return matches[0]
 
 
-def read_calibration(text, language):
-    """(measured, floor) the workflow records, or SystemExit when it records none.
-
-    The flag is read too and required to agree with the floor: rewriting a
-    file whose gate already disagrees with its own comment would bake that
-    disagreement in rather than reporting it.
-    """
+def _calibration_matches(text, language):
     measured_pattern, floor_pattern, flag_pattern = _patterns(language)
+    scalar_spans = _block_scalar_spans(text)
     measured = _unique_match(
-        text, measured_pattern, language, 'measured marker')
-    floor = _unique_match(text, floor_pattern, language, 'floor marker')
+        text, measured_pattern, language, 'measured marker', scalar_spans)
+    floor = _unique_match(
+        text, floor_pattern, language, 'floor marker', scalar_spans)
     flag = _unique_match(text, flag_pattern, language, 'gate flag')
     floor_value, flag_value = float(floor.group(2)), float(flag.group(2))
     if floor_value != flag_value:
         raise SystemExit(
             f'the gate runs --fail-under={flag_value} while the recorded floor '
             f'is {floor_value}; fix that by hand before ratcheting')
+    return measured, floor, flag
+
+
+def read_calibration(text, language):
+    """Return the workflow's recorded (measured, floor) pair.
+
+    Raise SystemExit when the trio is absent or inconsistent. The flag is read
+    too and required to agree with the floor: rewriting a file whose gate
+    already disagrees with its own comment would bake that disagreement in
+    rather than reporting it.
+    """
+    measured, floor, _flag = _calibration_matches(text, language)
+    floor_value = float(floor.group(2))
     return float(measured.group(2)), floor_value
 
 
@@ -110,8 +146,9 @@ def update(text, measured, language):
     the floor is a high-water mark, and a run that reached fewer subprocesses
     than the best one is not evidence that the code lost coverage.
     """
-    measured_pattern, floor_pattern, flag_pattern = _patterns(language)
-    floor = read_calibration(text, language)[1]
+    measured_match, floor_match, flag_match = _calibration_matches(
+        text, language)
+    floor = float(floor_match.group(2))
     target = floor_for(measured)
     if target <= floor:
         return None
@@ -126,12 +163,16 @@ def update(text, measured, language):
     def replacement(match, value):
         return f'{match.group(1)}{value:.1f}{match.group(3)}'
 
-    text = measured_pattern.sub(
-        lambda match: replacement(match, measured), text, count=1)
-    text = floor_pattern.sub(
-        lambda match: replacement(match, target), text, count=1)
-    return flag_pattern.sub(
-        lambda match: replacement(match, target), text, count=1)
+    replacements = (
+        (measured_match, measured),
+        (floor_match, target),
+        (flag_match, target),
+    )
+    for match, value in sorted(
+            replacements, key=lambda item: item[0].start(), reverse=True):
+        text = (text[:match.start()] + replacement(match, value)
+                + text[match.end():])
+    return text
 
 
 def main():
