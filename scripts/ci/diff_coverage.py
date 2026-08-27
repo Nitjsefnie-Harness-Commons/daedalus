@@ -316,11 +316,20 @@ def render(rows, covered, total, unmeasured=(), languages=_LANGUAGES):
     unmeasured = set(unmeasured)
     out = ['### Coverage of this change', '']
     if total == 0 and unmeasured:
-        out.append('This change added lines to source files a coverage '
-                   'report should measure, but the report names none of '
-                   'the changed paths. Nothing here was measured, which is '
-                   'not the same as nothing needing to be: the report most '
-                   'likely spells paths differently than the diff does.')
+        sentence = ('This change added lines to source files a coverage '
+                    'report should measure, but the report names none of '
+                    'the changed paths. Nothing here was measured, which '
+                    'is not the same as nothing needing to be')
+        if len(languages) == len(_LANGUAGES):
+            # Every language was measured, so an absent record really is
+            # a spelling mismatch. With a language unmeasured the scope
+            # note below names it, and guessing a cause here asserts one
+            # the reader can see is wrong.
+            sentence += (': the report most likely spells paths '
+                         'differently than the diff does.')
+        else:
+            sentence += '.'
+        out.append(sentence)
         out.append('')
         out.append('Unmeasured changed source files:')
         out.extend(f'- `{path}`' for path in sorted(unmeasured))

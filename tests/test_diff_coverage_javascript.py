@@ -241,5 +241,27 @@ def test_a_python_only_run_over_a_mixed_diff_says_javascript_is_out(tmp):
     assert '`extension/content.js`' in done.stdout, done.stdout
 
 
+def test_an_unmeasured_language_is_not_blamed_on_path_spelling(tmp):
+    """A language no report measured is the cause, not path spelling.
+
+    A Python-only run over a JavaScript-only diff lands in the
+    nothing-measured branch, and the scope note directly beneath already
+    says JavaScript was not measured; guessing "paths spelled
+    differently" there asserts a cause the reader can see is wrong.
+    """
+    del tmp
+    body = diff_coverage.render([], 0, 0,
+                                unmeasured={'extension/content.js'},
+                                languages=['Python'])
+    assert 'names none of the changed paths' in body, body
+    assert 'spells paths differently' not in body, body
+    assert _PYTHON_ONLY_NOTE in body, body
+    # With every language measured the guess is the likely cause and
+    # stays: an absent record then really is a spelling mismatch.
+    both = diff_coverage.render([], 0, 0,
+                                unmeasured={'extension/content.js'})
+    assert 'spells paths differently' in both, both
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
