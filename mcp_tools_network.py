@@ -1,7 +1,7 @@
 """Network and CDP tools for the Daedalus MCP front end."""
 
 
-# Matches NET_CAPTURE_MAX in extension/background.js and the CLI.
+# Matches NET_CAPTURE_MAX in extension/worker/netcapture.js and the CLI.
 NET_CAPTURE_MAX = 20000
 
 
