@@ -12,14 +12,15 @@ import _util  # noqa: E402
 
 
 def _load_queue(name):
-    return _util.load(_util.ROOT / 'command_queue.py', name=name)
+    return _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'command_queue.py', name=name)
 
 
 def test_command_queue_imports_without_daedalus_configuration(_tmp):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('DAEDALUS_') and key != 'TOKEN'}
     loaded = subprocess.run(
-        [sys.executable, '-c', 'import command_queue'],
+        [sys.executable, '-c', 'import daedalus_bridge.command_queue'],
         cwd=str(_util.ROOT), env=env, stderr=subprocess.PIPE, text=True)
     assert loaded.returncode == 0, loaded.stderr
 

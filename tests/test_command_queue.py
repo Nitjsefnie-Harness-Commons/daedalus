@@ -23,7 +23,8 @@ from _bridge import (TOK, next_stream_data, put_command,  # noqa: E402
 
 
 def _load_queue(name):
-    return _util.load(_util.ROOT / 'command_queue.py', name=name)
+    return _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'command_queue.py', name=name)
 
 
 def _set_mtime(path, stamp):
@@ -298,7 +299,7 @@ def _claim_trace_dir(tmp):
         'import threading\n'
         f'_trace = {str(trace)!r}\n'
         f'sys.path.insert(0, {str(_util.ROOT)!r})\n'
-        'import command_queue\n'
+        'from daedalus_bridge import command_queue\n'
         '_record_lock = threading.Lock()\n'
         '_sequence = 0\n'
         '_active = {}\n'

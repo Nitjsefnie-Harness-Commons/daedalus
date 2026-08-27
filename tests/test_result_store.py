@@ -15,7 +15,7 @@ import json
 import os
 from pathlib import Path
 
-import result_store
+from daedalus_bridge import result_store
 
 slot = Path(os.environ['RESULT_SLOT'])
 payload = {

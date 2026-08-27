@@ -38,12 +38,6 @@
 !/LICENSE
 !/README.md
 !/SECURITY.md
-!/atomic_file.py
-!/bridge_config.py
-!/command_queue.py
-!/delivery_stripes.py
-!/env_config.py
-!/log_safe.py
 !/mcp_auth.py
 !/mcp_request_guard.py
 !/mcp_server.py
@@ -55,17 +49,13 @@
 !/mcp_tools_network.py
 !/mcp_tools_tabs.py
 !/mcp_transport.py
-!/path_safety.py
 !/pyproject.toml
 !/pyrightconfig.json
 !/requirements-dev.txt
 !/requirements-test.txt
-!/result_store.py
 !/run_tests.py
-!/segment_store.py
 !/server.py
 !/setup.cfg
-!/stream_service.py
 
 # ─── .githooks ───
 !/.githooks/
@@ -98,6 +88,20 @@
 !/.github/workflows/tests.yml
 !/.github/workflows/types.yml
 !/.github/workflows/version.yml
+
+# ─── daedalus_bridge ───
+!/daedalus_bridge/
+!/daedalus_bridge/__init__.py
+!/daedalus_bridge/atomic_file.py
+!/daedalus_bridge/command_queue.py
+!/daedalus_bridge/config.py
+!/daedalus_bridge/delivery_stripes.py
+!/daedalus_bridge/env_config.py
+!/daedalus_bridge/log_safe.py
+!/daedalus_bridge/path_safety.py
+!/daedalus_bridge/result_store.py
+!/daedalus_bridge/segment_store.py
+!/daedalus_bridge/stream_service.py
 
 # ─── daedalus_cli ───
 !/daedalus_cli/
