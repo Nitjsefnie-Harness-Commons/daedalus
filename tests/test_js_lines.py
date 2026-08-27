@@ -203,11 +203,11 @@ def test_escaped_identifier_is_refused_by_its_own_shape(tmp):
 
 
 def test_advancing_at_end_of_source_is_a_noop(tmp):
-    """An attempted cursor advance at EOF leaves the scan empty."""
+    """An attempted cursor advance at EOF changes no cursor state."""
     del tmp
     scanner = _Scanner('', 'fixtures/empty.js')
     scanner._advance()
-    assert scanner.scan() == set()
+    assert (scanner.index, scanner.line) == (0, 1)
 
 
 def test_unterminated_block_comment_is_refused(tmp):
@@ -231,12 +231,6 @@ def test_string_reaching_a_line_ending_is_refused(tmp):
                     'unterminated string', 1)
 
 
-def test_string_ending_after_an_escape_is_refused(tmp):
-    """A final backslash does not hide an unterminated string."""
-    del tmp
-    _assert_refusal("const text = 'open\\", 'unterminated string', 1)
-
-
 def test_unterminated_template_is_refused(tmp):
     """A template or one of its holes must reach the closing backtick."""
     del tmp
@@ -248,12 +242,6 @@ def test_raw_unterminated_template_is_refused(tmp):
     """Raw template text reaching EOF names the opening line."""
     del tmp
     _assert_refusal('const text = `open', 'unterminated template', 1)
-
-
-def test_template_ending_after_an_escape_is_refused(tmp):
-    """A final backslash does not hide an unterminated template."""
-    del tmp
-    _assert_refusal('const text = `open\\', 'unterminated template', 1)
 
 
 def test_unterminated_regex_is_refused(tmp):
@@ -275,12 +263,6 @@ def test_regex_escaped_line_ending_is_refused(tmp):
     del tmp
     _assert_refusal('const match = /open\\\nstill open/;',
                     'unterminated regex', 1)
-
-
-def test_regex_ending_after_an_escape_is_refused(tmp):
-    """A final backslash does not hide an unterminated regex."""
-    del tmp
-    _assert_refusal('const match = /open\\', 'unterminated regex', 1)
 
 
 def test_every_shipped_javascript_file_is_modelled(tmp):

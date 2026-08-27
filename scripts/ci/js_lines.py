@@ -207,8 +207,6 @@ class _Scanner:
                 self._error('unterminated string', opening_line)
             if char == '\\':
                 self._advance(code=True)
-                if self.index == len(self.source):
-                    break
                 self._advance(code=True)
                 continue
             self._advance(code=True)
@@ -224,8 +222,6 @@ class _Scanner:
                 return
             if char == '\\':
                 self._advance(code=True)
-                if self.index == len(self.source):
-                    break
                 self._advance(code=True)
                 continue
             if char == '$' and self._peek(1) == '{':
@@ -246,8 +242,6 @@ class _Scanner:
                 self._error('unterminated regex', opening_line)
             if char == '\\':
                 self._advance(code=True)
-                if self.index == len(self.source):
-                    break
                 if self._peek() in _LINE_ENDS:
                     self._error('unterminated regex', opening_line)
                 self._advance(code=True)
