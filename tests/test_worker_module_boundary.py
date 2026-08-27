@@ -34,6 +34,9 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
                         '_serializer', 'bridgeAuth', 'bridgeHeaders',
                         'bytesToBase64', 'gmResponseLimit',
                         'readBoundedBody'), ()),
+    ('worker/config.js', ('_executionContext', 'config', 'configured',
+                          'loadConfig', 'postResult'),
+     ('chrome.storage.onChanged.addListener',)),
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
