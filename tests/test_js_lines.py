@@ -288,7 +288,6 @@ def test_every_shipped_javascript_file_is_modelled(tmp):
 
 
 def main():
-    """Run this file as a standalone suite."""
     return _util.runner(_util.collect(globals()), tmp_prefix='jslines_')
 
 
