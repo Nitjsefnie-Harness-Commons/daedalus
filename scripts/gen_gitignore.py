@@ -152,4 +152,7 @@ def main(repo):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print(f'usage: {sys.argv[0]} <repo> [<repo> ...]', file=sys.stderr)
+        sys.exit(2)
     sys.exit(max(main(r) for r in sys.argv[1:]))
