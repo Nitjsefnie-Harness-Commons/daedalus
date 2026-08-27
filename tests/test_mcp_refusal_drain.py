@@ -26,25 +26,32 @@ def _need_deps():
 
 def _request_contains_payload(request, payload):
     seen = set()
-
-    def contains(value):
-        if isinstance(value, (bytes, bytearray, memoryview)):
-            return payload in bytes(value)
-        if not isinstance(value, (list, tuple, set, dict)):
-            return False
-        marker = id(value)
-        if marker in seen:
-            return False
-        seen.add(marker)
-        if isinstance(value, dict):
-            return any(
-                contains(key) or contains(item)
-                for key, item in value.items())
-        return any(contains(item) for item in value)
-
     state_values = tuple(request.scope.setdefault('state', {}).values())
     request_values = tuple(request.__dict__.values())
-    return any(contains(value) for value in state_values + request_values)
+    pending = list(state_values + request_values)
+
+    while pending:
+        value = pending.pop()
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            try:
+                if payload in bytes(value):
+                    return True
+            except ValueError:
+                # Released views expose no byte content to inspect.
+                pass
+            continue
+        if not isinstance(value, (list, tuple, set, dict)):
+            continue
+        marker = id(value)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if isinstance(value, dict):
+            pending.extend(value)
+            pending.extend(value.values())
+        else:
+            pending.extend(value)
+    return False
 
 
 def test_payload_search_reaches_deep_state_containers(tmp):
@@ -54,6 +61,20 @@ def test_payload_search_reaches_deep_state_containers(tmp):
 
     request = Request({'type': 'http'})
     request.state.nested = [[[[[REFUSED_PAYLOAD]]]]]
+
+    assert _request_contains_payload(request, REFUSED_PAYLOAD)
+
+
+def test_payload_search_has_no_recursion_limit(tmp):
+    del tmp
+    _need_deps()
+    from starlette.requests import Request
+
+    request = Request({'type': 'http'})
+    nested = REFUSED_PAYLOAD
+    for _unused in range(1500):
+        nested = [nested]
+    request.state.nested = nested
 
     assert _request_contains_payload(request, REFUSED_PAYLOAD)
 
@@ -78,6 +99,19 @@ def test_payload_search_reads_memoryviews(tmp):
     request.state.view = memoryview(REFUSED_PAYLOAD)
 
     assert _request_contains_payload(request, REFUSED_PAYLOAD)
+
+
+def test_payload_search_ignores_released_memoryviews(tmp):
+    del tmp
+    _need_deps()
+    from starlette.requests import Request
+
+    request = Request({'type': 'http'})
+    view = memoryview(REFUSED_PAYLOAD)
+    view.release()
+    request.state.view = view
+
+    assert not _request_contains_payload(request, REFUSED_PAYLOAD)
 
 
 def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
