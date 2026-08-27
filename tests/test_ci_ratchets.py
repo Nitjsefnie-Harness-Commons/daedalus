@@ -30,6 +30,78 @@ def _ratchet():
     return _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py', 'ratchet_mod')
 
 
+def _assert_duplicate_refused(language, anchor, name):
+    ratchet = _ratchet()
+    duplicate = f'{anchor}\n{_RATCHET_WORKFLOW}'
+    try:
+        ratchet.update(duplicate, 90.0, language)
+    except SystemExit as why:
+        assert f'exactly one {name}' in str(why), why
+    else:
+        raise AssertionError(
+            f'duplicate {language} {name} was accepted')
+
+
+def test_python_duplicate_measured_marker_is_refused(tmp):
+    """A decoy measured marker must not divert the Python rewrite."""
+    del tmp
+    _assert_duplicate_refused(
+        'python', '        # Python measured: 73.3', 'measured marker')
+
+
+def test_python_duplicate_floor_marker_is_refused(tmp):
+    """A decoy floor marker must not divert the Python rewrite."""
+    del tmp
+    _assert_duplicate_refused(
+        'python', '        # Python floor: 72', 'floor marker')
+
+
+def test_python_duplicate_gate_flag_is_refused(tmp):
+    """A decoy gate flag must not divert the Python rewrite."""
+    del tmp
+    _assert_duplicate_refused(
+        'python',
+        '        run: python -m coverage report '
+        '--fail-under=72 --precision=1',
+        'gate flag')
+
+
+def test_javascript_duplicate_measured_marker_is_refused(tmp):
+    """A decoy measured marker must not divert the JavaScript rewrite."""
+    del tmp
+    _assert_duplicate_refused(
+        'javascript', '        # JavaScript measured: 34.6',
+        'measured marker')
+
+
+def test_javascript_duplicate_floor_marker_is_refused(tmp):
+    """A decoy floor marker must not divert the JavaScript rewrite."""
+    del tmp
+    _assert_duplicate_refused(
+        'javascript', '        # JavaScript floor: 33.1', 'floor marker')
+
+
+def test_javascript_duplicate_gate_flag_is_refused(tmp):
+    """A decoy gate flag must not divert the JavaScript rewrite."""
+    del tmp
+    _assert_duplicate_refused(
+        'javascript',
+        '            --xml javascript-coverage.xml --fail-under=33.1',
+        'gate flag')
+
+
+def test_unknown_language_guard_names_the_language(tmp):
+    """The defensive helper guard must not expose a bare KeyError."""
+    del tmp
+    ratchet = _ratchet()
+    try:
+        ratchet._patterns('ruby')
+    except SystemExit as why:
+        assert str(why) == 'unknown coverage language: ruby', why
+    else:
+        raise AssertionError('an unknown coverage language was accepted')
+
+
 def test_the_ratchet_raises_the_floor_to_what_a_run_measured(tmp):
     """The recorded measurement is what goes stale, so it is rewritten too."""
     del tmp

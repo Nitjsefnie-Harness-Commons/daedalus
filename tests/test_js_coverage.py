@@ -15,9 +15,9 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-from js_coverage import (_data_source, _file_url_path, collect_coverage,
-                         merge_records, resolve_script,  # noqa: E402
-                         tracked_sources)
+from js_coverage import (_data_source, _file_url_path, _resolve_data,
+                         collect_coverage, merge_records,  # noqa: E402
+                         resolve_script, tracked_sources)
 
 
 _SCRIPT = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
@@ -146,6 +146,20 @@ def test_malformed_base64_data_url_is_rejected(tmp):
     """Letting malformed base64 escape the decode guard must fail."""
     del tmp
     assert _data_source('data:text/javascript;base64,%%%') is None
+
+
+def test_failed_data_decode_stops_before_source_lookup(tmp):
+    """Removing the decoded-None guard must consult this forbidden map."""
+    del tmp
+
+    class UnreadableSources:
+        @staticmethod
+        def items():
+            raise AssertionError('sources consulted after failed decode')
+
+    assert _resolve_data(
+        'data:text/javascript;base64,%%%', UnreadableSources()
+    ) is None
 
 
 def test_base64_data_url_with_invalid_utf8_is_rejected(tmp):

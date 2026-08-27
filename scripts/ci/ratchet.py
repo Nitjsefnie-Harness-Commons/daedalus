@@ -66,6 +66,18 @@ def _patterns(language):
         for pattern in (measured, floor, settings['flag']))
 
 
+def _unique_match(text, pattern, language, name):
+    matches = list(pattern.finditer(text))
+    if not matches:
+        raise SystemExit(
+            f'the {language} coverage gate records no calibration')
+    if len(matches) != 1:
+        raise SystemExit(
+            f'the {language} coverage gate must record exactly one {name}; '
+            f'found {len(matches)}')
+    return matches[0]
+
+
 def read_calibration(text, language):
     """(measured, floor) the workflow records, or SystemExit when it records none.
 
@@ -74,12 +86,10 @@ def read_calibration(text, language):
     disagreement in rather than reporting it.
     """
     measured_pattern, floor_pattern, flag_pattern = _patterns(language)
-    measured = measured_pattern.search(text)
-    floor = floor_pattern.search(text)
-    flag = flag_pattern.search(text)
-    if not (measured and floor and flag):
-        raise SystemExit(
-            f'the {language} coverage gate records no calibration')
+    measured = _unique_match(
+        text, measured_pattern, language, 'measured marker')
+    floor = _unique_match(text, floor_pattern, language, 'floor marker')
+    flag = _unique_match(text, flag_pattern, language, 'gate flag')
     floor_value, flag_value = float(floor.group(2)), float(flag.group(2))
     if floor_value != flag_value:
         raise SystemExit(

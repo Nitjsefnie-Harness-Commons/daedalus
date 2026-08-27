@@ -128,10 +128,10 @@ jobs:
       # tree and run it with that tree as the working directory. A relative
       # data file follows the child's cwd, so its measurements were written
       # inside the tree and deleted with it.
-      COVERAGE_FILE: ${{ github.workspace }}/.coverage
+      COVERAGE_FILE: "${{ github.workspace }}/.coverage"
       # Node children inherit NODE_V8_COVERAGE from this job environment,
       # so V8 writes here directly; no harness plumbing is needed.
-      NODE_V8_COVERAGE: ${{ github.workspace }}/.node-v8-coverage
+      NODE_V8_COVERAGE: "${{ github.workspace }}/.node-v8-coverage"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
