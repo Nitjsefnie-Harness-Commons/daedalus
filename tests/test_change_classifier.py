@@ -11,6 +11,9 @@ import contextlib
 import io
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
-    _flow_sequence, _workflow_path_filters, _workflow_triggers)
+    _workflow_path_filters, _workflow_triggers)
+from _yamlread import job_mapping  # noqa: E402
 
 
 def _classifier():
@@ -241,41 +245,146 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
                 name, event, filters)
 
 
-def _suites_matrix(workflow):
-    """jobs.suites.strategy.matrix, read as text from the workflow source."""
+def _tests_yml():
+    return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+
+
+def _job_section(workflow, job):
+    """One job's source lines, from its header to the next job's."""
     lines = workflow.splitlines()
-    start = None
-    for index, line in enumerate(lines):
-        if line == '      matrix:':
-            assert start is None, 'a second matrix: block appeared'
-            start = index
-    assert start is not None, 'no suites matrix block found'
-    matrix = {}
-    for line in lines[start + 1:]:
+    start = next((index for index, line in enumerate(lines)
+                  if line == f'  {job}:'), None)
+    assert start is not None, f'tests.yml has no {job!r} job'
+    end = next((index for index in range(start + 1, len(lines))
+                if lines[index][:2] == '  ' and lines[index][2:3].strip()),
+               len(lines))
+    return lines[start:end]
+
+
+def _job_needs(workflow, job):
+    """The job names listed under `needs:` on the named job."""
+    names = []
+    in_needs = False
+    for line in _job_section(workflow, job)[1:]:
         stripped = line.strip()
         if not stripped or stripped.startswith('#'):
             continue
-        if len(line) - len(line.lstrip(' ')) <= 6:
+        if in_needs:
+            if stripped.startswith('- '):
+                names.append(stripped[2:])
+                continue
+            return names
+        if line.startswith('    needs:'):
+            inline = stripped[len('needs:'):].strip()
+            if inline:
+                return [inline]
+            in_needs = True
+    return names
+
+
+def _aggregate_script(workflow):
+    """The aggregate job's run block, dedented, ready for bash."""
+    section = '\n'.join(_job_section(workflow, 'aggregate'))
+    _, marker, after = section.partition('        run: |\n')
+    assert marker, 'aggregate has no run block shaped as this test expects'
+    lines = []
+    for line in after.splitlines():
+        if line.strip() and not line.startswith('          '):
             break
-        key, colon, value = stripped.partition(':')
-        assert colon, line
-        matrix[key] = _flow_sequence(value.strip(), key, 'tests.yml')
-    return matrix
+        lines.append(line[10:])
+    return '\n'.join(lines)
 
 
-def test_full_matrix_matches_the_workflow_suites_matrix(tmp):
-    """FULL_MATRIX is the literal suites matrix tests.yml declares.
+def _run_aggregate(results):
+    """Run the real aggregate script against one `needs` result mapping."""
+    bash = shutil.which('bash')
+    assert bash, 'bash is required to execute the aggregate script'
+    needs = {name: {'result': result} for name, result in results.items()}
+    env = {**os.environ, 'NEEDS_JSON': json.dumps(needs)}
+    return subprocess.run([bash, '-c', _aggregate_script(_tests_yml())],
+                          env=env, capture_output=True, text=True, timeout=60)
 
-    Task 2 of this change replaces that literal with
-    fromJSON(needs.changes.outputs.matrix) and retargets this test, so a
-    reader who finds this test failing on that task's branch should look
-    there first.
+
+def test_changes_job_permissions_are_exactly_read_only(tmp):
+    del tmp
+    permissions = job_mapping(_tests_yml(), 'changes', 'permissions')
+    assert permissions == {'contents': 'read', 'pull-requests': 'read'}, (
+        permissions)
+
+
+def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
+    """coverage skips on docs_only; suites runs the classifier's matrix."""
+    del tmp
+    workflow = _tests_yml()
+    assert 'changes' in _job_needs(workflow, 'coverage')
+    # Read as text: job_scalar refuses a plain `if:` when deeper-indented
+    # lines follow it in the job body, which env: and steps: guarantee.
+    conditions = [line.strip() for line in _job_section(workflow, 'coverage')
+                  if line.startswith('    if:')]
+    assert conditions, 'coverage has no job-level if'
+    assert any('needs.changes.outputs.docs_only' in condition
+               for condition in conditions), conditions
+    matrix_lines = [line.strip() for line in _job_section(workflow, 'suites')
+                    if line.strip().startswith('matrix:')]
+    assert matrix_lines == [
+        'matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}'], (
+        matrix_lines)
+
+
+def test_aggregate_waits_on_every_job_it_checks(tmp):
+    del tmp
+    needs = _job_needs(_tests_yml(), 'aggregate')
+    for job in ('changes', 'suites', 'wheel', 'coverage'):
+        assert job in needs, (job, needs)
+
+
+def test_the_aggregate_script_accepts_skips_but_not_for_changes(tmp):
+    """The accept-skipped behaviour, exercised by running the real script.
+
+    This is the case that goes green for the wrong reason when the strict
+    set or the accepted results drift, so the fixtures below run the
+    workflow's own shell rather than a reading of it.
+    """
+    del tmp
+    all_success = {'changes': 'success', 'suites': 'success',
+                   'wheel': 'success', 'coverage': 'success'}
+    result = _run_aggregate(all_success)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+
+    docs_only = dict(all_success, suites='skipped', coverage='skipped')
+    result = _run_aggregate(docs_only)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+
+    result = _run_aggregate(dict(all_success, changes='skipped'))
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert 'changes' in result.stderr, result.stderr
+
+    for name in ('changes', 'suites'):
+        result = _run_aggregate(dict(all_success, **{name: 'failure'}))
+        assert result.returncode != 0, (name, result.stdout, result.stderr)
+    result = _run_aggregate(dict(all_success, suites='cancelled'))
+    assert result.returncode != 0, (result.stdout, result.stderr)
+
+
+def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
+    """The workflow no longer declares the suites matrix literally.
+
+    Retargeted when the classifier was wired in: the os/python lists moved
+    to FULL_MATRIX in scripts/ci/classify_changes.py, which the changes job
+    renders into the suites matrix at runtime. The classifier's constant
+    keeps its shape pinned here instead.
     """
     del tmp
     mod = _classifier()
-    text = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    assert mod.FULL_MATRIX == _suites_matrix(text), _suites_matrix(text)
+    section = '\n'.join(_job_section(_tests_yml(), 'suites'))
+    assert not re.search(r'^\s+(?:os|python): \[', section, re.MULTILINE), (
+        section)
+    assert len(mod.FULL_MATRIX['os']) == 3, mod.FULL_MATRIX
+    assert len(mod.FULL_MATRIX['python']) == 4, mod.FULL_MATRIX
+    for axis, values in mod.FULL_MATRIX.items():
+        for value in values:
+            assert isinstance(value, str) and value, (axis, value)
 
 
 def test_main_records_the_fallback_outputs_and_returns_zero(tmp):
