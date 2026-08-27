@@ -1928,7 +1928,7 @@ if __name__ == '__main__':
     httpd = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
     bridge_port = httpd.server_address[1]
     try:
-        import mcp_server
+        from daedalus_mcp import server as mcp_server
         mcp_server.start_in_thread(f'http://127.0.0.1:{bridge_port}')
     except Exception as e:
         # ASCII only, and it names the install: without the optional

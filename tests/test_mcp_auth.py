@@ -16,7 +16,7 @@ import test_mcp_server  # noqa: E402
 def _auth_module():
     test_mcp_server._need_deps()
     return _util.load(
-        _util.ROOT / 'mcp_auth.py',
+        _util.ROOT / 'daedalus_mcp' / 'auth.py',
         'mcp_auth_under_test_' + str(time.time_ns()))
 
 

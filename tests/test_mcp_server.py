@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Suite for mcp_server.py, bounded by what its dependencies allow.
+"""Suite for daedalus_mcp/server.py, bounded by what its dependencies allow.
 
-mcp_server needs httpx, mcp and starlette, which a public checkout does not
+daedalus_mcp.server needs httpx, mcp and starlette, which a public checkout does not
 necessarily have installed. Where they are missing every test here skips
 cleanly; a suite that failed on an optional front end would be wrong. Where
 they are present the tool handlers are exercised against a real bridge, with
@@ -45,11 +45,11 @@ os.environ['DAEDALUS_TOKEN'] = TOK
 
 def _need_deps():
     if not DEPS:
-        _util.skip('mcp_server dependencies (httpx/mcp/starlette) not installed')
+        _util.skip('daedalus_mcp.server dependencies (httpx/mcp/starlette) not installed')
 
 
 def _load_mcp(base_url):
-    """Import mcp_server.py with a private bridge session bound at import."""
+    """Import daedalus_mcp/server.py with a private bridge session bound at import."""
     prev = os.environ.get('DAEDALUS_LOCAL_URL')
     root = str(_util.ROOT)
     added_root = root not in sys.path
@@ -57,7 +57,7 @@ def _load_mcp(base_url):
         sys.path.insert(0, root)
     os.environ['DAEDALUS_LOCAL_URL'] = base_url
     try:
-        return _util.load(_util.ROOT / 'mcp_server.py',
+        return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
                           'mcp_server_under_test_' + str(time.time_ns()))
     finally:
         if added_root:
@@ -291,7 +291,7 @@ def test_module_imports_and_exposes_tools(tmp):
     for name in ('list_tabs', 'ping', 'navigate', 'screenshot',
                  'segment_status'):
         fn = getattr(mod, name, None)
-        assert callable(fn), f'mcp_server.{name} missing'
+        assert callable(fn), f'daedalus_mcp.server.{name} missing'
 
 
 def test_local_url_derives_from_the_bridge_port(tmp):
@@ -313,7 +313,7 @@ def test_local_url_derives_from_the_bridge_port(tmp):
         sys.path.insert(0, root)
     try:
         def fresh(tag):
-            return _util.load(_util.ROOT / 'mcp_server.py',
+            return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
                               'mcp_server_url_' + tag + str(time.time_ns()))
         os.environ.pop('DAEDALUS_LOCAL_URL', None)
         os.environ['DAEDALUS_PORT'] = '54321'
@@ -637,7 +637,7 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
         })
         Path(env['DAEDALUS_DIR']).mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
-            [sys.executable, '-c', 'import mcp_server'], cwd=_util.ROOT,
+            [sys.executable, '-c', 'import daedalus_mcp.server'], cwd=_util.ROOT,
             env=env, capture_output=True, text=True, timeout=120)
         output = (proc.stdout + proc.stderr).strip()
         if (proc.returncode == 0 or 'Traceback' in output
@@ -741,7 +741,7 @@ def test_list_tabs_tool_against_real_bridge(tmp):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': '7', 'url': 'https://example.com/mcp', 'title': 'M'}]})
         mod = _load_mcp(base)
-        mod._token.set(TOK)  # what mcp_auth.BearerAuth does per request
+        mod._token.set(TOK)  # what daedalus_mcp.auth.BearerAuth does per request
         tabs = asyncio.run(mod.list_tabs())
         assert isinstance(tabs, list) and len(tabs) == 1, tabs
         assert tabs[0]['tabId'] == '7'
@@ -1664,7 +1664,7 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
     _need_deps()
     with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
         mod = _load_mcp(base)
-        mod._token.set(TOK)  # what mcp_auth.BearerAuth does per request
+        mod._token.set(TOK)  # what daedalus_mcp.auth.BearerAuth does per request
         cases = (
             (lambda: mod.open_tab('https://example.com'), 'open-tab',
              {'url': 'https://example.com'}),

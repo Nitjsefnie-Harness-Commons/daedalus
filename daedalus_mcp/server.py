@@ -13,19 +13,19 @@ import contextlib
 import os, socket, sys, threading
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
-import mcp_auth
-import mcp_tools_cookies
-import mcp_tools_css
-import mcp_tools_eval
-import mcp_tools_hotfixes
-import mcp_tools_media
-import mcp_tools_network
-import mcp_tools_tabs
+from daedalus_mcp import auth
+from daedalus_mcp import request_guard
+from daedalus_mcp import tools_cookies
+from daedalus_mcp import tools_css
+from daedalus_mcp import tools_eval
+from daedalus_mcp import tools_hotfixes
+from daedalus_mcp import tools_media
+from daedalus_mcp import tools_network
+from daedalus_mcp import tools_tabs
+from daedalus_mcp.transport import BridgeSession, BridgeTransport
 from daedalus_cli.output import configure_stdio
 from daedalus_bridge.env_config import env_int
 from daedalus_bridge.log_safe import log_safe
-import mcp_request_guard
-from mcp_transport import BridgeSession, BridgeTransport
 
 # Same reason as the bridge: this process prints crash lines carrying values
 # it did not choose. See server.py.
@@ -46,7 +46,7 @@ MCP_PORT = env_int('DAEDALUS_MCP_PORT', 8086, 0, 65535)
 # make the process hold whatever it chose to send.
 MAX_BODY_SIZE = env_int(
     'DAEDALUS_MCP_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
-_token = mcp_request_guard.request_token
+_token = request_guard.request_token
 # The app auto-enables DNS rebinding protection for a localhost bind only when
 # it is given no settings of its own; these are passed explicitly, so the list
 # has to include the public hostname the reverse proxy fronts us with or
@@ -72,7 +72,7 @@ def _register_tool_module(module):
     return tools
 
 
-tabs_tools = _register_tool_module(mcp_tools_tabs)
+tabs_tools = _register_tool_module(tools_tabs)
 list_tabs = tabs_tools['list_tabs']
 open_tab = tabs_tools['open_tab']
 open_tabs = tabs_tools['open_tabs']
@@ -81,7 +81,7 @@ close_tab = tabs_tools['close_tab']
 ext_navigate = tabs_tools['ext_navigate']
 ext_reload = tabs_tools['ext_reload']
 
-eval_tools = _register_tool_module(mcp_tools_eval)
+eval_tools = _register_tool_module(tools_eval)
 exec = eval_tools['exec']
 put = eval_tools['put']
 result = eval_tools['result']
@@ -92,34 +92,34 @@ title = eval_tools['title']
 url = eval_tools['url']
 ext_self_reload = eval_tools['ext_self_reload']
 
-media_tools = _register_tool_module(mcp_tools_media)
+media_tools = _register_tool_module(tools_media)
 screenshot = media_tools['screenshot']
 uploads = media_tools['uploads']
 delete_upload = media_tools['delete_upload']
 segment_job = media_tools['segment_job']
 segment_status = media_tools['segment_status']
 
-cookies_tools = _register_tool_module(mcp_tools_cookies)
+cookies_tools = _register_tool_module(tools_cookies)
 get_cookies = cookies_tools['get_cookies']
 set_cookie = cookies_tools['set_cookie']
 remove_cookie = cookies_tools['remove_cookie']
 clear_cookies = cookies_tools['clear_cookies']
 
-css_tools = _register_tool_module(mcp_tools_css)
+css_tools = _register_tool_module(tools_css)
 inject_css = css_tools['inject_css']
 remove_css = css_tools['remove_css']
 block_requests = css_tools['block_requests']
 unblock_requests = css_tools['unblock_requests']
 list_block_rules = css_tools['list_block_rules']
 
-hotfix_tools = _register_tool_module(mcp_tools_hotfixes)
+hotfix_tools = _register_tool_module(tools_hotfixes)
 store_hotfix = hotfix_tools['store_hotfix']
 clear_hotfix = hotfix_tools['clear_hotfix']
 clear_hotfixes = hotfix_tools['clear_hotfixes']
 list_hotfixes = hotfix_tools['list_hotfixes']
 set_permanent = hotfix_tools['set_permanent']
 
-network_tools = _register_tool_module(mcp_tools_network)
+network_tools = _register_tool_module(tools_network)
 net_capture = network_tools['net_capture']
 net_capture_stop = network_tools['net_capture_stop']
 net_capture_get = network_tools['net_capture_get']
@@ -150,7 +150,7 @@ def _serve():
             ),
         )
         app.add_middleware(
-            mcp_auth.BearerAuth,
+            auth.BearerAuth,
             max_body_size=MAX_BODY_SIZE,
         )
 

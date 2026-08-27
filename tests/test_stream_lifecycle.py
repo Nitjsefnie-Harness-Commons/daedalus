@@ -124,7 +124,7 @@ def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
     line that reports the failure is the one place that can name the install
     that fixes it.
     """
-    blocked = 'import sys\nsys.modules["mcp_server"] = None\n'
+    blocked = 'import sys\nsys.modules["daedalus_mcp.server"] = None\n'
     output = []
     with _util.bridge(tmp,
                       env={'PYTHONPATH': _noise_path(tmp, 'nomcp', blocked)},
