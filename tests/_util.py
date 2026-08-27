@@ -230,15 +230,20 @@ def _startup_observations(proc, drained, waited):
     """Render one snapshot of the child's state and captured output."""
     lines = list(drained)
     code = proc.poll()
+    drain_incomplete = False
     if code is not None:
         thread = getattr(proc, '_daedalus_drain_thread', None)
         if thread is not None:
             thread.join(timeout=1)
+            drain_incomplete = thread.is_alive()
             lines = list(drained)
     state = ('still running' if code is None
              else f'exited with code {code}')
+    capture = f'{len(lines)} line(s) captured'
+    if drain_incomplete:
+        capture += '; drain timed out before EOF'
     return (f'waited {waited:.1f}s, child {state}, '
-            f'{len(lines)} line(s) captured:\n' + ''.join(lines))
+            f'{capture}:\n' + ''.join(lines))
 
 
 def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
