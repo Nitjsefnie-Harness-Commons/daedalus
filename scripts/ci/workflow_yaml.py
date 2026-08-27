@@ -2,12 +2,21 @@
 from dataclasses import dataclass
 import re
 
-from yamlscalar import (
-    YAMLReadError,
-    _strip_inline_comment,
-    decode_inline_scalar,
-    split_mapping_field,
-)
+if __package__:
+    # pylint: disable-next=relative-beyond-top-level
+    from .yamlscalar import (
+        YAMLReadError,
+        _strip_inline_comment,
+        decode_inline_scalar,
+        split_mapping_field,
+    )
+else:
+    from yamlscalar import (
+        YAMLReadError,
+        _strip_inline_comment,
+        decode_inline_scalar,
+        split_mapping_field,
+    )
 
 
 _BLOCK_HEADER = re.compile(
@@ -121,10 +130,7 @@ def _continued_quote_end(lines, start, end, quote):
     raise YAMLReadError('workflow has an incomplete quoted scalar')
 
 
-def _block_end(lines, start, end, header_indent, header):
-    match = _BLOCK_HEADER.fullmatch(header)
-    if match is None:
-        raise YAMLReadError('workflow has an unsupported block header')
+def _block_end(lines, start, end, header_indent, match):
     explicit = int(match.group('first') or match.group('second') or 0)
     if match.group('first') and match.group('second'):
         raise YAMLReadError('workflow block has two indentation indicators')
@@ -162,7 +168,7 @@ def _scalar_lines(lines):
         match = _BLOCK_HEADER.fullmatch(value)
         if match is not None:
             stop = _block_end(
-                lines, index + 1, len(lines), _indent(lines[index]), value)
+                lines, index + 1, len(lines), _indent(lines[index]), match)
             scalar.update(range(index + 1, stop))
             index = stop
             continue
@@ -239,8 +245,9 @@ def _step_value(lines, start, end, indent, raw_value, owner):
     value = _strip_inline_comment(raw_value.strip(' \t'))
     if not value:
         raise YAMLReadError(f'{owner} has no scalar value')
-    if _BLOCK_HEADER.fullmatch(value):
-        stop = _block_end(lines, start + 1, end, indent, value)
+    match = _BLOCK_HEADER.fullmatch(value)
+    if match is not None:
+        stop = _block_end(lines, start + 1, end, indent, match)
         body = [
             (line.text, line.end > line.start + len(line.text))
             for line in lines[start + 1:stop]
