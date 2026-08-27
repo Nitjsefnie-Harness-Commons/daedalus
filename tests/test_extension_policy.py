@@ -337,7 +337,7 @@ def test_every_content_script_message_type_has_a_background_branch(tmp):
 
     `content.js` relays page-context calls to the service worker with
     `chrome.runtime.sendMessage({ type: ... })`. If the `onMessage` listener
-    in `background.js` has no branch for a type, the callback fires with
+    has no branch for a type, the callback fires with
     `undefined` and the page-side promise resolves to `undefined` with no
     error logged anywhere. The `GM.cookie.list()` relay shipped exactly like
     that — documented in the README, wired in content.js, and dead from the
