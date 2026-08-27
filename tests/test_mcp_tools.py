@@ -139,6 +139,15 @@ REQUIRED_ARGUMENTS = {
 BRANCH_ARGUMENTS = {
     'screenshot': {'include_image': True},
 }
+MUTABLE_CONTAINER_NODES = (
+    ast.Dict,
+    ast.DictComp,
+    ast.List,
+    ast.ListComp,
+    ast.Set,
+    ast.SetComp,
+)
+MUTABLE_CONTAINER_FACTORIES = {'dict', 'list', 'set'}
 
 
 def _load_composition(marker):
@@ -171,16 +180,54 @@ def _assert_inventory_matches_registry(composition):
         f'unregistered={len(inventoried - registered)}')
 
 
-def _composition_tool_uses():
-    path = _util.ROOT / 'mcp_server.py'
-    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-    return sorted(
-        f'{path.name}:{node.lineno}:{node.col_offset + 1}'
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == 'mcp'
-        and node.attr == 'tool')
+def _is_mutable_container(node):
+    if isinstance(node, MUTABLE_CONTAINER_NODES):
+        return True
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in MUTABLE_CONTAINER_FACTORIES
+    )
+
+
+def _inside_local_scope(node, parents):
+    parent = parents.get(node)
+    while parent is not None:
+        if isinstance(parent, (
+                ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef,
+                ast.Lambda)):
+            return True
+        parent = parents.get(parent)
+    return False
+
+
+def _tool_module_state_violations():
+    violations = []
+    for path in sorted(_util.ROOT.glob('mcp_tools_*.py')):
+        tree = ast.parse(
+            path.read_text(encoding='utf-8'), filename=str(path))
+        parents = {
+            child: parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Global):
+                names = ', '.join(node.names)
+                violations.append(
+                    f'{path.name}:{node.lineno}: global {names}')
+            elif isinstance(node, ast.Nonlocal):
+                names = ', '.join(node.names)
+                violations.append(
+                    f'{path.name}:{node.lineno}: nonlocal {names}')
+            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+                value = node.value
+                if (not _inside_local_scope(node, parents)
+                        and _is_mutable_container(value)):
+                    violations.append(
+                        f'{path.name}:{node.lineno}: module-level '
+                        f'{type(value).__name__}')
+    return sorted(violations)
 
 
 def _tool_arguments(tool):
@@ -296,11 +343,25 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
 
 
 def test_composition_point_defines_no_tools_directly(_tmp):
-    """The composition source never accesses its registry decorator."""
-    direct_uses = _composition_tool_uses()
-    assert not direct_uses, (
-        'mcp_server.py contains direct mcp.tool use: '
-        f'{direct_uses}')
+    """No registered tool was compiled from the composition point."""
+    composition = _load_composition('composition-origin')
+    composition_path = (_util.ROOT / 'mcp_server.py').resolve()
+    direct_tools = sorted(
+        f'{name} at {tool.__code__.co_filename}:'
+        f'{tool.__code__.co_firstlineno}'
+        for name, tool in composition.mcp.registered.items()
+        if Path(tool.__code__.co_filename).resolve() == composition_path)
+    assert not direct_tools, (
+        'tools compiled from mcp_server.py: '
+        f'{direct_tools}')
+
+
+def test_tool_modules_hold_no_cross_registration_state(_tmp):
+    """Tool modules have no mutable module state or rebinding statements."""
+    violations = _tool_module_state_violations()
+    assert not violations, (
+        'tool modules can retain cross-registration state: '
+        f'{violations}')
 
 
 if __name__ == '__main__':
