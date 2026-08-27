@@ -172,6 +172,26 @@ def test_runtime_observer_skips_unprobeable_property_names(tmp):
     assert observed['bindings'] == ['await', 'yield']
 
 
+def test_node_harness_decodes_utf8_independent_of_locale(tmp):
+    """A legacy Windows code page cannot decode the Node JSON stream."""
+    del tmp
+    node = shutil.which('node')
+    assert node, 'node is required to check harness output decoding'
+    original_text_encoding = _boundary_env.subprocess._text_encoding
+    _boundary_env.subprocess._text_encoding = lambda: 'cp1252'
+    try:
+        program = (
+            r"process.stdout.write(JSON.stringify("
+            r"{name:'joiner\u200Dname'}));")
+        result = _boundary_env.run_node_program(
+            node, program, [], cwd=ROOT)
+    finally:
+        _boundary_env.subprocess._text_encoding = original_text_encoding
+
+    assert result.returncode == 0, result
+    assert json.loads(result.stdout) == {'name': 'joiner\u200dname'}
+
+
 def test_runtime_observer_tracks_probeable_global_properties(tmp):
     """A global property write can overwrite another classic-script binding."""
     root = Path(tmp)
@@ -331,7 +351,8 @@ def test_sibling_mutation_failure_names_module_type_and_handlers(tmp):
 
     result = subprocess.run(
         [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, capture_output=True, text=True, timeout=30)
+        cwd=export_root, capture_output=True, text=True,
+        encoding='utf-8', timeout=30)
 
     assert result.returncode != 0, result.stdout
     expected = (
@@ -346,7 +367,8 @@ def test_worker_boundary_runs_without_untracked_node_modules(tmp):
     export_root = _tracked_tree(tmp)
     result = subprocess.run(
         [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, capture_output=True, text=True, timeout=30)
+        cwd=export_root, capture_output=True, text=True,
+        encoding='utf-8', timeout=30)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
 

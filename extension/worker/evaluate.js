@@ -64,8 +64,8 @@ async function _evalViaCdp(cmd, chromeTabId) {
     try {
       if (/\breturn\b/.test(cmd.code)) {
         // REPL mode supplies top-level `await`, but `return` still needs a
-        // function around it — and only when the source is a body rather than
-        // an expression that merely contains the word. This parser heuristic
+        // function around it — and only when the source is a body rather
+        // than an expression that merely contains the word. This parser
         // is not a security boundary: submitted text can escape the probe
         // wrapper.
         // Without a successful probe, assume a body.
