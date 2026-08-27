@@ -82,7 +82,7 @@ Object.defineProperty(globalThis, 'sharedName', {{
     else:
         raise AssertionError('the sharedName getter failure was swallowed')
 
-    assert str(worker) in failure, failure
+    assert repr(str(worker))[1:-1] in failure, failure
     assert 'sharedName' in failure, failure
     assert 'Error: reading binding' in failure, failure
     return failure
