@@ -12,11 +12,20 @@ import re
 import socket
 import subprocess
 import sys
+import threading
+import time
+import types
 import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+
+
+def _observation_child(code, thread):
+    return types.SimpleNamespace(
+        poll=lambda: code,
+        _daedalus_drain_thread=thread)
 
 
 def test_child_exit_during_startup_reports_exit_code(tmp):
@@ -35,28 +44,71 @@ def test_child_exit_during_startup_reports_exit_code(tmp):
     assert 'exited with code 23' in failure, failure
 
 
-def test_exited_child_output_is_drained_before_observations(tmp):
-    """Every exited child's flushed output reaches its failure message."""
+def test_drain_lines_records_pump_thread_on_child(tmp):
+    """The renderer can find the real pump that fills its observation list."""
     del tmp
-    missing = []
-    for attempt in range(30):
-        marker = f'exited child marker {attempt}'
-        program = f'print({marker!r}, flush=True); raise SystemExit(23)'
-        proc = subprocess.Popen(
-            [sys.executable, '-c', program],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        proc.wait(timeout=10)
-        failure = ''
-        try:
-            _util.await_listening_line(
-                proc, _util.drain_lines(proc), timeout=1)
-        except RuntimeError as exc:
-            failure = str(exc)
-        if marker not in failure:
-            missing.append((attempt, failure))
-    assert not missing, (
-        f'{len(missing)}/30 exited child outputs missing; '
-        f'first: {missing[0] if missing else None}')
+    proc = types.SimpleNamespace(stdout=('wired pump marker\n',))
+    drained = _util.drain_lines(proc)
+    thread = getattr(proc, '_daedalus_drain_thread', None)
+    assert isinstance(thread, threading.Thread), thread
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert drained == ['wired pump marker\n']
+
+
+def test_exited_child_drain_join_is_bounded_and_reported(tmp):
+    """A stuck exited-child drain is bounded and marked incomplete."""
+    del tmp
+    ready = threading.Event()
+    release = threading.Event()
+
+    def hold_drain():
+        ready.set()
+        release.wait(timeout=3)
+
+    thread = threading.Thread(target=hold_drain)
+    thread.start()
+    assert ready.wait(timeout=1), 'controlled drain did not start'
+    proc = _observation_child(23, thread)
+    started = time.monotonic()
+    try:
+        message = _util._startup_observations(proc, [], 0)
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()
+        thread.join(timeout=1)
+    assert elapsed < 2, elapsed
+    assert 'drain timed out before EOF' in message, message
+
+
+def test_exited_child_observations_wait_for_drain(tmp):
+    """An exited child gives its delayed drain time to reach EOF."""
+    del tmp
+    ready = threading.Event()
+    release = threading.Event()
+    drained = []
+    marker = 'delayed drain marker\n'
+
+    def finish_drain():
+        ready.set()
+        release.wait()
+        drained.append(marker)
+
+    thread = threading.Thread(target=finish_drain)
+    thread.start()
+    assert ready.wait(timeout=1), 'controlled drain did not start'
+    timer = threading.Timer(0.05, release.set)
+    timer.start()
+    proc = _observation_child(23, thread)
+    try:
+        message = _util._startup_observations(proc, drained, 0)
+    finally:
+        release.set()
+        timer.cancel()
+        timer.join(timeout=1)
+        thread.join(timeout=1)
+    assert marker in message, message
+    assert 'drain timed out before EOF' not in message, message
 
 
 def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
@@ -89,6 +141,32 @@ def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
         assert _util._bridge_started is True
     finally:
         _util._bridge_started = saved_started
+
+
+def test_live_child_observations_never_wait_for_drain(tmp):
+    """A live child's pump cannot delay rendering its observations."""
+    del tmp
+    ready = threading.Event()
+    release = threading.Event()
+
+    def hold_drain():
+        ready.set()
+        release.wait()
+
+    thread = threading.Thread(target=hold_drain)
+    thread.start()
+    assert ready.wait(timeout=1), 'controlled drain did not start'
+    proc = _observation_child(None, thread)
+    started = time.monotonic()
+    try:
+        message = _util._startup_observations(proc, [], 0)
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()
+        thread.join(timeout=1)
+    assert elapsed < 0.5, elapsed
+    assert 'child still running' in message, message
+    assert 'drain timed out before EOF' not in message, message
 
 
 def test_live_child_startup_timeout_reports_observations(tmp):
