@@ -5,12 +5,6 @@ from daedalus_cli import SEGMENT_SIG_HEADER
 
 
 def register(mcp, bridge):
-    """Define this group's tools against `mcp`, bound to `bridge`.
-
-    Returns {tool name: coroutine function} so the composition point can keep
-    the tools callable as its own attributes.
-    """
-
     @mcp.tool()
     async def screenshot(cmd_id: str = '_ss', chrome_tab: int | None = None,
                          format: str = 'png', quality: int | None = None,
@@ -56,9 +50,6 @@ def register(mcp, bridge):
     not exist raises rather than being brought into being by the question, and
     one owned by a different token raises too.
     """
-        # /segment-status takes the job's minted capability, not the bridge token,
-        # and GET /segment-job is the lookup that hands it over without creating
-        # the job when the name has never been used.
         client = bridge.http_client()
         found = await client.get(
             '/segment-job', params={'job': job}, headers=bridge.auth())

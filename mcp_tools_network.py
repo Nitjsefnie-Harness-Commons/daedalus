@@ -6,12 +6,6 @@ NET_CAPTURE_MAX = 20000
 
 
 def register(mcp, bridge):
-    """Define this group's tools against `mcp`, bound to `bridge`.
-
-    Returns {tool name: coroutine function} so the composition point can keep
-    the tools callable as its own attributes.
-    """
-
     @mcp.tool()
     async def net_capture(chrome_tab: int | None = None, max_requests: int = 1000) -> dict:
         """Start CDP network capture on a tab. Returns {tabId, already?, buffered?}."""
