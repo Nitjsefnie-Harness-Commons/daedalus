@@ -30,6 +30,10 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
                             '_takeEvalRelay'), ()),
     ('worker/hotfixes.js', ('handleHotfixReplay',), ()),
     ('worker/netcapture.js', ('_netCaptures',), ()),
+    ('worker/util.js', ('_fetchTimings', '_hasNativeToBase64', '_recordTiming',
+                        '_serializer', 'bridgeAuth', 'bridgeHeaders',
+                        'bytesToBase64', 'gmResponseLimit',
+                        'readBoundedBody'), ()),
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.

@@ -159,6 +159,7 @@
 !/extension/worker/hotfixes.js
 !/extension/worker/netcapture.js
 !/extension/worker/tabs.js
+!/extension/worker/util.js
 
 # ─── scripts ───
 !/scripts/
