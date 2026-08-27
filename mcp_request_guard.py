@@ -2,6 +2,7 @@
 import hmac
 from contextvars import ContextVar
 
+from starlette.requests import ClientDisconnect
 from starlette.responses import JSONResponse
 
 from daedalus_cli import ambiguous_request_carrier
@@ -76,7 +77,10 @@ def early_refusal(request, max_body_size):
 async def drain_refused_body(request):
     """Stream-discard at most the shared refusal-drain bound."""
     remaining = REFUSED_BODY_DRAIN
-    async for chunk in request.stream():
-        remaining -= len(chunk)
-        if remaining <= 0:
-            break
+    try:
+        async for chunk in request.stream():
+            remaining -= len(chunk)
+            if remaining <= 0:
+                break
+    except ClientDisconnect:
+        pass
