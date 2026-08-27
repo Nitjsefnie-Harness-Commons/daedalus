@@ -158,7 +158,10 @@
 !/extension/worker/cookies.js
 !/extension/worker/evaluate.js
 !/extension/worker/hotfixes.js
+!/extension/worker/messaging.js
 !/extension/worker/netcapture.js
+!/extension/worker/registry.js
+!/extension/worker/stream.js
 !/extension/worker/tabs.js
 !/extension/worker/util.js
 

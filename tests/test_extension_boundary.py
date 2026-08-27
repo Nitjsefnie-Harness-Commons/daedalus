@@ -82,6 +82,21 @@ def test_eval_relay_expiry_posts_one_timeout_at_300000_ms(tmp):
     }, actual
 
 
+def test_stream_timers_drive_reconnect_watchdog_and_keepalive(tmp):
+    """Scheduled callbacks, not wall time, prove stream lifecycle effects."""
+    del tmp
+    actual = run_extension_result_boundary('stream-timers')
+    assert actual == {
+        'reconnectDelays': [5000, 3000],
+        'reconnectFetches': 2,
+        'watchdogDelays': [5000],
+        'watchdogAborted': True,
+        'watchdogFetches': 2,
+        'keepaliveDelay': 20000,
+        'keepaliveCalls': 1,
+    }, actual
+
+
 def test_result_route_snapshot_covers_retries_and_side_operations(tmp):
     """Config rotation cannot retarget result retries or side operations."""
     del tmp
