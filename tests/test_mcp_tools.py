@@ -89,8 +89,7 @@ def _composed_tool_modules():
                 continue
             owner = function.value
             if (function.attr == 'register'
-                    and isinstance(owner, ast.Name)
-                    and owner.id.startswith('mcp_tools_')):
+                    and isinstance(owner, ast.Name)):
                 composed.add(owner.id)
     return composed
 
