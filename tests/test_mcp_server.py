@@ -335,7 +335,7 @@ def test_local_url_derives_from_the_bridge_port(tmp):
 
 def _module_list_tabs(mod):
     async def fetch():
-        response = await mod._http_client().get(
+        response = await mod.bridge.http_client().get(
             '/tabs', headers={'Authorization': f'Bearer {TOK}'})
         response.raise_for_status()
         return response.json()
@@ -356,7 +356,8 @@ def test_fresh_mcp_modules_keep_distinct_bound_transports(tmp):
             first_mod = _load_mcp(first_base)
             second_mod = _load_mcp(second_base)
             assert first_mod.BridgeTransport is second_mod.BridgeTransport
-            assert first_mod._transport is not second_mod._transport
+            assert first_mod.bridge.transport is not (
+                second_mod.bridge.transport)
             first_tabs = _module_list_tabs(first_mod)
             second_tabs = _module_list_tabs(second_mod)
             assert first_tabs[0]['title'] == 'first', first_tabs
@@ -380,16 +381,15 @@ def test_two_module_routing_regression_is_sensitive_to_url_blind_singleton(tmp):
 
             def url_blind_client(_local_url=None):
                 if old_client['value'] is None:
-                    old_client['value'] = second_mod.BridgeTransport(
-                        second_base).client()
+                    old_client['value'] = second_mod.bridge.transport.client()
                 return old_client['value']
 
-            original = first_mod._http_client
-            first_mod._http_client = url_blind_client
+            original = first_mod.bridge.http_client
+            first_mod.bridge.http_client = url_blind_client
             try:
                 tabs = _module_list_tabs(first_mod)
             finally:
-                first_mod._http_client = original
+                first_mod.bridge.http_client = original
             assert tabs[0]['title'] == 'second', tabs
 
 
@@ -495,7 +495,7 @@ def test_start_in_thread_rejects_a_second_start(tmp):
     mod._serve = lambda: None
     thread = mod.start_in_thread('http://127.0.0.1:1111')
     thread.join(timeout=5)
-    assert mod._transport._base_url == 'http://127.0.0.1:1111'
+    assert mod.bridge.transport._base_url == 'http://127.0.0.1:1111'
     try:
         mod.start_in_thread('http://127.0.0.1:2222')
     except RuntimeError as exc:
@@ -975,8 +975,8 @@ def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
 
             async def callers():
                 return await asyncio.gather(*(
-                    mod._ext_cmd('_cookies', 'cookies', timeout=30,
-                                 domain=owner)
+                    mod.bridge.ext_cmd('_cookies', 'cookies', timeout=30,
+                                       domain=owner)
                     for owner in owners))
 
             try:
