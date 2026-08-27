@@ -509,12 +509,12 @@ class Handler(BaseHTTPRequestHandler):
         # for the life of the connection, and the namespace a stream reads
         # from is decided when it is admitted, not re-decided every second.
         try:
-            target_queue_name, target_legacy_name = (
+            target_queue_name, legacy_name = (
                 command_queue.command_target_names(token, tab))
             broadcast_queue_name, broadcast_legacy_name = (
                 command_queue.command_target_names(token))
             target_queue = path_safety.under(CMD_DIR, target_queue_name)
-            target_legacy = path_safety.under(CMD_DIR, target_legacy_name)
+            target_legacy = path_safety.under(CMD_DIR, legacy_name)
             broadcast_queue = path_safety.under(CMD_DIR, broadcast_queue_name)
             broadcast_legacy = path_safety.under(
                 CMD_DIR, broadcast_legacy_name)
@@ -539,7 +539,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Connection', 'close')
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
-        frame_writer = partial(stream_service.write_frame, self.wfile)
+        writer = partial(stream_service.write_frame, self.wfile)
         last_ka = time.time()
         stream_start = time.time()
         try:
@@ -558,15 +558,15 @@ class Handler(BaseHTTPRequestHandler):
                 if tab == 'dashboard':
                     delivered += stream_service.drain_queue(
                         target_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=frame_writer)
+                        command_ttl=CMD_TTL, frame_writer=writer)
                 elif tab == 'extension':
                     # Typed commands addressed to the extension itself
                     delivered += stream_service.drain_queue(
                         target_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=frame_writer)
+                        command_ttl=CMD_TTL, frame_writer=writer)
                     delivered += stream_service.drain_legacy_file(
                         target_legacy, None, command_ttl=CMD_TTL,
-                        frame_writer=frame_writer)
+                        frame_writer=writer)
                     # Per-tab eval queues for every other tab (tag chromeTab so bg can route)
                     prefix = f'{token}_'
                     for entry in sorted(CMD_DIR.iterdir()):
@@ -577,30 +577,30 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                         delivered += stream_service.drain_queue(
                             entry, sub, killed_event, command_ttl=CMD_TTL,
-                            frame_writer=frame_writer)
+                            frame_writer=writer)
                     # Broadcast queue + legacy per-tab raw-file drops
                     delivered += stream_service.drain_queue(
                         broadcast_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=frame_writer)
+                        command_ttl=CMD_TTL, frame_writer=writer)
                     delivered += stream_service.drain_legacy_ext(
-                        CMD_DIR, token, target_legacy_name, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=frame_writer)
+                        CMD_DIR, token, killed_event, frame_writer=writer,
+                        extension_legacy_name=legacy_name, command_ttl=CMD_TTL)
                 else:  # specific-tab stream (rare — normal clients use tab=extension)
                     delivered += stream_service.drain_queue(
                         target_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=frame_writer)
+                        command_ttl=CMD_TTL, frame_writer=writer)
                     if tab:
                         delivered += stream_service.drain_queue(
                             broadcast_queue, None, killed_event,
-                            command_ttl=CMD_TTL, frame_writer=frame_writer)
+                            command_ttl=CMD_TTL, frame_writer=writer)
                         delivered += stream_service.drain_legacy_file(
                             target_legacy, None, command_ttl=CMD_TTL,
-                            frame_writer=frame_writer)
+                            frame_writer=writer)
                 # Broadcast legacy raw-file — skip for dashboard so it doesn't steal commands
                 if tab != 'dashboard':
                     delivered += stream_service.drain_legacy_file(
                         broadcast_legacy, None, command_ttl=CMD_TTL,
-                        frame_writer=frame_writer)
+                        frame_writer=writer)
 
                 now = time.time()
                 if now - last_ka >= STREAM_KEEPALIVE:
