@@ -195,8 +195,6 @@ def _section(lines, scalar, start, parent_indent):
 
 def _first_child(lines, scalar, start, end, parent_indent):
     for index in range(start, end):
-        if index in scalar:
-            continue
         if _meaningful(lines[index]) and _indent(lines[index]) > parent_indent:
             return index
     return None
