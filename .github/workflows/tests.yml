@@ -223,7 +223,7 @@ jobs:
         # would describe no program at all rather than low coverage.
         run: |
           python scripts/ci/coverage_suites.py
-          python -m coverage combine
+          python scripts/ci/coverage_combine.py
 
       - name: Python coverage summary
         # Renders whether or not the gate below passes — a coverage
