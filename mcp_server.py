@@ -10,12 +10,12 @@ existing configuration path before it enters the _token ContextVar and is
 forwarded to the local bridge. Missing configuration fails closed.
 """
 import contextlib
-import json, os, socket, sys, threading
-from typing import Any
-import httpx
+import os, socket, sys, threading
 from mcp.server.mcpserver import MCPServer, Image
 from mcp.server.transport_security import TransportSecuritySettings
 import mcp_auth
+import mcp_tools_eval
+import mcp_tools_tabs
 from daedalus_cli import SEGMENT_SIG_HEADER
 from daedalus_cli.output import configure_stdio
 from env_config import env_int
@@ -59,201 +59,25 @@ bridge = BridgeSession(LOCAL_URL, _token)
 
 mcp = MCPServer('daedalus')
 
+tabs_tools = mcp_tools_tabs.register(mcp, bridge)
+list_tabs = tabs_tools['list_tabs']
+open_tab = tabs_tools['open_tab']
+open_tabs = tabs_tools['open_tabs']
+focus_tab = tabs_tools['focus_tab']
+close_tab = tabs_tools['close_tab']
+ext_navigate = tabs_tools['ext_navigate']
+ext_reload = tabs_tools['ext_reload']
 
-@mcp.tool()
-async def list_tabs() -> list[dict]:
-    """List active Daedalus-registered Chrome tabs, each with the age of its last registration. Entries are not pruned by age: a tab persists until it is unregistered or replaced by a sync."""
-    return await bridge.get('/tabs')
-
-
-@mcp.tool()
-async def open_tab(url: str, background: bool = False, pinned: bool = False) -> dict:
-    """Open a new Chrome tab at `url`. Returns {tabId, windowId, roundtrip_ms, ...}."""
-    fields: dict = {'url': url}
-    if background:
-        fields['active'] = False
-    if pinned:
-        fields['pinned'] = True
-    return await bridge.ext_cmd(
-        '_open_tab', 'open-tab', include_roundtrip=True, **fields)
-
-
-@mcp.tool()
-async def open_tabs(urls: list[str], background: bool = False, pinned: bool = False) -> dict:
-    """Open multiple Chrome tabs in one call. Returns {opened:[{tabId,url,windowId}], errors:[{url,error}], roundtrip_ms}."""
-    fields: dict = {'urls': list(urls)}
-    if background:
-        fields['active'] = False
-    if pinned:
-        fields['pinned'] = True
-    return await bridge.ext_cmd(
-        '_open_tabs', 'open-tabs', timeout=30, include_roundtrip=True,
-        **fields)
-
-
-@mcp.tool()
-async def focus_tab(chrome_tab: int) -> dict:
-    """Bring Chrome tab `chrome_tab` to the foreground."""
-    return await bridge.ext_cmd(
-        '_focus', 'focus-tab', tabId=int(chrome_tab))
-
-
-@mcp.tool()
-async def close_tab(chrome_tabs: list[int]) -> dict:
-    """Close one or more Chrome tabs by id."""
-    ids = [int(x) for x in chrome_tabs]
-    fields: dict = {}
-    if len(ids) == 1:
-        fields['tabId'] = ids[0]
-    else:
-        fields['tabIds'] = ids
-    return await bridge.ext_cmd('_close_tab', 'close-tab', **fields)
-
-
-@mcp.tool()
-async def ext_navigate(url: str, chrome_tab: int | None = None) -> dict:
-    """Navigate `chrome_tab` (or active tab) to `url`. Works on chrome:// pages."""
-    fields: dict = {'url': url}
-    if chrome_tab is not None:
-        fields['tabId'] = int(chrome_tab)
-    return await bridge.ext_cmd('_nav', 'navigate', **fields)
-
-
-@mcp.tool()
-async def ext_reload(chrome_tab: int | None = None, bypass_cache: bool = False) -> dict:
-    """Reload `chrome_tab` (or active tab). `bypass_cache=True` forces no-cache."""
-    fields: dict = {}
-    if chrome_tab is not None:
-        fields['tabId'] = int(chrome_tab)
-    if bypass_cache:
-        fields['bypassCache'] = True
-    return await bridge.ext_cmd('_reload', 'reload', **fields)
-
-
-def _flatten_eval(body: dict | None) -> dict | None:
-    """The MCP client renders a tool's dict return under a top-level `result` key,
-    and an eval body carries its own `result` field (the JS return value), so callers
-    would see a confusing `result.result`. Surface it as `value` — same info, no
-    double nesting. If the value is a JSON string (e.g. JSON.stringify output),
-    parse it so the structure surfaces directly; non-JSON strings stay untouched.
-    The `world` marker stays unchanged, including a `page:<hostname>` prefix."""
-    if isinstance(body, dict) and 'result' in body:
-        v = body.pop('result')
-        if isinstance(v, str):
-            try:
-                v = json.loads(v)
-            except ValueError:
-                # A result that is not JSON is a plain string result, which is
-                # the ordinary case. It travels through unchanged.
-                pass
-        body['value'] = v
-    return body
-
-
-async def _send_eval(cmd_id: str, code: str, tab_id: str, wait: bool, timeout: float) -> dict | None:
-    if not cmd_id:
-        raise ValueError('cmd_id is required')
-    if not code:
-        raise ValueError('code is empty')
-    if wait:
-        bridge.checked_timeout(timeout)
-    payload: dict = {'id': cmd_id, 'code': code}
-    if tab_id:
-        payload['tab'] = tab_id
-    sent = await bridge.put('/command', payload)
-    if not wait:
-        return None
-    body = await bridge.poll_result(
-        tab_id, timeout, expect_id=cmd_id,
-        expect_delivery=sent.get('did'))
-    return _flatten_eval(body)
-
-
-@mcp.tool()
-async def exec(cmd_id: str, code: str, tab_id: str = '', broadcast: bool = False,
-               wait: bool = True, timeout: float = 15.0) -> dict | None:
-    """Evaluate JS in a tab. `tab_id=''` + `broadcast=True` fans out to all tabs.
-    Waited results retain the server's exact `world` marker, including
-    `page:<hostname>`."""
-    target = '' if broadcast else tab_id
-    return await _send_eval(cmd_id, code.strip(), target, wait, timeout)
-
-
-@mcp.tool()
-async def put(cmd_id: str, code: str, tab_id: str = '', broadcast: bool = False,
-              wait: bool = True, timeout: float = 15.0) -> dict | None:
-    """Evaluate inline JS source in the tab. MCP callers read their own files;
-    the bridge server does not open caller-named paths. Waited results retain
-    the server's exact `world` marker, including `page:<hostname>`."""
-    target = '' if broadcast else tab_id
-    return await _send_eval(cmd_id, code.strip(), target, wait, timeout)
-
-
-@mcp.tool()
-async def result(tab_id: str = '', consume: bool = False) -> dict:
-    """Fetch the newest unconsumed result for `tab_id` (or the broadcast slot).
-    A waited exec/put consumes its own result, so this only finds one after
-    `wait=False` (or a raw command-file drop). `consume=True` deletes after read.
-    The returned result retains the server's exact `world` marker, including
-    `page:<hostname>`."""
-    params: dict = {}
-    if tab_id:
-        params['tab'] = tab_id
-    if consume:
-        params['consume'] = '1'
-    body = await bridge.get('/result', **params)
-    if isinstance(body, dict) and body.get('pending'):
-        return {'no_result': True,
-                'note': 'no unconsumed result for this target — a waited exec/put '
-                        'consumes its own result; send with wait=false to leave one readable'}
-    return _flatten_eval(body) or {}
-
-
-@mcp.tool()
-async def ping(tab_id: str = '') -> dict:
-    """Round-trip a `document.title` eval to `tab_id` (or broadcast)."""
-    import time
-    t0 = time.time()
-    payload: dict = {'id': '_ping', 'code': 'document.title'}
-    if tab_id:
-        payload['tab'] = tab_id
-    sent = await bridge.put('/command', payload)
-    res = await bridge.poll_result(
-        tab_id, 10.0, expect_id='_ping', expect_delivery=sent.get('did'))
-    if res.get('error'):
-        raise RuntimeError(f'ping: {res["error"]}')
-    return {'ms': int((time.time() - t0) * 1000), 'title': res.get('result', ''),
-            'world': res.get('world', '')}
-
-
-@mcp.tool()
-async def navigate(url: str, tab_id: str = '') -> None:
-    """Set `location.href = url` in `tab_id` (via eval, does not wait for result)."""
-    code = f'location.href = {json.dumps(url)}'
-    await _send_eval('_nav', code, tab_id, wait=False, timeout=0)
-
-
-@mcp.tool()
-async def reload(tab_id: str = '', broadcast: bool = False) -> None:
-    """Call `location.reload()` in `tab_id` or broadcast."""
-    target = '' if broadcast else tab_id
-    await _send_eval('_reload', 'location.reload()', target, wait=False, timeout=0)
-
-
-@mcp.tool()
-async def title(tab_id: str = '') -> dict:
-    """Return `document.title` for `tab_id`."""
-    res = await _send_eval('_title', 'document.title', tab_id, wait=True, timeout=10)
-    assert res is not None
-    return res
-
-
-@mcp.tool()
-async def url(tab_id: str = '') -> dict:
-    """Return `location.href` for `tab_id`."""
-    res = await _send_eval('_url', 'location.href', tab_id, wait=True, timeout=10)
-    assert res is not None
-    return res
+eval_tools = mcp_tools_eval.register(mcp, bridge)
+exec = eval_tools['exec']
+put = eval_tools['put']
+result = eval_tools['result']
+ping = eval_tools['ping']
+navigate = eval_tools['navigate']
+reload = eval_tools['reload']
+title = eval_tools['title']
+url = eval_tools['url']
+ext_self_reload = eval_tools['ext_self_reload']
 
 
 @mcp.tool()
@@ -577,12 +401,6 @@ async def fetch_timings(reset: bool = False) -> dict:
         fields['reset'] = True
     return await bridge.ext_cmd(
         '_fetch_timings', 'fetch-timings', **fields)
-
-
-@mcp.tool()
-async def ext_self_reload() -> dict:
-    """Reload the Chrome extension from disk via chrome.runtime.reload()."""
-    return await bridge.ext_cmd('_ext_reload', 'ext-reload')
 
 
 # A cell rather than a rebound global: this flag is read and written only

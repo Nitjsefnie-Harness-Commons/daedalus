@@ -104,15 +104,18 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
       quote, so nothing is masked wrongly — but adding one with a quote
       silently weakens this guard.
     """
-    senders_py = [ROOT / 'mcp_server.py', *(ROOT / 'daedalus_cli').glob('*.py')]
+    senders_py = [ROOT / 'mcp_server.py',
+                  *ROOT.glob('mcp_tools_*.py'),
+                  *(ROOT / 'daedalus_cli').glob('*.py')]
     senders_js = sorted((ROOT / 'dashboard').rglob('*.js'))
     scanned_py = [p for p in senders_py if p.is_file()]
     # A floor, not a glob of whatever happens to exist: with the senders
     # moved aside the scan above finds nothing and passes vacuously.
-    assert len(scanned_py) >= 3, (
+    assert len(scanned_py) >= 13, (
         f'found {len(scanned_py)} Python senders (mcp_server.py + '
-        'daedalus_cli/*.py), expected at least 3 — the senders moved and '
-        'this guard is stale')
+        'mcp_tools_*.py + daedalus_cli/*.py), expected at least 13 — '
+        'one composition point, two MCP tool modules, and ten CLI modules; '
+        'the senders moved and this guard is stale')
     assert len(senders_js) >= 10, (
         f'found {len(senders_js)} dashboard .js files, expected at least '
         '10 — the senders moved and this guard is stale')
