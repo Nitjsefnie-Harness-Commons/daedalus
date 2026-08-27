@@ -16,9 +16,9 @@ DEPS = importlib.util.find_spec('httpx') is not None
 
 def _transport():
     if not DEPS:
-        _util.skip('mcp_transport dependency (httpx) not installed')
+        _util.skip('daedalus_mcp.transport dependency (httpx) not installed')
     return _util.load(
-        _util.ROOT / 'mcp_transport.py',
+        _util.ROOT / 'daedalus_mcp' / 'transport.py',
         'mcp_transport_guards_' + str(time.time_ns()))
 
 

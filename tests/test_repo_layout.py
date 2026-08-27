@@ -28,6 +28,35 @@ BRIDGE_PACKAGE = (
     'stream_service.py',
 )
 
+MCP_PACKAGE = (
+    '__init__.py',
+    'auth.py',
+    'request_guard.py',
+    'server.py',
+    'tools_cookies.py',
+    'tools_css.py',
+    'tools_eval.py',
+    'tools_hotfixes.py',
+    'tools_media.py',
+    'tools_network.py',
+    'tools_tabs.py',
+    'transport.py',
+)
+
+MCP_OLD_NAMES = (
+    'mcp_auth.py',
+    'mcp_request_guard.py',
+    'mcp_server.py',
+    'mcp_tools_cookies.py',
+    'mcp_tools_css.py',
+    'mcp_tools_eval.py',
+    'mcp_tools_hotfixes.py',
+    'mcp_tools_media.py',
+    'mcp_tools_network.py',
+    'mcp_tools_tabs.py',
+    'mcp_transport.py',
+)
+
 
 def _tracked_python():
     listed = subprocess.run(
@@ -53,6 +82,33 @@ def test_the_bridge_modules_live_in_the_bridge_package(tmp):
         and path in set(BRIDGE_PACKAGE) | {'bridge_config.py'})
     assert not stray, (
         f'these bridge modules are still tracked at the repository root: {stray}')
+
+
+def test_the_mcp_modules_live_in_the_mcp_package(tmp):
+    """The package holds exactly its twelve modules, and none of the eleven
+    old `mcp_*.py` names is tracked anywhere."""
+    del tmp
+    tracked = _tracked_python()
+    packaged = sorted(
+        path.split('/', 1)[1] for path in tracked
+        if path.startswith('daedalus_mcp/') and '/' not in path.split('/', 1)[1])
+    assert packaged == sorted(MCP_PACKAGE), (
+        f'daedalus_mcp/ holds {packaged}, expected {sorted(MCP_PACKAGE)}')
+    stray = sorted(
+        path for path in tracked
+        if path.rsplit('/', 1)[-1] in set(MCP_OLD_NAMES))
+    assert not stray, (
+        f'these moved MCP modules are still tracked under their old names: {stray}')
+
+
+def test_the_root_holds_no_python_module_but_the_entry_points(tmp):
+    """Only the two process entry points stay at the repository root."""
+    del tmp
+    tracked = _tracked_python()
+    root_modules = sorted(path for path in tracked if '/' not in path)
+    assert root_modules == ['run_tests.py', 'server.py'], (
+        f'the repository root holds {root_modules}, '
+        "expected ['run_tests.py', 'server.py']")
 
 
 if __name__ == '__main__':

@@ -45,8 +45,9 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     is exactly what happened to the first version of this fix: the wire test
     was green and `dashboard/sections/tabs.js` was still wrong.
 
-    What is enforced: in statically resolved sender shapes in mcp_server.py,
-    daedalus_cli/ and dashboard/, a typed extension command (one routed
+    What is enforced: in statically resolved sender shapes in
+    daedalus_mcp/, daedalus_cli/ and dashboard/, a typed extension command
+    (one routed
     through ext_cmd/_ext_cmd/extCmd/runCommand, or sent to /command with a
     visible `type` key) may carry `tab` only as the literal 'extension'. The
     eval path is exempt by structure: eval payloads carry `code` instead of
@@ -104,16 +105,16 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
       quote, so nothing is masked wrongly — but adding one with a quote
       silently weakens this guard.
     """
-    senders_py = [ROOT / 'mcp_server.py',
-                  *ROOT.glob('mcp_tools_*.py'),
+    senders_py = [ROOT / 'daedalus_mcp' / 'server.py',
+                  *(ROOT / 'daedalus_mcp').glob('tools_*.py'),
                   *(ROOT / 'daedalus_cli').glob('*.py')]
     senders_js = sorted((ROOT / 'dashboard').rglob('*.js'))
     scanned_py = [p for p in senders_py if p.is_file()]
     # A floor, not a glob of whatever happens to exist: with the senders
     # moved aside the scan above finds nothing and passes vacuously.
     assert len(scanned_py) >= 18, (
-        f'found {len(scanned_py)} Python senders (mcp_server.py + '
-        'mcp_tools_*.py + daedalus_cli/*.py), expected at least 18 — '
+        f'found {len(scanned_py)} Python senders (daedalus_mcp/server.py + '
+        'daedalus_mcp/tools_*.py + daedalus_cli/*.py), expected at least 18 — '
         'one composition point, seven MCP tool modules, and ten CLI modules; '
         'the senders moved and this guard is stale')
     assert len(senders_js) >= 10, (
@@ -170,7 +171,7 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                " padding padding padding padding padding padding', tab: tid });\n"
                "}\n"),
         # The shapes a mutation sweep found this guard missing open on:
-        # annotated assignments (cli.py and mcp_server.py spell every payload
+        # annotated assignments (cli.py and daedalus_mcp/server.py spell every payload
         # `fields: dict = {...}` / `cmd: dict = {...}`) ...
         ('py', "def f(args):\n"
                "    cmd: dict = {'id': '_x', 'type': 'close-tab', 'tab': 'extension'}\n"

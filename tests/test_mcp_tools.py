@@ -137,7 +137,7 @@ BRANCH_ARGUMENTS = {
 
 def _load_composition(marker):
     mcpserver = importlib.import_module('mcp.server.mcpserver')
-    mcp_transport = importlib.import_module('mcp_transport')
+    mcp_transport = importlib.import_module('daedalus_mcp.transport')
 
     def bridge_session(*_args, **_kwargs):
         return BridgeProbe(marker)
@@ -146,7 +146,7 @@ def _load_composition(marker):
             mock.patch.object(
                 mcp_transport, 'BridgeSession', bridge_session):
         return _util.load(
-            _util.ROOT / 'mcp_server.py', f'mcp_server_tools_{marker}')
+            _util.ROOT / 'daedalus_mcp' / 'server.py', f'mcp_server_tools_{marker}')
 
 
 def _assert_inventory_matches_registry(composition):
@@ -175,8 +175,9 @@ def _composition_module_names(composition):
 def _assert_complete_inventory(composition):
     module_names = set(_composition_module_names(composition))
     unwired_modules = sorted(
-        path.stem for path in _util.ROOT.glob('mcp_tools_*.py')
-        if path.stem not in module_names)
+        f'daedalus_mcp.{path.stem}'
+        for path in (_util.ROOT / 'daedalus_mcp').glob('tools_*.py')
+        if f'daedalus_mcp.{path.stem}' not in module_names)
     assert not unwired_modules, (
         f'MCP tool modules not registered: {unwired_modules}')
     _assert_inventory_matches_registry(composition)
@@ -332,14 +333,14 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
     """
     first_composition = _load_composition('first')
     assert hasattr(first_composition, 'tool_module_inventory'), (
-        'mcp_server.tool_module_inventory missing')
+        'daedalus_mcp.server.tool_module_inventory missing')
     _assert_complete_inventory(first_composition)
     first_modules = _composition_module_names(first_composition)
     _exercise_composition(first_composition, 'first', 'first')
 
     second_composition = _load_composition('second')
     assert hasattr(second_composition, 'tool_module_inventory'), (
-        'mcp_server.tool_module_inventory missing')
+        'daedalus_mcp.server.tool_module_inventory missing')
     _assert_complete_inventory(second_composition)
     second_modules = _composition_module_names(second_composition)
     assert first_modules == second_modules, (
@@ -388,7 +389,7 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     outside the property.
     """
     composition = _load_composition('composition-origin')
-    composition_path = (_util.ROOT / 'mcp_server.py').resolve()
+    composition_path = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
     direct_tools = sorted(
         f'{name} via {code.co_name} at {code.co_filename}:'
         f'{code.co_firstlineno}'
@@ -396,7 +397,7 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
         for code in _tool_code_objects(tool)
         if Path(code.co_filename).resolve() == composition_path)
     assert not direct_tools, (
-        'tool behavior authored in mcp_server.py: '
+        'tool behavior authored in daedalus_mcp/server.py: '
         f'{direct_tools}')
 
 
