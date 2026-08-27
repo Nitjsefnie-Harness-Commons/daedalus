@@ -35,6 +35,30 @@ def test_child_exit_during_startup_reports_exit_code(tmp):
     assert 'exited with code 23' in failure, failure
 
 
+def test_exited_child_output_is_drained_before_observations(tmp):
+    """Every exited child's flushed output reaches its failure message."""
+    del tmp
+    missing = []
+    for attempt in range(30):
+        marker = f'exited child marker {attempt}'
+        program = f'print({marker!r}, flush=True); raise SystemExit(23)'
+        proc = subprocess.Popen(
+            [sys.executable, '-c', program],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        proc.wait(timeout=10)
+        failure = ''
+        try:
+            _util.await_listening_line(
+                proc, _util.drain_lines(proc), timeout=1)
+        except RuntimeError as exc:
+            failure = str(exc)
+        if marker not in failure:
+            missing.append((attempt, failure))
+    assert not missing, (
+        f'{len(missing)}/30 exited child outputs missing; '
+        f'first: {missing[0] if missing else None}')
+
+
 def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
     """The first successful bridge start consumes the cold allowance."""
     assert hasattr(_util, '_bridge_started'), 'fixture has no start state'
