@@ -48,6 +48,9 @@ _PYTHON_ONLY_NOTE = (
 _JAVASCRIPT_ONLY_NOTE = (
     'Only the JavaScript report was given, so added Python lines are '
     'not measured.')
+_NO_LANGUAGE_NOTE = (
+    'The report measured neither Python nor JavaScript, so added lines '
+    'in both languages are not measured.')
 
 
 def _write(tmp, name, text):
@@ -316,6 +319,26 @@ def test_main_merges_both_reports_for_one_mixed_diff(tmp):
     assert '| `extension/content.js` | 1 | 1 | — |' in out, out
     assert 'Every added line was reached.' in out, out
     assert _BOTH_LANGUAGES_NOTE in out, out
+
+
+def test_a_report_measuring_no_language_gets_a_distinct_sentence(tmp):
+    """An empty language list must not render inside "Only the  report".
+
+    No producer here emits such a report — coverage.py always names
+    Python files and js_coverage.py only names shipped JavaScript — but
+    the tool accepts arbitrary Cobertura XML, and joining an empty list
+    into the one-language sentence renders "Only the  report was
+    given", a broken sentence for a true claim.
+    """
+    del tmp
+    measured = {'examples/kill-hls.js': {1: 1}}
+    languages = diff_coverage.report_languages(measured)
+    assert languages == [], languages
+
+    body = diff_coverage.render([], 0, 0, languages=languages)
+
+    assert _NO_LANGUAGE_NOTE in body, body
+    assert 'Only the  report' not in body, body
 
 
 if __name__ == '__main__':

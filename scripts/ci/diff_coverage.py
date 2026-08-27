@@ -305,6 +305,11 @@ def _scope_note(languages):
     missing = [name for name in _LANGUAGES if name not in languages]
     if not missing:
         return ['This number covers added Python and JavaScript lines.']
+    if not languages:
+        # Joining the empty list into the sentence below would render
+        # "Only the  report was given" — broken text for a true claim.
+        return ['The report measured neither Python nor JavaScript, so '
+                'added lines in both languages are not measured.']
     present = ' and '.join(languages)
     absent = ' and '.join(missing)
     return [f'Only the {present} report was given, so added {absent} '
