@@ -17,6 +17,9 @@ def register(mcp, bridge):
                 try:
                     v = json.loads(v)
                 except ValueError:
+                    # A result that is not JSON is a plain string
+                    # result, which is the ordinary case. It travels
+                    # through unchanged.
                     pass
             body['value'] = v
         return body
