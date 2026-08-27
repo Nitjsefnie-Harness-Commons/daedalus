@@ -23,7 +23,6 @@ def _transport():
 
 
 def test_sessions_keep_distinct_token_contexts(tmp):
-    """A later session cannot replace an earlier session's token context."""
     del tmp
     transport = _transport()
     first_token = ContextVar('first_mcp_token', default='')
@@ -39,7 +38,6 @@ def test_sessions_keep_distinct_token_contexts(tmp):
 
 
 def test_url_resolution_preserves_the_full_precedence_order(tmp):
-    """Each winning URL source defeats every weaker source at once."""
     del tmp
     transport = _transport()
     cases = (

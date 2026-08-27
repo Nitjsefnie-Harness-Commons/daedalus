@@ -46,7 +46,6 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
 
 
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
-    """The scanner input is the non-empty set of 220 tracked release paths."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,

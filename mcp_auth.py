@@ -75,7 +75,6 @@ def job_carrier_names(request_body):
 
 
 def ambiguous_json_carrier(raw):
-    """Return a repeated segment-tool job carrier in one JSON request."""
     try:
         body = json.loads(raw, object_pairs_hook=CarrierJSONObject)
     except (json.JSONDecodeError, RecursionError, ValueError):

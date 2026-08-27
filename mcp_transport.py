@@ -68,13 +68,8 @@ class BridgeSession:
         return self._transport
 
     def resolved_local_url(self, local_url: str | None = None) -> str:
-        """Resolve the bridge URL for this client lookup.
-
-        The caller's bridge URL is resolved before its transport facade is bound.
-        The URL supplied after the bridge binds wins over the port-derived
-        fallback, while the explicit standalone override remains strongest.
-        ``LOCAL_URL`` is the import-time fallback retained for callers that load
-        this module by path and restore the environment afterwards.
+        """Retain the import-time fallback for path-loaded callers that restore
+        the environment after loading this module.
         """
         override = os.environ.get('DAEDALUS_LOCAL_URL')
         if override:
@@ -93,7 +88,6 @@ class BridgeSession:
         self._transport = BridgeTransport(self.resolved_local_url())
 
     def http_client(self, local_url: str | None = None) -> httpx.AsyncClient:
-        """Return this caller's client, or a compatibility client for a URL."""
         if local_url is not None:
             return BridgeTransport(self.resolved_local_url(local_url)).client()
         return self._transport.client()
@@ -185,7 +179,6 @@ class BridgeSession:
             if (expect_id is not None and data.get('id') != expect_id
                     or expect_delivery is not None
                     and data.get('deliveryId') != expect_delivery):
-                # Someone else's result. Leave it where it is for them.
                 continue
             generation = data.get('resultGeneration')
             if not generation:

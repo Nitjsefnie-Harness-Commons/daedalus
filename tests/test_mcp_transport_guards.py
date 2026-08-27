@@ -30,8 +30,6 @@ def _session(transport, token='mcptok'):
 
 
 class ResponseProbe:
-    """A complete JSON response used below the session boundary."""
-
     def __init__(self, body, status_error=None):
         self.body = body
         self.status_error = status_error
@@ -45,8 +43,6 @@ class ResponseProbe:
 
 
 class ClientProbe:
-    """Record shaped HTTP requests and provide deterministic result replies."""
-
     def __init__(self, replies=(), post_response=None,
                  delete_response=None):
         self.replies = list(replies)
@@ -78,7 +74,6 @@ def _capture(coroutine):
 
 
 def test_explicit_http_client_uses_the_explicit_url(tmp):
-    """A compatibility client binds to the call-site URL."""
     del tmp
     transport = _transport()
 
@@ -95,7 +90,6 @@ def test_explicit_http_client_uses_the_explicit_url(tmp):
 
 
 def test_empty_token_context_is_rejected(tmp):
-    """An unset request context cannot authorize a bridge request."""
     del tmp
     transport = _transport()
     session = _session(transport, token='')
@@ -108,7 +102,6 @@ def test_empty_token_context_is_rejected(tmp):
 
 
 def test_post_sends_authorization_header(tmp):
-    """POST authorizes before the bridge reads its JSON body."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -126,7 +119,6 @@ def test_post_sends_authorization_header(tmp):
 
 
 def test_post_propagates_http_status_error(tmp):
-    """POST does not turn an HTTP error response into a successful result."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -147,7 +139,6 @@ def test_post_propagates_http_status_error(tmp):
 
 
 def test_delete_sends_authorization_header(tmp):
-    """DELETE authorizes before the bridge reads its JSON body."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -164,7 +155,6 @@ def test_delete_sends_authorization_header(tmp):
 
 
 def test_delete_propagates_http_status_error(tmp):
-    """DELETE does not turn an HTTP error response into a successful result."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -185,7 +175,6 @@ def test_delete_propagates_http_status_error(tmp):
 
 
 def test_poll_skips_a_different_delivery(tmp):
-    """A stale delivery stays while the named delivery is awaited."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -214,7 +203,6 @@ def test_poll_skips_a_different_delivery(tmp):
 
 
 def test_poll_skips_a_result_without_generation(tmp):
-    """A result without an acceptance generation cannot be consumed safely."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -239,7 +227,6 @@ def test_poll_skips_a_result_without_generation(tmp):
 
 
 def test_poll_retries_a_failed_conditional_consume(tmp):
-    """A replaced generation is retried instead of reported as consumed."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -271,7 +258,6 @@ def test_poll_retries_a_failed_conditional_consume(tmp):
 
 
 def test_poll_reports_timeout_when_no_attempt_is_admitted(tmp):
-    """A zero-length polling window has one explicit timeout outcome."""
     del tmp
     transport = _transport()
     session = _session(transport)
@@ -283,7 +269,6 @@ def test_poll_reports_timeout_when_no_attempt_is_admitted(tmp):
 
 
 def test_extension_command_surfaces_result_error(tmp):
-    """An extension error is not returned as a successful empty result."""
     del tmp
     transport = _transport()
     session = _session(transport)

@@ -4,12 +4,6 @@ import json
 
 
 def register(mcp, bridge):
-    """Define this group's tools against `mcp`, bound to `bridge`.
-
-    Returns {tool name: coroutine function} so the composition point can keep
-    the tools callable as its own attributes.
-    """
-
     def _flatten_eval(body: dict | None) -> dict | None:
         """The MCP client renders a tool's dict return under a top-level `result` key,
     and an eval body carries its own `result` field (the JS return value), so callers
@@ -23,8 +17,6 @@ def register(mcp, bridge):
                 try:
                     v = json.loads(v)
                 except ValueError:
-                    # A result that is not JSON is a plain string result, which is
-                    # the ordinary case. It travels through unchanged.
                     pass
             body['value'] = v
         return body

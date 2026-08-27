@@ -47,7 +47,6 @@ def _initialize_body(padding=0):
 
 
 def test_undeclared_oversized_body_is_refused_after_read(tmp):
-    """An undeclared body still cannot exceed the listener's body limit."""
     del tmp
     auth = _auth_module()
     outbound = []
@@ -110,7 +109,6 @@ def test_undeclared_oversized_body_is_refused_after_read(tmp):
 
 
 def test_top_level_json_scalar_has_no_job_carrier(tmp):
-    """A scalar JSON request cannot contribute a segment-tool job name."""
     del tmp
     auth = _auth_module()
     try:
@@ -121,7 +119,6 @@ def test_top_level_json_scalar_has_no_job_carrier(tmp):
 
 
 def test_malformed_json_is_not_a_duplicate_carrier(tmp):
-    """Malformed JSON remains the MCP transport's validation concern."""
     del tmp
     auth = _auth_module()
     try:
@@ -132,7 +129,6 @@ def test_malformed_json_is_not_a_duplicate_carrier(tmp):
 
 
 def test_live_listeners_keep_auth_state_and_body_limits_separate(tmp):
-    """A later listener cannot replace an earlier listener's auth inputs."""
     test_mcp_server._need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
