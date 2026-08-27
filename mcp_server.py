@@ -47,7 +47,7 @@ MCP_PORT = env_int('DAEDALUS_MCP_PORT', 8086, 0, 65535)
 # make the process hold whatever it chose to send.
 MAX_BODY_SIZE = env_int(
     'DAEDALUS_MCP_MAX_BODY_SIZE', 64 * 1024 * 1024, 0)
-_token = mcp_request_guard._token
+_token = mcp_request_guard.request_token
 # The app auto-enables DNS rebinding protection for a localhost bind only when
 # it is given no settings of its own; these are passed explicitly, so the list
 # has to include the public hostname the reverse proxy fronts us with or

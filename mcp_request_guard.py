@@ -9,7 +9,11 @@ from daedalus_cli.transport import token as _configured_token
 from env_config import REFUSED_BODY_DRAIN
 
 
-_token: ContextVar[str] = ContextVar('daedalus_token', default='')
+__all__ = ('drain_refused_body', 'early_refusal', 'request_token')
+
+
+request_token: ContextVar[str] = ContextVar(
+    'daedalus_token', default='')
 
 
 def early_refusal(request, max_body_size):
@@ -50,7 +54,7 @@ def early_refusal(request, max_body_size):
                 tok.encode('utf-8', 'surrogatepass'),
                 authorized.encode('utf-8', 'surrogatepass'))):
         return JSONResponse({'error': 'unauthorized'}, status_code=401)
-    _token.set(tok)
+    request_token.set(tok)
 
     if request.method == 'POST':
         declared = request.headers.get('content-length')
