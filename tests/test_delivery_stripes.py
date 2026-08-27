@@ -13,7 +13,8 @@ _SERVER = None
 
 
 def _load_stripes(name):
-    return _util.load(_util.ROOT / 'delivery_stripes.py', name=name)
+    return _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'delivery_stripes.py', name=name)
 
 
 def _load_result_store(tmp):
@@ -30,7 +31,8 @@ def _load_result_store(tmp):
     sys.path.insert(0, str(_util.ROOT))
     try:
         _SERVER = _util.load(
-            _util.ROOT / 'result_store.py', name='delivery_stripes_store')
+            _util.ROOT / 'daedalus_bridge' / 'result_store.py',
+            name='delivery_stripes_store')
     finally:
         sys.path.pop(0)
         for name, value in saved.items():

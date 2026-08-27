@@ -343,7 +343,8 @@ def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
     is about the path, so it is asked of the path.
     """
     probe = (
-        'import os, segment_store, server\n'
+        'import os, server\n'
+        'from daedalus_bridge import segment_store\n'
         'os.makedirs(server.SEG_DIR / "collide.json", exist_ok=True)\n'
         'print("collision:", segment_store.load_record("collide"))\n'
         '(server.SEG_DIR / "broken.json").write_text("{", encoding="utf-8")\n'

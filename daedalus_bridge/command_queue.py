@@ -6,9 +6,9 @@ import threading
 import time
 import uuid
 
-import atomic_file
-from log_safe import log_safe
-import path_safety
+from daedalus_bridge import atomic_file
+from daedalus_bridge.log_safe import log_safe
+from daedalus_bridge import path_safety
 
 
 _lock = threading.Lock()

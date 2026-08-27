@@ -1,10 +1,10 @@
 """Atomic result slots and retained delivery-result files."""
 import os, json, pathlib, threading, time, uuid
 
-import atomic_file
-from bridge_config import DELIVERY_DIR, MAX_DELIVERY_RESULTS
-from delivery_stripes import stripe_index
-import path_safety
+from daedalus_bridge import atomic_file
+from daedalus_bridge.config import DELIVERY_DIR, MAX_DELIVERY_RESULTS
+from daedalus_bridge.delivery_stripes import stripe_index
+from daedalus_bridge import path_safety
 
 
 # Result files are single-value delivery slots. POST replacement and

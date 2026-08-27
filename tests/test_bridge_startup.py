@@ -206,7 +206,7 @@ def test_server_uses_the_shared_log_safe_function(tmp):
     if added_root:
         sys.path.insert(0, root)
     try:
-        shared_log_safe = importlib.import_module('log_safe')
+        shared_log_safe = importlib.import_module('daedalus_bridge.log_safe')
         mod = _util.load(
             _util.ROOT / 'server.py', 'server_shared_log_safe_binding')
     finally:
@@ -239,7 +239,7 @@ class EnvironmentWithoutDaedalusReads(dict):
         return super().get(key, default)
 
 os.environ = EnvironmentWithoutDaedalusReads(os.environ)
-import log_safe
+from daedalus_bridge import log_safe
 
 root = pathlib.Path.cwd().resolve()
 loaded = []
@@ -252,7 +252,7 @@ for name, module in sys.modules.items():
     except ValueError:
         continue
     loaded.append(name)
-assert loaded == ['log_safe'], loaded
+assert loaded == ['daedalus_bridge', 'daedalus_bridge.log_safe'], loaded
 assert callable(log_safe.log_safe)
 """
     loaded = subprocess.run(
@@ -279,7 +279,7 @@ def test_bridge_configuration_is_resolvable_as_a_unit(tmp):
     env.update({'DAEDALUS_DIR': str(root), 'DAEDALUS_PORT': '0'})
     code = """
 import json
-import bridge_config as config
+from daedalus_bridge import config
 print(json.dumps({
     'base': str(config.BASE),
     'cmd': str(config.CMD_DIR),
@@ -336,7 +336,7 @@ print(json.dumps({
     missing_env = dict(env)
     del missing_env['DAEDALUS_DIR']
     refused = subprocess.run(
-        [sys.executable, '-c', 'import bridge_config'],
+        [sys.executable, '-c', 'import daedalus_bridge.config'],
         cwd=str(_util.ROOT), env=missing_env,
         capture_output=True, text=True, check=False)
     assert refused.returncode == 1
@@ -434,7 +434,8 @@ def test_shared_log_safe_never_raises_and_stays_useful(tmp):
     layer inside it.
     """
     del tmp
-    mod = _util.load(_util.ROOT / 'log_safe.py', 'shared_log_safe_contract')
+    mod = _util.load(_util.ROOT / 'daedalus_bridge' / 'log_safe.py',
+                     'shared_log_safe_contract')
 
     for value, expected in _util.log_safe_cases():
         assert mod.log_safe(value) == expected, (

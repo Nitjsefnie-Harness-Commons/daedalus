@@ -10,13 +10,13 @@ from urllib.parse import urlparse, parse_qs
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
-import atomic_file
-import command_queue
-from log_safe import log_safe
-import result_store
-import segment_store
-import stream_service
-from bridge_config import (
+from daedalus_bridge import atomic_file
+from daedalus_bridge import command_queue
+from daedalus_bridge.log_safe import log_safe
+from daedalus_bridge import result_store
+from daedalus_bridge import segment_store
+from daedalus_bridge import stream_service
+from daedalus_bridge.config import (
     BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR,
     MAX_BODY_SIZE, MAX_JSON_DEPTH,
     MAX_REQUEST_WORKERS, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
@@ -24,8 +24,8 @@ from bridge_config import (
     RES_DIR, SEG_DIR, STREAM_KEEPALIVE, STREAM_MAX_AGE,
     UPLOAD_DIR,
 )
-from env_config import REFUSED_BODY_DRAIN
-import path_safety
+from daedalus_bridge.env_config import REFUSED_BODY_DRAIN
+from daedalus_bridge import path_safety
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
 # whose encoding it did not choose either: under a C locale a result id

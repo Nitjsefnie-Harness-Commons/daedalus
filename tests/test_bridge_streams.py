@@ -213,7 +213,7 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
         'import sys\n'
         'import time\n'
         f'sys.path.insert(0, {str(_util.ROOT)!r})\n'
-        'import command_queue\n'
+        'from daedalus_bridge import command_queue\n'
         'def gc_loop(cmd_dir, ttl):\n'
         '    trigger = pathlib.Path(cmd_dir) / ".gc-trigger"\n'
         '    done = pathlib.Path(cmd_dir) / ".gc-done"\n'

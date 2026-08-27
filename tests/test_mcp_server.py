@@ -649,7 +649,7 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
 
 def test_mcp_and_bridge_config_use_one_env_parser(tmp):
     _need_deps()
-    import env_config
+    from daedalus_bridge import env_config
 
     mod = _load_mcp('http://127.0.0.1:1')
     saved = {key: os.environ.get(key)
@@ -657,7 +657,7 @@ def test_mcp_and_bridge_config_use_one_env_parser(tmp):
     os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
     os.environ['DAEDALUS_PORT'] = '0'
     try:
-        bridge_config = _util.load(_util.ROOT / 'bridge_config.py')
+        bridge_config = _util.load(_util.ROOT / 'daedalus_bridge' / 'config.py')
     finally:
         for key, value in saved.items():
             if value is None:
@@ -697,7 +697,7 @@ def test_mcp_uses_the_shared_log_safe_function(tmp):
     del tmp
     _need_deps()
     mod = _load_mcp('http://127.0.0.1:1')
-    assert mod.log_safe is sys.modules['log_safe'].log_safe
+    assert mod.log_safe is sys.modules['daedalus_bridge.log_safe'].log_safe
 
 
 def test_the_shared_contract_catches_a_divergent_copy(tmp):
