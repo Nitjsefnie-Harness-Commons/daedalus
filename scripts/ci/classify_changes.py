@@ -82,7 +82,8 @@ def changed_paths(event, run):
     name = event.get('name')
     if name == 'pull_request':
         number = event.get('pull_request')
-        if not (isinstance(number, str) and number.isdigit()):
+        if not (isinstance(number, str) and number.isascii()
+                and number.isdigit()):
             return None
         return _read(run, [
             'gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',

@@ -7,7 +7,10 @@ for one suite leg and no coverage instead of the full matrix. These tests pin
 the pattern matcher, the event-to-API mapping, the over-run fallbacks and the
 two contracts that keep the module's constants honest against the workflows.
 """
+import contextlib
+import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -71,6 +74,19 @@ def test_an_unimplemented_pattern_shape_fails_closed(tmp):
         raise AssertionError("'docs/**' was matched instead of refused")
 
 
+def test_star_star_pattern_compares_the_final_segment(tmp):
+    """`**/rest` matches on the path's final segment, not the whole path.
+
+    A whole-path comparison would fail 'foo/doc1.md' here: fnmatch does
+    not treat '/' specially, but the pattern's literal 'doc' prefix would
+    have to match at the path's start.
+    """
+    del tmp
+    mod = _classifier()
+    assert mod.matches('**/doc*.md', 'foo/doc1.md')
+    assert mod.matches('**/doc*.md', 'doc1.md')
+
+
 def test_documentation_paths_classify_to_the_reduced_matrix(tmp):
     del tmp
     mod = _classifier()
@@ -129,6 +145,15 @@ def test_unusable_events_never_call_the_api(tmp):
     assert (docs_only, matrix) == (False, mod.FULL_MATRIX)
     docs_only, matrix, _reason = mod.classify(
         _event(name='workflow_dispatch'), run)
+    assert (docs_only, matrix) == (False, mod.FULL_MATRIX)
+    # A non-numeric PR number must not reach the API either: 'abc' is not
+    # digits, and '²' isdigit() but is not an ASCII digit string.
+    for bad_number in ('abc', '²', ''):
+        docs_only, matrix, _reason = mod.classify(
+            _event(pull_request=bad_number), run)
+        assert (docs_only, matrix) == (False, mod.FULL_MATRIX), bad_number
+    docs_only, matrix, _reason = mod.classify(
+        _event(repository=None), run)
     assert (docs_only, matrix) == (False, mod.FULL_MATRIX)
     assert calls == [], calls
 
@@ -251,6 +276,32 @@ def test_full_matrix_matches_the_workflow_suites_matrix(tmp):
     text = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     assert mod.FULL_MATRIX == _suites_matrix(text), _suites_matrix(text)
+
+
+def test_main_records_the_fallback_outputs_and_returns_zero(tmp):
+    """main never returns nonzero, even on the fallback branch.
+
+    A workflow_dispatch event reads no paths, so this exercises main end
+    to end — environment in, outputs file out — without spawning `gh`.
+    """
+    mod = _classifier()
+    out = Path(tmp) / 'github_output'
+    saved = dict(os.environ)
+    try:
+        os.environ.clear()
+        os.environ.update({
+            'GITHUB_EVENT_NAME': 'workflow_dispatch',
+            'GITHUB_OUTPUT': str(out),
+        })
+        with contextlib.redirect_stdout(io.StringIO()):
+            status = mod.main()
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    assert status == 0, status
+    lines = out.read_text(encoding='utf-8').splitlines()
+    assert lines == ['docs_only=false',
+                     f'matrix={json.dumps(mod.FULL_MATRIX)}'], lines
 
 
 def main():
