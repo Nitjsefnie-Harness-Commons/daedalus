@@ -17,7 +17,11 @@ import re
 import sys
 from pathlib import Path
 
-from workflow_yaml import YAMLReadError, workflow_step_items
+if __package__:
+    # pylint: disable-next=relative-beyond-top-level
+    from .workflow_yaml import YAMLReadError, workflow_step_items
+else:
+    from workflow_yaml import YAMLReadError, workflow_step_items
 
 WORKFLOW = (Path(__file__).resolve().parents[2]
             / '.github' / 'workflows' / 'tests.yml')
