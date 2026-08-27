@@ -27,6 +27,33 @@ class ToolRegistry:
         return decorate
 
 
+class HTTPResponseProbe:
+    """Minimal response for the media status tool."""
+
+    def __init__(self, body):
+        self.status_code = 200
+        self.body = body
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.body
+
+
+class HTTPClientProbe:
+    """Record direct HTTP client calls against the owning bridge probe."""
+
+    def __init__(self, bridge):
+        self.bridge = bridge
+
+    async def get(self, path, **kwargs):
+        self.bridge.calls.append(('http_client.get', path, kwargs))
+        if path == '/segment-job':
+            return HTTPResponseProbe({'sig': self.bridge.marker})
+        return HTTPResponseProbe({'done': []})
+
+
 class BridgeProbe:
     """Record which per-registration bridge a tool actually calls."""
 
@@ -36,7 +63,10 @@ class BridgeProbe:
         self.transport = object()
 
     def http_client(self):
-        return None
+        return HTTPClientProbe(self)
+
+    def auth(self):
+        return {'Authorization': self.marker}
 
     def checked_timeout(self, timeout):
         self.calls.append(('checked_timeout', timeout))
@@ -46,6 +76,14 @@ class BridgeProbe:
         if path == '/tabs':
             return [{'title': self.marker}]
         return {'result': self.marker}
+
+    async def post(self, path, body):
+        self.calls.append(('post', path, body))
+        return {'bridge': self.marker}
+
+    async def delete(self, path, body):
+        self.calls.append(('delete', path, body))
+        return {'bridge': self.marker}
 
     async def ext_cmd(self, *args, **kwargs):
         self.calls.append(('ext_cmd', args, kwargs))
@@ -67,6 +105,15 @@ REQUIRED_ARGUMENTS = {
     'urls': ['https://example.com'],
     'chrome_tab': 7,
     'chrome_tabs': [7],
+    'job': 'job',
+    'target_url': 'https://example.com',
+    'name': 'name',
+    'value': 'value',
+    'css': 'body {}',
+    'pattern': '*://example.com/*',
+    'fix_id': 'fix',
+    'permanent': True,
+    'method': 'Page.getFrameTree',
 }
 
 
