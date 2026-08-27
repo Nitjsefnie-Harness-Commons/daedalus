@@ -4,7 +4,8 @@
     "include": [
         "*.py",
         "scripts/*.py",
-        "daedalus_cli"
+        "daedalus_cli",
+        "daedalus_bridge"
     ],
     "exclude": [
         "**/__pycache__",
