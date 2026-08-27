@@ -240,6 +240,7 @@
 !/tests/test_command_queue.py
 !/tests/test_command_queue_unit.py
 !/tests/test_coverage_comment_boundary.py
+!/tests/test_coverage_comment_fork.py
 !/tests/test_coverage_comment_workflow.py
 !/tests/test_coverage_suites.py
 !/tests/test_dashboard_accessibility.py
