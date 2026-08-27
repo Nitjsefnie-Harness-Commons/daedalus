@@ -2,7 +2,7 @@
 
 The parsers live in this environment-free module so the MCP front end can
 share them without importing server.py. Importing server.py requires its
-environment, runs module-level configuration, and imports mcp_server at
+environment, runs module-level configuration, and imports daedalus_mcp.server at
 startup; this module reads no environment until a parser is called.
 """
 import math

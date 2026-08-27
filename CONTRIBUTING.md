@@ -76,7 +76,7 @@ Requires **Python 3.11+**. The bridge and CLI need nothing else.
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
-pip install . '.[mcp]'                  # the mcp extra only if you touch mcp_server.py
+pip install . '.[mcp]'                  # the mcp extra only if you touch daedalus_mcp/
 
 DAEDALUS_DIR=/tmp/daedalus DAEDALUS_PORT=8081 python3 server.py
 ```
