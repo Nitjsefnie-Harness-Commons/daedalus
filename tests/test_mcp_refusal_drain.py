@@ -26,7 +26,7 @@ def _need_deps():
 
 def _request_contains_payload(request, payload):
     seen = set()
-    state_values = tuple(request.scope.setdefault('state', {}).values())
+    state_values = tuple(request.scope.get('state', {}).values())
     request_values = tuple(request.__dict__.values())
     pending = list(state_values + request_values)
 
@@ -54,15 +54,15 @@ def _request_contains_payload(request, payload):
     return False
 
 
-def test_payload_search_reaches_deep_state_containers(tmp):
+def test_payload_search_does_not_create_request_state(tmp):
     del tmp
     _need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
-    request.state.nested = [[[[[REFUSED_PAYLOAD]]]]]
 
-    assert _request_contains_payload(request, REFUSED_PAYLOAD)
+    assert not _request_contains_payload(request, REFUSED_PAYLOAD)
+    assert 'state' not in request.scope
 
 
 def test_payload_search_has_no_recursion_limit(tmp):
@@ -241,31 +241,34 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
     assert mod.MAX_BODY_SIZE + 1 < mod.mcp_request_guard.REFUSED_BODY_DRAIN
     valid_auth = (b'authorization', f'Bearer {TOK}'.encode())
     cases = (
-        ('duplicate authorization',
+        ('duplicate authorization', 'POST',
          (valid_auth, valid_auth)),
-        ('duplicate session',
+        ('duplicate session', 'POST',
          ((b'mcp-session-id', b'a'), (b'mcp-session-id', b'b'))),
-        ('duplicate host',
+        ('duplicate host', 'POST',
          ((b'host', b'a.example.com'), (b'host', b'b.example.com'))),
-        ('duplicate origin',
+        ('duplicate origin', 'POST',
          ((b'origin', b'https://a.example.com'),
           (b'origin', b'https://b.example.com'))),
-        ('missing bearer', ()),
-        ('bad bearer', ((b'authorization', b'Bearer a/b'),)),
-        ('unauthorized bearer',
+        ('missing bearer', 'POST', ()),
+        ('bad bearer', 'POST',
+         ((b'authorization', b'Bearer a/b'),)),
+        ('unauthorized bearer', 'POST',
          ((b'authorization', b'Bearer othermcptok'),)),
-        ('noninteger content length',
+        ('noninteger content length', 'POST',
          (valid_auth, (b'content-length', b'bad'))),
-        ('negative content length',
+        ('negative content length', 'POST',
          (valid_auth, (b'content-length', b'-1'))),
-        ('oversized content length',
+        ('oversized content length', 'POST',
          (valid_auth,
           (b'content-length', str(mod.MAX_BODY_SIZE + 1).encode()))),
+        ('delete missing bearer', 'DELETE', ()),
     )
 
-    async def exercise(headers):
+    async def exercise(method, headers):
         events = []
-        chunks = [REFUSED_PAYLOAD for _unused in range(9)]
+        chunk = REFUSED_PAYLOAD + bytes(10000 - len(REFUSED_PAYLOAD))
+        chunks = [chunk for _unused in range(8)]
         received = []
         request_seen = []
         real_response = mod.mcp_request_guard.JSONResponse
@@ -301,7 +304,7 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
             'type': 'http',
             'asgi': {'version': '3.0'},
             'http_version': '1.1',
-            'method': 'POST',
+            'method': method,
             'scheme': 'http',
             'path': '/mcp',
             'raw_path': b'/mcp',
@@ -315,13 +318,15 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
             await CapturingBearerAuth(accepted)(scope, receive, send)
         finally:
             mod.mcp_request_guard.JSONResponse = real_response
-        return events, received, chunks, request_seen[0]
+        return events, received, request_seen[0]
 
-    for name, headers in cases:
-        events, received, remaining, request = asyncio.run(
-            exercise(headers))
-        assert len(received) == 8, (name, events, len(received))
-        assert len(remaining) == 1, (name, len(remaining))
+    for name, method, headers in cases:
+        events, received, request = asyncio.run(exercise(method, headers))
+        assert len(received) == 7, (name, events, len(received))
+        drained_before_last = sum(len(chunk) for chunk in received[:-1])
+        drained = sum(len(chunk) for chunk in received)
+        assert drained_before_last < mod.mcp_request_guard.REFUSED_BODY_DRAIN
+        assert drained >= mod.mcp_request_guard.REFUSED_BODY_DRAIN
         assert events[0] == 'decision', (name, events)
         assert events[-1] == 'response-complete', (name, events)
         assert all(event == 'receive' for event in events[1:-1]), (
