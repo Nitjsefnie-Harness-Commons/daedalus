@@ -2,7 +2,11 @@
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
 
 
 def run_step(workdir, step, env, *, workflow=None, job=None):
@@ -26,11 +30,8 @@ def run_step(workdir, step, env, *, workflow=None, job=None):
         raise FileNotFoundError(
             f'workflow shell executable not found on PATH: {program}')
     command[0] = executable
-    child_env = {
-        name: value for name, value in _effective_environment(
-            workdir, workflow, job, step, env).items()
-        if not name.startswith('COVERAGE_')
-    }
+    child_env = _util.coverage_free_environment(_effective_environment(
+        workdir, workflow, job, step, env))
     return subprocess.run(
         command, cwd=workdir, env=child_env,
         capture_output=True, text=True, timeout=60)
