@@ -16,6 +16,23 @@ def _load_service(name):
     return _util.load(_util.ROOT / 'stream_service.py', name=name)
 
 
+class _RecordingByteSink:
+    def __init__(self, fail_at=None):
+        self.data = b''
+        self.flushes = 0
+        self.fail_at = fail_at
+
+    def write(self, data):
+        if self.fail_at == 'write':
+            raise BrokenPipeError('write failed')
+        self.data += data
+
+    def flush(self):
+        self.flushes += 1
+        if self.fail_at == 'flush':
+            raise BrokenPipeError('flush failed')
+
+
 def test_stream_service_imports_without_daedalus_configuration(_tmp):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('DAEDALUS_') and key != 'TOKEN'}
@@ -23,6 +40,46 @@ def test_stream_service_imports_without_daedalus_configuration(_tmp):
         [sys.executable, '-c', 'import stream_service'],
         cwd=str(_util.ROOT), env=env, stderr=subprocess.PIPE, text=True)
     assert loaded.returncode == 0, loaded.stderr
+
+
+def test_write_frame_emits_exact_command_event_and_flushes_once(_tmp):
+    service = _load_service('stream_service_frame_bytes')
+    sink = _RecordingByteSink()
+
+    service.write_frame(sink, {'id': 'frame-check'})
+
+    assert sink.data == (
+        b'event: command\n'
+        b'data: {"id": "frame-check"}\n\n')
+    assert sink.flushes == 1, sink.flushes
+
+
+def test_write_frame_propagates_write_errors(_tmp):
+    service = _load_service('stream_service_frame_write_error')
+    sink = _RecordingByteSink(fail_at='write')
+
+    try:
+        service.write_frame(sink, {'id': 'frame-check'})
+    except BrokenPipeError as error:
+        assert str(error) == 'write failed', error
+    else:
+        raise AssertionError('write error was swallowed')
+
+    assert sink.flushes == 0, sink.flushes
+
+
+def test_write_frame_propagates_flush_errors(_tmp):
+    service = _load_service('stream_service_frame_flush_error')
+    sink = _RecordingByteSink(fail_at='flush')
+
+    try:
+        service.write_frame(sink, {'id': 'frame-check'})
+    except BrokenPipeError as error:
+        assert str(error) == 'flush failed', error
+    else:
+        raise AssertionError('flush error was swallowed')
+
+    assert sink.flushes == 1, sink.flushes
 
 
 def test_queue_drain_honors_explicit_ttl_and_frame_writer(tmp):
@@ -102,12 +159,29 @@ def test_legacy_extension_drain_uses_explicit_command_directory(tmp):
     frames = []
 
     delivered = service.drain_legacy_ext(
-        command_dir, 'tok', 'tok_extension.json', None,
+        command_dir, 'tok', None,
+        extension_legacy_name='tok_extension.json',
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered
     assert frames == [{'id': 'legacy', 'chromeTab': '42'}], frames
     assert not legacy.exists(), legacy
+
+
+def test_legacy_extension_name_must_be_keyword_only(tmp):
+    service = _load_service('stream_service_legacy_extension_keyword')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    frames = []
+
+    try:
+        service.drain_legacy_ext(
+            command_dir, 'tok', 'tok_extension.json', None,
+            command_ttl=100, frame_writer=frames.append)
+    except TypeError as error:
+        assert 'positional' in str(error), error
+    else:
+        raise AssertionError('extension legacy name accepted positionally')
 
 
 def test_legacy_extension_drain_stops_after_stream_is_killed(tmp):
@@ -126,7 +200,8 @@ def test_legacy_extension_drain_stops_after_stream_is_killed(tmp):
         killed.set()
 
     delivered = service.drain_legacy_ext(
-        command_dir, 'tok', 'tok_extension.json', killed,
+        command_dir, 'tok', killed,
+        extension_legacy_name='tok_extension.json',
         command_ttl=100, frame_writer=capture)
 
     assert delivered == 1, delivered
@@ -146,7 +221,8 @@ def test_legacy_extension_drain_skips_dashboard_name(tmp):
     frames = []
 
     delivered = service.drain_legacy_ext(
-        command_dir, 'tok', 'tok_extension.json', None,
+        command_dir, 'tok', None,
+        extension_legacy_name='tok_extension.json',
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered
@@ -166,7 +242,7 @@ def test_legacy_extension_drain_skips_its_own_legacy_name(tmp):
     frames = []
 
     delivered = service.drain_legacy_ext(
-        command_dir, 'tok', extension.name, None,
+        command_dir, 'tok', None, extension_legacy_name=extension.name,
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered

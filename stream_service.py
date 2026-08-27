@@ -78,7 +78,11 @@ def last_delivery_at():
 
 
 def write_frame(stream, data):
-    """Serialize, write, and flush one SSE command frame."""
+    """Serialize, write, and flush one SSE command frame.
+
+    Socket write and flush errors propagate so the caller can tear down the
+    stream.
+    """
     stream.write(f'event: command\ndata: {json.dumps(data)}\n\n'.encode())
     stream.flush()
 
@@ -91,7 +95,7 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
     entries remain for a later scan because a non-atomic publisher may still
     be writing them. The socket write happens before unlink, so a failed write
     leaves the command queued for redelivery and propagates to tear the stream
-    down.
+    down. Returns the number of commands handed to `frame_writer`.
     """
     if not qdir.is_dir():
         return 0
@@ -208,9 +212,15 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
         return 1
 
 
-def drain_legacy_ext(cmd_dir, token, extension_legacy_name, killed_event, *,
-                     command_ttl, frame_writer):
-    """Deliver tagged legacy per-tab files to the extension stream."""
+def drain_legacy_ext(cmd_dir, token, killed_event, *,
+                     extension_legacy_name, command_ttl, frame_writer):
+    """Deliver legacy `<token>_<tab>.json` files to the extension stream.
+
+    Each delivered command carries its tab in `chromeTab`. The dashboard file
+    and `extension_legacy_name` are skipped; the latter is delivered
+    separately without a tag. Scanning stops when `killed_event` is set.
+    Returns the delivered command count.
+    """
     prefix = f'{token}_'
     count = 0
     for path in sorted(cmd_dir.iterdir()):
