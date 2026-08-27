@@ -7,6 +7,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKGROUND_PATH = ROOT / 'extension' / 'background.js'
 
+_JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
+
+
+def directive_entries(source, directive):
+    """Names one `/* directive ... */` comment lists, in source order."""
+    names = []
+    pattern = re.compile(rf'/\*\s*{directive}\b([^*]*)\*/')
+    for match in pattern.finditer(source):
+        for item in match.group(1).split(','):
+            name = item.strip().partition(':')[0]
+            if name:
+                assert re.fullmatch(_JS_IDENTIFIER, name), (
+                    f'unreadable {directive} directive entry {name!r}')
+                names.append(name)
+    return names
+
 
 def imported_worker_paths(background_path=BACKGROUND_PATH):
     background_path = Path(background_path)

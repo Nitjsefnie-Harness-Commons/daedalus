@@ -13,9 +13,9 @@ from _boundary import (observe_extension_worker_paths,  # noqa: E402
 from _jsread import js_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_runtime import observe_worker_runtime  # noqa: E402
-from _worker_sources import worker_source_paths  # noqa: E402
+from _worker_sources import (directive_entries,  # noqa: E402
+                             worker_source_paths)
 
-_JS_IDENTIFIER = r'[A-Za-z_$][\w$]*'
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
     'Promise', 'Set', 'String', 'TextDecoder', 'URL',
@@ -78,21 +78,8 @@ def _runtime_observations(watched_by_source=None):
     }, observed['shared']
 
 
-def _directive_entries(source, directive):
-    names = []
-    pattern = re.compile(rf'/\*\s*{directive}\b([^*]*)\*/')
-    for match in pattern.finditer(source):
-        for item in match.group(1).split(','):
-            name = item.strip().partition(':')[0]
-            if name:
-                assert re.fullmatch(_JS_IDENTIFIER, name), (
-                    f'unreadable {directive} directive entry {name!r}')
-                names.append(name)
-    return names
-
-
 def _directive_names(source, directive):
-    return set(_directive_entries(source, directive))
+    return set(directive_entries(source, directive))
 
 
 def _masked_code_mentions(masked_source, name):
@@ -305,7 +292,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         module_path = extension_root / relative
         assert module_path.is_file(), f'{relative} does not exist'
         module = module_path.read_text(encoding='utf-8')
-        exported = _directive_entries(module, 'exported')
+        exported = directive_entries(module, 'exported')
         duplicates = sorted(
             name for name, count in Counter(exported).items() if count > 1)
         if duplicates:
