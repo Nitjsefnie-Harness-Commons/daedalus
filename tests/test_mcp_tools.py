@@ -322,11 +322,14 @@ def _release_composition(composition):
 
 
 def test_every_registered_tool_keeps_its_own_bridge(_tmp):
-    """Executed tools stay local and the first bridge dies after teardown.
+    """No executed tool retains the peer bridge object at teardown.
 
-    The collector covers every strong retention path, and existing weak
-    aliases are rejected directly. A store that never happens on an executed
-    path leaves nothing to detect.
+    After registration and default tool paths run, the first bridge must have
+    no weak alias and its observation weak reference must be dead immediately
+    after collection. The check cannot see independently usable derivatives,
+    such as a cached authentication dictionary or a copied bridge. Cyclic
+    finalization can also resurrect the bridge after clearing that weak
+    reference, so liveness is established only at the teardown observation.
     """
     first_composition = _load_composition('first')
     assert hasattr(first_composition, 'tool_module_inventory'), (
@@ -359,11 +362,14 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
 
 
 def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
-    """No registered tool's executable code is authored in composition.
+    """No registered tool lexically reaches composition-authored behavior.
 
-    Own and nested code, closure-reachable functions, and ``__wrapped__``
-    functions are checked. Helper-authored behavior is allowed; deliberately
-    forged code origins remain outside this property.
+    The check follows the callable's own and nested code, functions in closure
+    cells, and ``__wrapped__`` links. It allows helper-authored handlers and
+    does not detect composition-authored functions found dynamically at call
+    time through globals, imports, module attributes, ``getattr``, or
+    dictionaries. Code objects with deliberately forged origins are also
+    outside the property.
     """
     composition = _load_composition('composition-origin')
     composition_path = (_util.ROOT / 'mcp_server.py').resolve()
