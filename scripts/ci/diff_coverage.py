@@ -263,6 +263,10 @@ def _measured_source(path):
     """
     if path.lower().endswith('.py'):
         return not path.startswith('tests/')
+    # Case-sensitive where the Python branch above is not, on purpose:
+    # the JavaScript measurer scans case-sensitive `.js` under exactly
+    # extension/ and dashboard/, so a lowercased guard could demand a
+    # file the measurer is incapable of naming.
     return _shipped_javascript(path)
 
 
