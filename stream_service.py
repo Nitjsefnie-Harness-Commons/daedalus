@@ -16,8 +16,15 @@ _stream_lock = threading.Lock()
 _last_delivery_ts = 0.0
 
 
-def register(key, tab):
-    """Register one connection, replacing the live stream for `key`."""
+def register(token, tab):
+    """Register one connection and return its opaque id and kill event.
+
+    Named streams replace an existing stream when their `(token, tab)` values
+    compare equal. A tabless stream never replaces and is never replaced. The
+    caller owns the returned pair: it stops when the event is set and passes
+    both values to `unregister` when the connection ends.
+    """
+    key = (token, tab) if tab else None
     killed_event = threading.Event()
     with _stream_lock:
         # None is not an identity another connection can claim. A tabless
@@ -46,6 +53,9 @@ def unregister(stream_id, killed_event):
 def snapshot():
     """Return the live connection count and sorted distinct tab names."""
     with _stream_lock:
+        # Count connections, not distinct display names: two tokens streaming
+        # the same named tab are two live workers even though stream_tabs has
+        # one distinct name for them.
         return (
             len(_active_streams),
             sorted({entry['tab'] for entry in _active_streams.values()}),

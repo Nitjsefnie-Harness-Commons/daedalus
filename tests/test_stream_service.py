@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Standalone state and lifecycle guarantees for the SSE stream service."""
 import threading
-import time
 
 from pathlib import Path
 import sys
@@ -14,24 +13,29 @@ def _load_service(name):
     return _util.load(_util.ROOT / 'stream_service.py', name=name)
 
 
-def test_register_returns_id_event_and_makes_stream_live(_tmp):
+def test_register_returns_handles_that_unregister_the_stream(_tmp):
     service = _load_service('stream_service_register')
 
-    stream_id, killed = service.register(('tok', 'tab'), 'tab')
+    stream_id, killed = service.register('tok', 'tab')
 
-    live, _tabs = service.snapshot()
-    assert isinstance(stream_id, int), (
-        f'register returned non-integer stream id: {stream_id!r}')
     assert isinstance(killed, threading.Event), killed
     assert not killed.is_set()
-    assert live == 1, live
+    assert service.snapshot() == (1, ['tab'])
+
+    service.unregister(stream_id, killed)
+
+    assert service.snapshot() == (0, [])
 
 
-def test_register_replaces_an_existing_stream_with_the_same_key(_tmp):
+def test_register_replaces_equal_but_distinct_domain_inputs(_tmp):
     service = _load_service('stream_service_replace')
-    first_id, first_killed = service.register(('tok', 'tab'), 'tab')
+    first_inputs = tuple(['tok', 'tab'])
+    second_inputs = tuple(['tok', 'tab'])
+    assert first_inputs == second_inputs
+    assert first_inputs is not second_inputs
+    first_id, first_killed = service.register(*first_inputs)
 
-    second_id, second_killed = service.register(('tok', 'tab'), 'tab')
+    second_id, second_killed = service.register(*second_inputs)
 
     live, _tabs = service.snapshot()
     assert first_id != second_id
@@ -40,11 +44,22 @@ def test_register_replaces_an_existing_stream_with_the_same_key(_tmp):
     assert live == 1, live
 
 
+def test_streams_for_two_tabs_of_one_token_coexist(_tmp):
+    service = _load_service('stream_service_domain_inputs')
+
+    _first_id, first_killed = service.register('tok', 'first')
+    _second_id, second_killed = service.register('tok', 'second')
+
+    assert not first_killed.is_set()
+    assert not second_killed.is_set()
+    assert service.snapshot() == (2, ['first', 'second'])
+
+
 def test_two_tabless_streams_coexist_without_killing_either(_tmp):
     service = _load_service('stream_service_tabless')
-    _first_id, first_killed = service.register(None, '')
+    _first_id, first_killed = service.register('tok', '')
 
-    _second_id, second_killed = service.register(None, '')
+    _second_id, second_killed = service.register('tok', '')
 
     live, _tabs = service.snapshot()
     assert not first_killed.is_set()
@@ -54,8 +69,8 @@ def test_two_tabless_streams_coexist_without_killing_either(_tmp):
 
 def test_unregister_with_stale_kill_event_keeps_replacement(_tmp):
     service = _load_service('stream_service_stale_unregister')
-    _first_id, first_killed = service.register(('tok', 'tab'), 'tab')
-    second_id, second_killed = service.register(('tok', 'tab'), 'tab')
+    _first_id, first_killed = service.register('tok', 'tab')
+    second_id, second_killed = service.register('tok', 'tab')
 
     service.unregister(second_id, first_killed)
 
@@ -66,24 +81,25 @@ def test_unregister_with_stale_kill_event_keeps_replacement(_tmp):
 
 def test_snapshot_reports_live_count_and_tab_names_including_empty(_tmp):
     service = _load_service('stream_service_snapshot')
-    service.register(('tok-a', 'first'), 'first')
-    service.register(('tok-b', 'second'), 'second')
-    service.register(None, '')
+    service.register('tok-a', 'shared')
+    service.register('tok-b', 'shared')
+    service.register('tok-c', '')
 
-    assert service.snapshot() == (3, ['', 'first', 'second'])
+    assert service.snapshot() == (3, ['', 'shared'])
 
 
-def test_delivery_clock_is_unset_until_delivery_is_recorded(_tmp):
+def test_delivery_clock_records_each_delivery(_tmp):
     service = _load_service('stream_service_delivery_clock')
+    ticks = iter((10.0, 20.0))
+    service.time = type(
+        'Clock', (), {'time': staticmethod(lambda: next(ticks))})
     assert service.last_delivery_at() is None
-    before = time.time()
 
     service.record_delivery()
+    assert service.last_delivery_at() == 10.0
 
-    delivered_at = service.last_delivery_at()
-    assert isinstance(delivered_at, float), (
-        f'delivery clock stayed unset: {delivered_at!r}')
-    assert before <= delivered_at <= time.time(), delivered_at
+    service.record_delivery()
+    assert service.last_delivery_at() == 20.0
 
 
 if __name__ == '__main__':

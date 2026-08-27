@@ -596,6 +596,51 @@ def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
     assert '[Daedalus] Listening on 127.0.0.1:' in message, message
 
 
+def test_queue_delivery_updates_the_health_clock(tmp):
+    with _util.bridge(tmp) as (base, _docroot):
+        conn, response = stream_response(base, TOK, tab='extension')
+        try:
+            status, health = _util.get_json(base + '/health')
+            assert status == 200, (status, health)
+            assert health['last_delivery_s_ago'] is None, health
+
+            status, body = put_command(
+                base, {'token': TOK, 'tab': 'extension',
+                       'id': 'queue-clock', 'code': '1'})
+            assert status == 200, (status, body)
+            delivered = next_stream_data(response)
+            assert delivered['id'] == 'queue-clock', delivered
+
+            status, health = _util.get_json(base + '/health')
+            assert status == 200, (status, health)
+            assert health['last_delivery_s_ago'] is not None, health
+        finally:
+            response.close()
+            conn.close()
+
+
+def test_legacy_delivery_updates_the_health_clock(tmp):
+    with _util.bridge(tmp) as (base, docroot):
+        conn, response = stream_response(base, TOK, tab='extension')
+        try:
+            status, health = _util.get_json(base + '/health')
+            assert status == 200, (status, health)
+            assert health['last_delivery_s_ago'] is None, health
+
+            legacy = Path(docroot) / 'commands' / f'{TOK}.json'
+            legacy.write_text(
+                '{"id":"legacy-clock","code":"1"}', encoding='utf-8')
+            delivered = next_stream_data(response)
+            assert delivered['id'] == 'legacy-clock', delivered
+
+            status, health = _util.get_json(base + '/health')
+            assert status == 200, (status, health)
+            assert health['last_delivery_s_ago'] is not None, health
+        finally:
+            response.close()
+            conn.close()
+
+
 def test_health_counts_a_stream_that_named_no_tab(tmp):
     """A stream with no tab selector is still a stream.
 
