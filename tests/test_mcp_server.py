@@ -49,10 +49,7 @@ def _need_deps():
 
 
 def _load_mcp(base_url):
-    """Import mcp_server.py pointed at this bridge; a fresh module each call
-    (its httpx client is module-level and bound to DAEDALUS_LOCAL_URL at
-    import time). Loading by file path does not add the repository root to
-    sys.path the way executing mcp_server.py does, so mirror that here."""
+    """Import mcp_server.py with a private bridge session bound at import."""
     prev = os.environ.get('DAEDALUS_LOCAL_URL')
     root = str(_util.ROOT)
     added_root = root not in sys.path
@@ -591,7 +588,7 @@ def test_serve_crash_line_survives_a_hostile_decode_return(tmp):
 def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
     """The refusal has to land before the PUT, not after it.
 
-    _poll_result evaluates the deadline only after the command has been
+    poll_result evaluates the deadline only after the command has been
     submitted, so a non-positive timeout polled zero times, raised a timeout
     for a command the browser had already been handed, and left the caller
     believing nothing ran.
@@ -962,15 +959,16 @@ def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
         mod = _load_mcp(base)
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
         release_waiters = threading.Event()
-        original_poll = mod._poll_result
+        original_poll = mod.bridge.poll_result
+        held_ids, box = set(), {}
 
         async def gated_poll(*args, **kwargs):
+            held_ids.add(kwargs['expect_delivery'])
             while not release_waiters.is_set():
                 await asyncio.sleep(0.01)
             return await original_poll(*args, **kwargs)
 
-        mod._poll_result = gated_poll
-        box = {}
+        mod.bridge.poll_result = gated_poll
 
         def run_callers():
             mod._token.set(TOK)
@@ -987,31 +985,33 @@ def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
                 box['error'] = exc
 
         worker = threading.Thread(target=run_callers)
-        worker.start()
-        deadline = time.time() + 20
-        while time.time() < deadline:
+        try:
+            worker.start()
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+                if len(files) == len(held_ids) == len(owners):
+                    break
+                time.sleep(0.05)
             files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
-            if len(files) == len(owners):
-                break
-            if not worker.is_alive():
-                break
-            time.sleep(0.05)
-        files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
-        assert len(files) == len(owners), (files, box)
-        commands = [json.loads(path.read_text(encoding='utf-8'))
-                    for path in files]
-        by_owner = {command['domain']: command for command in commands}
-        assert set(by_owner) == set(owners), commands
-
-        for owner in owners:
-            command = by_owner[owner]
-            status, body = _util.post_json(base + '/result', {
-                'token': TOK, 'tabId': 'extension', 'id': command['id'],
-                'result': [{'domain': owner}], 'error': None, 'ts': 1,
-                '_did': command['_did']})
-            assert status == 200 and body == {'ok': True}, (status, body)
-        release_waiters.set()
-        worker.join(timeout=60)
+            assert len(files) == len(held_ids) == len(owners), (files, box)
+            commands = [json.loads(path.read_text(encoding='utf-8'))
+                        for path in files]
+            by_owner = {command['domain']: command for command in commands}
+            for owner in owners:
+                command = by_owner[owner]
+                status, body = _util.post_json(base + '/result', {
+                    'token': TOK, 'tabId': 'extension', 'id': command['id'],
+                    'result': [{'domain': owner}], 'error': None, 'ts': 1,
+                    '_did': command['_did']})
+                assert status == 200 and body == {'ok': True}, (status, body)
+            delivery_dir = Path(docroot) / 'results' / 'deliveries'
+            files = list((delivery_dir / f'{TOK}_extension').glob('*.json'))
+            assert len(files) == len(owners), files
+        finally:
+            release_waiters.set()
+            worker.join(timeout=60)
+            mod.bridge.poll_result = original_poll
         assert not worker.is_alive(), box
         if 'error' in box:
             raise box['error']
