@@ -47,6 +47,18 @@ class _DrainThreadDouble:
         return self.alive
 
 
+class _WaitableLines(list):
+    def __init__(self, awaited):
+        super().__init__()
+        self.awaited = awaited
+        self.ready = threading.Event()
+
+    def append(self, line):
+        super().append(line)
+        if line == self.awaited:
+            self.ready.set()
+
+
 def test_child_exit_during_startup_reports_exit_code(tmp):
     """A child that dies before announcing reports its process exit code."""
     del tmp
@@ -70,7 +82,7 @@ def test_drain_lines_records_pump_thread_on_child(tmp):
     drained = _util.drain_lines(proc)
     thread = getattr(proc, '_daedalus_drain_thread', None)
     assert isinstance(thread, threading.Thread), thread
-    thread.join(timeout=10)
+    thread.join()
     assert not thread.is_alive()
     assert drained == ['wired pump marker\n']
 
@@ -163,10 +175,15 @@ def test_live_child_startup_timeout_reports_observations(tmp):
         [sys.executable, '-c', program],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
+        marker = 'recognisable startup line\n'
+        drained = _WaitableLines(marker)
+        _util.drain_lines(proc, drained)
+        drained.ready.wait()
+        assert marker in drained, drained
         failure = ''
         try:
             _util.await_listening_line(
-                proc, _util.drain_lines(proc), timeout=1)
+                proc, drained, timeout=1)
         except RuntimeError as exc:
             failure = str(exc)
         assert 'did not announce its port in 1s' in failure, failure
