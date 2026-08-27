@@ -579,3 +579,5 @@ git config core.hooksPath .githooks
 If the browser loads the extension from a different checkout than the one you
 edit, install the hooks there too — and remember that reloading the extension
 re-reads the files on the browser's side, not yours.
+
+<!-- docs-only probe for issue 248; throwaway branch -->
