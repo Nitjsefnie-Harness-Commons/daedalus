@@ -1,4 +1,4 @@
-"""Environment-setting parsers shared by the bridge and MCP front ends.
+"""Environment-free HTTP constants and parsers shared by both front ends.
 
 The parsers live in this environment-free module so the MCP front end can
 share them without importing server.py. Importing server.py requires its
@@ -7,6 +7,13 @@ startup; this module reads no environment until a parser is called.
 """
 import math
 import os
+
+
+# Refused request bodies are discarded only far enough to keep an ordinary
+# refusal from becoming a connection reset. Both HTTP front ends use this
+# environment-free leaf module, so one bound governs both without either
+# importing the other's startup path.
+REFUSED_BODY_DRAIN = 65536
 
 
 def env_int(name, default, minimum, maximum=None):
