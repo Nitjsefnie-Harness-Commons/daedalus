@@ -167,7 +167,7 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
     if sitecustomize:
         (root / 'tests' / 'sitecustomize.py').write_text(
             sitecustomize, encoding='utf-8')
-    env = _util.coverage_free_environment(os.environ)
+    env = dict(os.environ)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     if sitecustomize:
         inherited_path = env.get('PYTHONPATH')
