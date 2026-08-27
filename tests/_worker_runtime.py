@@ -31,6 +31,7 @@ function escapedIdentifier(name) {
 
 function readBinding(workerContext, name, source) {
   const identifier = escapedIdentifier(name);
+  if (identifier === '') return { probeable: false };
   let lexicalProbe;
   try {
     new vm.Script(
@@ -204,6 +205,8 @@ function observedBindings(states, shared) {
       const after = readBinding(
         state.workerContext, name, state.details.path);
       if (!before.probeable || !after.probeable) continue;
+      // A lexical binding whose name no other source supplies is unseen:
+      // discovery is by name; a classic-script lexical publishes no name.
       if (state.propertyBindings.has(name)
           || (!before.available && after.available)) {
         bindings.push(name);

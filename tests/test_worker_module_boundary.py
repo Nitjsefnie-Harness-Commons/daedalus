@@ -521,6 +521,41 @@ def test_worker_imports_match_worker_modules(tmp):
     }
 
 
+def test_runtime_observer_skips_degenerate_candidate_names(tmp):
+    """Empty, whitespace, and escape-text properties are not bindings."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'degenerate.js'
+    worker.write_text(
+        "globalThis[''] = 1;\n"
+        "globalThis['   '] = 1;\n"
+        "globalThis['\\\\u0061'] = 1;\n",
+        encoding='utf-8')
+    result = observe_worker_runtime([{
+        'path': worker, 'globals': (), 'watched': (),
+    }], background_path=background)
+    observed = result['sources'][str(worker)]
+    assert result['shared']['error'] is None
+    assert observed['bindingExecutionError'] is None
+    assert observed['bindings'] == [], observed
+
+
+def test_limitation_unknown_lexical_name_is_not_attributed(tmp):
+    """A lexical-only name with no candidate source is not attributed."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'lexical.js'
+    worker.write_text('let taskThreeOnlyLexical;\n', encoding='utf-8')
+    observed = observe_worker_runtime([{
+        'path': worker, 'globals': (), 'watched': (),
+    }], background_path=background)['sources'][str(worker)]
+    assert observed['bindings'] == [], observed
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='workermodule_')
 
