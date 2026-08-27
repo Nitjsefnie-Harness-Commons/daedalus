@@ -744,7 +744,7 @@ def test_list_tabs_tool_against_real_bridge(tmp):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': '7', 'url': 'https://example.com/mcp', 'title': 'M'}]})
         mod = _load_mcp(base)
-        mod._token.set(TOK)  # what _BearerAuth does per request
+        mod._token.set(TOK)  # what mcp_auth.BearerAuth does per request
         tabs = asyncio.run(mod.list_tabs())
         assert isinstance(tabs, list) and len(tabs) == 1, tabs
         assert tabs[0]['tabId'] == '7'
@@ -1625,7 +1625,7 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     def run():
         # The token is a ContextVar, and a thread starts with a fresh context:
         # setting it on the caller's thread leaves the tool answering "no token
-        # in context". _BearerAuth sets it per request for the same reason.
+        # in context". BearerAuth sets it per request for the same reason.
         mod._token.set(TOK)
         try:
             box['value'] = asyncio.run(call())
@@ -1664,7 +1664,7 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
     _need_deps()
     with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
         mod = _load_mcp(base)
-        mod._token.set(TOK)  # what _BearerAuth does per request
+        mod._token.set(TOK)  # what mcp_auth.BearerAuth does per request
         cases = (
             (lambda: mod.open_tab('https://example.com'), 'open-tab',
              {'url': 'https://example.com'}),
