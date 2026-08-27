@@ -32,6 +32,14 @@ DOCUMENTATION_MATRIX = {'os': ['ubuntu-latest'], 'python': ['3.13']}
 
 _HEX40 = frozenset('0123456789abcdef')
 
+# The compare endpoint caps `files` at 300 entries; a list that long may
+# be truncated, and a truncated list can read as documentation-only.
+COMPARE_FILES_CAP = 300
+
+# The pulls files endpoint paginates, but the API hard-caps the collection
+# at 3000 files; past that a code file can sort beyond the cutoff unseen.
+PULL_REQUEST_FILES_CAP = 3000
+
 
 def matches(pattern, path):
     """Whether a GitHub filter `pattern` selects `path`."""
@@ -61,15 +69,13 @@ def _hex40(value):
             and all(char in _HEX40 for char in value))
 
 
-def _read(run, argv, capped=False):
+def _read(run, argv, cap=None):
     try:
         stdout = run(argv)
     except Exception:  # any read failure means over-run, never under-run
         return None
     paths = [line for line in stdout.splitlines() if line]
-    # The compare endpoint caps `files` at 300 entries; a list that long may
-    # be truncated, and a truncated list can read as documentation-only.
-    if capped and len(paths) >= 300:
+    if cap is not None and len(paths) >= cap:
         return None
     return paths or None
 
@@ -88,7 +94,7 @@ def changed_paths(event, run):
         return _read(run, [
             'gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',
             f'repos/{repository}/pulls/{number}/files', '--jq',
-            '.[].filename'])
+            '.[].filename'], cap=PULL_REQUEST_FILES_CAP)
     if name == 'push':
         before, sha = event.get('before'), event.get('sha')
         if not (_hex40(before) and _hex40(sha)) or before == '0' * 40:
@@ -96,7 +102,7 @@ def changed_paths(event, run):
         return _read(run, [
             'gh', 'api', '-H', 'Cache-Control: no-cache',
             f'repos/{repository}/compare/{before}...{sha}', '--jq',
-            '.files[].filename'], capped=True)
+            '.files[].filename'], cap=COMPARE_FILES_CAP)
     return None
 
 
