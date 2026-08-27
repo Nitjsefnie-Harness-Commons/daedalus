@@ -58,14 +58,24 @@ def _vm_file_read_calls(source_files=None):
 
 
 def _assert_vm_file_loads_are_named(calls, expected_count):
+    """Enforce one canonical spelling for shipped-file VM loads.
+
+    This is a spelling contract on our own test harnesses, chosen so the
+    check can be exact without modelling JavaScript semantics. The cost is
+    that a correct-but-unusual spelling must be rewritten rather than taught
+    to the guard.
+    """
     assert len(calls) == expected_count, [
         (path, expression) for path, expression, _ in calls]
     for path, expression, call in calls:
         arguments = _split_js_arguments(call)
-        filename = (_filename_option(arguments[2])
-                    if len(arguments) >= 3 else None)
-        assert filename == ''.join(expression.split()), (
-            path, expression, call)
+        expected = '{filename:' + ''.join(expression.split()) + '}'
+        actual = (''.join(arguments[2].split())
+                  if len(arguments) == 3 else None)
+        assert actual == expected, (
+            path, expression, call,
+            'Use exactly { filename: <the same expression passed to '
+            'fs.readFileSync> }.')
 
 
 def _skip_js_string(source, index):
@@ -106,57 +116,6 @@ def _split_js_arguments(call):
             argument_start = index + 1
         index += 1
     return arguments
-
-
-def _filename_option(options):
-    brace_depth = 0
-    index = 0
-    while index < len(options):
-        char = options[index]
-        if char in '\'"`':
-            index = _skip_js_string(options, index)
-            continue
-        if char == '{':
-            brace_depth += 1
-        elif char == '}':
-            brace_depth -= 1
-        elif brace_depth == 1 and options.startswith('filename', index):
-            before = options[index - 1] if index else ''
-            after = options[index + len('filename')]
-            if (before not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-                    'abcdefghijklmnopqrstuvwxyz0123456789_$'
-                    and after not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-                    'abcdefghijklmnopqrstuvwxyz0123456789_$'):
-                end = index + len('filename')
-                while end < len(options) and options[end].isspace():
-                    end += 1
-                if end < len(options) and options[end] == ':':
-                    value_start = end + 1
-                    value_end = _filename_value_end(options, value_start)
-                    return ''.join(options[value_start:value_end].split())
-        index += 1
-    return None
-
-
-def _filename_value_end(options, start):
-    depths = {'(': 0, '[': 0, '{': 0}
-    index = start
-    while index < len(options):
-        char = options[index]
-        if char in '\'"`':
-            index = _skip_js_string(options, index)
-            continue
-        if char in '([{':
-            depths[char] += 1
-        elif char in ')]}':
-            opener = {')': '(', ']': '[', '}': '{'}[char]
-            if not depths[opener]:
-                return index
-            depths[opener] -= 1
-        elif char == ',' and not any(depths.values()):
-            return index
-        index += 1
-    return index
 
 
 def _guard_accepts_source(tmp, source):
@@ -204,6 +163,75 @@ def test_guard_accepts_whitespace_between_file_load_tokens(tmp):
         '  { filename: backgroundPath });')
     assert _guard_accepts_source(tmp, source), (
         'guard rejected harmless whitespace and line breaks')
+
+
+def test_guard_rejects_a_duplicate_filename_key(tmp):
+    """A later duplicate filename key is outside the spelling contract."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, { filename: backgroundPath, "
+              "filename: backgroundPath + '.wrong' });")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted a duplicate filename key')
+
+
+def test_guard_rejects_a_later_filename_spread(tmp):
+    """A spread that can overwrite filename is outside the contract."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, { filename: backgroundPath, "
+              "...{ filename: backgroundPath + '.wrong' } });")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted a later filename spread')
+
+
+def test_guard_rejects_a_filename_from_a_spread(tmp):
+    """A spread-only filename is outside the canonical spelling."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, { ...{ filename: backgroundPath } });")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted a filename supplied by a spread')
+
+
+def test_guard_rejects_a_second_options_property(tmp):
+    """A second options property is outside the canonical spelling."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, { filename: backgroundPath, context });")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted a second options property')
+
+
+def test_guard_rejects_a_computed_filename_key(tmp):
+    """A computed filename key is outside the canonical spelling."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, { ['filename']: backgroundPath });")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted a computed filename key')
+
+
+def test_guard_rejects_an_options_variable(tmp):
+    """An options object held in a variable is outside the contract."""
+    source = ("const backgroundOptions = { filename: backgroundPath };\n"
+              "vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, backgroundOptions);")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted an options variable')
+
+
+def test_guard_rejects_a_parenthesized_filename_value(tmp):
+    """Parentheses around filename are outside the canonical spelling."""
+    source = ("vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), "
+              "context, { filename: (backgroundPath) });")
+    assert not _guard_accepts_source(tmp, source), (
+        'guard accepted a parenthesized filename value')
+
+
+def test_guard_accepts_the_canonical_filename_spelling(tmp):
+    """The canonical spelling accepts whitespace and line breaks."""
+    source = (
+        'vm . runInContext ( fs . readFileSync ( backgroundPath ,\n'
+        "  'utf8' ) , context , {\n"
+        '  filename :\n  backgroundPath\n} );')
+    assert _guard_accepts_source(tmp, source), (
+        'guard rejected the canonical filename spelling')
 
 
 def test_v8_coverage_attributes_the_shipped_background_script(tmp):
