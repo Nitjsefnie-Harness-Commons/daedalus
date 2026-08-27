@@ -246,6 +246,7 @@
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
 !/tests/test_js_coverage.py
+!/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
 !/tests/test_mcp_server.py
 !/tests/test_overlap_harness.py
