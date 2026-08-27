@@ -178,7 +178,7 @@ def test_compatibility_consume_retries_are_bounded(tmp):
     patch_gate.mkdir()
     (patch_dir / 'sitecustomize.py').write_text(
         'import pathlib\n'
-        'import sys;sys.path.insert(0,".");import result_store\n'
+        'import sys;sys.path.insert(0,".");from daedalus_bridge import result_store\n'
         'import os\n'
         'import threading\n'
         'import time\n'
@@ -240,7 +240,7 @@ def test_bounded_consume_fallback_still_honours_expected(tmp):
     patch_gate.mkdir()
     (patch_dir / 'sitecustomize.py').write_text(
         'import pathlib\n'
-        'import sys;sys.path.insert(0,".");import result_store\n'
+        'import sys;sys.path.insert(0,".");from daedalus_bridge import result_store\n'
         'import os\n'
         'import threading\n'
         'import time\n'
@@ -416,7 +416,7 @@ def test_delivery_write_cannot_race_compatibility_cleanup(tmp):
 _STRIPE_SITE_CUSTOMIZE = r'''
 import os
 import pathlib
-import sys;sys.path.insert(0,'.');import result_store
+import sys;sys.path.insert(0,'.');from daedalus_bridge import result_store
 import threading
 import time
 import traceback
@@ -804,7 +804,7 @@ def test_failed_delivery_stamp_skips_eviction_with_distinct_stamps(tmp):
     (patch_dir / 'sitecustomize.py').write_text(
         'import os\n'
         'import pathlib\n'
-        'import sys;sys.path.insert(0,".");import result_store\n'
+        'import sys;sys.path.insert(0,".");from daedalus_bridge import result_store\n'
         'import threading\n'
         'import time\n'
         'gate = pathlib.Path(os.environ["UTIME_GATE_DIR"])\n'
@@ -916,7 +916,8 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
         repo = Path(__file__).resolve().parents[1]
         sys.path.insert(0, str(repo))
         try:
-            result_store = _util.load(repo / 'result_store.py', name='rs')
+            result_store = _util.load(
+                repo / 'daedalus_bridge' / 'result_store.py', name='rs')
         finally:
             sys.path.pop(0)
         result_store.DELIVERY_DIR.parent.mkdir(parents=True)

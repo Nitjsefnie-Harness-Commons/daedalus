@@ -1,12 +1,12 @@
 """Segment job records and HLS segment usage accounting."""
 import os, json, hmac, secrets, threading, time
 
-import atomic_file
-from bridge_config import (
+from daedalus_bridge import atomic_file
+from daedalus_bridge.config import (
     DEBUG_TIMING, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
     MAX_SEGMENTS_PER_JOB, SEG_DIR,
 )
-import path_safety
+from daedalus_bridge import path_safety
 
 
 # One flat job namespace under the data root: segments/<job>/ holds the .ts

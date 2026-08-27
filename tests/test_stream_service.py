@@ -13,7 +13,8 @@ import _util  # noqa: E402
 
 
 def _load_service(name):
-    return _util.load(_util.ROOT / 'stream_service.py', name=name)
+    return _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'stream_service.py', name=name)
 
 
 class _RecordingByteSink:
@@ -37,7 +38,7 @@ def test_stream_service_imports_without_daedalus_configuration(_tmp):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('DAEDALUS_') and key != 'TOKEN'}
     loaded = subprocess.run(
-        [sys.executable, '-c', 'import stream_service'],
+        [sys.executable, '-c', 'import daedalus_bridge.stream_service'],
         cwd=str(_util.ROOT), env=env, stderr=subprocess.PIPE, text=True)
     assert loaded.returncode == 0, loaded.stderr
 

@@ -22,8 +22,8 @@ import mcp_tools_media
 import mcp_tools_network
 import mcp_tools_tabs
 from daedalus_cli.output import configure_stdio
-from env_config import env_int
-from log_safe import log_safe
+from daedalus_bridge.env_config import env_int
+from daedalus_bridge.log_safe import log_safe
 import mcp_request_guard
 from mcp_transport import BridgeSession, BridgeTransport
 

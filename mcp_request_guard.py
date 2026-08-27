@@ -7,7 +7,7 @@ from starlette.responses import JSONResponse
 
 from daedalus_cli import ambiguous_request_carrier
 from daedalus_cli.transport import token as _configured_token
-from env_config import REFUSED_BODY_DRAIN
+from daedalus_bridge.env_config import REFUSED_BODY_DRAIN
 
 
 __all__ = ('drain_refused_body', 'early_refusal', 'request_token')

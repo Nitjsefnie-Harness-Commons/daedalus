@@ -2,7 +2,7 @@
 import os
 import pathlib
 
-from env_config import env_int, env_positive_float
+from daedalus_bridge.env_config import env_int, env_positive_float
 
 
 if 'DAEDALUS_DIR' not in os.environ:
