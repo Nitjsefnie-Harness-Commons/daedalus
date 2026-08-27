@@ -177,7 +177,6 @@ def _load_mcp(max_body_size=None):
 
 
 def test_request_token_is_public_guard_state(tmp):
-    """The guard publishes the same request token state MCP tools consume."""
     del tmp
     _need_deps()
     mod = _load_mcp()
@@ -186,7 +185,6 @@ def test_request_token_is_public_guard_state(tmp):
 
 
 def test_disconnect_during_drain_preserves_refusal(tmp):
-    """A peer disconnect cannot replace an already-decided refusal."""
     del tmp
     _need_deps()
     from starlette.requests import ClientDisconnect
@@ -234,7 +232,6 @@ def test_disconnect_during_drain_preserves_refusal(tmp):
 
 
 def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
-    """Header-decided refusals drain without materializing the request body."""
     del tmp
     _need_deps()
     mod = _load_mcp(max_body_size=4096)
