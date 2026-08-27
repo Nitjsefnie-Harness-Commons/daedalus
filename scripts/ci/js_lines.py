@@ -93,6 +93,15 @@ class _Scanner:
                 self._template()
                 previous = 'expression'
                 continue
+            if char == '?' and following == '.' and previous == 'expression':
+                self._advance(code=True)
+                self._advance(code=True)
+                previous = 'property'
+                continue
+            if char == '.' and previous == 'expression':
+                self._advance(code=True)
+                previous = 'property'
+                continue
             if char == '/':
                 if previous in ('start', 'prefix'):
                     self._regex()
@@ -114,7 +123,9 @@ class _Scanner:
                 self._error('escaped identifier is not modelled')
             if _identifier_start(char):
                 token = self._identifier()
-                if token in _REGEX_KEYWORDS:
+                if previous == 'property':
+                    previous = 'expression'
+                elif token in _REGEX_KEYWORDS:
                     previous = 'prefix'
                 elif token in _EXPRESSION_KEYWORDS:
                     previous = 'expression'
