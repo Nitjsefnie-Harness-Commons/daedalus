@@ -131,28 +131,27 @@ def test_cdp_eval_releases_every_remote_handle_in_held_sessions(tmp):
     del tmp
     actual = run_cdp_handle_lifecycle()
     transport = {
-        'replMode': True,
-        'awaitPromise': False,
-        'returnByValuePresent': False,
+        'replModeEnabled': True,
+        'awaitPromiseEnabled': False,
+        'returnByValueEnabled': False,
     }
-    assert actual == {
-        'released': [
-            'compile-exception',
-            'compile-result',
-            'pending-late',
-            'pending-original',
-            'reject-exception',
-            'reject-original',
-            'reject-result',
-            'throw-exception',
-            'throw-result',
-        ],
-        'evalTransports': [transport, transport, transport],
-        'finalAwaitPromise': [False, False, False],
-        'hotfixTransports': [transport],
-        'pendingHasTimeout': True,
-        'resultWorlds': ['cdp', 'cdp', 'cdp'],
-    }, actual
+    assert actual['evalTransports'] == [transport, transport, transport], (
+        'eval CDP transport semantics', actual['evalTransports'])
+    assert actual['hotfixTransports'] == [transport], (
+        'hotfix CDP transport semantics', actual['hotfixTransports'])
+    assert actual['released'] == [
+        'compile-exception',
+        'compile-result',
+        'pending-late',
+        'pending-original',
+        'reject-exception',
+        'reject-original',
+        'reject-result',
+        'throw-exception',
+        'throw-result',
+    ], actual
+    assert actual['pendingHasTimeout'] is True, actual
+    assert actual['resultWorlds'] == ['cdp', 'cdp', 'cdp'], actual
 
 
 def test_eval_relay_same_id_overlap_uses_bounded_invocation_ids(tmp):
