@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Per-registration bridge binding for every returned MCP tool."""
-import ast
 import asyncio
+import builtins
+import gc
 import importlib
 import inspect
 import sys
+import types
+import weakref
 from pathlib import Path
 from unittest import mock
 
@@ -139,15 +142,17 @@ REQUIRED_ARGUMENTS = {
 BRANCH_ARGUMENTS = {
     'screenshot': {'include_image': True},
 }
-MUTABLE_CONTAINER_NODES = (
-    ast.Dict,
-    ast.DictComp,
-    ast.List,
-    ast.ListComp,
-    ast.Set,
-    ast.SetComp,
-)
-MUTABLE_CONTAINER_FACTORIES = {'dict', 'list', 'set'}
+PROJECT_ROOT = _util.ROOT.resolve()
+TEST_SOURCE = Path(__file__).resolve()
+HARNESS_REFERENCE_IDS = {
+    id(globals()),
+    id(sys),
+    id(vars(sys)),
+    id(sys.modules),
+    id(builtins),
+    id(vars(builtins)),
+}
+HARNESS_REFERENCE_IDS.add(id(sys.modules[__name__]))
 
 
 def _load_composition(marker):
@@ -180,54 +185,151 @@ def _assert_inventory_matches_registry(composition):
         f'unregistered={len(inventoried - registered)}')
 
 
-def _is_mutable_container(node):
-    if isinstance(node, MUTABLE_CONTAINER_NODES):
-        return True
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id in MUTABLE_CONTAINER_FACTORIES
-    )
+def _project_source(filename):
+    path = Path(filename)
+    if not path.is_absolute():
+        return None
+    path = path.resolve()
+    if path.is_relative_to(PROJECT_ROOT):
+        return path
+    return None
 
 
-def _inside_local_scope(node, parents):
-    parent = parents.get(node)
-    while parent is not None:
-        if isinstance(parent, (
-                ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef,
-                ast.Lambda)):
-            return True
-        parent = parents.get(parent)
-    return False
+def _function_references(function):
+    source = _project_source(function.__code__.co_filename)
+    if source == TEST_SOURCE:
+        return
+    known = {
+        id(function.__code__),
+        id(function.__globals__),
+        id(getattr(function, '__builtins__', None)),
+    }
+    if function.__closure__:
+        known.add(id(function.__closure__))
+        for index, cell in enumerate(function.__closure__):
+            try:
+                value = cell.cell_contents
+            except ValueError:
+                continue
+            yield f'.__closure__[{index}]', value
+    if function.__defaults__:
+        known.add(id(function.__defaults__))
+        yield '.__defaults__', function.__defaults__
+    if function.__kwdefaults__:
+        known.add(id(function.__kwdefaults__))
+        yield '.__kwdefaults__', function.__kwdefaults__
+    namespace = vars(function)
+    known.add(id(namespace))
+    if namespace:
+        yield '.__dict__', namespace
+    if source is not None:
+        for name, value in function.__globals__.items():
+            if name != '__builtins__':
+                yield f'.__globals__[{name!r}]', value
+    for index, member in enumerate(gc.get_referents(function)):
+        if id(member) not in known:
+            yield f'.<function-referent-{index}>', member
 
 
-def _tool_module_state_violations():
-    violations = []
-    for path in sorted(_util.ROOT.glob('mcp_tools_*.py')):
-        tree = ast.parse(
-            path.read_text(encoding='utf-8'), filename=str(path))
-        parents = {
-            child: parent
-            for parent in ast.walk(tree)
-            for child in ast.iter_child_nodes(parent)
-        }
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Global):
-                names = ', '.join(node.names)
-                violations.append(
-                    f'{path.name}:{node.lineno}: global {names}')
-            elif isinstance(node, ast.Nonlocal):
-                names = ', '.join(node.names)
-                violations.append(
-                    f'{path.name}:{node.lineno}: nonlocal {names}')
-            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
-                value = node.value
-                if (not _inside_local_scope(node, parents)
-                        and _is_mutable_container(value)):
-                    violations.append(
-                        f'{path.name}:{node.lineno}: module-level '
-                        f'{type(value).__name__}')
-    return sorted(violations)
+def _project_module(module):
+    filename = getattr(module, '__file__', None)
+    if not filename:
+        return False
+    source = _project_source(filename)
+    return source is not None and source != TEST_SOURCE
+
+
+def _object_references(value):
+    if inspect.isfunction(value):
+        yield from _function_references(value)
+        return
+    if isinstance(value, types.ModuleType):
+        if _project_module(value):
+            for name, member in vars(value).items():
+                if name != '__builtins__':
+                    yield f'.__dict__[{name!r}]', member
+        return
+    if isinstance(value, dict):
+        for key, member in value.items():
+            yield '.<dict-key>', key
+            yield f'[{key!r}]', member
+        if value.__class__ is dict:
+            return
+    if isinstance(value, (list, tuple)):
+        for index, member in enumerate(value):
+            yield f'[{index}]', member
+        if value.__class__ in (list, tuple):
+            return
+    if isinstance(value, (frozenset, set)):
+        for member in value:
+            yield '.<set-member>', member
+        if value.__class__ in (frozenset, set):
+            return
+    if isinstance(value, type):
+        known = set()
+        for name, member in vars(value).items():
+            yield f'.__dict__[{name!r}]', member
+            known.add(id(member))
+        for index, base in enumerate(value.__mro__[1:], 1):
+            yield f'.__mro__[{index}]', base
+            known.add(id(base))
+        for index, member in enumerate(gc.get_referents(value)):
+            if id(member) not in known:
+                yield f'.<class-referent-{index}>', member
+        return
+    try:
+        namespace = vars(value)
+    except TypeError:
+        namespace = None
+    if namespace:
+        yield '.__dict__', namespace
+    value_type = type(value)
+    yield '.__class__', value_type
+    known = {id(value_type)}
+    if namespace is not None:
+        known.add(id(namespace))
+    for index, member in enumerate(gc.get_referents(value)):
+        if id(member) not in known:
+            yield f'.<referent-{index}>', member
+
+
+def _reference_path(root, target):
+    targets = {id(target)}
+    targets.update(id(alias) for alias in weakref.getweakrefs(target))
+    stack = [('tool', root)]
+    visited = set()
+    while stack:
+        path, value = stack.pop()
+        if id(value) in targets:
+            return path
+        identity = id(value)
+        if identity in visited or identity in HARNESS_REFERENCE_IDS:
+            continue
+        visited.add(identity)
+        if isinstance(value, (
+                bool, bytes, complex, float, int, str, type(None))):
+            continue
+        for edge, member in _object_references(value):
+            stack.append((path + edge, member))
+    return None
+
+
+def _assert_peer_bridge_unreachable(composition, peer, registration):
+    for name, tool in sorted(composition.mcp.registered.items()):
+        path = _reference_path(tool, peer.bridge)
+        assert path is None, (
+            f'{tool.__module__}.{name}: {registration} registered tool '
+            f'reaches peer bridge via {path}')
+
+
+def _wrapper_chain(tool):
+    unwrapped = inspect.unwrap(tool)
+    current = tool
+    while True:
+        yield current
+        if current is unwrapped:
+            return
+        current = current.__wrapped__
 
 
 def _tool_arguments(tool):
@@ -276,7 +378,12 @@ def _assert_bound_interactions(
 
 
 def test_every_registered_tool_keeps_its_own_bridge(_tmp):
-    """Every returned tool calls the bridge from its own registration."""
+    """Invoked tools stay local and post-run state holds no peer bridge.
+
+    This covers state present after registration and one invocation of every
+    tool. It cannot detect a crossing whose store and read both occur only on
+    unexecuted paths.
+    """
     first_composition = _load_composition('first')
     second_composition = _load_composition('second')
     assert hasattr(first_composition, 'tool_module_inventory'), (
@@ -340,28 +447,29 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
         'registered tool coverage mismatch: '
         f'not exercised={sorted(returned_callables - exercised_callables)}; '
         f'not returned={sorted(exercised_callables - returned_callables)}')
+    _assert_peer_bridge_unreachable(
+        first_composition, second_composition, 'first')
+    _assert_peer_bridge_unreachable(
+        second_composition, first_composition, 'second')
 
 
-def test_composition_point_defines_no_tools_directly(_tmp):
-    """No registered tool was compiled from the composition point."""
+def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
+    """No registered tool behavior is authored in the composition module.
+
+    Every ordinary ``__wrapped__`` layer is checked. Helper-authored behavior
+    is allowed; deliberately forged code origins are outside this property.
+    """
     composition = _load_composition('composition-origin')
     composition_path = (_util.ROOT / 'mcp_server.py').resolve()
     direct_tools = sorted(
-        f'{name} at {tool.__code__.co_filename}:'
-        f'{tool.__code__.co_firstlineno}'
+        f'{name} via {layer.__name__} at {layer.__code__.co_filename}:'
+        f'{layer.__code__.co_firstlineno}'
         for name, tool in composition.mcp.registered.items()
-        if Path(tool.__code__.co_filename).resolve() == composition_path)
+        for layer in _wrapper_chain(tool)
+        if Path(layer.__code__.co_filename).resolve() == composition_path)
     assert not direct_tools, (
-        'tools compiled from mcp_server.py: '
+        'tool behavior authored in mcp_server.py: '
         f'{direct_tools}')
-
-
-def test_tool_modules_hold_no_cross_registration_state(_tmp):
-    """Tool modules have no mutable module state or rebinding statements."""
-    violations = _tool_module_state_violations()
-    assert not violations, (
-        'tool modules can retain cross-registration state: '
-        f'{violations}')
 
 
 if __name__ == '__main__':
