@@ -136,6 +136,15 @@ def test_keywords_used_as_property_names_end_expressions(tmp):
     assert code_lines(source) == {1, 2, 3, 4, 5, 6}
 
 
+def test_brace_ended_receivers_can_have_keyword_properties(tmp):
+    """Object and class expressions retain member-access context."""
+    del tmp
+    source = (
+        'const objectValue = {}.yield / 2;\n'
+        'const classValue = class {}?.yield / 2;\n')
+    assert code_lines(source) == {1, 2}
+
+
 def test_division_follows_parentheses_identifiers_and_numbers(tmp):
     """Expression-ending tokens classify a slash as division."""
     del tmp

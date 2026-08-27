@@ -93,12 +93,13 @@ class _Scanner:
                 self._template()
                 previous = 'expression'
                 continue
-            if char == '?' and following == '.' and previous == 'expression':
+            if (char == '?' and following == '.'
+                    and previous in ('expression', 'brace')):
                 self._advance(code=True)
                 self._advance(code=True)
                 previous = 'property'
                 continue
-            if char == '.' and previous == 'expression':
+            if char == '.' and previous in ('expression', 'brace'):
                 self._advance(code=True)
                 previous = 'property'
                 continue
