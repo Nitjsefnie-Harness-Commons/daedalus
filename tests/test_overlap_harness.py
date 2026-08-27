@@ -106,10 +106,12 @@ def _wait_for_path(path):
 
 
 @contextlib.contextmanager
-def _slow_result_server():
+def _slow_result_server(post_delay=0):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             self.rfile.read(int(self.headers['Content-Length']))
+            if post_delay:
+                time.sleep(post_delay)
             self.send_response(200)
             self.send_header('Content-Length', '2')
             self.end_headers()
@@ -285,6 +287,30 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
             _worker(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
             wait_between=True, inner_wait=5)
+    assert ('timed out waiting for the first result to be consumed'
+            in failure), failure
+    assert 'outer backstop' not in failure, failure
+    _assert_step_trace(failure, [
+        'the worker script to initialize',
+        'the worker to load its config',
+        'the dispatchCommand calls to start',
+        'all cookie handlers to start',
+        'result POST for owner-a',
+        'the first result to be consumed',
+    ])
+
+
+def test_a_slow_result_post_cannot_preempt_the_consume_wait(tmp):
+    """A delayed result POST cannot spend the consume wait's inner bound."""
+    commands = [
+        {'id': '_cookies', 'domain': 'owner-a'},
+        {'id': '_cookies', 'domain': 'owner-b'},
+    ]
+    with _slow_result_server(post_delay=4) as base:
+        failure = _harness_failure(
+            _worker(tmp, _SETTLING_WORKER), commands=commands,
+            order=['owner-a', 'owner-b'], result_base=base,
+            wait_between=True, inner_wait=2)
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure
