@@ -409,6 +409,80 @@ function settle() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+async function runStreamTimers() {
+  vm.runInContext('stopStream()', context);
+  for (const timer of timers) timer.cleared = true;
+  timers.length = 0;
+
+  let reconnectFetches = 0;
+  context.fetch = async () => {
+    reconnectFetches++;
+    return response(503, { error: 'disabled' });
+  };
+  await vm.runInContext('startStream()', context);
+  const reconnectDelays = timers
+    .filter((timer) => !timer.cleared)
+    .map((timer) => timer.delay);
+  const retry = timers.find(
+    (timer) => !timer.cleared && timer.delay === 3000);
+  retry.callback();
+  await settle();
+
+  vm.runInContext('stopStream()', context);
+  for (const timer of timers) timer.cleared = true;
+  timers.length = 0;
+
+  context.__streamNow = 1000;
+  vm.runInContext('Date.now = () => __streamNow', context);
+  let watchdogFetches = 0;
+  context.fetch = async () => {
+    watchdogFetches++;
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return { read: () => new Promise(() => {}) };
+        },
+      },
+    };
+  };
+  vm.runInContext('startStream()', context);
+  await settle();
+  const firstController = vm.runInContext('sseAbort', context);
+  const watchdogDelays = timers
+    .filter((timer) => !timer.cleared)
+    .map((timer) => timer.delay);
+  context.__streamNow = 31001;
+  const watchdog = timers.find(
+    (timer) => !timer.cleared && timer.delay === 5000);
+  watchdog.callback();
+  await settle();
+
+  vm.runInContext('stopStream(); keepaliveTimer = null', context);
+  for (const timer of timers) timer.cleared = true;
+  timers.length = 0;
+  let keepaliveCalls = 0;
+  chrome.runtime.getPlatformInfo = (callback) => {
+    keepaliveCalls++;
+    callback();
+  };
+  vm.runInContext('ensureKeepAlive()', context);
+  const keepalive = timers.find(
+    (timer) => !timer.cleared && timer.delay === 20000);
+  keepalive.callback();
+
+  return {
+    reconnectDelays,
+    reconnectFetches,
+    watchdogDelays,
+    watchdogAborted: firstController.signal.aborted,
+    watchdogFetches,
+    keepaliveDelay: keepalive.delay,
+    keepaliveCalls,
+  };
+}
+
 async function runDedupAcrossRestart() {
   const frame = 'event: command\ndata: ' + JSON.stringify({
     id: 'dedup-open', type: 'open-tab', url: 'about:blank',
@@ -529,6 +603,7 @@ async function run() {
   if (scenario === 'clear-partitioned') return runClearPartitioned();
   if (scenario === 'dedup-restart') return runDedupAcrossRestart();
   if (scenario === 'fetch-bound') return runFetchBound();
+  if (scenario === 'stream-timers') return runStreamTimers();
   throw new Error('unknown scenario: ' + scenario);
 }
 

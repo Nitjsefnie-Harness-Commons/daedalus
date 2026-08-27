@@ -29,7 +29,8 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
     ('worker/evaluate.js', ('_canUseMainWorldEval', '_executeMainWorldEval',
                             '_takeEvalRelay'), ()),
     ('worker/hotfixes.js', ('handleHotfixReplay',), ()),
-    ('worker/netcapture.js', ('_netCaptures',), ()),
+    ('worker/netcapture.js', ('_netCaptures',),
+     ('chrome.tabs.onRemoved.addListener',)),
     ('worker/util.js', ('_fetchTimings', '_hasNativeToBase64', '_recordTiming',
                         '_serializer', 'bridgeAuth', 'bridgeHeaders',
                         'bytesToBase64', 'gmResponseLimit',
@@ -37,6 +38,14 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
     ('worker/config.js', ('_executionContext', 'config', 'configured',
                           'loadConfig', 'postResult'),
      ('chrome.storage.onChanged.addListener',)),
+    ('worker/registry.js', ('registerTab', 'registerAllTabs'),
+     ('chrome.tabs.onUpdated.addListener',
+      'chrome.tabs.onCreated.addListener',
+      'chrome.tabs.onRemoved.addListener')),
+    ('worker/stream.js', ('sseAbort', '_loadSeenDids', 'startStream',
+                          'stopStream', 'ensureKeepAlive'), ()),
+    ('worker/messaging.js', (),
+     ('chrome.runtime.onMessage.addListener',)),
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
@@ -106,14 +115,66 @@ def _masked_code_mentions(masked_source, name):
     return None
 
 
+def _background_top_level_kinds(source):
+    mask = js_mask(source)
+    kinds = []
+    start = depth = 0
+    for index, char in enumerate(mask):
+        if char in '([{':
+            depth += 1
+        elif char in ')]}':
+            depth -= 1
+            statement = mask[start:index + 1].strip()
+            function = re.match(r'(?:async\s+)?function\s+(\w+)', statement)
+            if char == '}' and depth == 0 and function:
+                kinds.append(function.group(1))
+                start = index + 1
+        elif char == ';' and depth == 0:
+            statement = mask[start:index + 1].strip()
+            if statement.startswith('loadConfig().then('):
+                kinds.append('loadConfig.then')
+            else:
+                match = re.match(
+                    r'(?:const|let)\s+(\w+)|([\w.]+)\s*\(', statement)
+                assert match, statement
+                kinds.append(next(
+                    value for value in match.groups() if value))
+            start = index + 1
+    assert not mask[start:].strip(), mask[start:]
+    return kinds
+
+
+def test_background_has_only_the_residual_worker_surface(tmp):
+    """The split leaves only orchestration and worker boot at top level."""
+    del tmp
+    source = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
+    assert len(re.findall(r'^// @version .+$', source, re.MULTILINE)) == 1
+    expected = [
+        'VERSION',
+        'DEFAULT_SERVER',
+        'importScripts',
+        'dispatchCommand',
+        'chrome.alarms.onAlarm.addListener',
+        'chrome.runtime.onConnect.addListener',
+        'loadConfig.then',
+    ]
+    observed = _background_top_level_kinds(source)
+    assert observed == expected, f'background top-level residual: {observed}'
+
+
 def test_non_command_worker_ownership_is_structural(tmp):
-    """Non-command exports and listener sites have one positive owner."""
+    """Non-command exports and listener sites have declared owners."""
     del tmp
     modules = [row[0] for row in _WORKER_NON_COMMAND_OWNERSHIP]
     symbols = [symbol for _, owned, _ in _WORKER_NON_COMMAND_OWNERSHIP
                for symbol in owned]
     assert not [item for item, count in Counter(modules).items() if count > 1]
     assert not [item for item, count in Counter(symbols).items() if count > 1]
+    listener_owners = {}
+    for module, _, listener_sites in _WORKER_NON_COMMAND_OWNERSHIP:
+        for listener in listener_sites:
+            listener_owners.setdefault(listener, set()).add(
+                f'extension/{module}')
 
     loaded = {
         path.relative_to(ROOT / 'extension').as_posix()
@@ -140,7 +201,7 @@ def test_non_command_worker_ownership_is_structural(tmp):
         for listener in listener_sites:
             owners = [name for name, source in sources.items()
                       if js_mask(source).count(listener)]
-            if owners != [relative]:
+            if set(owners) != listener_owners[listener]:
                 problem.setdefault('listener owners', {})[listener] = owners
         problem = {key: value for key, value in problem.items() if value}
         if problem:
