@@ -123,6 +123,19 @@ def test_throw_keyword_is_followed_by_a_regex_literal(tmp):
     assert code_lines('throw /boom/;\n') == {1}
 
 
+def test_keywords_used_as_property_names_end_expressions(tmp):
+    """Keyword spellings after member access are property names."""
+    del tmp
+    source = (
+        'obj.throw / 2;\n'
+        'obj?.throw / 2;\n'
+        'obj.return / 2;\n'
+        'obj.delete / 2;\n'
+        'throw /boom/;\n'
+        'throwable / 2;\n')
+    assert code_lines(source) == {1, 2, 3, 4, 5, 6}
+
+
 def test_division_follows_parentheses_identifiers_and_numbers(tmp):
     """Expression-ending tokens classify a slash as division."""
     del tmp
