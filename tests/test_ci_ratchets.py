@@ -102,6 +102,20 @@ def test_unknown_language_guard_names_the_language(tmp):
         raise AssertionError('an unknown coverage language was accepted')
 
 
+def test_anchor_text_inside_block_scalar_is_not_a_duplicate(tmp):
+    """A comment-shaped shell line is scalar data, not an anchor."""
+    del tmp
+    ratchet = _ratchet()
+    decoy = _RATCHET_WORKFLOW.replace(
+        '          python scripts/ci/js_coverage.py',
+        '          # Python measured: 73.3\n'
+        '          python scripts/ci/js_coverage.py')
+
+    raised = ratchet.update(decoy, 80.0, 'python')
+    assert raised is not None
+    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
+
+
 def test_the_ratchet_raises_the_floor_to_what_a_run_measured(tmp):
     """The recorded measurement is what goes stale, so it is rewritten too."""
     del tmp

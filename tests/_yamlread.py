@@ -100,6 +100,58 @@ def top_level_mapping(workflow, key):
         lines, *mapping_body, mapping_entry.indent, key)
 
 
+def step_mapping_scalar(workflow, job, step, mapping_name, key):
+    """Return one scalar from a mapping on a named step."""
+    lines = _lines(workflow)
+    jobs = _decoded_mapping_entry(lines, 0, len(lines), -1, 'jobs')
+    if jobs is None:
+        return None
+    if jobs.rest.strip(' '):
+        raise YAMLReadError('jobs is not a mapping')
+    jobs_body = _section(lines, jobs.index, jobs.indent)
+    job_entry = _decoded_mapping_entry(
+        lines, *jobs_body, jobs.indent, job)
+    if job_entry is None:
+        return None
+    if job_entry.rest.strip(' '):
+        raise YAMLReadError(f'job {job!r} is not a mapping')
+    job_body = _section(lines, job_entry.index, job_entry.indent)
+    steps = _decoded_mapping_entry(
+        lines, *job_body, job_entry.indent, 'steps')
+    if steps is None:
+        return None
+    if steps.rest.strip(' '):
+        raise YAMLReadError(f'job {job!r} steps are not a sequence')
+    steps_body = _section(lines, steps.index, steps.indent)
+    _require_sequence_body(
+        lines, *steps_body, steps.indent, f'job {job!r} steps')
+    step_entry = _sequence_entry(
+        lines, *steps_body, steps.indent, step)
+    if step_entry is None:
+        return None
+    step_body = _section(lines, step_entry.index, step_entry.indent)
+    _require_mapping_body(
+        lines, *step_body, step_entry.indent, f'step {step!r}')
+    mapping = _decoded_mapping_entry(
+        lines, *step_body, step_entry.indent, mapping_name)
+    if mapping is None:
+        return None
+    if mapping.rest.strip(' '):
+        raise YAMLReadError(f'{mapping_name} is not a mapping')
+    mapping_body = _section(lines, mapping.index, mapping.indent)
+    _require_mapping_body(
+        lines, *mapping_body, mapping.indent, mapping_name)
+    value = _decoded_mapping_entry(
+        lines, *mapping_body, mapping.indent, key)
+    if value is None:
+        return None
+    value_body = _section(lines, value.index, value.indent)
+    if any(_meaningful(lines[index]) for index in range(*value_body)):
+        raise YAMLReadError(f'{mapping_name} value for {key!r} is nested')
+    return _decode_inline_scalar(
+        value.rest, f'{mapping_name} value for {key!r}')
+
+
 def step_scalar(workflow, job, step, key):
     """Return a complete scalar named `key` on a named step in `job`."""
     lines = _lines(workflow)
