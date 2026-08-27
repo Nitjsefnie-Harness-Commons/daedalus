@@ -121,12 +121,29 @@ The rest of the gate runs on GitHub:
 
 | Workflow | What it does |
 | --- | --- |
-| `tests` | The suites across 3 OSes x 4 Pythons, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage ratchet. |
+| `tests` | The suites across 3 OSes x 4 Pythons, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage ratchet per language. |
 | `lint` / `types` / `eslint` | pycodestyle and pylint, pyright, and eslint over the shipped JavaScript. |
 | `codeql` | Security analysis for Python and JavaScript. Findings go to the Security tab, not the build. Also weekly, because a new query only ever sees code that changed after it shipped. |
 | `actionlint` | `actionlint` + `zizmor` over the workflows themselves. A broken workflow does not go red, it silently stops running. |
 | `speed` | Runs the last release's suite and yours on the same runner, interleaved, and fails if the tests present in both got more than 30% slower. |
 | `release` | Builds and publishes the wheel, the sdist and `SHA256SUMS` on a `v*` tag. |
+
+Coverage is two numbers, published and gated separately, and they are
+not the same measurement. Python's is statement coverage from
+`coverage.py`; JavaScript's is physical code-line coverage derived from
+V8's own output, where a code line is a non-blank line that is not
+entirely a comment — a closing brace is a code line under that
+definition and is not a statement under the other, so the two numbers
+must never be added together or compared. Each is gated against its own
+floor because a regression in one language must not hide inside the
+other's. The JavaScript number needs no new dependency and no separate
+test run: the suites already execute the shipped extension and
+dashboard source in Node, and `NODE_V8_COVERAGE` is a Node built-in
+their child processes inherit. It also needs one piece of context: no
+suite executes the dashboard UI modules or the extension options page,
+so a large share of the shipped JavaScript reads as zero. That is the
+true state of the tests, not a shortfall in the measurement — the fix
+is tests, not tooling.
 
 The matrix is not ceremony. This code reads paths and decodes bytes, so Windows
 path spellings, the `/var` → `/private/var` aliasing macOS applies to temp
