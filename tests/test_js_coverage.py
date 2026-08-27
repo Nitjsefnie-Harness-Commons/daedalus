@@ -31,7 +31,7 @@ def _repository(tmp, sources):
     for rel, source in sources.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding='utf-8')
+        path.write_bytes(source.encode('utf-8'))
     _git(root, 'add', *sources)
     return root
 
@@ -92,6 +92,18 @@ def test_absolute_relative_and_file_urls_resolve_to_tracked_files(tmp):
     ) == 'dashboard/file-url.js'
 
 
+def test_file_url_outside_repository_is_not_resolved(tmp):
+    """Crediting an unmatched external file URL must fail."""
+    source = 'const identical = true;\n'
+    root = _repository(tmp, {'extension/tracked.js': source})
+    outside = Path(tmp) / 'outside.js'
+    outside.write_bytes(source.encode('utf-8'))
+
+    assert resolve_script(
+        outside.as_uri(), root, tracked_sources(root)
+    ) is None
+
+
 def test_percent_and_base64_data_urls_match_exact_source_text(tmp):
     """Changing either data decoder or matching decoded bytes must fail."""
     percent_source = 'export const percent = "one & two";\n'
@@ -113,6 +125,28 @@ def test_percent_and_base64_data_urls_match_exact_source_text(tmp):
     ) == 'dashboard/base64.js'
 
 
+def test_data_url_near_match_is_not_resolved(tmp):
+    """Ignoring a tracked source's trailing newline must fail."""
+    source = 'export const exact = true;\n'
+    root = _repository(tmp, {'dashboard/exact.js': source})
+    near_url = 'data:text/javascript,' + quote(source.rstrip('\n'), safe='')
+
+    assert resolve_script(
+        near_url, root, tracked_sources(root)
+    ) is None
+
+
+def test_data_url_with_unmatched_text_is_not_resolved(tmp):
+    """Assigning unrelated decoded text to a tracked file must fail."""
+    root = _repository(tmp, {
+        'dashboard/tracked.js': 'export const tracked = true;\n',
+    })
+    url = 'data:text/javascript,' + quote(
+        'export const unrelated = true;\n', safe='')
+
+    assert resolve_script(url, root, tracked_sources(root)) is None
+
+
 def test_ambiguous_data_url_is_an_error(tmp):
     """Selecting either of two exact source matches must fail."""
     duplicate = 'export const duplicate = true;\n'
@@ -124,13 +158,13 @@ def test_ambiguous_data_url_is_an_error(tmp):
     url = 'data:text/javascript,' + quote(duplicate, safe='')
 
     try:
-        resolve_script(url, root, sources)
+        result = resolve_script(url, root, sources)
     except ValueError as failure:
         assert 'ambiguous data URL' in str(failure), failure
         assert 'dashboard/duplicate.js' in str(failure), failure
         assert 'extension/duplicate.js' in str(failure), failure
     else:
-        raise AssertionError('ambiguous data URL selected a tracked file')
+        raise AssertionError(f'expected ValueError, got {result!r}')
 
 
 def test_non_shipped_script_shapes_are_not_resolved(tmp):
@@ -166,6 +200,17 @@ def test_inner_zero_range_overrides_outer_nonzero_range(tmp):
     ])
 
     assert merge_records([record], 6) == [1, 1, 0, 0, 1, 1]
+
+
+def test_inner_nonzero_range_overrides_outer_zero_range(tmp):
+    """Suppressing an inner hit under an outer zero must fail."""
+    del tmp
+    record = _record('extension/sample.js', [
+        {'startOffset': 0, 'endOffset': 6, 'count': 0},
+        {'startOffset': 2, 'endOffset': 4, 'count': 1},
+    ])
+
+    assert merge_records([record], 6) == [0, 0, 1, 1, 0, 0]
 
 
 def test_separate_script_records_add_their_counts(tmp):
@@ -233,11 +278,14 @@ def test_real_node_dump_reports_executed_and_skipped_lines(tmp):
     if node is None:
         _util.skip('node is not installed')
     source = (
-        'const hit = 1;\n'
+        'function called() {\n'
+        '  return 1;\n'
+        '}\n'
         'function missed() {\n'
         '  return 2;\n'
         '}\n'
-        'console.log(hit);\n'
+        'called();\n'
+        'console.log("done");\n'
     )
     root = _repository(tmp, {'extension/real.js': source})
     dumps = Path(tmp) / 'coverage'
@@ -253,6 +301,37 @@ def test_real_node_dump_reports_executed_and_skipped_lines(tmp):
 
     report = collect_coverage(dumps, root)
     coverage = report.files['extension/real.js']
+    assert coverage.executable_lines == {1, 2, 3, 4, 5, 6, 7, 8}
+    assert coverage.covered_lines == {1, 2, 3, 7, 8}
+
+
+def test_real_node_dump_preserves_crlf_offsets(tmp):
+    """Translating CRLF before applying V8 offsets must fail everywhere."""
+    node = shutil.which('node')
+    if node is None:
+        _util.skip('node is not installed')
+    source = (
+        b'const hit = 1;\r\n'
+        b'function missed() {\r\n'
+        b'  return 2;\r\n'
+        b'}\r\n'
+        b'console.log(hit);\r\n'
+    )
+    root = _repository(tmp, {'extension/crlf.js': ''})
+    script = root / 'extension' / 'crlf.js'
+    script.write_bytes(source)
+    dumps = Path(tmp) / 'coverage'
+    dumps.mkdir()
+    env = dict(os.environ)
+    env['NODE_V8_COVERAGE'] = str(dumps)
+
+    completed = subprocess.run(
+        [node, str(script)], cwd=str(root), env=env,
+        capture_output=True, text=True, timeout=30)
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+
+    report = collect_coverage(dumps, root)
+    coverage = report.files['extension/crlf.js']
     assert coverage.executable_lines == {1, 2, 3, 4, 5}
     assert coverage.covered_lines == {1, 5}
 
