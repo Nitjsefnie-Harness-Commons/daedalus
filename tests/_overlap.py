@@ -141,6 +141,7 @@ function step(label) {
 }
 
 function bounded(work, label, timeoutMs) {
+  if (timeoutMs === null) return Promise.resolve(work);
   let timer;
   const guard = new Promise((_resolve, reject) => {
     timer = setTimeout(
@@ -152,6 +153,12 @@ function bounded(work, label, timeoutMs) {
 
 async function waitFor(predicate, label, timeoutMs = innerWaitMs) {
   step(label);
+  if (timeoutMs === null) {
+    for (;;) {
+      if (await bounded(predicate(), label, null)) return;
+      await delay(10);
+    }
+  }
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const left = deadline - Date.now();
@@ -195,9 +202,10 @@ async function waitForResultConsume() {
     if (!complete) throw new Error('missing cookie completion for ' + owner);
     const postedBefore = postedResults.length;
     complete();
+    // The POST round-trip is incidental; only the outer backstop bounds it.
     await waitFor(
       () => postedResults.length === postedBefore + 1,
-      'result POST for ' + owner);
+      'result POST for ' + owner, null);
     if (waitBetween && index + 1 < completionOrder.length) {
       await waitForResultConsume();
     }
