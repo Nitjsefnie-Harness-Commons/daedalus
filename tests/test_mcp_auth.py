@@ -119,6 +119,7 @@ def test_top_level_json_scalar_has_no_job_carrier(tmp):
 
 
 def test_malformed_json_is_not_a_duplicate_carrier(tmp):
+    """Malformed JSON remains the MCP transport's validation concern."""
     del tmp
     auth = _auth_module()
     try:
