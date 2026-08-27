@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _worker_sources import worker_source_paths  # noqa: E402
 
 
 _FETCH_RELAY_HARNESS = r"""
@@ -181,10 +182,16 @@ def test_the_background_relays_the_response_url_and_status_text(tmp):
     off the request it was handed.
     """
     del tmp
-    source = (_util.ROOT / 'extension' / 'background.js').read_text(
-        encoding='utf-8')
-    _, marker, after = source.partition('sendResponse({ status: resp.status,')
-    assert marker, 'the fetch success response is not shaped as this test finds it'
+    marker = 'sendResponse({ status: resp.status,'
+    matches = [
+        path.read_text(encoding='utf-8')
+        for path in worker_source_paths()
+        if marker in path.read_text(encoding='utf-8')
+    ]
+    assert len(matches) == 1, (
+        'the fetch success response is not uniquely shaped as this test '
+        f'finds it: {len(matches)} matches')
+    _, marker, after = matches[0].partition(marker)
     response, _, _ = after.partition('}\n')
     for field in ('statusText: resp.statusText', 'finalUrl: resp.url'):
         assert field in response, (field, response)
