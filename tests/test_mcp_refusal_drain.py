@@ -135,7 +135,7 @@ def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
     async def accepted(_scope, _receive, _send):
         raise AssertionError('an early refusal reached the MCP app')
 
-    class CapturingBearerAuth(mod._BearerAuth):
+    class CapturingBearerAuth(mod.mcp_auth.BearerAuth):
         async def dispatch(self, request, call_next):
             request.state.trace_metadata = b'ordinary-state-' * 40
             captured.append(request)
@@ -154,7 +154,9 @@ def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
         'client': ('127.0.0.1', 12345),
         'server': ('127.0.0.1', 8086),
     }
-    asyncio.run(CapturingBearerAuth(accepted)(scope, receive, send))
+    middleware = CapturingBearerAuth(
+        accepted, token_var=mod._token, max_body_size=mod.MAX_BODY_SIZE)
+    asyncio.run(middleware(scope, receive, send))
 
     assert outbound[0]['status'] == 401
     assert not _request_contains_payload(captured[0], REFUSED_PAYLOAD)
@@ -219,7 +221,10 @@ def test_disconnect_during_drain_preserves_refusal(tmp):
         'server': ('127.0.0.1', 8086),
     }
     try:
-        asyncio.run(mod._BearerAuth(accepted)(scope, receive, send))
+        middleware = mod.mcp_auth.BearerAuth(
+            accepted, token_var=mod._token,
+            max_body_size=mod.MAX_BODY_SIZE)
+        asyncio.run(middleware(scope, receive, send))
     except ClientDisconnect as exc:
         raise AssertionError(
             f'{type(exc).__name__} escaped refusal drain') from exc
@@ -292,7 +297,7 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         async def accepted(_scope, _receive, _send):
             raise AssertionError('an early refusal reached the MCP app')
 
-        class CapturingBearerAuth(mod._BearerAuth):
+        class CapturingBearerAuth(mod.mcp_auth.BearerAuth):
             async def dispatch(self, request, call_next):
                 request_seen.append(request)
                 return await super().dispatch(request, call_next)
@@ -312,7 +317,10 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         }
         mod.mcp_request_guard.JSONResponse = deciding_response
         try:
-            await CapturingBearerAuth(accepted)(scope, receive, send)
+            middleware = CapturingBearerAuth(
+                accepted, token_var=mod._token,
+                max_body_size=mod.MAX_BODY_SIZE)
+            await middleware(scope, receive, send)
         finally:
             mod.mcp_request_guard.JSONResponse = real_response
         return events, received, request_seen[0]
