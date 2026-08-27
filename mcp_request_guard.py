@@ -34,10 +34,8 @@ def early_refusal(request, max_body_size):
         return JSONResponse(
             {'error': 'duplicate Origin header'}, status_code=400)
 
-    # Credentials are decided BEFORE the body is touched. Parsing it first
-    # made an unauthenticated caller able to have an arbitrarily large
-    # request materialized on its way to a 401, and handed it body-level
-    # diagnostics about a request it was never allowed to make.
+    # Authenticate before parsing so an unauthenticated caller cannot force
+    # body materialization or receive body diagnostics.
     authorizations = request.headers.getlist('authorization')
     auth = authorizations[0] if authorizations else ''
     if not auth.lower().startswith('bearer '):
@@ -75,7 +73,7 @@ def early_refusal(request, max_body_size):
 
 
 async def drain_refused_body(request):
-    """Stream-discard at most the shared refusal-drain bound."""
+    """Discard until one ASGI chunk reaches or passes the threshold."""
     remaining = REFUSED_BODY_DRAIN
     try:
         async for chunk in request.stream():

@@ -9,10 +9,8 @@ import math
 import os
 
 
-# Refused request bodies are discarded only far enough to keep an ordinary
-# refusal from becoming a connection reset. Both HTTP front ends use this
-# environment-free leaf module, so one bound governs both without either
-# importing the other's startup path.
+# The stdlib bridge caps reads exactly; ASGI stops after the chunk that
+# reaches this threshold.
 REFUSED_BODY_DRAIN = 65536
 
 
