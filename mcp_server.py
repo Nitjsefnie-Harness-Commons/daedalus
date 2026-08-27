@@ -10,7 +10,6 @@ existing configuration path before it enters the _token ContextVar and is
 forwarded to the local bridge. Missing configuration fails closed.
 """
 import contextlib
-import math
 import json, os, socket, sys, threading
 from typing import Any
 import httpx
@@ -22,7 +21,7 @@ from daedalus_cli.output import configure_stdio
 from env_config import env_int
 from log_safe import log_safe
 import mcp_request_guard
-from mcp_transport import BridgeTransport
+from mcp_transport import BridgeSession, BridgeTransport
 
 # Same reason as the bridge: this process prints crash lines carrying values
 # it did not choose. See server.py.
@@ -56,13 +55,15 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
     '127.0.0.1:*,localhost:*'
 ).split(',') if h.strip()]
 
+bridge = BridgeSession(LOCAL_URL, _token)
+
 mcp = MCPServer('daedalus')
 
 
 @mcp.tool()
 async def list_tabs() -> list[dict]:
     """List active Daedalus-registered Chrome tabs, each with the age of its last registration. Entries are not pruned by age: a tab persists until it is unregistered or replaced by a sync."""
-    return await _get('/tabs')
+    return await bridge.get('/tabs')
 
 
 @mcp.tool()
@@ -73,7 +74,8 @@ async def open_tab(url: str, background: bool = False, pinned: bool = False) -> 
         fields['active'] = False
     if pinned:
         fields['pinned'] = True
-    return await _ext_cmd('_open_tab', 'open-tab', include_roundtrip=True, **fields)
+    return await bridge.ext_cmd(
+        '_open_tab', 'open-tab', include_roundtrip=True, **fields)
 
 
 @mcp.tool()
@@ -84,13 +86,16 @@ async def open_tabs(urls: list[str], background: bool = False, pinned: bool = Fa
         fields['active'] = False
     if pinned:
         fields['pinned'] = True
-    return await _ext_cmd('_open_tabs', 'open-tabs', timeout=30, include_roundtrip=True, **fields)
+    return await bridge.ext_cmd(
+        '_open_tabs', 'open-tabs', timeout=30, include_roundtrip=True,
+        **fields)
 
 
 @mcp.tool()
 async def focus_tab(chrome_tab: int) -> dict:
     """Bring Chrome tab `chrome_tab` to the foreground."""
-    return await _ext_cmd('_focus', 'focus-tab', tabId=int(chrome_tab))
+    return await bridge.ext_cmd(
+        '_focus', 'focus-tab', tabId=int(chrome_tab))
 
 
 @mcp.tool()
@@ -102,7 +107,7 @@ async def close_tab(chrome_tabs: list[int]) -> dict:
         fields['tabId'] = ids[0]
     else:
         fields['tabIds'] = ids
-    return await _ext_cmd('_close_tab', 'close-tab', **fields)
+    return await bridge.ext_cmd('_close_tab', 'close-tab', **fields)
 
 
 @mcp.tool()
@@ -111,7 +116,7 @@ async def ext_navigate(url: str, chrome_tab: int | None = None) -> dict:
     fields: dict = {'url': url}
     if chrome_tab is not None:
         fields['tabId'] = int(chrome_tab)
-    return await _ext_cmd('_nav', 'navigate', **fields)
+    return await bridge.ext_cmd('_nav', 'navigate', **fields)
 
 
 @mcp.tool()
@@ -122,7 +127,7 @@ async def ext_reload(chrome_tab: int | None = None, bypass_cache: bool = False) 
         fields['tabId'] = int(chrome_tab)
     if bypass_cache:
         fields['bypassCache'] = True
-    return await _ext_cmd('_reload', 'reload', **fields)
+    return await bridge.ext_cmd('_reload', 'reload', **fields)
 
 
 def _flatten_eval(body: dict | None) -> dict | None:
@@ -145,33 +150,20 @@ def _flatten_eval(body: dict | None) -> dict | None:
     return body
 
 
-def _checked_timeout(timeout: float) -> float:
-    """Refuse a wait that cannot wait, BEFORE the command is submitted.
-
-    The command is PUT first and the deadline evaluated afterwards, so a
-    non-positive or non-finite timeout polls zero times and raises a timeout
-    for a command the browser has already been handed. The caller is told
-    nothing ran; retrying then runs the side effect a second time.
-    """
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError(f'timeout must be a finite positive number of seconds; got {timeout!r}')
-    return timeout
-
-
 async def _send_eval(cmd_id: str, code: str, tab_id: str, wait: bool, timeout: float) -> dict | None:
     if not cmd_id:
         raise ValueError('cmd_id is required')
     if not code:
         raise ValueError('code is empty')
     if wait:
-        _checked_timeout(timeout)
+        bridge.checked_timeout(timeout)
     payload: dict = {'id': cmd_id, 'code': code}
     if tab_id:
         payload['tab'] = tab_id
-    sent = await _put('/command', payload)
+    sent = await bridge.put('/command', payload)
     if not wait:
         return None
-    body = await _poll_result(
+    body = await bridge.poll_result(
         tab_id, timeout, expect_id=cmd_id,
         expect_delivery=sent.get('did'))
     return _flatten_eval(body)
@@ -209,7 +201,7 @@ async def result(tab_id: str = '', consume: bool = False) -> dict:
         params['tab'] = tab_id
     if consume:
         params['consume'] = '1'
-    body = await _get('/result', **params)
+    body = await bridge.get('/result', **params)
     if isinstance(body, dict) and body.get('pending'):
         return {'no_result': True,
                 'note': 'no unconsumed result for this target — a waited exec/put '
@@ -225,8 +217,8 @@ async def ping(tab_id: str = '') -> dict:
     payload: dict = {'id': '_ping', 'code': 'document.title'}
     if tab_id:
         payload['tab'] = tab_id
-    sent = await _put('/command', payload)
-    res = await _poll_result(
+    sent = await bridge.put('/command', payload)
+    res = await bridge.poll_result(
         tab_id, 10.0, expect_id='_ping', expect_delivery=sent.get('did'))
     if res.get('error'):
         raise RuntimeError(f'ping: {res["error"]}')
@@ -281,7 +273,8 @@ async def screenshot(cmd_id: str = '_ss', chrome_tab: int | None = None,
         fields['quality'] = quality
     if chrome_tab is not None:
         fields['tabId'] = int(chrome_tab)
-    result_blob = await _ext_cmd(cmd_id, 'screenshot', timeout=timeout, **fields)
+    result_blob = await bridge.ext_cmd(
+        cmd_id, 'screenshot', timeout=timeout, **fields)
     meta = {'path': result_blob.get('path', ''), 'size': result_blob.get('size', 0)}
     if not include_image:
         return meta
@@ -289,7 +282,7 @@ async def screenshot(cmd_id: str = '_ss', chrome_tab: int | None = None,
     # than a capture and its newest file belongs to whichever invocation
     # finished last.
     selector = {'path': meta['path']} if meta['path'] else {'id': cmd_id}
-    img_bytes = await _get_raw('/screenshot', **selector)
+    img_bytes = await bridge.get_raw('/screenshot', **selector)
     return [meta, Image(data=img_bytes, format=format)]
 
 
@@ -299,7 +292,7 @@ async def segment_job(job: str) -> dict:
     capability as {ok, sig}. The sig is what examples/hls-segment-relay.js
     substitutes for __SIG__; minting is idempotent for the owning token, so a
     resumed run gets the same one back."""
-    return await _post('/segment-job', {'job': job})
+    return await bridge.post('/segment-job', {'job': job})
 
 
 @mcp.tool()
@@ -313,9 +306,9 @@ async def segment_status(job: str) -> dict:
     # /segment-status takes the job's minted capability, not the bridge token,
     # and GET /segment-job is the lookup that hands it over without creating
     # the job when the name has never been used.
-    client = _http_client()
+    client = bridge.http_client()
     found = await client.get(
-        '/segment-job', params={'job': job}, headers=_bridge_auth())
+        '/segment-job', params={'job': job}, headers=bridge.auth())
     if found.status_code == 404:
         raise RuntimeError(f'segment_status: no job named {job!r}')
     if found.status_code == 409:
@@ -345,7 +338,7 @@ async def uploads(upload_id: str = '', limit: int | None = None,
         params['limit'] = limit
     if offset is not None:
         params['offset'] = offset
-    return await _get('/upload', **params)
+    return await bridge.get('/upload', **params)
 
 
 @mcp.tool()
@@ -361,7 +354,7 @@ async def delete_upload(upload_id: str = '', filename: str = '') -> dict:
         body['id'] = upload_id
     if filename:
         body['filename'] = filename
-    return await _delete('/upload', body)
+    return await bridge.delete('/upload', body)
 
 
 @mcp.tool()
@@ -372,7 +365,7 @@ async def get_cookies(domain: str = '', target_url: str = '') -> list[dict]:
         fields['domain'] = domain
     if target_url:
         fields['url'] = target_url
-    return await _ext_cmd('_cookies', 'cookies', **fields)
+    return await bridge.ext_cmd('_cookies', 'cookies', **fields)
 
 
 @mcp.tool()
@@ -393,13 +386,14 @@ async def set_cookie(target_url: str, name: str, value: str, domain: str = '',
         fields['sameSite'] = same_site
     if expires is not None:
         fields['expirationDate'] = float(expires)
-    return await _ext_cmd('_set_cookie', 'set-cookie', **fields)
+    return await bridge.ext_cmd('_set_cookie', 'set-cookie', **fields)
 
 
 @mcp.tool()
 async def remove_cookie(target_url: str, name: str) -> dict:
     """Remove a specific cookie by name at `target_url`."""
-    return await _ext_cmd('_rm_cookie', 'remove-cookie', url=target_url, name=name)
+    return await bridge.ext_cmd(
+        '_rm_cookie', 'remove-cookie', url=target_url, name=name)
 
 
 @mcp.tool()
@@ -410,7 +404,8 @@ async def clear_cookies(domain: str = '', target_url: str = '') -> dict:
         fields['domain'] = domain
     if target_url:
         fields['url'] = target_url
-    return await _ext_cmd('_clear_cookies', 'clear-cookies', **fields)
+    return await bridge.ext_cmd(
+        '_clear_cookies', 'clear-cookies', **fields)
 
 
 @mcp.tool()
@@ -424,7 +419,7 @@ async def inject_css(css: str, chrome_tab: int | None = None,
         fields['tabId'] = int(chrome_tab)
     if all_frames:
         fields['allFrames'] = True
-    return await _ext_cmd('_inject_css', 'inject-css', **fields)
+    return await bridge.ext_cmd('_inject_css', 'inject-css', **fields)
 
 
 @mcp.tool()
@@ -438,7 +433,7 @@ async def remove_css(css: str, chrome_tab: int | None = None,
         fields['tabId'] = int(chrome_tab)
     if all_frames:
         fields['allFrames'] = True
-    return await _ext_cmd('_remove_css', 'remove-css', **fields)
+    return await bridge.ext_cmd('_remove_css', 'remove-css', **fields)
 
 
 @mcp.tool()
@@ -447,7 +442,7 @@ async def block_requests(pattern: str, chrome_tab: int | None = None) -> dict:
     fields: dict = {'pattern': pattern}
     if chrome_tab is not None:
         fields['tabId'] = int(chrome_tab)
-    return await _ext_cmd('_block', 'block-requests', **fields)
+    return await bridge.ext_cmd('_block', 'block-requests', **fields)
 
 
 @mcp.tool()
@@ -460,13 +455,13 @@ async def unblock_requests(rule_id: int | None = None) -> dict:
         if int(rule_id) <= 0:
             return {'error': 'rule_id must be a positive integer'}
         fields['ruleId'] = int(rule_id)
-    return await _ext_cmd('_unblock', 'unblock-requests', **fields)
+    return await bridge.ext_cmd('_unblock', 'unblock-requests', **fields)
 
 
 @mcp.tool()
 async def list_block_rules() -> list[dict]:
     """List currently-active declarativeNetRequest block rules."""
-    return await _ext_cmd('_list_rules', 'list-block-rules')
+    return await bridge.ext_cmd('_list_rules', 'list-block-rules')
 
 
 @mcp.tool()
@@ -474,31 +469,38 @@ async def store_hotfix(fix_id: str, code: str, permanent: bool = False) -> dict:
     """Store inline JS as a persistent hotfix. Set `permanent=True` to mark the fix as surviving extension version bumps."""
     if not code:
         raise ValueError('code required')
-    return await _ext_cmd('_store_hf', 'store-hotfix', fixId=fix_id, code=code, permanent=permanent)
+    return await bridge.ext_cmd(
+        '_store_hf', 'store-hotfix', fixId=fix_id, code=code,
+        permanent=permanent)
 
 
 @mcp.tool()
 async def clear_hotfix(fix_id: str) -> dict:
     """Remove a specific hotfix by id."""
-    return await _ext_cmd('_clear_hf', 'clear-hotfix', fixId=fix_id)
+    return await bridge.ext_cmd(
+        '_clear_hf', 'clear-hotfix', fixId=fix_id)
 
 
 @mcp.tool()
 async def clear_hotfixes(include_permanent: bool = False) -> dict:
     """Remove stored hotfixes. By default, permanent fixes are preserved; set `include_permanent=True` to nuke everything."""
-    return await _ext_cmd('_clear_all_hf', 'clear-all-hotfixes', includePermanent=include_permanent)
+    return await bridge.ext_cmd(
+        '_clear_all_hf', 'clear-all-hotfixes',
+        includePermanent=include_permanent)
 
 
 @mcp.tool()
 async def list_hotfixes() -> dict:
     """List stored hotfixes. Returns {version, fixes:[{id,ts,code},...]}."""
-    return await _ext_cmd('_list_hf', 'list-hotfixes')
+    return await bridge.ext_cmd('_list_hf', 'list-hotfixes')
 
 
 @mcp.tool()
 async def set_permanent(fix_id: str, permanent: bool) -> dict:
     """Toggle the permanent flag on an existing hotfix. Permanent fixes survive extension version bumps. Returns {id, permanent, found}."""
-    return await _ext_cmd('_set_perm', 'set-permanent', fixId=fix_id, permanent=permanent)
+    return await bridge.ext_cmd(
+        '_set_perm', 'set-permanent', fixId=fix_id,
+        permanent=permanent)
 
 
 @mcp.tool()
@@ -518,7 +520,8 @@ async def net_capture(chrome_tab: int | None = None, max_requests: int = 1000) -
                 f'max_requests must be an integer from 1 to {NET_CAPTURE_MAX}; '
                 f'got {max_requests}')
         fields['maxRequests'] = int(max_requests)
-    return await _ext_cmd('_net_cap', 'net-capture', timeout=15, **fields)
+    return await bridge.ext_cmd(
+        '_net_cap', 'net-capture', timeout=15, **fields)
 
 
 @mcp.tool()
@@ -529,7 +532,8 @@ async def net_capture_stop(chrome_tab: int | None = None, bodies: bool = False) 
         fields['tabId'] = int(chrome_tab)
     if bodies:
         fields['bodies'] = True
-    return await _ext_cmd('_net_stop', 'net-capture-stop', timeout=30, **fields)
+    return await bridge.ext_cmd(
+        '_net_stop', 'net-capture-stop', timeout=30, **fields)
 
 
 @mcp.tool()
@@ -543,7 +547,8 @@ async def net_capture_get(chrome_tab: int | None = None, url_filter: str = '',
         fields['filter'] = url_filter
     if bodies:
         fields['bodies'] = True
-    return await _ext_cmd('_net_get', 'net-capture-get', timeout=30, **fields)
+    return await bridge.ext_cmd(
+        '_net_get', 'net-capture-get', timeout=30, **fields)
 
 
 @mcp.tool()
@@ -561,7 +566,7 @@ async def cdp(method: str, params: dict | None = None, chrome_tab: int | None = 
         fields['tabId'] = int(chrome_tab)
     if keep_session:
         fields['keep_session'] = True
-    return await _ext_cmd('_cdp', 'cdp', timeout=30, **fields)
+    return await bridge.ext_cmd('_cdp', 'cdp', timeout=30, **fields)
 
 
 @mcp.tool()
@@ -570,177 +575,33 @@ async def fetch_timings(reset: bool = False) -> dict:
     fields: dict = {}
     if reset:
         fields['reset'] = True
-    return await _ext_cmd('_fetch_timings', 'fetch-timings', **fields)
+    return await bridge.ext_cmd(
+        '_fetch_timings', 'fetch-timings', **fields)
 
 
 @mcp.tool()
 async def ext_self_reload() -> dict:
     """Reload the Chrome extension from disk via chrome.runtime.reload()."""
-    return await _ext_cmd('_ext_reload', 'ext-reload')
+    return await bridge.ext_cmd('_ext_reload', 'ext-reload')
 
 
-_started_local_url: str | None = None
 # A cell rather than a rebound global: this flag is read and written only
 # inside start_in_thread, and a module global written there reads as dead.
 _start_state = {'started': False}
 
-
-def _resolved_local_url(local_url: str | None = None) -> str:
-    """Resolve the bridge URL for this client lookup.
-
-    The caller's bridge URL is resolved before its transport facade is bound.
-    The URL supplied after the bridge binds wins over the port-derived
-    fallback, while the explicit standalone override remains strongest.
-    ``LOCAL_URL`` is the import-time fallback retained for callers that load
-    this module by path and restore the environment afterwards.
-    """
-    override = os.environ.get('DAEDALUS_LOCAL_URL')
-    if override:
-        return override
-    if local_url:
-        return local_url
-    if _started_local_url:
-        return _started_local_url
-    if 'DAEDALUS_PORT' in os.environ:
-        return f'http://127.0.0.1:{os.environ["DAEDALUS_PORT"]}'
-    return LOCAL_URL
-
-
-_transport = BridgeTransport(_resolved_local_url())
-
-
-def _http_client(local_url: str | None = None) -> httpx.AsyncClient:
-    """Return this caller's client, or a compatibility client for a URL."""
-    if local_url is not None:
-        return BridgeTransport(_resolved_local_url(local_url)).client()
-    return _transport.client()
-
-
-def _tok() -> str:
-    t = _token.get()
-    if not t:
-        raise RuntimeError('no token in context')
-    return t
-
-
-def _bridge_auth() -> dict[str, str]:
-    """The bridge's pre-body credential carrier.
-
-    The bridge settles credentials before it reads a request body, so a body
-    token alone caps what this client may send at the unauthenticated window.
-    It is also what keeps a reusable credential out of a request target, which
-    a reverse-proxy access log retains and a query parameter cannot avoid.
-    Same header, same value the MCP listener itself required to get here.
-    """
-    return {'Authorization': f'Bearer {_tok()}'}
-
-
-async def _get(path: str, **params) -> Any:
-    r = await _http_client().get(path, params=params, headers=_bridge_auth())
-    r.raise_for_status()
-    return r.json()
-
-
-async def _put(path: str, body: dict) -> dict:
-    body = {**body, 'token': _tok()}
-    r = await _http_client().put(path, json=body, headers=_bridge_auth())
-    r.raise_for_status()
-    return r.json()
-
-
-async def _post(path: str, body: dict) -> dict:
-    body = {**body, 'token': _tok()}
-    r = await _http_client().post(path, json=body, headers=_bridge_auth())
-    r.raise_for_status()
-    return r.json()
-
-
-async def _delete(path: str, body: dict) -> dict:
-    body = {**body, 'token': _tok()}
-    r = await _http_client().request(
-        'DELETE', path, json=body, headers=_bridge_auth())
-    r.raise_for_status()
-    return r.json()
-
-
-async def _get_raw(route: str, **params) -> bytes:
-    """Fetch one bridge route as raw bytes. The route is named `route` rather
-    than `path` so a caller can pass a `path` query parameter, which the
-    screenshot download does."""
-    r = await _http_client().get(route, params=params, headers=_bridge_auth())
-    r.raise_for_status()
-    return r.content
-
-
-async def _poll_result(tab: str, timeout: float, interval: float = 0.5,
-                       expect_id: str | None = None,
-                       expect_delivery: str | None = None) -> dict:
-    """Poll until the named command delivery is conditionally consumed.
-
-    The delivery id rejects stale results from an earlier invocation even when
-    its command id is reused. The result generation makes peek then consume
-    safe when another caller replaces the shared slot between those requests.
-
-    The wait ramps 20ms -> `interval` instead of sleeping a flat `interval` up
-    front: most commands finish in tens of milliseconds, and the fixed first
-    sleep was adding half a second of dead time to every single tool call."""
-    import asyncio, time
-    peek = {}
-    if tab:
-        peek['tab'] = tab
-    if expect_delivery:
-        peek['delivery'] = expect_delivery
-    auth = _bridge_auth()
-    deadline = time.time() + timeout
-    wait = 0.02
-    while time.time() < deadline:
-        await asyncio.sleep(wait)
-        wait = min(wait * 2, interval)
-        r = await _http_client().get('/result', params=peek, headers=auth)
-        r.raise_for_status()
-        data = r.json()
-        if data.get('pending'):
-            continue
-        if (expect_id is not None and data.get('id') != expect_id
-                or expect_delivery is not None
-                and data.get('deliveryId') != expect_delivery):
-            # Someone else's result. Leave it where it is for them.
-            continue
-        generation = data.get('resultGeneration')
-        if not generation:
-            continue
-        take = {**peek, 'consume': '1', 'expected': generation}
-        consumed = await _http_client().get(
-            '/result', params=take, headers=auth)
-        consumed.raise_for_status()
-        receipt = consumed.json()
-        if (receipt.get('consumed') is not True
-                or receipt.get('resultGeneration') != generation):
-            continue
-        return data
-    raise TimeoutError(f'no result within {timeout}s')
-
-
-async def _ext_cmd(cmd_id: str, cmd_type: str, timeout: float = 10.0,
-                   include_roundtrip: bool = False, **fields) -> Any:
-    """Send a typed extension command (tab=extension) and return result.result.
-
-    The server computes `roundtrip_ms` (enqueue -> result arrival) as a sibling of
-    `result` in the body, so returning result.result alone drops it.
-    include_roundtrip merges it back in, for tools where how long the extension
-    took is part of the answer."""
-    _checked_timeout(timeout)
-    payload = {'id': cmd_id, 'type': cmd_type, 'tab': 'extension', **fields}
-    sent = await _put('/command', payload)
-    res = await _poll_result(
-        'extension', timeout, expect_id=cmd_id,
-        expect_delivery=sent.get('did'))
-    if res.get('error'):
-        raise RuntimeError(f'ext {cmd_type}: {res["error"]}')
-    out = res.get('result', {})
-    if include_roundtrip and isinstance(out, dict) and 'roundtrip_ms' in res:
-        out = {**out, 'roundtrip_ms': res['roundtrip_ms']}
-    return out
+_transport = bridge.transport
+_resolved_local_url = bridge.resolved_local_url
+_http_client = bridge.http_client
+_tok = bridge.token
+_bridge_auth = bridge.auth
+_get = bridge.get
+_put = bridge.put
+_post = bridge.post
+_delete = bridge.delete
+_get_raw = bridge.get_raw
+_poll_result = bridge.poll_result
+_ext_cmd = bridge.ext_cmd
+_checked_timeout = bridge.checked_timeout
 
 
 # The listener's actual port, for whoever started it: with DAEDALUS_MCP_PORT=0
@@ -798,14 +659,13 @@ def _serve():
 
 
 def start_in_thread(local_url: str | None = None) -> threading.Thread:
-    global _started_local_url, _transport
+    global _transport
     if _start_state['started']:
         raise RuntimeError(
             'start_in_thread called more than once for this module')
     _start_state['started'] = True
-    if local_url is not None:
-        _started_local_url = local_url
-    _transport = BridgeTransport(_resolved_local_url())
+    bridge.rebind(local_url)
+    _transport = bridge.transport
     t = threading.Thread(target=_serve, daemon=True, name='mcp-server')
     t.start()
     return t
