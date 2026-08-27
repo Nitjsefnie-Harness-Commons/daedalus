@@ -141,6 +141,19 @@ def _break_one_site(copy_root, replacement='0.0.0-drift'):
     init_copy.write_text(new_text, encoding='utf-8')
 
 
+def _duplicate_the_package_version(copy_root, second_value='0.22.0.2'):
+    """Add a second, later `__version__` assignment in the COPY's CLI package.
+
+    A plain, valid assignment in a shape the file does not otherwise use —
+    the exact reproduction from #228: nothing about it looks malformed, so a
+    checker that reports the first regex match cannot tell the file now binds
+    a different value at runtime.
+    """
+    init_copy = copy_root / 'daedalus_cli' / '__init__.py'
+    text = init_copy.read_text(encoding='utf-8')
+    init_copy.write_text(text + f"\n__version__ = '{second_value}'\n", encoding='utf-8')
+
+
 def _run_checker(copy_root, *args):
     """Run the copied checker from inside the copy.
 
@@ -344,6 +357,49 @@ def test_check_versions_set_reports_a_site_it_cannot_rewrite(tmp):
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
     assert 'no version found' in r.stderr, r.stderr
     assert desc in r.stderr, (desc, r.stderr)
+
+
+def test_check_versions_refuses_a_second_version_assignment(tmp):
+    """A second `__version__` line -- even spelled with the other quote
+    character, which the site's old pattern could not see at all -- must not
+    let the checker report the tree consistent while Python binds a
+    different value at import time (#228)."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, _pattern = checker.SITES[-1]
+    assert path == 'daedalus_cli/__init__.py', path
+    _duplicate_the_package_version(copy_root)
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    assert desc in r.stderr, (desc, r.stderr)
+    assert '0.22.0.2' in r.stderr, r.stderr
+
+
+def test_check_versions_print_refuses_a_second_version_assignment(tmp):
+    """--print must not hand out the first of two competing values."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    _duplicate_the_package_version(copy_root)
+    r = _run_checker(copy_root, '--print')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert r.stdout.strip() == '', r.stdout
+    assert 'matches 2 times' in r.stderr, r.stderr
+
+
+def test_check_versions_set_refuses_a_second_version_assignment(tmp):
+    """--set must not rewrite only the first of two competing assignments
+    and leave the second one stale, which would silently reintroduce the
+    exact disagreement this checker exists to catch."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    _duplicate_the_package_version(copy_root)
+    before = (copy_root / 'daedalus_cli' / '__init__.py').read_text(encoding='utf-8')
+    r = _run_checker(copy_root, '--set', '9.9.9')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    after = (copy_root / 'daedalus_cli' / '__init__.py').read_text(encoding='utf-8')
+    assert after == before, 'refused sites must not be partially rewritten'
 
 
 def test_check_versions_print_refuses_a_tree_that_disagrees(tmp):

@@ -73,8 +73,15 @@ SITES = [
     # The published wheel is a version claim about the wire format, so it is
     # checked like any other site. pyproject reads this same attribute, so
     # there is nothing separate to keep in step.
+    #
+    # Either quote character, not just the one the file happens to use: a
+    # second `__version__ = '...'` assignment is exactly as valid Python as
+    # the first and wins the binding just the same, so a pattern that only
+    # recognizes the convention already in use cannot see a duplicate spelled
+    # the other way (#228) -- it has to see every assignment to be able to
+    # refuse more than one.
     ('daedalus_cli/__init__.py', 'package __version__',
-     r'__version__\s*=\s*"(?P<v>[^"]+)"'),
+     r'''__version__\s*=\s*(?P<q>['"])(?P<v>[^'"]+)(?P=q)'''),
 ]
 
 # The site every other site is compared against.
@@ -94,6 +101,29 @@ def read_source(path, staged, rev):
     return out.stdout
 
 
+def _find_site(path, desc, pattern, text):
+    """The site's one match in `text`, or a FAIL naming why there wasn't one.
+
+    A second assignment further down the file is invisible to `re.search`,
+    which returns only the first: the checker would report that value as
+    canonical while the runtime binds whichever assignment executes last,
+    and `--set` would rewrite only the first occurrence, leaving the second
+    stale. Neither can happen once a site is required to match exactly once.
+    """
+    matches = list(re.finditer(pattern, text))
+    if not matches:
+        raise SystemExit(
+            f'FAIL: no version found for {desc} in {path} — the file changed '
+            f'shape and SITES in {__file__} needs updating')
+    if len(matches) > 1:
+        values = ', '.join(sorted({m.group('v') for m in matches}))
+        raise SystemExit(
+            f'FAIL: {desc} in {path} matches {len(matches)} times ({values}) '
+            f'— a checker that reports the first match cannot report the '
+            f'value the file actually binds')
+    return matches[0]
+
+
 def collect(staged=False, rev=None):
     """[(path, description, version)] for every site, in SITES order."""
     cache = {}
@@ -101,11 +131,7 @@ def collect(staged=False, rev=None):
     for path, desc, pattern in SITES:
         if path not in cache:
             cache[path] = read_source(path, staged, rev)
-        m = re.search(pattern, cache[path])
-        if not m:
-            raise SystemExit(
-                f'FAIL: no version found for {desc} in {path} — the file changed '
-                f'shape and SITES in {__file__} needs updating')
+        m = _find_site(path, desc, pattern, cache[path])
         found.append((path, desc, m.group('v')))
     return found
 
@@ -149,9 +175,7 @@ def apply(version):
         target = REPO / path
         text = target.read_text(encoding='utf-8')
         for desc, pattern in entries:
-            m = re.search(pattern, text)
-            if not m:
-                raise SystemExit(f'FAIL: no version found for {desc} in {path}')
+            m = _find_site(path, desc, pattern, text)
             # Replace only the 'v' group so surrounding markup stays byte-identical.
             start, end = m.span('v')
             text = text[:start] + version + text[end:]
