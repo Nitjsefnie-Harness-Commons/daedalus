@@ -21,6 +21,12 @@ statements, and counting them would make the percentage depend on formatting.
 For any changed Python source the XML does measure, every added executable
 statement must have an XML record; an absent record is an invalid report,
 never a smaller denominator.
+
+Two reports feed the number: the Python Cobertura XML from `coverage xml`
+(--coverage) and, when given, the JavaScript one from js_coverage.py
+(--js-coverage), which records the shipped files under extension/ and
+dashboard/. The comment says which languages a run measured, so a number
+from one report never reads as though it described the whole change.
 """
 import argparse
 import re
@@ -35,6 +41,10 @@ from coverage.exceptions import CoverageException
 _TARGET = re.compile(r'^\+\+\+ (.*)$')
 # `@@ -old,count +new,count @@`; the counts are optional and mean 1.
 _HUNK = re.compile(r'^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@')
+# Shipped JavaScript is exactly the roots js_coverage.py measures.
+_SHIPPED_JAVASCRIPT_ROOTS = ('extension/', 'dashboard/')
+# Every language a run can measure, in comment order.
+_LANGUAGES = ('Python', 'JavaScript')
 
 
 def _decode_git_path(value):
@@ -118,6 +128,19 @@ def executable_lines(coverage_xml):
     return measured
 
 
+def _merge(measured, other):
+    """Fold a second report's records in, keeping the best hit count.
+
+    The Python and JavaScript reports name disjoint trees in practice, but
+    a shared path must keep the coverage either report saw rather than let
+    one silently replace the other.
+    """
+    for path, lines in other.items():
+        known = measured.setdefault(path, {})
+        for number, hits in lines.items():
+            known[number] = max(known.get(number, 0), hits)
+
+
 def added_lines(diff_text):
     """Return {path: {line numbers this diff adds}} from a unified diff."""
     added = {}
@@ -176,6 +199,10 @@ def validate_statement_records(measured, added):
     """
     analyzer = Coverage(config_file=True)
     for path in sorted(set(measured) & set(added)):
+        # Deliberately Python-only: the coverage.py statement analyzer is
+        # the oracle for which added lines are executable statements, and
+        # there is no JavaScript equivalent to validate against. Do not
+        # "fix" this filter to cover .js.
         if not path.lower().endswith('.py'):
             continue
         _source, statements, _excluded, _missing, _formatted = (
@@ -220,38 +247,58 @@ def measure(measured, added):
     return rows, covered, total
 
 
+def _measured_source(path):
+    """Whether some coverage report is expected to name this changed path.
+
+    Python coverage measures non-test Python; the JavaScript report
+    measures shipped JavaScript, which is exactly the two roots
+    js_coverage.py scans. Examples and test fixtures are not shipped
+    source, so their absence from a report says nothing.
+    """
+    if path.lower().endswith('.py'):
+        return not path.startswith('tests/')
+    return (path.endswith('.js')
+            and path.startswith(_SHIPPED_JAVASCRIPT_ROOTS))
+
+
 def unmeasured_sources(measured, added):
-    """Return changed non-test Python paths absent from the report.
+    """Return changed source paths the reports never named.
 
     A systematic path-spelling mismatch — the report naming
     `src/pkg/mod.py` where the diff says `pkg/mod.py` — is otherwise
     indistinguishable from a change confined to `tests/`. Returning every
-    absent path matters when one changed source file is measured and another
-    is not: a boolean all-or-nothing guard would hide the latter.
+    absent path matters when one changed source file is measured and
+    another is not: a boolean all-or-nothing guard would hide the latter.
     """
-    return {
-        path for path in added
-        if path.lower().endswith('.py')
-        and not path.startswith('tests/')
-        and path not in measured
-    }
+    return {path for path in added
+            if _measured_source(path) and path not in measured}
 
 
-def render(rows, covered, total, unmeasured=()):
+def _scope_note(languages):
+    """Name the languages this run measured, and any it was not given."""
+    missing = [name for name in _LANGUAGES if name not in languages]
+    if not missing:
+        return ['This number covers added Python and JavaScript lines.']
+    present = ' and '.join(languages)
+    absent = ' and '.join(missing)
+    return [f'Only the {present} report was given, so added {absent} '
+            f'lines are not measured.']
+
+
+def render(rows, covered, total, unmeasured=(), languages=_LANGUAGES):
     """Render the markdown comment body for one run."""
     unmeasured = set(unmeasured)
     out = ['### Coverage of this change', '']
     if total == 0 and unmeasured:
-        out.append('This change added lines to Python files outside '
-                   '`tests/`, but the coverage report names none of the '
-                   'changed paths. Nothing here was measured, which is not '
-                   'the same as nothing needing to be: the report most '
+        out.append('This change added lines to source files a coverage '
+                   'report should measure, but the report names none of '
+                   'the changed paths. Nothing here was measured, which is '
+                   'not the same as nothing needing to be: the report most '
                    'likely spells paths differently than the diff does.')
         out.append('')
-        out.append('Unmeasured changed Python files:')
+        out.append('Unmeasured changed source files:')
         out.extend(f'- `{path}`' for path in sorted(unmeasured))
-        return '\n'.join(out) + '\n'
-    if total == 0:
+    elif total == 0:
         # Said in full rather than as "0 lines": the common case here is a
         # change that only touches `tests/`, which the run omits, and a bare
         # "nothing added" reads like the tool failed to find the diff.
@@ -259,39 +306,45 @@ def render(rows, covered, total, unmeasured=()):
                    '`tests/*`, so a change confined to test files or to '
                    'files the report does not measure has no patch coverage '
                    'to report — that is not the same as none of it running.')
-        return '\n'.join(out) + '\n'
-    percent = 100.0 * covered / total
-    if covered < total:
-        percent = min(percent, 99.9)
-    subject = 'measured added lines' if unmeasured else 'added lines'
-    out.append(f'**{percent:.1f}%** of {subject} covered '
-               f'({covered}/{total}).')
-    out.append('')
-    out.append('| File | Covered | Added | Missed lines |')
-    out.append('| --- | ---: | ---: | --- |')
-    for path, file_covered, file_total, missed in rows:
-        detail = _ranges(missed) if missed else '—'
-        out.append(f'| `{path}` | {file_covered} | {file_total} | {detail} |')
-    if unmeasured:
+    else:
+        percent = 100.0 * covered / total
+        if covered < total:
+            percent = min(percent, 99.9)
+        subject = 'measured added lines' if unmeasured else 'added lines'
+        out.append(f'**{percent:.1f}%** of {subject} covered '
+                   f'({covered}/{total}).')
         out.append('')
-        out.append('The coverage report did not measure these changed '
-                   'Python files:')
-        out.extend(f'- `{path}`' for path in sorted(unmeasured))
-    if covered == total:
-        out.append('')
+        out.append('| File | Covered | Added | Missed lines |')
+        out.append('| --- | ---: | ---: | --- |')
+        for path, file_covered, file_total, missed in rows:
+            detail = _ranges(missed) if missed else '—'
+            out.append(
+                f'| `{path}` | {file_covered} | {file_total} | {detail} |')
         if unmeasured:
-            out.append('Every measured added line was reached; the files '
-                       'above were not measured.')
-        else:
-            out.append('Every added line was reached.')
+            out.append('')
+            out.append('The coverage reports did not measure these changed '
+                       'source files:')
+            out.extend(f'- `{path}`' for path in sorted(unmeasured))
+        if covered == total:
+            out.append('')
+            if unmeasured:
+                out.append('Every measured added line was reached; the '
+                           'files above were not measured.')
+            else:
+                out.append('Every added line was reached.')
+    out.append('')
+    out.extend(_scope_note(languages))
     return '\n'.join(out) + '\n'
 
 
 def main():
-    """Read a coverage report and a diff; print the markdown body."""
+    """Read the coverage reports and a diff; print the markdown body."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--coverage', required=True,
                         help='Cobertura XML written by `coverage xml`')
+    parser.add_argument('--js-coverage',
+                        help='Cobertura XML written by `js_coverage.py '
+                             '--xml`, covering shipped JavaScript')
     parser.add_argument('--diff', default='-',
                         help='unified diff to read, or - for stdin')
     args = parser.parse_args()
@@ -303,6 +356,10 @@ def main():
         # are not UTF-8 raises UnicodeDecodeError, a ValueError subclass,
         # and outside it that died as a traceback.
         measured = executable_lines(args.coverage)
+        languages = ['Python']
+        if args.js_coverage is not None:
+            _merge(measured, executable_lines(args.js_coverage))
+            languages.append('JavaScript')
         added = added_lines(diff_text)
         validate_statement_records(measured, added)
     except (CoverageException, ET.ParseError, ValueError) as error:
@@ -315,7 +372,8 @@ def main():
         return 1
     rows, covered, total = measure(measured, added)
     sys.stdout.write(render(rows, covered, total,
-                            unmeasured_sources(measured, added)))
+                            unmeasured_sources(measured, added),
+                            languages=languages))
     return 0
 
 

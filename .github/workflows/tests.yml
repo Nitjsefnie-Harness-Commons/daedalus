@@ -432,8 +432,12 @@ jobs:
         run: |
           git diff --text --no-ext-diff --no-textconv --unified=0 \
             HEAD^1 HEAD > patch.diff
+          # Both reports live in the one coverage-xml artifact this job
+          # downloaded; the comment says which languages it measured.
           python3 scripts/ci/diff_coverage.py \
-            --coverage coverage.xml --diff patch.diff > body.md
+            --coverage coverage.xml \
+            --js-coverage javascript-coverage.xml \
+            --diff patch.diff > body.md
           cat body.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Package the comment for the trusted commenter
