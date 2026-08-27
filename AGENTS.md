@@ -15,6 +15,7 @@ These rules and notes apply to every session and every task in this repo, not ju
 <housekeeping>
 - Don't over-engineer. Only make changes directly requested or clearly necessary. A bug fix doesn't need surrounding cleanup; a simple feature doesn't need extra configurability. Don't add docstrings, comments, or type annotations to code you didn't change. Don't add defensive handling for scenarios that can't happen.
 - If you create test artifacts in `$DAEDALUS_DIR/commands/`, `$DAEDALUS_DIR/results/`, or `$DAEDALUS_DIR/uploads/`, remove them at the end of the task.
+- Keep comments concise, and aim for at most a 15% comment ratio (`python3 ~/.agent-bundle/scripts/comment_ratio.py`). Write only what a reader cannot recover from the code itself; never restate what the next line already says. Go past 15% only where the reasoning genuinely needs it.
 - Server endpoint changes are one unit with your reverse-proxy routing — update the vhost in the same pass and reload both.
 </housekeeping>
 
