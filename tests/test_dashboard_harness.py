@@ -188,7 +188,7 @@ setInterval(() => {}, 10);
         process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
     assert _backstop_seconds(failure) == 1.5, failure
     drain_seconds = _drain_seconds(failure)
-    assert drain_seconds < 0.5, (
+    assert 0.8 <= drain_seconds < 1.5, (
         f'dashboard drain took {drain_seconds:.3f}s')
     assert 'drain timed out: yes' in failure, failure
 
