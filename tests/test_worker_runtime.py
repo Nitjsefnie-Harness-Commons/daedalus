@@ -208,6 +208,36 @@ def test_runtime_observer_tracks_probeable_global_properties(tmp):
     assert observed['bindings'] == ['sharedName']
 
 
+def test_runtime_observer_surfaces_syntax_error_from_binding_read(tmp):
+    """A getter's SyntaxError is not mistaken for invalid identifier syntax."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text("""
+Object.defineProperty(globalThis, 'sharedName', {
+  configurable: true,
+  get() { throw new SyntaxError('getter failed'); },
+});
+""", encoding='utf-8')
+
+    try:
+        _worker_runtime.observe_worker_runtime([{
+            'path': worker, 'globals': (), 'watched': (),
+        }], background_path=background)
+    except AssertionError as error:
+        failure = str(error)
+    else:
+        raise AssertionError(
+            'runtime SyntaxError for sharedName was swallowed')
+
+    assert str(worker) in failure, failure
+    assert 'sharedName' in failure, failure
+    assert 'SyntaxError: reading binding' in failure, failure
+    assert 'getter failed' in failure, failure
+
+
 def test_payload_keeps_harness_source_on_the_second_line(tmp):
     """A serialized payload does not shift program stack locations."""
     node = shutil.which('node')

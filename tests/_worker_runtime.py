@@ -21,19 +21,30 @@ function observationContext(details) {
   return workerContext;
 }
 
-function readBinding(workerContext, name) {
+function readBinding(workerContext, name, source) {
+  let probe;
+  try {
+    probe = new vm.Script(name);
+  } catch (error) {
+    if (error.name === 'SyntaxError') return { probeable: false };
+    throw error;
+  }
   try {
     return {
       probeable: true,
       available: true,
-      value: vm.runInContext(name, workerContext),
+      value: probe.runInContext(workerContext),
       descriptor: Object.getOwnPropertyDescriptor(workerContext, name),
     };
   } catch (error) {
     if (error.name === 'ReferenceError') {
       return { probeable: true, available: false };
     }
-    if (error.name === 'SyntaxError') return { probeable: false };
+    if (error.name === 'SyntaxError') {
+      throw new SyntaxError(
+        `reading binding ${JSON.stringify(name)} from ${source}: `
+        + error.message);
+    }
     throw error;
   }
 }
@@ -179,8 +190,10 @@ function observedBindings(states, shared) {
   for (const state of states) {
     const bindings = [];
     for (const name of candidates) {
-      const before = readBinding(state.baselineContext, name);
-      const after = readBinding(state.workerContext, name);
+      const before = readBinding(
+        state.baselineContext, name, state.details.path);
+      const after = readBinding(
+        state.workerContext, name, state.details.path);
       if (!before.probeable || !after.probeable) continue;
       if (state.propertyBindings.has(name)
           || (!before.available && after.available)) {
