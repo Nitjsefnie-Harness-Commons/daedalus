@@ -3,7 +3,6 @@
 import base64
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _worker_sources import directive_entries  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 from js_coverage import (_data_source, _file_url_path, _resolve_data,
@@ -510,14 +510,8 @@ def test_real_node_dump_preserves_crlf_offsets(tmp):
 
 def _worker_globals(module):
     """The `/* global ... */` directive names one worker module consumes."""
-    names = set()
-    source = module.read_text(encoding='utf-8')
-    for match in re.finditer(r'/\*\s*global\b([^*]*)\*/', source):
-        for item in match.group(1).split(','):
-            name = item.strip().partition(':')[0]
-            if name:
-                names.add(name)
-    return names
+    return set(directive_entries(
+        module.read_text(encoding='utf-8'), 'global'))
 
 
 def test_filename_naming_vm_loads_run_verbatim_source(tmp):
