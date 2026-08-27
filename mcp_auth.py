@@ -9,9 +9,8 @@ import mcp_request_guard
 
 
 class BearerAuth(BaseHTTPMiddleware):
-    def __init__(self, app, token_var, max_body_size):
+    def __init__(self, app, max_body_size):
         super().__init__(app)
-        self.token_var = token_var
         self.max_body_size = max_body_size
 
     async def dispatch(self, request, call_next):

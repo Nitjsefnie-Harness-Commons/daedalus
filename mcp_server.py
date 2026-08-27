@@ -148,7 +148,6 @@ def _serve():
         )
         app.add_middleware(
             mcp_auth.BearerAuth,
-            token_var=_token,
             max_body_size=MAX_BODY_SIZE,
         )
 
