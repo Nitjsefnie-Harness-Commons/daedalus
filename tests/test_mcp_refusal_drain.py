@@ -13,6 +13,7 @@ import _util  # noqa: E402
 DEPS = all(importlib.util.find_spec(name) is not None
            for name in ('httpx', 'mcp', 'starlette'))
 TOK = 'mcptok'
+REFUSED_PAYLOAD = bytes(range(256)) * 32
 os.environ['TOKEN'] = ''
 os.environ['DAEDALUS_TOKEN'] = TOK
 
@@ -23,46 +24,106 @@ def _need_deps():
             'mcp_server dependencies (httpx/mcp/starlette) not installed')
 
 
-def _attached_byte_count(request):
-    def count(value, depth):
-        if isinstance(value, (bytes, bytearray)):
-            return len(value)
-        if depth == 0 or not isinstance(value, (list, tuple, set, dict)):
-            return 0
-        if isinstance(value, dict):
-            return sum(
-                count(key, depth - 1) + count(item, depth - 1)
-                for key, item in value.items())
-        values = value
-        return sum(count(item, depth - 1) for item in values)
+def _request_contains_payload(request, payload):
+    seen = set()
 
-    # Bound depth so cyclic or deeply nested state cannot make the control
-    # perform unbounded graph walking.
+    def contains(value):
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return payload in bytes(value)
+        if not isinstance(value, (list, tuple, set, dict)):
+            return False
+        marker = id(value)
+        if marker in seen:
+            return False
+        seen.add(marker)
+        if isinstance(value, dict):
+            return any(
+                contains(key) or contains(item)
+                for key, item in value.items())
+        return any(contains(item) for item in value)
+
     state_values = tuple(request.scope.setdefault('state', {}).values())
     request_values = tuple(request.__dict__.values())
-    return sum(count(value, 3) for value in state_values + request_values)
+    return any(contains(value) for value in state_values + request_values)
 
 
-def test_attached_byte_count_reaches_three_state_container_levels(tmp):
+def test_payload_search_reaches_deep_state_containers(tmp):
     del tmp
     _need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
-    request.state.nested = [[[b'x' * 8192]]]
+    request.state.nested = [[[[[REFUSED_PAYLOAD]]]]]
 
-    assert _attached_byte_count(request) >= 8192
+    assert _request_contains_payload(request, REFUSED_PAYLOAD)
 
 
-def test_attached_byte_count_visits_dictionary_keys(tmp):
+def test_payload_search_visits_dictionary_keys(tmp):
     del tmp
     _need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
-    request.state.mapping = {b'x' * 8192: None}
+    request.state.mapping = {REFUSED_PAYLOAD: None}
 
-    assert _attached_byte_count(request) >= 8192
+    assert _request_contains_payload(request, REFUSED_PAYLOAD)
+
+
+def test_payload_search_reads_memoryviews(tmp):
+    del tmp
+    _need_deps()
+    from starlette.requests import Request
+
+    request = Request({'type': 'http'})
+    request.state.view = memoryview(REFUSED_PAYLOAD)
+
+    assert _request_contains_payload(request, REFUSED_PAYLOAD)
+
+
+def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
+    del tmp
+    _need_deps()
+    mod = _load_mcp(max_body_size=4096)
+    captured = []
+    outbound = []
+    inbound = [{
+        'type': 'http.request',
+        'body': REFUSED_PAYLOAD,
+        'more_body': False,
+    }]
+
+    async def receive():
+        return inbound.pop(0)
+
+    async def send(message):
+        outbound.append(message)
+
+    async def accepted(_scope, _receive, _send):
+        raise AssertionError('an early refusal reached the MCP app')
+
+    class CapturingBearerAuth(mod._BearerAuth):
+        async def dispatch(self, request, call_next):
+            request.state.trace_metadata = b'ordinary-state-' * 40
+            captured.append(request)
+            return await super().dispatch(request, call_next)
+
+    scope = {
+        'type': 'http',
+        'asgi': {'version': '3.0'},
+        'http_version': '1.1',
+        'method': 'POST',
+        'scheme': 'http',
+        'path': '/mcp',
+        'raw_path': b'/mcp',
+        'query_string': b'',
+        'headers': [(b'x-metadata', b'ordinary-header-' * 128)],
+        'client': ('127.0.0.1', 12345),
+        'server': ('127.0.0.1', 8086),
+    }
+    asyncio.run(CapturingBearerAuth(accepted)(scope, receive, send))
+
+    assert outbound[0]['status'] == 401
+    assert not _request_contains_payload(captured[0], REFUSED_PAYLOAD)
 
 
 def _load_mcp(max_body_size=None):
@@ -170,7 +231,7 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
 
     async def exercise(headers):
         events = []
-        chunks = [b'x' * 8192 for _unused in range(9)]
+        chunks = [REFUSED_PAYLOAD for _unused in range(9)]
         received = []
         request_seen = []
         real_response = mod.mcp_request_guard.JSONResponse
@@ -232,8 +293,8 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         assert all(event == 'receive' for event in events[1:-1]), (
             name, events)
         assert not hasattr(request, '_body'), name
-        retained = _attached_byte_count(request)
-        assert retained < 1024, (name, retained)
+        assert not _request_contains_payload(
+            request, REFUSED_PAYLOAD), name
 
 
 if __name__ == '__main__':
