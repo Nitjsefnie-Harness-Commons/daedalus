@@ -187,6 +187,32 @@ def _tests_workflow():
         encoding='utf-8')
 
 
+def test_coverage_job_publishes_distinct_python_and_javascript_metrics(tmp):
+    """Dropping capture, labels, either XML, or either gate must fail."""
+    del tmp
+    coverage = _tests_workflow().split('\n  coverage:\n', 1)[1]
+    coverage = coverage.split('\n  diff-coverage:\n', 1)[0]
+    capture = 'NODE_V8_COVERAGE: ${{ github.workspace }}/.node-v8-coverage'
+    assert capture in coverage, coverage
+    assert coverage.index(capture) < coverage.index('coverage_suites.py')
+    assert 'inherit NODE_V8_COVERAGE' in coverage, coverage
+    assert '- name: Python coverage summary' in coverage, coverage
+    assert '- name: Python coverage gate' in coverage, coverage
+    assert '- name: JavaScript coverage summary' in coverage, coverage
+    assert '- name: JavaScript coverage gate' in coverage, coverage
+    assert "echo '### Python coverage'" in coverage, coverage
+    assert "echo '### JavaScript coverage'" in coverage, coverage
+    assert 'Python statement coverage and JavaScript physical code-line' \
+        in coverage, coverage
+    assert 'coverage are separate metrics; do not add them together.' \
+        in coverage, coverage
+    upload = coverage.partition('name: coverage-xml')[2]
+    upload = upload.partition('if-no-files-found: error')[0]
+    assert re.search(r'^\s+coverage\.xml\s*$', upload, re.MULTILINE), upload
+    assert re.search(r'^\s+javascript-coverage\.xml\s*$',
+                     upload, re.MULTILINE), upload
+
+
 def _assert_diff_coverage_permissions(workflow):
     """Require the producer job's complete decoded permission grant."""
     permissions = job_mapping(workflow, 'diff-coverage', 'permissions')
