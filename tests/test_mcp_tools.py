@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Per-registration bridge binding for every returned MCP tool."""
 import asyncio
-import ast
 import importlib
 import inspect
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -16,7 +16,7 @@ sys.path.insert(0, str(_util.ROOT))
 class ToolRegistry:
     """Minimal MCP registry that preserves decorated coroutine functions."""
 
-    def __init__(self):
+    def __init__(self, *_args, **_kwargs):
         self.registered = {}
 
     def tool(self):
@@ -33,6 +33,10 @@ class BridgeProbe:
     def __init__(self, marker):
         self.marker = marker
         self.calls = []
+        self.transport = object()
+
+    def http_client(self):
+        return None
 
     def checked_timeout(self, timeout):
         self.calls.append(('checked_timeout', timeout))
@@ -66,32 +70,37 @@ REQUIRED_ARGUMENTS = {
 }
 
 
-def _discover_tool_modules():
-    paths = sorted(_util.ROOT.glob('mcp_tools_*.py'))
-    return {
-        path.stem: importlib.import_module(path.stem)
-        for path in paths
-    }
+def _load_composition(marker):
+    mcpserver = importlib.import_module('mcp.server.mcpserver')
+    mcp_transport = importlib.import_module('mcp_transport')
+
+    def bridge_session(*_args, **_kwargs):
+        return BridgeProbe(marker)
+
+    with mock.patch.object(mcpserver, 'MCPServer', ToolRegistry), \
+            mock.patch.object(
+                mcp_transport, 'BridgeSession', bridge_session):
+        return _util.load(
+            _util.ROOT / 'mcp_server.py', f'mcp_server_tools_{marker}')
 
 
-def _composed_tool_modules():
-    source = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
-    tree = ast.parse(source, filename='mcp_server.py')
-    composed = set()
-    for statement in tree.body:
-        if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Expr)):
-            continue
-        for node in ast.walk(statement):
-            if not isinstance(node, ast.Call):
-                continue
-            function = node.func
-            if not isinstance(function, ast.Attribute):
-                continue
-            owner = function.value
-            if (function.attr == 'register'
-                    and isinstance(owner, ast.Name)):
-                composed.add(owner.id)
-    return composed
+def _assert_inventory_matches_registry(composition):
+    inventoried = set()
+    for module, tools in composition.tool_module_inventory:
+        for name, tool in tools.items():
+            qualified_name = f'{module.__name__}.{name}'
+            assert composition.mcp.registered.get(name) is tool, (
+                f'{qualified_name}: inventory does not match MCP registry')
+            inventoried.add(tool)
+
+    unrecorded = sorted(
+        f'{tool.__module__}.{name}'
+        for name, tool in composition.mcp.registered.items()
+        if tool not in inventoried
+        and tool.__module__ != composition.__name__)
+    assert not unrecorded, (
+        'tools registered outside tool module inventory: '
+        f'{unrecorded}')
 
 
 def _required_arguments(tool):
@@ -122,26 +131,42 @@ async def _reached_bridge(tool, arguments, first_bridge, second_bridge):
 
 def test_every_registered_tool_keeps_its_own_bridge(_tmp):
     """Every returned tool calls the bridge from its own registration."""
-    modules = _discover_tool_modules()
-    discovered = set(modules)
-    composed = _composed_tool_modules()
-    assert discovered == composed, (
-        'MCP tool module mismatch: '
-        f'not composed={sorted(discovered - composed)}; '
-        f'no module file={sorted(composed - discovered)}')
+    first_composition = _load_composition('first')
+    second_composition = _load_composition('second')
+    assert hasattr(first_composition, 'tool_module_inventory'), (
+        'mcp_server.tool_module_inventory missing')
+    assert hasattr(second_composition, 'tool_module_inventory'), (
+        'mcp_server.tool_module_inventory missing')
+    first_inventory = first_composition.tool_module_inventory
+    second_inventory = second_composition.tool_module_inventory
+    first_modules = [module.__name__ for module, _tools in first_inventory]
+    second_modules = [module.__name__
+                      for module, _tools in second_inventory]
+    assert first_modules == second_modules, (
+        'MCP tool inventory changed between registrations: '
+        f'first={first_modules}; second={second_modules}')
+
+    wired_modules = set(first_modules)
+    unwired_modules = sorted(
+        path.stem for path in _util.ROOT.glob('mcp_tools_*.py')
+        if path.stem not in wired_modules)
+    assert not unwired_modules, (
+        f'MCP tool modules not registered: {unwired_modules}')
+    _assert_inventory_matches_registry(first_composition)
+    _assert_inventory_matches_registry(second_composition)
 
     returned_callables = set()
     exercised_callables = set()
-    for module_name, module in modules.items():
-        first_mcp = ToolRegistry()
-        second_mcp = ToolRegistry()
-        first_bridge = BridgeProbe('first')
-        second_bridge = BridgeProbe('second')
-        first_tools = module.register(first_mcp, first_bridge)
-        second_tools = module.register(second_mcp, second_bridge)
+    first_bridge = first_composition.bridge
+    second_bridge = second_composition.bridge
+    for first_entry, second_entry in zip(first_inventory, second_inventory):
+        module, first_tools = first_entry
+        second_module, second_tools = second_entry
+        module_name = module.__name__
+        assert module is second_module, (
+            'MCP tool inventory module mismatch: '
+            f'first={module_name}; second={second_module.__name__}')
 
-        assert set(first_tools) == set(first_mcp.registered)
-        assert set(second_tools) == set(second_mcp.registered)
         assert set(first_tools) == set(second_tools)
         assert all(callable(tool) for tool in first_tools.values())
         assert all(callable(tool) for tool in second_tools.values())

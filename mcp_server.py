@@ -58,8 +58,17 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
 bridge = BridgeSession(LOCAL_URL, _token)
 
 mcp = MCPServer('daedalus')
+tool_module_inventory = []
 
-tabs_tools = mcp_tools_tabs.register(mcp, bridge)
+
+def _register_tool_module(module):
+    """Register one tool module and retain its exact runtime result."""
+    tools = module.register(mcp, bridge)
+    tool_module_inventory.append((module, tools))
+    return tools
+
+
+tabs_tools = _register_tool_module(mcp_tools_tabs)
 list_tabs = tabs_tools['list_tabs']
 open_tab = tabs_tools['open_tab']
 open_tabs = tabs_tools['open_tabs']
@@ -68,7 +77,7 @@ close_tab = tabs_tools['close_tab']
 ext_navigate = tabs_tools['ext_navigate']
 ext_reload = tabs_tools['ext_reload']
 
-eval_tools = mcp_tools_eval.register(mcp, bridge)
+eval_tools = _register_tool_module(mcp_tools_eval)
 exec = eval_tools['exec']
 put = eval_tools['put']
 result = eval_tools['result']
