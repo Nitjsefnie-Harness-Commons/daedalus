@@ -20,9 +20,10 @@ Load the unpacked extension (`extension/`) in Chrome:
 
 A unique token is auto-generated on first install and stored in `chrome.storage.local`. View/change it from the extension's options page (puzzle icon → Daedalus → Options).
 
-For multi-tab parallel scraping, disable Chrome's background tab throttling:
+For multi-tab parallel scraping, disable Chrome's background tab throttling and
+freezing, raise the renderer process cap, and drop the debugger banner:
 ```
-chrome --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding
+chrome --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion,ThrottleUnimportantFrameTimers,FreezingOnEnergySaver,FreezingOnBatterySaver,HighEfficiencyModeAvailable,BatterySaverModeAvailable --renderer-process-limit=32 --silent-debugger-extension-api
 ```
 
 The bridge itself (`server.py`) is stdlib-only and needs no install. The CLI
