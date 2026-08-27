@@ -7,12 +7,12 @@ _REGEX_KEYWORDS = {
     'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new',
     'of', 'return', 'throw', 'typeof', 'void', 'yield',
 }
+_STATEMENT_KEYWORDS = {'for', 'if', 'while', 'with'}
 _OTHER_KEYWORDS = {
     'break', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
-    'enum', 'export', 'extends', 'finally', 'for', 'function', 'if',
-    'implements', 'import', 'interface', 'let', 'package', 'private',
-    'protected', 'public', 'static', 'switch', 'try', 'var',
-    'while', 'with',
+    'enum', 'export', 'extends', 'finally', 'function', 'implements',
+    'import', 'interface', 'let', 'package', 'private', 'protected',
+    'public', 'static', 'switch', 'try', 'var',
 }
 _REGEX_PUNCTUATORS = set('(,=: [!&|?+-*/%<>^~;{'.replace(' ', ''))
 _EXPRESSION_PUNCTUATORS = set(')]')
@@ -73,6 +73,7 @@ class _Scanner:
     def _code(self, template_line=None):
         previous = 'start' if template_line is None else 'prefix'
         brace_depth = 0
+        paren_heads = []
         while self.index < len(self.source):
             char = self._peek()
             following = self._peek(1)
@@ -130,6 +131,8 @@ class _Scanner:
                     previous = 'prefix'
                 elif token in _EXPRESSION_KEYWORDS:
                     previous = 'expression'
+                elif token in _STATEMENT_KEYWORDS:
+                    previous = 'statement'
                 elif token in _OTHER_KEYWORDS:
                     previous = 'unknown'
                 else:
@@ -148,6 +151,16 @@ class _Scanner:
                     return
                 brace_depth -= 1
                 previous = 'brace'
+            elif char == '(':
+                paren_heads.append(previous == 'statement')
+                previous = 'prefix'
+            elif char == ')':
+                # The body of if/while/for/with (...) may open with a
+                # regex literal; division there has no left operand.
+                if paren_heads and paren_heads.pop():
+                    previous = 'prefix'
+                else:
+                    previous = 'expression'
             elif char in _EXPRESSION_PUNCTUATORS:
                 previous = 'expression'
             elif char in _REGEX_PUNCTUATORS:
