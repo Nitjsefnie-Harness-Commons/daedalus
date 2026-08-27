@@ -146,10 +146,7 @@ def _coverage_tree(tmp, suites, unlaunchable=(), cpu_count=None):
         _FAKE_COVERAGE, encoding='utf-8')
     for name, source in suites.items():
         (root / 'tests' / name).write_text(source, encoding='utf-8')
-    env = {
-        key: value for key, value in os.environ.items()
-        if not key.startswith('COVERAGE_')
-    }
+    env = _util.coverage_free_environment(os.environ)
     env['COVERAGE_PROCESS_START'] = _SYNTHETIC_PROCESS_START
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     inherited_path = env.get('PYTHONPATH')

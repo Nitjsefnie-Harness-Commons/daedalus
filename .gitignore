@@ -244,6 +244,7 @@
 !/tests/test_coverage_comment_boundary.py
 !/tests/test_coverage_comment_fork.py
 !/tests/test_coverage_comment_workflow.py
+!/tests/test_coverage_environment.py
 !/tests/test_coverage_suites.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py

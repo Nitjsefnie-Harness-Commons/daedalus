@@ -488,7 +488,7 @@ def test_real_node_dump_reports_executed_and_skipped_lines(tmp):
     root = _repository(tmp, {'extension/real.js': source})
     dumps = Path(tmp) / 'coverage'
     dumps.mkdir()
-    env = dict(os.environ)
+    env = _util.coverage_free_environment(os.environ)
     env['NODE_V8_COVERAGE'] = str(dumps)
 
     completed = subprocess.run(
@@ -520,7 +520,7 @@ def test_real_node_dump_preserves_crlf_offsets(tmp):
     script.write_bytes(source)
     dumps = Path(tmp) / 'coverage'
     dumps.mkdir()
-    env = dict(os.environ)
+    env = _util.coverage_free_environment(os.environ)
     env['NODE_V8_COVERAGE'] = str(dumps)
 
     completed = subprocess.run(
