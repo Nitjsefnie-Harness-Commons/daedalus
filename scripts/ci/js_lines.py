@@ -5,13 +5,13 @@ _LINE_ENDS = '\n\r\u2028\u2029'
 _EXPRESSION_KEYWORDS = {'false', 'null', 'super', 'this', 'true'}
 _REGEX_KEYWORDS = {
     'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new',
-    'of', 'return', 'typeof', 'void', 'yield',
+    'of', 'return', 'throw', 'typeof', 'void', 'yield',
 }
 _OTHER_KEYWORDS = {
     'break', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
     'enum', 'export', 'extends', 'finally', 'for', 'function', 'if',
     'implements', 'import', 'interface', 'let', 'package', 'private',
-    'protected', 'public', 'static', 'switch', 'throw', 'try', 'var',
+    'protected', 'public', 'static', 'switch', 'try', 'var',
     'while', 'with',
 }
 _REGEX_PUNCTUATORS = set('(,=: [!&|?+-*/%<>^~;{'.replace(' ', ''))
@@ -24,6 +24,10 @@ def _identifier_start(char):
 
 def _identifier_part(char):
     return _identifier_start(char) or char.isdigit()
+
+
+def _javascript_whitespace(char):
+    return char == '\ufeff' or char.isspace()
 
 
 class _Scanner:
@@ -58,7 +62,7 @@ class _Scanner:
             self.index += 1
             self.line += 1
             return
-        if code and not char.isspace():
+        if code and not _javascript_whitespace(char):
             self.lines.add(self.line)
         self.index += 1
 
@@ -72,7 +76,7 @@ class _Scanner:
         while self.index < len(self.source):
             char = self._peek()
             following = self._peek(1)
-            if char.isspace():
+            if _javascript_whitespace(char):
                 self._advance()
                 continue
             if char == '/' and following == '/':
@@ -101,6 +105,13 @@ class _Scanner:
                 else:
                     self._error('unclassified slash')
                 continue
+            if char in '+-' and following == char:
+                self._advance(code=True)
+                self._advance(code=True)
+                previous = 'expression'
+                continue
+            if char == '\\':
+                self._error('escaped identifier is not modelled')
             if _identifier_start(char):
                 token = self._identifier()
                 if token in _REGEX_KEYWORDS:

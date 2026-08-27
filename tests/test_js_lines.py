@@ -19,6 +19,13 @@ def test_blank_and_comment_only_lines_are_not_code(tmp):
     assert code_lines(source) == {1, 6}
 
 
+def test_byte_order_mark_is_javascript_whitespace(tmp):
+    """A BOM-only physical line does not enter the denominator."""
+    del tmp
+    source = '\ufeff\nconst value = 1;\n'
+    assert code_lines(source) == {2}
+
+
 def test_line_comments_end_at_each_javascript_terminator(tmp):
     """All four JavaScript line terminators end a line comment."""
     del tmp
@@ -29,6 +36,13 @@ def test_line_comments_end_at_each_javascript_terminator(tmp):
         '// only\u2029'
         'const c = 3;')
     assert code_lines(source) == {1, 3, 5}
+
+
+def test_crlf_is_one_physical_line_terminator(tmp):
+    """A CRLF pair advances the physical line number only once."""
+    del tmp
+    source = 'const one = 1;\r\nconst two = 2;\r\nconst three = 3;\r\n'
+    assert code_lines(source) == {1, 2, 3}
 
 
 def test_block_comments_can_span_lines_and_share_code_lines(tmp):
@@ -70,6 +84,13 @@ def test_template_holes_nest_and_model_their_own_literals(tmp):
     assert code_lines(source) == {1, 2, 3}
 
 
+def test_template_backslash_escapes_preserve_raw_text(tmp):
+    """Backslash escapes, including an escaped backtick, stay raw."""
+    del tmp
+    source = 'const text = `slash \\\\ and tick \\``;\n'
+    assert code_lines(source) == {1}
+
+
 def test_regex_slashes_survive_classes_and_escapes(tmp):
     """Neither a class slash nor an escaped slash ends a regex early."""
     del tmp
@@ -77,6 +98,12 @@ def test_regex_slashes_survive_classes_and_escapes(tmp):
         'const inClass = /[/]/g;\n'
         'const escaped = /^data:image\\/\\w+;base64,/i;\n')
     assert code_lines(source) == {1, 2}
+
+
+def test_regex_character_class_can_be_followed_by_a_quantifier(tmp):
+    """A slash inside a class does not end the regex before its star."""
+    del tmp
+    assert code_lines('const slashRun = /[/]*/;\n') == {1}
 
 
 def test_regex_literals_follow_start_keywords_and_punctuators(tmp):
@@ -90,6 +117,12 @@ def test_regex_literals_follow_start_keywords_and_punctuators(tmp):
     assert code_lines(source) == {1, 2, 3, 4}
 
 
+def test_throw_keyword_is_followed_by_a_regex_literal(tmp):
+    """The expression after throw can begin with a regex literal."""
+    del tmp
+    assert code_lines('throw /boom/;\n') == {1}
+
+
 def test_division_follows_parentheses_identifiers_and_numbers(tmp):
     """Expression-ending tokens classify a slash as division."""
     del tmp
@@ -98,6 +131,20 @@ def test_division_follows_parentheses_identifiers_and_numbers(tmp):
         'const ratio = total / count;\n'
         'const half = 10 / 2;\n')
     assert code_lines(source) == {1, 2, 3}
+
+
+def test_division_follows_postfix_increment_and_decrement(tmp):
+    """Postfix update tokens leave a completed expression before slash."""
+    del tmp
+    source = 'const up = n++ / 2;\nconst down = n-- / 2;\n'
+    assert code_lines(source) == {1, 2}
+
+
+def test_numeric_exponent_can_end_an_expression(tmp):
+    """A signed exponent remains one number before division."""
+    del tmp
+    source = 'const large = 1e+5;\nconst half = 1e+5 / 2;\n'
+    assert code_lines(source) == {1, 2}
 
 
 def _assert_refusal(source, shape, line):
@@ -127,6 +174,12 @@ def test_slash_after_an_unclassified_token_is_refused(tmp):
     _assert_refusal('value. / pattern;\n', 'unclassified slash', 1)
 
 
+def test_escaped_identifier_is_refused_by_its_own_shape(tmp):
+    """An unsupported escaped identifier is not blamed on its slash."""
+    del tmp
+    _assert_refusal(r'\u{61} / 2;', 'escaped identifier', 1)
+
+
 def test_unterminated_block_comment_is_refused(tmp):
     """A block comment reaching EOF names its opening line."""
     del tmp
@@ -141,6 +194,13 @@ def test_unterminated_string_is_refused(tmp):
                     'unterminated string', 2)
 
 
+def test_string_reaching_a_line_ending_is_refused(tmp):
+    """A quoted string cannot cross an unescaped physical line."""
+    del tmp
+    _assert_refusal("const text = 'open\nstill open",
+                    'unterminated string', 1)
+
+
 def test_unterminated_template_is_refused(tmp):
     """A template or one of its holes must reach the closing backtick."""
     del tmp
@@ -148,11 +208,31 @@ def test_unterminated_template_is_refused(tmp):
                     'unterminated template', 2)
 
 
+def test_raw_unterminated_template_is_refused(tmp):
+    """Raw template text reaching EOF names the opening line."""
+    del tmp
+    _assert_refusal('const text = `open', 'unterminated template', 1)
+
+
 def test_unterminated_regex_is_refused(tmp):
     """A regex reaching EOF names its opening line."""
     del tmp
     _assert_refusal('const value = 1;\nconst match = /open[abc',
                     'unterminated regex', 2)
+
+
+def test_regex_reaching_a_line_ending_is_refused(tmp):
+    """An unescaped physical line ending cannot occur in a regex."""
+    del tmp
+    _assert_refusal('const match = /open\nstill open',
+                    'unterminated regex', 1)
+
+
+def test_regex_escaped_line_ending_is_refused(tmp):
+    """A backslash cannot make a physical line ending part of a regex."""
+    del tmp
+    _assert_refusal('const match = /open\\\nstill open/;',
+                    'unterminated regex', 1)
 
 
 def test_every_shipped_javascript_file_is_modelled(tmp):
