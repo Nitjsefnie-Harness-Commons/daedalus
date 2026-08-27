@@ -182,6 +182,7 @@
 # ─── scripts/ci ───
 !/scripts/
 !/scripts/ci/
+!/scripts/ci/classify_changes.py
 !/scripts/ci/compare_durations.py
 !/scripts/ci/coverage_suites.py
 !/scripts/ci/diff_coverage.py
@@ -231,6 +232,7 @@
 !/tests/test_bridge_streams.py
 !/tests/test_bridge_tabs.py
 !/tests/test_bridge_uploads.py
+!/tests/test_change_classifier.py
 !/tests/test_checkout_pin.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_workflows.py
