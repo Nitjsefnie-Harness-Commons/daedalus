@@ -122,6 +122,7 @@ def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
         assert _util.startup_timeout() == _util.WARM_START_TIMEOUT
         assert _util.COLD_START_TIMEOUT > _util.WARM_START_TIMEOUT
 
+        _util._bridge_started = False
         real_startup_timeout = _util.startup_timeout
         _util.startup_timeout = lambda: 0.001
         try:
@@ -132,6 +133,7 @@ def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
             except RuntimeError as exc:
                 failure = str(exc)
             assert 'did not announce its port in 0.001s' in failure, failure
+            assert _util._bridge_started is False
         finally:
             _util.startup_timeout = real_startup_timeout
 
