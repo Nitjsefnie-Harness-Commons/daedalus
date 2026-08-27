@@ -291,10 +291,16 @@ async function waitFor(predicate, label) {
 }
 
 async function run() {
-  vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), backgroundContext);
+  vm.runInContext(
+    fs.readFileSync(backgroundPath, 'utf8'), backgroundContext,
+    { filename: backgroundPath });
   await vm.runInContext('loadConfig()', backgroundContext);
-  vm.runInContext(fs.readFileSync(contentPath, 'utf8'), relayContext);
-  vm.runInContext(fs.readFileSync(pagePath, 'utf8'), relayContext);
+  vm.runInContext(
+    fs.readFileSync(contentPath, 'utf8'), relayContext,
+    { filename: contentPath });
+  vm.runInContext(
+    fs.readFileSync(pagePath, 'utf8'), relayContext,
+    { filename: pagePath });
 
   if (mode === 'injection-shapes') {
     const shapes = ['reject', 'empty', 'frame-error', 'missing-result',

@@ -200,7 +200,9 @@ async function runEval(id, code) {
 }
 
 (async () => {
-  vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context);
+  vm.runInContext(
+    fs.readFileSync(backgroundPath, 'utf8'), context,
+    { filename: backgroundPath });
   await delay();
   vm.runInContext('_cdpSessions[7] = true', context);
 

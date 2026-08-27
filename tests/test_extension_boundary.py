@@ -7,16 +7,84 @@ upload is an error rather than an envelope with nothing in it; a rule id of
 zero does not widen into remove-all. These run the shipped background script
 in a Node VM with a fake browser under it.
 """
+import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
-from _boundary import run_extension_result_boundary  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _boundary import HARNESS, run_extension_result_boundary  # noqa: E402
+from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
+
+
+_VM_SOURCE_FILES = (
+    ROOT / 'tests' / '_boundary.py',
+    ROOT / 'tests' / '_cdpharness.py',
+    ROOT / 'tests' / '_overlap.py',
+    ROOT / 'tests' / '_relayharness.py',
+    ROOT / 'tests' / 'test_dashboard_behaviour.py',
+    ROOT / 'tests' / 'test_gm_storage.py',
+    ROOT / 'tests' / 'test_gm_transfers.py',
+)
+
+
+def _vm_file_read_calls():
+    pattern = re.compile(
+        r'vm\.runIn(?:Context|NewContext)\(\s*'
+        r'fs\.readFileSync\((?P<expr>[^,]+?),\s*[\'\"]utf8[\'\"]\)'
+        r'(?P<tail>.*?)\);', re.DOTALL)
+    calls = []
+    for path in _VM_SOURCE_FILES:
+        source = path.read_text(encoding='utf-8')
+        for match in pattern.finditer(source):
+            calls.append((path, match.group('expr').strip(), match.group(0)))
+    return calls
+
+
+def test_every_vm_file_load_names_the_shipped_source(tmp):
+    """Every VM load of a file supplies that file as V8's filename."""
+    del tmp
+    calls = _vm_file_read_calls()
+    assert len(calls) == 19, [
+        (path, expression) for path, expression, _ in calls]
+    for path, expression, call in calls:
+        expected = re.escape(expression)
+        filename_pattern = (r'filename\s*:\s*' + expected
+                            + r'(?![A-Za-z0-9_$])')
+        assert re.search(filename_pattern, call), (path, expression, call)
+
+
+def test_v8_coverage_attributes_the_shipped_background_script(tmp):
+    """A real Node coverage dump names the shipped background script."""
+    coverage = Path(tmp) / 'v8-coverage'
+    coverage.mkdir()
+    node = shutil.which('node')
+    assert node, 'node is required to collect V8 coverage'
+    background_path = EXTENSION_ROOT / 'background.js'
+    env = dict(os.environ)
+    env['NODE_V8_COVERAGE'] = str(coverage)
+    result = subprocess.run(
+        [node, '-e', HARNESS, str(background_path), 'capacity'],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    dumps = sorted(coverage.glob('*.json'))
+    assert dumps, 'Node emitted no V8 coverage dump'
+    urls = []
+    for dump in dumps:
+        payload = json.loads(dump.read_text(encoding='utf-8'))
+        urls.extend(item.get('url') for item in payload.get('result', [])
+                    if item.get('url'))
+    shipped_url = background_path.resolve().as_uri()
+    shipped = [url for url in urls if url == shipped_url]
+    assert shipped, urls
+    assert all(url != 'evalmachine.<anonymous>' for url in shipped), shipped
 
 
 def test_extension_same_id_overlap_keeps_each_delivery_id(tmp):

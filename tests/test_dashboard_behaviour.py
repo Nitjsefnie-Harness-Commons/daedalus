@@ -88,7 +88,9 @@ const context = vm.createContext({
 });
 
 phase('dashboard module import started');
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+vm.runInContext(
+  fs.readFileSync(process.argv[1], 'utf8'), context,
+  { filename: process.argv[1] });
 phase('dashboard module imported');
 phase('dashboard call started');
 const firstProactive = timers.find((item) => item.delay === 4 * 60 * 1000);
