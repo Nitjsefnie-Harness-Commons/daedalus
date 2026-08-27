@@ -5,7 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from daedalus_cli import ambiguous_request_carrier
-import mcp_request_guard
+from daedalus_mcp import request_guard
 
 
 class BearerAuth(BaseHTTPMiddleware):
@@ -14,10 +14,10 @@ class BearerAuth(BaseHTTPMiddleware):
         self.max_body_size = max_body_size
 
     async def dispatch(self, request, call_next):
-        refusal = mcp_request_guard.early_refusal(
+        refusal = request_guard.early_refusal(
             request, self.max_body_size)
         if refusal is not None:
-            await mcp_request_guard.drain_refused_body(request)
+            await request_guard.drain_refused_body(request)
             return refusal
 
         if request.method == 'POST':

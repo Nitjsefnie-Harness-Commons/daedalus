@@ -38,17 +38,6 @@
 !/LICENSE
 !/README.md
 !/SECURITY.md
-!/mcp_auth.py
-!/mcp_request_guard.py
-!/mcp_server.py
-!/mcp_tools_cookies.py
-!/mcp_tools_css.py
-!/mcp_tools_eval.py
-!/mcp_tools_hotfixes.py
-!/mcp_tools_media.py
-!/mcp_tools_network.py
-!/mcp_tools_tabs.py
-!/mcp_transport.py
 !/pyproject.toml
 !/pyrightconfig.json
 !/requirements-dev.txt
@@ -115,6 +104,21 @@
 !/daedalus_cli/output.py
 !/daedalus_cli/parser.py
 !/daedalus_cli/transport.py
+
+# ─── daedalus_mcp ───
+!/daedalus_mcp/
+!/daedalus_mcp/__init__.py
+!/daedalus_mcp/auth.py
+!/daedalus_mcp/request_guard.py
+!/daedalus_mcp/server.py
+!/daedalus_mcp/tools_cookies.py
+!/daedalus_mcp/tools_css.py
+!/daedalus_mcp/tools_eval.py
+!/daedalus_mcp/tools_hotfixes.py
+!/daedalus_mcp/tools_media.py
+!/daedalus_mcp/tools_network.py
+!/daedalus_mcp/tools_tabs.py
+!/daedalus_mcp/transport.py
 
 # ─── dashboard ───
 !/dashboard/

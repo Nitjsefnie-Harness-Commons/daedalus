@@ -21,7 +21,7 @@ os.environ['DAEDALUS_TOKEN'] = TOK
 def _need_deps():
     if not DEPS:
         _util.skip(
-            'mcp_server dependencies (httpx/mcp/starlette) not installed')
+            'daedalus_mcp.server dependencies (httpx/mcp/starlette) not installed')
 
 
 def _request_contains_payload(request, payload):
@@ -135,7 +135,7 @@ def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
     async def accepted(_scope, _receive, _send):
         raise AssertionError('an early refusal reached the MCP app')
 
-    class CapturingBearerAuth(mod.mcp_auth.BearerAuth):
+    class CapturingBearerAuth(mod.auth.BearerAuth):
         async def dispatch(self, request, call_next):
             request.state.trace_metadata = b'ordinary-state-' * 40
             captured.append(request)
@@ -169,7 +169,7 @@ def _load_mcp(max_body_size=None):
         os.environ[setting] = str(max_body_size)
     try:
         return _util.load(
-            _util.ROOT / 'mcp_server.py',
+            _util.ROOT / 'daedalus_mcp' / 'server.py',
             'mcp_refusal_drain_' + str(time.time_ns()))
     finally:
         if previous is None:
@@ -183,7 +183,7 @@ def test_request_token_is_public_guard_state(tmp):
     _need_deps()
     mod = _load_mcp()
 
-    assert mod._token is mod.mcp_request_guard.request_token
+    assert mod._token is mod.request_guard.request_token
 
 
 def test_disconnect_during_drain_preserves_refusal(tmp):
@@ -221,7 +221,7 @@ def test_disconnect_during_drain_preserves_refusal(tmp):
         'server': ('127.0.0.1', 8086),
     }
     try:
-        middleware = mod.mcp_auth.BearerAuth(
+        middleware = mod.auth.BearerAuth(
             accepted, max_body_size=mod.MAX_BODY_SIZE)
         asyncio.run(middleware(scope, receive, send))
     except ClientDisconnect as exc:
@@ -239,7 +239,7 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
     del tmp
     _need_deps()
     mod = _load_mcp(max_body_size=4096)
-    assert mod.MAX_BODY_SIZE + 1 < mod.mcp_request_guard.REFUSED_BODY_DRAIN
+    assert mod.MAX_BODY_SIZE + 1 < mod.request_guard.REFUSED_BODY_DRAIN
     valid_auth = (b'authorization', f'Bearer {TOK}'.encode())
     cases = (
         ('duplicate authorization', 'POST',
@@ -272,7 +272,7 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         chunks = [chunk for _unused in range(8)]
         received = []
         request_seen = []
-        real_response = mod.mcp_request_guard.JSONResponse
+        real_response = mod.request_guard.JSONResponse
 
         def deciding_response(*args, **kwargs):
             events.append('decision')
@@ -296,7 +296,7 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         async def accepted(_scope, _receive, _send):
             raise AssertionError('an early refusal reached the MCP app')
 
-        class CapturingBearerAuth(mod.mcp_auth.BearerAuth):
+        class CapturingBearerAuth(mod.auth.BearerAuth):
             async def dispatch(self, request, call_next):
                 request_seen.append(request)
                 return await super().dispatch(request, call_next)
@@ -314,13 +314,13 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
             'client': ('127.0.0.1', 12345),
             'server': ('127.0.0.1', 8086),
         }
-        mod.mcp_request_guard.JSONResponse = deciding_response
+        mod.request_guard.JSONResponse = deciding_response
         try:
             middleware = CapturingBearerAuth(
                 accepted, max_body_size=mod.MAX_BODY_SIZE)
             await middleware(scope, receive, send)
         finally:
-            mod.mcp_request_guard.JSONResponse = real_response
+            mod.request_guard.JSONResponse = real_response
         return events, received, request_seen[0]
 
     for name, method, headers in cases:
@@ -328,8 +328,8 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         assert len(received) == 7, (name, events, len(received))
         drained_before_last = sum(len(chunk) for chunk in received[:-1])
         drained = sum(len(chunk) for chunk in received)
-        assert drained_before_last < mod.mcp_request_guard.REFUSED_BODY_DRAIN
-        assert drained >= mod.mcp_request_guard.REFUSED_BODY_DRAIN
+        assert drained_before_last < mod.request_guard.REFUSED_BODY_DRAIN
+        assert drained >= mod.request_guard.REFUSED_BODY_DRAIN
         assert events[0] == 'decision', (name, events)
         assert events[-1] == 'response-complete', (name, events)
         assert all(event == 'receive' for event in events[1:-1]), (
