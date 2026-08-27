@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # first bridge start pays its cold import costs alongside the other firsts.
 COLD_START_TIMEOUT = 60
 WARM_START_TIMEOUT = 20
+DRAIN_JOIN_TIMEOUT = 1
 _bridge_started = False
 
 
@@ -234,7 +235,7 @@ def _startup_observations(proc, drained, waited):
     if code is not None:
         thread = getattr(proc, '_daedalus_drain_thread', None)
         if thread is not None:
-            thread.join(timeout=1)
+            thread.join(timeout=DRAIN_JOIN_TIMEOUT)
             drain_incomplete = thread.is_alive()
             lines = list(drained)
     state = ('still running' if code is None
