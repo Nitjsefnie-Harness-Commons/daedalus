@@ -54,7 +54,9 @@ __CONTEXT__.importScripts = (...sourceNames) => {
     const sourcePath = require('path').resolve(
       require('path').dirname(backgroundPath), sourceName);
     loadedWorkerSourcePaths.push(sourcePath);
-    vm.runInContext(fs.readFileSync(sourcePath, 'utf8'), __CONTEXT__);
+    vm.runInContext(
+      fs.readFileSync(sourcePath, 'utf8'), __CONTEXT__,
+      { filename: sourcePath });
   }
 };
 """.replace('__CONTEXT__', context_name).replace(

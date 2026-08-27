@@ -19,40 +19,56 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _boundary import HARNESS, run_extension_result_boundary  # noqa: E402
-from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _repo import EXTENSION_ROOT, ROOT, iter_tree_files  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
 
 
-_VM_SOURCE_FILES = (
-    ROOT / 'tests' / '_boundary.py',
-    ROOT / 'tests' / '_cdpharness.py',
-    ROOT / 'tests' / '_overlap.py',
-    ROOT / 'tests' / '_relayharness.py',
-    ROOT / 'tests' / 'test_dashboard_behaviour.py',
-    ROOT / 'tests' / 'test_gm_storage.py',
-    ROOT / 'tests' / 'test_gm_transfers.py',
-)
+_VM_FILE_READ = re.compile(
+    r'vm\s*\.\s*runIn(?:Context|NewContext)\s*\(\s*'
+    r'fs\s*\.\s*readFileSync\s*\(\s*'
+    r'(?P<expr>[^,]+?)\s*,\s*[\'\"]utf8[\'\"]\s*\)'
+    r'(?P<tail>.*?)\s*\)\s*;', re.DOTALL)
+_JS_COMMENT = re.compile(
+    r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|'
+    r'`(?:\\.|[^`\\])*`)|//[^\r\n]*|/\*.*?\*/', re.DOTALL)
+
+
+def _without_js_comments(source):
+    return _JS_COMMENT.sub(
+        lambda match: match.group(1) or ' ', source)
+
+
+def _vm_harness_files(root=ROOT, tracked=None):
+    """Tracked test files whose VM file loads the guard scans.
+
+    The set is discovered rather than listed, so a harness file added
+    later is scanned by default. This module is the single exemption:
+    its pattern matches are the guard's own synthetic fixtures —
+    deliberately non-canonical spellings feeding the rejection tests —
+    not loads a harness performs.
+    """
+    if tracked is None:
+        tracked = iter_tree_files(root)
+    self_path = Path(__file__).resolve()
+    files = []
+    for path in tracked:
+        path = Path(path)
+        if path.resolve() == self_path:
+            continue
+        if path.relative_to(root).parts[0] != 'tests':
+            continue
+        source = _without_js_comments(path.read_text(encoding='utf-8'))
+        if _VM_FILE_READ.search(source):
+            files.append(path)
+    return tuple(files)
 
 
 def _vm_file_read_calls(source_files=None):
-    comment = re.compile(
-        r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|'
-        r'`(?:\\.|[^`\\])*`)|//[^\r\n]*|/\*.*?\*/', re.DOTALL)
-
-    def without_comments(source):
-        return comment.sub(
-            lambda match: match.group(1) or ' ', source)
-
-    pattern = re.compile(
-        r'vm\s*\.\s*runIn(?:Context|NewContext)\s*\(\s*'
-        r'fs\s*\.\s*readFileSync\s*\(\s*'
-        r'(?P<expr>[^,]+?)\s*,\s*[\'\"]utf8[\'\"]\s*\)'
-        r'(?P<tail>.*?)\s*\)\s*;', re.DOTALL)
     calls = []
-    paths = _VM_SOURCE_FILES if source_files is None else source_files
+    paths = _vm_harness_files() if source_files is None else source_files
     for path in paths:
-        source = without_comments(path.read_text(encoding='utf-8'))
-        for match in pattern.finditer(source):
+        source = _without_js_comments(path.read_text(encoding='utf-8'))
+        for match in _VM_FILE_READ.finditer(source):
             calls.append((path, match.group('expr').strip(), match.group(0)))
     return calls
 
@@ -132,7 +148,45 @@ def _guard_accepts_source(tmp, source):
 def test_every_vm_file_load_names_the_shipped_source(tmp):
     """Every VM load of a file supplies that file as V8's filename."""
     del tmp
-    _assert_vm_file_loads_are_named(_vm_file_read_calls(), 19)
+    calls = _vm_file_read_calls()
+    assert calls, 'discovery found no VM file loads to check'
+    _assert_vm_file_loads_are_named(calls, len(calls))
+
+
+def test_vm_load_guard_scans_the_worker_harness_files(tmp):
+    """The guard scans the harness files the worker split introduced.
+
+    The coverage collapse this guard exists to prevent came from two
+    harness files its fixed list never named, so the scanned calls must
+    include loads from both.
+    """
+    del tmp
+    scanned = {path.name for path, _, _ in _vm_file_read_calls()}
+    assert {'_worker_runtime.py', '_worker_sources.py'} <= scanned, (
+        sorted(scanned))
+
+
+def test_a_late_harness_with_an_unnamed_load_turns_the_guard_red(tmp):
+    """A harness file added after this guard was written is still scanned.
+
+    A guard over a hardcoded file list lets every file added later escape
+    by default. Discovery handed a tree that gains a file containing an
+    unnamed VM load must find that file and refuse the load.
+    """
+    harness = Path(tmp) / 'tests' / '_late_harness.py'
+    harness.parent.mkdir()
+    harness.write_text(
+        'STUB = """\n'
+        "vm.runInContext(fs.readFileSync(sourcePath, 'utf8'), context);\n"
+        '"""\n', encoding='utf-8')
+    files = _vm_harness_files(root=Path(tmp), tracked=(harness,))
+    assert files == (harness,), files
+    try:
+        _assert_vm_file_loads_are_named(_vm_file_read_calls(files), 1)
+    except AssertionError:
+        return
+    raise AssertionError(
+        'guard accepted an unnamed load in a file added after the guard')
 
 
 def test_guard_rejects_a_filename_value_with_a_suffix(tmp):
