@@ -22,30 +22,31 @@ function observationContext(details) {
 }
 
 function readBinding(workerContext, name, source) {
-  let probe;
   try {
-    probe = new vm.Script(name);
-  } catch (error) {
-    if (error.name === 'SyntaxError') return { probeable: false };
-    throw error;
+    new vm.Script(`async function* bindingProbe() { let ${name}; }`);
+  } catch {
+    return { probeable: false };
   }
+  const globalObject = new vm.Script('this').runInContext(workerContext);
+  const descriptor = Object.getOwnPropertyDescriptor(globalObject, name);
   try {
+    if (!descriptor) {
+      const bindingType = new vm.Script(
+        `typeof ${name}`).runInContext(workerContext);
+      if (bindingType === 'undefined') {
+        return { probeable: true, available: false };
+      }
+    }
     return {
       probeable: true,
       available: true,
-      value: probe.runInContext(workerContext),
-      descriptor: Object.getOwnPropertyDescriptor(workerContext, name),
+      value: new vm.Script(name).runInContext(workerContext),
+      descriptor,
     };
   } catch (error) {
-    if (error.name === 'ReferenceError') {
-      return { probeable: true, available: false };
-    }
-    if (error.name === 'SyntaxError') {
-      throw new SyntaxError(
-        `reading binding ${JSON.stringify(name)} from ${source}: `
-        + error.message);
-    }
-    throw error;
+    throw new Error(
+      `reading binding ${JSON.stringify(name)} from ${source}: `
+      + String(error));
   }
 }
 
