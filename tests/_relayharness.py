@@ -109,6 +109,7 @@ const backgroundChrome = {
         throw new Error('inspector detached mid-evaluation');
       }
       try {
+        // vm-load-exempt: evaluates the CDP expression handed in
         return { result: { value: await vm.runInNewContext(params.expression, {}) } };
       } catch (error) {
         return { exceptionDetails: { exception: { description: String(error) } } };
@@ -148,6 +149,7 @@ const backgroundChrome = {
       relayContext.__injectionArgs = injection.args || [];
       const source = '(' + injection.func.toString()
         + ')(...__injectionArgs)';
+      // vm-load-exempt: runs the function the test injected, not a file
       const result = await vm.runInContext(source, relayContext);
       delete relayContext.__injectionArgs;
       return [{ result }];
@@ -407,6 +409,7 @@ async function run() {
 
   if (mode === 'gm-abort') {
     relayContext.abortProbe = {};
+    // vm-load-exempt: issues a literal xmlhttpRequest probe, not a file
     vm.runInContext(
       'abortProbe.handle = window.GM.xmlhttpRequest({'
       + ' url: "https://example.com/slow",'

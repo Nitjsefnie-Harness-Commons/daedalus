@@ -269,6 +269,7 @@
 !/tests/test_suite_runner.py
 !/tests/test_tab_routing.py
 !/tests/test_version_contract.py
+!/tests/test_vm_file_load_guard.py
 !/tests/test_wfcheckout.py
 !/tests/test_wfscalars.py
 !/tests/test_worker_module_boundary.py

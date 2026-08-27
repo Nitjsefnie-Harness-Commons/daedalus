@@ -42,10 +42,12 @@ async function runCapabilityRoutes() {
     if (!/^[A-Za-z_$][\w$]*$/.test(publishedSymbol)) {
       throw new Error('invalid published symbol: ' + publishedSymbol);
     }
+    // vm-load-exempt: probes a published symbol's type, not a file
     const available = vm.runInContext(
       'typeof ' + publishedSymbol + ' === "function"', context);
     if (available) {
       probedOriginals.set(
+        // vm-load-exempt: reads a published handler by name, not a file
         publishedSymbol, vm.runInContext(publishedSymbol, context));
       const descriptor = Object.getOwnPropertyDescriptor(
         context, publishedSymbol);
@@ -84,9 +86,11 @@ async function runCapabilityRoutes() {
         return sentinelAnswer;
       };
       try {
+        // vm-load-exempt: writes a sentinel through a published name
         vm.runInContext(
           publishedSymbol + ' = capabilitySentinel', context);
         expectedHandlers.set(
+          // vm-load-exempt: reads the handler back by name, not a file
           publishedSymbol, vm.runInContext(publishedSymbol, context));
       } catch (error) {
         delete context.capabilitySentinel;
@@ -120,6 +124,7 @@ async function runCapabilityRoutes() {
         const state = handlerStates.get(symbol);
         const wrote = state && state.writes;
         const sameIdentity = descriptor
+          // vm-load-exempt: reads a handler by name, not a file
           && vm.runInContext(symbol, context) === expectedHandlers.get(symbol);
         if (symbol !== publishedSymbol
             && (wrote || !sameIdentity
@@ -154,6 +159,7 @@ async function runCapabilityRoutes() {
           originalDescriptors.get(publishedSymbol));
       } else {
         context.capabilityOriginal = original;
+        // vm-load-exempt: restores a handler through its published name
         vm.runInContext(
           publishedSymbol + ' = capabilityOriginal', context);
       }
@@ -165,6 +171,7 @@ async function runCapabilityRoutes() {
   if (routes.some((route) => route.verifyBatchRestoration)) {
     const restored = {};
     for (const [symbol, original] of verificationOriginals) {
+      // vm-load-exempt: reads a restored handler by name, not a file
       restored[symbol] = vm.runInContext(symbol, context) === original;
     }
     return { observations, restored };
@@ -492,6 +499,7 @@ async function runDedupAcrossRestart() {
   }) + '\n\n';
   const deliver = 'parseSSEChunk(' + JSON.stringify(frame) + ')';
 
+  // vm-load-exempt: delivers a canned SSE frame string, not a file
   vm.runInContext(deliver, context);
   for (let turn = 0; turn < 6; turn++) await settle();
 
@@ -502,6 +510,7 @@ async function runDedupAcrossRestart() {
     fs.readFileSync(backgroundPath, 'utf8'), restarted,
     { filename: backgroundPath });
   await vm.runInContext('loadConfig()', restarted);
+  // vm-load-exempt: delivers the same canned frame after the restart
   vm.runInContext(deliver, restarted);
   for (let turn = 0; turn < 6; turn++) await settle();
 
@@ -581,6 +590,7 @@ async function runFetchBound() {
       ['fractional', '1.5'], ['text', '"8000000"'],
       ['below the default', '1024'],
       ['above the ceiling', String(1024 * 1024 * 1024 * 1024)]]) {
+    // vm-load-exempt: asks gmResponseLimit a case-shaped question
     limits[label] = vm.runInContext('gmResponseLimit(' + asked + ')', context);
   }
   const timings = JSON.parse(vm.runInContext(

@@ -183,6 +183,7 @@ async function waitForResultConsume() {
   context.commands = commands;
   step('the dispatchCommand calls to start');
   const executions = commands.map((_command, index) =>
+    // vm-load-exempt: dispatches a queued command by index, not a file
     vm.runInContext('dispatchCommand(commands[' + index + '])', context));
   await waitFor(
     () => pendingCookies.size === commands.length,

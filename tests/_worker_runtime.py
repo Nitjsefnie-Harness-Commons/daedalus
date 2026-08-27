@@ -91,13 +91,14 @@ function ownDescriptors(workerContext) {
 }
 
 function observeBindingState(details) {
-  const source = fs.readFileSync(details.path, 'utf8');
   const baselineContext = observationContext(details);
   const workerContext = observationContext(details);
   const before = ownDescriptors(workerContext);
   let executionError = null;
   try {
-    vm.runInContext(source, workerContext, { filename: details.path });
+    vm.runInContext(
+      fs.readFileSync(details.path, 'utf8'), workerContext,
+      { filename: details.path });
   } catch (error) {
     executionError = { name: error.name, message: error.message };
   }
@@ -149,6 +150,7 @@ function observeHandlerWrites(details) {
     // counting run must not name details.path: a V8 coverage record is
     // measured against the bytes actually executed, and offsets taken
     // from the concatenated source cannot fit the file on disk.
+    // vm-load-exempt: runs marker plus source, so it must not name the file
     vm.runInContext(
       '__markWorkerObservationStarted();\n' + source,
       workerContext, { filename: '[worker-handler-observation]' });
@@ -160,7 +162,9 @@ function observeHandlerWrites(details) {
     // The verbatim run keeps this observer's coverage contribution: the
     // bytes executed are exactly the bytes on disk, so every offset in
     // the record maps onto details.path.
-    vm.runInContext(source, coverageContext, { filename: details.path });
+    vm.runInContext(
+      fs.readFileSync(details.path, 'utf8'), coverageContext,
+      { filename: details.path });
   } catch {
     // The counting run above reports execution errors; this run exists
     // only to execute the shipped bytes under their own name.
