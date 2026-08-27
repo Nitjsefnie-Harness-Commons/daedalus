@@ -44,6 +44,7 @@
 !/delivery_stripes.py
 !/env_config.py
 !/log_safe.py
+!/mcp_request_guard.py
 !/mcp_server.py
 !/mcp_transport.py
 !/path_safety.py
@@ -250,6 +251,7 @@
 !/tests/test_js_coverage.py
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
+!/tests/test_mcp_refusal_drain.py
 !/tests/test_mcp_server.py
 !/tests/test_overlap_harness.py
 !/tests/test_path_safety.py
