@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _boundary import run_extension_result_boundary  # noqa: E402
-from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _repo import ROOT  # noqa: E402
+from _worker_sources import worker_source_paths  # noqa: E402
 
 
 def test_extension_same_id_overlap_keeps_each_delivery_id(tmp):
@@ -335,7 +336,8 @@ def test_the_gm_fetch_relay_bounds_the_response_while_it_reads(tmp):
 def test_the_relay_ceiling_is_declared_once_and_bounds_the_default(tmp):
     """Both limits live in the worker, and the ceiling is the larger one."""
     del tmp
-    source = (EXTENSION_ROOT / 'background.js').read_text(encoding='utf-8')
+    source = '\n'.join(
+        path.read_text(encoding='utf-8') for path in worker_source_paths())
     found = dict(re.findall(
         r'const (GM_FETCH_MAX_RESPONSE|GM_FETCH_RESPONSE_CEILING) = '
         r'([0-9 *]+);', source))
