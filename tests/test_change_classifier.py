@@ -23,6 +23,7 @@ from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
     _workflow_path_filters, _workflow_triggers)
 from _yamlread import job_mapping  # noqa: E402
+from _ghexpr import evaluate  # noqa: E402
 
 
 def _classifier():
@@ -318,6 +319,9 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
     del tmp
     workflow = _tests_yml()
     assert 'changes' in _job_needs(workflow, 'coverage')
+    # Without this needs the needs.changes context is empty at runtime
+    # and fromJSON(null) fails matrix evaluation on the runner.
+    assert 'changes' in _job_needs(workflow, 'suites')
     # Read as text: job_scalar refuses a plain `if:` when deeper-indented
     # lines follow it in the job body, which env: and steps: guarantee.
     conditions = [line.strip() for line in _job_section(workflow, 'coverage')
@@ -330,6 +334,32 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
     assert matrix_lines == [
         'matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}'], (
         matrix_lines)
+
+
+def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
+    """The if: over-runs on every docs_only value except an exact 'true'.
+
+    Evaluated, not substring-matched: `== 'false'` reads as equivalent but
+    skips coverage when the classifier emitted nothing — Actions resolves
+    a missing output to '' — and a skipped required check reports success
+    with nothing measured. Only `!= 'true'` keeps the failure case on the
+    over-run branch the design promises.
+    """
+    del tmp
+    conditions = [line.strip()[len('if:'):].strip()
+                  for line in _job_section(_tests_yml(), 'coverage')
+                  if line.startswith('    if:')]
+    assert len(conditions) == 1, conditions
+
+    def runs(docs_only):
+        context = {'needs': {'changes': {'outputs': {
+            'docs_only': docs_only}}}}
+        return evaluate(conditions[0], context)
+
+    assert runs('true') is False
+    assert runs('false') is True
+    # '' is both an empty emission and what a missing output resolves to.
+    assert runs('') is True
 
 
 def test_aggregate_waits_on_every_job_it_checks(tmp):
