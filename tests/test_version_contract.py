@@ -223,6 +223,20 @@ def test_check_versions_set_refuses_a_version_no_site_can_carry(tmp):
         assert (copy_root / path).read_text(encoding='utf-8') == text, path
 
 
+def test_check_versions_set_refuses_a_segment_chrome_cannot_hold(tmp):
+    """A manifest version segment stops at 65535, so a version above it is
+    refused for the same reason a letter is: no site can carry it."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    before = {p: (copy_root / p).read_text(encoding='utf-8')
+              for p, _, _ in checker.SITES}
+    r = _run_checker(copy_root, '--set', '9.70000.9')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert '65535' in r.stderr, r.stderr
+    for path, text in before.items():
+        assert (copy_root / path).read_text(encoding='utf-8') == text, path
+
+
 def test_a_version_no_site_can_carry_is_reported(tmp):
     """A tree that acquired such a version some other way is reported rather
     than handed to the gate, which would otherwise pass a tree whose
