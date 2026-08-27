@@ -223,6 +223,24 @@ def test_check_versions_set_refuses_a_version_no_site_can_carry(tmp):
         assert (copy_root / path).read_text(encoding='utf-8') == text, path
 
 
+def test_check_versions_set_refuses_an_empty_version(tmp):
+    """--set '' used to test the argument for truthiness rather than
+    presence, so an empty version took the plain-check path instead of the
+    write path: it exited 0 and printed the ordinary check's success line,
+    without writing or reporting anything. --set names a version explicitly;
+    an empty one is refused like any other shape no site can carry, not
+    silently treated as if --set were never passed."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    before = {p: (copy_root / p).read_text(encoding='utf-8')
+              for p, _, _ in checker.SITES}
+    r = _run_checker(copy_root, '--set', '')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'ok:' not in r.stdout, r.stdout
+    for path, text in before.items():
+        assert (copy_root / path).read_text(encoding='utf-8') == text, path
+
+
 def test_check_versions_set_refuses_one_value_spelled_more_than_one_way(tmp):
     """A version has to be the single spelling Chrome reads back, so a
     non-ASCII digit and a leading zero are refused like any other shape no
