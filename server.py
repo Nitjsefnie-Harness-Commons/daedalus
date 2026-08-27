@@ -2,6 +2,7 @@
 """Daedalus debug server — SSE command bridge + tab registry."""
 import hmac, json, os, pathlib, shutil, threading, time, uuid
 import ctypes, ctypes.util
+from functools import partial
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import TCPServer, ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
@@ -538,6 +539,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Connection', 'close')
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
+        frame_writer = partial(stream_service.write_frame, self.wfile)
         last_ka = time.time()
         stream_start = time.time()
         try:
@@ -554,13 +556,17 @@ class Handler(BaseHTTPRequestHandler):
                 ev.clear()
                 delivered = 0
                 if tab == 'dashboard':
-                    delivered += self._drain_queue(
-                        target_queue, None, killed_event)
+                    delivered += stream_service.drain_queue(
+                        target_queue, None, killed_event,
+                        command_ttl=CMD_TTL, frame_writer=frame_writer)
                 elif tab == 'extension':
                     # Typed commands addressed to the extension itself
-                    delivered += self._drain_queue(
-                        target_queue, None, killed_event)
-                    delivered += self._drain_legacy_file(target_legacy, None)
+                    delivered += stream_service.drain_queue(
+                        target_queue, None, killed_event,
+                        command_ttl=CMD_TTL, frame_writer=frame_writer)
+                    delivered += stream_service.drain_legacy_file(
+                        target_legacy, None, command_ttl=CMD_TTL,
+                        frame_writer=frame_writer)
                     # Per-tab eval queues for every other tab (tag chromeTab so bg can route)
                     prefix = f'{token}_'
                     for entry in sorted(CMD_DIR.iterdir()):
@@ -569,24 +575,32 @@ class Handler(BaseHTTPRequestHandler):
                         sub = entry.name[len(prefix):]
                         if sub in ('extension', 'dashboard'):
                             continue
-                        delivered += self._drain_queue(entry, sub, killed_event)
+                        delivered += stream_service.drain_queue(
+                            entry, sub, killed_event, command_ttl=CMD_TTL,
+                            frame_writer=frame_writer)
                     # Broadcast queue + legacy per-tab raw-file drops
-                    delivered += self._drain_queue(
-                        broadcast_queue, None, killed_event)
-                    delivered += self._drain_legacy_ext(
-                        token, target_legacy_name, killed_event)
+                    delivered += stream_service.drain_queue(
+                        broadcast_queue, None, killed_event,
+                        command_ttl=CMD_TTL, frame_writer=frame_writer)
+                    delivered += stream_service.drain_legacy_ext(
+                        CMD_DIR, token, target_legacy_name, killed_event,
+                        command_ttl=CMD_TTL, frame_writer=frame_writer)
                 else:  # specific-tab stream (rare — normal clients use tab=extension)
-                    delivered += self._drain_queue(
-                        target_queue, None, killed_event)
+                    delivered += stream_service.drain_queue(
+                        target_queue, None, killed_event,
+                        command_ttl=CMD_TTL, frame_writer=frame_writer)
                     if tab:
-                        delivered += self._drain_queue(
-                            broadcast_queue, None, killed_event)
-                        delivered += self._drain_legacy_file(
-                            target_legacy, None)
+                        delivered += stream_service.drain_queue(
+                            broadcast_queue, None, killed_event,
+                            command_ttl=CMD_TTL, frame_writer=frame_writer)
+                        delivered += stream_service.drain_legacy_file(
+                            target_legacy, None, command_ttl=CMD_TTL,
+                            frame_writer=frame_writer)
                 # Broadcast legacy raw-file — skip for dashboard so it doesn't steal commands
                 if tab != 'dashboard':
-                    delivered += self._drain_legacy_file(
-                        broadcast_legacy, None)
+                    delivered += stream_service.drain_legacy_file(
+                        broadcast_legacy, None, command_ttl=CMD_TTL,
+                        frame_writer=frame_writer)
 
                 now = time.time()
                 if now - last_ka >= STREAM_KEEPALIVE:
@@ -602,140 +616,6 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             stream_service.unregister(stream_id, killed_event)
         return None
-
-    def _write_frame(self, data):
-        """Serialize + write+flush one SSE command frame. Raises on socket error."""
-        self.wfile.write(f'event: command\ndata: {json.dumps(data)}\n\n'.encode())
-        self.wfile.flush()
-
-    def _drain_queue(self, qdir, chrome_tab, killed_event):
-        """Deliver every ready command from a directory queue, FIFO. Returns the
-        count delivered. TTL-expired and non-object entries are removed;
-        unreadable or invalid-JSON entries remain for a later scan because a
-        non-atomic publisher may still be writing them. The socket write happens
-        BEFORE unlink, so a failed write leaves the command queued for redelivery
-        (a socket error propagates out to tear the stream down)."""
-        if not qdir.is_dir():
-            return 0
-        count = 0
-        try:
-            queued_files = sorted(qdir.iterdir())
-        except OSError:
-            return 0
-        for f in queued_files:
-            if killed_event and killed_event.is_set():
-                break
-            name = f.name
-            if name.startswith('.') or not name.endswith('.json'):
-                continue  # skip .tmp in-flight writes
-            # Use logical names: path spellings can differ between realpath and
-            # directory enumeration; see result_store.delivery_lock_for.
-            with command_queue.claimed(
-                    f'queue:{qdir.name}/{name}') as owned:
-                if not owned:
-                    continue  # another consumer covering this queue has it
-                try:
-                    age = time.time() - f.stat().st_mtime
-                except OSError:
-                    continue  # vanished or became unavailable during the scan
-                if age > CMD_TTL:
-                    # Already gone, or gone by the next sweep: an expired command
-                    # is not delivered either way.
-                    try: f.unlink()
-                    except OSError: pass  # expired either way
-                    print(
-                        f'[STREAM] TTL-DROP {log_safe(qdir.name)}/'
-                        f'{log_safe(name)}', flush=True)
-                    continue
-                try:
-                    data = json.loads(f.read_text(encoding='utf-8'))
-                except (OSError, json.JSONDecodeError, ValueError):
-                    # A visible final name may still have an older non-atomic
-                    # writer. Leave it in place so that writer does not finish a
-                    # command into an unlinked inode; the TTL sweep bounds retries
-                    # for an entry that never becomes valid.
-                    continue
-                if not isinstance(data, dict):
-                    # Same: readable JSON that is not a command object.
-                    try: f.unlink()
-                    except OSError: pass  # the TTL sweep takes it
-                    continue
-                if chrome_tab is not None:
-                    data['chromeTab'] = chrome_tab
-                self._write_frame(data)  # BEFORE unlink
-                # The claim excludes other consumers until this write and
-                # unlink finish. A file that will not unlink is redelivered
-                # on the next tick and deduplicated by its `_did`.
-                try: f.unlink()
-                except OSError: pass  # a redelivery is deduplicated by _did
-                stream_service.record_delivery()
-                count += 1
-                print(
-                    f'[STREAM] DELIVERED q={log_safe(qdir.name)} '
-                    f'id={log_safe(data.get("id", ""))} '
-                    f'did={log_safe(data.get("_did", ""))}', flush=True)
-        return count
-
-    def _drain_legacy_file(self, path, chrome_tab):
-        """Deliver one atomically published legacy command file.
-
-        A malformed visible file may still have an open writer from an older,
-        non-atomic publisher. Leave it in place and retry on the next scan;
-        deleting it would discard the writer's eventual complete command.
-        """
-        # Use the logical filename: path spellings can differ between routes;
-        # result_store.delivery_lock_for documents its logical target key.
-        with command_queue.claimed(f'legacy:{path.name}') as owned:
-            if not owned:
-                return 0
-            if not path.exists():
-                return 0
-            try:
-                data = json.loads(path.read_text(encoding='utf-8'))
-            except (OSError, json.JSONDecodeError, RecursionError, ValueError):
-                return 0
-            if not isinstance(data, dict):
-                return 0
-            try:
-                age = time.time() - path.stat().st_mtime
-            except OSError:
-                return 0
-            if age > CMD_TTL:
-                # Already gone, or gone by the next sweep.
-                try: path.unlink()
-                except OSError: pass  # expired either way
-                return 0
-            if chrome_tab is not None:
-                data['chromeTab'] = chrome_tab
-            self._write_frame(data)  # BEFORE unlink
-            # The claim excludes other consumers until this write and unlink
-            # finish. A redelivery is deduplicated by the `_did` it carries.
-            try: path.unlink()
-            except OSError: pass  # a redelivery is deduplicated by _did
-            stream_service.record_delivery()
-            print(
-                f'[STREAM] DELIVERED legacy={log_safe(path.name)} '
-                f'id={log_safe(data.get("id", ""))}', flush=True)
-            return 1
-
-    def _drain_legacy_ext(self, token, extension_legacy_name, killed_event):
-        """Extension stream: deliver legacy per-tab raw-write files ({token}_<tab>.json),
-        tagging chromeTab for routing. Queue dirs and dashboard/extension are skipped."""
-        prefix = f'{token}_'
-        count = 0
-        for f in sorted(CMD_DIR.iterdir()):
-            if killed_event and killed_event.is_set():
-                break
-            name = f.name
-            if not f.is_file() or not name.startswith(prefix) or not name.endswith('.json'):
-                continue
-            if name == extension_legacy_name:
-                continue  # handled separately (no chromeTab tag)
-            sub = name[len(prefix):-5]
-            if sub == 'dashboard':
-                continue
-            count += self._drain_legacy_file(f, sub)
-        return count
 
     def do_POST(self):
         clen = self._declared_body_length()
