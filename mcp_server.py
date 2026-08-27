@@ -590,18 +590,8 @@ async def ext_self_reload() -> dict:
 _start_state = {'started': False}
 
 _transport = bridge.transport
-_resolved_local_url = bridge.resolved_local_url
 _http_client = bridge.http_client
-_tok = bridge.token
-_bridge_auth = bridge.auth
-_get = bridge.get
-_put = bridge.put
-_post = bridge.post
-_delete = bridge.delete
-_get_raw = bridge.get_raw
-_poll_result = bridge.poll_result
 _ext_cmd = bridge.ext_cmd
-_checked_timeout = bridge.checked_timeout
 
 
 # The listener's actual port, for whoever started it: with DAEDALUS_MCP_PORT=0
