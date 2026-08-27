@@ -25,7 +25,6 @@ const vm = require('vm');
 const backgroundPath = process.argv[1];
 const released = [];
 const postedResults = [];
-const finalAwaitPromise = [];
 const submittedTransports = { eval: [], hotfix: [] };
 const timers = [];
 let pendingResolve;
@@ -98,14 +97,10 @@ const chrome = {
             },
           };
         }
-        if (activeRoute === 'eval') {
-          finalAwaitPromise.push(params.awaitPromise);
-        }
         submittedTransports[activeRoute].push({
-          replMode: params.replMode,
-          awaitPromise: params.awaitPromise,
-          returnByValuePresent: Object.prototype.hasOwnProperty.call(
-            params, 'returnByValue'),
+          replModeEnabled: params.replMode === true,
+          awaitPromiseEnabled: params.awaitPromise === true,
+          returnByValueEnabled: params.returnByValue === true,
         });
         if (params.expression.includes('throw-case')) {
           return {
@@ -235,7 +230,6 @@ async function runEval(id, code) {
   process.stdout.write(JSON.stringify({
     released: [...new Set(released)].sort(),
     evalTransports: submittedTransports.eval,
-    finalAwaitPromise,
     hotfixTransports: submittedTransports.hotfix,
     pendingHasTimeout,
     resultWorlds: postedResults.map((item) => item.world),
