@@ -214,6 +214,16 @@ def drain_lines(proc, collected=None):
     return collected
 
 
+def _startup_observations(proc, drained, waited):
+    """Render one snapshot of the child's state and captured output."""
+    lines = list(drained)
+    code = proc.poll()
+    state = ('still running' if code is None
+             else f'exited with code {code}')
+    return (f'waited {waited:.1f}s, child {state}, '
+            f'{len(lines)} line(s) captured:\n' + ''.join(lines))
+
+
 def await_listening_line(proc, drained, timeout=20):
     """Return the port the child actually bound, read from its Listening line.
 
@@ -233,7 +243,8 @@ def await_listening_line(proc, drained, timeout=20):
     fails at `timeout`. Either way the failure carries the child's captured
     output, which is what says which line arrived instead.
     """
-    deadline = time.time() + timeout
+    started = time.time()
+    deadline = started + timeout
     seen = 0
     while True:
         pending = drained[seen:]
@@ -244,12 +255,15 @@ def await_listening_line(proc, drained, timeout=20):
             if match:
                 return int(match.group(1))
         if proc.poll() is not None:
-            raise RuntimeError('bridge exited during startup:\n'
-                               + ''.join(drained))
+            raise RuntimeError(
+                'bridge exited during startup: '
+                + _startup_observations(
+                    proc, drained, time.time() - started))
         if time.time() > deadline:
             raise RuntimeError(
-                f'bridge did not announce its port in {timeout}s:\n'
-                + ''.join(drained))
+                f'bridge did not announce its port in {timeout}s: '
+                + _startup_observations(
+                    proc, drained, time.time() - started))
         time.sleep(0.05)
 
 
@@ -290,20 +304,28 @@ def bridge(tmp, env=None, output=None):
         cwd=str(ROOT), env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     drained = drain_lines(proc, output)
+    timeout = 20
     try:
-        base = f'http://127.0.0.1:{await_listening_line(proc, drained)}'
-        deadline = time.time() + 20
+        port = await_listening_line(proc, drained, timeout=timeout)
+        base = f'http://127.0.0.1:{port}'
+        started = time.time()
+        deadline = started + timeout
         while True:
             if proc.poll() is not None:
-                raise RuntimeError('bridge exited during startup:\n'
-                                   + ''.join(drained))
+                raise RuntimeError(
+                    'bridge exited during startup: '
+                    + _startup_observations(
+                        proc, drained, time.time() - started))
             try:
                 get(base + '/health')
                 break
             except (urllib.error.URLError, OSError) as exc:
                 if time.time() > deadline:
                     raise RuntimeError(
-                        'bridge did not answer /health in 20s') from exc
+                        f'bridge did not answer /health in {timeout}s: '
+                        + _startup_observations(
+                            proc, drained,
+                            time.time() - started)) from exc
                 time.sleep(0.05)
         yield base, docroot
     finally:
