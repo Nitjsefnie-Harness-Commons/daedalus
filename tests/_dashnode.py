@@ -29,7 +29,10 @@ from _repo import ROOT
 
 _DASHBOARD_STEP_TIMEOUT_S = 5
 _DASHBOARD_PROCESS_GRACE_S = 5
-_DASHBOARD_DRAIN_TIMEOUT_S = 0.2
+# Healthy post-kill drains take single-digit to low-hundreds of milliseconds,
+# while an inherited pipe writer held one beyond 3.6s. One second leaves room
+# for scheduling jitter without letting a genuinely held pipe stall diagnosis.
+_DASHBOARD_DRAIN_TIMEOUT_S = 1
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
 
 _DASHBOARD_PRELUDE = r"""
