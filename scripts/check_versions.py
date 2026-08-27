@@ -32,15 +32,23 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # identically everywhere, which is the one thing this script exists to keep
 # true. Refusing it here is what stops a tree passing every gate while the
 # extension it describes is one Chrome will not load.
-_SPELLING = re.compile(r'\d+(?:\.\d+){0,3}')
+#
+# The digit class is spelled out rather than written `\d`, which matches every
+# Unicode decimal digit — `\u0661.\u0662.\u0663` names the same value as
+# `1.2.3` without being a string Chrome reads as an integer. A leading zero is
+# refused for the neighbouring reason: it is a second spelling of a value that
+# already has one, and a version with two spellings is what this whole file
+# exists to prevent.
+_SPELLING = re.compile(r'(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){0,3}')
 
 
 def spelling_error(version):
     """Why `version` cannot be carried by every site, or None if it can."""
     if not _SPELLING.fullmatch(version):
-        return (f'{version!r} is not one to four dot-separated integers, so '
-                f'no tree can spell it the same way at every site — Chrome '
-                f'refuses it as a manifest version')
+        return (f'{version!r} is not one to four dot-separated integers in '
+                f'ASCII digits without a leading zero, so no tree can spell '
+                f'it the same way at every site — Chrome refuses it as a '
+                f'manifest version')
     if any(int(part) > 65535 for part in version.split('.')):
         return (f'{version!r} has a segment above 65535, which Chrome '
                 f'refuses as a manifest version')

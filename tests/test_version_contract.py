@@ -223,6 +223,24 @@ def test_check_versions_set_refuses_a_version_no_site_can_carry(tmp):
         assert (copy_root / path).read_text(encoding='utf-8') == text, path
 
 
+def test_check_versions_set_refuses_one_value_spelled_more_than_one_way(tmp):
+    """A version has to be the single spelling Chrome reads back, so a
+    non-ASCII digit and a leading zero are refused like any other shape no
+    site can carry. Both name an integer without being the string an integer
+    is written as."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    before = {p: (copy_root / p).read_text(encoding='utf-8')
+              for p, _, _ in checker.SITES}
+    for version in ('01.2.3', '1.02.3', '\u0661.\u0662.\u0663'):
+        r = _run_checker(copy_root, '--set', version)
+        assert r.returncode != 0, (version, r.returncode, r.stdout, r.stderr)
+        assert version in r.stderr, (version, r.stderr)
+        for path, text in before.items():
+            assert (copy_root / path).read_text(encoding='utf-8') == text, (
+                version, path)
+
+
 def test_check_versions_set_refuses_a_segment_chrome_cannot_hold(tmp):
     """A manifest version segment stops at 65535, so a version above it is
     refused for the same reason a letter is: no site can carry it."""
