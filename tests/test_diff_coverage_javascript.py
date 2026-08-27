@@ -42,6 +42,9 @@ _BOTH_LANGUAGES_NOTE = (
 _PYTHON_ONLY_NOTE = (
     'Only the Python report was given, so added JavaScript lines are '
     'not measured.')
+_JAVASCRIPT_ONLY_NOTE = (
+    'Only the JavaScript report was given, so added Python lines are '
+    'not measured.')
 
 
 def _write(tmp, name, text):
@@ -189,6 +192,53 @@ def test_a_python_only_run_says_javascript_is_not_measured(tmp):
         done.stdout)
     assert _PYTHON_ONLY_NOTE in done.stdout, done.stdout
     assert _BOTH_LANGUAGES_NOTE not in done.stdout, done.stdout
+
+
+def test_a_javascript_report_under_coverage_is_read_as_javascript(tmp):
+    """The note names what the run measured, not which flag was passed.
+
+    --coverage accepts the JavaScript XML just as well as --js-coverage
+    does. Deriving the scope note from the flag names rendered a measured
+    extension/content.js row directly above "added JavaScript lines are
+    not measured" — the table and the note contradicting each other.
+    """
+    js_xml = _write(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/extension/content.js\n'
+                  '+++ b/extension/content.js\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+reached()\n')
+    done = _run(tmp, '--coverage', str(js_xml), '--diff', str(diff))
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '| `extension/content.js` | 1 | 1 | — |' in done.stdout, (
+        done.stdout)
+    assert _PYTHON_ONLY_NOTE not in done.stdout, done.stdout
+    assert _JAVASCRIPT_ONLY_NOTE in done.stdout, done.stdout
+
+
+def test_a_python_only_run_over_a_mixed_diff_says_javascript_is_out(tmp):
+    """Reading scope from the report keeps correct invocations honest."""
+    _write(tmp, 'mod.py', 'reached = 1\n')
+    coverage_xml = _write(
+        tmp, 'coverage.xml',
+        '<coverage><class filename="mod.py"><lines>'
+        '<line number="1" hits="1"/>'
+        '</lines></class></coverage>\n')
+    diff = _write(tmp, 'patch.diff',
+                  '--- a/mod.py\n'
+                  '+++ b/mod.py\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+reached = 1\n'
+                  '--- a/extension/content.js\n'
+                  '+++ b/extension/content.js\n'
+                  '@@ -0,0 +1 @@\n'
+                  '+never_measured()\n')
+    done = _run(tmp, '--coverage', str(coverage_xml),
+                '--diff', str(diff))
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert _PYTHON_ONLY_NOTE in done.stdout, done.stdout
+    assert _BOTH_LANGUAGES_NOTE not in done.stdout, done.stdout
+    assert '`extension/content.js`' in done.stdout, done.stdout
 
 
 if __name__ == '__main__':
