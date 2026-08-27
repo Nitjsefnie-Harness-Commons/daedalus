@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Patch coverage across two languages: Python and shipped JavaScript.
-
-The diff reporter reads one Cobertura report per language. These pin that
-an added shipped-JavaScript line is measured like an added Python one,
-that a shipped JavaScript path the report never names is surfaced the way
-an unmeasured Python source is, and that a run given only one report says
-which language its number never measured.
-"""
+"""Patch coverage across two languages: Python and shipped JavaScript."""
 import contextlib
 import io
 import os
