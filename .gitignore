@@ -154,6 +154,7 @@
 !/extension/worker/blocking.js
 !/extension/worker/capture.js
 !/extension/worker/cdp.js
+!/extension/worker/config.js
 !/extension/worker/cookies.js
 !/extension/worker/evaluate.js
 !/extension/worker/hotfixes.js
