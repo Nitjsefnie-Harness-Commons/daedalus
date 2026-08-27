@@ -66,8 +66,8 @@ async function _evalViaCdp(cmd, chromeTabId) {
         // REPL mode supplies top-level `await`, but `return` still needs a
         // function around it — and only when the source is a body rather
         // than an expression that merely contains the word. This parser
-        // is not a security boundary: submitted text can escape the probe
-        // wrapper.
+        // heuristic is not a security boundary: submitted text can escape
+        // the probe wrapper.
         // Without a successful probe, assume a body.
         const stripped = cmd.code.replace(/[\s;]+$/, '');
         let isExpr = false;
