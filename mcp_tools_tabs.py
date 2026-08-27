@@ -2,12 +2,6 @@
 
 
 def register(mcp, bridge):
-    """Define this group's tools against `mcp`, bound to `bridge`.
-
-    Returns {tool name: coroutine function} so the composition point can keep
-    the tools callable as its own attributes.
-    """
-
     @mcp.tool()
     async def list_tabs() -> list[dict]:
         """List active Daedalus-registered Chrome tabs, each with the age of its last registration. Entries are not pruned by age: a tab persists until it is unregistered or replaced by a sync."""

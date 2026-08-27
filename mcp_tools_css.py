@@ -2,12 +2,6 @@
 
 
 def register(mcp, bridge):
-    """Define this group's tools against `mcp`, bound to `bridge`.
-
-    Returns {tool name: coroutine function} so the composition point can keep
-    the tools callable as its own attributes.
-    """
-
     @mcp.tool()
     async def inject_css(css: str, chrome_tab: int | None = None,
                          all_frames: bool = False) -> dict:

@@ -19,8 +19,6 @@ INTERACTIONS = []
 
 
 class ToolRegistry:
-    """Minimal MCP registry that preserves decorated coroutine functions."""
-
     def __init__(self, *_args, **_kwargs):
         self.registered = {}
 
@@ -33,8 +31,6 @@ class ToolRegistry:
 
 
 class HTTPResponseProbe:
-    """Minimal response for the media status tool."""
-
     def __init__(self, body):
         self.status_code = 200
         self.body = body
@@ -47,8 +43,6 @@ class HTTPResponseProbe:
 
 
 class HTTPClientProbe:
-    """Record direct HTTP client calls against the owning bridge probe."""
-
     def __init__(self, bridge):
         self.bridge = bridge
 
@@ -63,8 +57,6 @@ class HTTPClientProbe:
 
 
 class BridgeProbe:
-    """Record which per-registration bridge a tool actually calls."""
-
     def __init__(self, marker):
         self.marker = marker
         self.calls = []
@@ -369,7 +361,6 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
 
 
 def test_screenshot_default_returns_metadata_without_fetching_image(_tmp):
-    """The default screenshot path does not inline image bytes."""
     composition = _load_composition('screenshot-default')
     screenshot = composition.mcp.registered['screenshot']
 
