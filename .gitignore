@@ -176,6 +176,7 @@
 !/scripts/ci/compare_durations.py
 !/scripts/ci/coverage_suites.py
 !/scripts/ci/diff_coverage.py
+!/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
@@ -244,6 +245,7 @@
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
+!/tests/test_js_coverage.py
 !/tests/test_js_lines.py
 !/tests/test_mcp_server.py
 !/tests/test_overlap_harness.py
