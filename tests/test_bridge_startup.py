@@ -8,6 +8,7 @@ and serves the dashboard from the repository without letting a path leave it.
 import importlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -16,6 +17,48 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+
+
+def test_child_exit_during_startup_reports_exit_code(tmp):
+    """A child that dies before announcing reports its process exit code."""
+    del tmp
+    proc = subprocess.Popen(
+        [sys.executable, '-c', 'import sys; sys.exit(23)'],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc.wait(timeout=10)
+    failure = ''
+    try:
+        _util.await_listening_line(proc, _util.drain_lines(proc), timeout=1)
+    except RuntimeError as exc:
+        failure = str(exc)
+    assert 'bridge exited during startup' in failure, failure
+    assert 'exited with code 23' in failure, failure
+
+
+def test_live_child_startup_timeout_reports_observations(tmp):
+    """A live child timeout reports its state, wait, and captured output."""
+    del tmp
+    program = ('import time; '
+               'print("recognisable startup line", flush=True); '
+               'time.sleep(600)')
+    proc = subprocess.Popen(
+        [sys.executable, '-c', program],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        failure = ''
+        try:
+            _util.await_listening_line(
+                proc, _util.drain_lines(proc), timeout=1)
+        except RuntimeError as exc:
+            failure = str(exc)
+        assert 'did not announce its port in 1s' in failure, failure
+        assert 'child still running' in failure, failure
+        assert '1 line(s) captured' in failure, failure
+        assert re.search(r'waited \d+\.\ds', failure), failure
+        assert 'recognisable startup line' in failure, failure
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
 
 
 def test_server_uses_the_shared_log_safe_function(tmp):
