@@ -1,43 +1,81 @@
 # Daedalus
 
-Remote browser control via a Chrome extension. Eval bridge + persistent hotfixes + per-tab control + screenshots, CDP, cookies, network capture on pages where Chrome runs the extension.
+Expose Chromium tabs to a coding LLM so it can access the browser's DevTools. A
+Python server and a Chromium extension hand the LLM real control of your live
+tabs. It can run JavaScript, read and change pages, take screenshots, capture
+network traffic, and pull out data. It can open, close, and navigate tabs,
+inject CSS, block requests, set cookies, and save hotfixes that run again on
+every reload. You can drive it from the command line, from a web dashboard, or
+straight from an MCP client.
 
-## Install
+## Quick Installation
 
-**Know this before you install:** ordinary eval uses banner-free MAIN-world
-injection. When a source-free CSP probe cannot establish that dynamic
-compilation is available, Daedalus tries the CDP fallback; a successful attach
-shows Chrome's "Daedalus started debugging this browser" banner while that
-fallback runs. A kept CDP session or network capture can hold the attachment
-longer. The banner identifies a debugger attachment, not a value-integrity
-guarantee.
+Needs `Chromium` and `pipx` already installed.
 
-Load the unpacked extension (`extension/`) in Chrome:
-
-1. Visit `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked**, select `extension/`
-
-A unique token is auto-generated on first install and stored in `chrome.storage.local`. View/change it from the extension's options page (puzzle icon → Daedalus → Options).
-
-For multi-tab parallel scraping, disable Chrome's background tab throttling and
-freezing, raise the renderer process cap, and drop the debugger banner:
-```
-chrome --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion,ThrottleUnimportantFrameTimers,FreezingOnEnergySaver,FreezingOnBatterySaver,HighEfficiencyModeAvailable,BatterySaverModeAvailable --renderer-process-limit=32 --silent-debugger-extension-api
-```
-
-The bridge itself (`server.py`) is stdlib-only and needs no install. The CLI
-and the in-process MCP endpoint are the Python package in this repository:
+**1. Clone and enter the repo:**
 
 ```bash
-pip install .            # the `daedalus` CLI
-pip install ".[mcp]"     # ... and the MCP endpoint's dependencies
+git clone https://github.com/Nitjsefnie-Harness-Commons/daedalus.git && cd daedalus
 ```
 
-Without the `mcp` extra the bridge still starts and serves everything else; it
-reports the failed MCP bootstrap at startup and `/mcp` is not served.
+**2. Install the `daedalus` command:**
 
-### Verifying a published release
+```bash
+pipx install ".[mcp]"
+```
+
+**3. Mint a token, launch Chromium with the extension, start the server.** The `cd` is required — `--load-extension` and `server.py` are resolved from the current directory, so running this elsewhere loads no extension (no **Daedalus** card appears):
+
+```bash
+export DAEDALUS_DIR=~/.daedalus/data DAEDALUS_PORT=8085
+mkdir -p "$DAEDALUS_DIR"
+[ -s ~/.daedalus/token ] || python3 -c 'import uuid; print(uuid.uuid4())' > ~/.daedalus/token
+export DAEDALUS_TOKEN="$(cat ~/.daedalus/token)"
+echo "SERVER TOKEN = $DAEDALUS_TOKEN"
+chromium --user-data-dir="$HOME/.daedalus/chrome-profile" \
+  --load-extension="$PWD/extension" \
+  --no-first-run --no-default-browser-check --disable-fre --no-service-autorun \
+  --disable-background-timer-throttling --disable-backgrounding-occluded-windows \
+  --disable-renderer-backgrounding --renderer-process-limit=32 --silent-debugger-extension-api \
+  --disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion,ThrottleUnimportantFrameTimers,FreezingOnEnergySaver,FreezingOnBatterySaver,HighEfficiencyModeAvailable,BatterySaverModeAvailable \
+  https://example.com &
+python3 server.py
+```
+
+This uses a dedicated Chromium profile, so your everyday browser is untouched and you don't need to quit it first. The server runs in the foreground — Ctrl-C stops it; close the Chromium window yourself. Line 3 reuses an existing `~/.daedalus/token`; if you ever saw a mismatch, `rm ~/.daedalus/token` first to mint a fresh one, then re-run this block.
+
+**4. Point the extension at the server (one time).** In the Chromium window that opened, go to `chrome://extensions` → enable **Developer mode** → **Daedalus** card → **Details** → **Extension options**, then:
+
+- **Server URL:** `http://127.0.0.1:8085` — no trailing space or slash.
+- **Token:** the field is pre-filled with a *different* token the extension generated for itself; it must be fully replaced. Click the field, **Ctrl-A, Delete** until it is empty, then paste the `SERVER TOKEN` printed by step 3. Pasting on top of the pre-filled value concatenates them, and a token that does not match the server's is rejected as `Server unreachable: 401`.
+
+Save. The status reads `Connected — token saved`. A `401` here means the field's token does not match the server's — re-clear it and paste again. These persist in the profile, so future launches of the step-3 block reconnect automatically.
+
+Daedalus now works on that tab and every real page you open (not `chrome://` pages). The token is the password to your browser — keep the server on `127.0.0.1` and don't share it.
+
+To drive it yourself, open a new terminal in the same repo:
+
+```bash
+export DAEDALUS_URL=http://127.0.0.1:8085 DAEDALUS_TOKEN="$(cat ~/.daedalus/token)"
+daedalus tabs
+ID=<tabId> daedalus exec myid '2 + 2'
+```
+
+To let an AI agent drive the browser over MCP, run the bridge under the
+interpreter that has the `mcp` extra — the one `pipx` created for the `daedalus`
+command — instead of the system `python3` in step 3, which cannot import it and
+starts without MCP:
+
+```bash
+~/.local/share/pipx/venvs/daedalus-cli/bin/python server.py
+```
+
+That serves MCP on its own loopback port, so point a local client at
+`http://127.0.0.1:8086/mcp` (the default `DAEDALUS_MCP_PORT`) with
+`Authorization: Bearer <the token above>`. "Sending Commands" below covers the
+full client config and fronting `/mcp` with a reverse proxy.
+
+## Verifying a published release
 
 Every release publishes the wheel, the source distribution and a `SHA256SUMS`
 file covering both. `SHA256SUMS` proves the files go together; it does not
