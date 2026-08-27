@@ -239,9 +239,9 @@ jobs:
         # The buffer absorbs measurement variation — which suites reach a
         # subprocess before it exits, and which optional dependency set the
         # runner resolved — not a licence to regress into it.
-        # Python measured: 87.1
-        # Python floor: 85.6
-        run: python -m coverage report --fail-under=85.6 --precision=1
+        # Python measured: 87.2
+        # Python floor: 85.7
+        run: python -m coverage report --fail-under=85.7 --precision=1
 
       # Keep this exact name: ratchet.py scopes the three anchors to this step.
       - name: JavaScript coverage gate
