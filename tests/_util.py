@@ -219,8 +219,10 @@ def drain_lines(proc, collected=None):
         for line in proc.stdout:
             collected.append(line)
 
-    threading.Thread(target=pump, daemon=True,
-                     name='bridge-stdout-drain').start()
+    thread = threading.Thread(target=pump, daemon=True,
+                              name='bridge-stdout-drain')
+    setattr(proc, '_daedalus_drain_thread', thread)
+    thread.start()
     return collected
 
 
@@ -228,6 +230,11 @@ def _startup_observations(proc, drained, waited):
     """Render one snapshot of the child's state and captured output."""
     lines = list(drained)
     code = proc.poll()
+    if code is not None:
+        thread = getattr(proc, '_daedalus_drain_thread', None)
+        if thread is not None:
+            thread.join(timeout=1)
+            lines = list(drained)
     state = ('still running' if code is None
              else f'exited with code {code}')
     return (f'waited {waited:.1f}s, child {state}, '
