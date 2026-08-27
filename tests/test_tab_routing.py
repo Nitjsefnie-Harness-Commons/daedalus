@@ -111,10 +111,10 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     scanned_py = [p for p in senders_py if p.is_file()]
     # A floor, not a glob of whatever happens to exist: with the senders
     # moved aside the scan above finds nothing and passes vacuously.
-    assert len(scanned_py) >= 13, (
+    assert len(scanned_py) >= 18, (
         f'found {len(scanned_py)} Python senders (mcp_server.py + '
-        'mcp_tools_*.py + daedalus_cli/*.py), expected at least 13 — '
-        'one composition point, two MCP tool modules, and ten CLI modules; '
+        'mcp_tools_*.py + daedalus_cli/*.py), expected at least 18 — '
+        'one composition point, seven MCP tool modules, and ten CLI modules; '
         'the senders moved and this guard is stale')
     assert len(senders_js) >= 10, (
         f'found {len(senders_js)} dashboard .js files, expected at least '

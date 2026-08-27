@@ -78,7 +78,7 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
                 for m in re.finditer(r'NET_CAPTURE_MAX = (\d+)',
                                      path.read_text(encoding='utf-8'))]
     assert len(declared) == 1, f'expected one CLI declaration, found {declared}'
-    mcp = (_util.ROOT / 'mcp_server.py').read_text(encoding='utf-8')
+    mcp = (_util.ROOT / 'mcp_tools_network.py').read_text(encoding='utf-8')
 
     declaration_pattern = re.compile(
         r'\b(?:const|let|var)\s+NET_CAPTURE_MAX\b')
@@ -101,10 +101,10 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
         'literal')
     extension_declared = (extension_name, int(literal.group(1)))
     mcp_match = re.search(r'NET_CAPTURE_MAX = (\d+)', mcp)
-    assert mcp_match, 'no capture ceiling declared in mcp_server.py'
+    assert mcp_match, 'no capture ceiling declared in mcp_tools_network.py'
     values = {
         extension_declared[0]: extension_declared[1],
-        'mcp_server.py': int(mcp_match.group(1)),
+        'mcp_tools_network.py': int(mcp_match.group(1)),
     }
     values[f'daedalus_cli/{declared[0][0]}'] = declared[0][1]
     assert len(set(values.values())) == 1, values
