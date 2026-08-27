@@ -72,8 +72,9 @@ def _run_resolve_block(tmp, event_numbers):
         'STUB_PR_NUMBER': _PR_NUMBER,
         'CURRENT_HEAD': _HEAD_SHA,
     }
+    workflow = commenter._workflow()  # pylint: disable=protected-access
     script = commenter._run_block(  # pylint: disable=protected-access
-        commenter._workflow(), _RESOLVE_STEP)  # pylint: disable=protected-access
+        workflow, _RESOLVE_STEP)
     result = commenter._run_shell_block(  # pylint: disable=protected-access
         workdir, script, env)
     return result, calls, output

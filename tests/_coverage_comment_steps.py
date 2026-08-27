@@ -48,6 +48,8 @@ EXPECTED_STEP_MAPPINGS = [
             "GH_TOKEN": "${{ github.token }}",
             "REPO": "${{ github.repository }}",
             "HEAD_SHA": "${{ github.event.workflow_run.head_sha }}",
+            "HEAD_REPO": "${{ "
+            "github.event.workflow_run.head_repository.full_name }}",
             "EVENT_NUMBERS": "${{ "
             "toJSON(github.event.workflow_run.pull_requests.*.number) "
             "}}",
@@ -61,10 +63,12 @@ EXPECTED_STEP_MAPPINGS = [
         '  | sort -u)"\n'
         'if [ -z "$numbers" ]; then\n'
         "  # A fork pull request arrives with an empty `pull_requests`, "
-        "so\n"
-        "  # ask which pull request owns the head commit instead.\n"
+        "and\n"
+        "  # the base repository does not associate its head commit with "
+        "a\n"
+        "  # pull request, so ask the head repository which one owns it.\n"
         "  if ! gh api -H 'Cache-Control: no-cache' --paginate \\\n"
-        '    "repos/$REPO/commits/$HEAD_SHA/pulls" \\\n'
+        '    "repos/$HEAD_REPO/commits/$HEAD_SHA/pulls" \\\n'
         "    --jq '.[].number' > pulls.txt\n"
         "  then\n"
         '    echo "listing the pull requests for $HEAD_SHA failed" >&2\n'

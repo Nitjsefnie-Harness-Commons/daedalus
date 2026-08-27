@@ -689,7 +689,7 @@ def test_the_coverage_commenter_guards_its_privileged_shell(tmp):
     assert len(guarded) == workflow.count('run: |') == 4, workflow
     assert 'cancel-in-progress: true' in workflow, workflow
     # The destination comes from the event; the artifact's copy is compared.
-    assert 'repos/$REPO/commits/$HEAD_SHA/pulls' in workflow, workflow
+    assert 'repos/$HEAD_REPO/commits/$HEAD_SHA/pulls' in workflow, workflow
     assert 'PR_NUMBER: ${{ steps.pr.outputs.number }}' in workflow, workflow
     assert 'repos/$REPO/issues/$PR_NUMBER/comments' in workflow, workflow
     assert '"$claimed" != "$PR_NUMBER"' in workflow, workflow
