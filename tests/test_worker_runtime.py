@@ -59,6 +59,35 @@ def _tracked_tree(tmp):
     return export_root
 
 
+def _assert_binding_read_failure(tmp, thrown, expected):
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text(f"""
+Object.defineProperty(globalThis, 'sharedName', {{
+  configurable: true,
+  get() {{ throw {thrown}; }},
+}});
+""", encoding='utf-8')
+
+    failure = None
+    try:
+        _worker_runtime.observe_worker_runtime([{
+            'path': worker, 'globals': (), 'watched': (),
+        }], background_path=background)
+    except AssertionError as error:
+        failure = str(error)
+    else:
+        raise AssertionError(f'{expected} from sharedName was swallowed')
+
+    assert str(worker) in failure, failure
+    assert 'sharedName' in failure, failure
+    assert 'Error: reading binding' in failure, failure
+    assert expected in failure, failure
+
+
 def test_runtime_observer_uses_javascript_global_scope(tmp):
     """Runtime scope, not a declaration lexer, decides binding ownership."""
     root = Path(tmp)
@@ -176,8 +205,8 @@ def test_runtime_observer_reports_unicode_binding_collisions(tmp):
     ]
 
 
-def test_runtime_observer_skips_unprobeable_property_names(tmp):
-    """Reserved-word properties do not turn into binding probe failures."""
+def test_runtime_observer_skips_non_binding_property_names(tmp):
+    """Only valid binding identifiers enter the binding inventory."""
     root = Path(tmp)
     background = root / 'background.js'
     background.write_text('const backgroundMarker = true;\n',
@@ -189,7 +218,9 @@ def test_runtime_observer_skips_unprobeable_property_names(tmp):
         'globalThis.for = 1;\n'
         'globalThis.with = 1;\n'
         'globalThis.yield = 1;\n'
-        'globalThis.await = 1;\n',
+        'globalThis.await = 1;\n'
+        "globalThis['not-an-identifier'] = 1;\n"
+        "globalThis['one + two'] = 1;\n",
         encoding='utf-8')
 
     observed = _worker_runtime.observe_worker_runtime([{
@@ -197,7 +228,7 @@ def test_runtime_observer_skips_unprobeable_property_names(tmp):
     }], background_path=background)['sources'][str(worker)]
 
     assert observed['bindingExecutionError'] is None
-    assert observed['bindings'] == ['await', 'yield']
+    assert observed['bindings'] == []
 
 
 def test_node_harness_decodes_utf8_independent_of_locale(tmp):
@@ -236,6 +267,61 @@ def test_runtime_observer_tracks_probeable_global_properties(tmp):
     assert observed['bindings'] == ['sharedName']
 
 
+def test_runtime_observer_reads_binding_getter_once(tmp):
+    """Descriptor discovery does not add a second getter invocation."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text("""
+let bindingReads = 0;
+Object.defineProperty(globalThis, 'sharedName', {
+  configurable: true,
+  get() {
+    bindingReads++;
+    if (bindingReads > 1) throw new Error('getter read more than once');
+    return 1;
+  },
+});
+""", encoding='utf-8')
+
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker, 'globals': (), 'watched': (),
+    }], background_path=background)['sources'][str(worker)]
+
+    assert observed['bindings'] == ['sharedName']
+
+
+def test_runtime_observer_skips_missing_probe_property(tmp):
+    """A candidate absent from the context remains unavailable."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text('const localMarker = true;\n', encoding='utf-8')
+
+    observed = _worker_runtime.observe_worker_runtime([{
+        'path': worker, 'globals': (), 'probes': {'missingName'},
+        'watched': (),
+    }], background_path=background)['sources'][str(worker)]
+
+    assert observed['bindingExecutionError'] is None
+    assert observed['bindings'] == []
+
+
+def test_runtime_observer_surfaces_range_error_from_binding_read(tmp):
+    """A getter's RangeError remains a binding-read failure."""
+    _assert_binding_read_failure(
+        tmp, "new RangeError('range failed')", 'RangeError: range failed')
+
+
+def test_runtime_observer_surfaces_string_from_binding_read(tmp):
+    """A getter's thrown string remains a binding-read failure."""
+    _assert_binding_read_failure(tmp, "'string failed'", 'string failed')
+
+
 def test_runtime_observer_surfaces_syntax_error_from_binding_read(tmp):
     """A getter's SyntaxError is not mistaken for invalid identifier syntax."""
     root = Path(tmp)
@@ -263,8 +349,77 @@ Object.defineProperty(globalThis, 'sharedName', {
 
     assert str(worker) in failure, failure
     assert 'sharedName' in failure, failure
-    assert 'SyntaxError: reading binding' in failure, failure
-    assert 'getter failed' in failure, failure
+    assert 'Error: reading binding' in failure, failure
+    assert 'SyntaxError: getter failed' in failure, failure
+
+
+def test_runtime_observer_surfaces_type_error_from_binding_read(tmp):
+    """A getter's TypeError remains a binding-read failure."""
+    _assert_binding_read_failure(
+        tmp, "new TypeError('type failed')", 'TypeError: type failed')
+
+
+def test_runtime_observer_surfaces_object_named_reference_error(tmp):
+    """A getter object cannot forge the unavailable-binding outcome."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text("""
+Object.defineProperty(globalThis, 'sharedName', {
+  configurable: true,
+  get() { throw { name: 'ReferenceError', message: 'forged failure' }; },
+});
+""", encoding='utf-8')
+
+    failure = None
+    try:
+        _worker_runtime.observe_worker_runtime([{
+            'path': worker, 'globals': (), 'watched': (),
+        }], background_path=background)
+    except AssertionError as error:
+        failure = str(error)
+    else:
+        raise AssertionError(
+            'getter object named ReferenceError was swallowed')
+
+    assert str(worker) in failure, failure
+    assert 'sharedName' in failure, failure
+    assert 'Error: reading binding' in failure, failure
+    assert '[object Object]' in failure, failure
+
+
+def test_runtime_observer_does_not_launder_object_named_syntax_error(tmp):
+    """A getter object cannot forge the binding-read error's native type."""
+    root = Path(tmp)
+    background = root / 'background.js'
+    background.write_text('const backgroundMarker = true;\n',
+                          encoding='utf-8')
+    worker = root / 'property.js'
+    worker.write_text("""
+Object.defineProperty(globalThis, 'sharedName', {
+  configurable: true,
+  get() { throw { name: 'SyntaxError', message: 'forged failure' }; },
+});
+""", encoding='utf-8')
+
+    failure = None
+    try:
+        _worker_runtime.observe_worker_runtime([{
+            'path': worker, 'globals': (), 'watched': (),
+        }], background_path=background)
+    except AssertionError as error:
+        failure = str(error)
+    else:
+        raise AssertionError(
+            'getter object named SyntaxError was swallowed')
+
+    assert str(worker) in failure, failure
+    assert 'sharedName' in failure, failure
+    assert '[object Object]' in failure, failure
+    assert 'SyntaxError: reading binding' not in failure, failure
+    assert 'Error: reading binding' in failure, failure
 
 
 def test_payload_keeps_harness_source_on_the_second_line(tmp):
