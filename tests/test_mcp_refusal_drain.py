@@ -39,6 +39,54 @@ def test_request_token_is_public_guard_state(tmp):
     assert mod._token is mod.mcp_request_guard.request_token
 
 
+def test_disconnect_during_drain_preserves_refusal(tmp):
+    """A peer disconnect cannot replace an already-decided refusal."""
+    del tmp
+    _need_deps()
+    from starlette.requests import ClientDisconnect
+
+    mod = _load_mcp()
+    inbound = [
+        {'type': 'http.request', 'body': b'x', 'more_body': True},
+        {'type': 'http.disconnect'},
+    ]
+    outbound = []
+
+    async def receive():
+        return inbound.pop(0)
+
+    async def send(message):
+        outbound.append(message)
+
+    async def accepted(_scope, _receive, _send):
+        raise AssertionError('a refused request reached the MCP app')
+
+    scope = {
+        'type': 'http',
+        'asgi': {'version': '3.0'},
+        'http_version': '1.1',
+        'method': 'POST',
+        'scheme': 'http',
+        'path': '/mcp',
+        'raw_path': b'/mcp',
+        'query_string': b'',
+        'headers': [],
+        'client': ('127.0.0.1', 12345),
+        'server': ('127.0.0.1', 8086),
+    }
+    try:
+        asyncio.run(mod._BearerAuth(accepted)(scope, receive, send))
+    except ClientDisconnect as exc:
+        raise AssertionError(
+            f'{type(exc).__name__} escaped refusal drain') from exc
+
+    assert inbound == []
+    assert outbound[0]['type'] == 'http.response.start'
+    assert outbound[0]['status'] == 401
+    assert outbound[-1]['type'] == 'http.response.body'
+    assert not outbound[-1].get('more_body', False)
+
+
 def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
     """Header-decided refusals drain without materializing the request body."""
     del tmp
