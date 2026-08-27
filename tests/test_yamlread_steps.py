@@ -283,6 +283,89 @@ def test_comment_header_cannot_hide_a_following_step_field(tmp):
     assert items[0].identity == 'chosen', items[0]
 
 
+def test_quoted_scalar_escapes_cannot_expose_forged_steps(tmp):
+    """Escaped quotes in multiline data do not end the scalar early."""
+    del tmp
+    source = (
+        "jobs:\n  sample:\n    steps:\n"
+        "      - run: 'first'' piece\n"
+        "        - name: forged-single\n"
+        "        final'' piece'\n"
+        "        name: single\n"
+        '      - run: "first\\"\n'
+        "        - name: forged-double\n"
+        '        final\\" piece"\n'
+        "        name: double\n")
+    items = workflow_step_items(source, 'sample')
+    assert items is not None
+    assert [item.name for item in items] == ['single', 'double'], items
+
+
+def test_incomplete_multiline_quote_is_refused(tmp):
+    """An unterminated quoted scalar cannot hide the rest of a workflow."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - run: "never closes\n')
+    try:
+        workflow_step_items(source, 'sample')
+    except YAMLReadError as error:
+        assert str(error) == (
+            'workflow has an incomplete quoted scalar'), error
+        return
+    raise AssertionError('an incomplete multiline quote was accepted')
+
+
+def test_block_scalar_boundaries_preserve_sibling_steps(tmp):
+    """Blank and empty block bodies cannot absorb sibling sequence items."""
+    del tmp
+    cases = (
+        (
+            'jobs:\n  sample:\n    steps:\n'
+            '      - name: first\n'
+            '        run: |\n'
+            '\n'
+            '          true\n',
+            ['first'],
+        ),
+        (
+            'jobs:\n  sample:\n    steps:\n'
+            '      - name: first\n'
+            '        run: |\n'
+            '      - name: second\n',
+            ['first', 'second'],
+        ),
+        (
+            'jobs:\n  sample:\n    steps:\n'
+            '      - name: first\n'
+            '        run: |\n'
+            '\n',
+            ['first'],
+        ),
+    )
+    for source, expected in cases:
+        items = workflow_step_items(source, 'sample')
+        assert items is not None
+        assert [item.name for item in items] == expected, items
+
+
+def test_block_scalar_with_two_indent_indicators_is_refused(tmp):
+    """Two explicit indentation indicators are not a scalar header."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: target\n'
+        '        run: >1+2\n'
+        '          true\n')
+    try:
+        workflow_step_items(source, 'sample')
+    except YAMLReadError as error:
+        assert str(error) == (
+            'workflow block has two indentation indicators'), error
+        return
+    raise AssertionError('two block indentation indicators were accepted')
+
+
 def test_complete_workflow_and_job_mappings_decode_every_container(tmp):
     """Complete maps retain every nested workflow and job value."""
     del tmp

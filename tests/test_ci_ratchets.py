@@ -39,6 +39,16 @@ def _ratchet():
     return _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py', 'ratchet_mod')
 
 
+def test_promoted_modules_import_by_package(tmp):
+    """Shared workflow modules must import without a sys.path test shim."""
+    del tmp
+    imported = subprocess.run(
+        [sys.executable, '-c',
+         'import scripts.ci.workflow_yaml; import scripts.ci.ratchet'],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+    assert imported.returncode == 0, (imported.stdout, imported.stderr)
+
+
 def _assert_duplicate_refused(language, anchor, name):
     ratchet = _ratchet()
     step = (_PYTHON_STEP if language == 'python' else _JAVASCRIPT_STEP)
@@ -446,6 +456,24 @@ def test_the_ratchet_rewrites_the_file_it_is_pointed_at(tmp):
     assert 'raised the Python coverage floor 72.0 -> 78.5' \
         in raised.stdout, raised.stdout
     assert '--fail-under=78.5' in workflow.read_text(encoding='utf-8')
+
+
+def test_package_entry_point_reports_refused_workflow_yaml(tmp):
+    """A reader refusal must become the ratchet's decode diagnostic."""
+    workflow = Path(tmp) / 'refused.yml'
+    workflow.write_text(
+        'jobs:\n  coverage:\n    steps: not-a-sequence\n',
+        encoding='utf-8')
+    result = subprocess.run(
+        [sys.executable, '-m', 'scripts.ci.ratchet',
+         '--language', 'python', '--measured', '80.0',
+         '--workflow', str(workflow)],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+    assert result.returncode != 0, result.stdout
+    assert result.stdout == '', result.stdout
+    assert result.stderr == (
+        "cannot decode workflow YAML: job 'coverage' steps are not a "
+        'sequence\n'), result.stderr
 
 
 def test_the_ratchet_can_raise_the_real_workflow(tmp):
