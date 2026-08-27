@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Per-registration bridge binding for every returned MCP tool."""
+import ast
 import asyncio
 import importlib
 import inspect
@@ -11,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
+
+INTERACTIONS = []
 
 
 class ToolRegistry:
@@ -48,7 +51,10 @@ class HTTPClientProbe:
         self.bridge = bridge
 
     async def get(self, path, **kwargs):
-        self.bridge.calls.append(('http_client.get', path, kwargs))
+        headers = kwargs.get('headers', {})
+        self.bridge.record(
+            'http_client.get',
+            authorization=headers.get('Authorization'))
         if path == '/segment-job':
             return HTTPResponseProbe({'sig': self.bridge.marker})
         return HTTPResponseProbe({'done': []})
@@ -62,39 +68,54 @@ class BridgeProbe:
         self.calls = []
         self.transport = object()
 
+    def record(self, surface, **details):
+        self.calls.append((surface, details))
+        INTERACTIONS.append((self.marker, surface, details))
+
     def http_client(self):
+        self.record('http_client')
         return HTTPClientProbe(self)
 
     def auth(self):
+        self.record('auth')
         return {'Authorization': self.marker}
 
     def checked_timeout(self, timeout):
-        self.calls.append(('checked_timeout', timeout))
+        self.record('checked_timeout', timeout=timeout)
 
     async def get(self, path, **params):
-        self.calls.append(('get', path, params))
+        self.record('get', path=path, params=params)
         if path == '/tabs':
             return [{'title': self.marker}]
         return {'result': self.marker}
 
+    async def get_raw(self, endpoint, **params):
+        self.record('get_raw', endpoint=endpoint, params=params)
+        return b'image'
+
     async def post(self, path, body):
-        self.calls.append(('post', path, body))
+        self.record('post', path=path, body=body)
         return {'bridge': self.marker}
 
     async def delete(self, path, body):
-        self.calls.append(('delete', path, body))
+        self.record('delete', path=path, body=body)
         return {'bridge': self.marker}
 
     async def ext_cmd(self, *args, **kwargs):
-        self.calls.append(('ext_cmd', args, kwargs))
+        self.record('ext_cmd', args=args, kwargs=kwargs)
+        if len(args) > 1 and args[1] == 'screenshot':
+            return {
+                'path': f'{self.marker}/shot.png',
+                'size': len(self.marker),
+            }
         return {'bridge': self.marker}
 
     async def put(self, path, payload):
-        self.calls.append(('put', path, payload))
+        self.record('put', path=path, payload=payload)
         return {'did': self.marker}
 
     async def poll_result(self, *args, **kwargs):
-        self.calls.append(('poll_result', args, kwargs))
+        self.record('poll_result', args=args, kwargs=kwargs)
         return {'result': self.marker, 'error': None, 'world': self.marker}
 
 
@@ -114,6 +135,9 @@ REQUIRED_ARGUMENTS = {
     'fix_id': 'fix',
     'permanent': True,
     'method': 'Page.getFrameTree',
+}
+BRANCH_ARGUMENTS = {
+    'screenshot': {'include_image': True},
 }
 
 
@@ -140,17 +164,26 @@ def _assert_inventory_matches_registry(composition):
                 f'{qualified_name}: inventory does not match MCP registry')
             inventoried.add(tool)
 
-    unrecorded = sorted(
-        f'{tool.__module__}.{name}'
-        for name, tool in composition.mcp.registered.items()
-        if tool not in inventoried
-        and tool.__module__ != composition.__name__)
-    assert not unrecorded, (
-        'tools registered outside tool module inventory: '
-        f'{unrecorded}')
+    registered = set(composition.mcp.registered.values())
+    assert registered == inventoried, (
+        'MCP registry and tool module inventory differ: '
+        f'unrecorded={len(registered - inventoried)}; '
+        f'unregistered={len(inventoried - registered)}')
 
 
-def _required_arguments(tool):
+def _composition_tool_uses():
+    path = _util.ROOT / 'mcp_server.py'
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    return sorted(
+        f'{path.name}:{node.lineno}:{node.col_offset + 1}'
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == 'mcp'
+        and node.attr == 'tool')
+
+
+def _tool_arguments(tool):
     arguments = {}
     for parameter in inspect.signature(tool).parameters.values():
         if parameter.default is not inspect.Parameter.empty:
@@ -159,21 +192,40 @@ def _required_arguments(tool):
             f'{tool.__name__}: no test value for required argument '
             f'{parameter.name}')
         arguments[parameter.name] = REQUIRED_ARGUMENTS[parameter.name]
+    arguments.update(BRANCH_ARGUMENTS.get(tool.__name__, {}))
     return arguments
 
 
-async def _reached_bridge(tool, arguments, first_bridge, second_bridge):
-    first_calls = len(first_bridge.calls)
-    second_calls = len(second_bridge.calls)
+async def _bridge_interactions(tool, arguments):
+    offset = len(INTERACTIONS)
     await tool(**arguments)
-    reached = []
-    if len(first_bridge.calls) > first_calls:
-        reached.append(first_bridge.marker)
-    if len(second_bridge.calls) > second_calls:
-        reached.append(second_bridge.marker)
-    assert len(reached) == 1, (
-        f'{tool.__name__}: expected one bridge call, reached {reached}')
-    return reached[0]
+    return INTERACTIONS[offset:]
+
+
+def _assert_bound_interactions(
+        qualified_name, registration, expected, interactions):
+    assert interactions, (
+        f'{qualified_name}: {registration} registered tool recorded no '
+        'bridge interaction')
+    bearer_crossings = [
+        (marker, details['authorization'])
+        for marker, surface, details in interactions
+        if surface == 'http_client.get'
+        and details.get('authorization') is not None
+        and details['authorization'] != marker
+    ]
+    assert not bearer_crossings, (
+        f'{qualified_name}: {registration} registered tool crossed '
+        'http_client.get bearer ownership: '
+        f'{bearer_crossings}')
+    surface_crossings = [
+        f'{surface} via {marker} bridge'
+        for marker, surface, _details in interactions
+        if marker != expected
+    ]
+    assert not surface_crossings, (
+        f'{qualified_name}: {registration} registered tool crossed bridge '
+        f'surfaces: {surface_crossings}')
 
 
 def test_every_registered_tool_keeps_its_own_bridge(_tmp):
@@ -204,8 +256,6 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
 
     returned_callables = set()
     exercised_callables = set()
-    first_bridge = first_composition.bridge
-    second_bridge = second_composition.bridge
     for first_entry, second_entry in zip(first_inventory, second_inventory):
         module, first_tools = first_entry
         second_module, second_tools = second_entry
@@ -222,17 +272,15 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
         for name, first_tool in first_tools.items():
             qualified_name = f'{module_name}.{name}'
             returned_callables.add(qualified_name)
-            arguments = _required_arguments(first_tool)
-            first_reached = asyncio.run(_reached_bridge(
-                first_tool, arguments, first_bridge, second_bridge))
-            second_reached = asyncio.run(_reached_bridge(
-                second_tools[name], arguments, first_bridge, second_bridge))
-            assert first_reached == 'first', (
-                f'{qualified_name}: first registered tool reached '
-                f'{first_reached} bridge')
-            assert second_reached == 'second', (
-                f'{qualified_name}: second registered tool reached '
-                f'{second_reached} bridge')
+            arguments = _tool_arguments(first_tool)
+            first_interactions = asyncio.run(_bridge_interactions(
+                first_tool, arguments))
+            _assert_bound_interactions(
+                qualified_name, 'first', 'first', first_interactions)
+            second_interactions = asyncio.run(_bridge_interactions(
+                second_tools[name], arguments))
+            _assert_bound_interactions(
+                qualified_name, 'second', 'second', second_interactions)
             covered.add(name)
             exercised_callables.add(qualified_name)
 
@@ -248,14 +296,11 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
 
 
 def test_composition_point_defines_no_tools_directly(_tmp):
-    """Every MCP tool reaches composition through a module inventory."""
-    composition = _load_composition('composition')
-    direct_tools = sorted(
-        f'{tool.__module__}.{name}'
-        for name, tool in composition.mcp.registered.items()
-        if tool.__module__ == composition.__name__)
-    assert not direct_tools, (
-        f'tools defined directly in composition point: {direct_tools}')
+    """The composition source never accesses its registry decorator."""
+    direct_uses = _composition_tool_uses()
+    assert not direct_uses, (
+        'mcp_server.py contains direct mcp.tool use: '
+        f'{direct_uses}')
 
 
 if __name__ == '__main__':
