@@ -247,5 +247,16 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
         f'not returned={sorted(exercised_callables - returned_callables)}')
 
 
+def test_composition_point_defines_no_tools_directly(_tmp):
+    """Every MCP tool reaches composition through a module inventory."""
+    composition = _load_composition('composition')
+    direct_tools = sorted(
+        f'{tool.__module__}.{name}'
+        for name, tool in composition.mcp.registered.items()
+        if tool.__module__ == composition.__name__)
+    assert not direct_tools, (
+        f'tools defined directly in composition point: {direct_tools}')
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
