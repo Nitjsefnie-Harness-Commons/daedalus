@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""Read GitHub-rendered pull-request HTML for admission checks."""
+import re
+from html import unescape
+from html.parser import HTMLParser
+from typing import NamedTuple
+from unicodedata import category
+from urllib.parse import urlsplit
+
+
+RELATED = 'related issues and pull requests'
+_BACKTICKS = re.compile(r'`+')
+_HEADING_LINE = re.compile(
+    r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.+?)[ \t]*#*[ \t]*$',
+    re.MULTILINE)
+_REFERENCE_SHAPE = re.compile(
+    r'#[0-9]|gh-[0-9]|issues/|pull/|://|%|&#|&num', re.IGNORECASE)
+_TEMPLATE_HEADING = re.compile(
+    r'^##[ \t]+(?P<text>.+?)[ \t]*$', re.MULTILINE)
+_TEMPLATE_COMMENT = re.compile(r'<!--.*?-->', re.DOTALL)
+_TEMPLATE_TAG = re.compile(
+    r'<!--\s*(?P<tag>required|conditional|optional)\b')
+_HEADING_TAGS = frozenset(f'h{depth}' for depth in range(1, 7))
+_VOID_TAGS = frozenset((
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+    'meta', 'param', 'source', 'track', 'wbr',
+))
+_MAX_ISSUE_DIGITS = 19
+_INVISIBLE_CHARACTERS = frozenset((
+    '\u034f', '\u115f', '\u1160', '\u2800', '\u3164', '\uffa0',
+))
+
+
+class Section(NamedTuple):
+    name: str
+    key: str
+    text: str
+    links: tuple[str, ...]
+    issues: tuple[int, ...]
+
+
+class Rule(NamedTuple):
+    name: str
+    tag: str
+    index: int
+
+
+def _heading_text(text):
+    text = ' '.join(text.split())
+    if text.endswith(':'):
+        text = text[:-1].rstrip()
+    return text
+
+
+def _repository_parts(repository):
+    parts = repository.strip('/').split('/')
+    if len(parts) != 2 or not all(parts):
+        raise ValueError('repository must have the form owner/name')
+    return tuple(part.casefold() for part in parts)
+
+
+def issue_number(href, repository):
+    if not href:
+        return None
+    try:
+        target = urlsplit(href)
+        port = target.port
+    except ValueError:
+        return None
+    if target.netloc:
+        scheme = target.scheme.casefold()
+        default_port = {'': 443, 'http': 80, 'https': 443}.get(scheme)
+        if (default_port is None
+                or (target.hostname or '').casefold() != 'github.com'
+                or target.username is not None or target.password is not None
+                or port not in (None, default_port)):
+            return None
+    elif (target.scheme or not href.startswith('/')
+          or href.startswith('//')):
+        return None
+    parts = target.path.strip('/').split('/')
+    if len(parts) != 4 or parts[2].casefold() != 'issues':
+        return None
+    if tuple(part.casefold() for part in parts[:2]) != _repository_parts(
+            repository):
+        return None
+    digits = parts[3]
+    if (not digits.isascii() or not digits.isdecimal()
+            or len(digits) > _MAX_ISSUE_DIGITS):
+        return None
+    number = int(digits)
+    return number or None
+
+
+class _RenderedBodyParser(HTMLParser):
+    def __init__(self, repository):
+        super().__init__(convert_charrefs=False)
+        _repository_parts(repository)
+        self.repository = repository
+        self.sections = []
+        self.saw_element = False
+        self._open_tags = []
+        self._heading_tag = None
+        self._heading_parts = []
+        self._name = None
+        self._key = None
+        self._text = []
+        self._links = []
+        self._issues = []
+        self._footnote_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        self.saw_element = True
+        tag = tag.casefold()
+        if tag not in _VOID_TAGS:
+            self._open_tags.append(tag)
+        if self._footnote_depth:
+            if tag not in _VOID_TAGS:
+                self._footnote_depth += 1
+            return
+        attributes = {
+            name.casefold(): value or '' for name, value in attrs}
+        if (tag == 'section' and 'data-footnotes' in attributes
+                and 'footnotes' in attributes.get('class', '').split()):
+            self._footnote_depth = 1
+            return
+        if tag in _HEADING_TAGS:
+            if self._heading_tag is not None:
+                raise ValueError('rendered HTML contains nested headings')
+            self._finish_section()
+            self._heading_tag = tag
+            self._heading_parts = []
+            return
+        if tag == 'img':
+            self._record_text(attributes.get('alt', ''))
+            zero_size = any(
+                attributes.get(name, '').strip() == '0'
+                for name in ('width', 'height'))
+            if (self._heading_tag is None and self._key is not None
+                    and attributes.get('src') and not zero_size):
+                self._text.append('\ufffc')
+            return
+        if tag != 'a' or self._heading_tag is not None or self._key is None:
+            return
+        destinations = [
+            value for name, value in attrs if name.casefold() == 'href']
+        if not destinations:
+            return
+        href = destinations[0]
+        if href:
+            self._links.append(href)
+        number = issue_number(href, self.repository)
+        if number is not None:
+            self._issues.append(number)
+
+    def handle_startendtag(self, tag, attrs):
+        tag = tag.casefold()
+        if tag not in _VOID_TAGS:
+            raise ValueError(
+                'rendered HTML contains a self-closing content element')
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        tag = tag.casefold()
+        if not self._open_tags or self._open_tags[-1] != tag:
+            raise ValueError(
+                'rendered HTML contains mismatched element boundaries')
+        self._open_tags.pop()
+        if self._footnote_depth:
+            self._footnote_depth -= 1
+            return
+        if tag != self._heading_tag:
+            return
+        name = _heading_text(''.join(self._heading_parts))
+        self._name = name
+        self._key = name.casefold()
+        self._text = []
+        self._links = []
+        self._issues = []
+        self._heading_tag = None
+        self._heading_parts = []
+
+    def handle_data(self, data):
+        self._record_text(data)
+
+    def handle_entityref(self, name):
+        self._record_text(unescape(f'&{name};'))
+
+    def handle_charref(self, name):
+        self._record_text(unescape(f'&#{name};'))
+
+    def _record_text(self, data):
+        if self._footnote_depth:
+            return
+        if self._heading_tag is not None:
+            self._heading_parts.append(data)
+        elif self._key is not None:
+            self._text.append(data)
+
+    def finish(self):
+        if not self.saw_element:
+            raise ValueError('input is not usable rendered HTML')
+        if self.rawdata:
+            raise ValueError('rendered HTML is structurally incomplete')
+        super().close()
+        if self._heading_tag is not None:
+            raise ValueError('rendered HTML contains an unfinished heading')
+        if any(tag not in _HEADING_TAGS for tag in self._open_tags):
+            raise ValueError('rendered HTML contains an unfinished element')
+        self._finish_section()
+
+    def _finish_section(self):
+        if self._key is None:
+            return
+        self.sections.append(Section(
+            self._name, self._key, ''.join(self._text),
+            tuple(self._links), tuple(self._issues)))
+        self._name = None
+        self._key = None
+        self._text = []
+        self._links = []
+        self._issues = []
+
+
+def parse_rendered(rendered, repository):
+    parser = _RenderedBodyParser(repository)
+    parser.feed(rendered or '')
+    parser.finish()
+    return parser.sections
+
+
+def referenced_issues(sections):
+    section = next(
+        (item for item in sections if item.key == RELATED), None)
+    if section is None:
+        return []
+    found = []
+    seen = set()
+    for number in section.issues:
+        if number not in seen:
+            seen.add(number)
+            found.append(number)
+    return found
+
+
+def code_span(text):
+    runs = [len(run) for run in _BACKTICKS.findall(text)]
+    fence = '`' * (max(runs, default=0) + 1)
+    if text.startswith('`') or text.endswith('`') or not text.strip():
+        text = f' {text} '
+    return f'{fence}{text}{fence}'
+
+
+def template_rules(template):
+    headings = list(_TEMPLATE_HEADING.finditer(template))
+    rules = {}
+    for index, heading in enumerate(headings):
+        name = _heading_text(heading.group('text'))
+        end = (headings[index + 1].start()
+               if index + 1 < len(headings) else len(template))
+        tag = _TEMPLATE_TAG.search(template[heading.end():end])
+        if tag is None:
+            raise ValueError(
+                f'template section "{name}" has no instruction comment')
+        rules[name.casefold()] = Rule(name, tag.group('tag'), index)
+    return rules
+
+
+def _has_visible_text(text):
+    for char in text:
+        if char.isspace() or char in _INVISIBLE_CHARACTERS:
+            continue
+        if category(char) in ('Cc', 'Cf', 'Cs'):
+            continue
+        if ('\ufe00' <= char <= '\ufe0f'
+                or '\U000e0100' <= char <= '\U000e01ef'):
+            continue
+        return True
+    return False
+
+
+def layout_errors(sections, template):
+    rules = template_rules(template)
+    errors = []
+    seen = set()
+    last_index = -1
+    for section in sections:
+        rule = rules.get(section.key)
+        if rule is None:
+            errors.append(
+                f'Section {code_span(section.name)} is not defined by '
+                'the template.')
+            continue
+        if section.key in seen:
+            errors.append(f'Section "{rule.name}" appears more than once.')
+        seen.add(section.key)
+        if rule.index < last_index:
+            errors.append(f'Section "{rule.name}" is out of order.')
+        else:
+            last_index = rule.index
+        if not _has_visible_text(section.text):
+            errors.append(f'Section "{rule.name}" is empty.')
+    for key, rule in rules.items():
+        if rule.tag == 'required' and key not in seen:
+            errors.append(f'Required section "{rule.name}" is missing.')
+    return errors
+
+
+def retains_instruction_comment(source, template):
+    source = source.replace('\r\n', '\n').replace('\r', '\n')
+    template = template.replace('\r\n', '\n').replace('\r', '\n')
+    return any(
+        match.group(0) in source
+        for match in _TEMPLATE_COMMENT.finditer(template))
+
+
+def related_links(sections):
+    section = next(
+        (item for item in sections if item.key == RELATED), None)
+    return list(section.links) if section is not None else []
+
+
+def _heading_name(text):
+    return _heading_text(text.strip('*_~` ')).casefold()
+
+
+def _related_regions(source, names):
+    source = source.replace('\r\n', '\n').replace('\r', '\n')
+    headings = list(_HEADING_LINE.finditer(source))
+    regions = []
+    for index, heading in enumerate(headings):
+        if _heading_name(heading.group('text')) != RELATED:
+            continue
+        end = len(source)
+        for later in headings[index + 1:]:
+            if _heading_name(later.group('text')) in names:
+                end = later.start()
+                break
+        regions.append(source[heading.end():end])
+    return regions
+
+
+def related_may_reference(source, sections, template):
+    names = set(template_rules(template))
+    if any(_REFERENCE_SHAPE.search(region)
+           for region in _related_regions(source or '', names)):
+        return True
+    return bool(related_links(sections))
