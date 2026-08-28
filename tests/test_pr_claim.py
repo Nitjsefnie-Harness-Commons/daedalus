@@ -174,6 +174,18 @@ def test_parser_stops_at_the_next_atx_heading(tmp):
     assert PR_CLAIM.referenced_issues(body) == [60]
 
 
+def test_parser_stops_at_a_setext_heading(tmp):
+    del tmp
+    body = SECTION + 'Fixes #62\nSummary\n-------\nFixes #63\n'
+    assert PR_CLAIM.referenced_issues(body) == [62]
+
+
+def test_parser_ignores_atx_headings_inside_fenced_code(tmp):
+    del tmp
+    body = SECTION + '```markdown\n## Changes\n```\nFixes #64\n'
+    assert PR_CLAIM.referenced_issues(body) == [64]
+
+
 def test_parser_removes_fenced_and_inline_code(tmp):
     del tmp
     body = (SECTION + '```text\nFixes #70\n```\nFixes #71\n'
@@ -181,6 +193,8 @@ def test_parser_removes_fenced_and_inline_code(tmp):
     assert PR_CLAIM.referenced_issues(body) == [71]
     body = SECTION + 'Use `Fixes #73` or ``code ` #74``. Fixes #75\n'
     assert PR_CLAIM.referenced_issues(body) == [75]
+    body = SECTION + 'A stray ` in prose does not hide Fixes #76\n'
+    assert PR_CLAIM.referenced_issues(body) == [76]
 
 
 def test_parser_filters_and_deduplicates_references_in_order(tmp):
@@ -188,6 +202,12 @@ def test_parser_filters_and_deduplicates_references_in_order(tmp):
     body = (SECTION + '#3 #1 #3 #0 abc#12 ##12 x_#13 '
             '(#42) and -#14\n')
     assert PR_CLAIM.referenced_issues(body) == [3, 1, 42, 14]
+
+
+def test_parser_ignores_html_numeric_entities(tmp):
+    del tmp
+    body = SECTION + '&#8212; is an em dash. Fixes #15\n'
+    assert PR_CLAIM.referenced_issues(body) == [15]
 
 
 def test_cli_prints_one_issue_number_per_line(tmp):

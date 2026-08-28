@@ -8,39 +8,18 @@ _ATX_HEADING = re.compile(
     r'^ {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?[ \t]*$')
 _HTML_COMMENT = re.compile(r'<!--.*?(?:-->|$)', re.DOTALL)
 _FENCE = re.compile(r'^ {0,3}(?P<fence>`{3,}|~{3,})(?P<rest>.*)$')
+_SETEXT_UNDERLINE = re.compile(r'^ {0,3}(?:=+|-+)[ \t]*$')
 _BACKTICKS = re.compile(r'`+')
-_REFERENCE = re.compile(r'(?<![\w#])#([0-9]+)')
+_REFERENCE = re.compile(r'(?<![\w#&])#([0-9]+)')
 _SECTION = 'related issues and pull requests'
 
 
-def referenced_issues(body):
-    if body is None or body == '':
-        return []
-
-    body = body.replace('\r\n', '\n').replace('\r', '\n')
-    body = _HTML_COMMENT.sub('', body)
-    lines = body.split('\n')
-
-    section_start = None
-    section_end = len(lines)
-    for index, line in enumerate(lines):
-        heading = _ATX_HEADING.fullmatch(line)
-        if heading is None:
-            continue
-        if section_start is not None:
-            section_end = index
-            break
-        text = heading.group('text') or ''
-        text = re.sub(r'[ \t]+#+[ \t]*$', '', text).strip()
-        if text.casefold() == _SECTION:
-            section_start = index + 1
-    if section_start is None:
-        return []
-
+def _remove_fenced_code(lines):
     unfenced = []
     fence_close = None
-    for line in lines[section_start:section_end]:
+    for line in lines:
         if fence_close is not None:
+            unfenced.append('')
             if fence_close.fullmatch(line):
                 fence_close = None
             continue
@@ -51,10 +30,43 @@ def referenced_issues(body):
                 fence_close = re.compile(
                     rf'^ {{0,3}}{re.escape(fence[0])}'
                     rf'{{{len(fence)},}}[ \t]*$')
+                unfenced.append('')
                 continue
         unfenced.append(line)
+    return unfenced
 
-    source = '\n'.join(unfenced)
+
+def referenced_issues(body):
+    if body is None or body == '':
+        return []
+
+    body = body.replace('\r\n', '\n').replace('\r', '\n')
+    body = _HTML_COMMENT.sub('', body)
+    lines = _remove_fenced_code(body.split('\n'))
+
+    section_start = None
+    section_end = len(lines)
+    for index, line in enumerate(lines):
+        heading = _ATX_HEADING.fullmatch(line)
+        if section_start is not None:
+            setext = (
+                line.strip()
+                and index + 1 < len(lines)
+                and _SETEXT_UNDERLINE.fullmatch(lines[index + 1]))
+            if heading is not None or setext:
+                section_end = index
+                break
+            continue
+        if heading is None:
+            continue
+        text = heading.group('text') or ''
+        text = re.sub(r'[ \t]+#+[ \t]*$', '', text).strip()
+        if text.casefold() == _SECTION:
+            section_start = index + 1
+    if section_start is None:
+        return []
+
+    source = '\n'.join(lines[section_start:section_end])
     without_code = []
     cursor = 0
     while True:
