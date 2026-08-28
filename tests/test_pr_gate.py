@@ -12,8 +12,8 @@ import _util  # noqa: E402
 from _prgate import (  # noqa: E402
     BOT, CLOSE_MARKER, MARKER_COMMENT, _GH_STUB,
     _assert_commented_then_closed, _assert_commented_then_reopened,
-    _assert_no_mutation, _body_from, _closed_by, _issue, _layout_body,
-    _run_workflow, _valid_body, _workflow, _workflow_script,
+    _assert_no_mutation, _body_from, _closed_by, _issue, _issue_lookups,
+    _layout_body, _run_workflow, _valid_body, _workflow, _workflow_script,
 )
 from _repo import ROOT  # noqa: E402
 from _yamlread import job_scalar, top_level_mapping  # noqa: E402
@@ -75,9 +75,9 @@ def test_pull_request_gate_uses_general_names(tmp):
     assert 'and reopen the same pull request' not in contributing
 
 
-def test_gh_stub_models_include_response_headers(tmp):
+def _run_stub(tmp, *args):
     workdir = Path(tmp) / 'gh-headers'
-    workdir.mkdir()
+    workdir.mkdir(exist_ok=True)
     stub = workdir / 'gh'
     stub.write_text(_GH_STUB, encoding='utf-8')
     calls_path = workdir / 'calls.jsonl'
@@ -90,16 +90,29 @@ def test_gh_stub_models_include_response_headers(tmp):
         'STUB_ISSUES': str(fixture_path),
         'STUB_CALLS': str(calls_path),
     }
-    result = subprocess.run(
-        [sys.executable, str(stub), 'api', '--include',
-         'repos/owner/repo/issues/1', '--jq', '.assignees[].login'],
+    return subprocess.run(
+        [sys.executable, str(stub), *args],
         env=env, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[1:4] == [
-        'cache-control: private, max-age=60',
-        'content-type: application/json; charset=utf-8',
-        'x-github-media-type: github.v3; format=json',
-    ], result.stdout
+
+
+def test_gh_stub_models_include_response_headers(tmp):
+    for flag in ('--include', '-i'):
+        result = _run_stub(
+            tmp, 'api', flag, 'repos/owner/repo/issues/1',
+            '--jq', '.assignees[].login')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines()[1:4] == [
+            'cache-control: private, max-age=60',
+            'content-type: application/json; charset=utf-8',
+            'x-github-media-type: github.v3; format=json',
+        ], result.stdout
+
+
+def test_gh_stub_rejects_commands_it_does_not_model(tmp):
+    result = _run_stub(
+        tmp, 'pr', 'reopen', '99', '--repo', 'owner/repo')
+    assert result.returncode != 0, result.stdout
+    assert 'unsupported gh command' in result.stderr, result.stderr
 
 
 def test_open_admissible_body_is_left_untouched(tmp):
@@ -260,7 +273,7 @@ def test_reference_limit_checks_twenty_and_tells_the_truth(tmp):
               for number in range(130, 150)}
     calls, result = _run_workflow(tmp, _valid_body(references), issues)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    lookups = [call for call in calls if '--include' in call]
+    lookups = _issue_lookups(calls)
     assert len(lookups) == 20, lookups
     reason = ('This body names more than 20 issue references, so only the '
               'first 20 were checked.')
@@ -275,7 +288,7 @@ def test_lookup_failures_keep_the_safe_direction(tmp):
         Path(tmp) / 'failed', _valid_body('Fixes #122'),
         {'122': {'_http_status': 502}})
     assert one.returncode == 0
-    assert len([call for call in missing if '--include' in call]) == 2
+    assert len(_issue_lookups(missing)) == 2
     _assert_commented_then_closed(
         missing, 'No checked issue is assigned to you.')
     assert two.returncode != 0, (two.stdout, two.stderr)

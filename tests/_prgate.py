@@ -36,6 +36,9 @@ for arg in argv:
 with calls.open('a', encoding='utf-8') as handle:
     handle.write(json.dumps(recorded) + chr(10))
 endpoint = next((arg for arg in argv if arg.startswith('repos/')), '')
+if not argv or argv[0] != 'api':
+    print('unsupported gh command', file=sys.stderr)
+    raise SystemExit(2)
 if '/timeline?' in endpoint:
     status = fixtures.get('_timeline_status', 200)
     if status != 200:
@@ -69,7 +72,7 @@ parts = endpoint.split('/')
 if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
     issue = fixtures.get(parts[-1])
     status = 404 if issue is None else issue.get('_http_status', 200)
-    if '--include' in argv:
+    if '--include' in argv or '-i' in argv:
         reason = {200: 'OK', 404: 'Not Found'}.get(status, 'Error')
         print(f'HTTP/2.0 {status} {reason}')
         print('cache-control: private, max-age=60')
@@ -88,10 +91,18 @@ if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
             print(prefix + assignee['login'])
     else:
         print(json.dumps(issue))
-if endpoint.endswith('/comments') and os.environ.get('STUB_COMMENT_STATUS'):
-    status = os.environ['STUB_COMMENT_STATUS']
-    print(f'gh: HTTP {status}', file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(0)
+if endpoint.endswith('/comments'):
+    if os.environ.get('STUB_COMMENT_STATUS'):
+        status = os.environ['STUB_COMMENT_STATUS']
+        print(f'gh: HTTP {status}', file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0)
+if re.fullmatch(r'repos/[^/]+/[^/]+/pulls/[0-9]+', endpoint):
+    if '-X' in argv and argv[argv.index('-X') + 1] == 'PATCH':
+        raise SystemExit(0)
+print('unsupported gh api call', file=sys.stderr)
+raise SystemExit(2)
 """
 
 _CRLF_PYTHON_STUB = r"""#!/usr/bin/env bash
@@ -197,10 +208,29 @@ def _body_from(call):
     return next(arg[5:] for arg in call if arg.startswith('body='))
 
 
+def _write_calls(calls):
+    writes = []
+    for call in calls:
+        if not call:
+            continue
+        if call[0] != 'api':
+            writes.append(call)
+            continue
+        method = call[call.index('-X') + 1] if '-X' in call else 'GET'
+        fields = {'-f', '-F', '--field', '--raw-field'}
+        if method != 'GET' or fields.intersection(call):
+            writes.append(call)
+    return writes
+
+
+def _issue_lookups(calls):
+    pattern = re.compile(r'^repos/[^/]+/[^/]+/issues/[0-9]+$')
+    return [call for call in calls
+            if any(pattern.fullmatch(arg) for arg in call)]
+
+
 def _assert_no_mutation(calls):
-    arguments = [arg for call in calls for arg in call]
-    assert not any(arg.startswith(('body=', 'state='))
-                   for arg in arguments), calls
+    assert _write_calls(calls) == [], calls
 
 
 def _assert_commented_then_closed(
@@ -213,7 +243,8 @@ def _assert_commented_then_closed(
     assert len(close_calls) == 1, calls
     comment = comment_calls[0]
     close = close_calls[0]
-    assert calls.index(comment) < calls.index(close), calls
+    writes = _write_calls(calls)
+    assert writes == [comment, close], calls
     body = _body_from(comment)
     assert body.startswith(f'@{actor} — closing this automatically'), body
     assert CLOSE_MARKER in body, body
@@ -233,11 +264,16 @@ def _assert_commented_then_closed(
 
 def _assert_commented_then_reopened(
         calls, actor='alice', pr='99', repo='owner/repo'):
-    comment = next(call for call in calls
-                   if f'repos/{repo}/issues/{pr}/comments' in call)
-    reopen = next(call for call in calls
-                  if f'repos/{repo}/pulls/{pr}' in call)
-    assert calls.index(comment) < calls.index(reopen), calls
+    comment_endpoint = f'repos/{repo}/issues/{pr}/comments'
+    reopen_endpoint = f'repos/{repo}/pulls/{pr}'
+    comment_calls = [call for call in calls if comment_endpoint in call]
+    reopen_calls = [call for call in calls if reopen_endpoint in call]
+    assert len(comment_calls) == 1, calls
+    assert len(reopen_calls) == 1, calls
+    comment = comment_calls[0]
+    reopen = reopen_calls[0]
+    writes = _write_calls(calls)
+    assert writes == [comment, reopen], calls
     body = _body_from(comment)
     assert body.startswith(f'@{actor} —'), body
     assert 'reopening it automatically' in body, body
