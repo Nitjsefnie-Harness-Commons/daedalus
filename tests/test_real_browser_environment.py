@@ -21,6 +21,12 @@ def _which_with(node):
     return which
 
 
+def test_browser_environment_skip_has_runner_identity(tmp):
+    del tmp
+    assert issubclass(
+        _realbrowser.BrowserEnvironmentSkipped, _util.Skipped)
+
+
 def test_node_interpreter_start_failure_is_environment_skip(tmp):
     bad_node = Path(tmp) / 'node'
     bad_node.write_text('#!/missing/node-loader\n', encoding='utf-8')
