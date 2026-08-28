@@ -604,9 +604,10 @@ def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
     for request_arrives, failure in failures.items():
         assert failure.__class__ is failure_type, failure
         assert failure.request_arrived is request_arrives, failure
-        candidate_owners = getattr(failure, 'candidate_owners', ())
-        assert len(candidate_owners) > 1, candidate_owners
-        for owner in candidate_owners:
+        required_owners = (
+            'the browser', 'the CDP transport', 'this repository',
+            'the machine')
+        for owner in required_owners:
             assert owner in str(failure), (owner, failure)
 
 

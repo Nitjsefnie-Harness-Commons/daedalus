@@ -48,7 +48,7 @@ class FirstNavigationTimeout(AssertionError):
     """A first navigation deadline with its in-process arrival observation."""
 
     candidate_owners = (
-        'the browser', 'the CDP transport', 'this repository')
+        'the browser', 'the CDP transport', 'this repository', 'the machine')
 
     def __init__(self, page_url, request_arrived):
         self.request_arrived = request_arrived
