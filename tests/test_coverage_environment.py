@@ -136,9 +136,55 @@ env = _util.child_coverage('scrub')
 {mutation}
 subprocess.run(['python3', 'child.py'], cwd=tmp, env=env)
 """)
-        assert len(violations) == 1, (mutation, violations)
-        assert 'tests/synthetic.py:5' in violations[0], (mutation,
-                                                         violations)
+        assert any('tests/synthetic.py:5' in v for v in violations), (
+            mutation, violations)
+
+
+def test_a_declaration_name_used_elsewhere_is_a_violation(tmp):
+    """Aliasing, subscripting or passing the name are all refused."""
+    del tmp
+    for appearance in ('alias = env',
+                       'env["x"]',
+                       'print(env)',
+                       'env.copy()'):
+        violations = _synthetic_violations(
+            f"""import subprocess
+import _util
+env = _util.child_coverage('scrub')
+{appearance}
+subprocess.run(['python3', 'child.py'], cwd=tmp, env=env)
+""")
+        assert any('tests/synthetic.py:4' in v for v in violations), (
+            appearance, violations)
+
+
+def test_a_declaration_name_cannot_be_aliased(tmp):
+    """An alias mutates the same dict the launches use: it is refused."""
+    del tmp
+    target = ROOT / 'tests' / 'test_diff_coverage.py'
+    original = target.read_bytes()
+    needle = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
+    text = _module_text(target)
+    assert needle in text, 'the declaration binding shape changed'
+    line = text[:text.index(needle)].count('\n') + 2
+    mutated = text.replace(
+        needle,
+        needle
+        + "_COVERAGE_ALIAS = _COVERAGE_ENV\n"
+        + "_COVERAGE_ALIAS['COVERAGE_PROCESS_START'] = "
+        + "os.environ['COVERAGE_PROCESS_START']\n", 1)
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations()
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
+    restored = _coverage_environment_violations()
+    assert not any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in restored), restored
 
 
 def test_an_earlier_non_root_chdir_taints_an_inherited_cwd(tmp):
