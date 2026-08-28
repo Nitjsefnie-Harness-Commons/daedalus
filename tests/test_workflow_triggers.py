@@ -179,16 +179,13 @@ def test_workflow_trigger_gate_rejects_quote_collisions_and_accepts_comments(
 
 
 def test_contribution_gates_have_unfiltered_push_triggers(tmp):
-    """The six contribution gates run on every push to main.
+    """The three unfiltered contribution workflows run on every push to main.
 
     This test owns the release-safety direction: release.yml finds these runs
     by the shared commit SHA, so a Markdown-only push must not be filtered.
     """
     del tmp
-    gate_names = (
-        'tests.yml', 'lint.yml', 'types.yml', 'eslint.yml', 'audit.yml',
-        'codeql.yml',
-    )
+    gate_names = ('tests.yml', 'audit.yml', 'codeql.yml')
     workflows = ROOT / '.github' / 'workflows'
     for name in gate_names:
         path = workflows / name
@@ -199,6 +196,9 @@ def test_contribution_gates_have_unfiltered_push_triggers(tmp):
         assert not _workflow_path_filters(triggers['push'], name), (
             f'{name} filters its push trigger: '
             f'{_workflow_path_filters(triggers["push"], name)}')
+    for retired in ('lint.yml', 'types.yml', 'eslint.yml', 'actionlint.yml'):
+        assert not (workflows / retired).exists(), (
+            f'moved gate workflow still exists: {retired}')
 
 
 def test_workflow_trigger_filters_accept_string_pairs_and_opposite_quotes(tmp):
