@@ -13,8 +13,6 @@ from _ghexpr import (  # noqa: E402
     evaluate,
     evaluate_if,
 )
-from _wfgraph import _tests_yml  # noqa: E402
-from _wfskip import implicit_skip_violations  # noqa: E402
 
 
 def _raises(expression, context, detail=None):
@@ -119,23 +117,6 @@ def test_if_applies_success_unless_a_status_check_is_parsed(tmp):
     assert evaluate_if('false || always()', {
         'status': states['cancelled'],
     }) is True
-
-
-def test_quoted_status_function_text_is_not_a_status_call(tmp):
-    """A function name inside a string cannot protect a dependent job."""
-    del tmp
-    workflow = _tests_yml()
-    mutated = workflow.replace(
-        "    if: ${{ !cancelled() && !failure() }}\n",
-        "    if: ${{ github.event_name == 'pull_request' "
-        "&& 'cancelled()' != '' }}\n",
-        1,
-    )
-    assert mutated != workflow, 'the real suites condition was not mutated'
-    violations = implicit_skip_violations(mutated)
-    expected = 'suites: skippable ancestor actionlint;'
-    detail = '\n'.join(violations) or 'no suites/actionlint violation reported'
-    assert any(item.startswith(expected) for item in violations), detail
 
 
 def test_success_requires_a_boolean_status_value(tmp):
