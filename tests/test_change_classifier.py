@@ -9,6 +9,7 @@ two contracts that keep the module's constants honest against the workflows.
 """
 import contextlib
 import io
+import itertools
 import json
 import os
 import re
@@ -372,6 +373,8 @@ CONDITION_CONTEXTS = (
     ({'success': False, 'failure': True, 'cancelled': False}, False),
     ({'success': False, 'failure': False, 'cancelled': True}, False),
 )
+DOCS_ONLY_VALUES = ('true', 'false', '')
+AGGREGATE_RESULT_STATES = ('success', 'failure', 'cancelled', 'skipped')
 
 
 def _aggregate_script(workflow):
@@ -395,6 +398,24 @@ def _run_aggregate(results):
     env = {**os.environ, 'NEEDS_JSON': json.dumps(needs)}
     return subprocess.run([bash, '-c', _aggregate_script(_tests_yml())],
                           env=env, capture_output=True, text=True, timeout=60)
+
+
+def _job_condition_runs(workflow, job, outputs):
+    """Evaluate one job condition with an all-success dependency context."""
+    expression = _job_if_expression(workflow, job)
+    assert expression is not None, job
+    context = {
+        'status': CONDITION_CONTEXTS[0][0],
+        'needs': {'changes': {'outputs': outputs}},
+    }
+    return evaluate_if(expression, context)
+
+
+def _aggregate_expected(results):
+    """Return the pointwise result-table verdict for one dependency mapping."""
+    return all(
+        result in AGGREGATE_ALLOWED_RESULTS[name]
+        for name, result in results.items())
 
 
 def test_changes_job_permissions_are_exactly_read_only(tmp):
@@ -489,12 +510,18 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
         expression = _job_if_expression(workflow, job)
         assert expression is not None, job
         for status, should_run in CONDITION_CONTEXTS:
-            context = {
-                'status': status,
-                'needs': {'changes': {'outputs': {'docs_only': 'false'}}},
-            }
-            assert evaluate_if(expression, context) is should_run, (
-                job, status, expression)
+            for docs_only in DOCS_ONLY_VALUES:
+                context = {
+                    'status': status,
+                    'needs': {'changes': {'outputs': {
+                        'docs_only': docs_only}}},
+                }
+                expected = (
+                    should_run
+                    and not (job == 'coverage'
+                             and docs_only == 'true'))
+                assert evaluate_if(expression, context) is expected, (
+                    job, status, docs_only, expression)
 
 
 def test_actionlint_runs_only_when_workflow_paths_changed(tmp):
@@ -582,17 +609,31 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
 
     all_success = {name: 'success' for name in expected}
     for name, accepted in AGGREGATE_ALLOWED_RESULTS.items():
-        for result_name in ('success', 'failure', 'cancelled', 'skipped'):
+        for result_name in AGGREGATE_RESULT_STATES:
             result = _run_aggregate(
                 dict(all_success, **{name: result_name}))
             assert (result.returncode == 0) is (result_name in accepted), (
                 name, result_name, accepted, result.stdout, result.stderr)
 
-    # Documentation-only runs skip actionlint, suites, and coverage; wheel
-    # still builds the artifact. Every one of these statuses is table-allowed.
-    docs_only = dict(
-        all_success, actionlint='skipped', suites='skipped',
-        coverage='skipped')
+    # Nine dependencies choose two, with four result states per side: 576.
+    for names in itertools.combinations(expected, 2):
+        for result_names in itertools.product(
+                AGGREGATE_RESULT_STATES, repeat=2):
+            results = dict(all_success, **dict(zip(names, result_names)))
+            expected_success = _aggregate_expected(results)
+            result = _run_aggregate(results)
+            assert (result.returncode == 0) is expected_success, (
+                names, result_names, result.stdout, result.stderr)
+
+    workflow = _tests_yml()
+    docs_only = dict(all_success)
+    for job, outputs in (
+            ('actionlint', {'workflows': 'false'}),
+            ('suites', {'docs_only': 'true'}),
+            ('wheel', {'docs_only': 'true'}),
+            ('coverage', {'docs_only': 'true'})):
+        docs_only[job] = 'success' if _job_condition_runs(
+            workflow, job, outputs) else 'skipped'
     result = _run_aggregate(docs_only)
     assert result.returncode == 0, (result.stdout, result.stderr)
     for name, result_name in docs_only.items():
