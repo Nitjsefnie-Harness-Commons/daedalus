@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Shared fixtures for pull-request body and workflow gate tests."""
 import html
+import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -181,3 +183,189 @@ def _valid_html(references=None, changes=None, repo='owner/repo'):
         ('Related Issues and Pull Requests', references),
         ('Changes', changes),
         ('Testing', _text_html('Ran the suite.')))
+
+
+BOT = 'github-actions[bot]'
+MARKER = '<!-- pr-gate -->'
+CLOSED_MARKER = '<!-- pr-gate: closed -->'
+
+GH_STUB = r'''#!/usr/bin/env python3
+import json
+import os
+import re
+import sys
+
+
+def finish(status, data):
+    reasons = {
+        200: 'OK', 201: 'Created', 404: 'Not Found', 500: 'Error'}
+    print(f'HTTP/2.0 {status} {reasons.get(status, "Response")}')
+    print('content-type: application/json')
+    print()
+    if data is not None:
+        print(json.dumps(data))
+    raise SystemExit(0 if 200 <= status < 300 else 1)
+
+
+def unsupported():
+    print('unsupported', file=sys.stderr)
+    raise SystemExit(2)
+
+
+arguments = sys.argv[1:]
+payload = None
+if '--input' in arguments:
+    index = arguments.index('--input')
+    if index + 2 != len(arguments):
+        unsupported()
+    with open(arguments[index + 1], encoding='utf-8') as handle:
+        payload = json.load(handle)
+with open(os.environ['STUB_CALLS'], 'a', encoding='utf-8') as handle:
+    handle.write(json.dumps({'argv': arguments, 'input': payload}) + '\n')
+if (len(arguments) < 5 or arguments[0] != 'api'
+        or arguments[1:3] != ['--include', '-X']):
+    unsupported()
+method = arguments[3]
+endpoint = arguments[4]
+with open(os.environ['STUB_FIXTURES'], encoding='utf-8') as handle:
+    fixtures = json.load(handle)
+if fixtures.get('unparsable'):
+    print('first gh failure line', file=sys.stderr)
+    print('second gh failure line', file=sys.stderr)
+    raise SystemExit(2)
+if any(item in f'{method} {endpoint}' for item in fixtures.get('fail', [])):
+    finish(500, {'message': 'fixture failure'})
+if endpoint == 'repos/owner/repo/pulls/99':
+    if method == 'GET':
+        finish(200, fixtures['pull'])
+    if method == 'PATCH':
+        finish(200, {**fixtures['pull'], **payload})
+if endpoint == 'markdown' and method == 'POST':
+    finish(200, fixtures['rendered'])
+page = re.fullmatch(
+    r'repos/owner/repo/issues/99/(comments|timeline)'
+    r'\?per_page=100&page=([0-9]+)', endpoint)
+if page and method == 'GET':
+    values = fixtures[page.group(1)]
+    offset = (int(page.group(2)) - 1) * 100
+    finish(200, values[offset:offset + 100])
+issue = re.fullmatch(r'repos/owner/repo/issues/([0-9]+)', endpoint)
+if issue and method == 'GET':
+    value = fixtures['issues'].get(issue.group(1))
+    finish(200, value) if value is not None else finish(404, None)
+if endpoint == 'repos/owner/repo/issues/99/comments' and method == 'POST':
+    finish(201, {'id': 100, **payload})
+comment = re.fullmatch(
+    r'repos/owner/repo/issues/comments/([0-9]+)', endpoint)
+if comment and method == 'PATCH':
+    finish(200, {'id': int(comment.group(1)), **payload})
+unsupported()
+'''
+
+
+class _Response(NamedTuple):
+    status: int
+    data: object
+
+
+def _issue(*assignees, pull_request=False):
+    value = {'assignees': [{'login': login} for login in assignees]}
+    if pull_request:
+        value['pull_request'] = {}
+    return value
+
+
+class FakeApi:
+    def __init__(self, *, pull, issues=None, comments=(), timeline=(),
+                 rendered=None, fail=()):
+        self.pull = pull
+        self.issues = issues or {}
+        self.comments = list(comments)
+        self.timeline = list(timeline)
+        self.rendered = _valid_html() if rendered is None else rendered
+        self.fail = set(fail)
+        self.calls = []
+        self.writes = []
+
+    def _failed(self, method, endpoint):
+        target = f'{method} {endpoint}'
+        return any(fragment in target for fragment in self.fail)
+
+    def request(self, method, endpoint, payload=None):
+        call = (method, endpoint, payload)
+        self.calls.append(call)
+        if method != 'GET' and endpoint != 'markdown':
+            self.writes.append(call)
+        if self._failed(method, endpoint):
+            return _Response(500, None)
+        if endpoint == 'repos/owner/repo/pulls/99':
+            if method == 'GET':
+                return _Response(200, self.pull)
+            if method == 'PATCH':
+                self.pull['state'] = payload['state']
+                return _Response(200, self.pull)
+        if endpoint == 'markdown' and method == 'POST':
+            return _Response(200, self.rendered)
+        if (endpoint == 'repos/owner/repo/issues/99/comments'
+                and method == 'POST'):
+            return _Response(201, {'id': 100, 'body': payload['body']})
+        match = re.fullmatch(
+            r'repos/owner/repo/issues/comments/([0-9]+)', endpoint)
+        if match and method == 'PATCH':
+            return _Response(200, {'id': int(match.group(1)),
+                                   'body': payload['body']})
+        match = re.fullmatch(
+            r'repos/owner/repo/issues/([0-9]+)', endpoint)
+        if match and method == 'GET':
+            issue = self.issues.get(match.group(1))
+            return _Response(200, issue) if issue is not None else _Response(
+                404, None)
+        raise AssertionError(f'unmodelled: {method} {endpoint} {payload!r}')
+
+    def paginate(self, endpoint):
+        self.calls.append(('GET', endpoint, None))
+        if self._failed('GET', endpoint):
+            return _Response(500, None)
+        if endpoint == 'repos/owner/repo/issues/99/comments?per_page=100':
+            return _Response(200, self.comments)
+        if endpoint == 'repos/owner/repo/issues/99/timeline?per_page=100':
+            return _Response(200, self.timeline)
+        raise AssertionError(f'unmodelled: GET {endpoint}')
+
+
+def _gate_module():
+    path = ROOT / 'scripts' / 'ci' / 'pr_gate.py'
+    if not path.is_file():
+        return None
+    return _util.load(path, 'scripts.ci.pr_gate')
+
+
+def run_gate(api, body=None):
+    gate = _gate_module()
+    assert gate is not None, 'scripts/ci/pr_gate.py is not implemented'
+    api.pull['body'] = body
+    code = gate.run(api, 'owner/repo', '99', 'alice', TEMPLATE)
+    return code, api.writes
+
+
+def _comment_body(write):
+    return write[2]['body']
+
+
+def _assert_no_writes(writes):
+    assert writes == [], writes
+
+
+def _markdown_code_spans(text):
+    runs = list(re.finditer(r'`+', text))
+    spans = []
+    index = 0
+    while index < len(runs):
+        opener = runs[index]
+        close = next((candidate for candidate in runs[index + 1:]
+                      if len(candidate.group()) == len(opener.group())), None)
+        if close is None:
+            break
+        spans.append((opener.start(), close.end()))
+        index = runs.index(close) + 1
+    return spans
