@@ -9,14 +9,17 @@ that serves them because they are content, not machinery.
 """
 
 
+CDP_RESPONSE_DEADLINE_MS = 10000
+
+
 CDP_CALL_HARNESS = r"""
-const [target, method, paramsText] = process.argv.slice(1);
+const [target, method, paramsText, deadlineText] = process.argv.slice(1);
 const socket = new WebSocket(target);
 const timer = setTimeout(() => {
   process.stderr.write('CDP response timed out\n');
   socket.close();
   process.exitCode = 1;
-}, 10000);
+}, Number(deadlineText));
 
 socket.addEventListener('open', () => {
   socket.send(JSON.stringify({ id: 1, method, params: JSON.parse(paramsText) }));
