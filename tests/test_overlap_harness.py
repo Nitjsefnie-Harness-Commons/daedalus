@@ -118,6 +118,8 @@ def _slow_result_server(post_delay=0):
                 self.end_headers()
                 self.wfile.write(b'{}')
             except OSError:
+                # A delayed POST can outlive the child the backstop
+                # killed, so writing to its closed socket is expected.
                 pass
 
         def do_GET(self):
