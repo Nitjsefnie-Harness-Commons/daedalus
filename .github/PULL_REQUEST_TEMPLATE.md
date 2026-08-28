@@ -27,10 +27,11 @@ Fixes #
 -
 
 ## Testing
-<!-- required: bullet list of the GATES that were run and their outcome — not
+<!-- required: checkbox list of the GATES that were run and their outcome — not
      an enumeration of the tests added, which belongs under Changes. Check a
      box only for a gate actually run whose result you read; leave it unchecked
-     and say why when a gate was skipped. If nothing was run, say so and why. -->
+     and say why when a gate was skipped. Add boxes for any other gate you ran;
+     at most one sentence per box. If nothing was run, say so and why. -->
 
 - [ ] Test suite
 - [ ] Lint
