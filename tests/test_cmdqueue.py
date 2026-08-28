@@ -15,18 +15,8 @@ import _overlap  # noqa: E402
 import test_cli  # noqa: E402
 import test_mcp_server  # noqa: E402
 
-
-def _is_utf8_text_read(signature, candidate, args, kwargs):
-    try:
-        bound = signature.bind(candidate, *args, **kwargs)
-    except TypeError:
-        return False
-    bound.apply_defaults()
-    return (bound.arguments['mode'] == 'r'
-            and bound.arguments['buffering'] == -1
-            and bound.arguments['encoding'] == 'utf-8'
-            and bound.arguments['errors'] is None
-            and bound.arguments['newline'] is None)
+# This large number is a runaway guard, not a valid-wait sleep assertion.
+_RUNAWAY_SLEEP_LIMIT = 1000
 
 
 @contextlib.contextmanager
@@ -38,9 +28,8 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
     def refused(candidate, *args, **kwargs):
         if operation == 'open':
-            if not _is_utf8_text_read(
-                    signature, candidate, args, kwargs):
-                return original(candidate, *args, **kwargs)
+            # Native validation may open a read twice; keep it authoritative.
+            original(candidate, *args, **kwargs).close()
         else:
             try:
                 signature.bind(candidate, *args, **kwargs)
@@ -123,12 +112,10 @@ def _vanish_during_unlink(path):
 @contextlib.contextmanager
 def _vanish_during_read(path, clock):
     original = Path.open
-    signature = inspect.signature(original)
     armed = [True]
 
     def vanished(candidate, *args, **kwargs):
-        if not _is_utf8_text_read(signature, candidate, args, kwargs):
-            return original(candidate, *args, **kwargs)
+        original(candidate, *args, **kwargs).close()
         if candidate == path and armed[0]:
             armed[0] = False
             clock.record_read()
@@ -146,12 +133,10 @@ def _vanish_during_read(path, clock):
 @contextlib.contextmanager
 def _disappear_on_first_open(path):
     original = Path.open
-    signature = inspect.signature(original)
     armed = [True]
 
     def missing(candidate, *args, **kwargs):
-        if not _is_utf8_text_read(signature, candidate, args, kwargs):
-            return original(candidate, *args, **kwargs)
+        original(candidate, *args, **kwargs).close()
         if candidate == path and armed[0]:
             armed[0] = False
             raise FileNotFoundError(2, 'injected disappearance', str(path))
@@ -167,12 +152,10 @@ def _disappear_on_first_open(path):
 @contextlib.contextmanager
 def _refuse_first_queue_read(queue):
     original = Path.open
-    signature = inspect.signature(original)
     refused_path = [None]
 
     def refused(candidate, *args, **kwargs):
-        if not _is_utf8_text_read(signature, candidate, args, kwargs):
-            return original(candidate, *args, **kwargs)
+        original(candidate, *args, **kwargs).close()
         if (refused_path[0] is None and candidate.parent == queue
                 and candidate.suffix == '.json'):
             refused_path[0] = candidate
@@ -246,13 +229,14 @@ def test_a_present_queue_file_outlives_its_finished_producer(tmp):
 def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    with _virtual_cmdqueue_clock(math.inf) as (clock, _events, origin):
+    with _virtual_cmdqueue_clock(
+            _RUNAWAY_SLEEP_LIMIT) as (clock, _events, origin):
         with _vanish_during_read(queued, clock):
             observed = _cmdqueue.wait_for_command(
                 queue, timeout=timeout, producer_alive=lambda: False)
     observed_end = clock.monotonic()
     with _virtual_cmdqueue_clock(
-            math.inf) as (clock, _events, baseline_origin):
+            _RUNAWAY_SLEEP_LIMIT) as (clock, _events, baseline_origin):
         baseline = _cmdqueue.wait_for_command(queue, timeout=timeout)
     baseline_end = clock.monotonic()
     assert observed is None, observed
@@ -263,18 +247,25 @@ def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
         observed_end, baseline_end)
 
 
-def test_open_injectors_preserve_excess_and_binary_encoding_failures(tmp):
+def test_open_injectors_preserve_excess_binary_and_wrong_type_failures(
+        tmp):
     queue, queued = _queued_file(tmp)
     excess_args = ('r', 1, -1, None, None, None, False, 'extra')
     expected_excess = _path_open_failure(queued, *excess_args)
     expected_binary = _path_open_failure(
         queued, mode='rb', encoding='utf-8')
+    expected_buffering = _path_open_failure(
+        queued, buffering=-1.0, encoding='utf-8')
     rejected_calls = (
         ('excess arguments', excess_args, {}, expected_excess),
         ('binary encoding', (),
          {'mode': 'rb', 'encoding': 'utf-8'}, expected_binary),
+        ('value-equal wrong-type buffering', (),
+         {'buffering': -1.0, 'encoding': 'utf-8'},
+         expected_buffering),
     )
-    with _virtual_cmdqueue_clock(math.inf) as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(
+            _RUNAWAY_SLEEP_LIMIT) as (clock, _events, _origin):
         injectors = (
             ('generic refusal',
              _refuse_path_operation(queued, 'open', 1), PermissionError),
