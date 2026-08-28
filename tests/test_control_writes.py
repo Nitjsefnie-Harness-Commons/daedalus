@@ -76,6 +76,21 @@ def test_refuses_a_shadowed_copy_helper(tmp):
     ]
 
 
+def test_refuses_a_redirected_owned_container(tmp):
+    """Replacing an element of an owned container ends its ownership."""
+    source = Path(tmp) / 'container-target.py'
+    source.write_text(
+        "def test_control(tmp, relative):\n"
+        "    first, *targets = _real_module_copy(tmp, relative)\n"
+        "    targets[0] = ROOT / 'unsafe.py'\n"
+        "    targets[0].write_bytes(b'mutated')\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'container-target.py:4: write_bytes target path is not '
+        + 'control-owned'
+    ]
+
+
 def test_refuses_a_comprehension_rebound_owned_name(tmp):
     """A comprehension target shadowing tmp does not inherit ownership."""
     source = Path(tmp) / 'comprehension-target.py'
