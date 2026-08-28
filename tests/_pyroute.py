@@ -179,7 +179,16 @@ def _resolve_sender_name(expr, aliases):
 
 def _rebound_names(node):
     """Every local name `node` can rebind, in any binding form: a plain or
-    annotated assignment, a `for`/`with`/`except` target, or an import."""
+    annotated assignment, a `for`/`with`/`except` target, an import, or a
+    nested def/async def/class whose own name shadows it.
+
+    The last one needs the unrestricted `ast.walk` rather than
+    `_scope_nodes`, which deliberately never descends into a nested
+    function -- exactly right for the dict and call tracking above, which
+    must not read a nested function's body as this scope's code, but wrong
+    here: the nested function's NAME still rebinds in the enclosing scope
+    whether or not its body is ever walked.
+    """
     nodes = [node, *_scope_nodes(node)]
     names = {n.id for n in nodes
              if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
@@ -188,6 +197,9 @@ def _rebound_names(node):
               for a in n.names}
     names |= {n.name for n in nodes
               if isinstance(n, ast.ExceptHandler) and n.name}
+    names |= {n.name for n in ast.walk(node)
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                ast.ClassDef)) and n is not node}
     return names
 
 
@@ -319,6 +331,10 @@ def _py_calls_in(node):
     return [child for child in nodes if isinstance(child, ast.Call)]
 
 
+_UNWALKED_BODY = (ast.For, ast.AsyncFor, ast.While, ast.With,
+                  ast.AsyncWith, ast.Try, ast.TryStar, ast.Match)
+
+
 def _py_flow_violations(statements, pairs, rel, allowed_opaque_names):
     """Walk statements in order, retaining alternate `if` branch (dict-state,
     alias-map) pairs. Each pair advances together: a statement that isn't
@@ -362,6 +378,20 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names):
                 other_pairs = incoming
             pairs = _dedupe_state_pairs([*body_pairs, *other_pairs])
             continue
+        if isinstance(statement, _UNWALKED_BODY):
+            # A `for`/`while`/`with`/`try`/`match` body is never entered
+            # statement by statement the way an `if` branch is, so a
+            # rebinding partway through it can't be applied only from that
+            # point on the way _apply_alias_statement does for straight-
+            # line code. Clearing every name the whole body could rebind
+            # before any call in it is checked is the conservative answer:
+            # a real sender inside the body might now go unreported (#325
+            # already tracks that direction), but a name the body rebinds
+            # away from a sender is never wrongly read as one.
+            rebound = _rebound_names(statement)
+            for _, aliases in pairs:
+                for name in rebound:
+                    aliases.pop(name, None)
         check_calls(statement, pairs)
         for state, aliases in pairs:
             _apply_dict_statement(statement, state)
