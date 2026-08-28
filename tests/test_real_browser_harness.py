@@ -95,6 +95,24 @@ def _ready_worker(node, workers):
     return 'ws://worker', True, None
 
 
+def test_cdp_eval_preserves_typed_evaluation_failure(tmp):
+    del tmp
+    response = {
+        'exceptionDetails': {'text': 'controlled evaluation failure'},
+        'result': {'value': 'must not be returned'},
+    }
+    failure = None
+    with mock.patch.object(
+            _realbrowser, 'cdp_call', return_value=response):
+        try:
+            _realbrowser.cdp_eval(
+                'node-for-control', 'ws://worker', 'controlled probe')
+        except Exception as why:  # noqa: BLE001
+            failure = why
+    assert failure.__class__ is _realbrowser.CDPEvaluationError, failure
+    assert failure.response is response, failure.response
+
+
 def test_repository_worker_probe_exception_counts_as_reached(tmp):
     del tmp
     node = shutil.which('node')
