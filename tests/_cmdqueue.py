@@ -3,7 +3,7 @@ import json
 import time
 
 
-_POLL_DELAY = 0.05
+POLL_DELAY = 0.05
 UNLINK_ATTEMPTS = 25
 _UNLINK_RETRY_DELAY = 0.02
 
@@ -50,7 +50,7 @@ def wait_for_command(directory, timeout, producer_alive=None,
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
-        time.sleep(min(_POLL_DELAY, remaining))
+        time.sleep(min(POLL_DELAY, remaining))
 
 
 def wait_for_commands(directory, count, timeout):
@@ -71,4 +71,4 @@ def wait_for_commands(directory, count, timeout):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
-        time.sleep(min(_POLL_DELAY, remaining))
+        time.sleep(min(POLL_DELAY, remaining))
