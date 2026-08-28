@@ -398,6 +398,52 @@ def test_segment_storage_never_touches_the_old_tmp_root(tmp):
     assert after == before, f'the old world-shared root changed: {after - before}'
 
 
+def test_a_failing_accounting_write_still_leaves_the_quota_enforced(tmp):
+    """The job mints fine, but every write_usage after that fails to land,
+    and the count quota still has to hold (#203).
+
+    Before this was fixed, the record kept reporting whatever it recorded
+    at mint, zero, forever, and every request after the first read that
+    same zero and got waved through. Two segments land, a third should not,
+    and the only way it still gets refused is if something other than the
+    record notices two are already on disk.
+    """
+    fault_dir = Path(tmp) / 'fault-injection'
+    fault_dir.mkdir()
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import os\n'
+        '_real_replace = os.replace\n'
+        '_json_replaces = [0]\n'
+        'def _fail_record_replace(src, dst):\n'
+        '    if str(dst).endswith(".json"):\n'
+        '        _json_replaces[0] += 1\n'
+        '        if _json_replaces[0] > 1:\n'
+        '            raise OSError("injected accounting write failure")\n'
+        '    return _real_replace(src, dst)\n'
+        'os.replace = _fail_record_replace\n',
+        encoding='utf-8')
+    env = {
+        'PYTHONPATH': str(fault_dir),
+        'DAEDALUS_MAX_SEGMENT_INDEX': '10',
+        'DAEDALUS_MAX_SEGMENTS_PER_JOB': '2',
+        'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '100',
+    }
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        job = seg_job()
+        _, minted = mint_job(base, TOK, job)
+        sig = minted['sig']
+        status0, _ = post_segment(base, job, sig, '0', payload=b'abc')
+        status1, _ = post_segment(base, job, sig, '1', payload=b'abc')
+        status2, body2 = post_segment(base, job, sig, '2', payload=b'abc')
+        assert (status0, status1) == (200, 200), (status0, status1)
+        assert status2 == 413, (status2, body2)
+        seg_dir = Path(docroot) / 'segments' / job
+        assert len(list(seg_dir.glob('*.ts'))) == 2, list(seg_dir.iterdir())
+        record_path = Path(docroot) / 'segments' / f'{job}.json'
+        record = json.loads(record_path.read_text(encoding='utf-8'))
+        assert record['stored_count'] == 0, record
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segstorage_')
 
