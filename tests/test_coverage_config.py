@@ -48,16 +48,27 @@ def _write_executed_files(tmp):
 
 
 def _coverage_rows(report):
+    lines = report.splitlines()
+    assert lines and lines[0].split() == [
+        'Name', 'Stmts', 'Miss', 'Cover'], report
     rows = {}
-    for line in report.splitlines():
+    for line in lines[1:]:
+        if line and not line.strip('-'):
+            continue
         columns = line.rsplit(maxsplit=3)
-        if len(columns) != 4:
-            continue
+        assert len(columns) == 4, (
+            f'unparsed coverage row: {line!r}\n{report}')
         name, statements, missed, percent = columns
-        if not (statements.isdecimal() and missed.isdecimal()
-                and percent.endswith('%')):
-            continue
-        rows[name] = (int(statements), int(missed), float(percent[:-1]))
+        assert statements.isdecimal() and missed.isdecimal(), (
+            f'unparsed coverage row: {line!r}\n{report}')
+        assert percent.endswith('%'), (
+            f'unparsed coverage row: {line!r}\n{report}')
+        try:
+            percentage = float(percent[:-1])
+        except ValueError as error:
+            raise AssertionError(
+                f'unparsed coverage row: {line!r}\n{report}') from error
+        rows[name] = (int(statements), int(missed), percentage)
     return rows
 
 
@@ -88,7 +99,33 @@ def test_untracked_node_modules_python_is_not_reported(tmp):
     report = _coverage_report(tmp)
     rows = _coverage_rows(report)
 
+    assert rows.get('driver.py') == (2, 0, 100.0), report
+    assert rows.get('ran.py') == (2, 0, 100.0), report
     assert str(_NODE_MODULE_FILE) not in rows, report
+
+
+def test_wrapped_forbidden_row_cannot_satisfy_negative_control(tmp):
+    report = (
+        'Name        Stmts   Miss  Cover\n'
+        '-------------------------------\n'
+        'driver.py       2      0   100%\n'
+        f'{_NODE_MODULE_FILE.parent}{os.sep}\n'
+        f'{_NODE_MODULE_FILE.name}       2      2     0%\n'
+        'ran.py          2      0   100%\n'
+        '-------------------------------\n'
+        'TOTAL           6      2    67%\n')
+    original_report = globals()['_coverage_report']
+    globals()['_coverage_report'] = lambda _cwd: report
+    try:
+        try:
+            test_untracked_node_modules_python_is_not_reported(tmp)
+        except AssertionError as error:
+            assert 'unparsed coverage row' in str(error), error
+            return
+        raise AssertionError(
+            'the negative control accepted a wrapped forbidden row')
+    finally:
+        globals()['_coverage_report'] = original_report
 
 
 if __name__ == '__main__':
