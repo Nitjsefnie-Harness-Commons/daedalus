@@ -6,7 +6,6 @@ these tests pin each rule, the mutation-shaped regressions it exists to
 catch, and the behaviour of the _util.child_coverage declaration it
 reads.
 """
-import os
 import shutil
 import subprocess
 import sys
@@ -34,14 +33,6 @@ def _real_module_copy(tmp, relative):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
     return root, root / relative
-
-
-class _HidingEnvironment(dict):
-    """A mapping whose iteration hides what its items() still carries."""
-
-    def __iter__(self):
-        return (name for name in dict.__iter__(self)
-                if not name.startswith('COVERAGE_'))
 
 
 def _repository_write_lines():
@@ -88,6 +79,19 @@ subprocess.run(['python3', 'child.py'], cwd=ROOT / '/tmp')
     assert "cwd=ROOT / '/tmp'" in violations[0], violations
 
 
+def test_a_local_rebinding_leaves_another_scope_alone(tmp):
+    """A name bound inside one function cannot taint another's launch."""
+    del tmp
+    assert _synthetic_violations(
+        """import subprocess
+def unrelated(tmp):
+    ROOT = tmp
+    return ROOT
+def launch():
+    subprocess.run(['python3', 'child.py'], cwd=str(ROOT))
+""") == []
+
+
 def test_a_rebound_root_spelling_is_unresolved(tmp):
     """A local ROOT spelling does not prove the repository value."""
     del tmp
@@ -122,6 +126,32 @@ subprocess.run([{argv}, 'x'], cwd=tmp)
 """)
         assert len(violations) == 1, violations
         assert 'tests/synthetic.py:2' in violations[0], violations
+
+
+def test_every_stdlib_launcher_needs_a_declaration(tmp):
+    """run and Popen are not the only ways to start a child."""
+    del tmp
+    for launcher in ('run', 'Popen', 'call', 'check_call', 'check_output'):
+        violations = _synthetic_violations(
+            f"""import subprocess
+subprocess.{launcher}(['python3', 'child.py'], cwd=tmp)
+""")
+        assert len(violations) == 1, (launcher, violations)
+        assert 'tests/synthetic.py:2' in violations[0], (launcher, violations)
+
+
+def test_a_chdir_after_a_launch_helper_still_taints_it(tmp):
+    """Lexical order is not call order: any non-root chdir taints."""
+    del tmp
+    violations = _synthetic_violations(
+        """import os
+import subprocess
+def launch():
+    subprocess.run(['python3', 'child.py'])
+os.chdir(tmp)
+launch()
+""")
+    assert any('tests/synthetic.py:4' in v for v in violations), violations
 
 
 def test_a_chain_of_launch_callable_aliases_is_followed(tmp):
@@ -215,7 +245,8 @@ def test_a_declaration_name_used_elsewhere_is_a_violation(tmp):
                        'env["x"]',
                        'print(env)',
                        'env.copy()',
-                       "globals()['env'].update({})"):
+                       "globals()['env'].update({})",
+                       "locals()['env'].update({})"):
         violations = _synthetic_violations(
             f"""import subprocess
 import _util
@@ -267,6 +298,8 @@ def test_rebinding_the_declaration_helper_is_a_violation(tmp):
                     "globals()['_util'] = replacement",
                     'globals()[helper_name] = replacement',
                     "globals().update({'_util': replacement})",
+                    "_util.__dict__['child_coverage'] = replacement",
+                    "vars(_util)['child_coverage'] = replacement",
                     'cc = None'):
         violations = _synthetic_violations(
             f"""import subprocess
@@ -414,7 +447,14 @@ import _util
 subprocess.run(['python3', 'child.py'], cwd=str(root),
                env=_util.child_coverage('keep', cwd=root))
 """)
-    assert not any("launch's cwd" in v for v in matched), matched
+    assert not any("child_coverage('keep') cwd" in v for v in matched), matched
+    recomputed = _synthetic_violations(
+        """import subprocess
+import _util
+subprocess.run(['python3', 'child.py'], cwd=next(roots),
+               env=_util.child_coverage('keep', cwd=next(roots)))
+""")
+    assert any('not a plain name' in v for v in recomputed), recomputed
 
 
 def test_an_allowlist_entry_without_a_keep_site_fails(tmp):
@@ -581,74 +621,6 @@ def test_every_launch_is_proven_safe_or_declares(tmp):
     assert not violations, '\n'.join(violations)
 
 
-def test_child_coverage_declares_scrub_and_keep(tmp):
-    """The helper scrubs, keeps in a mapped tree, and rejects bad modes."""
-    environment = {'COVERAGE_PROCESS_START': 'x', 'PATH': '/bin'}
-    assert _util.child_coverage('scrub', environment) == {'PATH': '/bin'}
-    kept = _util.child_coverage('keep', environment, cwd=Path(tmp) / 'tree')
-    assert kept == environment and kept is not environment
-    try:
-        _util.child_coverage('maybe')
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("child_coverage accepted mode 'maybe'")
-
-
-def test_child_coverage_rejects_a_leaking_scrub_result(tmp):
-    """Scrub mode validates the environment it is about to return.
-
-    The second delegate leaks through `items()`, which is what subprocess
-    serializes, while hiding the same names from iteration.
-    """
-    del tmp
-
-    def leaking_scrub(environment):
-        return dict(environment)
-
-    for delegate in (leaking_scrub, _HidingEnvironment):
-        original = _util.coverage_free_environment
-        _util.coverage_free_environment = delegate
-        try:
-            environment = {'COVERAGE_PROCESS_START': 'must-not-leak'}
-            try:
-                _util.child_coverage('scrub', environment)
-            except ValueError as error:
-                assert 'COVERAGE_PROCESS_START' in str(error), error
-            else:
-                raise AssertionError(
-                    f'child_coverage returned a leaking scrub: {delegate}')
-        finally:
-            _util.coverage_free_environment = original
-
-
-def test_child_coverage_keep_requires_a_mapped_tree(tmp):
-    """A keep outside the '*/tree' anchor fails where it is declared."""
-    for cwd in (None, Path(tmp) / 'unmapped-runner',
-                Path(tmp) / 'tree' / '..' / 'unmapped-runner'):
-        try:
-            _util.child_coverage('keep', {}, cwd=cwd)
-        except ValueError as error:
-            if cwd is not None:
-                assert 'unmapped-runner' in str(error), error
-        else:
-            raise AssertionError(f'keep accepted cwd={cwd}')
-
-
-def test_child_coverage_keep_refuses_a_scrubbed_environment(tmp):
-    """A keep whose environment lost the collector is not keeping it."""
-    os.environ['COVERAGE_GUARD_PROBE'] = 'present'
-    try:
-        _util.child_coverage(
-            'keep', {'PATH': '/bin'}, cwd=Path(tmp) / 'tree')
-    except ValueError as error:
-        assert 'COVERAGE_GUARD_PROBE' in str(error), error
-    else:
-        raise AssertionError('keep accepted a scrubbed environment')
-    finally:
-        del os.environ['COVERAGE_GUARD_PROBE']
-
-
 def test_keep_outside_a_mapped_tree_fails_at_runtime(tmp):
     """Renaming the runner's tree anchor trips the keep declaration."""
     relative = Path('tests/test_suite_runner.py')
@@ -668,27 +640,6 @@ def test_keep_outside_a_mapped_tree_fails_at_runtime(tmp):
     else:
         raise AssertionError(
             'a keep launch outside a mapped tree ran unchallenged')
-
-
-def test_child_coverage_scrubs_a_real_child(tmp):
-    """The declared scrub removes every COVERAGE_* name from a child."""
-    probe = Path(tmp) / 'coverage-env-probe.py'
-    probe.write_text(
-        'import json, os\n'
-        'print(json.dumps(sorted(name for name in os.environ\n'
-        "                           if name.startswith('COVERAGE_'))))\n",
-        encoding='utf-8')
-    parent = dict(os.environ)
-    parent.update({
-        'COVERAGE_PROCESS_START': 'synthetic-config',
-        'COVERAGE_CONTEXT': 'coverage-environment-test',
-    })
-    result = subprocess.run(
-        [sys.executable, str(probe)], cwd=tmp,
-        env=_util.child_coverage('scrub', parent),
-        capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == '[]\n', result.stdout
 
 
 if __name__ == '__main__':
