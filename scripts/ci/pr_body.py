@@ -254,8 +254,20 @@ def layout_errors(body, template):
 
 
 def main():
-    for number in referenced_issues(sys.stdin.read()):
-        print(number)
+    body = sys.stdin.read()
+    if len(sys.argv) == 1:
+        for number in referenced_issues(body):
+            print(number)
+        return 0
+    if len(sys.argv) != 2:
+        print(f'usage: {sys.argv[0]} [template]', file=sys.stderr)
+        return 2
+    with open(sys.argv[1], encoding='utf-8') as handle:
+        template = handle.read()
+    for number in referenced_issues(body):
+        print(f'issue:{number}')
+    for error in layout_errors(body, template):
+        print(f'layout:{error}')
     return 0
 
 

@@ -20,27 +20,12 @@ PR_BODY = _util.load(ROOT / 'scripts' / 'ci' / 'pr_body.py')
 SECTION = '## Related Issues and Pull Requests\n'
 TEMPLATE = (ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md').read_text(
     encoding='utf-8')
-_COMMENT_TAIL = (
-    ' — closing this automatically, and it is recoverable: read on.\n\n'
-    """A pull request here has to name the issue it resolves, in its
-**Related Issues and Pull Requests** section, and that issue has to be
-assigned to you before you start. This one does not, so nothing tells other
-contributors that the work is taken.
-
-Two steps, in this order:
-
-1. Comment `/claim` on the issue you are fixing. That assigns it to you, no
-   write access needed — see CONTRIBUTING.md.
-2. Edit this pull request's body so its **Related Issues and Pull Requests**
-   section names that issue: `Fixes #<issue>`, with the real number.
-
-Then reopen this same pull request. A closed pull request still accepts edits
-and comments, so there is no need to open a second one and nothing here is
-lost.
-""")
+BOT = 'github-actions[bot]'
+CLOSE_MARKER = '<!-- pr-gate: close -->'
+MARKER_COMMENT = [{'id': 7, 'user': {'login': BOT}, 'body': CLOSE_MARKER}]
 
 _GH_STUB = r"""#!/usr/bin/env python3
-import json, os, pathlib, sys
+import json, os, pathlib, re, sys
 fixtures = json.loads(pathlib.Path(os.environ['STUB_ISSUES']).read_text())
 calls = pathlib.Path(os.environ['STUB_CALLS'])
 argv = sys.argv[1:]
@@ -54,6 +39,35 @@ for arg in argv:
 with calls.open('a', encoding='utf-8') as handle:
     handle.write(json.dumps(recorded) + chr(10))
 endpoint = next((arg for arg in argv if arg.startswith('repos/')), '')
+if '/timeline?' in endpoint:
+    status = fixtures.get('_timeline_status', 200)
+    if status != 200:
+        print(f'gh: HTTP {status}', file=sys.stderr)
+        raise SystemExit(1)
+    query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
+    for event in fixtures.get('_timeline', []):
+        if 'event == "closed"' in query and event.get('event') != 'closed':
+            continue
+        login = event.get('actor', {}).get('login')
+        if login is None and '// "__unreadable__"' in query:
+            login = '__unreadable__'
+        print(login or '')
+    raise SystemExit(0)
+if '/comments?' in endpoint:
+    status = fixtures.get('_comments_status', 200)
+    if status != 200:
+        print(f'gh: HTTP {status}', file=sys.stderr)
+        raise SystemExit(1)
+    query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
+    user = re.search(r'\.user\.login *== *"([^"]+)"', query)
+    marker = re.search(r'contains\("([^"]+)"\)', query)
+    for comment in fixtures.get('_comments', []):
+        if user and comment['user']['login'] != user.group(1):
+            continue
+        if marker and marker.group(1) not in comment['body']:
+            continue
+        print(comment['id'])
+    raise SystemExit(0)
 parts = endpoint.split('/')
 if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
     issue = fixtures.get(parts[-1])
@@ -128,7 +142,9 @@ def _issue(*assignees, pull_request=False):
 
 def _run_workflow(
         tmp, body, issues, actor='alice', pr='99', repo='owner/repo',
-        parser_crlf=False, comment_status=None):
+        parser_crlf=False, comment_status=None, state='open', merged='false',
+        timeline=(), comments=(), timeline_status=None,
+        comments_status=None):
     """Execute the real workflow shell against the controlled gh boundary."""
     bash = shutil.which('bash')
     assert bash, 'bash is required to execute the pull-request body gate'
@@ -142,7 +158,14 @@ def _run_workflow(
         python_stub.write_text(_CRLF_PYTHON_STUB, encoding='utf-8')
         python_stub.chmod(0o755)
     fixture_path = workdir / 'issues.json'
-    fixture_path.write_text(json.dumps(issues), encoding='utf-8')
+    fixtures = dict(issues)
+    fixtures['_timeline'] = list(timeline)
+    fixtures['_comments'] = list(comments)
+    if timeline_status is not None:
+        fixtures['_timeline_status'] = timeline_status
+    if comments_status is not None:
+        fixtures['_comments_status'] = comments_status
+    fixture_path.write_text(json.dumps(fixtures), encoding='utf-8')
     calls_path = workdir / 'calls.jsonl'
     calls_path.write_text('', encoding='utf-8')
     env = {
@@ -156,6 +179,8 @@ def _run_workflow(
         'PR': pr,
         'ACTOR': actor,
         'BODY': body,
+        'STATE': state,
+        'MERGED': merged,
     }
     if comment_status is not None:
         env['STUB_COMMENT_STATUS'] = str(comment_status)
@@ -167,8 +192,18 @@ def _run_workflow(
     return calls, result
 
 
+def _body_from(call):
+    return next(arg[5:] for arg in call if arg.startswith('body='))
+
+
+def _assert_no_mutation(calls):
+    arguments = [arg for call in calls for arg in call]
+    assert not any(arg.startswith(('body=', 'state='))
+                   for arg in arguments), calls
+
+
 def _assert_commented_then_closed(
-        calls, actor='alice', pr='99', repo='owner/repo'):
+        calls, *reasons, actor='alice', pr='99', repo='owner/repo'):
     comment_endpoint = f'repos/{repo}/issues/{pr}/comments'
     close_endpoint = f'repos/{repo}/pulls/{pr}'
     comment_calls = [call for call in calls if comment_endpoint in call]
@@ -178,16 +213,35 @@ def _assert_commented_then_closed(
     comment = comment_calls[0]
     close = close_calls[0]
     assert calls.index(comment) < calls.index(close), calls
-    body = next(arg[5:] for arg in comment if arg.startswith('body='))
-    assert body == f'@{actor}{_COMMENT_TAIL}', body
+    body = _body_from(comment)
+    assert body.startswith(f'@{actor} — closing this automatically'), body
+    assert CLOSE_MARKER in body, body
     assert '-F' in comment, comment
     assert re.search(r'#[0-9]', body) is None, body
-    assert 'has to name the issue it resolves' in body, body
-    assert 'section names that issue: `Fixes #<issue>`' in body, body
+    for reason in reasons:
+        assert reason in body, body
+    assert '**Related Issues and Pull Requests**' in body, body
+    assert 'match the pull request template' in body, body
+    assert '`Fixes #<issue>`' in body, body
     assert '/claim' in body, body
-    assert 'Then reopen this same pull request.' in body, body
+    assert 'reopen it automatically' in body, body
+    assert 'Then reopen this same pull request.' not in body, body
     assert '-X' in close and close[close.index('-X') + 1] == 'PATCH', close
     assert 'state=closed' in close, close
+
+
+def _assert_commented_then_reopened(
+        calls, actor='alice', pr='99', repo='owner/repo'):
+    comment = next(call for call in calls
+                   if f'repos/{repo}/issues/{pr}/comments' in call)
+    reopen = next(call for call in calls
+                  if f'repos/{repo}/pulls/{pr}' in call)
+    assert calls.index(comment) < calls.index(reopen), calls
+    body = _body_from(comment)
+    assert body.startswith(f'@{actor} —'), body
+    assert 'reopening it automatically' in body, body
+    assert '-X' in reopen and reopen[reopen.index('-X') + 1] == 'PATCH'
+    assert 'state=open' in reopen, reopen
 
 
 def test_parser_accepts_a_reference_in_the_real_template(tmp):
@@ -340,6 +394,17 @@ def test_cli_prints_one_issue_number_per_line(tmp):
         capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout == '81\n82\n', repr(result.stdout)
+    body = _layout_body(
+        ('Summary', 'A summary.'),
+        ('Related Issues and Pull Requests', 'Fixes #81'),
+        ('Changes', '- A change'),
+        ('Testing', 'Ran tests.'))
+    result = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py'),
+         str(ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md')],
+        input=body, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == 'issue:81\n', repr(result.stdout)
 
 
 def _layout_body(*sections):
@@ -409,9 +474,7 @@ def test_workflow_keeps_its_body_gate_shape(tmp):
     assert ('pull_request_target:  '
             '# zizmor: ignore[dangerous-triggers]') in workflow
     condition = job_scalar(workflow, 'gate', 'if')
-    assert "github.event.pull_request.state == 'open'" in condition
-    assert "github.event.pull_request.user.type != 'Bot'" in condition
-    assert 'draft' not in condition.casefold(), condition
+    assert condition == "github.event.pull_request.user.type != 'Bot'"
     steps = step_mappings(workflow, 'gate')
     checkout = [step for step in steps
                 if str(step.get('uses', '')).startswith('actions/checkout@')]
@@ -421,6 +484,11 @@ def test_workflow_keeps_its_body_gate_shape(tmp):
     assert checkout[0].get('with') == {'persist-credentials': 'false'}
     assert '${{' not in _workflow_script(), (
         'an expression is interpolated into contributor-controlled shell')
+    script = _workflow_script()
+    assert '$(cat <<' not in script, script
+    assert '-F "body=@$comment_file"' in script
+    assert 'leave the pull request open rather than close it silently' \
+        in script.replace('\n# ', ' ')
 
 
 def test_pull_request_gate_uses_general_names(tmp):
@@ -438,21 +506,6 @@ def test_pull_request_gate_uses_general_names(tmp):
     assert all(path.is_file() for path in expected), expected
     assert not any(path.exists() for path in retired), retired
     assert _workflow().splitlines()[0] == 'name: pr gate'
-
-
-def test_workflow_uses_a_portable_comment_file(tmp):
-    del tmp
-    script = _workflow_script()
-    assert '$(cat <<' not in script, script
-    assert "cat <<'COMMENT' >> \"$comment_file\"" in script, script
-    assert '-F "body=@$comment_file"' in script, script
-
-
-def test_workflow_documents_comment_before_close_fail_safe(tmp):
-    del tmp
-    script = _workflow_script()
-    assert ('leave the pull request open rather than close it silently'
-            in script.replace('\n# ', ' '))
 
 
 def test_gh_stub_models_include_response_headers(tmp):
@@ -482,146 +535,157 @@ def test_gh_stub_models_include_response_headers(tmp):
     ], result.stdout
 
 
-def test_workflow_passes_for_an_issue_assigned_to_the_author(tmp):
+def _valid_body(references='Fixes #101'):
+    return _layout_body(
+        ('Summary', 'One sentence.'),
+        ('Related Issues and Pull Requests', references),
+        ('Changes', '- One change'),
+        ('Testing', 'Ran the suite.'))
+
+
+def _closed_by(login):
+    return [{'event': 'closed', 'actor': {'login': login}}]
+
+
+def test_open_admissible_body_is_left_untouched(tmp):
     calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #101\n', {'101': _issue('alice')})
+        tmp, _valid_body('Refs #101 and #102'),
+        {'101': _issue('bob'), '102': _issue('carol')},
+        actor='carol', repo='acme/widget', parser_crlf=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert len(calls) == 1, calls
-    assert 'repos/owner/repo/issues/101' in calls[0], calls
-    query = calls[0][calls[0].index('--jq') + 1]
-    assert 'assignee:' in query, query
-    assert 'issue 101' in result.stdout, result.stdout
+    assert 'repos/acme/widget/issues/101' in calls[0], calls
+    assert 'repos/acme/widget/issues/102' in calls[1], calls
+    _assert_no_mutation(calls)
 
 
-def test_workflow_closes_when_the_issue_belongs_to_someone_else(tmp):
+def test_open_body_reports_both_failed_conditions_once(tmp):
+    body = _layout_body(
+        ('Summary', ''),
+        ('Related Issues and Pull Requests', 'Fixes #103'),
+        ('Changes', '- One change'), ('Testing', 'Ran tests.'))
+    calls, result = _run_workflow(tmp, body, {'103': _issue('alicebob')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(
+        calls, 'No checked issue is assigned to you.',
+        'Section "Summary" is empty.')
+
+
+def test_open_body_reports_each_single_failed_condition(tmp):
+    unclaimed, first = _run_workflow(
+        Path(tmp) / 'claim', _valid_body(), {'101': _issue()})
+    malformed, second = _run_workflow(
+        Path(tmp) / 'layout', _valid_body().replace('## Summary', '## Notes'),
+        {'101': _issue('alice')})
+    assert first.returncode == second.returncode == 0
+    _assert_commented_then_closed(
+        unclaimed, 'No checked issue is assigned to you.')
+    _assert_commented_then_closed(
+        malformed, 'Section "Notes" is not defined by the template.')
+
+
+def test_closed_owned_admissible_body_is_reopened(tmp):
     calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #102\n', {'102': _issue('bob')})
+        tmp, _valid_body(), {'101': _issue('alice')}, state='closed',
+        timeline=_closed_by(BOT), comments=MARKER_COMMENT)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(calls)
+    _assert_commented_then_reopened(calls)
 
 
-def test_workflow_requires_an_exact_assignee_login(tmp):
+def test_closed_by_someone_else_is_never_changed(tmp):
+    cases = [('valid', _valid_body(), _closed_by('maintainer')),
+             ('invalid', 'bad body', _closed_by('maintainer')),
+             ('unknown', _valid_body(),
+              _closed_by(BOT) + [{'event': 'closed', 'actor': {}}])]
+    for name, body, timeline in cases:
+        calls, result = _run_workflow(
+            Path(tmp) / name, body, {'101': _issue('alice')}, state='closed',
+            timeline=timeline, comments=MARKER_COMMENT)
+        assert result.returncode == 0, (name, result.stderr)
+        _assert_no_mutation(calls)
+
+
+def test_closed_owned_without_marker_is_not_changed(tmp):
+    spoof = [{'id': 8, 'user': {'login': 'alice'}, 'body': CLOSE_MARKER}]
+    for name, comments in [('absent', ()), ('spoofed', spoof)]:
+        calls, result = _run_workflow(
+            Path(tmp) / name, _valid_body(), {'101': _issue('alice')},
+            state='closed', timeline=_closed_by(BOT), comments=comments)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        _assert_no_mutation(calls)
+
+
+def test_closed_owned_inadmissible_body_stays_closed(tmp):
     calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #108\n', {'108': _issue('alicebob')})
+        tmp, 'bad body', {}, state='closed', timeline=_closed_by(BOT),
+        comments=MARKER_COMMENT)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(calls)
+    _assert_no_mutation(calls)
 
 
-def test_workflow_closes_when_the_issue_is_unassigned(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #103\n', {'103': _issue()})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(calls)
+def test_merged_pull_request_is_never_touched(tmp):
+    for name, body in [('valid', _valid_body()), ('invalid', 'bad body')]:
+        calls, result = _run_workflow(
+            Path(tmp) / name, body, {'101': _issue('alice')},
+            state='closed', merged='true', timeline=_closed_by(BOT),
+            comments=MARKER_COMMENT)
+        assert result.returncode == 0, (name, result.stderr)
+        assert calls == [], calls
 
 
-def test_workflow_closes_when_the_body_references_nothing(tmp):
-    calls, result = _run_workflow(tmp, '## Summary\nNo issue here.\n', {})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(calls)
+def test_unreadable_ownership_evidence_never_reopens(tmp):
+    first, one = _run_workflow(
+        Path(tmp) / 'timeline', _valid_body(), {}, state='closed',
+        timeline_status=502)
+    second, two = _run_workflow(
+        Path(tmp) / 'marker', _valid_body(), {}, state='closed',
+        timeline=_closed_by(BOT), comments_status=502)
+    assert one.returncode == two.returncode == 0
+    _assert_no_mutation(first)
+    _assert_no_mutation(second)
 
 
-def test_workflow_does_not_accept_a_pull_request_number(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #104\n',
-        {'104': _issue('alice', pull_request=True)})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(calls)
-
-
-def test_workflow_skips_a_missing_issue_without_failing(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #105\n', {})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert any('repos/owner/repo/issues/105' in call for call in calls), calls
-    _assert_commented_then_closed(calls)
-
-
-def test_workflow_skips_a_missing_nonfirst_issue(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Refs #109 and #110\n',
-        {'109': _issue('bob')})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert 'repos/owner/repo/issues/109' in calls[0], calls
-    assert 'repos/owner/repo/issues/110' in calls[1], calls
-    _assert_commented_then_closed(calls)
-
-
-def test_workflow_tolerates_two_missing_issues(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Refs #120 and #121\n', {})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert 'repos/owner/repo/issues/120' in calls[0], calls
-    assert 'repos/owner/repo/issues/121' in calls[1], calls
-    _assert_commented_then_closed(calls)
-
-
-def test_workflow_continues_after_a_missing_first_issue(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Refs #111 and #112\n',
-        {'112': _issue('alice')})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert len(calls) == 2, calls
-    assert 'repos/owner/repo/issues/111' in calls[0], calls
-    assert 'repos/owner/repo/issues/112' in calls[1], calls
-    assert 'issue 112' in result.stdout, result.stdout
-
-
-def test_workflow_fails_without_closing_on_a_non_404_lookup_error(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #113\n',
-        {'113': {'_http_status': 502}})
-    assert result.returncode != 0, (result.stdout, result.stderr)
-    assert len(calls) == 1, calls
-    assert 'repos/owner/repo/issues/113' in calls[0], calls
-    assert 'HTTP 502' in result.stderr, result.stderr
-
-
-def test_workflow_passes_when_only_the_second_issue_matches(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Refs #106 and #107\n',
-        {'106': _issue('bob'), '107': _issue('alice')},
-        parser_crlf=True)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert len(calls) == 2, calls
-    assert 'repos/owner/repo/issues/106' in calls[0], calls
-    assert 'repos/owner/repo/issues/107' in calls[1], calls
-    assert 'issue 107' in result.stdout, result.stdout
-
-
-def test_workflow_uses_the_event_author_login(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #114\n', {'114': _issue('carol')},
-        actor='carol')
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert len(calls) == 1, calls
-    assert 'issue 114' in result.stdout, result.stdout
-
-
-def test_workflow_uses_the_event_repository(tmp):
-    calls, result = _run_workflow(
-        tmp, SECTION + 'Fixes #115\n', {'115': _issue('alice')},
-        repo='acme/widget')
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert len(calls) == 1, calls
-    assert 'repos/acme/widget/issues/115' in calls[0], calls
-
-
-def test_workflow_closes_without_lookup_when_reference_limit_is_exceeded(tmp):
+def test_reference_limit_checks_twenty_and_tells_the_truth(tmp):
     references = ' '.join(f'#{number}' for number in range(130, 151))
-    calls, result = _run_workflow(
-        tmp, SECTION + references + '\n', {'130': _issue('alice')})
+    issues = {str(number): _issue('alice' if number == 130 else 'bob')
+              for number in range(130, 150)}
+    calls, result = _run_workflow(tmp, _valid_body(references), issues)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert not [call for call in calls if '--include' in call], calls
-    _assert_commented_then_closed(calls)
+    lookups = [call for call in calls if '--include' in call]
+    assert len(lookups) == 20, lookups
+    reason = ('This body names more than 20 issue references, so only the '
+              'first 20 were checked.')
+    _assert_commented_then_closed(calls, reason)
+    assert 'No checked issue is assigned to you.' not in _body_from(calls[-2])
 
 
-def test_workflow_does_not_close_when_the_comment_fails(tmp):
+def test_lookup_failures_keep_the_safe_direction(tmp):
+    missing, one = _run_workflow(
+        Path(tmp) / 'missing', _valid_body('Refs #120 and #121'), {})
+    failed, two = _run_workflow(
+        Path(tmp) / 'failed', _valid_body('Fixes #122'),
+        {'122': {'_http_status': 502}})
+    assert one.returncode == 0
+    assert len([call for call in missing if '--include' in call]) == 2
+    _assert_commented_then_closed(
+        missing, 'No checked issue is assigned to you.')
+    assert two.returncode != 0, (two.stdout, two.stderr)
+    _assert_no_mutation(failed)
+
+
+def test_pull_request_reference_does_not_satisfy_claim(tmp):
     calls, result = _run_workflow(
-        tmp, '## Summary\nNo issue here.\n', {}, comment_status=502)
+        tmp, _valid_body(), {'101': _issue('alice', pull_request=True)})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(
+        calls, 'No checked issue is assigned to you.')
+
+
+def test_failed_explanation_prevents_silent_state_change(tmp):
+    calls, result = _run_workflow(
+        tmp, _valid_body(), {'101': _issue()}, comment_status=502)
     assert result.returncode != 0, (result.stdout, result.stderr)
-    assert len(calls) == 1, calls
-    assert 'repos/owner/repo/issues/99/comments' in calls[0], calls
-    assert not any('repos/owner/repo/pulls/99' in call for call in calls)
+    assert not any(any(arg.startswith('state=') for arg in call)
+                   for call in calls), calls
 
 
 def main():
