@@ -50,7 +50,11 @@ class CarrierJSONObject(dict):
     default: `dict` defines its own `__ne__`, so simply overriding `__eq__`
     here does not make `!=` consistent with it — without this, `!=` would
     silently fall back to plain dict inequality and miss the very duplicate
-    key `==` exists to catch.
+    key `==` exists to catch. `__eq__` can itself return `NotImplemented`
+    (comparison against a non-dict falls through to `dict.__eq__`, which
+    returns it rather than `False`), and `NotImplemented` is truthy, so
+    `__ne__` has to check for it explicitly rather than just negate --
+    negating it directly would silently turn every such comparison false.
     """
 
     def __init__(self, pairs):
@@ -63,7 +67,10 @@ class CarrierJSONObject(dict):
         return super().__eq__(other)
 
     def __ne__(self, other):
-        return not self.__eq__(other)
+        equal = self.__eq__(other)
+        if equal is NotImplemented:
+            return equal
+        return not equal
 
 
 def job_carrier_names(request_body):
