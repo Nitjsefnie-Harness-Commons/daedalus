@@ -213,6 +213,7 @@
 !/tests/_cli_arg_audit_support.py
 !/tests/_cmdqueue.py
 !/tests/_coverage_comment_steps.py
+!/tests/_coverage_guard.py
 !/tests/_dashnode.py
 !/tests/_evalpages.py
 !/tests/_ghexpr.py
