@@ -19,6 +19,11 @@ from _coverage_guard import (  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
+def _module_text(target):
+    """A test module's source with checkout line endings normalised."""
+    return target.read_bytes().decode('utf-8').replace('\r\n', '\n')
+
+
 def test_a_launch_with_a_provable_cwd_is_safe(tmp):
     """Root spellings and an inherited root cwd need no declaration."""
     del tmp
@@ -40,23 +45,20 @@ subprocess.run(['python3', 'j.py'])
 """) == []
 
 
-def test_a_literal_non_python_launch_is_safe(tmp):
-    """A string-literal node/git/shell first element runs no Python."""
+def test_a_literal_interpreter_launch_needs_a_declaration(tmp):
+    """node/git/shell literals run whatever they are handed: declare."""
     del tmp
-    assert _synthetic_violations(
+    violations = _synthetic_violations(
         """import subprocess
 subprocess.run(['node', 'child.js'], cwd=tmp)
 subprocess.run(['git', 'status'], cwd=tmp)
-subprocess.run(['bash', '-c', 'true'], cwd=tmp)
-subprocess.run(['sh', 'script.sh'], cwd=tmp)
-subprocess.run(['zsh', 'script.sh'], cwd=tmp)
-subprocess.run(['cmd', '/c', 'ver'], cwd=tmp)
-subprocess.run(['pwsh', 'script.ps1'], cwd=tmp)
-""") == []
+subprocess.run(['bash', '-c', 'exec "$@"', 'bash', 'child.py'], cwd=tmp)
+""")
+    assert len(violations) == 3, violations
 
 
-def test_a_non_literal_first_element_is_treated_as_python(tmp):
-    """A name, attribute or call first element is Python to the guard."""
+def test_no_first_element_exempts_a_launch(tmp):
+    """A name, attribute or call first element changes nothing."""
     del tmp
     for argv in ('node', "shutil.which('bash')"):
         violations = _synthetic_violations(
@@ -190,6 +192,41 @@ def test_an_allowlist_entry_without_a_keep_site_fails(tmp):
         _coverage_guard._KEEP_ALLOWLIST = original
     assert ('allowlisted keep site tests/synthetic.py::ghost has no launch'
             in violations), violations
+
+
+def test_shell_wrapped_python_in_a_temp_cwd_is_caught(tmp):
+    """A bash literal wrapping sys.executable runs Python: declare."""
+    del tmp
+    target = ROOT / 'tests' / 'test_diff_coverage.py'
+    original = target.read_bytes()
+    needle = (
+        "        done = subprocess.run(\n"
+        "            [sys.executable, str(_SCRIPT), '--coverage', "
+        "str(coverage_xml),\n"
+        "             '--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,\n"
+        "            capture_output=True, text=True, timeout=60)")
+    text = _module_text(target)
+    assert needle in text, 'the shell-wrap launch shape changed'
+    line = text[:text.index(needle)].count('\n') + 1
+    mutated = text.replace(
+        needle,
+        "        done = subprocess.run(\n"
+        "            ['bash', '-c', 'exec \"$@\"', 'bash', sys.executable,\n"
+        "             str(_SCRIPT), '--coverage', str(coverage_xml),\n"
+        "             '--diff', str(diff)], cwd=tmp,\n"
+        "            capture_output=True, text=True, timeout=60)", 1)
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations()
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
+    restored = _coverage_environment_violations()
+    assert not any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in restored), restored
 
 
 def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
