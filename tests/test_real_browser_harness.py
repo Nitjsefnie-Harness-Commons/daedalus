@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Browser-free controls for the real-browser fixture machinery."""
+import base64
 import contextlib
+import hashlib
 import shutil
+import socket
 import subprocess
 import sys
+import threading
+import time
 import types
 from pathlib import Path
 from unittest import mock
@@ -12,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _evalpages  # noqa: E402
 import _realbrowser  # noqa: E402
 import _util  # noqa: E402
+import test_real_browser_eval as _real_browser_eval  # noqa: E402
 
 
 class _ProcessDouble:
@@ -119,10 +125,10 @@ def _fixture_runtime(tmp, cdp_call, *, subprocess_run=None):
         yield process, launches
 
 
-def _enter_fixture(tmp):
+def _enter_fixture(tmp, page_url='http://127.0.0.1:2/plain.html'):
     return _realbrowser.real_extension_page(
         tmp, 'http://127.0.0.1:1', 'controltoken',
-        'http://127.0.0.1:2/plain.html')
+        page_url)
 
 
 def _successful_run_recorder(recorded):
@@ -227,6 +233,9 @@ global.clearTimeout = () => {};
 
 def test_cdp_response_timeout_has_distinct_assertion_subtype(tmp):
     del tmp
+    timeout_exit_code = getattr(
+        _realbrowser, 'CDP_TIMEOUT_EXIT_CODE', None)
+    assert timeout_exit_code is not None, 'timeout exit code is unnamed'
 
     def timed_out(args, *, cwd, capture_output, text, timeout):
         assert len(args) == 7, args
@@ -236,7 +245,8 @@ def test_cdp_response_timeout_has_distinct_assertion_subtype(tmp):
         assert text is True, text
         assert timeout == 15, timeout
         return types.SimpleNamespace(
-            returncode=1, stdout='', stderr='CDP response timed out\n')
+            returncode=timeout_exit_code, stdout='',
+            stderr='CDP response timed out\n')
 
     failure = None
     with mock.patch.object(_realbrowser.subprocess, 'run', timed_out):
@@ -250,6 +260,94 @@ def test_cdp_response_timeout_has_distinct_assertion_subtype(tmp):
     assert issubclass(timeout_type, AssertionError), timeout_type
     assert failure.__class__ is timeout_type, failure.__class__
     assert 'CDP response timed out' in str(failure), failure
+
+
+@contextlib.contextmanager
+def _silent_websocket_peer():
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(('127.0.0.1', 0))
+    listener.listen(1)
+    listener.settimeout(2)
+    port = listener.getsockname()[1]
+    errors = []
+
+    def serve():
+        try:
+            connection, _address = listener.accept()
+            with connection:
+                connection.settimeout(2)
+                request = b''
+                while b'\r\n\r\n' not in request:
+                    chunk = connection.recv(4096)
+                    if not chunk:
+                        raise AssertionError('WebSocket handshake ended early')
+                    request += chunk
+                headers = request.decode('ascii').split('\r\n')
+                key = next(
+                    line.split(':', 1)[1].strip() for line in headers
+                    if line.lower().startswith('sec-websocket-key:'))
+                digest = hashlib.sha1(
+                    (key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+                    .encode('ascii')).digest()
+                accepted = base64.b64encode(digest).decode('ascii')
+                response = (
+                    'HTTP/1.1 101 Switching Protocols\r\n'
+                    'Upgrade: websocket\r\n'
+                    'Connection: Upgrade\r\n'
+                    f'Sec-WebSocket-Accept: {accepted}\r\n\r\n')
+                connection.sendall(response.encode('ascii'))
+                time.sleep(0.2)
+        except Exception as why:  # noqa: BLE001
+            errors.append(why)
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    try:
+        yield f'ws://127.0.0.1:{port}'
+    finally:
+        listener.close()
+        thread.join(timeout=2)
+    assert not thread.is_alive(), 'silent WebSocket peer did not stop'
+    assert not errors, errors
+
+
+def test_real_cdp_harness_timeout_is_classified_by_exit_code(tmp):
+    del tmp
+    node = shutil.which('node')
+    assert node, 'Node is required to execute the CDP harness control'
+    timeout_type = getattr(_realbrowser, 'CDPTimeout', None)
+    assert timeout_type is not None, 'cdp_call has no timeout type'
+
+    failure = None
+    with mock.patch.object(_realbrowser, 'CDP_RESPONSE_DEADLINE_MS', 50), \
+            _silent_websocket_peer() as target:
+        try:
+            _realbrowser.cdp_call(node, target, 'Runtime.evaluate', {})
+        except AssertionError as why:
+            failure = why
+    assert failure.__class__ is timeout_type, failure
+
+
+def test_outer_subprocess_deadline_is_cdp_timeout(tmp):
+    del tmp
+
+    def outer_timeout(args, *, cwd, capture_output, text, timeout):
+        assert cwd == _realbrowser.ROOT, cwd
+        assert capture_output is True, capture_output
+        assert text is True, text
+        raise subprocess.TimeoutExpired(
+            args, timeout, output='', stderr='outer deadline')
+
+    failure = None
+    with mock.patch.object(_realbrowser.subprocess, 'run', outer_timeout):
+        try:
+            _realbrowser.cdp_call(
+                'node-for-control', 'ws://target', 'Runtime.evaluate', {})
+        except Exception as why:  # noqa: BLE001
+            failure = why
+    timeout_type = getattr(_realbrowser, 'CDPTimeout', None)
+    assert failure.__class__ is timeout_type, failure
 
 
 def test_cdp_non_timeout_failure_stays_plain_assertion(tmp):
@@ -276,35 +374,177 @@ def test_cdp_non_timeout_failure_stays_plain_assertion(tmp):
     assert 'CDP websocket failed' in str(failure), failure
 
 
-def test_first_navigation_cdp_timeout_skips_with_browser_version(tmp):
+def test_first_navigation_timeout_skips_when_exact_fixture_url_answers(tmp):
     timeout_type = getattr(_realbrowser, 'CDPTimeout', AssertionError)
+    environment_type = getattr(
+        _realbrowser, 'BrowserEnvironmentSkipped', ())
+    requested = []
+    original_get = _realbrowser._EvalPageHandler.do_GET
 
     def first_navigation(node, target, method, params):
         assert (node, target, method) == (
             'node-for-control', 'ws://page', 'Page.navigate')
-        assert params == {
-            'url': 'http://127.0.0.1:2/plain.html'}, params
+        assert params == {'url': page_url}, params
         raise timeout_type('CDP response timed out')
 
+    def record_get(handler):
+        requested.append(handler.path)
+        return original_get(handler)
+
     skipped = None
-    with _fixture_runtime(
-            tmp, first_navigation, subprocess_run=_browser_version) as (
-                process, launches):
-        try:
-            with _enter_fixture(tmp):
+    with mock.patch.object(
+            _realbrowser._EvalPageHandler, 'do_GET', record_get), \
+            _realbrowser.eval_page_server() as pages:
+        page_url = pages + '/never-ready.html'
+        with _fixture_runtime(
+                tmp, first_navigation, subprocess_run=_browser_version) as (
+                    process, launches):
+            try:
+                with _enter_fixture(tmp, page_url):
+                    raise AssertionError(
+                        'fixture yielded after navigation timeout')
+            except _util.Skipped as why:
+                skipped = why
+            except AssertionError as failure:
                 raise AssertionError(
-                    'fixture yielded after navigation timeout')
-        except _util.Skipped as why:
-            skipped = why
-        except AssertionError as failure:
-            raise AssertionError(
-                'first navigation timeout stayed a failure') from failure
+                    'an answered fixture URL stayed a failure') from failure
 
     assert len(launches) == 1, launches
     assert process.terminated is True
     assert skipped is not None, 'first navigation timeout did not skip'
+    assert isinstance(skipped, environment_type), skipped.__class__
+    assert requested == ['/never-ready.html'], requested
     assert '/controlled/chromium' in str(skipped), skipped
     assert 'Chromium 151.0.7922.169' in str(skipped), skipped
+
+
+def test_first_navigation_timeout_fails_when_exact_fixture_url_stalls(tmp):
+    timeout_type = getattr(_realbrowser, 'CDPTimeout', AssertionError)
+    original_get = _realbrowser._EvalPageHandler.do_GET
+    requested = []
+
+    def first_navigation(node, target, method, params):
+        assert (node, target, method) == (
+            'node-for-control', 'ws://page', 'Page.navigate')
+        assert params == {'url': page_url}, params
+        raise timeout_type('CDP response timed out')
+
+    def stall_performance_page(handler):
+        requested.append(handler.path)
+        if handler.path == '/performance-poison.html':
+            time.sleep(0.1)
+        else:
+            original_get(handler)
+
+    skipped = None
+    failure = None
+    with mock.patch.object(_realbrowser, 'CDP_RESPONSE_DEADLINE_MS', 50), \
+            mock.patch.object(
+                _realbrowser._EvalPageHandler, 'do_GET',
+                stall_performance_page), \
+            _realbrowser.eval_page_server() as pages:
+        page_url = pages + '/performance-poison.html'
+        with _fixture_runtime(
+                tmp, first_navigation, subprocess_run=_browser_version) as (
+                    process, launches):
+            try:
+                with _enter_fixture(tmp, page_url):
+                    raise AssertionError(
+                        'fixture yielded after navigation timeout')
+            except _util.Skipped as why:
+                skipped = why
+            except AssertionError as why:
+                failure = why
+
+    assert len(launches) == 1, launches
+    assert process.terminated is True
+    assert requested == ['/performance-poison.html'], requested
+    assert skipped is None, skipped
+    assert failure is not None, 'a stalled fixture URL did not fail'
+
+
+def test_fixture_probe_derives_bound_and_uses_exact_url(tmp):
+    del tmp
+    requested = []
+
+    def no_reply(url, *, timeout):
+        requested.append((url, timeout))
+        raise OSError('controlled fixture silence')
+
+    page_url = 'http://127.0.0.1:43210/exact-fixture.html'
+    with mock.patch.object(
+            _realbrowser, 'CDP_RESPONSE_DEADLINE_MS', 4321), \
+            mock.patch.object(
+                _realbrowser.urllib.request, 'urlopen', no_reply):
+        assert _realbrowser._fixture_url_answered(page_url) is False
+    assert requested == [(page_url, 4.321)], requested
+
+
+@contextlib.contextmanager
+def _controlled_bridge(*args, **kwargs):
+    del args, kwargs
+    yield 'http://127.0.0.1:1', Path('/controlled/docroot')
+
+
+@contextlib.contextmanager
+def _controlled_pages():
+    yield 'http://127.0.0.1:2'
+
+
+def _run_broken_worker_control(tmp, page_fixture):
+    with mock.patch.object(
+            _real_browser_eval, 'browser_requirements', lambda: None), \
+            mock.patch.object(
+                _real_browser_eval._util, 'bridge', _controlled_bridge), \
+            mock.patch.object(
+                _real_browser_eval, 'eval_page_server', _controlled_pages), \
+            mock.patch.object(
+                _real_browser_eval, 'real_extension_page', page_fixture):
+        return _real_browser_eval \
+            .test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp)
+
+
+class _RaisingContext:
+    def __init__(self, failure):
+        self.failure = failure
+
+    def __enter__(self):
+        raise self.failure
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        del exc_type, exc_value, traceback
+
+
+def test_broken_worker_wrapper_preserves_environment_skip(tmp):
+    environment_type = getattr(
+        _realbrowser, 'BrowserEnvironmentSkipped', None)
+    assert environment_type is not None, 'environment skip has no identity'
+
+    def environment_skip(*args, **kwargs):
+        del args, kwargs
+        return _RaisingContext(
+            environment_type('controlled browser environment timeout'))
+
+    survived = None
+    try:
+        _run_broken_worker_control(tmp, environment_skip)
+    except environment_type as skipped:
+        survived = skipped
+    assert survived is not None, 'the wrapper swallowed an environment skip'
+
+
+def test_broken_worker_wrapper_still_fails_for_broken_extension(tmp):
+    def broken_extension(*args, **kwargs):
+        del args, kwargs
+        return _RaisingContext(AssertionError(
+            'the extension service worker never finished loading'))
+
+    try:
+        _run_broken_worker_control(tmp, broken_extension)
+    except _util.Skipped as skipped:
+        raise AssertionError(
+            'the broken-worker wrapper excused a broken extension'
+        ) from skipped
 
 
 def test_first_navigation_non_timeout_failure_stays_failure(tmp):
