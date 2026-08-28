@@ -343,22 +343,38 @@ def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
     second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
                       encoding='utf-8')
     original = Path.read_text
-    armed = [True]
+    expected = [{'id': 'queued', 'type': 'reload'},
+                {'id': 'second', 'type': 'reload'}]
+    expected_read_counts = {
+        first: {first: 2, second: 1},
+        second: {first: 2, second: 2},
+    }
+    missing_file = [None]
+    armed = [False]
+    reads = []
 
     def missing(candidate, *args, **kwargs):
-        if candidate == first and armed[0]:
+        if candidate in (first, second):
+            reads.append(candidate)
+        if candidate == missing_file[0] and armed[0]:
             armed[0] = False
             raise FileNotFoundError(
-                2, 'injected transient read error', str(first))
+                2, 'injected transient read error', str(missing_file[0]))
         return original(candidate, *args, **kwargs)
 
-    Path.read_text = missing
-    try:
-        commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
-    finally:
-        Path.read_text = original
-    assert commands == [{'id': 'queued', 'type': 'reload'},
-                        {'id': 'second', 'type': 'reload'}], commands
+    for refused_file in (first, second):
+        missing_file[0] = refused_file
+        armed[0] = True
+        reads.clear()
+        Path.read_text = missing
+        try:
+            commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
+        finally:
+            Path.read_text = original
+        assert commands == expected, commands
+        read_counts = {queued: reads.count(queued)
+                       for queued in (first, second)}
+        assert read_counts == expected_read_counts[refused_file], reads
 
 
 def test_the_multi_command_wait_honors_a_count_other_than_two(tmp):
