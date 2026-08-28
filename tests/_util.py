@@ -64,7 +64,8 @@ def child_coverage(mode, environment=None, cwd=None):
         if cwd is None:
             raise ValueError(
                 "child_coverage('keep') requires the launch's cwd")
-        if 'tree' not in Path(cwd).parts:
+        path = Path(cwd)
+        if '..' in path.parts or 'tree' not in path.resolve().parts:
             raise ValueError(
                 "child_coverage('keep') outside a mapped '*/tree' tree: "
                 f'{cwd}')
