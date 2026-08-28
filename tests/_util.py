@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -31,6 +32,14 @@ COLD_START_TIMEOUT = 60
 WARM_START_TIMEOUT = 20
 DRAIN_JOIN_TIMEOUT = 1
 _bridge_started = False
+
+
+def workflow_bash():
+    """Resolve the Bash used by workflow-shell tests through PATH."""
+    bash = shutil.which('bash')
+    if not bash:
+        raise AssertionError('bash is required to execute the workflow shell')
+    return bash
 
 
 def coverage_free_environment(environment):
