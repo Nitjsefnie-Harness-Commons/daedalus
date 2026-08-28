@@ -459,6 +459,28 @@ def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
     assert desc in r.stderr, (desc, r.stderr)
 
 
+def test_check_versions_page_js_value_may_contain_a_different_quote_character(tmp):
+    """The value class only has to exclude whichever delimiter is actually
+    in play, not every delimiter this site recognizes. Review on #247
+    found that excluding all three regressed the single-quote case: `main`
+    lets a single-quoted value contain a double quote (and vice versa),
+    same as the package version site already does, and the widened
+    pattern must not narrow that."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, _pattern = checker.SITES[3]
+    assert path == 'extension/page.js', path
+    page_copy = copy_root / 'extension' / 'page.js'
+    text = page_copy.read_text(encoding='utf-8')
+    page_copy.write_text(
+        text + '\nconst _dup = { info: { script: { version: \'9.9.9"\' } } };\n',
+        encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    assert desc in r.stderr, (desc, r.stderr)
+
+
 def test_check_versions_page_js_keys_are_assumed_bare(tmp):
     """A deliberate limit, not an oversight: the page.js pattern matches the
     keys `script` and `version` bare, so a duplicate that also quotes those
