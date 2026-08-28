@@ -68,12 +68,15 @@ SITES = [
     # written with a different quote character is still valid JavaScript
     # and still wins, so the pattern has to see any of the three ways a
     # string can be spelled here to catch a duplicate written another way
-    # (#247, then a template literal reported in review). The two keys are
-    # assumed bare, matching this file's own style; a duplicate that also
-    # quotes them would need its own pattern, and none of page.js's own
-    # sites do that today.
+    # (#247, then a template literal reported in review). The value only
+    # excludes whichever delimiter `q` actually captured, not all three --
+    # excluding all three regressed the single-quote site, which used to
+    # allow a double quote inside a single-quoted value same as `main`
+    # does. The two keys are assumed bare, matching this file's own style;
+    # a duplicate that also quotes them would need its own pattern, and
+    # none of page.js's own sites do that today.
     ('extension/page.js', 'GM bridge info.script.version',
-     r'''script:\s*\{\s*version:\s*(?P<q>['"`])(?P<v>[^'"`]+)(?P=q)'''),
+     r'''script:\s*\{\s*version:\s*(?P<q>['"`])(?P<v>(?:(?!(?P=q))[^\n])+)(?P=q)'''),
     ('dashboard/index.html', 'dashboard rail footer',
      r'class="rail-foot">v(?P<v>[^ <]+)'),
     ('dashboard/index.html', 'dashboard status line',
