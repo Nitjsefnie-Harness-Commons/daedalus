@@ -35,7 +35,7 @@ _bridge_started = False
 
 
 def workflow_bash():
-    """Resolve the Bash used by workflow-shell tests through PATH."""
+    """Resolve Git-for-Windows Bash through PATH, not a bare WSL launcher."""
     bash = shutil.which('bash')
     if not bash:
         raise AssertionError('bash is required to execute the workflow shell')
