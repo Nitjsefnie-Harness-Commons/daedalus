@@ -141,7 +141,6 @@ function step(label) {
 }
 
 function bounded(work, label, timeoutMs) {
-  if (timeoutMs === null) return Promise.resolve(work);
   let timer;
   const guard = new Promise((_resolve, reject) => {
     timer = setTimeout(
@@ -153,9 +152,10 @@ function bounded(work, label, timeoutMs) {
 
 async function waitFor(predicate, label, timeoutMs = innerWaitMs) {
   step(label);
+  // null disables this deadline; the caller's backstop bounds the wait.
   if (timeoutMs === null) {
     for (;;) {
-      if (await bounded(predicate(), label, null)) return;
+      if (await predicate()) return;
       await delay(10);
     }
   }
@@ -241,11 +241,14 @@ def overlap_child_timeout(order, wait_between,
                           inner_wait=_OVERLAP_INNER_WAIT_S):
     """How long to let the overlap harness run before killing it.
 
-    Every wait inside the harness is bounded and names what it was waiting
-    for; this backstop preserves the child's pipes and last step, but it still
-    has to outlast the worst inner path — config load, handler startup, one
-    wait per result, one per requested gap, and dispatch settlement — so the
-    more specific inner failure gets to report first.
+    Every wait names what it was waiting for and has its own bound except the
+    result POST wait. That round-trip is incidental, so only this backstop
+    bounds it. The backstop preserves the child's pipes and last step, and it
+    still has to outlast the bounded stages — config load, handler startup,
+    each requested gap, and dispatch settlement — with one inner interval of
+    slack per result. Those inner failures report first. A genuinely stuck
+    result POST instead reaches the backstop, making its diagnosis take the
+    outer bound rather than an inner one.
     """
     waits = 3 + len(order) + (len(order) - 1 if wait_between else 0)
     return inner_wait * (waits + 1)
