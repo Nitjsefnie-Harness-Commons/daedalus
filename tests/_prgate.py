@@ -32,6 +32,34 @@ GITHUB_ISSUE_101 = (
     'issues/101/hovercard" href="https://github.com/'
     'Nitjsefnie-Harness-Commons/daedalus/issues/101">#101</a>')
 
+GITHUB_FOOTNOTE_MARKDOWN = (
+    '## Summary\nOne sentence.\n\n'
+    '## Related Issues and Pull Requests\nFixes #101\n\n'
+    '## Changes\nThe behavior is pinned.[^1]\n\n'
+    '[^1]: By a focused regression test.\n\n'
+    '## Testing\nRan the suite.')
+GITHUB_FOOTNOTE_HTML = (
+    '<h2 dir="auto">Summary</h2>\n'
+    '<p dir="auto">One sentence.</p>\n'
+    '<h2 dir="auto">Related Issues and Pull Requests</h2>\n'
+    f'<p dir="auto">Fixes {GITHUB_ISSUE_101}</p>\n'
+    '<h2 dir="auto">Changes</h2>\n'
+    '<p dir="auto">The behavior is pinned.<sup><a href="'
+    '#user-content-fn-1-994fe5c1980496529dc0a26cdffba501" id="'
+    'user-content-fnref-1-994fe5c1980496529dc0a26cdffba501" '
+    'data-footnote-ref="" aria-describedby="footnote-label">1</a>'
+    '</sup></p>\n<h2 dir="auto">Testing</h2>\n'
+    '<p dir="auto">Ran the suite.</p>\n'
+    '<section data-footnotes="" class="footnotes"><h2 '
+    'id="footnote-label" class="sr-only" dir="auto">Footnotes</h2>\n'
+    '<ol dir="auto">\n<li id="user-content-fn-1-'
+    '994fe5c1980496529dc0a26cdffba501">\n'
+    '<p dir="auto">By a focused regression test. <a href="'
+    '#user-content-fnref-1-994fe5c1980496529dc0a26cdffba501" '
+    'data-footnote-backref="" aria-label="Back to reference 1" '
+    'class="data-footnote-backref">↩</a></p>\n</li>\n</ol>\n'
+    '</section>')
+
 # These fragments are responses captured from GitHub's /markdown endpoint in
 # GFM mode with Nitjsefnie-Harness-Commons/daedalus as the context.
 GITHUB_HTML = {
@@ -67,6 +95,10 @@ GITHUB_HTML = {
         '<p dir="auto"><a target="_blank" rel="noopener noreferrer" '
         'href=""><img src="" alt="documentation" '
         'style="max-width: 100%;"></a></p>'),
+    'empty_image': (
+        '<p dir="auto"><a target="_blank" rel="noopener noreferrer" '
+        'href=""><img src="" alt="" '
+        'style="max-width: 100%;"></a></p>'),
     'kbd_block': '<kbd>\n## literal heading\n</kbd>',
     'empty_list': '<ul dir="auto">\n<li></li>\n</ul>',
     'empty_ordered': '<ol dir="auto">\n<li></li>\n</ol>',
@@ -91,6 +123,15 @@ GITHUB_HTML = {
         '&lt;!-- required: bullet list of concrete changes — files, '
         'modules, behavior. --&gt;\n</code></pre>\n<ul dir="auto">\n'
         '<li>A visible change</li>\n</ul>'),
+    'named_anchor': '<p dir="auto"><a name="user-content-spot"></a></p>',
+    'entity_instruction': (
+        '<ul dir="auto">\n'
+        '<li>The literal template marker is &lt;!-- optional --&gt;.</li>\n'
+        '<li>One change.</li>\n</ul>'),
+    'zero_size_image': (
+        '<p dir="auto"><a target="_blank" rel="noopener noreferrer" '
+        'href=""><img alt="" width="0" height="0" '
+        'style="max-width: 100%;"></a></p>'),
 }
 
 GITHUB_MARKDOWN = {
@@ -417,6 +458,30 @@ def _assert_commented_then_closed(
     assert _normalise_method(close) == [
         'PATCH', 'api', close_endpoint,
         '-f', 'state=closed', '--silent'], close
+
+
+def _assert_commented_not_closed(
+        calls, *reasons, actor='alice', pr='99', repo='owner/repo'):
+    comment_endpoint = f'repos/{repo}/issues/{pr}/comments'
+    close_endpoint = f'repos/{repo}/pulls/{pr}'
+    comment_calls = [call for call in calls if comment_endpoint in call]
+    assert len(comment_calls) == 1, calls
+    assert not any(close_endpoint in call for call in calls), calls
+    comment = comment_calls[0]
+    assert _write_calls(calls) == [comment], calls
+    body = _body_from(comment)
+    assert body.startswith(
+        f'@{actor} — this pull request needs changes, but it remains open.'
+    ), body
+    assert CLOSE_MARKER not in body, body
+    for reason in reasons:
+        assert reason in body, body
+    assert '/claim' in body, body
+    assert '**Related Issues and Pull Requests**' in body, body
+    assert 'match the pull request template' in body, body
+    assert 'reopen it automatically' not in body, body
+    assert comment == [
+        'api', comment_endpoint, '-F', f'body={body}', '--silent'], comment
 
 
 def _assert_commented_then_reopened(

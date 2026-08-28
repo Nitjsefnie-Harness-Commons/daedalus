@@ -2,6 +2,7 @@
 """Read GitHub-rendered pull-request HTML for repository admission checks."""
 import re
 import sys
+from html import unescape
 from html.parser import HTMLParser
 from typing import NamedTuple
 from unicodedata import category
@@ -14,6 +15,9 @@ _TEMPLATE_HEADING = re.compile(
     r'^##[ \t]+(?P<text>.+?)[ \t]*$', re.MULTILINE)
 _TEMPLATE_TAG = re.compile(
     r'<!--\s*(?P<tag>required|conditional|optional)\b')
+_SOURCE_HEADING = re.compile(
+    r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.*?)[ \t]*#*[ \t]*$',
+    re.MULTILINE)
 _HEADING_TAGS = frozenset(f'h{depth}' for depth in range(1, 7))
 _VOID_TAGS = frozenset((
     'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
@@ -21,6 +25,9 @@ _VOID_TAGS = frozenset((
 ))
 _MAX_ISSUE_DIGITS = 19
 _SECTION = 'related issues and pull requests'
+_INVISIBLE_CHARACTERS = frozenset((
+    '\u034f', '\u115f', '\u1160', '\u2800', '\u3164', '\uffa0',
+))
 
 
 class _Section(NamedTuple):
@@ -78,7 +85,7 @@ def _issue_number(href, repository):
 
 class _RenderedBodyParser(HTMLParser):
     def __init__(self, repository):
-        super().__init__(convert_charrefs=True)
+        super().__init__(convert_charrefs=False)
         _repository_parts(repository)
         self.repository = repository
         self.sections = []
@@ -91,12 +98,24 @@ class _RenderedBodyParser(HTMLParser):
         self._key = None
         self._text = []
         self._issues = []
+        self._footnote_depth = 0
 
     def handle_starttag(self, tag, attrs):
         self.saw_element = True
         tag = tag.casefold()
         if tag not in _VOID_TAGS:
             self._open_tags.append(tag)
+        if self._footnote_depth:
+            if tag not in _VOID_TAGS:
+                self._footnote_depth += 1
+            return
+        attributes = {
+            name.casefold(): value or '' for name, value in attrs}
+        # GitHub appends this generated heading after contributor sections.
+        if (tag == 'section' and 'data-footnotes' in attributes
+                and 'footnotes' in attributes.get('class', '').split()):
+            self._footnote_depth = 1
+            return
         if tag in _HEADING_TAGS:
             if self._heading_tag is not None:
                 raise ValueError(
@@ -106,10 +125,13 @@ class _RenderedBodyParser(HTMLParser):
             self._heading_parts = []
             return
         if tag == 'img':
-            alt = next((value for name, value in attrs
-                        if name.casefold() == 'alt'), None)
-            self._record_text(alt or '')
-            if self._heading_tag is None and self._key is not None:
+            alt = attributes.get('alt', '')
+            self._record_text(alt)
+            zero_size = any(
+                attributes.get(name, '').strip() == '0'
+                for name in ('width', 'height'))
+            if (self._heading_tag is None and self._key is not None
+                    and attributes.get('src') and not zero_size):
                 self._text.append('\ufffc')
             return
         if tag != 'a':
@@ -117,8 +139,7 @@ class _RenderedBodyParser(HTMLParser):
         destinations = [value for name, value in attrs
                         if name.casefold() == 'href']
         if not destinations:
-            raise ValueError(
-                'rendered HTML contains an anchor without a destination')
+            return
         if self._heading_tag is not None or self._key is None:
             return
         href = destinations[0]
@@ -139,6 +160,9 @@ class _RenderedBodyParser(HTMLParser):
             raise ValueError(
                 'rendered HTML contains mismatched element boundaries')
         self._open_tags.pop()
+        if self._footnote_depth:
+            self._footnote_depth -= 1
+            return
         if tag != self._heading_tag:
             return
         name = _heading_text(''.join(self._heading_parts))
@@ -152,8 +176,18 @@ class _RenderedBodyParser(HTMLParser):
     def handle_data(self, data):
         self._record_text(data)
 
-    def _record_text(self, data):
-        self.visible_text.append(data)
+    def handle_entityref(self, name):
+        source = f'&{name};'
+        self._record_text(unescape(source), source)
+
+    def handle_charref(self, name):
+        source = f'&#{name};'
+        self._record_text(unescape(source), source)
+
+    def _record_text(self, data, source=None):
+        if self._footnote_depth:
+            return
+        self.visible_text.append(data if source is None else source)
         if self._heading_tag is not None:
             self._heading_parts.append(data)
         elif self._key is not None:
@@ -234,6 +268,16 @@ def _retains_instruction_comment(source, rendered_text, template):
     return False
 
 
+def _source_has_missing_rendered_section(source, sections, template):
+    rules = _template_rules(template)
+    rendered = {section.key for section in sections}
+    for match in _SOURCE_HEADING.finditer(source):
+        key = _heading_text(match.group('text')).casefold()
+        if key in rules and key not in rendered:
+            return True
+    return False
+
+
 def _referenced_issues(sections):
     section = next(
         (item for item in sections if item.key == _SECTION), None)
@@ -280,13 +324,25 @@ def _layout_errors(sections, template):
             errors.append(f'Section "{rule.name}" is out of order.')
         else:
             last_index = rule.index
-        if not any(not char.isspace() and category(char) != 'Cf'
-                   for char in section.text):
+        if not _has_visible_text(section.text):
             errors.append(f'Section "{rule.name}" is empty.')
     for key, rule in rules.items():
         if rule.tag == 'required' and key not in seen:
             errors.append(f'Required section "{rule.name}" is missing.')
     return errors
+
+
+def _has_visible_text(text):
+    for char in text:
+        if char.isspace() or char in _INVISIBLE_CHARACTERS:
+            continue
+        if category(char) in ('Cc', 'Cf', 'Cs'):
+            continue
+        if ('\ufe00' <= char <= '\ufe0f'
+                or '\U000e0100' <= char <= '\U000e01ef'):
+            continue
+        return True
+    return False
 
 
 def layout_errors(rendered, template):
@@ -295,6 +351,9 @@ def layout_errors(rendered, template):
 
 def analyze(rendered, repository, template, source=None):
     document = _rendered_body(rendered, repository)
+    if (source is not None and _source_has_missing_rendered_section(
+            source, document.sections, template)):
+        raise ValueError('rendered HTML does not represent the source body')
     errors = _layout_errors(document.sections, template)
     if source is not None and _retains_instruction_comment(
             source, ''.join(document.visible_text), template):

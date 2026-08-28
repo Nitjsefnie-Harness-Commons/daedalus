@@ -15,7 +15,8 @@ Section order is fixed. No new sections. Delete these comments before posting.
 ## Related Issues and Pull Requests
 <!-- required: claim the issue with `/claim` before you start, then name it
      here, plus any related work. Closing keywords ONLY here. The named issue
-     must be assigned to the PR author or the PR is closed automatically.
+     must be assigned to the PR author. The gate explains every mismatch and
+     closes only a body containing no issue-number shape at all.
      GitHub auto-closes only on merge into the DEFAULT branch. -->
 
 Fixes #

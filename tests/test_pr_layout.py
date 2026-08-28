@@ -55,11 +55,26 @@ def test_layout_treats_an_image_as_section_content(tmp):
         assert PR_BODY.layout_errors(rendered, TEMPLATE) == [], image
 
 
-def test_layout_treats_zero_width_text_as_empty(tmp):
+def test_layout_treats_invisible_text_as_empty(tmp):
     del tmp
-    rendered = _valid_html(changes='<p dir="auto">\u200b</p>')
-    assert 'Section "Changes" is empty.' in PR_BODY.layout_errors(
-        rendered, TEMPLATE)
+    invisible = (
+        '\u200b', '\ufe0f', '\u034f', '\u115f', '\u1160', '\u3164',
+        '\uffa0', '\u2800')
+    for character in invisible:
+        rendered = _valid_html(
+            changes=f'<p dir="auto">{character}</p>')
+        assert 'Section "Changes" is empty.' in PR_BODY.layout_errors(
+            rendered, TEMPLATE), f'U+{ord(character):04X}'
+
+
+def test_layout_treats_empty_or_invisible_images_as_empty(tmp):
+    del tmp
+    for image in (
+            GITHUB_HTML['empty_image'],
+            GITHUB_HTML['zero_size_image']):
+        rendered = _valid_html(changes=image)
+        assert 'Section "Changes" is empty.' in PR_BODY.layout_errors(
+            rendered, TEMPLATE), image
 
 
 def test_layout_rejects_a_template_heading_without_a_rule(tmp):

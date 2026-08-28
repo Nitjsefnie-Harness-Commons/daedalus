@@ -9,8 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    GITHUB_HTML, GITHUB_ISSUE_101, PR_BODY, ROOT, _html_body,
-    _issue_html, _text_html,
+    GITHUB_HTML, GITHUB_ISSUE_101, PR_BODY, ROOT, TEMPLATE, _html_body,
+    _issue_html, _text_html, _valid_body,
 )
 
 
@@ -160,15 +160,24 @@ def test_parser_rejects_unusable_render_responses(tmp):
     assert accepted == [], accepted
 
 
-def test_parser_rejects_an_anchor_without_a_destination(tmp):
+def test_analyzer_rejects_a_render_missing_source_sections(tmp):
     del tmp
-    rendered = _related('<p>Fixes <a>#101</a></p>')
+    rendered = '<h2>Summary</h2><p>One sentence.</p>'
     try:
-        PR_BODY.referenced_issues(rendered, REPOSITORY)
+        PR_BODY.analyze(
+            rendered, REPOSITORY, TEMPLATE, _valid_body())
     except ValueError as error:
-        assert 'anchor' in str(error), error
+        assert 'does not represent' in str(error), error
     else:
-        raise AssertionError('an anchor without a destination was accepted')
+        raise AssertionError('a balanced render prefix was accepted')
+
+
+def test_parser_ignores_a_named_anchor_without_a_destination(tmp):
+    del tmp
+    rendered = _related(
+        GITHUB_HTML['named_anchor']
+        + f'<p>Fixes {_issue_html(101, REPOSITORY)}</p>')
+    assert PR_BODY.referenced_issues(rendered, REPOSITORY) == [101]
 
 
 def test_parser_rejects_a_self_closing_content_element(tmp):

@@ -98,6 +98,16 @@ jobs:
           trap 'rm -f "$body_file" "$rendered_file" "$analysis_file" \
             "$reasons_file" "$comment_file"' EXIT
           printf '%s' "$BODY" > "$body_file"
+          source_has_reference=0
+          if grep -Eq '#[0-9]+' "$body_file"; then
+            source_has_reference=1
+          else
+            grep_status="$?"
+            if [ "$grep_status" -ne 1 ]; then
+              echo 'could not inspect the pull request body' >&2
+              exit 1
+            fi
+          fi
           numbers=''
           if ! gh api markdown -F "text=@$body_file" \
             -f mode=gfm -f "context=$REPO" > "$rendered_file"
@@ -179,12 +189,20 @@ jobs:
           fi
 
           printf '@%s' "$ACTOR" > "$comment_file"
-          cat <<'COMMENT' >> "$comment_file"
+          if [ "$source_has_reference" -eq 1 ]; then
+            cat <<'COMMENT' >> "$comment_file"
+           — this pull request needs changes, but it remains open.
+
+          This pull request is not admissible yet:
+          COMMENT
+          else
+            cat <<'COMMENT' >> "$comment_file"
            — closing this automatically, and it is recoverable: read on.
           <!-- pr-gate: close -->
 
           This pull request is not admissible yet:
           COMMENT
+          fi
           while IFS= read -r reason; do
             printf -- '- %s\n' "$reason" >> "$comment_file"
           done < "$reasons_file"
@@ -197,15 +215,30 @@ jobs:
           2. Edit this same pull request so its sections match the pull request template.
              Its **Related Issues and Pull Requests** section must name the claimed
              issue as `Fixes #<issue>`, with the real number.
+          COMMENT
+          if [ "$source_has_reference" -eq 1 ]; then
+            cat <<'COMMENT' >> "$comment_file"
+
+          This pull request remains open. Edit it to fix every item above; the gate
+          checks each edit, so there is no need to open a second pull request.
+          COMMENT
+          else
+            cat <<'COMMENT' >> "$comment_file"
 
           The gate checks edits on this closed pull request and will reopen it automatically
           once every condition passes. There is no need to open a second pull request,
           and nothing here is lost.
           COMMENT
+          fi
           # If the explanation cannot be posted, leave the pull request open
           # rather than close it silently. The reopen path likewise stays
           # closed if its explanation cannot be posted.
           gh api "repos/$REPO/issues/$PR/comments" \
             -F "body=@$comment_file" --silent
+          # Only the absence of any raw issue-number shape is unambiguous
+          # enough to justify closing contributor work.
+          if [ "$source_has_reference" -eq 1 ]; then
+            exit 0
+          fi
           gh api -X PATCH "repos/$REPO/pulls/$PR" \
             -f state=closed --silent

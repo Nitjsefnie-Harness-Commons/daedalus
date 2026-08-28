@@ -10,12 +10,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSE_MARKER, GITHUB_HTML, GITHUB_MARKDOWN, MARKER_COMMENT,
-    _GH_STUB,
-    _assert_commented_then_closed, _assert_commented_then_reopened,
-    _assert_no_mutation, _body_from, _closed_by, _issue, _issue_lookups,
-    _html_body, _issue_html, _layout_body, _run_workflow, _text_html,
-    _valid_body, _valid_html, _workflow, _workflow_script, _write_calls,
+    BOT, CLOSE_MARKER, GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_MARKDOWN,
+    GITHUB_HTML, GITHUB_MARKDOWN, MARKER_COMMENT, _GH_STUB,
+    _assert_commented_not_closed, _assert_commented_then_closed,
+    _assert_commented_then_reopened, _assert_no_mutation, _body_from,
+    _closed_by, _issue, _issue_lookups, _html_body, _issue_html,
+    _layout_body, _run_workflow, _text_html, _valid_body, _valid_html,
+    _workflow, _workflow_script, _write_calls,
 )
 from _repo import ROOT  # noqa: E402
 from _yamlread import job_scalar, top_level_mapping  # noqa: E402
@@ -189,6 +190,27 @@ def test_github_visible_markdown_constructs_stay_admissible(tmp):
     assert failures == [], failures
 
 
+def test_github_footnotes_and_named_anchors_stay_admissible(tmp):
+    named_body = _valid_body().replace(
+        '- One change', '<a name="spot"></a>\n- One change')
+    named_html = _valid_html(
+        changes=GITHUB_HTML['named_anchor']
+        + '<ul dir="auto"><li>One change</li></ul>')
+    cases = (
+        ('footnote', GITHUB_FOOTNOTE_MARKDOWN, GITHUB_FOOTNOTE_HTML,
+         'Nitjsefnie-Harness-Commons/daedalus'),
+        ('named-anchor', named_body, named_html, 'owner/repo'),
+    )
+    failures = []
+    for name, body, rendered, repo in cases:
+        calls, result = _run_workflow(
+            Path(tmp) / name, body, {'101': _issue('alice')},
+            repo=repo, rendered_html=rendered)
+        if result.returncode != 0 or _write_calls(calls):
+            failures.append((name, result.returncode, calls, result.stderr))
+    assert failures == [], failures
+
+
 def test_github_nontext_constructs_do_not_satisfy_the_claim(tmp):
     names = (
         'balanced_destination',
@@ -205,7 +227,7 @@ def test_github_nontext_constructs_do_not_satisfy_the_claim(tmp):
             rendered_html=rendered)
         try:
             assert result.returncode == 0, (result.stdout, result.stderr)
-            _assert_commented_then_closed(
+            _assert_commented_not_closed(
                 calls, 'No checked issue is assigned to you.')
         except AssertionError as error:
             failures.append((name, str(error)))
@@ -243,6 +265,11 @@ def test_unusable_render_responses_never_change_pull_request_state(tmp):
         '<h2>Summary</h2><p>text',
         '<h2>Summary</h2><h2',
         '<h2>Summary</h2><!-- unfinished',
+        '<h2>Summary</h2><p>One sentence.</p>',
+        _html_body(
+            ('Summary', _text_html('One sentence.')),
+            ('Related Issues and Pull Requests',
+             f'Fixes {_issue_html(101)}')),
     )
     pulls = (
         ('open', {}, {}),
@@ -357,7 +384,7 @@ def test_layout_names_retained_template_instructions_separately(tmp):
         tmp, body, {'101': _issue('alice')},
         rendered_html=_valid_html())
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
         calls, 'Remove the template instruction comments.')
 
 
@@ -369,7 +396,21 @@ def test_retained_comment_is_detected_beside_visible_fingerprint(tmp):
     calls, result = _run_workflow(
         tmp, body, {'101': _issue('alice')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
+        calls, 'Remove the template instruction comments.')
+
+
+def test_entity_spelling_does_not_hide_a_retained_comment(tmp):
+    changes = ('<!-- optional -->\n'
+               '- The literal template marker is '
+               '&lt;!-- optional --&gt;.\n- One change.')
+    body = _valid_body().replace('- One change', changes)
+    calls, result = _run_workflow(
+        tmp, body, {'101': _issue('alice')},
+        rendered_html=_valid_html(
+            changes=GITHUB_HTML['entity_instruction']))
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_not_closed(
         calls, 'Remove the template instruction comments.')
 
 
@@ -384,7 +425,7 @@ def test_each_template_instruction_comment_is_detected(tmp):
             {'101': _issue('alice')})
         try:
             assert result.returncode == 0, (result.stdout, result.stderr)
-            _assert_commented_then_closed(
+            _assert_commented_not_closed(
                 calls, 'Remove the template instruction comments.')
         except AssertionError as error:
             failures.append((index, str(error)))
@@ -405,9 +446,18 @@ def test_open_body_reports_both_failed_conditions_once(tmp):
     calls, result = _run_workflow(
         tmp, body, {'103': _issue('alicebob')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
         calls, 'No checked issue is assigned to you.',
         'Section "Summary" is empty.')
+
+
+def test_open_body_without_a_raw_reference_is_closed(tmp):
+    calls, result = _run_workflow(
+        tmp, 'No issue reference anywhere.', {},
+        rendered_html='<p dir="auto">No issue reference anywhere.</p>')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(
+        calls, 'No checked issue is assigned to you.')
 
 
 def test_open_body_reports_each_single_failed_condition(tmp):
@@ -422,19 +472,19 @@ def test_open_body_reports_each_single_failed_condition(tmp):
             ('Changes', '<ul><li>One change</li></ul>'),
             ('Testing', _text_html('Ran the suite.'))))
     assert first.returncode == second.returncode == 0
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
         unclaimed, 'No checked issue is assigned to you.')
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
         malformed, 'Section `Notes` is not defined by the template.')
 
 
-def test_open_rendered_empty_changes_is_closed(tmp):
+def test_open_rendered_empty_changes_is_commented_without_closing(tmp):
     body = _valid_body().replace('- One change', '-')
     calls, result = _run_workflow(
         tmp, body, {'101': _issue('alice')},
         rendered_html=_valid_html(changes=GITHUB_HTML['empty_list']))
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(calls, 'Section "Changes" is empty.')
+    _assert_commented_not_closed(calls, 'Section "Changes" is empty.')
 
 
 def test_open_image_only_optional_section_is_left_untouched(tmp):
@@ -453,8 +503,6 @@ def test_unanswerable_analysis_inputs_never_write(tmp):
     cases = (
         ('repository', 'missing-owner', _valid_html(
             references='<p>No reference.</p>')),
-        ('anchor', 'owner/repo', _valid_html(
-            references='<p>Fixes <a>#101</a></p>')),
         ('self-closing', 'owner/repo', _valid_html(changes='<p/>')),
     )
     for name, repository, rendered in cases:
@@ -474,7 +522,7 @@ def test_link_destination_does_not_satisfy_the_claim(tmp):
         rendered_html=_valid_html(
             references=GITHUB_HTML['html_attribute']))
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
         calls, 'No checked issue is assigned to you.')
 
 
@@ -491,6 +539,7 @@ def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
             (name, _text_html('Unknown.')),
             ('Testing', _text_html('Ran the suite.'))))
     assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_not_closed(calls)
     endpoint = 'repos/owner/repo/issues/99/comments'
     comment = _body_from(next(call for call in calls if endpoint in call))
     quoted = '``` Notes ``for #255`` ```'
@@ -583,8 +632,8 @@ def test_reference_limit_checks_twenty_and_tells_the_truth(tmp):
     assert len(lookups) == 20, lookups
     reason = ('This body names more than 20 issue references, so only the '
               'first 20 were checked.')
-    _assert_commented_then_closed(calls, reason)
-    assert 'No checked issue is assigned to you.' not in _body_from(calls[-2])
+    _assert_commented_not_closed(calls, reason)
+    assert 'No checked issue is assigned to you.' not in _body_from(calls[-1])
 
 
 def test_exactly_twenty_references_do_not_trigger_the_limit(tmp):
@@ -613,7 +662,7 @@ def test_lookup_failures_keep_the_safe_direction(tmp):
             references=f'Fixes {_issue_html(122)}'))
     assert one.returncode == 0
     assert len(_issue_lookups(missing)) == 2
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
         missing, 'No checked issue is assigned to you.')
     assert two.returncode != 0, (two.stdout, two.stderr)
     _assert_no_mutation(failed)
@@ -623,7 +672,7 @@ def test_pull_request_reference_does_not_satisfy_claim(tmp):
     calls, result = _run_workflow(
         tmp, _valid_body(), {'101': _issue('alice', pull_request=True)})
     assert result.returncode == 0, (result.stdout, result.stderr)
-    _assert_commented_then_closed(
+    _assert_commented_not_closed(
         calls, 'No checked issue is assigned to you.')
 
 

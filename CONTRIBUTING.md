@@ -212,10 +212,11 @@ was wrong.
 Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. A pull request whose section
 names no issue assigned to its author, or whose body does not follow the
-template's section rules, is closed automatically with an explanation of
-every problem. Fix the claim or body on that same pull request; the gate
-rechecks the edit and reopens it automatically once every check passes. There
-is no need to open another.
+template's section rules, receives one explanation of every problem. It stays
+open when its source contains an issue-number shape and closes only when none
+appears anywhere. Fix the claim or body on that same pull request; the gate
+rechecks each edit and reopens it automatically once every check passes if the
+gate closed it. There is no need to open another.
 
 In the description, include what changed, why, and the actual output of the
 tests you ran. For a performance change, a before and after measurement rather
