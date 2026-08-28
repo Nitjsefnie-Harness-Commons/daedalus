@@ -64,8 +64,12 @@ SITES = [
      r'@version\s+(?P<v>\S+)'),
     ('extension/background.js', 'VERSION constant',
      r"const VERSION\s*=\s*'(?P<v>[^']+)'"),
+    # Same reasoning as the __version__ site below: a second assignment
+    # written with the other quote character is still valid JavaScript and
+    # still wins, so the pattern has to see either quote to catch a
+    # duplicate spelled the other way (#247).
     ('extension/page.js', 'GM bridge info.script.version',
-     r"script:\s*\{\s*version:\s*'(?P<v>[^']+)'"),
+     r'''script:\s*\{\s*version:\s*(?P<q>['"])(?P<v>[^'"]+)(?P=q)'''),
     ('dashboard/index.html', 'dashboard rail footer',
      r'class="rail-foot">v(?P<v>[^ <]+)'),
     ('dashboard/index.html', 'dashboard status line',
