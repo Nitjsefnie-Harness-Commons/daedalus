@@ -374,7 +374,7 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
 
     @contextlib.contextmanager
     def fake_bridge(bridge_tmp, env=None, output=None):
-        yield 'http://fake-bridge', str(docroot)
+        yield 'http://bridge.test', str(docroot)
 
     original_bridge = _overlap._util.bridge
     original_overlap = _overlap.run_background_overlap
