@@ -45,6 +45,35 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
     assert not accepted, f'scanners accepted an empty Git enumeration: {accepted}'
 
 
+def test_release_scanner_enumeration_matches_a_throwaway_repository(tmp):
+    global ROOT
+    release = Path(tmp) / 'enumeration-release'
+    release.mkdir()
+    for name in ('one.txt', 'two.txt', 'three.txt'):
+        (release / name).write_text(name + '\n', encoding='utf-8')
+    subprocess.run(['git', '-C', str(release), 'init', '-q'], check=True)
+    subprocess.run(
+        ['git', '-C', str(release), 'config',
+         'user.email', 'test@example.com'], check=True)
+    subprocess.run(
+        ['git', '-C', str(release), 'config', 'user.name', 'Release Test'],
+        check=True)
+    subprocess.run(
+        ['git', '-C', str(release), 'add', '--',
+         'one.txt', 'two.txt', 'three.txt'], check=True)
+    subprocess.run(
+        ['git', '-C', str(release), 'commit', '-qm', 'fixtures'], check=True)
+
+    real_root = ROOT
+    ROOT = release
+    try:
+        assert (
+            test_release_scanner_enumeration_matches_tracked_files(
+                tmp) is None)
+    finally:
+        ROOT = real_root
+
+
 def test_release_scanner_enumeration_matches_tracked_files(tmp):
     del tmp
     listed = subprocess.run(
@@ -56,8 +85,6 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     }
     enumerated = set(iter_tree_files(ROOT))
     assert tracked, 'Git returned no tracked release paths'
-    assert len(tracked) == 230, (
-        f'expected 230 tracked paths, found {len(tracked)}')
     assert tracked - enumerated == set(), (
         f'tracked paths omitted from scanner input: {tracked - enumerated}')
     assert enumerated - tracked == set(), (
