@@ -62,8 +62,7 @@ def child_coverage(mode, environment=None, cwd=None):
     if environment is None:
         environment = os.environ
     if mode == 'scrub':
-        # subprocess serializes env.items(), so the returned mapping is
-        # rebuilt from that view and validated there.
+        # subprocess serializes env.items(), so that is the view to validate.
         scrubbed = dict(coverage_free_environment(environment).items())
         leaked = sorted(
             name for name in scrubbed if name.startswith('COVERAGE_'))
