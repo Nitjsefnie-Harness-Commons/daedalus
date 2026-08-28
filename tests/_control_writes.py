@@ -6,6 +6,7 @@ _UNKNOWN_PATH = 0
 _RELATIVE_PATH = 1
 _CONTROL_OWNED_PATH = 2
 _UNRESOLVED_MODE = object()
+_MAX_PROOF_DEPTH = 2
 _READ_MODES = frozenset({'r', 'rb', 'rt'})
 _WRITE_MODES = frozenset({'w', 'a', 'x', 'wb', 'ab', 'xb'})
 _SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
@@ -22,31 +23,21 @@ def _bound_names(target):
             yield from _bound_names(part)
 
 
-def _real_copy_call(node, trusted):
-    return (trusted and isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == '_real_module_copy')
-
-
-def _record_binding(bindings, target, value, trusted_copy=True):
+def _record_binding(bindings, target, value):
     if isinstance(target, ast.Name):
         bindings.setdefault(target.id, []).append(value)
         return
     if isinstance(target, ast.Starred):
-        _record_binding(bindings, target.value, value, trusted_copy)
+        _record_binding(bindings, target.value, value)
         return
     if not isinstance(target, (ast.List, ast.Tuple)):
-        return
-    if _real_copy_call(value, trusted_copy):
-        for name in _bound_names(target):
-            bindings.setdefault(name, []).append(_CONTROL_OWNED_PATH)
         return
     if isinstance(value, (ast.List, ast.Tuple)):
         plain = [part for part in target.elts
                  if not isinstance(part, ast.Starred)]
         if len(plain) == len(target.elts) == len(value.elts):
             for part, source in zip(target.elts, value.elts):
-                _record_binding(bindings, part, source, trusted_copy)
+                _record_binding(bindings, part, source)
             return
     for name in _bound_names(target):
         bindings.setdefault(name, []).append(value)
@@ -106,40 +97,54 @@ def _os_path_join(node):
             and owner.value.id == 'os')
 
 
-def _path_kind(node, owned_names, trusted_names):
+def _path_kind(node, owned_names, trusted_names, mutated_names=(),
+               context=None, depth=0):
     if isinstance(node, int):
         return node
     if isinstance(node, ast.Name):
-        return (_CONTROL_OWNED_PATH if node.id in owned_names
-                else _UNKNOWN_PATH)
+        return owned_names.get(node.id, _UNKNOWN_PATH)
     if isinstance(node, ast.Constant):
         return _literal_path_kind(node.value)
     if isinstance(node, ast.Subscript):
+        if (isinstance(node.value, ast.Name)
+                and node.value.id in mutated_names):
+            return _UNKNOWN_PATH
         return (_CONTROL_OWNED_PATH
-                if _path_kind(node.value, owned_names, trusted_names)
+                if _path_kind(node.value, owned_names, trusted_names,
+                              mutated_names, context, depth)
                 == _CONTROL_OWNED_PATH else _UNKNOWN_PATH)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        left = _path_kind(node.left, owned_names, trusted_names)
-        right = _path_kind(node.right, owned_names, trusted_names)
+        left = _path_kind(node.left, owned_names, trusted_names,
+                          mutated_names, context, depth)
+        right = _path_kind(node.right, owned_names, trusted_names,
+                           mutated_names, context, depth)
         return left if right == _RELATIVE_PATH else _UNKNOWN_PATH
     if isinstance(node, ast.IfExp):
-        body = _path_kind(node.body, owned_names, trusted_names)
-        other = _path_kind(node.orelse, owned_names, trusted_names)
+        body = _path_kind(node.body, owned_names, trusted_names,
+                          mutated_names, context, depth)
+        other = _path_kind(node.orelse, owned_names, trusted_names,
+                           mutated_names, context, depth)
         return body if body == other else _UNKNOWN_PATH
     if not isinstance(node, ast.Call):
         return _UNKNOWN_PATH
     if (isinstance(node.func, ast.Name)
             and node.func.id in {'Path', 'str'}
             and node.func.id in trusted_names and len(node.args) == 1):
-        return _path_kind(node.args[0], owned_names, trusted_names)
+        return _path_kind(node.args[0], owned_names, trusted_names,
+                          mutated_names, context, depth)
     if 'os' in trusted_names and _os_path_join(node) and node.args:
-        first = _path_kind(node.args[0], owned_names, trusted_names)
-        rest = [_path_kind(part, owned_names, trusted_names)
+        first = _path_kind(node.args[0], owned_names, trusted_names,
+                           mutated_names, context, depth)
+        rest = [_path_kind(part, owned_names, trusted_names, mutated_names,
+                           context, depth)
                 for part in node.args[1:]]
         return (first if first != _UNKNOWN_PATH
                 and all(part == _RELATIVE_PATH for part in rest)
                 else _UNKNOWN_PATH)
-    return _UNKNOWN_PATH
+    if context is None:
+        return _UNKNOWN_PATH
+    return _proved_call_kind(node, context, owned_names, trusted_names,
+                             mutated_names, depth)
 
 
 def _nested_scope_expressions(node):
@@ -192,7 +197,86 @@ def _scope_local_names(scope):
     return names
 
 
-def _owned_path_names(scope):
+def _module_functions(tree):
+    """The module-level functions a call in this file can resolve to."""
+    return {node.name: node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _returned_values(scope):
+    """Every expression this scope returns, tuples flattened.
+
+    Empty where it returns nothing, or returns with no value: neither is
+    provable, and the caller reads empty as unprovable.
+    """
+    values = []
+    for node in _scope_nodes(scope):
+        if not isinstance(node, ast.Return):
+            continue
+        if node.value is None:
+            return []
+        if isinstance(node.value, (ast.Tuple, ast.List)):
+            values.extend(node.value.elts)
+        else:
+            values.append(node.value)
+    return values
+
+
+def _proved_call_kind(call, context, owned, trusted_names, mutated, depth):
+    """The kind of a call's result, proved from the callee's own body.
+
+    A helper is trusted for what it returns, never for what it is called:
+    a copy helper edited to return a checkout path stops being proof the
+    moment its body says so.
+    """
+    if depth >= _MAX_PROOF_DEPTH or not isinstance(call.func, ast.Name):
+        return _UNKNOWN_PATH
+    function = context.get(call.func.id)
+    if function is None or call.func.id not in context:
+        return _UNKNOWN_PATH
+    parameters = (function.args.posonlyargs + function.args.args
+                  + function.args.kwonlyargs)
+    if (function.args.vararg is not None or function.args.kwarg is not None
+            or len(call.args) > len(parameters)):
+        return _UNKNOWN_PATH
+    seeded = {}
+    for index, parameter in enumerate(parameters):
+        value = _argument(call, parameter.arg, index)
+        if value is None:
+            return _UNKNOWN_PATH
+        seeded[parameter.arg] = _path_kind(
+            value, owned, trusted_names, mutated, context, depth)
+    values = _returned_values(function)
+    if not values:
+        return _UNKNOWN_PATH
+    inner_owned, inner_mutated = _owned_path_names(
+        function, context, seeded, depth + 1)
+    inner_trusted = {'Path', 'str', 'os'} - _scope_local_names(function)
+    if all(_path_kind(value, inner_owned, inner_trusted, inner_mutated,
+                      context, depth + 1) == _CONTROL_OWNED_PATH
+           for value in values):
+        return _CONTROL_OWNED_PATH
+    return _UNKNOWN_PATH
+
+
+def _mutated_container_names(scope):
+    """Names whose elements a subscript can no longer prove.
+
+    Ownership of a container is a claim about what it holds, and any
+    mutation of it — an assignment into it or a call through one of its own
+    methods — retires the claim, whatever the method is named.
+    """
+    mutated = set()
+    for node in _scope_nodes(scope):
+        mutated.update(_subscript_bases(node))
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)):
+            mutated.add(node.func.value.id)
+    return mutated
+
+
+def _owned_path_names(scope, functions=None, seeded=None, depth=0):
     bindings = {}
     arguments = []
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
@@ -202,8 +286,11 @@ def _owned_path_names(scope):
                   and scope.name.startswith('test_'))
     if is_control and any(argument.arg == 'tmp' for argument in arguments):
         bindings['tmp'] = [_CONTROL_OWNED_PATH]
+    for name, kind in (seeded or {}).items():
+        bindings.setdefault(name, []).append(kind)
     local_names = _scope_local_names(scope)
-    trusted_copy = '_real_module_copy' not in local_names
+    context = {name: function for name, function in (functions or {}).items()
+               if name not in local_names}
     trusted_names = {'Path', 'str', 'os'} - local_names
     modelled = set()
     for node in _scope_nodes(scope):
@@ -211,22 +298,21 @@ def _owned_path_names(scope):
         if isinstance(node, ast.Assign):
             targets = node.targets
             for target in node.targets:
-                _record_binding(bindings, target, node.value, trusted_copy)
+                _record_binding(bindings, target, node.value)
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             targets = [node.target]
             _record_binding(
-                bindings, node.target, node.value, trusted_copy)
+                bindings, node.target, node.value)
         elif isinstance(node, ast.AugAssign):
             targets = [node.target]
             _record_binding(bindings, node.target, _UNKNOWN_PATH)
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             targets = [node.target]
-            _record_binding(bindings, node.target, node.iter, trusted_copy)
+            _record_binding(bindings, node.target, node.iter)
         elif isinstance(node, ast.withitem) and node.optional_vars is not None:
             targets = [node.optional_vars]
             _record_binding(
-                bindings, node.optional_vars, node.context_expr,
-                trusted_copy)
+                bindings, node.optional_vars, node.context_expr)
         for target in targets:
             modelled.update(id(name) for name in _target_name_nodes(target))
         # An element written into an owned container can be a checkout
@@ -239,26 +325,34 @@ def _owned_path_names(scope):
         if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
                 and id(node) not in modelled):
             bindings.setdefault(node.id, []).append(_UNKNOWN_PATH)
-    owned = set()
+    mutated = _mutated_container_names(scope)
+    # A name resolves to one kind only when every binding agrees on it, so
+    # a relative literal stays relative and a contested name stays unknown.
+    kinds = {}
     changed = True
     while changed:
         changed = False
         for name, sources in bindings.items():
-            if name in owned:
+            if name in kinds:
                 continue
-            if all(_path_kind(source, owned, trusted_names)
-                   == _CONTROL_OWNED_PATH
-                   for source in sources):
-                owned.add(name)
+            resolved = {_path_kind(source, kinds, trusted_names, mutated,
+                                   context, depth) for source in sources}
+            if len(resolved) == 1 and _UNKNOWN_PATH not in resolved:
+                kinds[name] = resolved.pop()
                 changed = True
-    return owned
+    return kinds, mutated
+
+
+def _argument(call, name, position):
+    """A call's argument by keyword, else by position, else None."""
+    for keyword in call.keywords:
+        if keyword.arg == name:
+            return keyword.value
+    return call.args[position] if len(call.args) > position else None
 
 
 def _write_mode(node, position):
-    mode = node.args[position] if len(node.args) > position else None
-    for keyword in node.keywords:
-        if keyword.arg == 'mode':
-            mode = keyword.value
+    mode = _argument(node, 'mode', position)
     if mode is None:
         return None
     if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
@@ -278,12 +372,15 @@ def control_write_violations(source, repository_root):
     except ValueError:
         label = source.name
     violations = []
+    functions = _module_functions(tree)
     scopes = [tree]
     scopes.extend(node for node in ast.walk(tree)
                   if isinstance(node, _SCOPES[1:]))
     for scope in scopes:
         local_names = _scope_local_names(scope)
-        owned_names = _owned_path_names(scope)
+        owned_names, mutated_names = _owned_path_names(scope, functions)
+        context = {name: function for name, function in functions.items()
+                   if name not in local_names}
         for node in _scope_nodes(scope):
             if not isinstance(node, ast.Call):
                 continue
@@ -304,7 +401,7 @@ def control_write_violations(source, repository_root):
                     kind = f'Path.open mode {mode!r}'
                     target = node.func.value
             elif (isinstance(node.func, ast.Name)
-                  and node.func.id == 'open' and node.args):
+                  and node.func.id == 'open'):
                 if 'open' in local_names:
                     violations.append(
                         (node.lineno, f'{label}:{node.lineno}: '
@@ -317,11 +414,17 @@ def control_write_violations(source, repository_root):
                          'open mode is unresolved'))
                 elif mode is not None:
                     kind = f'open mode {mode!r}'
-                    target = node.args[0]
+                    target = _argument(node, 'file', 0)
+                    if target is None:
+                        violations.append(
+                            (node.lineno, f'{label}:{node.lineno}: '
+                             'open target is unresolved'))
+                        continue
             if (target is not None
                     and _path_kind(
                         target, owned_names,
-                        {'Path', 'str', 'os'} - local_names)
+                        {'Path', 'str', 'os'} - local_names, mutated_names,
+                        context)
                     != _CONTROL_OWNED_PATH):
                 violations.append(
                     (node.lineno, f'{label}:{node.lineno}: {kind} target '
