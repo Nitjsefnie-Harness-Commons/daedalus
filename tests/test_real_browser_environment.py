@@ -87,8 +87,7 @@ def test_e2big_start_failure_skips_when_minimal_spawn_fails(tmp):
     calls = []
 
     def minimal_spawn(args, **kwargs):
-        del kwargs
-        calls.append(args)
+        calls.append((list(args), dict(kwargs)))
         raise OSError(errno.E2BIG, 'controlled minimal spawn refusal')
 
     skipped = None
@@ -100,7 +99,8 @@ def test_e2big_start_failure_skips_when_minimal_spawn_fails(tmp):
             skipped = why
     assert skipped is not None, 'E2BIG did not produce an environment skip'
     assert skipped.__cause__ is too_large, skipped.__cause__
-    assert calls == [[sys.executable, '-c', '']], calls
+    assert calls[0][0] == [sys.executable, '-c', ''], calls
+    assert 'env' not in calls[0][1], calls
 
 
 def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
@@ -109,8 +109,7 @@ def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
     calls = []
 
     def minimal_spawn(args, **kwargs):
-        del kwargs
-        calls.append(args)
+        calls.append((list(args), dict(kwargs)))
         return subprocess.CompletedProcess(args, 0)
 
     failure = None
@@ -122,7 +121,8 @@ def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
             failure = why
     assert failure.__class__ is AssertionError, failure
     assert failure.__cause__ is too_large, failure.__cause__
-    assert calls == [[sys.executable, '-c', '']], calls
+    assert calls[0][0] == [sys.executable, '-c', ''], calls
+    assert 'env' not in calls[0][1], calls
 
 
 def test_nonterminating_node_probe_is_harness_failure(tmp):
