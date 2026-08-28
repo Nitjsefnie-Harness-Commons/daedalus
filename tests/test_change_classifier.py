@@ -24,6 +24,9 @@ from _workflows import (  # noqa: E402
     _workflow_path_filters, _workflow_triggers)
 from _yamlread import job_mapping  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
+from _wfgraph import (  # noqa: E402
+    _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
+    _job_step_ids, _tests_yml)
 
 
 def _classifier():
@@ -349,44 +352,6 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
                 name, event, filters)
 
 
-def _tests_yml():
-    return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-
-
-def _job_section(workflow, job):
-    """One job's source lines, from its header to the next job's."""
-    lines = workflow.splitlines()
-    start = next((index for index, line in enumerate(lines)
-                  if line == f'  {job}:'), None)
-    assert start is not None, f'tests.yml has no {job!r} job'
-    end = next((index for index in range(start + 1, len(lines))
-                if lines[index][:2] == '  ' and lines[index][2:3].strip()),
-               len(lines))
-    return lines[start:end]
-
-
-def _job_needs(workflow, job):
-    """The job names listed under `needs:` on the named job."""
-    names = []
-    in_needs = False
-    for line in _job_section(workflow, job)[1:]:
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
-        if in_needs:
-            if stripped.startswith('- '):
-                names.append(stripped[2:])
-                continue
-            return names
-        if line.startswith('    needs:'):
-            inline = stripped[len('needs:'):].strip()
-            if inline:
-                return [inline]
-            in_needs = True
-    return names
-
-
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
 STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
 
@@ -433,6 +398,14 @@ def test_changes_job_exposes_every_classifier_output(tmp):
     assert not missing, missing
 
 
+def test_changes_job_outputs_reference_existing_step_ids(tmp):
+    del tmp
+    workflow = _tests_yml()
+    referenced = _job_output_step_ids(workflow, 'changes')
+    declared = _job_step_ids(workflow, 'changes')
+    assert referenced <= declared, (referenced, declared)
+
+
 def test_static_analysis_jobs_keep_their_required_ids_and_names(tmp):
     del tmp
     workflow = _tests_yml()
@@ -463,29 +436,14 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
         tmp):
     del tmp
     workflow = _tests_yml()
-    expected = {
-        'suites': ("    if: ${{ !cancelled() && !failure() }}",),
-        'wheel': ("    if: ${{ !cancelled() && !failure() }}",),
-        'coverage': (
-            "    if: ${{ !cancelled() && !failure()",
-            "               && needs.changes.outputs.docs_only != 'true' }}",
-        ),
-    }
     contexts = (
         ({'success': False, 'failure': False, 'cancelled': False}, True),
         ({'success': False, 'failure': True, 'cancelled': False}, False),
         ({'success': False, 'failure': False, 'cancelled': True}, False),
     )
-    for job, expected_lines in expected.items():
-        section = _job_section(workflow, job)
-        condition_lines = tuple(
-            line for line in section
-            if line.startswith('    if:')
-            or line.startswith('               && needs.changes.outputs.'))
-        assert condition_lines == expected_lines, (
-            job, condition_lines, expected_lines)
-        expression = ' '.join(line.strip() for line in condition_lines)
-        expression = expression[len('if:'):].strip()
+    for job in ('suites', 'wheel', 'coverage'):
+        expression = _job_if_expression(workflow, job)
+        assert expression is not None, job
         for status, should_run in contexts:
             context = {
                 'status': status,
@@ -543,18 +501,8 @@ def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
     the over-run branch the design promises.
     """
     del tmp
-    section = _job_section(_tests_yml(), 'coverage')
-    expected = (
-        "    if: ${{ !cancelled() && !failure()",
-        "               && needs.changes.outputs.docs_only != 'true' }}",
-    )
-    conditions = tuple(
-        line for line in section
-        if line.startswith('    if:')
-        or line.startswith('               && needs.changes.outputs.'))
-    assert conditions == expected, conditions
-    expression = ' '.join(line.strip() for line in conditions)
-    expression = expression[len('if:'):].strip()
+    expression = _job_if_expression(_tests_yml(), 'coverage')
+    assert expression is not None
 
     def runs(docs_only):
         context = {
@@ -576,8 +524,10 @@ def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
 def test_aggregate_waits_on_every_job_it_checks(tmp):
     del tmp
     needs = _job_needs(_tests_yml(), 'aggregate')
-    for job in ('changes', *GATE_JOBS, 'suites', 'wheel', 'coverage'):
-        assert job in needs, (job, needs)
+    expected = ('changes', *GATE_JOBS, 'suites', 'wheel', 'coverage')
+    assert set(needs) == set(expected), (needs, expected)
+    assert len(needs) == len(set(needs)) == len(expected), (
+        needs, expected)
 
 
 def test_aggregate_script_accepts_only_intentional_gate_skips(tmp):
@@ -604,7 +554,7 @@ def test_aggregate_script_accepts_only_intentional_gate_skips(tmp):
     result = _run_aggregate(docs_only)
     assert result.returncode == 0, (result.stdout, result.stderr)
 
-    for name in ('changes', *GATE_JOBS, 'suites'):
+    for name in ('changes', *GATE_JOBS, 'suites', 'wheel', 'coverage'):
         result = _run_aggregate(dict(all_success, **{name: 'failure'}))
         assert result.returncode != 0, (name, result.stdout, result.stderr)
 
