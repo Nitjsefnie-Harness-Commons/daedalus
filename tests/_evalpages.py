@@ -10,15 +10,19 @@ that serves them because they are content, not machinery.
 
 
 CDP_RESPONSE_DEADLINE_MS = 10000
+CDP_TIMEOUT_EXIT_CODE = 2
 
 
 CDP_CALL_HARNESS = r"""
+const CDP_TIMEOUT_EXIT_CODE = 2;
 const [target, method, paramsText, deadlineText] = process.argv.slice(1);
 const socket = new WebSocket(target);
+let timedOut = false;
 const timer = setTimeout(() => {
+  timedOut = true;
+  process.exitCode = CDP_TIMEOUT_EXIT_CODE;
   process.stderr.write('CDP response timed out\n');
   socket.close();
-  process.exitCode = 1;
 }, Number(deadlineText));
 
 socket.addEventListener('open', () => {
@@ -37,6 +41,7 @@ socket.addEventListener('message', (event) => {
   socket.close();
 });
 socket.addEventListener('error', () => {
+  if (timedOut) return;
   clearTimeout(timer);
   process.stderr.write('CDP websocket failed\n');
   process.exitCode = 1;
