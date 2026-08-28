@@ -2,6 +2,7 @@
 """Pull-request issue references and the workflow that enforces claims."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,23 @@ from _workflows import _workflow_triggers  # noqa: E402
 
 PR_CLAIM = _util.load(ROOT / 'scripts' / 'ci' / 'pr_claim.py')
 SECTION = '## Related Issues and Pull Requests\n'
+_COMMENT_TAIL = (
+    ' — closing this automatically, and it is recoverable: read on.\n\n'
+    """A pull request here has to name the issue it resolves, in its
+**Related Issues and Pull Requests** section, and that issue has to be
+assigned to you before you start. This one does not, so nothing tells other
+contributors that the work is taken.
+
+Two steps, in this order:
+
+1. Comment `/claim` on the issue you are fixing. That assigns it to you, no
+   write access needed — see CONTRIBUTING.md.
+2. Edit this pull request's body so its **Related Issues and Pull Requests**
+   section names that issue: `Fixes #<issue>`, with the real number.
+
+Then reopen this same pull request. A closed pull request still accepts edits
+and comments, so there is no need to open a second one and nothing here is
+lost.""")
 
 _GH_STUB = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -29,16 +47,36 @@ endpoint = next((arg for arg in argv if arg.startswith('repos/')), '')
 parts = endpoint.split('/')
 if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
     issue = fixtures.get(parts[-1])
-    if issue is None:
+    status = 404 if issue is None else issue.get('_http_status', 200)
+    if '--include' in argv:
+        reason = {200: 'OK', 404: 'Not Found'}.get(status, 'Error')
+        print(f'HTTP/2.0 {status} {reason}')
+        print()
+    if status != 200:
+        print(f'gh: HTTP {status}', file=sys.stderr)
         raise SystemExit(1)
     query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
     if 'pull_request' in issue and 'has("pull_request")' in query:
         raise SystemExit(0)
     if '.assignees' in query:
         for assignee in issue['assignees']:
-            print(assignee['login'])
+            prefix = 'assignee:' if 'assignee:' in query else ''
+            print(prefix + assignee['login'])
     else:
         print(json.dumps(issue))
+"""
+
+_CRLF_PYTHON_STUB = r"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == scripts/ci/pr_claim.py ||
+      "${1:-}" == */scripts/ci/pr_claim.py ]]; then
+  "$STUB_REAL_PYTHON" "$@" |
+    "$STUB_REAL_PYTHON" -c 'import sys
+data = sys.stdin.buffer.read().replace(b"\r\n", b"\n")
+sys.stdout.buffer.write(data.replace(b"\n", b"\r\n"))'
+else
+  exec "$STUB_REAL_PYTHON" "$@"
+fi
 """
 
 
@@ -51,11 +89,14 @@ def _workflow_script():
     """The pr-claim.yml run block, dedented and ready for Bash."""
     _, marker, after = _workflow().partition('        run: |\n')
     assert marker, 'pr-claim.yml has no literal run block'
+    first = after.splitlines()[0]
+    indent = len(first) - len(first.lstrip())
+    assert first.strip() and indent, 'pr-claim.yml run block has no body'
     lines = []
     for line in after.splitlines():
-        if line.strip() and not line.startswith('          '):
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
             break
-        lines.append(line[10:])
+        lines.append(line[indent:])
     return chr(10).join(lines)
 
 
@@ -70,7 +111,9 @@ def _issue(*assignees, pull_request=False):
     return issue
 
 
-def _run_workflow(tmp, body, issues, actor='alice', pr='99'):
+def _run_workflow(
+        tmp, body, issues, actor='alice', pr='99', repo='owner/repo',
+        parser_crlf=False):
     """Execute the real workflow shell against the controlled gh boundary."""
     bash = shutil.which('bash')
     assert bash, 'bash is required to execute the pull-request claim gate'
@@ -79,6 +122,10 @@ def _run_workflow(tmp, body, issues, actor='alice', pr='99'):
     stub = workdir / 'bin' / 'gh'
     stub.write_text(_GH_STUB, encoding='utf-8')
     stub.chmod(0o755)
+    if parser_crlf:
+        python_stub = workdir / 'bin' / 'python3'
+        python_stub.write_text(_CRLF_PYTHON_STUB, encoding='utf-8')
+        python_stub.chmod(0o755)
     fixture_path = workdir / 'issues.json'
     fixture_path.write_text(json.dumps(issues), encoding='utf-8')
     calls_path = workdir / 'calls.jsonl'
@@ -88,8 +135,9 @@ def _run_workflow(tmp, body, issues, actor='alice', pr='99'):
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
         'STUB_ISSUES': str(fixture_path),
         'STUB_CALLS': str(calls_path),
+        'STUB_REAL_PYTHON': sys.executable,
         'GH_TOKEN': 'stub',
-        'REPO': 'owner/repo',
+        'REPO': repo,
         'PR': pr,
         'ACTOR': actor,
         'BODY': body,
@@ -102,9 +150,10 @@ def _run_workflow(tmp, body, issues, actor='alice', pr='99'):
     return calls, result
 
 
-def _assert_commented_then_closed(calls, pr='99'):
-    comment_endpoint = f'repos/owner/repo/issues/{pr}/comments'
-    close_endpoint = f'repos/owner/repo/pulls/{pr}'
+def _assert_commented_then_closed(
+        calls, actor='alice', pr='99', repo='owner/repo'):
+    comment_endpoint = f'repos/{repo}/issues/{pr}/comments'
+    close_endpoint = f'repos/{repo}/pulls/{pr}'
     comment_calls = [call for call in calls if comment_endpoint in call]
     close_calls = [call for call in calls if close_endpoint in call]
     assert len(comment_calls) == 1, calls
@@ -113,6 +162,10 @@ def _assert_commented_then_closed(calls, pr='99'):
     close = close_calls[0]
     assert calls.index(comment) < calls.index(close), calls
     body = next(arg[5:] for arg in comment if arg.startswith('body='))
+    assert body == f'@{actor}{_COMMENT_TAIL}', body
+    assert re.search(r'#[0-9]', body) is None, body
+    assert 'has to name the issue it resolves' in body, body
+    assert 'section names that issue: `Fixes #<issue>`' in body, body
     assert '/claim' in body, body
     assert 'Then reopen this same pull request.' in body, body
     assert '-X' in close and close[close.index('-X') + 1] == 'PATCH', close
@@ -239,6 +292,7 @@ def test_workflow_keeps_its_claim_gate_shape(tmp):
     condition = job_scalar(workflow, 'claim', 'if')
     assert "github.event.pull_request.state == 'open'" in condition
     assert "github.event.pull_request.user.type != 'Bot'" in condition
+    assert 'draft' not in condition.casefold(), condition
     steps = step_mappings(workflow, 'claim')
     checkout = [step for step in steps
                 if str(step.get('uses', '')).startswith('actions/checkout@')]
@@ -262,6 +316,13 @@ def test_workflow_passes_for_an_issue_assigned_to_the_author(tmp):
 def test_workflow_closes_when_the_issue_belongs_to_someone_else(tmp):
     calls, result = _run_workflow(
         tmp, SECTION + 'Fixes #102\n', {'102': _issue('bob')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_requires_an_exact_assignee_login(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #108\n', {'108': _issue('alicebob')})
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_then_closed(calls)
 
@@ -295,15 +356,65 @@ def test_workflow_skips_a_missing_issue_without_failing(tmp):
     _assert_commented_then_closed(calls)
 
 
+def test_workflow_skips_a_missing_nonfirst_issue(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Refs #109 and #110\n',
+        {'109': _issue('bob')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert 'repos/owner/repo/issues/109' in calls[0], calls
+    assert 'repos/owner/repo/issues/110' in calls[1], calls
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_continues_after_a_missing_first_issue(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Refs #111 and #112\n',
+        {'112': _issue('alice')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(calls) == 2, calls
+    assert 'repos/owner/repo/issues/111' in calls[0], calls
+    assert 'repos/owner/repo/issues/112' in calls[1], calls
+    assert 'issue 112' in result.stdout, result.stdout
+
+
+def test_workflow_fails_without_closing_on_a_non_404_lookup_error(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #113\n',
+        {'113': {'_http_status': 502}})
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert len(calls) == 1, calls
+    assert 'repos/owner/repo/issues/113' in calls[0], calls
+    assert 'HTTP 502' in result.stderr, result.stderr
+
+
 def test_workflow_passes_when_only_the_second_issue_matches(tmp):
     calls, result = _run_workflow(
         tmp, SECTION + 'Refs #106 and #107\n',
-        {'106': _issue('bob'), '107': _issue('alice')})
+        {'106': _issue('bob'), '107': _issue('alice')},
+        parser_crlf=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert len(calls) == 2, calls
     assert 'repos/owner/repo/issues/106' in calls[0], calls
     assert 'repos/owner/repo/issues/107' in calls[1], calls
     assert 'issue 107' in result.stdout, result.stdout
+
+
+def test_workflow_uses_the_event_author_login(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #114\n', {'114': _issue('carol')},
+        actor='carol')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(calls) == 1, calls
+    assert 'issue 114' in result.stdout, result.stdout
+
+
+def test_workflow_uses_the_event_repository(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #115\n', {'115': _issue('alice')},
+        repo='acme/widget')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(calls) == 1, calls
+    assert 'repos/acme/widget/issues/115' in calls[0], calls
 
 
 def main():

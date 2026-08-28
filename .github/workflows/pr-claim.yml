@@ -53,13 +53,25 @@ jobs:
           set -euo pipefail
 
           numbers="$(printf '%s' "$BODY" \
-            | python3 scripts/ci/pr_claim.py)"
+            | python3 scripts/ci/pr_claim.py \
+            | tr -d '\r')"
           for N in $numbers; do
-            if ! assignees="$(gh api "repos/$REPO/issues/$N" \
+            if lookup="$(gh api --include "repos/$REPO/issues/$N" \
               --jq 'if has("pull_request") then empty else
-                .assignees[].login end')"
+                (.assignees[].login | "assignee:\(.)") end')"
             then
-              continue
+              assignees="$(printf '%s\n' "$lookup" \
+                | sed -n 's/^assignee://p')"
+            else
+              status="$(printf '%s\n' "$lookup" \
+                | sed -n \
+                  '1s/^HTTP\/[^ ]* \([0-9][0-9][0-9]\).*/\1/p')"
+              if [ "$status" = 404 ]; then
+                continue
+              fi
+              printf 'failed to look up issue %s (HTTP %s)\n' \
+                "$N" "${status:-unknown}" >&2
+              exit 1
             fi
             if printf '%s\n' "$assignees" | grep -Fxq "$ACTOR"; then
               echo "pull request $PR is covered by claimed issue $N"
@@ -67,38 +79,25 @@ jobs:
             fi
           done
 
-          comment="$(
-            printf '@%s%s%s\n\n' "$ACTOR" \
-              ' — closing this automatically, and it is' \
-              ' recoverable: read on.'
-            printf '%s%s\n' \
-              'A pull request here has to name the issue it resolves,' \
-              ' in its'
-            printf '%s%s\n' \
-              '**Related Issues and Pull Requests** section, and that' \
-              ' issue has to be'
-            printf '%s%s\n' \
-              'assigned to you before you start. This one does not,' \
-              ' so nothing tells other'
-            printf '%s\n\n' 'contributors that the work is taken.'
-            printf '%s\n\n' 'Two steps, in this order:'
-            printf '%s%s\n' \
-              "1. Comment \`/claim\` on the issue you are fixing. That" \
-              ' assigns it to you, no'
-            printf '%s\n' '   write access needed — see CONTRIBUTING.md.'
-            printf '%s%s\n' \
-              "2. Edit this pull request's body so its **Related Issues" \
-              ' and Pull Requests**'
-            printf '%s%s\n\n' \
-              "   section names that issue: \`Fixes #<issue>\`,"\
-              ' with the real number.'
-            printf '%s%s\n' \
-              'Then reopen this same pull request. A closed pull request' \
-              ' still accepts edits'
-            printf '%s%s\n' \
-              'and comments, so there is no need to open a second one' \
-              ' and nothing here is'
-            printf '%s\n' 'lost.'
+          comment="@$ACTOR$(cat <<'COMMENT'
+           — closing this automatically, and it is recoverable: read on.
+
+          A pull request here has to name the issue it resolves, in its
+          **Related Issues and Pull Requests** section, and that issue has to be
+          assigned to you before you start. This one does not, so nothing tells other
+          contributors that the work is taken.
+
+          Two steps, in this order:
+
+          1. Comment `/claim` on the issue you are fixing. That assigns it to you, no
+             write access needed — see CONTRIBUTING.md.
+          2. Edit this pull request's body so its **Related Issues and Pull Requests**
+             section names that issue: `Fixes #<issue>`, with the real number.
+
+          Then reopen this same pull request. A closed pull request still accepts edits
+          and comments, so there is no need to open a second one and nothing here is
+          lost.
+          COMMENT
           )"
           gh api "repos/$REPO/issues/$PR/comments" \
             -f body="$comment" --silent
