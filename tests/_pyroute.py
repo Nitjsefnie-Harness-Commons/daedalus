@@ -164,37 +164,63 @@ def _is_extension_constant(node):
     return isinstance(node, ast.Constant) and node.value == 'extension'
 
 
-def sender_aliases(scope):
-    """Local names bound to `ext_cmd`/`_ext_cmd` by a plain same-scope
-    assignment, e.g. `send = _ext_cmd` -- so a call through the alias is
-    judged the same as a call through the name it was bound to.
+def _resolve_sender_name(expr, aliases):
+    """The sender name ('ext_cmd' or '_ext_cmd') `expr` denotes -- directly,
+    through an attribute access, or through one level of an alias already
+    in `aliases` -- or None if it denotes neither."""
+    if isinstance(expr, ast.Name):
+        if expr.id in ('ext_cmd', '_ext_cmd'):
+            return expr.id
+        return aliases.get(expr.id)
+    if isinstance(expr, ast.Attribute) and expr.attr in ('ext_cmd', '_ext_cmd'):
+        return expr.attr
+    return None
 
-    Only a bare `name = ext_cmd` (or `_ext_cmd`) counts. Anything less direct
-    -- attribute access, a call, a conditional value -- leaves the name
-    untracked, and a call through it still reads as an ordinary call rather
-    than as a typed sender.
+
+def _apply_alias_statement(node, aliases):
+    """Track a same-scope alias of ext_cmd/_ext_cmd, in the same
+    source-ordered pass the dict tracking below runs in -- an alias is
+    exactly as order- and branch-sensitive as a payload dict is, so it
+    can't be collected in a single whole-scope pass without going stale.
+
+    A name whose new value resolves to neither sender is cleared rather
+    than left alone, so a sender rebound to something else stops reading
+    as one. Resolving through `aliases` here (not just a literal name)
+    is what makes `a = _ext_cmd` followed later by `b = a` recognise `b`
+    too, one hop at a time, in source order.
     """
-    aliases = {}
-    for node in _scope_nodes(scope):
-        if not isinstance(node, ast.Assign):
-            continue
-        if not (isinstance(node.value, ast.Name)
-                and node.value.id in ('ext_cmd', '_ext_cmd')):
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                aliases[target.id] = node.value.id
-    return aliases
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        targets = [node.target]
+    else:
+        return
+    resolved = _resolve_sender_name(node.value, aliases)
+    for target in targets:
+        if isinstance(target, ast.Name):
+            if resolved is not None:
+                aliases[target.id] = resolved
+            else:
+                aliases.pop(target.id, None)
 
 
 def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
                         aliases=None):
-    """Violations from one Call node, given the scope's tracked dicts."""
+    """Violations from one Call node, given the scope's tracked dicts.
+
+    Only a bare-name callee ever consults `aliases`: `send()` can be judged
+    against whatever `send` currently resolves to, but `sink.send()` names
+    an attribute of `sink`, not the local `send`, and must not be
+    reclassified just because some unrelated local happens to share that
+    name.
+    """
     func = node.func
-    name = func.id if isinstance(func, ast.Name) else (
-        func.attr if isinstance(func, ast.Attribute) else '')
-    if aliases:
-        name = aliases.get(name, name)
+    if isinstance(func, ast.Name):
+        name = (aliases or {}).get(func.id, func.id)
+    elif isinstance(func, ast.Attribute):
+        name = func.attr
+    else:
+        name = ''
     if name in ('ext_cmd', '_ext_cmd'):
         found = []
         for kw in node.keywords:
@@ -238,10 +264,22 @@ def _copy_dict_state(dicts):
     return {name: keys.copy() for name, keys in dicts.items()}
 
 
-def _dedupe_dict_states(states):
-    """Collapse flow states that are equivalent for this routing contract."""
+def _copy_state_pair(pair):
+    """A (dict-state, alias-map) pair carries an alias map alongside its
+    dict state through the same branch copies and merges, since a sender
+    alias is exactly as flow-sensitive as a payload dict is."""
+    state, aliases = pair
+    return (_copy_dict_state(state), dict(aliases))
+
+
+def _dedupe_state_pairs(pairs):
+    """Collapse pairs whose dict-state signature is equivalent for this
+    routing contract, keeping each surviving state's own alias map paired
+    with it rather than merging alias maps across pairs -- a call after
+    the branch is still checked against every surviving pair, so a sender
+    alias true on only one branch still gets caught."""
     found = {}
-    for state in states:
+    for state, aliases in pairs:
         signature = []
         for name, keys in sorted(state.items()):
             if _OPAQUE_TAB_SPREAD in keys:
@@ -253,7 +291,7 @@ def _dedupe_dict_states(states):
             else:
                 tab = 'other'
             signature.append((name, 'type' in keys, tab))
-        found.setdefault(tuple(signature), state)
+        found.setdefault(tuple(signature), (state, aliases))
     return list(found.values())
 
 
@@ -262,14 +300,17 @@ def _py_calls_in(node):
     return [child for child in nodes if isinstance(child, ast.Call)]
 
 
-def _py_flow_violations(statements, states, rel, allowed_opaque_names,
-                        aliases=None):
-    """Walk statements in order, retaining alternate `if` branch states."""
+def _py_flow_violations(statements, pairs, rel, allowed_opaque_names):
+    """Walk statements in order, retaining alternate `if` branch (dict-state,
+    alias-map) pairs. Each pair advances together: a statement that isn't
+    an `if` updates both halves of every pair in place, in the same source
+    order, so an alias assignment and a dict assignment on the same line
+    are both visible to whatever runs next."""
     violations = []
 
-    def check_calls(node, current_states):
+    def check_calls(node, current_pairs):
         for call in _py_calls_in(node):
-            for state in current_states:
+            for state, aliases in current_pairs:
                 violations.extend(_py_call_violations(
                     call, state, rel, allowed_opaque_names, aliases))
 
@@ -278,29 +319,30 @@ def _py_flow_violations(statements, states, rel, allowed_opaque_names,
                                   ast.ClassDef)):
             continue
         if isinstance(statement, ast.If):
-            check_calls(statement.test, states)
-            incoming = [_copy_dict_state(state) for state in states]
-            body, body_states = _py_flow_violations(
+            check_calls(statement.test, pairs)
+            incoming = [_copy_state_pair(pair) for pair in pairs]
+            body, body_pairs = _py_flow_violations(
                 statement.body,
-                [_copy_dict_state(state) for state in incoming], rel,
-                allowed_opaque_names, aliases)
+                [_copy_state_pair(pair) for pair in incoming], rel,
+                allowed_opaque_names)
             violations.extend(body)
             if statement.orelse:
-                other, other_states = _py_flow_violations(
+                other, other_pairs = _py_flow_violations(
                     statement.orelse,
-                    [_copy_dict_state(state) for state in incoming], rel,
-                    allowed_opaque_names, aliases)
+                    [_copy_state_pair(pair) for pair in incoming], rel,
+                    allowed_opaque_names)
                 violations.extend(other)
             else:
-                other_states = incoming
-            states = _dedupe_dict_states([*body_states, *other_states])
+                other_pairs = incoming
+            pairs = _dedupe_state_pairs([*body_pairs, *other_pairs])
             continue
-        check_calls(statement, states)
-        for state in states:
+        check_calls(statement, pairs)
+        for state, aliases in pairs:
             _apply_dict_statement(statement, state)
+            _apply_alias_statement(statement, aliases)
         if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
             return violations, []
-    return violations, states
+    return violations, pairs
 
 
 def py_tab_routing_violations(path, rel):
@@ -324,6 +366,6 @@ def py_tab_routing_violations(path, rel):
                 and scope.args.kwarg is not None):
             allowed_opaque = frozenset({scope.args.kwarg.arg})
         found, _ = _py_flow_violations(
-            statements, [{}], rel, allowed_opaque, sender_aliases(scope))
+            statements, [({}, {})], rel, allowed_opaque)
         violations.extend(found)
     return list(dict.fromkeys(violations))
