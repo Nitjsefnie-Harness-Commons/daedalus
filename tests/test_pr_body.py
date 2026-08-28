@@ -96,6 +96,16 @@ def test_parser_keeps_comment_markers_inside_fenced_code_literal(tmp):
     assert PR_BODY.referenced_issues(body) == [69]
 
 
+def test_parser_resolves_code_and_raw_html_before_structure(tmp):
+    del tmp
+    body = (SECTION + 'The token `<!--` is literal; Fixes #83\n'
+            '## Changes\n- A change\n')
+    assert PR_BODY.referenced_issues(body) == [83]
+    body = (SECTION + '<pre>\nFixes #84\n## literal heading\n</pre>\n'
+            'Fixes #85\n')
+    assert PR_BODY.referenced_issues(body) == [85]
+
+
 def test_parser_removes_fenced_and_inline_code(tmp):
     del tmp
     body = (SECTION + '```text\nFixes #70\n```\nFixes #71\n'
@@ -144,6 +154,29 @@ def test_parser_ignores_html_numeric_entities(tmp):
     assert PR_BODY.referenced_issues(body) == [15]
 
 
+def test_parser_ignores_link_destinations_and_html_attributes(tmp):
+    del tmp
+    hidden = (
+        '[documentation](#84)',
+        '![diagram](#84)',
+        '<a href="#84">documentation</a>',
+    )
+    for content in hidden:
+        assert PR_BODY.referenced_issues(SECTION + content) == []
+    assert PR_BODY.referenced_issues(
+        SECTION + '[Fixes #85](https://example.com)') == [85]
+
+
+def test_cli_ignores_reference_numbers_too_wide_for_github(tmp):
+    del tmp
+    result = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py')],
+        input=SECTION + 'Fixes #' + ('9' * 5000), text=True,
+        capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == '', repr(result.stdout)
+
+
 def test_cli_prints_one_issue_number_per_line(tmp):
     del tmp
     result = subprocess.run(
@@ -163,6 +196,17 @@ def test_cli_prints_one_issue_number_per_line(tmp):
         input=body, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout == 'issue:81\n', repr(result.stdout)
+
+
+def test_cli_rejects_extra_arguments(tmp):
+    del tmp
+    script = str(ROOT / 'scripts' / 'ci' / 'pr_body.py')
+    result = subprocess.run(
+        [sys.executable, script, 'template', 'extra'], input='', text=True,
+        capture_output=True, timeout=30)
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stdout == '', repr(result.stdout)
+    assert result.stderr == f'usage: {script} [template]\n', result.stderr
 
 
 def main():

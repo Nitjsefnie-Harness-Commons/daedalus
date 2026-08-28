@@ -2,6 +2,7 @@
 """Pull-request workflow shell and state-table behavior."""
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -112,6 +113,26 @@ def test_open_admissible_body_is_left_untouched(tmp):
     _assert_no_mutation(calls)
 
 
+def test_claimed_literal_markdown_contexts_are_left_untouched(tmp):
+    instruction = (
+        '<!-- required: bullet list of concrete changes — files, modules, '
+        'behavior. -->')
+    cases = (
+        _valid_body('The token `<!--` is literal; Fixes #101'),
+        _valid_body().replace(
+            '- One change', f'- Changed `{instruction}` to prose.'),
+        _valid_body().replace(
+            '- One change', f'    {instruction}\n- A visible change'),
+        _valid_body().replace(
+            '- One change', '<pre>\n## literal heading\n</pre>\n- A change'),
+    )
+    for index, body in enumerate(cases):
+        calls, result = _run_workflow(
+            Path(tmp) / str(index), body, {'101': _issue('alice')})
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        _assert_no_mutation(calls)
+
+
 def test_open_body_reports_both_failed_conditions_once(tmp):
     body = _layout_body(
         ('Summary', ''),
@@ -134,7 +155,39 @@ def test_open_body_reports_each_single_failed_condition(tmp):
     _assert_commented_then_closed(
         unclaimed, 'No checked issue is assigned to you.')
     _assert_commented_then_closed(
-        malformed, 'Section "Notes" is not defined by the template.')
+        malformed, 'Section `Notes` is not defined by the template.')
+
+
+def test_open_rendered_empty_changes_is_closed(tmp):
+    body = _valid_body().replace('- One change', '-')
+    calls, result = _run_workflow(
+        tmp, body, {'101': _issue('alice')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(calls, 'Section "Changes" is empty.')
+
+
+def test_link_destination_does_not_satisfy_the_claim(tmp):
+    calls, result = _run_workflow(
+        tmp, _valid_body('[documentation](#101)'),
+        {'101': _issue('alice')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(
+        calls, 'No checked issue is assigned to you.')
+
+
+def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
+    name = 'Notes ``for #255``'
+    body = _valid_body().replace(
+        '## Testing', f'## {name}\nUnknown.\n\n## Testing')
+    calls, result = _run_workflow(
+        tmp, body, {'101': _issue('alice')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    endpoint = 'repos/owner/repo/issues/99/comments'
+    comment = _body_from(next(call for call in calls if endpoint in call))
+    quoted = '```Notes ``for #255`````'
+    assert f'Section {quoted} is not defined by the template.' in comment
+    without_name = comment.replace(quoted, '')
+    assert re.search(r'#[0-9]', without_name) is None, comment
 
 
 def test_closed_owned_admissible_body_is_reopened(tmp):
