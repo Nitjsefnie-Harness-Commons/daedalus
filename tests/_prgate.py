@@ -172,8 +172,25 @@ GITHUB_MARKDOWN = {
     'kbd_block': '<kbd>\n## literal heading\n</kbd>',
 }
 
+_CRLF_SITECUSTOMIZE = """from pathlib import Path
+_original_write_text = Path.write_text
+
+
+def _write_text_crlf(self, data, encoding=None, errors=None, newline=None):
+    del newline
+    return _original_write_text(
+        self, data, encoding=encoding, errors=errors, newline='\\r\\n')
+
+
+Path.write_text = _write_text_crlf
+"""
+
+
 _CRLF_PYTHON_STUB = r"""#!/usr/bin/env bash
 set -euo pipefail
+if [[ "${STUB_SNAPSHOT_CRLF:-}" == 1 && "${1:-}" == - ]]; then
+  export PYTHONPATH="$STUB_CRLF_SITE${PYTHONPATH:+:$PYTHONPATH}"
+fi
 if [[ "${1:-}" == scripts/ci/pr_body.py ||
       "${1:-}" == */scripts/ci/pr_body.py ]]; then
   "$STUB_REAL_PYTHON" "$@" |
@@ -218,13 +235,14 @@ def _run_workflow(
         **options):
     """Execute the real workflow shell against the controlled gh boundary."""
     supported = {
-        'parser_crlf', 'comment_status', 'pull', 'history',
+        'parser_crlf', 'snapshot_crlf', 'comment_status', 'pull', 'history',
         'rendered_html', 'render_status', 'render_complete',
         'render_after_sentinel', 'render_sentinel_mangle',
         'current_pulls', 'pull_status', 'pull_statuses',
     }
     assert set(options) <= supported, sorted(set(options) - supported)
     parser_crlf = options.get('parser_crlf', False)
+    snapshot_crlf = options.get('snapshot_crlf', False)
     comment_status = options.get('comment_status')
     pull = options.get('pull')
     history = options.get('history')
@@ -258,10 +276,15 @@ def _run_workflow(
     stub = workdir / 'bin' / 'gh'
     stub.write_text(_GH_STUB, encoding='utf-8')
     stub.chmod(0o755)
-    if parser_crlf:
+    if parser_crlf or snapshot_crlf:
         python_stub = workdir / 'bin' / 'python3'
         python_stub.write_text(_CRLF_PYTHON_STUB, encoding='utf-8')
         python_stub.chmod(0o755)
+    crlf_site = workdir / 'crlf-site'
+    if snapshot_crlf:
+        crlf_site.mkdir()
+        (crlf_site / 'sitecustomize.py').write_text(
+            _CRLF_SITECUSTOMIZE, encoding='utf-8')
     fixture_path = workdir / 'issues.json'
     fixtures = dict(issues)
     fixtures['_timeline'] = list(timeline)
@@ -288,6 +311,8 @@ def _run_workflow(
         'STUB_ISSUES': str(fixture_path),
         'STUB_CALLS': str(calls_path),
         'STUB_REAL_PYTHON': sys.executable,
+        'STUB_SNAPSHOT_CRLF': '1' if snapshot_crlf else '0',
+        'STUB_CRLF_SITE': str(crlf_site),
         'STUB_RENDERED_HTML': str(rendered_path),
         'STUB_EXPECTED_BODY': current_pulls[0]['body'] or '',
         'STUB_EXPECTED_REPO': repo,
@@ -352,6 +377,7 @@ def _assert_unusable_render(tmp, body, rendered, **options):
 
 def _truncated_render_cases():
     body = _valid_body()
+    issue_url = 'https://github.com/owner/repo/issues/101'
     cases = (
         ('empty', ''),
         ('plain', 'upstream returned plain text'),
@@ -367,10 +393,22 @@ def _truncated_render_cases():
         ('last-content', _valid_html().replace(
             '<p dir="auto">Ran the suite.</p>', '')),
         ('middle-content', _valid_html(changes='')),
+        ('substituted-content', _valid_html(
+            changes=_text_html('Replacement.'))),
     )
-    url = '[tracked issue](https://github.com/owner/repo/issues/101)'
+    url = f'[tracked issue]({issue_url})'
+    reordered = _layout_body(
+        ('Summary', 'One sentence.'),
+        ('Changes', '- One change'),
+        ('Related Issues and Pull Requests', 'Fixes #101'),
+        ('Testing', 'Ran the suite.'))
     return tuple((name, body, rendered) for name, rendered in cases) + (
         ('middle-url', _valid_body(url), _valid_html(changes='')),
+        ('missing-issue-anchor', _valid_body(url), _valid_html(
+            references=_text_html('tracked issue'))),
+        ('hidden-substitution', _valid_body().replace(
+            'One sentence.', '<!-- hidden -->'), _valid_html()),
+        ('reordered-source', reordered, _valid_html()),
         ('unknown-source', _valid_body().replace('## Summary', '## Notes'),
          _valid_html()),)
 

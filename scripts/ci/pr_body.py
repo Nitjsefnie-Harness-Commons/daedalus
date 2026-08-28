@@ -21,6 +21,16 @@ _TEMPLATE_HEADING = re.compile(
     r'^##[ \t]+(?P<text>.+?)[ \t]*$', re.MULTILINE)
 _SOURCE_HEADING = re.compile(
     r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.+?)[ \t]*#*[ \t]*$', re.MULTILINE)
+_SOURCE_HASH = re.compile(r'(?<![\w/#])#([0-9]{1,19})')
+_SOURCE_GH = re.compile(r'\bGH-([0-9]{1,19})\b', re.IGNORECASE)
+_SOURCE_INDENTED_COMMENT = re.compile(
+    r'^(?: {4}|\t).*<!--', re.MULTILINE)
+_SOURCE_LIST = re.compile(r'^(?:[-+*]|[0-9]+[.)])(?:[ \t]+|$)')
+_SOURCE_QUOTE = re.compile(r'^(?:>[ \t]*)+')
+_SOURCE_TARGET = re.compile(
+    r'(?i)(?:https?://github\.com(?::[^/\s]+)?|'
+    r'//github\.com(?::[^/\s]+)?|/)[^)\s<>]+')
+_SOURCE_TOKEN = re.compile(r'[^\W_]+')
 _TEMPLATE_TAG = re.compile(
     r'<!--\s*(?P<tag>required|conditional|optional)\b')
 _HEADING_TAGS = frozenset(f'h{depth}' for depth in range(1, 7))
@@ -67,10 +77,23 @@ def _repository_parts(repository):
 def _issue_number(href, repository):
     if not href:
         return None
-    target = urlsplit(href)
-    if target.scheme and target.scheme.casefold() not in ('http', 'https'):
+    try:
+        target = urlsplit(href)
+        port = target.port
+    except ValueError:
         return None
-    if target.netloc and (target.hostname or '').casefold() != 'github.com':
+    # Accepted targets are root-relative, or exact github.com HTTP(S)
+    # authorities; scheme-relative links inherit GitHub's HTTPS origin.
+    if target.netloc:
+        scheme = target.scheme.casefold()
+        default_port = {'': 443, 'http': 80, 'https': 443}.get(scheme)
+        if (default_port is None
+                or (target.hostname or '').casefold() != 'github.com'
+                or target.username is not None or target.password is not None
+                or port not in (None, default_port)):
+            return None
+    elif (target.scheme or not href.startswith('/')
+            or href.startswith('//')):
         return None
     parts = target.path.strip('/').split('/')
     if len(parts) != 4 or parts[2].casefold() != 'issues':
@@ -333,28 +356,69 @@ def _has_visible_text(text):
     return False
 
 
-def _source_has_missing_rendered_content(source, sections, template):
+def _source_content_tokens(content):
+    if _SOURCE_INDENTED_COMMENT.search(content):
+        return None
+    content = _TEMPLATE_COMMENT.sub('', content)
+    if len(content) > 4096 or any(
+            marker in content for marker in '`[]<>\\&'):
+        return None
+    lines = []
+    for line in content.splitlines():
+        line = _SOURCE_QUOTE.sub('', line.strip())
+        line = _SOURCE_LIST.sub('', line).strip()
+        if line:
+            lines.append(line)
+    plain = ' '.join(lines)
+    tokens = tuple(_SOURCE_TOKEN.findall(plain.casefold()))
+    return None if not tokens and _has_visible_text(plain) else tokens
+
+
+def _source_issue_numbers(content, repository, tokens):
+    content = _TEMPLATE_COMMENT.sub('', content)
+    found = set()
+    if tokens is not None:
+        for pattern in (_SOURCE_HASH, _SOURCE_GH):
+            found.update(int(match) for match in pattern.findall(content))
+    if '`' not in content:
+        for target in _SOURCE_TARGET.findall(content):
+            number = _issue_number(target, repository)
+            if number is not None:
+                found.add(number)
+    return found
+
+
+def _source_has_missing_rendered_content(
+        source, sections, template, repository):
     source = _normalise_newlines(source)
     headings = list(_SOURCE_HEADING.finditer(source))
     rules = _template_rules(template)
-    rendered = {item.key for item in sections
-                if _has_visible_text(item.text)}
-    source_sections = set()
+    source_sections = []
     for index, heading in enumerate(headings):
         name = _heading_text(heading.group('text')).strip('*_~` ')
         key = name.casefold()
         if key not in rules:
             continue
-        source_sections.add(key)
         end = headings[index + 1].start() if index + 1 < len(headings) \
             else len(source)
-        content = _TEMPLATE_COMMENT.sub('', source[heading.end():end])
-        # This crude scan is only a veto; it can never authorize an action.
-        if content.strip() and key not in rendered:
+        source_sections.append((key, source[heading.end():end]))
+    rendered = [item for item in sections if item.key in rules]
+    if [key for key, _ in source_sections] != [item.key for item in rendered]:
+        return True
+    for (key, content), section in zip(source_sections, rendered):
+        tokens = _source_content_tokens(content)
+        rendered_tokens = tuple(
+            _SOURCE_TOKEN.findall(section.text.casefold()))
+        if tokens is not None and tokens != rendered_tokens:
             return True
-    # Render-only template sections prove substitution, never admissibility.
-    return any(item.key in rules and item.key not in source_sections
-               for item in sections)
+        if key == _SECTION:
+            expected = _source_issue_numbers(content, repository, tokens)
+            actual = set(section.issues)
+            if (tokens is not None and expected != actual
+                    or not expected.issubset(actual)):
+                return True
+    # This crude correspondence is only a veto; it never authorizes an action.
+    return False
 
 
 def layout_errors(rendered, template):
@@ -364,7 +428,7 @@ def layout_errors(rendered, template):
 def analyze(rendered, repository, template, source=None):
     document = _rendered_body(rendered, repository)
     if source is not None and _source_has_missing_rendered_content(
-            source, document.sections, template):
+            source, document.sections, template, repository):
         raise ValueError('rendered HTML omits source section content')
     errors = _layout_errors(document.sections, template)
     if source is not None and _retains_instruction_comment(

@@ -138,7 +138,7 @@ def test_gh_stub_rejects_wrong_write_methods_and_fields(tmp):
 def test_workflow_renders_the_current_body_once_in_repository_context(tmp):
     repository = 'acme/context-pin'
     actor = 'render-author'
-    body = _valid_body('Fixes #101\n\nUnique render payload.')
+    body = _valid_body()
     stale = 'event body that must not reach the renderer'
     sentinels = []
     for index in range(2):
@@ -446,9 +446,9 @@ def test_open_body_reports_both_failed_conditions_once(tmp):
 
 
 def test_open_body_without_a_raw_reference_is_closed(tmp):
+    body = 'No issue reference.'
     calls, result = _run_complete_workflow(
-        tmp, 'No issue reference anywhere.', {},
-        rendered_html='<p dir="auto">No issue reference anywhere.</p>')
+        tmp, body, {}, rendered_html=f'<p>{body}</p>', snapshot_crlf=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_then_closed(
         calls, 'No checked issue is assigned to you.')
@@ -462,7 +462,8 @@ def test_open_body_reports_each_single_failed_condition(tmp):
             references=f'<a href="{issue_url}">tracked</a>'))
     unclaimed, first = _run_complete_workflow(
         Path(tmp) / 'claim', _valid_body(f'[tracked]({issue_url})'), {},
-        rendered_html=_valid_html(references=_text_html('tracked')))
+        rendered_html=_valid_html(
+            references=f'<a href="{issue_url}">tracked</a>'))
     malformed, second = _run_complete_workflow(
         Path(tmp) / 'layout', _valid_body().replace('## Summary', '## Notes'),
         {'101': _issue('alice')}, rendered_html=_html_body(

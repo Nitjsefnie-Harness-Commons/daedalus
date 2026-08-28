@@ -107,13 +107,30 @@ def test_github_nontext_reference_fixtures_remain_hidden(tmp):
 
 def test_parser_filters_repository_and_pull_request_targets(tmp):
     del tmp
-    rendered = _related(
-        f'{_issue_html(40, REPOSITORY)} '
-        f'{_issue_html(41, "another/project")} '
-        '<a href="mailto:#43">#43</a> '
-        '<a href="https://github.com/Nitjsefnie-Harness-Commons/'
-        'daedalus/pull/42">#42</a>')
-    assert PR_BODY.referenced_issues(rendered, REPOSITORY) == [40]
+    path = 'Nitjsefnie-Harness-Commons/daedalus/issues/'
+    credentialed = 'contributor@github.com'
+    cases = (
+        ('absolute', f'https://github.com/{path}40', [40]),
+        ('default-port', f'https://github.com:443/{path}41', [41]),
+        ('scheme-relative', f'//github.com/{path}42', [42]),
+        ('root-relative', f'/{path}43', [43]),
+        ('foreign-repository',
+         'https://github.com/another/project/issues/44', []),
+        ('pull-request', 'https://github.com/Nitjsefnie-Harness-Commons/'
+         'daedalus/pull/45', []),
+        ('non-http', 'mailto:#46', []),
+        ('path-relative', f'{path}47', []),
+        ('malformed-port', f'https://github.com:notaport/{path}48', []),
+        ('non-default-port', f'https://github.com:444/{path}49', []),
+        ('credentials', f'https://{credentialed}/{path}50', []),
+    )
+    failures = []
+    for name, href, expected in cases:
+        rendered = _related(f'<a href="{href}">tracked</a>')
+        found = PR_BODY.referenced_issues(rendered, REPOSITORY)
+        if found != expected:
+            failures.append((name, found, expected))
+    assert failures == [], failures
 
 
 def test_parser_deduplicates_issue_anchors_in_document_order(tmp):
@@ -231,12 +248,41 @@ def test_numeric_entities_do_not_hide_a_retained_comment(tmp):
         source = _valid_body().replace(
             '- One change', f'<!-- optional -->\n- Literal {literal}.')
         rendered = _valid_html(
-            changes=f'<ul><li>Literal {literal}.</li></ul>')
+            changes=f'<ul><li>Literal {literal}.</li></ul>',
+            repo=REPOSITORY)
         _, errors = PR_BODY.analyze(
             rendered, REPOSITORY, TEMPLATE, source)
         if 'Remove the template instruction comments.' not in errors:
             failures.append((name, errors))
     assert failures == [], failures
+
+
+def test_source_render_correspondence_vetoes_content_substitution(tmp):
+    del tmp
+    issue_url = 'https://github.com/owner/repo/issues/101'
+    reordered = _valid_body().replace(
+        '## Related Issues and Pull Requests\nFixes #101\n\n'
+        '## Changes\n- One change',
+        '## Changes\n- One change\n\n'
+        '## Related Issues and Pull Requests\nFixes #101')
+    cases = (
+        ('content', _valid_body(), _valid_html(
+            changes=_text_html('Replacement.'))),
+        ('hidden', _valid_body().replace(
+            'One sentence.', '<!-- hidden -->'), _valid_html()),
+        ('issue', _valid_body(f'[tracked issue]({issue_url})'),
+         _valid_html(references=_text_html('tracked issue'))),
+        ('order', reordered, _valid_html()),
+    )
+    accepted = []
+    for name, source, rendered in cases:
+        try:
+            PR_BODY.analyze(rendered, 'owner/repo', TEMPLATE, source)
+        except ValueError as error:
+            assert 'source section content' in str(error), (name, error)
+        else:
+            accepted.append(name)
+    assert accepted == [], accepted
 
 
 def test_parser_ignores_a_named_anchor_without_a_destination(tmp):

@@ -86,10 +86,10 @@ jobs:
           if (not isinstance(body, str) or state not in ('open', 'closed')
                   or not isinstance(merged, bool)):
               raise ValueError('pull request response has an invalid shape')
-          Path(sys.argv[2]).write_text(body, encoding='utf-8')
-          Path(sys.argv[3]).write_text(f'{state}\n', encoding='utf-8')
-          Path(sys.argv[4]).write_text(
-              f'{str(merged).lower()}\n', encoding='utf-8')
+          Path(sys.argv[2]).write_bytes(body.encode('utf-8'))
+          Path(sys.argv[3]).write_bytes(f'{state}\n'.encode('ascii'))
+          Path(sys.argv[4]).write_bytes(
+              f'{str(merged).lower()}\n'.encode('ascii'))
           PY
             then
               echo 'could not read the current pull request fields' >&2
