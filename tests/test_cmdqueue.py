@@ -60,6 +60,8 @@ def _virtual_cmdqueue_clock(max_sleeps):
             now[0] += read_cost
 
         def sleep(self, seconds):
+            if seconds < 0:
+                raise ValueError('sleep length must be non-negative')
             if sleep_count[0] >= max_sleeps:
                 raise AssertionError(
                     f'virtual clock exceeded {max_sleeps} sleeps')
@@ -216,12 +218,15 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     sleep_groups = []
     for kind, duration in events:
         if kind == 'read':
-            assert not sleep_groups or sleep_groups[-1], events
+            assert not sleep_groups or sleep_groups[-1], (
+                'read without intervening sleep', events)
             sleep_groups.append([])
         else:
-            assert kind == 'sleep' and sleep_groups, events
+            assert kind == 'sleep' and sleep_groups, (
+                'sleep before first read', events)
             sleep_groups[-1].append(duration)
-    assert sleep_groups and sleep_groups[-1], events
+    assert sleep_groups and sleep_groups[-1], (
+        'final read had no following sleep', events)
     sleeps = [sum(group) for group in sleep_groups]
     assert command is None, command
     assert calls[0] == len(sleep_groups), (calls, sleep_groups)
