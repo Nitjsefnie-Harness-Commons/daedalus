@@ -1,5 +1,11 @@
 """Structural readers for the job graph in tests.yml."""
+import contextlib
+import io
+import json
+import os
 import re
+import shutil
+import subprocess
 
 from _repo import ROOT
 from _yamlread import (
@@ -13,6 +19,41 @@ from _yamlsteps import complete_job_mapping
 def _tests_yml():
     return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
+
+
+def _run_script(script, needs, through_bash=False):
+    """Run an extracted workflow script and capture its result."""
+    env = {**os.environ, 'NEEDS_JSON': json.dumps(needs)}
+    if through_bash:
+        bash = shutil.which('bash')
+        assert bash, 'bash is required to execute the aggregate script'
+        return subprocess.run([bash, '-c', script], env=env,
+                              capture_output=True, text=True, timeout=60)
+    source = '\n'.join(script.splitlines()[1:-1])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    code = 0
+    previous = os.environ.get('NEEDS_JSON')
+    os.environ['NEEDS_JSON'] = env['NEEDS_JSON']
+    try:
+        with contextlib.redirect_stdout(stdout):
+            with contextlib.redirect_stderr(stderr):
+                try:
+                    exec(source, {})  # pylint: disable=exec-used
+                except SystemExit as error:
+                    code = error.code or 0
+    finally:
+        if previous is None:
+            del os.environ['NEEDS_JSON']
+        else:
+            os.environ['NEEDS_JSON'] = previous
+    return subprocess.CompletedProcess(
+        [], code, stdout.getvalue(), stderr.getvalue())
+
+
+def aggregate_expected(results, allowed):
+    return all(
+        result in allowed[name]
+        for name, result in results.items())
 
 
 def _job_section(workflow, job):
