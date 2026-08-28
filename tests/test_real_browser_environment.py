@@ -122,7 +122,7 @@ def test_e2big_start_failure_skips_when_minimal_spawn_fails(tmp):
     assert skipped is not None, 'E2BIG did not produce an environment skip'
     assert skipped.__cause__ is too_large, skipped.__cause__
     assert calls[0][0] == [sys.executable, '-c', ''], calls
-    assert 'env' not in calls[0][1], calls
+    assert calls[0][1].get('env') is None, calls
 
 
 def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
@@ -144,7 +144,7 @@ def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
     assert failure.__class__ is AssertionError, failure
     assert failure.__cause__ is too_large, failure.__cause__
     assert calls[0][0] == [sys.executable, '-c', ''], calls
-    assert 'env' not in calls[0][1], calls
+    assert calls[0][1].get('env') is None, calls
 
 
 def test_nonterminating_node_probe_is_harness_failure(tmp):
