@@ -625,6 +625,9 @@ def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
         assert failure.__class__ is failure_type, failure
         assert failure.request_arrived is request_arrives, failure
         assert getattr(failure, 'selected_owner', object()) is None, failure
+        owner_selection = failure.render_owner_selection(
+            failure.selected_owner)
+        assert owner_selection in str(failure), failure
         assert failure.candidate_owners == required_owners, failure
 
 
