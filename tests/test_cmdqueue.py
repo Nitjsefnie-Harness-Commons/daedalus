@@ -2,6 +2,7 @@
 """Fault controls for test-side command queue readers."""
 import contextlib
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -40,7 +41,9 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 @contextlib.contextmanager
 def _virtual_cmdqueue_clock(max_sleeps):
     original = _cmdqueue.time
-    now = [0.0]
+    # A large power-of-two scale keeps even subnormal polling delays distinct.
+    origin = _cmdqueue.POLL_DELAY * (1 << 24)
+    now = [origin]
     events = []
     sleep_count = [0]
     # Read cost exposes stale deadline samples; the fallback avoids underflow.
@@ -65,7 +68,7 @@ def _virtual_cmdqueue_clock(max_sleeps):
     clock = Clock()
     _cmdqueue.time = clock
     try:
-        yield clock, events
+        yield clock, events, origin
     finally:
         _cmdqueue.time = original
 
@@ -203,7 +206,7 @@ def test_a_queue_file_already_gone_during_clear_is_not_an_error(tmp):
 def test_a_permanent_read_refusal_is_bounded(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    with _virtual_cmdqueue_clock(10) as (clock, events):
+    with _virtual_cmdqueue_clock(10) as (clock, events, origin):
         with _refuse_path_operation(
                 queued, 'read_text', 1000, clock=clock) as calls:
             command = _cmdqueue.wait_for_command(
@@ -217,7 +220,11 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), sleeps
     # An exact multiple can make the final sleep equal the polling delay.
     assert sleeps[-1] <= _cmdqueue.POLL_DELAY, sleeps
-    assert clock.monotonic() == timeout, (clock.monotonic(), timeout, events)
+    elapsed = clock.monotonic() - origin
+    assert clock.monotonic() == origin + timeout, (
+        clock.monotonic(), origin, timeout, events)
+    assert abs(elapsed - timeout) <= math.ulp(origin + timeout), (
+        elapsed, timeout, origin, events)
 
 
 def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
@@ -242,7 +249,7 @@ def test_wait_ends_early_when_the_producer_is_gone(tmp):
         producer_calls.append(True)
         return False
 
-    with _virtual_cmdqueue_clock(0) as (_clock, events):
+    with _virtual_cmdqueue_clock(0) as (_clock, events, _origin):
         command = _cmdqueue.wait_for_command(
             queue, timeout=10, producer_alive=producer_alive)
     assert command is None, command
