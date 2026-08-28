@@ -187,6 +187,51 @@ def test_a_declaration_name_cannot_be_aliased(tmp):
         for v in restored), restored
 
 
+def test_rebinding_the_declaration_helper_is_a_violation(tmp):
+    """Assigning to the helper, its module attribute, or its alias fails."""
+    del tmp
+    for binding in ('child_coverage = lambda _mode: {}',
+                    '_util.child_coverage = lambda _mode: {}',
+                    'cc = None'):
+        violations = _synthetic_violations(
+            f"""import subprocess
+import _util
+from _util import child_coverage as cc
+{binding}
+_ENV = _util.child_coverage('scrub')
+subprocess.run(['python3', 'child.py'], cwd=tmp, env=_ENV)
+""")
+        assert any('tests/synthetic.py:4' in v for v in violations), (
+            binding, violations)
+
+
+def test_a_rebound_declaration_helper_is_caught(tmp):
+    """Rebinding _util.child_coverage makes declarations no-ops: refuse."""
+    del tmp
+    target = ROOT / 'tests' / 'test_diff_coverage.py'
+    original = target.read_bytes()
+    needle = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
+    text = _module_text(target)
+    assert needle in text, 'the declaration binding shape changed'
+    line = text[:text.index(needle)].count('\n') + 1
+    mutated = text.replace(
+        needle,
+        "_util.child_coverage = lambda _mode: dict(os.environ)\n"
+        + needle, 1)
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations()
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
+    restored = _coverage_environment_violations()
+    assert not any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in restored), restored
+
+
 def test_an_earlier_non_root_chdir_taints_an_inherited_cwd(tmp):
     """A launch without cwd= after os.chdir(tmp) must declare."""
     del tmp

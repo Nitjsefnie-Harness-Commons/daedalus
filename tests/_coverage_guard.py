@@ -348,12 +348,48 @@ def _declaration_name_violations(tree, facts, relative):
     return violations
 
 
+def _rebinds_declaration(part, facts):
+    """Whether an assignment target names the declaration helper."""
+    if isinstance(part, ast.Name):
+        return (part.id == _DECLARATION
+                or part.id in facts.declaration_functions)
+    return (isinstance(part, ast.Attribute)
+            and part.attr == _DECLARATION
+            and isinstance(part.value, ast.Name)
+            and part.value.id in facts.declaration_modules)
+
+
+def _helper_rebind_violations(tree, facts, relative):
+    """A module may never assign to child_coverage or its local alias.
+
+    `_util.child_coverage = lambda _mode: dict(os.environ)` makes every
+    later declaration a no-op while reading exactly like one. Assignment
+    targets only — syntax, not control flow.
+    """
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+        else:
+            continue
+        for target in targets:
+            for part in ast.walk(target):
+                if _rebinds_declaration(part, facts):
+                    violations.append(
+                        f'{relative}:{node.lineno}: the module rebinds '
+                        f'{_DECLARATION}')
+    return violations
+
+
 def _analyze(relative, source, keeps):
     tree = ast.parse(source, filename=relative)
     facts = _ModuleFacts(tree)
     violations = []
     _visit(tree, relative, '<module>', facts, tree, keeps, violations)
     violations.extend(_declaration_name_violations(tree, facts, relative))
+    violations.extend(_helper_rebind_violations(tree, facts, relative))
     return violations
 
 
