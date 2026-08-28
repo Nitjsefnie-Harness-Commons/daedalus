@@ -506,6 +506,9 @@ def test_pull_request_gate_uses_general_names(tmp):
     assert all(path.is_file() for path in expected), expected
     assert not any(path.exists() for path in retired), retired
     assert _workflow().splitlines()[0] == 'name: pr gate'
+    contributing = (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8')
+    assert 'reopens it automatically' in contributing
+    assert 'and reopen the same pull request' not in contributing
 
 
 def test_gh_stub_models_include_response_headers(tmp):
