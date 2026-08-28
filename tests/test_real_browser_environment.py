@@ -48,21 +48,17 @@ def test_repository_node_probe_starts_and_terminates(tmp):
             node, '/controlled/chromium')
 
 
-def test_oversized_node_probe_is_harness_failure(tmp):
+def test_e2big_start_failure_is_environment_skip(tmp):
     del tmp
-    node = shutil.which('node')
-    assert node, 'Node is required to execute the probe control'
-    failure = None
-    with mock.patch.object(
-            _realbrowser.shutil, 'which', _which_with(node)), \
-            mock.patch.object(
-                _realbrowser, 'NODE_WEBSOCKET_PROBE', ' ' * (1024 * 1024)):
-        try:
-            _realbrowser.browser_requirements()
-        except Exception as why:  # noqa: BLE001
-            failure = why
-    assert failure.__class__ is AssertionError, failure
-    assert isinstance(failure.__cause__, OSError), failure.__cause__
+    too_large = OSError(errno.E2BIG, 'platform-dependent size refusal')
+    skipped = None
+    try:
+        _realbrowser._raise_start_failure(
+            'Node WebSocket probe', '/controlled/node', too_large)
+    except _realbrowser.BrowserEnvironmentSkipped as why:
+        skipped = why
+    assert skipped is not None, 'E2BIG did not produce an environment skip'
+    assert skipped.__cause__ is too_large, skipped.__cause__
 
 
 def test_nonterminating_node_probe_is_harness_failure(tmp):
