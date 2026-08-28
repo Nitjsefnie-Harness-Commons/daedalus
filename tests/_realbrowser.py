@@ -39,6 +39,21 @@ class CDPTimeout(AssertionError):
     """The JavaScript CDP harness reached its response deadline."""
 
 
+class FirstNavigationTimeout(AssertionError):
+    """A first navigation deadline with its in-process arrival observation."""
+
+    def __init__(self, page_url, request_arrived):
+        self.request_arrived = request_arrived
+        arrival = ('received a request for that page'
+                   if request_arrived
+                   else 'did not receive a request for that page')
+        super().__init__(
+            f'the first fixture navigation reached its deadline: {page_url}; '
+            f'the in-process handler {arrival}. This does not by itself '
+            'establish whether the browser, the CDP transport, or this '
+            'repository is at fault')
+
+
 class BrowserEnvironmentSkipped(_util.Skipped):
     """The browser installation could not reach a usable fixture state."""
 
@@ -343,17 +358,6 @@ def ready_worker(node, workers):
     return None, reached, error
 
 
-def _cdp_channel_answers(node, target):
-    try:
-        cdp_call(node, target, 'Runtime.evaluate', {
-            'expression': '1',
-            'returnByValue': True,
-        })
-    except AssertionError:
-        return False
-    return True
-
-
 def worker_state(node, target):
     """What one worker says about itself, for a failure that names which."""
     try:
@@ -428,32 +432,17 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         # script's keepalive port is an event the worker listens for, so
         # loading the page is what revives it, exactly as an ordinary
         # browsing session does.
-        # Only this first navigation can still be environmental. Later calls
-        # follow configuration and fail.
         request_marker = _fixture_request_marker(page_url)
         try:
             cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
         except CDPTimeout as why:
-            channel_answers = _cdp_channel_answers(node, page_target)
             request_arrived = _fixture_request_arrived(
                 page_url, request_marker)
-            if not channel_answers:
-                raise BrowserEnvironmentSkipped(
-                    'the browser CDP channel stopped answering during the '
-                    'first fixture navigation: '
-                    f'{_browser_version(browser)}') from why
-            if not request_arrived:
-                raise BrowserEnvironmentSkipped(
-                    'the first fixture navigation never reached the fixture: '
-                    f'{_browser_version(browser)}') from why
-            # A channel that selectively loses the navigation reply but
-            # answers this probe is indistinguishable from a slow fixture.
-            # The realistic channel-loss case, where it stopped working, is
-            # caught above; the observations here cannot settle the synthetic
-            # selective-loss case without inventing another causal inference.
-            raise AssertionError(
-                'the fixture received the first navigation request but did '
-                f'not satisfy it before the deadline: {page_url}') from why
+            # Arrival is an independent in-process observation, but it cannot
+            # identify whether the browser, CDP transport, or repository kept
+            # the navigation reply from arriving before the deadline.
+            raise FirstNavigationTimeout(
+                page_url, request_arrived) from why
         deadline = time.time() + 30
         last_error = 'no evaluation was attempted'
         answered = False
