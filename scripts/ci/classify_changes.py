@@ -53,7 +53,8 @@ def matches(pattern, path):
         # Filter patterns are rooted: LICENSE selects LICENSE, never
         # sub/LICENSE or LICENSE.txt.
         return pattern == path
-    if pattern.endswith('/**') and pattern[:-3] and '*' not in pattern[:-3]:
+    if (pattern.endswith('/**') and pattern[:-3]
+            and not any(char in pattern[:-3] for char in '*?[]')):
         return path.startswith(pattern[:-2])
     raise ValueError(f'unsupported pattern shape: {pattern!r}')
 
