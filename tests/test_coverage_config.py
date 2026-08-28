@@ -10,7 +10,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-_ENV = _util.coverage_free_environment(os.environ)
+_ENV = _util.child_coverage('scrub')
 _RCFILE = ROOT / 'pyproject.toml'
 # Independent roots stop a source entry for one fixture satisfying both.
 _UNEXECUTED_FILES = (
