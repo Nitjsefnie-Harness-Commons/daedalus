@@ -46,12 +46,53 @@ def test_node_interpreter_start_failure_is_environment_skip(tmp):
 def test_repository_node_probe_starts_and_terminates(tmp):
     del tmp
     node = shutil.which('node')
-    assert node, 'Node is required to execute the probe control'
+    if not node:
+        _util.skip('Node is absent, so its repository probe cannot be checked')
+    capability = subprocess.run(
+        [node, '-e',
+         "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
+        capture_output=True, text=True, timeout=10)
+    assert capability.returncode in (0, 1), (
+        capability.returncode, capability.stdout, capability.stderr)
+    requirements = None
     with mock.patch.object(
             _realbrowser.shutil, 'which', _which_with(node)), \
             mock.patch.object(_realbrowser, 'NODE_PROBE_TIMEOUT', 1):
-        assert _realbrowser.browser_requirements() == (
-            node, '/controlled/chromium')
+        try:
+            requirements = _realbrowser.browser_requirements()
+        except _realbrowser.BrowserEnvironmentSkipped as why:
+            if capability.returncode == 0:
+                raise AssertionError(
+                    f'the repository probe skipped capable Node {node}'
+                ) from why
+            _util.skip('Node is present but lacks the required WebSocket')
+    assert capability.returncode == 0, (
+        'the repository probe accepted Node without WebSocket', node)
+    assert requirements == (node, '/controlled/chromium'), requirements
+
+
+def test_repository_worker_probe_matches_declared_functions(tmp):
+    del tmp
+    node = shutil.which('node')
+    if not node:
+        _util.skip('Node is absent, so the worker probe cannot be checked')
+
+    def evaluate(declarations):
+        program = (
+            declarations + '\nprocess.stdout.write(String('
+            + _realbrowser._WORKER_READY_PROBE + '));')
+        result = subprocess.run(
+            [node, '-e', program], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, (
+            node, result.returncode, result.stdout, result.stderr)
+        return result.stdout
+
+    declared = (
+        'function loadConfig() {}\n'
+        'function ensureKeepAlive() {}\n'
+        'function startStream() {}')
+    assert evaluate('') == 'false'
+    assert evaluate(declared) == 'true'
 
 
 def test_invalid_repository_node_probe_is_harness_failure(tmp):
