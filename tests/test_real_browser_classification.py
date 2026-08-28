@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Browser-free mutation controls for fixture fault classification."""
+import contextlib
 import errno
 import subprocess
 import sys
@@ -55,6 +56,33 @@ def test_missing_browser_requirements_are_environment_skip(tmp):
     with mock.patch.object(_realbrowser.shutil, 'which', return_value=None):
         failure = _call_failure(_realbrowser.browser_requirements)
     assert failure.__class__ is _realbrowser.BrowserEnvironmentSkipped, failure
+
+
+def test_missing_declared_worker_is_repository_failure(tmp):
+    extension = Path(tmp) / 'missing-worker-extension'
+    extension.mkdir()
+    missing_worker = extension / 'missing-worker.js'
+    (extension / 'manifest.json').write_text(
+        '{"background":{"service_worker":"missing-worker.js"}}',
+        encoding='utf-8')
+
+    def enter_fixture():
+        with _realbrowser.real_extension_page(
+                tmp, 'http://127.0.0.1:1', 'controltoken',
+                'http://127.0.0.1:2/plain.html',
+                extension_root=extension):
+            raise AssertionError('missing-worker fixture unexpectedly yielded')
+
+    launch = mock.Mock(side_effect=AssertionError(
+        'browser launched before the declared worker was checked'))
+    with mock.patch.object(
+            _realbrowser, 'browser_requirements',
+            return_value=('node-for-control', '/controlled/chromium')), \
+            mock.patch.object(_realbrowser.subprocess, 'Popen', launch):
+        failure = _call_failure(enter_fixture)
+    assert failure.__class__ is AssertionError, failure
+    assert str(missing_worker.resolve()) in str(failure), failure
+    launch.assert_not_called()
 
 
 def test_browser_exit_before_devtools_is_environment_skip(tmp):
@@ -181,6 +209,23 @@ def test_ready_page_and_listed_tab_yield_fixture(tmp):
     assert evaluations[-1] == 'registerAllTabs()', evaluations
 
 
+def test_worker_configuration_failure_is_repository_failure(tmp):
+    def not_configured(node, target, expression):
+        del node, target
+        if 'chrome.storage.local.set' in expression:
+            return False
+        raise AssertionError('unexpected evaluation after configuration')
+
+    with _fixture_runtime(tmp, _navigate), \
+            mock.patch.object(_realbrowser, 'cdp_eval', not_configured), \
+            mock.patch.object(
+                _realbrowser.time, 'time', side_effect=(0, 0, 0, 31)), \
+            mock.patch.object(_realbrowser.time, 'sleep'):
+        failure = _fixture_failure(tmp)
+    assert failure.__class__ is AssertionError, failure
+    assert failure.__cause__ is None, failure.__cause__
+
+
 def test_page_readiness_timeout_is_repository_failure(tmp):
     def never_ready(node, target, expression):
         del node, target
@@ -244,6 +289,19 @@ def test_extension_command_delivery_timeout_is_repository_failure(tmp):
     assert failure.__class__ is AssertionError, failure
 
 
+def test_extension_command_submission_failure_is_repository_failure(tmp):
+    del tmp
+    with mock.patch.object(
+            _realbrowser._util, 'request',
+            return_value=(503, 'controlled extension rejection')):
+        failure = _call_failure(lambda: _realbrowser.real_ext_command(
+            'http://127.0.0.1:1', 'controltoken',
+            'controlled-command', {}))
+    assert failure.__class__ is AssertionError, failure
+    assert '503' in str(failure), failure
+    assert 'controlled extension rejection' in str(failure), failure
+
+
 def test_extension_matching_delivery_returns_result(tmp):
     del tmp
     result = {
@@ -271,6 +329,45 @@ def test_eval_delivery_timeout_is_repository_failure(tmp):
         'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
         'controlled-eval', '2 + 2'))
     assert failure.__class__ is AssertionError, failure
+
+
+def test_eval_submission_failure_is_repository_failure(tmp):
+    del tmp
+    with mock.patch.object(
+            _realbrowser._util, 'request',
+            return_value=(503, 'controlled eval rejection')):
+        failure = _call_failure(lambda: _realbrowser.real_eval(
+            'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
+            'controlled-eval', '2 + 2'))
+    assert failure.__class__ is AssertionError, failure
+    assert '503' in str(failure), failure
+    assert 'controlled eval rejection' in str(failure), failure
+
+
+def test_eval_consume_failure_is_repository_failure(tmp):
+    del tmp
+    result = {
+        'deliveryId': 'controlled-delivery',
+        'resultGeneration': 'controlled-generation',
+        'value': 4,
+    }
+
+    def get_json(url):
+        if 'consume=1' in url:
+            return 503, {'error': 'controlled consume rejection'}
+        return 200, result
+
+    with mock.patch.object(
+            _realbrowser._util, 'request',
+            return_value=(200, '{"did":"controlled-delivery"}')), \
+            mock.patch.object(_realbrowser._util, 'get_json', get_json), \
+            mock.patch.object(_realbrowser.time, 'time', side_effect=(0, 0)):
+        failure = _call_failure(lambda: _realbrowser.real_eval(
+            'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
+            'controlled-eval', '2 + 2'))
+    assert failure.__class__ is AssertionError, failure
+    assert '503' in str(failure), failure
+    assert 'controlled consume rejection' in str(failure), failure
 
 
 def test_eval_matching_delivery_returns_and_consumes_result(tmp):
@@ -302,6 +399,34 @@ def test_eval_matching_delivery_returns_and_consumes_result(tmp):
     assert len(reads) == 2, reads
     assert 'consume=1' in reads[-1], reads
     assert 'expected=controlled-generation' in reads[-1], reads
+
+
+def test_hostile_page_setup_failure_is_repository_failure(tmp):
+    @contextlib.contextmanager
+    def bridge(*args, **kwargs):
+        del args, kwargs
+        yield 'http://127.0.0.1:1', Path('/controlled/docroot')
+
+    @contextlib.contextmanager
+    def pages():
+        yield 'http://127.0.0.1:2'
+
+    @contextlib.contextmanager
+    def page(*args, **kwargs):
+        del args, kwargs
+        yield 'node-for-control', 'ws://page', 'controlled-tab'
+
+    with mock.patch.object(_realbrowser._util, 'bridge', bridge), \
+            mock.patch.object(_realbrowser, 'eval_page_server', pages), \
+            mock.patch.object(_realbrowser, 'real_extension_page', page), \
+            mock.patch.object(
+                _realbrowser, 'cdp_eval', return_value='controlled poison'), \
+            mock.patch.object(
+                _realbrowser, 'real_eval',
+                side_effect=AssertionError('eval ran after poisoned setup')):
+        failure = _call_failure(lambda: _realbrowser.hostile_eval_matrix(tmp))
+    assert failure.__class__ is AssertionError, failure
+    assert 'controlled poison' in str(failure), failure
 
 
 def main():
