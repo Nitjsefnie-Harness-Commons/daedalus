@@ -14,7 +14,7 @@ import os, socket, sys, threading
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-if __package__ in (None, ''):
+if __name__ == '__main__' and __package__ in (None, ''):
     sys.path.insert(
         0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
