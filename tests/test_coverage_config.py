@@ -40,26 +40,28 @@ def _write_executed_files(tmp):
         'def run():\n    return 1\n', encoding='utf-8')
 
 
-def test_unexecuted_python_in_nested_non_package_is_reported(tmp_path):
-    _write_executed_files(tmp_path)
-    unexecuted = tmp_path / 'pkgless' / 'deeper' / 'never_run.py'
+def test_unexecuted_python_in_nested_non_package_is_reported(tmp):
+    tmp = Path(tmp)
+    _write_executed_files(tmp)
+    unexecuted = tmp / 'pkgless' / 'deeper' / 'never_run.py'
     unexecuted.parent.mkdir(parents=True)
     unexecuted.write_text(
         'def never_run():\n    return 0\n', encoding='utf-8')
 
-    report = _coverage_report(tmp_path)
+    report = _coverage_report(tmp)
 
     assert 'pkgless/deeper/never_run.py' in report, report
 
 
-def test_untracked_node_modules_python_is_not_reported(tmp_path):
-    _write_executed_files(tmp_path)
-    third_party = tmp_path / _NODE_MODULE_FILE
+def test_untracked_node_modules_python_is_not_reported(tmp):
+    tmp = Path(tmp)
+    _write_executed_files(tmp)
+    third_party = tmp / _NODE_MODULE_FILE
     third_party.parent.mkdir(parents=True)
     third_party.write_text(
         'def bundled_tool():\n    return 0\n', encoding='utf-8')
 
-    report = _coverage_report(tmp_path)
+    report = _coverage_report(tmp)
 
     assert _NODE_MODULE_FILE not in report, report
 
