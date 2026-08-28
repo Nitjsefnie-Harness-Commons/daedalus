@@ -58,11 +58,20 @@ def test_missing_browser_requirements_are_environment_skip(tmp):
 
 
 def test_browser_exit_before_devtools_is_environment_skip(tmp):
-    process = mock.Mock()
-    process.poll.return_value = 1
-    failure = _call_failure(
-        lambda: _realbrowser._wait_for_devtools(tmp, process))
-    assert failure.__class__ is _realbrowser.BrowserEnvironmentSkipped, failure
+    for exit_code in (1, 0):
+        process = mock.Mock()
+        process.poll.return_value = exit_code
+        clock = mock.Mock(side_effect=(0, 0, 31))
+        sleeper = mock.Mock()
+        with mock.patch.object(_realbrowser.time, 'time', clock), \
+                mock.patch.object(_realbrowser.time, 'sleep', sleeper):
+            failure = _call_failure(
+                lambda: _realbrowser._wait_for_devtools(tmp, process))
+        assert failure.__class__ is (
+            _realbrowser.BrowserEnvironmentSkipped), failure
+        assert clock.call_count == 2, (exit_code, clock.call_count)
+        sleeper.assert_not_called()
+        assert 'Chromium' in str(failure), failure
 
 
 def test_live_browser_reaches_ready_devtools_targets(tmp):
