@@ -53,6 +53,8 @@ def _virtual_cmdqueue_clock(max_sleeps):
         def monotonic(self):
             return now[0]
 
+        perf_counter = monotonic
+
         def record_read(self):
             events.append(('read', read_cost))
             now[0] += read_cost
@@ -211,16 +213,24 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
                 queued, 'read_text', 1000, clock=clock) as calls:
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)
-    sleeps = [duration for kind, duration in events if kind == 'sleep']
+    sleep_groups = []
+    for kind, duration in events:
+        if kind == 'read':
+            assert not sleep_groups or sleep_groups[-1], events
+            sleep_groups.append([])
+        else:
+            assert kind == 'sleep' and sleep_groups, events
+            sleep_groups[-1].append(duration)
+    assert sleep_groups and sleep_groups[-1], events
+    sleeps = [sum(group) for group in sleep_groups]
     assert command is None, command
-    assert calls[0] == len(sleeps), (calls, sleeps)
-    assert sleeps, sleeps
-    assert [kind for kind, _duration in events] == (
-        ['read', 'sleep'] * len(sleeps)), events
+    assert calls[0] == len(sleep_groups), (calls, sleep_groups)
     assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), sleeps
     # An exact multiple can make the final sleep equal the polling delay.
     assert sleeps[-1] <= _cmdqueue.POLL_DELAY, sleeps
     elapsed = clock.monotonic() - origin
+    # Sterbenz makes deadline - now exact while its operands are within a
+    # factor of two, so adding it lands on the already-representable deadline.
     assert clock.monotonic() == origin + timeout, (
         clock.monotonic(), origin, timeout, events)
     assert abs(elapsed - timeout) <= math.ulp(origin + timeout), (
