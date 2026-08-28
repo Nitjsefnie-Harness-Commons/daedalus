@@ -273,11 +273,12 @@ def _copy_state_pair(pair):
 
 
 def _dedupe_state_pairs(pairs):
-    """Collapse pairs whose dict-state signature is equivalent for this
-    routing contract, keeping each surviving state's own alias map paired
-    with it rather than merging alias maps across pairs -- a call after
-    the branch is still checked against every surviving pair, so a sender
-    alias true on only one branch still gets caught."""
+    """Collapse pairs whose (dict-state signature, alias map) is equivalent
+    for this routing contract -- a call after the branch is still checked
+    against every surviving pair, so a sender alias true on only one
+    branch still gets caught, as long as two pairs whose alias maps
+    actually differ are kept as two entries rather than folded into one
+    by a signature that only looks at the dict-state half."""
     found = {}
     for state, aliases in pairs:
         signature = []
@@ -291,7 +292,9 @@ def _dedupe_state_pairs(pairs):
             else:
                 tab = 'other'
             signature.append((name, 'type' in keys, tab))
-        found.setdefault(tuple(signature), (state, aliases))
+        found.setdefault(
+            (tuple(signature), tuple(sorted(aliases.items()))),
+            (state, aliases))
     return list(found.values())
 
 

@@ -115,6 +115,39 @@ def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
         f'sink.send() names an attribute, not the local send: {violations}')
 
 
+def _if_else_alias_source(*, alias_in_if):
+    """Two branches, only one of which binds `send` to a real sender --
+    the other binds it to something unrelated. Both spellings hand `tab`
+    to whichever sender actually runs, so both must be caught the same
+    way regardless of which branch happens to come first in the file."""
+    sender_branch = "        send = bridge.ext_cmd\n"
+    other_branch = "        send = _legacy_sender\n"
+    first, second = (
+        (sender_branch, other_branch) if alias_in_if else (other_branch, sender_branch))
+    return (
+        "async def focus_tab(chrome_tab, legacy, bridge):\n"
+        "    if legacy:\n"
+        f"{first}"
+        "    else:\n"
+        f"{second}"
+        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n")
+
+
+def test_an_if_branch_alias_is_caught_regardless_of_which_branch_binds_it(tmp):
+    """Two programs that only differ in which branch binds the real sender
+    must both be caught -- the verdict must not depend on whether the
+    sender happens to be assigned in the `if` or the `else` (#224)."""
+    if_source = Path(tmp) / 'if_branch_alias.py'
+    if_source.write_text(_if_else_alias_source(alias_in_if=True), encoding='utf-8')
+    else_source = Path(tmp) / 'else_branch_alias.py'
+    else_source.write_text(_if_else_alias_source(alias_in_if=False), encoding='utf-8')
+
+    if_violations = py_tab_routing_violations(if_source, 'if_branch_alias.py')
+    else_violations = py_tab_routing_violations(else_source, 'else_branch_alias.py')
+    assert if_violations, 'the alias bound in the if branch must be caught'
+    assert else_violations, 'the alias bound in the else branch must be caught too'
+
+
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     r"""`tab` routes to a server queue; `tabId` names a browser tab.
 
