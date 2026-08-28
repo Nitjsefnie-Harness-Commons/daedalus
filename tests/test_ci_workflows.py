@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""What the workflows in .github/ must keep doing, read as shell and as YAML.
+"""Execute CI invariants that GitHub otherwise fails silently.
 
-A workflow fails silently when a detail is dropped — a gate that never runs
-on the commit it is gating, a permission widened past what the job needs, a
-release published before its checks finished. These tests read the workflow
-files themselves, and run the /claim script as shell rather than trusting a
-reading of it.
+These tests parse workflows and execute /claim instead of trusting source
+inspection.
 """
 import fnmatch
 import os
@@ -18,9 +15,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wfskip import (evaluate_job_condition,  # noqa: E402
-                     implicit_skip_violations)
-from _yamlread import job_mapping, job_scalar  # noqa: E402
+from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
+                      _tests_yml)
+import _wfpermissions  # noqa: E402
+from _wfskip import implicit_skip_violations  # noqa: E402
+from _wfskip_cases import suites_skip_violation  # noqa: E402
+from _yamlread import job_scalar  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
 
@@ -183,62 +183,61 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     assert '${{' not in after, 'an expression is interpolated into the script'
 
 
-def _tests_workflow():
-    """Read the pull-request workflow whose producer job is untrusted."""
-    return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-
-
-def _assert_diff_coverage_permissions(workflow):
-    """Require the producer job's complete decoded permission grant."""
-    permissions = job_mapping(workflow, 'diff-coverage', 'permissions')
-    assert permissions == {'contents': 'read'}, (
-        f'unsafe decoded permissions: {permissions!r}')
-
-
-def _assert_permissions_mutation_refused(workflow):
-    """Require one widened real-workflow mutation to fail the contract."""
-    try:
-        _assert_diff_coverage_permissions(workflow)
-    except AssertionError as error:
-        assert 'unsafe decoded permissions' in str(error), str(error)
-        return
-    raise AssertionError('widened decoded permissions were accepted')
-
-
 def test_diff_coverage_permissions_are_exactly_read_only(tmp):
-    """The job running pull-request code has only contents read access."""
     del tmp
-    _assert_diff_coverage_permissions(_tests_workflow())
+    _wfpermissions.assert_diff_coverage_permissions(_tests_yml())
 
 
 def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
-    """A skipped ancestor cannot hide a usable pull-request report."""
     del tmp
-    workflow = _tests_workflow()
+    source = _tests_yml()
     cases = (
-        ('all-success', 'pull_request', 'success', True, False, False, True),
-        ('pull request, coverage succeeded, ancestor skipped',
-         'pull_request', 'success', False, False, False, True),
-        ('cancelled PR', 'pull_request', 'success', False, False, True, False),
-        ('cov skipped', 'pull_request', 'skipped', False, False, False, False),
-        ('cov failed', 'pull_request', 'failure', False, True, False, False),
-        *((f'event {event}', event, 'success', True, False, False,
-           event == 'pull_request') for event in _trigger_names(workflow)),
+        {'name': 'all-success', 'event': 'pull_request', 'result': 'success',
+         'success': True, 'expected': True},
+        {'name': 'skipped ancestor', 'event': 'pull_request',
+         'result': 'success', 'expected': True},
+        {'name': 'cancelled PR', 'event': 'pull_request', 'result': 'success',
+         'cancelled': True, 'expected': False},
+        {'name': 'coverage skipped', 'event': 'pull_request',
+         'result': 'skipped', 'expected': False},
+        {'name': 'coverage failed', 'event': 'pull_request',
+         'result': 'failure', 'failure': True, 'expected': False},
     )
-    for (name, event_name, coverage, ok, failed, cancelled,
-         expected) in cases:
-        status = {'success': ok, 'failure': failed, 'cancelled': cancelled}
-        expression, actual = evaluate_job_condition(
-            workflow, 'diff-coverage', event_name,
-            {'coverage': {'result': coverage}}, status)
-        assert actual is expected, (name, expression, actual)
+    cases += tuple({'name': f'event {event}', 'event': event,
+                    'result': 'success', 'success': True,
+                    'expected': event == 'pull_request'}
+                   for event in _trigger_names(source))
+    for case in cases:
+        status = {name: case.get(name, False)
+                  for name in ('success', 'failure', 'cancelled')}
+        context = {'github': {'event_name': case['event']},
+                   'needs': {'coverage': {'result': case['result']}},
+                   'status': status}
+        expression = _job_if_expression(source, 'diff-coverage')
+        actual = _job_condition_runs(source, 'diff-coverage', context=context)
+        assert actual is case['expected'], {
+            'case': case['name'], 'condition': expression,
+            'expected': case['expected'], 'actual': actual,
+            'status': status}
+
+
+def test_skip_guard_uses_condition_behaviour_not_function_names(tmp):
+    del tmp
+    cases = {
+        "github.event_name == 'pull_request' && 'cancelled()' != ''": True,
+        'cancelled()': True,
+        'failure()': True,
+        '!success()': False,
+        "github.event_name == 'push'": False,
+    }
+    actual = {condition: suites_skip_violation(_tests_yml(), condition)
+              for condition in cases}
+    assert actual == cases, {'expected': cases, 'actual': actual}
 
 
 def test_skippable_ancestors_cannot_implicitly_skip_dependants(tmp):
-    """Every dependant of a conditional job overrides the implicit gate."""
     del tmp
-    violations = implicit_skip_violations(_tests_workflow())
+    violations = implicit_skip_violations(_tests_yml())
     assert not violations, '\n'.join(violations)
 
 
@@ -250,7 +249,7 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
                           encoding='utf-8'), re.MULTILINE)
     assert len(pins) == 1, pins
     workflow_dir = ROOT / '.github' / 'workflows'
-    tests = _tests_workflow()
+    tests = _tests_yml()
     release = (workflow_dir / 'release.yml').read_text(encoding='utf-8')
 
     def before(source, job, consumer):
@@ -277,18 +276,18 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
 def test_permission_whitespace_mutation_is_refused(tmp):
     """Whitespace before the colon cannot hide pull-request write access."""
     del tmp
-    workflow = _tests_workflow()
+    workflow = _tests_yml()
     mutated = workflow.replace(
         '      contents: read\n',
         '      contents: read\n      pull-requests : write\n', 1)
     assert mutated != workflow, 'real permission mapping was not mutated'
-    _assert_permissions_mutation_refused(mutated)
+    _wfpermissions.assert_permissions_mutation_refused(mutated)
 
 
 def test_quoted_and_escaped_permission_keys_are_refused(tmp):
     """Equivalent decoded keys cannot hide a widened permission grant."""
     del tmp
-    workflow = _tests_workflow()
+    workflow = _tests_yml()
     additions = (
         "      'pull-requests': write\n",
         '      "pull\\x2drequests": write\n',
@@ -298,13 +297,13 @@ def test_quoted_and_escaped_permission_keys_are_refused(tmp):
             '      contents: read\n',
             '      contents: read\n' + addition, 1)
         assert mutated != workflow, addition
-        _assert_permissions_mutation_refused(mutated)
+        _wfpermissions.assert_permissions_mutation_refused(mutated)
 
 
 def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
     """Equivalent decoded mapping fields cannot hide the widened grant."""
     del tmp
-    workflow = _tests_workflow()
+    workflow = _tests_yml()
     replacements = (
         "    'permissions':\n",
         '    "permis\\x73ions":\n',
@@ -315,13 +314,13 @@ def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
             field + '      contents: read\n'
             '      pull-requests: write\n', 1)
         assert mutated != workflow, field
-        _assert_permissions_mutation_refused(mutated)
+        _wfpermissions.assert_permissions_mutation_refused(mutated)
 
 
 def test_permission_values_and_unknown_keys_fail_closed(tmp):
     """Decoded writes and unrecognised permission names are refused."""
     del tmp
-    workflow = _tests_workflow()
+    workflow = _tests_yml()
     mutations = (
         workflow.replace('      contents: read\n',
                          '      contents: write\n', 1),
@@ -333,7 +332,7 @@ def test_permission_values_and_unknown_keys_fail_closed(tmp):
     )
     for mutated in mutations:
         assert mutated != workflow, 'real permission mapping was not mutated'
-        _assert_permissions_mutation_refused(mutated)
+        _wfpermissions.assert_permissions_mutation_refused(mutated)
 
 
 def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
@@ -346,7 +345,7 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
     workflow's own header says the other gates cannot catch.
     """
     del tmp
-    workflow = _tests_workflow()
+    workflow = _tests_yml()
     _, marker, after = workflow.partition('- name: actionlint\n')
     assert marker, 'the actionlint step is not named the way this test finds it'
     step, _, _ = after.partition('- name: zizmor')
