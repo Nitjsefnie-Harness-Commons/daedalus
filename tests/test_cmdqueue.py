@@ -191,14 +191,18 @@ def test_a_queue_file_already_gone_during_clear_is_not_an_error(tmp):
 
 def test_a_permanent_read_refusal_is_bounded(tmp):
     passes = 3
+    timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'read_text', 1000) as calls:
         with _virtual_cmdqueue_clock(passes) as sleeps:
             command = _cmdqueue.wait_for_command(
-                queue, timeout=passes * _cmdqueue.POLL_DELAY)
+                queue, timeout=timeout)
     assert command is None, command
     assert calls[0] == passes, calls
-    assert sleeps == [_cmdqueue.POLL_DELAY] * passes, sleeps
+    assert len(sleeps) == passes, sleeps
+    assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (passes - 1), sleeps
+    # The strict cap avoids pinning the partial remainder's float spelling.
+    assert sleeps[-1] < _cmdqueue.POLL_DELAY, sleeps
 
 
 def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
@@ -217,10 +221,17 @@ def test_wait_returns_none_when_the_timeout_expires(tmp):
 
 def test_wait_ends_early_when_the_producer_is_gone(tmp):
     queue = Path(tmp) / 'missing-queue'
+    producer_calls = []
+
+    def producer_alive():
+        producer_calls.append(True)
+        return False
+
     with _virtual_cmdqueue_clock(0) as sleeps:
         command = _cmdqueue.wait_for_command(
-            queue, timeout=10, producer_alive=lambda: False)
+            queue, timeout=10, producer_alive=producer_alive)
     assert command is None, command
+    assert producer_calls == [True], producer_calls
     assert sleeps == [], sleeps
 
 
