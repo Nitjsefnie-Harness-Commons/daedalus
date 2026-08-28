@@ -11,7 +11,6 @@ import _util  # noqa: E402
 import _bridge  # noqa: E402
 import _cmdqueue  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
-    _RUNAWAY_SLEEP_LIMIT,
     _disappear_on_first_open,
     _path_open_failure,
     _refuse_first_queue_read,
@@ -75,8 +74,7 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
 
     def observed_wait(remove_queue):
         queue, queued = _queued_file(tmp)
-        with _virtual_cmdqueue_clock(
-                _RUNAWAY_SLEEP_LIMIT) as (clock, _, origin):
+        with _virtual_cmdqueue_clock() as (clock, _, origin):
             with _vanish_during_read(queued, clock, remove_queue):
                 command = _cmdqueue.wait_for_command(
                     queue, timeout=timeout, producer_alive=lambda: False)
@@ -85,7 +83,7 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
         return queue, clock.monotonic(), origin
 
     queue, observed_end, origin = observed_wait(False)
-    with _virtual_cmdqueue_clock(_RUNAWAY_SLEEP_LIMIT) as (clock, _, base):
+    with _virtual_cmdqueue_clock() as (clock, _, base):
         baseline = _cmdqueue.wait_for_command(queue, timeout=timeout)
     base_end = clock.monotonic()
     _queue, queue_end, queue_origin = observed_wait(True)
@@ -127,7 +125,7 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
         Path.open = original
     # This open count is the transparency contract, not an internal detail.
     assert underlying_opens == [1], underlying_opens
-    with _virtual_cmdqueue_clock(_RUNAWAY_SLEEP_LIMIT) as (clock, _, _):
+    with _virtual_cmdqueue_clock() as (clock, _, _):
         injectors = (
             ('generic refusal',
              _refuse_path_operation(queued, 'open', 1), PermissionError),
@@ -165,7 +163,7 @@ def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue = Path(tmp) / 'empty-queue'
     queue.mkdir()
-    with _virtual_cmdqueue_clock(1000) as (clock, _events, origin):
+    with _virtual_cmdqueue_clock() as (clock, _events, origin):
         command = _cmdqueue.wait_for_command(
             queue, timeout=timeout, producer_alive=lambda: False)
     end = clock.monotonic()
@@ -178,7 +176,7 @@ def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
 def test_an_ignored_only_queue_lets_a_dead_producer_end_the_wait(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, ignored = _queued_file(tmp)
-    with _virtual_cmdqueue_clock(1000) as (clock, _events, origin):
+    with _virtual_cmdqueue_clock() as (clock, _events, origin):
         command = _cmdqueue.wait_for_command(
             queue, timeout=timeout, producer_alive=lambda: False,
             ignored_names={ignored.name})
