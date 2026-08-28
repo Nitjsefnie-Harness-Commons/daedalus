@@ -249,7 +249,8 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
     _queue, queue_end, queue_origin = observed_wait(True)
     assert baseline is None, baseline
     assert origin == base, (origin, base)
-    # Sterbenz makes the exact remainder land on the represented deadline.
+    # Sterbenz makes deadline - now exact while its operands are within a
+    # factor of two, so adding it lands on the already-representable deadline.
     endpoints = ((observed_end, origin), (base_end, base),
                  (queue_end, queue_origin))
     for end, start in endpoints:
