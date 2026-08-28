@@ -306,11 +306,54 @@ def _visit(node, relative, function, facts, tree, keeps, violations):
         _visit(child, relative, function, facts, tree, keeps, violations)
 
 
+def _declaration_names(facts):
+    """Names bound exactly once at module level to child_coverage(...)."""
+    return {name for name, bindings in facts.module_bindings.items()
+            if len(bindings) == 1
+            and facts.declaration_mode(bindings[0][1]) in {'scrub', 'keep'}}
+
+
+def _env_keyword_values(tree):
+    """The Name nodes appearing directly as an env= keyword's value."""
+    values = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.keyword) and node.arg == 'env'
+                and isinstance(node.value, ast.Name)):
+            values.add(id(node.value))
+    return values
+
+
+def _declaration_name_violations(tree, facts, relative):
+    """A declaration name appears at its binding and as env=, nowhere else.
+
+    Aliasing the name mutates the same dict the launches use, and
+    following aliases is data-flow analysis, so the appearance itself is
+    the violation: a syntactic count of occurrences, not control flow.
+    """
+    violations = []
+    env_values = _env_keyword_values(tree)
+    for name in sorted(_declaration_names(facts)):
+        binding_line = facts.module_bindings[name][0][0]
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Name) or node.id != name:
+                continue
+            if id(node) in env_values:
+                continue
+            if node.lineno == binding_line and isinstance(node.ctx,
+                                                          ast.Store):
+                continue
+            violations.append(
+                f'{relative}:{node.lineno}: declaration name {name} '
+                'appears outside its binding and env=')
+    return violations
+
+
 def _analyze(relative, source, keeps):
     tree = ast.parse(source, filename=relative)
     facts = _ModuleFacts(tree)
     violations = []
     _visit(tree, relative, '<module>', facts, tree, keeps, violations)
+    violations.extend(_declaration_name_violations(tree, facts, relative))
     return violations
 
 
