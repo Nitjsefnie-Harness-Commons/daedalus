@@ -274,7 +274,8 @@ jobs:
   # nobody has thought about yet.
   actionlint:
     needs: changes
-    if: ${{ needs.changes.outputs.workflows == 'true' }}
+    if: ${{ github.event_name == 'push'
+            || needs.changes.outputs.workflows == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -323,10 +324,11 @@ jobs:
 
       - name: actionlint
         id: actionlint
-        # Both extensions GitHub accepts, not just .yml. The classifier runs
-        # this job for every file under .github/workflows and zizmor scans the
-        # whole directory, so a workflow named .yaml used to start this gate
-        # and then be skipped by it. nullglob keeps an extension nothing
+        # Both extensions GitHub accepts, not just .yml. Pushes always run this
+        # job; on other events the classifier runs it for every file under
+        # .github/workflows and zizmor scans the whole directory, so a
+        # workflow named .yaml must not start this gate and then be skipped by
+        # it. nullglob keeps an extension nothing
         # matches from arriving as a literal pattern, and the emptiness check
         # keeps a directory with no workflows from reading as a clean lint —
         # which would move the silent pass rather than remove it.
