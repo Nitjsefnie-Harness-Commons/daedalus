@@ -90,5 +90,35 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
             proc.wait(timeout=10)
 
 
+def test_flat_loading_the_mcp_server_does_not_change_sys_path(tmp):
+    """The test loader must not trigger direct-execution bootstrapping."""
+    env = _util.coverage_free_environment(os.environ)
+    env.pop('PYTHONPATH', None)
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    probe = '''
+import sys
+sys.path.insert(0, sys.argv[1])
+import _util
+root = str(_util.ROOT)
+counts = [sys.path.count(root)]
+_util.load(sys.argv[2], 'first_mcp_server')
+counts.append(sys.path.count(root))
+_util.load(sys.argv[2], 'second_mcp_server')
+counts.append(sys.path.count(root))
+print('ROOT_COUNTS', *counts)
+'''
+    server = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
+    loaded = subprocess.run(
+        [sys.executable, '-c', probe, str(_util.ROOT / 'tests'), str(server)],
+        cwd=tmp, env=env, capture_output=True, text=True, timeout=30)
+    assert loaded.returncode == 0, loaded.stdout + loaded.stderr
+    marker = next(
+        line for line in loaded.stdout.splitlines()
+        if line.startswith('ROOT_COUNTS '))
+    counts = tuple(int(value) for value in marker.split()[1:])
+    assert counts == (0, 0, 0), (
+        f'flat loads changed the repository root count: {counts}')
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
