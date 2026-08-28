@@ -212,6 +212,8 @@ _ENV = _util.child_coverage('scrub')
 subprocess.run(['python3', 'a.py'], cwd=tmp,
                env=_util.child_coverage('scrub'))
 subprocess.run(['python3', 'b.py'], cwd=tmp, env=child_coverage('scrub'))
+subprocess.run(['python3', 'd.py'], cwd=tmp,
+               env=child_coverage(mode='scrub'))
 def run():
     subprocess.run(['python3', 'c.py'], cwd=tmp, env=_ENV)
 """) == []

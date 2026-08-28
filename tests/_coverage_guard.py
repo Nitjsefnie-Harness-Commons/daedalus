@@ -6,8 +6,15 @@ A Python child that inherits COVERAGE_* into a working directory that
 [tool.coverage.paths] does not map back onto the repository records
 coverage against paths that vanish with the temporary tree, and a later
 `coverage combine` fails with `No source for code`. The guard fails
-CLOSED: it proves each launch safe, and a launch it cannot prove safe is
-a violation, so a spelling it does not understand can never slip past.
+CLOSED WITHIN WHAT IT RECOGNISES: for a call it recognises as a launch,
+it proves the working directory safe or requires a declaration, and an
+expression it cannot resolve is a violation rather than an exemption.
+
+Recognition itself is enumerated — the launch callables and their module
+aliases, the namespaces that can rebind the helper, the writer calls in
+tests/_control_writes.py — so a call reached through a route not in those
+sets is not judged at all. That boundary is deliberate and is where to
+look first when this guard passes something it should not.
 """
 import ast
 
@@ -150,7 +157,7 @@ class _ModuleFacts:
 
     def declaration_mode(self, node):
         """The mode when `node` is a direct child_coverage(mode) call."""
-        if not isinstance(node, ast.Call) or not node.args:
+        if not isinstance(node, ast.Call):
             return None
         function = node.func
         if isinstance(function, ast.Name):
@@ -161,7 +168,11 @@ class _ModuleFacts:
                   and isinstance(function.value, ast.Name)
                   and function.value.id in self.declaration_modules):
             return None
-        mode = node.args[0]
+        # The helper takes `mode` by keyword too, and refusing that spelling
+        # would reject a valid call of the API this guard exists to read.
+        mode = _keyword_or_arg(node, 'mode', 0)
+        if mode is None:
+            return 'invalid'
         if (isinstance(mode, ast.Constant)
                 and mode.value in {'scrub', 'keep'}):
             return mode.value
