@@ -66,7 +66,9 @@ def _tracked_python(root=ROOT):
     paths = [path for path in listed.stdout.decode(
         'utf-8', 'surrogateescape').split('\0') if path]
     assert paths, 'Git returned no tracked Python files'
-    missing = sorted(path for path in paths if not (root / path).is_file())
+    missing = sorted(
+        path for path in paths
+        if (root / path).is_symlink() or not (root / path).is_file())
     assert not missing, (
         f'tracked Python paths missing or not regular files: {missing}')
     return paths
@@ -87,6 +89,24 @@ def test_the_inventory_refuses_a_missing_tracked_python_file(tmp):
     else:
         raise AssertionError(
             'the layout inventory accepted a missing tracked Python file')
+
+
+def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
+    """A tracked package module must be a regular worktree file."""
+    tree = Path(tmp) / 'tree'
+    subprocess.run(
+        ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
+        check=True, timeout=30)
+    symlink = tree / 'daedalus_bridge' / 'config.py'
+    symlink.unlink()
+    symlink.symlink_to('__init__.py')
+    try:
+        _tracked_python(tree)
+    except AssertionError as exc:
+        assert 'daedalus_bridge/config.py' in str(exc), str(exc)
+    else:
+        raise AssertionError(
+            'the layout inventory accepted a symlinked Python file')
 
 
 def test_the_bridge_modules_live_in_the_bridge_package(tmp):
