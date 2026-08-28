@@ -214,7 +214,7 @@ def main():
                       help='print the canonical version alone, for a script to read')
     args = ap.parse_args()
 
-    if args.set_to:
+    if args.set_to is not None:
         if args.staged or args.rev:
             raise SystemExit('--set rewrites the working tree; drop --staged/--rev')
         return apply(args.set_to)
