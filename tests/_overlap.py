@@ -11,10 +11,10 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cmdqueue  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -357,12 +357,12 @@ def assert_clients_exited(states, posted):
 
 
 def _wait_for_client_commands(queue, count):
-    deadline = time.time() + _CLIENT_COMMAND_WAIT_S
-    while time.time() < deadline:
-        if queue.is_dir() and len(list(queue.glob('*.json'))) == count:
-            return
-        time.sleep(0.05)
-    raise AssertionError('timed out waiting for both same-id client commands')
+    commands = _cmdqueue.wait_for_commands(
+        queue, count, _CLIENT_COMMAND_WAIT_S)
+    if commands is None:
+        raise AssertionError(
+            'timed out waiting for both same-id client commands')
+    return commands
 
 
 def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
@@ -385,9 +385,7 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
         }
         try:
             queue = Path(docroot) / 'commands' / f'{token}_extension'
-            _wait_for_client_commands(queue, len(owners))
-            queued = [json.loads(path.read_text(encoding='utf-8'))
-                      for path in sorted(queue.glob('*.json'))]
+            queued = _wait_for_client_commands(queue, len(owners))
             by_owner = {command['domain']: command for command in queued}
             assert set(by_owner) == set(owners), by_owner
             commands = [by_owner[owner] for owner in owners]

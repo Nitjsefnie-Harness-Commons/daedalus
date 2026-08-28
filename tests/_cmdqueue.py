@@ -51,3 +51,24 @@ def wait_for_command(directory, timeout, producer_alive=None,
         if remaining <= 0:
             return None
         time.sleep(min(_POLL_DELAY, remaining))
+
+
+def wait_for_commands(directory, count, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        if time.monotonic() >= deadline:
+            return None
+        files = (sorted(directory.glob('*.json'))
+                 if directory.is_dir() else [])
+        if len(files) == count:
+            try:
+                return [json.loads(queued.read_text(encoding='utf-8'))
+                        for queued in files]
+            except (FileNotFoundError, PermissionError):
+                # A held or vanished queue file clears on its own; the
+                # partial read is discarded and the whole set retried.
+                pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(_POLL_DELAY, remaining))
