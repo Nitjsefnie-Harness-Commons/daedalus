@@ -80,14 +80,53 @@ def test_refuses_a_redirected_owned_container(tmp):
     """Replacing an element of an owned container ends its ownership."""
     source = Path(tmp) / 'container-target.py'
     source.write_text(
-        "def test_control(tmp, relative):\n"
+        "def _real_module_copy(tmp, relative):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    return root, root / relative\n"
+        "def test_control(tmp):\n"
+        "    relative = Path('tests/probe.py')\n"
         "    first, *targets = _real_module_copy(tmp, relative)\n"
         "    targets[0] = ROOT / 'unsafe.py'\n"
         "    targets[0].write_bytes(b'mutated')\n",
         encoding='utf-8')
     assert _violations(source) == [
-        'container-target.py:4: write_bytes target path is not '
+        'container-target.py:8: write_bytes target path is not '
         + 'control-owned'
+    ]
+
+
+def test_refuses_an_appended_checkout_path(tmp):
+    """A method that changes what a container holds ends the proof."""
+    source = Path(tmp) / 'container-method.py'
+    source.write_text(
+        "def _real_module_copy(tmp, relative):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    return root, root / relative\n"
+        "def test_control(tmp):\n"
+        "    relative = Path('tests/probe.py')\n"
+        "    first, *targets = _real_module_copy(tmp, relative)\n"
+        "    targets.append(ROOT / relative)\n"
+        "    targets[-1].write_bytes(b'mutated')\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'container-method.py:8: write_bytes target path is not '
+        + 'control-owned'
+    ]
+
+
+def test_recognises_a_keyword_open(tmp):
+    """The builtin's target and mode arrive by keyword just as well."""
+    source = Path(tmp) / 'keyword-open.py'
+    source.write_text(
+        "def test_control(tmp):\n"
+        "    open(file=ROOT / 'unsafe.py', mode='ab')\n"
+        "    open(file=Path(tmp) / 'safe.py', mode='ab')\n"
+        "    open(mode='ab')\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        "keyword-open.py:2: open mode 'ab' target path is not "
+        + 'control-owned',
+        'keyword-open.py:4: open target is unresolved',
     ]
 
 
@@ -167,7 +206,11 @@ def test_resolves_only_control_owned_paths(tmp):
     """Owned paths pass; unresolved and checkout paths fail closed."""
     source = Path(tmp) / 'writer-shapes.py'
     source.write_text(
-        "def test_controls(tmp, relative, manager, holder):\n"
+        "def _real_module_copy(tmp, relative):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    return root, root / relative\n"
+        "def test_controls(tmp, manager, holder):\n"
+        "    relative = Path('tests/probe.py')\n"
         "    root, target = _real_module_copy(tmp, relative)\n"
         "    target.write_bytes(b'ok')\n"
         "    first, *rest = _real_module_copy(tmp, relative)\n"
@@ -196,23 +239,23 @@ def test_resolves_only_control_owned_paths(tmp):
         "    Path(tmp).write_text('unsafe')\n",
         encoding='utf-8')
     assert _violations(source) == [
-        "writer-shapes.py:14: open mode 'w' target path is not "
+        "writer-shapes.py:18: open mode 'w' target path is not "
         + 'control-owned',
-        "writer-shapes.py:15: open mode 'a' target path is not "
+        "writer-shapes.py:19: open mode 'a' target path is not "
         + 'control-owned',
-        "writer-shapes.py:16: open mode 'x' target path is not "
+        "writer-shapes.py:20: open mode 'x' target path is not "
         + 'control-owned',
-        "writer-shapes.py:17: open mode 'wb' target path is not "
+        "writer-shapes.py:21: open mode 'wb' target path is not "
         + 'control-owned',
-        "writer-shapes.py:18: open mode 'ab' target path is not "
+        "writer-shapes.py:22: open mode 'ab' target path is not "
         + 'control-owned',
-        "writer-shapes.py:19: open mode 'xb' target path is not "
+        "writer-shapes.py:23: open mode 'xb' target path is not "
         + 'control-owned',
-        'writer-shapes.py:21: write_text target path is not control-owned',
-        'writer-shapes.py:22: write_bytes target path is not control-owned',
-        'writer-shapes.py:23: write_text target path is not control-owned',
         'writer-shapes.py:25: write_text target path is not control-owned',
+        'writer-shapes.py:26: write_bytes target path is not control-owned',
         'writer-shapes.py:27: write_text target path is not control-owned',
+        'writer-shapes.py:29: write_text target path is not control-owned',
+        'writer-shapes.py:31: write_text target path is not control-owned',
     ]
 
 
