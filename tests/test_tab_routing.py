@@ -46,6 +46,75 @@ def test_a_local_alias_of_ext_cmd_is_judged_the_same_as_calling_it_directly(tmp)
     assert 'ext_cmd keyword `tab`' in violations[0], violations
 
 
+def test_an_attribute_alias_of_ext_cmd_is_also_caught(tmp):
+    """`send = bridge.ext_cmd` is the exact shape review found still
+    escaping: the alias source is an attribute access, not a bare name."""
+    source = Path(tmp) / 'attr_aliased_sender.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab):\n"
+        "    send = bridge.ext_cmd\n"
+        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'attr_aliased_sender.py')
+    assert violations, 'an attribute-access alias should be caught too'
+
+
+def test_an_annotated_alias_of_ext_cmd_is_also_caught(tmp):
+    """`send: object = _ext_cmd` is the same alias, just annotated."""
+    source = Path(tmp) / 'annotated_sender.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab):\n"
+        "    send: object = _ext_cmd\n"
+        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'annotated_sender.py')
+    assert violations, 'an annotated alias should be caught too'
+
+
+def test_an_alias_of_an_alias_of_ext_cmd_is_also_caught(tmp):
+    """`a = _ext_cmd` then `b = a` resolves transitively, in source order."""
+    source = Path(tmp) / 'transitive_sender.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab):\n"
+        "    a = _ext_cmd\n"
+        "    b = a\n"
+        "    return await b('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'transitive_sender.py')
+    assert violations, 'a transitive alias should be caught too'
+
+
+def test_a_name_rebound_away_from_ext_cmd_stops_reading_as_a_sender(tmp):
+    """The false-positive direction: once `send` is reassigned to something
+    else, a later `send(...)` is an ordinary call again, not still judged
+    as ext_cmd just because it once was."""
+    source = Path(tmp) / 'rebound_sender.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab):\n"
+        "    send = _ext_cmd\n"
+        "    send = some_other_function\n"
+        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'rebound_sender.py')
+    assert not violations, (
+        'send was rebound away from ext_cmd and should read as an '
+        f'ordinary call: {violations}')
+
+
+def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
+    """The other false-positive direction: declaring a local `send` alias
+    must not reclassify every unrelated `.send()` method call in scope."""
+    source = Path(tmp) / 'unrelated_dot_send.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab, sink):\n"
+        "    send = _ext_cmd\n"
+        "    return await sink.send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'unrelated_dot_send.py')
+    assert not violations, (
+        f'sink.send() names an attribute, not the local send: {violations}')
+
+
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     r"""`tab` routes to a server queue; `tabId` names a browser tab.
 
