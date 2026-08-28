@@ -219,7 +219,6 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
     assert len(pins) == 1, pins
     workflow_dir = ROOT / '.github' / 'workflows'
     tests = _tests_workflow()
-    lint = (workflow_dir / 'lint.yml').read_text(encoding='utf-8')
     release = (workflow_dir / 'release.yml').read_text(encoding='utf-8')
 
     def before(source, job, consumer):
@@ -229,7 +228,7 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
         ('diff-coverage', before(tests, 'diff-coverage',
                                  '- name: Measure the coverage')),
         ('suites', before(tests, 'suites', '- name: Run every suite')),
-        ('pylint', before(lint, 'pylint', '- name: pylint')),
+        ('pylint', before(tests, 'pylint', '- name: pylint')),
         ('release', before(release, 'publish',
                            '- name: Run every suite before publishing')),
     )
@@ -315,8 +314,7 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
     workflow's own header says the other gates cannot catch.
     """
     del tmp
-    workflow = (_util.ROOT / '.github' / 'workflows' / 'actionlint.yml').read_text(
-        encoding='utf-8')
+    workflow = _tests_workflow()
     _, marker, after = workflow.partition('- name: actionlint\n')
     assert marker, 'the actionlint step is not named the way this test finds it'
     step, _, _ = after.partition('- name: zizmor')

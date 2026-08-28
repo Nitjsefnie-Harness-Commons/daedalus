@@ -23,7 +23,7 @@ from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
     _workflow_path_filters, _workflow_triggers)
 from _yamlread import job_mapping  # noqa: E402
-from _ghexpr import evaluate  # noqa: E402
+from _ghexpr import evaluate, evaluate_if  # noqa: E402
 
 
 def _classifier():
@@ -144,7 +144,7 @@ def test_workflows_changed_reports_whether_any_path_matches(tmp):
 
 
 def test_workflow_patterns_pin_the_actionlint_paths_filter(tmp):
-    """The next task deletes actionlint.yml, so this records its filter."""
+    """The classifier retains the deleted actionlint workflow's filter."""
     del tmp
     mod = _classifier()
     assert mod.WORKFLOW_PATTERNS == (
@@ -387,6 +387,9 @@ def _job_needs(workflow, job):
     return names
 
 
+GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
+
+
 def _aggregate_script(workflow):
     """The aggregate job's run block, dedented, ready for bash."""
     section = '\n'.join(_job_section(workflow, 'aggregate'))
@@ -417,6 +420,78 @@ def test_changes_job_permissions_are_exactly_read_only(tmp):
         permissions)
 
 
+def test_changes_job_exposes_every_classifier_output(tmp):
+    del tmp
+    section = _job_section(_tests_yml(), 'changes')
+    expected = (
+        '      matrix: ${{ steps.classify.outputs.matrix }}',
+        '      docs_only: ${{ steps.classify.outputs.docs_only }}',
+        '      workflows: ${{ steps.classify.outputs.workflows }}',
+    )
+    missing = [line for line in expected if line not in section]
+    assert not missing, missing
+
+
+def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
+    del tmp
+    expected = ['changes', *GATE_JOBS]
+    workflow = _tests_yml()
+    for job in ('suites', 'wheel', 'coverage'):
+        needs = _job_needs(workflow, job)
+        assert needs == expected, (job, needs, expected)
+
+
+def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
+        tmp):
+    del tmp
+    workflow = _tests_yml()
+    expected = {
+        'suites': ("    if: ${{ !cancelled() && !failure() }}",),
+        'wheel': ("    if: ${{ !cancelled() && !failure() }}",),
+        'coverage': (
+            "    if: ${{ !cancelled() && !failure()",
+            "               && needs.changes.outputs.docs_only != 'true' }}",
+        ),
+    }
+    contexts = (
+        ({'success': False, 'failure': False, 'cancelled': False}, True),
+        ({'success': False, 'failure': True, 'cancelled': False}, False),
+        ({'success': False, 'failure': False, 'cancelled': True}, False),
+    )
+    for job, expected_lines in expected.items():
+        section = _job_section(workflow, job)
+        condition_lines = tuple(
+            line for line in section
+            if line.startswith('    if:')
+            or line.startswith('               && needs.changes.outputs.'))
+        assert condition_lines == expected_lines, (
+            job, condition_lines, expected_lines)
+        expression = ' '.join(line.strip() for line in condition_lines)
+        expression = expression[len('if:'):].strip()
+        for status, should_run in contexts:
+            context = {
+                'status': status,
+                'needs': {'changes': {'outputs': {'docs_only': 'false'}}},
+            }
+            assert evaluate_if(expression, context) is should_run, (
+                job, status, expression)
+
+
+def test_actionlint_runs_only_when_workflow_paths_changed(tmp):
+    del tmp
+    section = _job_section(_tests_yml(), 'actionlint')
+    expected = "    if: ${{ needs.changes.outputs.workflows == 'true' }}"
+    conditions = [line for line in section if line.startswith('    if:')]
+    assert conditions == [expected], conditions
+    expression = conditions[0].strip()[len('if:'):].strip()
+    for workflows, should_run in (
+            ('true', True), ('false', False), ('', False)):
+        context = {'needs': {'changes': {'outputs': {
+            'workflows': workflows}}}}
+        assert evaluate(expression, context) is should_run, (
+            workflows, expression)
+
+
 def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
     """coverage skips on docs_only; suites runs the classifier's matrix."""
     del tmp
@@ -425,13 +500,11 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
     # Without this needs the needs.changes context is empty at runtime
     # and fromJSON(null) fails matrix evaluation on the runner.
     assert 'changes' in _job_needs(workflow, 'suites')
-    # Read as text: job_scalar refuses a plain `if:` when deeper-indented
-    # lines follow it in the job body, which env: and steps: guarantee.
-    conditions = [line.strip() for line in _job_section(workflow, 'coverage')
-                  if line.startswith('    if:')]
-    assert conditions, 'coverage has no job-level if'
-    assert any('needs.changes.outputs.docs_only' in condition
-               for condition in conditions), conditions
+    coverage = _job_section(workflow, 'coverage')
+    assert any(line.startswith('    if:') for line in coverage), (
+        'coverage has no job-level if')
+    assert any('needs.changes.outputs.docs_only' in line
+               for line in coverage), coverage
     matrix_lines = [line.strip() for line in _job_section(workflow, 'suites')
                     if line.strip().startswith('matrix:')]
     assert matrix_lines == [
@@ -445,19 +518,34 @@ def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
     Evaluated, not substring-matched: `== 'false'` reads as equivalent but
     skips coverage when the classifier emitted nothing — Actions resolves
     a missing output to '' — and a skipped required check reports success
-    with nothing measured. Only `!= 'true'` keeps the failure case on the
-    over-run branch the design promises.
+    with nothing measured. The status calls also bypass Actions' implicit
+    success check when actionlint skips. Only this shape keeps both cases on
+    the over-run branch the design promises.
     """
     del tmp
-    conditions = [line.strip()[len('if:'):].strip()
-                  for line in _job_section(_tests_yml(), 'coverage')
-                  if line.startswith('    if:')]
-    assert len(conditions) == 1, conditions
+    section = _job_section(_tests_yml(), 'coverage')
+    expected = (
+        "    if: ${{ !cancelled() && !failure()",
+        "               && needs.changes.outputs.docs_only != 'true' }}",
+    )
+    conditions = tuple(
+        line for line in section
+        if line.startswith('    if:')
+        or line.startswith('               && needs.changes.outputs.'))
+    assert conditions == expected, conditions
+    expression = ' '.join(line.strip() for line in conditions)
+    expression = expression[len('if:'):].strip()
 
     def runs(docs_only):
-        context = {'needs': {'changes': {'outputs': {
-            'docs_only': docs_only}}}}
-        return evaluate(conditions[0], context)
+        context = {
+            'status': {
+                'success': False,
+                'failure': False,
+                'cancelled': False,
+            },
+            'needs': {'changes': {'outputs': {'docs_only': docs_only}}},
+        }
+        return evaluate_if(expression, context)
 
     assert runs('true') is False
     assert runs('false') is True
@@ -468,11 +556,11 @@ def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
 def test_aggregate_waits_on_every_job_it_checks(tmp):
     del tmp
     needs = _job_needs(_tests_yml(), 'aggregate')
-    for job in ('changes', 'suites', 'wheel', 'coverage'):
+    for job in ('changes', *GATE_JOBS, 'suites', 'wheel', 'coverage'):
         assert job in needs, (job, needs)
 
 
-def test_the_aggregate_script_accepts_skips_but_not_for_changes(tmp):
+def test_aggregate_script_accepts_only_intentional_gate_skips(tmp):
     """The accept-skipped behaviour, exercised by running the real script.
 
     This is the case that goes green for the wrong reason when the strict
@@ -480,12 +568,19 @@ def test_the_aggregate_script_accepts_skips_but_not_for_changes(tmp):
     workflow's own shell rather than a reading of it.
     """
     del tmp
-    all_success = {'changes': 'success', 'suites': 'success',
-                   'wheel': 'success', 'coverage': 'success'}
+    all_success = {
+        'changes': 'success',
+        **{name: 'success' for name in GATE_JOBS},
+        'suites': 'success',
+        'wheel': 'success',
+        'coverage': 'success',
+    }
     result = _run_aggregate(all_success)
     assert result.returncode == 0, (result.stdout, result.stderr)
 
-    docs_only = dict(all_success, suites='skipped', coverage='skipped')
+    docs_only = dict(
+        all_success, actionlint='skipped', suites='skipped',
+        coverage='skipped')
     result = _run_aggregate(docs_only)
     assert result.returncode == 0, (result.stdout, result.stderr)
 
@@ -493,9 +588,14 @@ def test_the_aggregate_script_accepts_skips_but_not_for_changes(tmp):
     assert result.returncode != 0, (result.stdout, result.stderr)
     assert 'changes' in result.stderr, result.stderr
 
-    for name in ('changes', 'suites'):
+    for name in ('changes', *GATE_JOBS, 'suites'):
         result = _run_aggregate(dict(all_success, **{name: 'failure'}))
         assert result.returncode != 0, (name, result.stdout, result.stderr)
+    result = _run_aggregate(dict(all_success, actionlint='skipped'))
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    result = _run_aggregate(dict(all_success, pylint='skipped'))
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert 'pylint' in result.stderr, result.stderr
     result = _run_aggregate(dict(all_success, suites='cancelled'))
     assert result.returncode != 0, (result.stdout, result.stderr)
 
