@@ -6,7 +6,9 @@ these tests pin each rule, the mutation-shaped regressions it exists to
 catch, and the behaviour of the _util.child_coverage declaration it
 reads.
 """
+import ast
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +24,69 @@ from _repo import ROOT  # noqa: E402
 def _module_text(target):
     """A test module's source with checkout line endings normalised."""
     return target.read_bytes().decode('utf-8').replace('\r\n', '\n')
+
+
+def _real_module_copy(tmp, relative):
+    """Copy the real test tree under a root this control owns."""
+    root = Path(tmp) / 'repository'
+    for source in sorted((ROOT / 'tests').glob('*.py')):
+        destination = root / source.relative_to(ROOT)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    return root, root / relative
+
+
+def _repository_write_lines():
+    """Writer calls whose path is derived from the checkout root."""
+    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    violations = []
+    for function in (node for node in ast.walk(tree)
+                     if isinstance(node, ast.FunctionDef)):
+        repository_names = {'ROOT'}
+        changed = True
+        while changed:
+            changed = False
+            for node in ast.walk(function):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    continue
+                value = node.value
+                if value is None or not any(
+                        isinstance(part, ast.Name)
+                        and part.id in repository_names
+                        for part in ast.walk(value)):
+                    continue
+                targets = (node.targets if isinstance(node, ast.Assign)
+                           else [node.target])
+                for target in targets:
+                    if (isinstance(target, ast.Name)
+                            and target.id not in repository_names):
+                        repository_names.add(target.id)
+                        changed = True
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            if (isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {'write_bytes', 'write_text'}
+                    and any(isinstance(part, ast.Name)
+                            and part.id in repository_names
+                            for part in ast.walk(node.func.value))):
+                violations.append(node.lineno)
+            if (isinstance(node.func, ast.Name)
+                    and node.func.id == 'open' and node.args
+                    and any(isinstance(part, ast.Name)
+                            and part.id in repository_names
+                            for part in ast.walk(node.args[0]))):
+                mode = node.args[1] if len(node.args) > 1 else None
+                if (isinstance(mode, ast.Constant)
+                        and 'w' in str(mode.value)):
+                    violations.append(node.lineno)
+    return violations
+
+
+def test_controls_never_write_inside_the_repository(tmp):
+    """A control may mutate copied content, never a checkout path."""
+    del tmp
+    assert not _repository_write_lines(), _repository_write_lines()
 
 
 def test_a_launch_with_a_provable_cwd_is_safe(tmp):
@@ -160,9 +225,8 @@ subprocess.run(['python3', 'child.py'], cwd=tmp, env=env)
 
 def test_a_declaration_name_cannot_be_aliased(tmp):
     """An alias mutates the same dict the launches use: it is refused."""
-    del tmp
-    target = ROOT / 'tests' / 'test_diff_coverage.py'
-    original = target.read_bytes()
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
     needle = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
     text = _module_text(target)
     assert needle in text, 'the declaration binding shape changed'
@@ -173,15 +237,13 @@ def test_a_declaration_name_cannot_be_aliased(tmp):
         + "_COVERAGE_ALIAS = _COVERAGE_ENV\n"
         + "_COVERAGE_ALIAS['COVERAGE_PROCESS_START'] = "
         + "os.environ['COVERAGE_PROCESS_START']\n", 1)
-    try:
-        target.write_bytes(mutated.encode('utf-8'))
-        violations = _coverage_environment_violations()
-        assert any(
-            v.startswith(f'tests/test_diff_coverage.py:{line}:')
-            for v in violations), violations
-    finally:
-        target.write_bytes(original)
-    restored = _coverage_environment_violations()
+    target.write_bytes(mutated.encode('utf-8'))
+    violations = _coverage_environment_violations(root)
+    assert any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in violations), violations
+    shutil.copyfile(ROOT / relative, target)
+    restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
         for v in restored), restored
@@ -207,9 +269,8 @@ subprocess.run(['python3', 'child.py'], cwd=tmp, env=_ENV)
 
 def test_a_rebound_declaration_helper_is_caught(tmp):
     """Rebinding _util.child_coverage makes declarations no-ops: refuse."""
-    del tmp
-    target = ROOT / 'tests' / 'test_diff_coverage.py'
-    original = target.read_bytes()
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
     needle = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
     text = _module_text(target)
     assert needle in text, 'the declaration binding shape changed'
@@ -218,15 +279,13 @@ def test_a_rebound_declaration_helper_is_caught(tmp):
         needle,
         "_util.child_coverage = lambda _mode: dict(os.environ)\n"
         + needle, 1)
-    try:
-        target.write_bytes(mutated.encode('utf-8'))
-        violations = _coverage_environment_violations()
-        assert any(
-            v.startswith(f'tests/test_diff_coverage.py:{line}:')
-            for v in violations), violations
-    finally:
-        target.write_bytes(original)
-    restored = _coverage_environment_violations()
+    target.write_bytes(mutated.encode('utf-8'))
+    violations = _coverage_environment_violations(root)
+    assert any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in violations), violations
+    shutil.copyfile(ROOT / relative, target)
+    restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
         for v in restored), restored
@@ -278,7 +337,7 @@ def test_an_allowlist_entry_without_a_keep_site_fails(tmp):
     _coverage_guard._KEEP_ALLOWLIST = (
         original | {'tests/synthetic.py::ghost'})
     try:
-        violations = _coverage_environment_violations()
+        violations = _coverage_environment_violations(ROOT)
     finally:
         _coverage_guard._KEEP_ALLOWLIST = original
     assert ('allowlisted keep site tests/synthetic.py::ghost has no launch'
@@ -287,9 +346,8 @@ def test_an_allowlist_entry_without_a_keep_site_fails(tmp):
 
 def test_shell_wrapped_python_in_a_temp_cwd_is_caught(tmp):
     """A bash literal wrapping sys.executable runs Python: declare."""
-    del tmp
-    target = ROOT / 'tests' / 'test_diff_coverage.py'
-    original = target.read_bytes()
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
     needle = (
         "        done = subprocess.run(\n"
         "            [sys.executable, str(_SCRIPT), '--coverage', "
@@ -306,15 +364,13 @@ def test_shell_wrapped_python_in_a_temp_cwd_is_caught(tmp):
         "             str(_SCRIPT), '--coverage', str(coverage_xml),\n"
         "             '--diff', str(diff)], cwd=tmp,\n"
         "            capture_output=True, text=True, timeout=60)", 1)
-    try:
-        target.write_bytes(mutated.encode('utf-8'))
-        violations = _coverage_environment_violations()
-        assert any(
-            v.startswith(f'tests/test_diff_coverage.py:{line}:')
-            for v in violations), violations
-    finally:
-        target.write_bytes(original)
-    restored = _coverage_environment_violations()
+    target.write_bytes(mutated.encode('utf-8'))
+    violations = _coverage_environment_violations(root)
+    assert any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in violations), violations
+    shutil.copyfile(ROOT / relative, target)
+    restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
         for v in restored), restored
@@ -340,25 +396,22 @@ def test_real_module_controls_agree_under_crlf_endings(tmp):
 
 def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
     """Deleting env= from a real repo-script launch in tmp is caught."""
-    del tmp
-    target = ROOT / 'tests' / 'test_diff_coverage.py'
-    original = target.read_bytes()
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
     needle = "'--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,"
     text = _module_text(target)
     assert needle in text, 'the row 1 launch shape changed'
     replacement = "'--diff', str(diff)], cwd=tmp,"
     start = text.rindex('subprocess.run(', 0, text.index(needle))
     line = text[:start].count('\n') + 1
-    try:
-        target.write_bytes(text.replace(
-            needle, replacement, 1).encode('utf-8'))
-        violations = _coverage_environment_violations()
-        assert any(
-            v.startswith(f'tests/test_diff_coverage.py:{line}:')
-            for v in violations), violations
-    finally:
-        target.write_bytes(original)
-    restored = _coverage_environment_violations()
+    target.write_bytes(text.replace(
+        needle, replacement, 1).encode('utf-8'))
+    violations = _coverage_environment_violations(root)
+    assert any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in violations), violations
+    shutil.copyfile(ROOT / relative, target)
+    restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
         for v in restored), restored
@@ -378,9 +431,8 @@ subprocess.run(['python3', 'child.py'], **kwargs)
 
 def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
     """A named argv is treated as Python: mutating a real launch fails."""
-    del tmp
-    target = ROOT / 'tests' / 'test_diff_coverage.py'
-    original = target.read_bytes()
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
     needle = (
         "    done = subprocess.run(\n"
         "        [sys.executable, str(_SCRIPT), '--coverage', "
@@ -399,15 +451,13 @@ def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
         "                          text=True, timeout=60)", 1)
     line = mutated[:mutated.index(
         'subprocess.run(command, cwd=tmp,')].count('\n') + 1
-    try:
-        target.write_bytes(mutated.encode('utf-8'))
-        violations = _coverage_environment_violations()
-        assert any(
-            v.startswith(f'tests/test_diff_coverage.py:{line}:')
-            for v in violations), violations
-    finally:
-        target.write_bytes(original)
-    restored = _coverage_environment_violations()
+    target.write_bytes(mutated.encode('utf-8'))
+    violations = _coverage_environment_violations(root)
+    assert any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in violations), violations
+    shutil.copyfile(ROOT / relative, target)
+    restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{restored_line}:')
         for v in restored), restored
@@ -431,7 +481,7 @@ subprocess.run(['python3', 'child.py'], cwd=tmp, env=child_env)
 def test_every_launch_is_proven_safe_or_declares(tmp):
     """The whole tests/ tree under the fail-closed decision procedure."""
     del tmp
-    violations = _coverage_environment_violations()
+    violations = _coverage_environment_violations(ROOT)
     assert not violations, '\n'.join(violations)
 
 
@@ -463,26 +513,23 @@ def test_child_coverage_keep_requires_a_mapped_tree(tmp):
 
 def test_keep_outside_a_mapped_tree_fails_at_runtime(tmp):
     """Renaming the runner's tree anchor trips the keep declaration."""
-    target = ROOT / 'tests' / 'test_suite_runner.py'
-    original = target.read_bytes()
+    relative = Path('tests/test_suite_runner.py')
+    _, target = _real_module_copy(tmp, relative)
     needle = "    root = Path(tmp) / under / 'tree'"
     text = _module_text(target)
     assert needle in text, 'the runner tree anchor shape changed'
     mutated = text.replace(
         needle, "    root = Path(tmp) / under / 'unmapped-runner'", 1)
+    target.write_bytes(mutated.encode('utf-8'))
+    module = _util.load(target, 'suite_runner_unmapped')
     try:
-        target.write_bytes(mutated.encode('utf-8'))
-        module = _util.load(target, 'suite_runner_unmapped')
-        try:
-            module._runner_tree(
-                tmp, {'test_ok.py': 'def test_ok(tmp):\n    del tmp\n'})
-        except ValueError as error:
-            assert 'unmapped-runner' in str(error), error
-        else:
-            raise AssertionError(
-                'a keep launch outside a mapped tree ran unchallenged')
-    finally:
-        target.write_bytes(original)
+        module._runner_tree(
+            tmp, {'test_ok.py': 'def test_ok(tmp):\n    del tmp\n'})
+    except ValueError as error:
+        assert 'unmapped-runner' in str(error), error
+    else:
+        raise AssertionError(
+            'a keep launch outside a mapped tree ran unchallenged')
 
 
 def test_child_coverage_scrubs_a_real_child(tmp):

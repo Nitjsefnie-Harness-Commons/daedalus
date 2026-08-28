@@ -33,7 +33,7 @@ def _await_mcp_listener(proc, output, timeout):
 
 def test_the_mcp_server_runs_by_absolute_file_path(tmp):
     """Direct-file execution must bootstrap package imports from any cwd."""
-    env = _util.coverage_free_environment(os.environ)
+    env = dict(os.environ)
     env.pop('PYTHONPATH', None)
     env.update({
         'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:1',
@@ -43,7 +43,8 @@ def test_the_mcp_server_runs_by_absolute_file_path(tmp):
     })
     script = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
     proc = subprocess.Popen(
-        [sys.executable, str(script)], cwd=tmp, env=env,
+        [sys.executable, str(script)], cwd=tmp,
+        env=_util.child_coverage('scrub', env),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     output = _util.drain_lines(proc)
     try:
@@ -61,7 +62,7 @@ def test_the_mcp_server_runs_by_absolute_file_path(tmp):
 
 def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
     """A direct symlink launch must resolve package imports from the target."""
-    env = _util.coverage_free_environment(os.environ)
+    env = dict(os.environ)
     env.pop('PYTHONPATH', None)
     env.update({
         'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:1',
@@ -75,7 +76,7 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
     link.symlink_to(script)
     proc = subprocess.Popen(
         [sys.executable, str(link)], cwd=tmp,
-        env=_util.coverage_free_environment(env),
+        env=_util.child_coverage('scrub', env),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     output = _util.drain_lines(proc)
     try:
@@ -93,7 +94,7 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
 
 def test_flat_loading_the_mcp_server_does_not_change_sys_path(tmp):
     """The test loader must not trigger direct-execution bootstrapping."""
-    env = _util.coverage_free_environment(os.environ)
+    env = dict(os.environ)
     env.pop('PYTHONPATH', None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     probe = '''
@@ -111,7 +112,7 @@ print('ROOT_COUNTS', *counts)
     server = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
     loaded = subprocess.run(
         [sys.executable, '-c', probe, str(_util.ROOT / 'tests'), str(server)],
-        cwd=tmp, env=_util.coverage_free_environment(env),
+        cwd=tmp, env=_util.child_coverage('scrub', env),
         capture_output=True, text=True, timeout=30)
     assert loaded.returncode == 0, loaded.stdout + loaded.stderr
     marker = next(
