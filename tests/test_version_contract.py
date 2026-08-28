@@ -158,6 +158,22 @@ def _duplicate_the_package_version(copy_root, second_value='0.22.0.2'):
     init_copy.write_text(text + f"\n__version__ = '{second_value}'\n", encoding='utf-8')
 
 
+def _duplicate_the_page_js_version(copy_root, second_value='9.9.9'):
+    """Add a second `script: { version: ... }` assignment in the COPY's
+    `extension/page.js`, spelled with the other quote character.
+
+    This is the reproduction from #247: the site's own value uses a single
+    quote, and a plain object literal spelled with a double quote is just as
+    valid JavaScript, so a pattern that only recognizes one quote character
+    cannot see the second one at all.
+    """
+    page_copy = copy_root / 'extension' / 'page.js'
+    text = page_copy.read_text(encoding='utf-8')
+    page_copy.write_text(
+        text + f'\nconst _dup = {{ info: {{ script: {{ version: "{second_value}" }} }} }};\n',
+        encoding='utf-8')
+
+
 def _run_checker(copy_root, *args):
     """Run the copied checker from inside the copy.
 
@@ -406,6 +422,24 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
     assert 'matches 2 times' in r.stderr, r.stderr
     after = (copy_root / 'daedalus_cli' / '__init__.py').read_text(encoding='utf-8')
     assert after == before, 'refused sites must not be partially rewritten'
+
+
+def test_check_versions_refuses_a_page_js_version_spelled_with_the_other_quote(tmp):
+    """A second `script: { version: ... }` in page.js, spelled with a double
+    quote where the file's own site uses a single one, still has to be
+    caught. Before the fix the site's pattern only recognized the single
+    quote, so this duplicate was invisible and the tree came back consistent
+    (#247)."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, _pattern = checker.SITES[3]
+    assert path == 'extension/page.js', path
+    _duplicate_the_page_js_version(copy_root)
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    assert desc in r.stderr, (desc, r.stderr)
+    assert '9.9.9' in r.stderr, r.stderr
 
 
 def test_check_versions_print_refuses_a_tree_that_disagrees(tmp):
