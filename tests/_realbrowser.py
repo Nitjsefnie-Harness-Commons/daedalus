@@ -26,6 +26,7 @@ from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
                         CDP_RESPONSE_DEADLINE_MS, CDP_TIMEOUT_EXIT_CODE,
                         HOSTILE_EVAL_SCRIPT, PERFORMANCE_POISON_EVAL_SCRIPT,
                         PLAIN_EVAL_SCRIPT, STRICT_CSP_EVAL_SCRIPT)
+from _realbrowser_errors import CDPEvaluationError  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
@@ -198,7 +199,8 @@ def cdp_eval(node, target, expression):
         'awaitPromise': True,
         'returnByValue': True,
     })
-    assert not response.get('exceptionDetails'), response
+    if response.get('exceptionDetails'):
+        raise CDPEvaluationError(response)
     return response.get('result', {}).get('value')
 
 
@@ -398,6 +400,10 @@ def ready_worker(node, workers):
                 return target, True, None
             reached = True
             error = 'the worker answered without its declarations'
+        except CDPEvaluationError as failure:
+            # Exception details prove the worker evaluated our probe.
+            reached = True
+            error = f'evaluating in the worker failed: {failure}'
         except AssertionError as failure:
             error = f'evaluating in the worker failed: {failure}'
     return None, reached, error
