@@ -209,6 +209,12 @@ Small and single-purpose beats large and comprehensive. One logical change per
 commit, with a message that says what changed and why the previous behaviour
 was wrong.
 
+Claim the issue before you start, then name it in the pull request's
+**Related Issues and Pull Requests** section. A pull request whose section
+names no issue assigned to its author is closed automatically with an
+explanation. Fix the claim or body and reopen the same pull request; there is
+no need to open another.
+
 In the description, include what changed, why, and the actual output of the
 tests you ran. For a performance change, a before and after measurement rather
 than an assertion that it should be faster.

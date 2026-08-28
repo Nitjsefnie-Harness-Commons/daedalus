@@ -13,9 +13,10 @@ Section order is fixed. No new sections. Delete these comments before posting.
 <!-- required: 1-2 sentences — what changed and why. -->
 
 ## Related Issues and Pull Requests
-<!-- conditional: the issue this PR resolves, plus related work. Closing
-     keywords ONLY here. Drop the whole section if it resolves and relates to
-     nothing. GitHub auto-closes only on merge into the DEFAULT branch. -->
+<!-- required: claim the issue with `/claim` before you start, then name it
+     here, plus any related work. Closing keywords ONLY here. The named issue
+     must be assigned to the PR author or the PR is closed automatically.
+     GitHub auto-closes only on merge into the DEFAULT branch. -->
 
 Fixes #
 
