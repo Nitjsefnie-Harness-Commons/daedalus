@@ -64,18 +64,14 @@
 # ─── .github/workflows ───
 !/.github/
 !/.github/workflows/
-!/.github/workflows/actionlint.yml
 !/.github/workflows/audit.yml
 !/.github/workflows/claim.yml
 !/.github/workflows/codeql.yml
 !/.github/workflows/coverage-comment.yml
-!/.github/workflows/eslint.yml
-!/.github/workflows/lint.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
 !/.github/workflows/speed.yml
 !/.github/workflows/tests.yml
-!/.github/workflows/types.yml
 !/.github/workflows/version.yml
 
 # ─── daedalus_bridge ───
