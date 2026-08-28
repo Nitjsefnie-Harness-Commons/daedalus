@@ -19,10 +19,15 @@ import test_mcp_server  # noqa: E402
 @contextlib.contextmanager
 def _refuse_path_operation(path, operation, failures, clock=None):
     original = getattr(Path, operation)
+    signature = inspect.signature(original)
     remaining = [failures]
     calls = [0]
 
     def refused(candidate, *args, **kwargs):
+        try:
+            signature.bind(candidate, *args, **kwargs)
+        except TypeError:
+            return original(candidate, *args, **kwargs)
         if candidate == path:
             calls[0] += 1
             if clock is not None:
@@ -104,7 +109,10 @@ def _vanish_during_read(path, clock):
     armed = [True]
 
     def vanished(candidate, *args, **kwargs):
-        signature.bind(candidate, *args, **kwargs)
+        try:
+            signature.bind(candidate, *args, **kwargs)
+        except TypeError:
+            return original(candidate, *args, **kwargs)
         if candidate == path and armed[0]:
             armed[0] = False
             clock.record_read()
@@ -120,11 +128,39 @@ def _vanish_during_read(path, clock):
 
 
 @contextlib.contextmanager
+def _disappear_on_first_open(path):
+    original = Path.open
+    signature = inspect.signature(original)
+    armed = [True]
+
+    def missing(candidate, *args, **kwargs):
+        try:
+            signature.bind(candidate, *args, **kwargs)
+        except TypeError:
+            return original(candidate, *args, **kwargs)
+        if candidate == path and armed[0]:
+            armed[0] = False
+            raise FileNotFoundError(2, 'injected disappearance', str(path))
+        return original(candidate, *args, **kwargs)
+
+    Path.open = missing
+    try:
+        yield
+    finally:
+        Path.open = original
+
+
+@contextlib.contextmanager
 def _refuse_first_queue_read(queue):
-    original = Path.read_text
+    original = Path.open
+    signature = inspect.signature(original)
     refused_path = [None]
 
     def refused(candidate, *args, **kwargs):
+        try:
+            signature.bind(candidate, *args, **kwargs)
+        except TypeError:
+            return original(candidate, *args, **kwargs)
         if (refused_path[0] is None and candidate.parent == queue
                 and candidate.suffix == '.json'):
             refused_path[0] = candidate
@@ -133,11 +169,11 @@ def _refuse_first_queue_read(queue):
             raise PermissionError(32, 'injected sharing violation')
         return original(candidate, *args, **kwargs)
 
-    Path.read_text = refused
+    Path.open = refused
     try:
         yield
     finally:
-        Path.read_text = original
+        Path.open = original
 
 
 def _queued_file(tmp, name='1700000000000_000001.json'):
@@ -147,6 +183,28 @@ def _queued_file(tmp, name='1700000000000_000001.json'):
     queued.write_text(json.dumps({'id': 'queued', 'type': 'reload'}),
                       encoding='utf-8')
     return queue, queued
+
+
+def _path_open_failure(path, *args, **kwargs):
+    try:
+        with path.open(*args, **kwargs):
+            pass
+    except (FileNotFoundError, PermissionError,
+            TypeError, ValueError) as caught:
+        return type(caught), str(caught)
+    raise AssertionError('Path.open accepted the refused arguments')
+
+
+def _check_open_injector(path, injector, injected_type, label):
+    excess_args = ('r', 1, -1, None, None, None, False, 'extra')
+    expected = _path_open_failure(path, *excess_args)
+    with injector:
+        actual = _path_open_failure(path, *excess_args)
+        assert path.exists(), f'{label} injected for args real open rejects'
+        injected = _path_open_failure(path)
+    assert actual == expected, (
+        f'{label} changed the real excess-argument failure', actual, expected)
+    assert injected[0] is injected_type, (f'{label} fault consumed', injected)
 
 
 @contextlib.contextmanager
@@ -172,14 +230,14 @@ def _redirect_stale_answer(queue, stale, stale_command):
 
 def test_a_transient_read_refusal_returns_the_queued_command(tmp):
     queue, queued = _queued_file(tmp)
-    with _refuse_path_operation(queued, 'read_text', 1):
+    with _refuse_path_operation(queued, 'open', 1):
         command = _cmdqueue.wait_for_command(queue, timeout=1)
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
 
 def test_a_present_queue_file_outlives_its_finished_producer(tmp):
     queue, queued = _queued_file(tmp)
-    with _refuse_path_operation(queued, 'read_text', 1):
+    with _refuse_path_operation(queued, 'open', 1):
         command = _cmdqueue.wait_for_command(
             queue, timeout=1, producer_alive=lambda: False)
     assert command == {'id': 'queued', 'type': 'reload'}, command
@@ -196,27 +254,53 @@ def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
     end = clock.monotonic()
     assert end >= origin + timeout, (
         'wait ended before timeout', end, origin, timeout)
-    # One polling delay permits tiny overshoot while still catching runaways.
-    ceiling = origin + timeout + _cmdqueue.POLL_DELAY
+    # One ULP permits only floating-point drift past the deadline.
+    ceiling = origin + timeout + math.ulp(origin + timeout)
     assert end <= ceiling, (
         'wait exceeded the timeout ceiling', end, ceiling, timeout)
 
 
-def test_vanishing_read_double_preserves_path_open_argument_errors(tmp):
+def test_vanishing_read_double_matches_excess_args_and_binary_mode(tmp):
     _queue, queued = _queued_file(tmp)
-    failure = None
+    excess_args = ('r', 1, -1, None, None, None, False, 'extra')
+    expected_excess = _path_open_failure(queued, *excess_args)
+    expected_binary = _path_open_failure(
+        queued, mode='rb', encoding='utf-8')
     with _virtual_cmdqueue_clock(1) as (clock, _events, _origin):
-        try:
-            with _vanish_during_read(queued, clock):
-                with queued.open(mode='rb', encoding='utf-8'):
-                    pass
-        except (FileNotFoundError, ValueError) as caught:
-            failure = caught
+        with _vanish_during_read(queued, clock):
+            actual_excess = _path_open_failure(queued, *excess_args)
+            assert queued.exists(), (
+                'refused excess arguments triggered the injector')
+            # Binary mode rejects encoding before filesystem lookup.
+            actual_binary = _path_open_failure(
+                queued, mode='rb', encoding='utf-8')
+    assert actual_excess == expected_excess, (
+        'double changed the excess-argument failure',
+        actual_excess, expected_excess)
+    assert actual_binary == expected_binary, (
+        'double changed the binary-mode failure',
+        actual_binary, expected_binary)
     assert not queued.exists(), (
-        'vanishing read double left the target file present')
-    assert isinstance(failure, ValueError), (
-        'vanishing read double bypassed Path.open argument validation',
-        failure)
+        'valid call did not reach the saved open after unlink')
+
+
+def test_path_operation_refusal_skips_excess_open_arguments(tmp):
+    _queue, queued = _queued_file(tmp)
+    _check_open_injector(queued,
+                         _refuse_path_operation(queued, 'open', 1),
+                         PermissionError, 'generic refusal')
+
+
+def test_first_queue_read_refusal_skips_excess_open_arguments(tmp):
+    queue, queued = _queued_file(tmp)
+    _check_open_injector(queued, _refuse_first_queue_read(queue),
+                         PermissionError, 'first-read refusal')
+
+
+def test_disappearing_open_double_skips_excess_arguments(tmp):
+    _queue, queued = _queued_file(tmp)
+    _check_open_injector(queued, _disappear_on_first_open(queued),
+                         FileNotFoundError, 'disappearance')
 
 
 def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
@@ -247,22 +331,23 @@ def test_an_ignored_only_queue_lets_a_dead_producer_end_the_wait(tmp):
         end, origin, timeout)
 
 
+def test_eligible_file_wins_over_ignored_stale_with_dead_producer(tmp):
+    queue, stale = _queued_file(tmp, '0000000000000_000000.json')
+    current = queue / '1700000000000_000001.json'
+    current.write_text(json.dumps({'id': 'current', 'type': 'reload'}),
+                       encoding='utf-8')
+    command = _cmdqueue.wait_for_command(
+        queue, timeout=1, producer_alive=lambda: False,
+        ignored_names={stale.name})
+    assert command == {'id': 'current', 'type': 'reload'}, (
+        'eligible command was hidden by stale-ignore/dead-producer state',
+        command)
+
+
 def test_a_queue_file_that_disappears_during_read_is_retried(tmp):
     queue, queued = _queued_file(tmp)
-    original = Path.read_text
-    armed = [True]
-
-    def missing(candidate, *args, **kwargs):
-        if candidate == queued and armed[0]:
-            armed[0] = False
-            raise FileNotFoundError(2, 'injected disappearance', str(queued))
-        return original(candidate, *args, **kwargs)
-
-    Path.read_text = missing
-    try:
+    with _disappear_on_first_open(queued):
         command = _cmdqueue.wait_for_command(queue, timeout=1)
-    finally:
-        Path.read_text = original
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
 
@@ -297,7 +382,7 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     queue, queued = _queued_file(tmp)
     with _virtual_cmdqueue_clock(10) as (clock, events, origin):
         with _refuse_path_operation(
-                queued, 'read_text', 1000, clock=clock) as calls:
+                queued, 'open', 1000, clock=clock) as calls:
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)
     sleep_groups = []
