@@ -404,15 +404,15 @@ def test_output_close_failure_reaps_the_spawned_suite(tmp):
 
 
 def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
-    """The subprocess bound is a backstop, not the first thing to fire.
+    """The subprocess bound leaves slack beyond its bounded inner waits.
 
-    Every wait inside the harness is bounded and names what it was waiting
-    for; the bound around the whole child says only that a command timed
-    out, and carries the entire harness source with it. A Windows leg
-    reported exactly that. So the outer bound has to outlast the worst path
-    through the inner ones: one for config load, one for the handlers to
-    start, one per result, one per requested gap, and one for dispatch
-    settlement.
+    Every wait names what it was waiting for and has its own bound except the
+    result POST wait, whose incidental round-trip is bounded only by the child
+    backstop. The inequality below sizes slack beyond the bounded waits for
+    config load, handler startup, requested gaps, and dispatch settlement,
+    while reserving one interval per result POST. It does not prove every path
+    reports before the backstop; a stuck result POST reaches the whole-command
+    timeout instead of an inner deadline.
     """
     del tmp
     inner = _overlap._OVERLAP_INNER_WAIT_S
@@ -423,9 +423,10 @@ def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
         bound = _overlap.overlap_child_timeout(
             order, wait_between, inner)
         assert bound > worst, (
-            f'{len(order)} commands, wait_between={wait_between}: the child '
-            f'is killed at {bound}s while its own waits can run to {worst}s, '
-            'so the failure names the whole command instead of the step')
+            f'{len(order)} commands, wait_between={wait_between}: the '
+            f'bounded-wait budget and result allowances total {worst}s '
+            f'against a {bound}s child backstop, leaving slack; an unbounded '
+            'result POST can still reach the child backstop')
 
 
 def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
