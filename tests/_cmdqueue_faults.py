@@ -7,8 +7,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cmdqueue  # noqa: E402
 
-# This large number is a runaway guard, not a valid-wait sleep assertion.
-_RUNAWAY_SLEEP_LIMIT = 1000
+# A runaway sleeps without advancing the clock; a valid wait may sleep any
+# number of times, because every positive sleep consumes its deadline.
+_STALLED_SLEEP_LIMIT = 1000
 
 
 @contextlib.contextmanager
@@ -44,13 +45,14 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
 
 @contextlib.contextmanager
-def _virtual_cmdqueue_clock(max_sleeps):
+def _virtual_cmdqueue_clock(max_sleeps=None):
     original = _cmdqueue.time
     # A large power-of-two scale keeps even subnormal polling delays distinct.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
     now = [origin]
     events = []
     sleep_count = [0]
+    stalled = [0]
     # Read cost exposes stale deadline samples; the fallback avoids underflow.
     read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
@@ -67,9 +69,13 @@ def _virtual_cmdqueue_clock(max_sleeps):
         def sleep(self, seconds):
             if seconds < 0:
                 raise ValueError('sleep length must be non-negative')
-            if sleep_count[0] >= max_sleeps:
+            if max_sleeps is not None and sleep_count[0] >= max_sleeps:
                 raise AssertionError(
                     f'virtual clock exceeded {max_sleeps} sleeps')
+            stalled[0] = 0 if seconds else stalled[0] + 1
+            if stalled[0] >= _STALLED_SLEEP_LIMIT:
+                raise AssertionError(
+                    f'virtual clock made no progress in {stalled[0]} sleeps')
             sleep_count[0] += 1
             events.append(('sleep', seconds))
             now[0] += seconds
