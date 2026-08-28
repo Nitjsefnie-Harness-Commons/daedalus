@@ -53,6 +53,8 @@ def test_a_launch_with_a_provable_cwd_is_safe(tmp):
     assert _synthetic_violations(
         """import os
 import subprocess
+import _util
+import test_dashboard_behaviour as behaviour
 subprocess.run(['python3', 'child.py'])
 subprocess.run(['python3', 'a.py'], cwd=ROOT)
 subprocess.run(['python3', 'b.py'], cwd=str(ROOT))
@@ -152,6 +154,38 @@ os.chdir(tmp)
 launch()
 """)
     assert any('tests/synthetic.py:4' in v for v in violations), violations
+
+
+def test_an_alias_of_the_subprocess_module_is_followed(tmp):
+    """A launch through a name bound to the module is still a launch."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+launcher_module = subprocess
+launcher_module.run(['python3', 'child.py'], cwd=tmp)
+""")
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:3' in violations[0], violations
+
+
+def test_an_attribute_root_must_name_an_imported_owner(tmp):
+    """`x.ROOT` proves nothing unless x is a module that owns ROOT."""
+    del tmp
+    violations = _synthetic_violations(
+        """import os as behaviour
+import subprocess
+behaviour.ROOT = tmp
+subprocess.run(['python3', 'child.py'], cwd=behaviour.ROOT)
+""")
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:4' in violations[0], violations
+    assigned = _synthetic_violations(
+        """import subprocess
+import _util
+_util.ROOT = tmp
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""")
+    assert len(assigned) == 1, assigned
 
 
 def test_a_chain_of_launch_callable_aliases_is_followed(tmp):
