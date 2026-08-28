@@ -83,6 +83,11 @@ omit = [
     "*/site-packages/*",
     # Untracked third-party JavaScript dependencies can ship Python files.
     "node_modules/*",
+    # Agent tooling that ships beside the skill documenting it. These drive
+    # `gh` against GitHub rather than exercising anything this repository
+    # distributes, so measuring them makes the floor track the coverage of the
+    # tools instead of the coverage of the product.
+    ".claude/*",
 ]
 
 [tool.coverage.paths]
