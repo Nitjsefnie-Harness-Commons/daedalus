@@ -320,13 +320,31 @@ def test_shell_wrapped_python_in_a_temp_cwd_is_caught(tmp):
         for v in restored), restored
 
 
+def test_real_module_controls_agree_under_crlf_endings(tmp):
+    """A CRLF checkout searches and counts lines exactly like LF."""
+    del tmp
+    target = ROOT / 'tests' / 'test_diff_coverage.py'
+    lf = _module_text(target)
+    crlf = lf.replace('\n', '\r\n')
+    single = "'--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,"
+    multi = ("    done = subprocess.run(\n"
+             "        [sys.executable, str(_SCRIPT), '--coverage', "
+             "str(coverage_xml),\n")
+    assert single in lf and single in crlf
+    assert multi in lf and multi not in crlf
+    normalised = crlf.replace('\r\n', '\n')
+    assert multi in normalised
+    assert (lf[:lf.index(multi)].count('\n')
+            == normalised[:normalised.index(multi)].count('\n'))
+
+
 def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
     """Deleting env= from a real repo-script launch in tmp is caught."""
     del tmp
     target = ROOT / 'tests' / 'test_diff_coverage.py'
     original = target.read_bytes()
     needle = "'--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,"
-    text = original.decode('utf-8')
+    text = _module_text(target)
     assert needle in text, 'the row 1 launch shape changed'
     replacement = "'--diff', str(diff)], cwd=tmp,"
     start = text.rindex('subprocess.run(', 0, text.index(needle))
@@ -370,7 +388,7 @@ def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
         "         '--diff', str(diff)],\n"
         "        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, "
         "timeout=60)")
-    text = original.decode('utf-8')
+    text = _module_text(target)
     assert needle in text, 'the row 3 launch shape changed'
     restored_line = text[:text.index(needle)].count('\n') + 1
     mutated = text.replace(
