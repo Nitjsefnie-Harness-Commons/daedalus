@@ -307,7 +307,9 @@
 !/tests/test_path_safety.py
 !/tests/test_pr_body.py
 !/tests/test_pr_gate.py
+!/tests/test_real_browser_environment.py
 !/tests/test_real_browser_eval.py
+!/tests/test_real_browser_harness.py
 !/tests/test_release_scan.py
 !/tests/test_repo_layout.py
 !/tests/test_result_store.py
