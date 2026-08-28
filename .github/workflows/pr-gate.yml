@@ -90,17 +90,62 @@ jobs:
             exit 0
           fi
 
+          body_file="$(mktemp)"
+          rendered_file="$(mktemp)"
           analysis_file="$(mktemp)"
           reasons_file="$(mktemp)"
           comment_file="$(mktemp)"
-          trap 'rm -f "$analysis_file" "$reasons_file" \
-            "$comment_file"' EXIT
-          printf '%s' "$BODY" \
-            | python3 scripts/ci/pr_body.py \
+          fingerprints_file="$(mktemp)"
+          trap 'rm -f "$body_file" "$rendered_file" "$analysis_file" \
+            "$reasons_file" "$comment_file" "$fingerprints_file"' EXIT
+          printf '%s' "$BODY" > "$body_file"
+          numbers=''
+          body_over_bound=0
+          # This matches GitHub's pull-request body ceiling while bounding
+          # both the render request and its possible HTML expansion.
+          body_bytes="$(wc -c < "$body_file")"
+          if [ "$body_bytes" -gt 65536 ]; then
+            body_over_bound=1
+            echo 'This body is larger than 65536 bytes, so it was not sent to the Markdown renderer.' > "$reasons_file"
+          else
+            if ! gh api /markdown -F "text=@$body_file" \
+              -f mode=gfm -f "context=$REPO" > "$rendered_file"
+            then
+              echo 'could not render the pull request body' >&2
+              exit 1
+            fi
+            if ! python3 scripts/ci/pr_body.py "$REPO" \
+              .github/PULL_REQUEST_TEMPLATE.md < "$rendered_file" \
+              | tr -d '\r' > "$analysis_file"
+            then
+              echo 'could not analyze the rendered pull request body' >&2
+              exit 1
+            fi
+            sed -n 's/^layout://p' "$analysis_file" > "$reasons_file"
+            numbers="$(sed -n 's/^issue://p' "$analysis_file")"
+
+            python3 scripts/ci/pr_body.py --instruction-fingerprints \
               .github/PULL_REQUEST_TEMPLATE.md \
-            | tr -d '\r' > "$analysis_file"
-          sed -n 's/^layout://p' "$analysis_file" > "$reasons_file"
-          numbers="$(sed -n 's/^issue://p' "$analysis_file")"
+              | tr -d '\r' > "$fingerprints_file"
+            retained_instructions=0
+            while IFS= read -r fingerprint; do
+              source_count=0
+              rendered_count=0
+              # No match is expected for a body that removed the template.
+              if source_count="$(grep -Fc -- "$fingerprint" \
+                "$body_file")"; then :; fi
+              if rendered_count="$(grep -Fc -- "$fingerprint" \
+                "$rendered_file")"; then :; fi
+              if [ "$source_count" -gt "$rendered_count" ]; then
+                retained_instructions=1
+                break
+              fi
+            done < "$fingerprints_file"
+            if [ "$retained_instructions" -eq 1 ]; then
+              echo 'Remove the template instruction comments.' \
+                >> "$reasons_file"
+            fi
+          fi
           # Tagged parser output makes the complete reference list countable.
           # shellcheck disable=SC2086
           set -- $numbers
@@ -137,10 +182,12 @@ jobs:
             fi
           done
 
-          if [ "$#" -gt 20 ]; then
-            echo 'This body names more than 20 issue references, so only the first 20 were checked.' >> "$reasons_file"
-          elif [ "$claimed" -eq 0 ]; then
-            echo 'No checked issue is assigned to you.' >> "$reasons_file"
+          if [ "$body_over_bound" -eq 0 ]; then
+            if [ "$#" -gt 20 ]; then
+              echo 'This body names more than 20 issue references, so only the first 20 were checked.' >> "$reasons_file"
+            elif [ "$claimed" -eq 0 ]; then
+              echo 'No checked issue is assigned to you.' >> "$reasons_file"
+            fi
           fi
 
           if [ ! -s "$reasons_file" ]; then

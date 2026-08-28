@@ -1,128 +1,98 @@
 #!/usr/bin/env python3
-"""Pull-request template layout validation."""
+"""Rendered pull-request template layout validation."""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _prgate import PR_BODY, TEMPLATE, _layout_body  # noqa: E402
+from _prgate import (  # noqa: E402
+    GITHUB_HTML, PR_BODY, TEMPLATE, _html_body, _issue_html, _text_html,
+    _valid_html,
+)
+
+
+RELATED = 'Related Issues and Pull Requests'
 
 
 def test_layout_accepts_required_sections_without_optional_footer(tmp):
     del tmp
-    body = _layout_body(
-        ('Summary', 'One sentence.'),
-        ('Related Issues and Pull Requests', 'Fixes #91'),
-        ('Changes', '- One change'),
-        ('Testing', 'Ran the suite.'))
-    assert PR_BODY.layout_errors(body, TEMPLATE) == []
+    assert PR_BODY.layout_errors(_valid_html(), TEMPLATE) == []
 
 
 def test_layout_reports_each_missing_or_empty_section(tmp):
     del tmp
-    body = _layout_body(
-        ('Related Issues and Pull Requests', 'Fixes #91'),
+    rendered = _html_body(
+        (RELATED, f'Fixes {_issue_html(91)}'),
         ('Changes', ''),
-        ('Testing', 'Ran the suite.'),
+        ('Testing', _text_html('Ran the suite.')),
         ('Breaking Changes', ''))
-    errors = PR_BODY.layout_errors(body, TEMPLATE)
+    errors = PR_BODY.layout_errors(rendered, TEMPLATE)
     assert 'Required section "Summary" is missing.' in errors
     assert 'Section "Changes" is empty.' in errors
     assert 'Section "Breaking Changes" is empty.' in errors
 
 
-def test_layout_rejects_markers_that_render_as_empty(tmp):
+def test_layout_rejects_constructs_that_render_as_empty(tmp):
     del tmp
-    for content in ('-', '1.', '>'):
-        body = _layout_body(
-            ('Summary', 'One sentence.'),
-            ('Related Issues and Pull Requests', 'Fixes #91'),
-            ('Changes', content),
-            ('Testing', 'Ran the suite.'))
+    for name in (
+            'empty_list', 'empty_ordered', 'empty_quote',
+            'link_definition'):
+        rendered = _valid_html(changes=GITHUB_HTML[name])
         assert 'Section "Changes" is empty.' in PR_BODY.layout_errors(
-            body, TEMPLATE)
+            rendered, TEMPLATE), name
 
 
 def test_layout_reports_unknown_duplicate_and_out_of_order_sections(tmp):
     del tmp
-    body = _layout_body(
-        ('Summary', 'First.'),
-        ('Changes', '- Too early'),
-        ('Notes', 'Unknown.'),
-        ('Summary', 'Again.'),
-        ('Related Issues and Pull Requests', 'Fixes #91'),
-        ('Testing', 'Ran the suite.'))
-    errors = PR_BODY.layout_errors(body, TEMPLATE)
+    rendered = _html_body(
+        ('Summary', _text_html('First.')),
+        ('Changes', _text_html('Too early.')),
+        ('Notes', _text_html('Unknown.')),
+        ('Summary', _text_html('Again.')),
+        (RELATED, f'Fixes {_issue_html(91)}'),
+        ('Testing', _text_html('Ran the suite.')))
+    errors = PR_BODY.layout_errors(rendered, TEMPLATE)
     assert 'Section `Notes` is not defined by the template.' in errors
     assert 'Section "Summary" appears more than once.' in errors
-    assert 'Section "Related Issues and Pull Requests" is out of order.' \
-        in errors
+    assert f'Section "{RELATED}" is out of order.' in errors
 
 
-def test_layout_names_retained_template_instructions_separately(tmp):
+def test_layout_counts_rendered_code_as_content(tmp):
     del tmp
-    errors = PR_BODY.layout_errors(TEMPLATE, TEMPLATE)
-    assert 'Remove the template instruction comments.' in errors
+    rendered = _valid_html(changes=GITHUB_HTML['inline_code'])
+    assert PR_BODY.layout_errors(rendered, TEMPLATE) == []
 
 
-def test_layout_resolves_code_before_template_comments(tmp):
+def test_layout_ignores_heading_shaped_text_in_raw_html(tmp):
     del tmp
-    instruction = (
-        '<!-- required: bullet list of concrete changes — files, modules, '
-        'behavior. -->')
-    changes = (
-        f'- Changed `{instruction}` to prose.',
-        f'    {instruction}\n- A visible change',
+    rendered = _valid_html(changes=GITHUB_HTML['kbd_block'])
+    assert PR_BODY.layout_errors(rendered, TEMPLATE) == []
+
+
+def test_unknown_section_reasons_escape_adversarial_names(tmp):
+    del tmp
+    cases = (
+        ('Notes for #255', '`Notes for #255`'),
+        ('Notes ` for #255', '``Notes ` for #255``'),
+        ('``` #255', '```` ``` #255 ````'),
+        ('#255 ```', '```` #255 ``` ````'),
+        ('`', '`` ` ``'),
+        ('`#255`', '`` `#255` ``'),
+        ('#255', '`#255`'),
     )
-    for content in changes:
-        body = _layout_body(
-            ('Summary', 'One sentence.'),
-            ('Related Issues and Pull Requests', 'Fixes #91'),
-            ('Changes', content),
-            ('Testing', 'Ran the suite.'))
-        assert PR_BODY.layout_errors(body, TEMPLATE) == []
-
-
-def test_layout_ignores_headings_inside_raw_html_blocks(tmp):
-    del tmp
-    body = _layout_body(
-        ('Summary', 'One sentence.'),
-        ('Related Issues and Pull Requests', 'Fixes #91'),
-        ('Changes', '<pre>\n## literal heading\n</pre>\n- A change'),
-        ('Testing', 'Ran the suite.'))
-    assert PR_BODY.layout_errors(body, TEMPLATE) == []
-
-
-def test_unknown_section_reasons_cannot_name_issues(tmp):
-    del tmp
-    names = (
-        'Notes for #255',
-        'Notes ` for #255',
-        '``` #255',
-        '#255 ```',
-        '`',
-        '`#255`',
-        '   #255   ',
-    )
-    leaks = []
-    for name in names:
-        body = _layout_body(
-            ('Summary', 'One sentence.'),
-            ('Related Issues and Pull Requests', 'Fixes #91'),
-            ('Changes', '- A change'),
-            ('Testing', 'Ran the suite.'),
-            (name, 'Unknown.'))
-        errors = PR_BODY.layout_errors(body, TEMPLATE)
-        reasons = [error for error in errors
-                   if 'is not defined by the template.' in error]
-        assert len(reasons) == 1, (name, errors)
-        synthetic = (
-            '## Related Issues and Pull Requests\n'
-            f'{reasons[0]}\n')
-        references = PR_BODY.referenced_issues(synthetic)
-        if references:
-            leaks.append((name, reasons[0], references))
-    assert not leaks, f'unsafe references: {leaks!r}'
+    failures = []
+    for name, quoted in cases:
+        rendered = _html_body(
+            ('Summary', _text_html('One sentence.')),
+            (RELATED, f'Fixes {_issue_html(91)}'),
+            ('Changes', _text_html('A change.')),
+            ('Testing', _text_html('Ran the suite.')),
+            (name, _text_html('Unknown.')))
+        reason = f'Section {quoted} is not defined by the template.'
+        errors = PR_BODY.layout_errors(rendered, TEMPLATE)
+        if reason not in errors:
+            failures.append((name, reason, errors))
+    assert failures == [], failures
 
 
 def main():
