@@ -76,6 +76,20 @@ def test_refuses_a_shadowed_copy_helper(tmp):
     ]
 
 
+def test_refuses_a_comprehension_rebound_owned_name(tmp):
+    """A comprehension target shadowing tmp does not inherit ownership."""
+    source = Path(tmp) / 'comprehension-target.py'
+    source.write_text(
+        "def test_control(tmp):\n"
+        "    [tmp.write_text('written', encoding='utf-8')\n"
+        "     for tmp in [ROOT / 'probe']]\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'comprehension-target.py:2: write_text target path is not '
+        + 'control-owned'
+    ]
+
+
 def test_refuses_a_shadowed_path_constructor(tmp):
     """A local Path spelling proves no relationship to tmp."""
     source = Path(tmp) / 'shadowed-path.py'

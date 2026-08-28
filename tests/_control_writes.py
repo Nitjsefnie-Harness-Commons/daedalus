@@ -52,6 +52,16 @@ def _record_binding(bindings, target, value, trusted_copy=True):
         bindings.setdefault(name, []).append(value)
 
 
+def _target_name_nodes(target):
+    if isinstance(target, ast.Name):
+        yield target
+    elif isinstance(target, ast.Starred):
+        yield from _target_name_nodes(target.value)
+    elif isinstance(target, (ast.List, ast.Tuple)):
+        for part in target.elts:
+            yield from _target_name_nodes(part)
+
+
 def _literal_path_kind(value):
     if not isinstance(value, str):
         return _UNKNOWN_PATH
@@ -171,21 +181,36 @@ def _owned_path_names(scope):
     local_names = _scope_local_names(scope)
     trusted_copy = '_real_module_copy' not in local_names
     trusted_names = {'Path', 'str', 'os'} - local_names
+    modelled = set()
     for node in _scope_nodes(scope):
+        targets = []
         if isinstance(node, ast.Assign):
+            targets = node.targets
             for target in node.targets:
                 _record_binding(bindings, target, node.value, trusted_copy)
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
             _record_binding(
                 bindings, node.target, node.value, trusted_copy)
         elif isinstance(node, ast.AugAssign):
+            targets = [node.target]
             _record_binding(bindings, node.target, _UNKNOWN_PATH)
         elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = [node.target]
             _record_binding(bindings, node.target, node.iter, trusted_copy)
         elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            targets = [node.optional_vars]
             _record_binding(
                 bindings, node.optional_vars, node.context_expr,
                 trusted_copy)
+        for target in targets:
+            modelled.update(id(name) for name in _target_name_nodes(target))
+    # A binding form this pass does not model — a comprehension target, a
+    # walrus, an except name — must clear ownership rather than inherit it.
+    for node in _scope_nodes(scope):
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+                and id(node) not in modelled):
+            bindings.setdefault(node.id, []).append(_UNKNOWN_PATH)
     owned = set()
     changed = True
     while changed:
