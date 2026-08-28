@@ -95,6 +95,53 @@ def _ready_worker(node, workers):
     return 'ws://worker', True, None
 
 
+def test_repository_worker_probe_exception_counts_as_reached(tmp):
+    del tmp
+    node = shutil.which('node')
+    assert node, 'Node is required to execute the worker probe control'
+    checks = []
+
+    def evaluate(_node, target, method, params):
+        assert (_node, target, method) == (
+            node, 'ws://worker', 'Runtime.evaluate')
+        check = subprocess.run(
+            [node, '--check'], input=params['expression'],
+            capture_output=True, text=True, timeout=10)
+        checks.append(check)
+        if check.returncode:
+            return {'exceptionDetails': {'text': 'probe did not parse'}}
+        return {'result': {'value': False}}
+
+    workers = [{'webSocketDebuggerUrl': 'ws://worker'}]
+    with mock.patch.object(_realbrowser, 'cdp_call', evaluate):
+        target, reached, reason = _realbrowser.ready_worker(node, workers)
+        assert checks[-1].returncode == 0, checks[-1]
+        assert target is None, target
+        assert reached is True, reason
+
+        with mock.patch.object(
+                _realbrowser, '_WORKER_READY_PROBE', 'function {'):
+            target, reached, reason = _realbrowser.ready_worker(node, workers)
+        assert checks[-1].returncode != 0, checks[-1]
+        assert target is None, target
+        assert reached is True, reason
+
+
+def test_worker_transport_failure_stays_unreached(tmp):
+    del tmp
+
+    def unanswered(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError('controlled transport failure')
+
+    workers = [{'webSocketDebuggerUrl': 'ws://worker'}]
+    with mock.patch.object(_realbrowser, 'cdp_call', unanswered):
+        target, reached, reason = _realbrowser.ready_worker(
+            'node-for-control', workers)
+    assert target is None, target
+    assert reached is False, reason
+
+
 def _configured_worker(node, target, expression):
     assert node == 'node-for-control', node
     assert target == 'ws://worker', target
