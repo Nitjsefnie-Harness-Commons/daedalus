@@ -34,15 +34,23 @@ Two steps, in this order:
 
 Then reopen this same pull request. A closed pull request still accepts edits
 and comments, so there is no need to open a second one and nothing here is
-lost.""")
+lost.
+""")
 
 _GH_STUB = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
 fixtures = json.loads(pathlib.Path(os.environ['STUB_ISSUES']).read_text())
 calls = pathlib.Path(os.environ['STUB_CALLS'])
 argv = sys.argv[1:]
+recorded = []
+for arg in argv:
+    if arg.startswith('body=@'):
+        body = pathlib.Path(arg[6:]).read_text(encoding='utf-8')
+        recorded.append('body=' + body)
+    else:
+        recorded.append(arg)
 with calls.open('a', encoding='utf-8') as handle:
-    handle.write(json.dumps(argv) + chr(10))
+    handle.write(json.dumps(recorded) + chr(10))
 endpoint = next((arg for arg in argv if arg.startswith('repos/')), '')
 parts = endpoint.split('/')
 if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
@@ -51,6 +59,9 @@ if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
     if '--include' in argv:
         reason = {200: 'OK', 404: 'Not Found'}.get(status, 'Error')
         print(f'HTTP/2.0 {status} {reason}')
+        print('cache-control: private, max-age=60')
+        print('content-type: application/json; charset=utf-8')
+        print('x-github-media-type: github.v3; format=json')
         print()
     if status != 200:
         print(f'gh: HTTP {status}', file=sys.stderr)
@@ -64,6 +75,10 @@ if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
             print(prefix + assignee['login'])
     else:
         print(json.dumps(issue))
+if endpoint.endswith('/comments') and os.environ.get('STUB_COMMENT_STATUS'):
+    status = os.environ['STUB_COMMENT_STATUS']
+    print(f'gh: HTTP {status}', file=sys.stderr)
+    raise SystemExit(1)
 """
 
 _CRLF_PYTHON_STUB = r"""#!/usr/bin/env bash
@@ -102,8 +117,6 @@ def _workflow_script():
 
 def _issue(*assignees, pull_request=False):
     issue = {
-        'number': 0,
-        'state': 'open',
         'assignees': [{'login': login} for login in assignees],
     }
     if pull_request:
@@ -113,7 +126,7 @@ def _issue(*assignees, pull_request=False):
 
 def _run_workflow(
         tmp, body, issues, actor='alice', pr='99', repo='owner/repo',
-        parser_crlf=False):
+        parser_crlf=False, comment_status=None):
     """Execute the real workflow shell against the controlled gh boundary."""
     bash = shutil.which('bash')
     assert bash, 'bash is required to execute the pull-request claim gate'
@@ -142,6 +155,8 @@ def _run_workflow(
         'ACTOR': actor,
         'BODY': body,
     }
+    if comment_status is not None:
+        env['STUB_COMMENT_STATUS'] = str(comment_status)
     result = subprocess.run(
         [bash, '-c', _workflow_script()], cwd=ROOT, env=env,
         capture_output=True, text=True, timeout=60)
@@ -163,6 +178,7 @@ def _assert_commented_then_closed(
     assert calls.index(comment) < calls.index(close), calls
     body = next(arg[5:] for arg in comment if arg.startswith('body='))
     assert body == f'@{actor}{_COMMENT_TAIL}', body
+    assert '-F' in comment, comment
     assert re.search(r'#[0-9]', body) is None, body
     assert 'has to name the issue it resolves' in body, body
     assert 'section names that issue: `Fixes #<issue>`' in body, body
@@ -355,12 +371,56 @@ def test_workflow_keeps_its_claim_gate_shape(tmp):
         'an expression is interpolated into contributor-controlled shell')
 
 
+def test_workflow_uses_a_portable_comment_file(tmp):
+    del tmp
+    script = _workflow_script()
+    assert '$(cat <<' not in script, script
+    assert "cat <<'COMMENT' >> \"$comment_file\"" in script, script
+    assert '-F "body=@$comment_file"' in script, script
+
+
+def test_workflow_documents_comment_before_close_fail_safe(tmp):
+    del tmp
+    script = _workflow_script()
+    assert ('leave the pull request open rather than close it silently'
+            in script.replace('\n# ', ' '))
+
+
+def test_gh_stub_models_include_response_headers(tmp):
+    workdir = Path(tmp) / 'gh-headers'
+    workdir.mkdir()
+    stub = workdir / 'gh'
+    stub.write_text(_GH_STUB, encoding='utf-8')
+    calls_path = workdir / 'calls.jsonl'
+    calls_path.write_text('', encoding='utf-8')
+    fixture_path = workdir / 'issues.json'
+    fixture_path.write_text(
+        json.dumps({'1': _issue('alice')}), encoding='utf-8')
+    env = {
+        **os.environ,
+        'STUB_ISSUES': str(fixture_path),
+        'STUB_CALLS': str(calls_path),
+    }
+    result = subprocess.run(
+        [sys.executable, str(stub), 'api', '--include',
+         'repos/owner/repo/issues/1', '--jq', '.assignees[].login'],
+        env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[1:4] == [
+        'cache-control: private, max-age=60',
+        'content-type: application/json; charset=utf-8',
+        'x-github-media-type: github.v3; format=json',
+    ], result.stdout
+
+
 def test_workflow_passes_for_an_issue_assigned_to_the_author(tmp):
     calls, result = _run_workflow(
         tmp, SECTION + 'Fixes #101\n', {'101': _issue('alice')})
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert len(calls) == 1, calls
     assert 'repos/owner/repo/issues/101' in calls[0], calls
+    query = calls[0][calls[0].index('--jq') + 1]
+    assert 'assignee:' in query, query
     assert 'issue 101' in result.stdout, result.stdout
 
 
@@ -417,6 +477,15 @@ def test_workflow_skips_a_missing_nonfirst_issue(tmp):
     _assert_commented_then_closed(calls)
 
 
+def test_workflow_tolerates_two_missing_issues(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Refs #120 and #121\n', {})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert 'repos/owner/repo/issues/120' in calls[0], calls
+    assert 'repos/owner/repo/issues/121' in calls[1], calls
+    _assert_commented_then_closed(calls)
+
+
 def test_workflow_continues_after_a_missing_first_issue(tmp):
     calls, result = _run_workflow(
         tmp, SECTION + 'Refs #111 and #112\n',
@@ -466,6 +535,24 @@ def test_workflow_uses_the_event_repository(tmp):
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert len(calls) == 1, calls
     assert 'repos/acme/widget/issues/115' in calls[0], calls
+
+
+def test_workflow_closes_without_lookup_when_reference_limit_is_exceeded(tmp):
+    references = ' '.join(f'#{number}' for number in range(130, 151))
+    calls, result = _run_workflow(
+        tmp, SECTION + references + '\n', {'130': _issue('alice')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert not [call for call in calls if '--include' in call], calls
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_does_not_close_when_the_comment_fails(tmp):
+    calls, result = _run_workflow(
+        tmp, '## Summary\nNo issue here.\n', {}, comment_status=502)
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert len(calls) == 1, calls
+    assert 'repos/owner/repo/issues/99/comments' in calls[0], calls
+    assert not any('repos/owner/repo/pulls/99' in call for call in calls)
 
 
 def main():

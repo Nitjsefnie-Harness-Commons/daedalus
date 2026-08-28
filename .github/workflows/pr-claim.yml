@@ -55,31 +55,45 @@ jobs:
           numbers="$(printf '%s' "$BODY" \
             | python3 scripts/ci/pr_claim.py \
             | tr -d '\r')"
-          for N in $numbers; do
-            if lookup="$(gh api --include "repos/$REPO/issues/$N" \
-              --jq 'if has("pull_request") then empty else
-                (.assignees[].login | "assignee:\(.)") end')"
-            then
-              assignees="$(printf '%s\n' "$lookup" \
-                | sed -n 's/^assignee://p')"
-            else
-              status="$(printf '%s\n' "$lookup" \
-                | sed -n \
-                  '1s/^HTTP\/[^ ]* \([0-9][0-9][0-9]\).*/\1/p')"
-              if [ "$status" = 404 ]; then
-                continue
+          # The parser emits only digits and newlines; deliberate splitting
+          # makes the complete list countable before any lookup.
+          # shellcheck disable=SC2086
+          set -- $numbers
+          # Twenty supports unusually broad multi-issue changes while keeping
+          # the API work safely inside this job's five-minute budget.
+          if [ "$#" -le 20 ]; then
+            for N in "$@"; do
+              if lookup="$(gh api --include "repos/$REPO/issues/$N" \
+                --jq 'if has("pull_request") then empty else
+                  (.assignees[].login | "assignee:\(.)") end')"
+              then
+                assignees="$(printf '%s\n' "$lookup" \
+                  | sed -n 's/^assignee://p')"
+              else
+                status="$(printf '%s\n' "$lookup" \
+                  | sed -n \
+                    '1s/^HTTP\/[^ ]* \([0-9][0-9][0-9]\).*/\1/p')"
+                if [ "$status" = 404 ]; then
+                  continue
+                fi
+                printf 'failed to look up issue %s (HTTP %s)\n' \
+                  "$N" "${status:-unknown}" >&2
+                exit 1
               fi
-              printf 'failed to look up issue %s (HTTP %s)\n' \
-                "$N" "${status:-unknown}" >&2
-              exit 1
-            fi
-            if printf '%s\n' "$assignees" | grep -Fxq "$ACTOR"; then
-              echo "pull request $PR is covered by claimed issue $N"
-              exit 0
-            fi
-          done
+              if printf '%s\n' "$assignees" | grep -Fxq "$ACTOR"; then
+                echo "pull request $PR is covered by claimed issue $N"
+                exit 0
+              fi
+            done
+          else
+            printf 'pull request %s names more than 20 issue references\n' \
+              "$PR" >&2
+          fi
 
-          comment="@$ACTOR$(cat <<'COMMENT'
+          comment_file="$(mktemp)"
+          trap 'rm -f "$comment_file"' EXIT
+          printf '@%s' "$ACTOR" > "$comment_file"
+          cat <<'COMMENT' >> "$comment_file"
            — closing this automatically, and it is recoverable: read on.
 
           A pull request here has to name the issue it resolves, in its
@@ -98,8 +112,9 @@ jobs:
           and comments, so there is no need to open a second one and nothing here is
           lost.
           COMMENT
-          )"
+          # If the explanation cannot be posted, leave the pull request open
+          # rather than close it silently.
           gh api "repos/$REPO/issues/$PR/comments" \
-            -f body="$comment" --silent
+            -F "body=@$comment_file" --silent
           gh api -X PATCH "repos/$REPO/pulls/$PR" \
             -f state=closed --silent
