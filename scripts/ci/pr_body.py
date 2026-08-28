@@ -15,9 +15,6 @@ _TEMPLATE_HEADING = re.compile(
     r'^##[ \t]+(?P<text>.+?)[ \t]*$', re.MULTILINE)
 _TEMPLATE_TAG = re.compile(
     r'<!--\s*(?P<tag>required|conditional|optional)\b')
-_SOURCE_HEADING = re.compile(
-    r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.*?)[ \t]*#*[ \t]*$',
-    re.MULTILINE)
 _HEADING_TAGS = frozenset(f'h{depth}' for depth in range(1, 7))
 _VOID_TAGS = frozenset((
     'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
@@ -25,6 +22,7 @@ _VOID_TAGS = frozenset((
 ))
 _MAX_ISSUE_DIGITS = 19
 _SECTION = 'related issues and pull requests'
+_SENTINEL = re.compile(r'pr-gate-sentinel-[0-9a-f]{64}')
 _INVISIBLE_CHARACTERS = frozenset((
     '\u034f', '\u115f', '\u1160', '\u2800', '\u3164', '\uffa0',
 ))
@@ -217,6 +215,105 @@ class _RenderedBodyParser(HTMLParser):
         self._issues = []
 
 
+class _RenderSentinelParser(HTMLParser):
+    def __init__(self, rendered, sentinel):
+        super().__init__(convert_charrefs=False)
+        self.rendered = rendered
+        self.sentinel = sentinel
+        self.elements = []
+        self._stack = []
+        self._current = None
+        self._line_offsets = [
+            0, *(match.end() for match in re.finditer('\n', rendered))]
+
+    def _offset(self):
+        line, column = self.getpos()
+        return self._line_offsets[line - 1] + column
+
+    def _tag_end(self):
+        end = self.rendered.find('>', self._offset())
+        return end + 1
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.casefold()
+        if not self._stack:
+            attributes = {
+                name.casefold(): value or '' for name, value in attrs}
+            kind = 'other'
+            if (tag == 'section' and 'data-footnotes' in attributes
+                    and 'footnotes' in attributes.get('class', '').split()):
+                kind = 'footnotes'
+            text = [] if tag == 'p' else None
+            self._current = [tag, kind, self._offset(), text]
+            if tag in _VOID_TAGS:
+                self.elements.append((kind, self._offset(), self._tag_end()))
+                self._current = None
+                return
+        elif self._current is not None:
+            self._current[3] = None
+        if tag not in _VOID_TAGS:
+            self._stack.append(tag)
+
+    def handle_startendtag(self, tag, _attrs):
+        if not self._stack:
+            self.elements.append(('other', self._offset(), self._tag_end()))
+
+    def handle_endtag(self, tag):
+        tag = tag.casefold()
+        if not self._stack or self._stack[-1] != tag:
+            raise ValueError(
+                'rendered HTML contains mismatched element boundaries')
+        if len(self._stack) == 1:
+            root, kind, start, text = self._current
+            if root == 'p' and text is not None \
+                    and ''.join(text) == self.sentinel:
+                kind = 'sentinel'
+            self.elements.append((kind, start, self._tag_end()))
+            self._current = None
+        self._stack.pop()
+
+    def handle_data(self, data):
+        if not self._stack:
+            if data.strip():
+                self.elements.append(('other', self._offset(), self._offset()))
+        elif len(self._stack) == 1 and self._current[3] is not None:
+            self._current[3].append(data)
+
+    def handle_comment(self, _data):
+        if not self._stack:
+            self.elements.append(('other', self._offset(), self._offset()))
+
+    def finish(self):
+        if self.rawdata:
+            raise ValueError('rendered HTML is structurally incomplete')
+        super().close()
+        if self._stack:
+            raise ValueError('rendered HTML contains an unfinished element')
+
+
+def strip_render_sentinel(rendered, sentinel):
+    if _SENTINEL.fullmatch(sentinel) is None:
+        raise ValueError('render sentinel has an invalid shape')
+    parser = _RenderSentinelParser(rendered, sentinel)
+    parser.feed(rendered)
+    parser.finish()
+    positions = [index for index, element in enumerate(parser.elements)
+                 if element[0] == 'sentinel']
+    if len(positions) != 1:
+        raise ValueError('rendered HTML has no unique terminal sentinel')
+    index = positions[0]
+    # GitHub moves its generated footnotes behind appended body content.
+    if [item[0] for item in parser.elements[index + 1:]] not in (
+            [], ['footnotes']):
+        raise ValueError('render sentinel is not terminal')
+    _, start, end = parser.elements[index]
+    if start and rendered[start - 1] == '\n':
+        start -= 1
+        if start and rendered[start - 1] == '\r':
+            start -= 1
+    return rendered[:start] + rendered[end:]
+
+
 def _rendered_body(rendered, repository=None):
     rendered = rendered or ''
     parser = _RenderedBodyParser(repository)
@@ -264,16 +361,6 @@ def _retains_instruction_comment(source, rendered_text, template):
     for match in _TEMPLATE_COMMENT.finditer(template):
         comment = _normalise_newlines(match.group(0))
         if source.count(comment) > rendered_text.count(comment):
-            return True
-    return False
-
-
-def _source_has_missing_rendered_section(source, sections, template):
-    rules = _template_rules(template)
-    rendered = {section.key for section in sections}
-    for match in _SOURCE_HEADING.finditer(source):
-        key = _heading_text(match.group('text')).casefold()
-        if key in rules and key not in rendered:
             return True
     return False
 
@@ -351,9 +438,6 @@ def layout_errors(rendered, template):
 
 def analyze(rendered, repository, template, source=None):
     document = _rendered_body(rendered, repository)
-    if (source is not None and _source_has_missing_rendered_section(
-            source, document.sections, template)):
-        raise ValueError('rendered HTML does not represent the source body')
     errors = _layout_errors(document.sections, template)
     if source is not None and _retains_instruction_comment(
             source, ''.join(document.visible_text), template):
@@ -367,28 +451,39 @@ def _read_template(path):
 
 
 def _usage():
-    print(f'usage: {sys.argv[0]} repository template [source-body]',
+    print(f'usage: {sys.argv[0]} [--sentinel value] repository template '
+          '[source-body]',
           file=sys.stderr)
 
 
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == '--instruction-fingerprints':
+    args = sys.argv[1:]
+    if len(args) == 2 and args[0] == '--instruction-fingerprints':
         try:
-            template = _read_template(sys.argv[2])
+            template = _read_template(args[1])
         except OSError as error:
             print(f'could not read template: {error}', file=sys.stderr)
             return 2
         for fingerprint in instruction_fingerprints(template):
             print(fingerprint)
         return 0
-    if len(sys.argv) not in (3, 4):
+    sentinel = None
+    if args[:1] == ['--sentinel']:
+        if len(args) < 3:
+            _usage()
+            return 2
+        sentinel = args[1]
+        args = args[2:]
+    if len(args) not in (2, 3):
         _usage()
         return 2
     rendered = sys.stdin.read()
     try:
-        template = _read_template(sys.argv[2])
-        source = _read_template(sys.argv[3]) if len(sys.argv) == 4 else None
-        issues, errors = analyze(rendered, sys.argv[1], template, source)
+        if sentinel is not None:
+            rendered = strip_render_sentinel(rendered, sentinel)
+        template = _read_template(args[1])
+        source = _read_template(args[2]) if len(args) == 3 else None
+        issues, errors = analyze(rendered, args[0], template, source)
     except (OSError, ValueError) as error:
         print(f'could not analyze rendered HTML: {error}', file=sys.stderr)
         return 2

@@ -91,13 +91,16 @@ jobs:
           fi
 
           body_file="$(mktemp)"
+          render_body_file="$(mktemp)"
           rendered_file="$(mktemp)"
           analysis_file="$(mktemp)"
           reasons_file="$(mktemp)"
           comment_file="$(mktemp)"
-          trap 'rm -f "$body_file" "$rendered_file" "$analysis_file" \
-            "$reasons_file" "$comment_file"' EXIT
+          trap 'rm -f "$body_file" "$render_body_file" "$rendered_file" \
+            "$analysis_file" "$reasons_file" "$comment_file"' EXIT
           printf '%s' "$BODY" > "$body_file"
+          sentinel="$(python3 -c 'import secrets; print("pr-gate-sentinel-" + secrets.token_hex(32))')"
+          printf '%s\n\n%s\n' "$BODY" "$sentinel" > "$render_body_file"
           source_has_reference=0
           if grep -Eq '#[0-9]+' "$body_file"; then
             source_has_reference=1
@@ -109,13 +112,13 @@ jobs:
             fi
           fi
           numbers=''
-          if ! gh api markdown -F "text=@$body_file" \
+          if ! gh api markdown -F "text=@$render_body_file" \
             -f mode=gfm -f "context=$REPO" > "$rendered_file"
           then
             echo 'could not render the pull request body' >&2
             exit 1
           fi
-          if ! python3 scripts/ci/pr_body.py "$REPO" \
+          if ! python3 scripts/ci/pr_body.py --sentinel "$sentinel" "$REPO" \
             .github/PULL_REQUEST_TEMPLATE.md "$body_file" \
             < "$rendered_file" | tr -d '\r' > "$analysis_file"
           then

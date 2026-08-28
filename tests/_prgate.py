@@ -175,19 +175,34 @@ def unsupported():
     print('unsupported gh api call', file=sys.stderr)
     raise SystemExit(2)
 if endpoint == 'markdown':
+    submitted = pathlib.Path(argv[3][6:]).read_text(encoding='utf-8') \
+        if len(argv) > 3 and argv[3].startswith('text=@') else ''
+    expected = os.environ['STUB_EXPECTED_BODY']
+    marker = re.fullmatch(
+        re.escape(expected)
+        + r'\n\n(pr-gate-sentinel-[0-9a-f]{64})\n', submitted)
     if (len(argv) != 8 or argv[:3] != ['api', 'markdown', '-F']
             or not argv[3].startswith('text=@')
             or argv[4] != '-f' or argv[5] != 'mode=gfm'
             or argv[6] != '-f'
             or argv[7] != 'context=' + os.environ['STUB_EXPECTED_REPO']
-            or pathlib.Path(argv[3][6:]).read_text(encoding='utf-8')
-            != os.environ['STUB_EXPECTED_BODY']):
+            or (submitted != expected and marker is None)):
         unsupported()
     status = int(os.environ.get('STUB_RENDER_STATUS', '200'))
     if status != 200:
         print(f'gh: HTTP {status}', file=sys.stderr)
         raise SystemExit(1)
-    print(pathlib.Path(os.environ['STUB_RENDERED_HTML']).read_text(), end='')
+    rendered = pathlib.Path(os.environ['STUB_RENDERED_HTML']).read_text()
+    if marker and os.environ.get('STUB_RENDER_COMPLETE', '1') == '1':
+        sentinel = f'<p dir="auto">{marker.group(1)}</p>'
+        footnotes = '\n<section data-footnotes="" class="footnotes">'
+        if footnotes in rendered:
+            rendered = rendered.replace(
+                footnotes, f'\n{sentinel}{footnotes}', 1)
+        else:
+            rendered = f'{rendered}\n{sentinel}'
+        rendered += os.environ.get('STUB_RENDER_AFTER_SENTINEL', '')
+    print(rendered, end='')
     raise SystemExit(0)
 if '/timeline?' in endpoint:
     if (len(argv) != 5 or argv[:2] != ['api', '--paginate']
@@ -322,7 +337,8 @@ def _run_workflow(
     """Execute the real workflow shell against the controlled gh boundary."""
     supported = {
         'parser_crlf', 'comment_status', 'pull', 'history',
-        'rendered_html', 'render_status',
+        'rendered_html', 'render_status', 'render_complete',
+        'render_after_sentinel',
     }
     assert set(options) <= supported, sorted(set(options) - supported)
     parser_crlf = options.get('parser_crlf', False)
@@ -331,6 +347,9 @@ def _run_workflow(
     history = options.get('history')
     rendered_html = options.get('rendered_html')
     render_status = options.get('render_status')
+    render_complete = options.get(
+        'render_complete', rendered_html is None)
+    render_after_sentinel = options.get('render_after_sentinel', '')
     pull = pull or {}
     history = history or {}
     state = pull.get('state', 'open')
@@ -374,6 +393,8 @@ def _run_workflow(
         'STUB_RENDERED_HTML': str(rendered_path),
         'STUB_EXPECTED_BODY': body,
         'STUB_EXPECTED_REPO': repo,
+        'STUB_RENDER_COMPLETE': '1' if render_complete else '0',
+        'STUB_RENDER_AFTER_SENTINEL': render_after_sentinel,
         'GH_TOKEN': 'stub',
         'REPO': repo,
         'PR': pr,
@@ -392,6 +413,51 @@ def _run_workflow(
     calls = [json.loads(line) for line in calls_path.read_text(
         encoding='utf-8').splitlines()]
     return calls, result
+
+
+def _run_complete_workflow(tmp, body, issues, **options):
+    assert 'render_complete' not in options
+    return _run_workflow(
+        tmp, body, issues, render_complete=True, **options)
+
+
+def _assert_unusable_render(tmp, body, rendered, **options):
+    calls, result = _run_workflow(
+        tmp, body, {'101': _issue('alice')},
+        rendered_html=rendered, **options)
+    assert result.returncode != 0, (result.stdout, result.stderr, calls)
+    assert 'could not analyze' in result.stderr, result.stderr
+    _assert_no_mutation(calls)
+
+
+def _truncated_render_cases():
+    return (
+        ('empty', ''),
+        ('plain', 'upstream returned plain text'),
+        ('token', '<h2>Summary</h2><'),
+        ('element', '<h2>Summary</h2><p>text'),
+        ('heading', '<h2>Summary</h2><h2'),
+        ('comment', '<h2>Summary</h2><!-- unfinished'),
+        ('prefix', '<h2>Summary</h2><p>One sentence.</p>'),
+        ('missing-headings', _html_body(
+            ('Summary', _text_html('One sentence.')),
+            ('Related Issues and Pull Requests',
+             f'Fixes {_issue_html(101)}'))),
+        ('last-content', _valid_html().replace(
+            '<p dir="auto">Ran the suite.</p>', '')),
+        ('middle-content', _valid_html(changes='')),
+    )
+
+
+def _sentinel_attack_cases():
+    fake = 'pr-gate-sentinel-' + ('0' * 64)
+    return (
+        ('forged', f'{_valid_body()}\n{fake}\n',
+         f'{_valid_html()}\n<p dir="auto">{fake}</p>', {}),
+        ('nonterminal', _valid_body(), _valid_html(), {
+            'render_complete': True,
+            'render_after_sentinel': '\n<p dir="auto">late</p>'}),
+    )
 
 
 def _body_from(call):

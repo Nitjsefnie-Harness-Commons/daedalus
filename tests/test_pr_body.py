@@ -9,8 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    GITHUB_HTML, GITHUB_ISSUE_101, PR_BODY, ROOT, TEMPLATE, _html_body,
-    _issue_html, _text_html, _valid_body,
+    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, GITHUB_ISSUE_101, PR_BODY, ROOT,
+    TEMPLATE, _html_body, _issue_html, _text_html, _valid_body, _valid_html,
 )
 
 
@@ -160,16 +160,72 @@ def test_parser_rejects_unusable_render_responses(tmp):
     assert accepted == [], accepted
 
 
-def test_analyzer_rejects_a_render_missing_source_sections(tmp):
+def test_render_sentinel_is_removed_without_changing_document(tmp):
     del tmp
-    rendered = '<h2>Summary</h2><p>One sentence.</p>'
-    try:
-        PR_BODY.analyze(
-            rendered, REPOSITORY, TEMPLATE, _valid_body())
-    except ValueError as error:
-        assert 'does not represent' in str(error), error
-    else:
-        raise AssertionError('a balanced render prefix was accepted')
+    sentinel = 'pr-gate-sentinel-' + ('a' * 64)
+    marker = f'<p dir="auto">{sentinel}</p>'
+    cases = (
+        (_valid_html(), f'{_valid_html()}\n{marker}'),
+        (GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_HTML.replace(
+            '\n<section data-footnotes="" class="footnotes">',
+            f'\n{marker}\n<section data-footnotes="" class="footnotes">',
+            1)),
+    )
+    for expected, rendered in cases:
+        assert PR_BODY.strip_render_sentinel(rendered, sentinel) == expected
+
+
+def test_render_sentinel_preserves_other_top_level_syntax(tmp):
+    del tmp
+    sentinel = 'pr-gate-sentinel-' + ('b' * 64)
+    marker = f'<p dir="auto">{sentinel}</p>'
+    cases = (
+        ('<hr>', f'<hr>\n{marker}'),
+        ('<hr />', f'<hr />\n{marker}'),
+        ('<!-- renderer note -->',
+         f'<!-- renderer note -->\n{marker}'),
+        (_valid_html(), f'{_valid_html()}\r\n{marker}'),
+    )
+    for expected, rendered in cases:
+        assert PR_BODY.strip_render_sentinel(rendered, sentinel) == expected
+
+
+def test_render_sentinel_rejects_unusable_evidence(tmp):
+    del tmp
+    sentinel = 'pr-gate-sentinel-' + ('c' * 64)
+    marker = f'<p dir="auto">{sentinel}</p>'
+    cases = (
+        ('invalid-shape', 'sentinel', marker),
+        ('mismatched', sentinel, f'<div></p>{marker}'),
+        ('duplicate', sentinel, f'{marker}\n{marker}'),
+    )
+    accepted = []
+    for name, value, rendered in cases:
+        try:
+            PR_BODY.strip_render_sentinel(rendered, value)
+        except ValueError as error:
+            assert 'render' in str(error), (name, error)
+        else:
+            accepted.append(name)
+    assert accepted == [], accepted
+
+
+def test_numeric_entities_do_not_hide_a_retained_comment(tmp):
+    del tmp
+    entities = (
+        ('&#60;', '&#62;'),
+        ('&#x3c;', '&#x3e;'),
+    )
+    for left, right in entities:
+        literal = f'{left}!-- optional --{right}'
+        source = _valid_body().replace(
+            '- One change', f'<!-- optional -->\n- Literal {literal}.')
+        rendered = _valid_html(
+            changes=f'<ul><li>Literal {literal}.</li></ul>')
+        _, errors = PR_BODY.analyze(
+            rendered, REPOSITORY, TEMPLATE, source)
+        assert 'Remove the template instruction comments.' in errors, (
+            left, errors)
 
 
 def test_parser_ignores_a_named_anchor_without_a_destination(tmp):
@@ -291,8 +347,24 @@ def test_cli_rejects_extra_arguments(tmp):
         input='', text=True, capture_output=True, timeout=30)
     assert result.returncode == 2, (result.stdout, result.stderr)
     assert result.stdout == '', repr(result.stdout)
-    usage = f'usage: {script} repository template [source-body]\n'
+    usage = (f'usage: {script} [--sentinel value] repository template '
+             '[source-body]\n')
     assert result.stderr == usage, result.stderr
+
+
+def test_cli_rejects_incomplete_sentinel_arguments(tmp):
+    del tmp
+    script = str(ROOT / 'scripts' / 'ci' / 'pr_body.py')
+    sentinel = 'pr-gate-sentinel-' + ('d' * 64)
+    usage = (f'usage: {script} [--sentinel value] repository template '
+             '[source-body]\n')
+    for arguments in (('--sentinel',), ('--sentinel', sentinel)):
+        result = subprocess.run(
+            [sys.executable, script, *arguments], input='', text=True,
+            capture_output=True, timeout=30)
+        assert result.returncode == 2, (arguments, result.stderr)
+        assert result.stdout == '', repr(result.stdout)
+        assert result.stderr == usage, (arguments, result.stderr)
 
 
 def main():

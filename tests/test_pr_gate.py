@@ -11,12 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
     BOT, CLOSE_MARKER, GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_MARKDOWN,
-    GITHUB_HTML, GITHUB_MARKDOWN, MARKER_COMMENT, _GH_STUB,
+    GITHUB_HTML, GITHUB_MARKDOWN, MARKER_COMMENT, PR_BODY, _GH_STUB,
     _assert_commented_not_closed, _assert_commented_then_closed,
-    _assert_commented_then_reopened, _assert_no_mutation, _body_from,
-    _closed_by, _issue, _issue_lookups, _html_body, _issue_html,
-    _layout_body, _run_workflow, _text_html, _valid_body, _valid_html,
-    _workflow, _workflow_script, _write_calls,
+    _assert_commented_then_reopened, _assert_no_mutation,
+    _assert_unusable_render, _body_from, _closed_by, _issue, _issue_lookups,
+    _html_body, _issue_html, _layout_body, _run_complete_workflow,
+    _sentinel_attack_cases, _text_html, _truncated_render_cases,
+    _valid_body, _valid_html, _workflow, _workflow_script, _write_calls,
 )
 from _repo import ROOT  # noqa: E402
 from _yamlread import job_scalar, top_level_mapping  # noqa: E402
@@ -151,20 +152,27 @@ def test_workflow_renders_the_event_body_once_in_repository_context(tmp):
     repository = 'acme/context-pin'
     actor = 'render-author'
     body = _valid_body('Fixes #101\n\nUnique render payload.')
-    calls, result = _run_workflow(
-        tmp, body, {'101': _issue(actor)}, actor=actor, repo=repository)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    renders = [call for call in calls if 'markdown' in call]
-    assert len(renders) == 1, calls
-    render = renders[0]
-    assert render[:2] == ['api', 'markdown'], render
-    assert '-F' in render, render
-    text = render[render.index('-F') + 1]
-    assert text == f'text={body}', render
-    assert render.count('-f') == 2, render
-    assert 'mode=gfm' in render, render
-    assert f'context={repository}' in render, render
-    _assert_no_mutation(calls)
+    sentinels = []
+    for index in range(2):
+        calls, result = _run_complete_workflow(
+            Path(tmp) / str(index), body, {'101': _issue(actor)},
+            actor=actor, repo=repository)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        renders = [call for call in calls if 'markdown' in call]
+        assert len(renders) == 1, calls
+        render = renders[0]
+        assert render[:2] == ['api', 'markdown'], render
+        text = render[render.index('-F') + 1]
+        match = re.fullmatch(
+            re.escape(f'text={body}')
+            + r'\n\n(pr-gate-sentinel-[0-9a-f]{64})\n', text)
+        assert match is not None, render
+        sentinels.append(match.group(1))
+        assert render.count('-f') == 2, render
+        assert 'mode=gfm' in render, render
+        assert f'context={repository}' in render, render
+        _assert_no_mutation(calls)
+    assert len(set(sentinels)) == 2, sentinels
 
 
 def test_github_visible_markdown_constructs_stay_admissible(tmp):
@@ -182,7 +190,7 @@ def test_github_visible_markdown_constructs_stay_admissible(tmp):
         body = _valid_body(GITHUB_MARKDOWN[name])
         rendered = _valid_html(
             references=GITHUB_HTML[name], repo=repository)
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')},
             repo=repository, rendered_html=rendered)
         if result.returncode != 0 or _write_calls(calls):
@@ -203,7 +211,7 @@ def test_github_footnotes_and_named_anchors_stay_admissible(tmp):
     )
     failures = []
     for name, body, rendered, repo in cases:
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')},
             repo=repo, rendered_html=rendered)
         if result.returncode != 0 or _write_calls(calls):
@@ -222,7 +230,7 @@ def test_github_nontext_constructs_do_not_satisfy_the_claim(tmp):
     for name in names:
         body = _valid_body(GITHUB_MARKDOWN[name])
         rendered = _valid_html(references=GITHUB_HTML[name])
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')},
             rendered_html=rendered)
         try:
@@ -237,7 +245,7 @@ def test_github_nontext_constructs_do_not_satisfy_the_claim(tmp):
 def test_heading_shaped_text_in_a_github_raw_block_stays_content(tmp):
     body = _valid_body().replace('- One change', GITHUB_MARKDOWN['kbd_block'])
     rendered = _valid_html(changes=GITHUB_HTML['kbd_block'])
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_no_mutation(calls)
@@ -250,7 +258,7 @@ def test_render_failures_never_change_pull_request_state(tmp):
             'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT}),
     )
     for name, pull, history in cases:
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, _valid_body(), {'101': _issue('alice')},
             pull=pull, history=history, render_status=502)
         assert result.returncode != 0, (name, result.stdout, result.stderr)
@@ -258,36 +266,22 @@ def test_render_failures_never_change_pull_request_state(tmp):
 
 
 def test_unusable_render_responses_never_change_pull_request_state(tmp):
-    renders = (
-        '',
-        'upstream returned plain text',
-        '<h2>Summary</h2><',
-        '<h2>Summary</h2><p>text',
-        '<h2>Summary</h2><h2',
-        '<h2>Summary</h2><!-- unfinished',
-        '<h2>Summary</h2><p>One sentence.</p>',
-        _html_body(
-            ('Summary', _text_html('One sentence.')),
-            ('Related Issues and Pull Requests',
-             f'Fixes {_issue_html(101)}')),
-    )
     pulls = (
         ('open', {}, {}),
         ('owned-closed', {'state': 'closed'}, {
             'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT}),
     )
-    failures = []
     for pull_name, pull, history in pulls:
-        for index, rendered in enumerate(renders):
-            calls, result = _run_workflow(
-                Path(tmp) / f'{pull_name}-{index}', _valid_body(),
-                {'101': _issue('alice')}, pull=pull, history=history,
-                rendered_html=rendered)
-            if (result.returncode == 0 or _write_calls(calls)
-                    or 'could not analyze' not in result.stderr):
-                failures.append((pull_name, rendered, result.returncode,
-                                 calls, result.stderr))
-    assert failures == [], failures
+        for render_name, rendered in _truncated_render_cases():
+            _assert_unusable_render(
+                Path(tmp) / f'{pull_name}-{render_name}', _valid_body(),
+                rendered, pull=pull, history=history)
+
+
+def test_render_sentinel_is_unpredictable_and_terminal(tmp):
+    for name, body, rendered, options in _sentinel_attack_cases():
+        _assert_unusable_render(
+            Path(tmp) / name, body, rendered, **options)
 
 
 def test_bodies_at_and_past_the_old_byte_bound_are_rendered(tmp):
@@ -297,12 +291,13 @@ def test_bodies_at_and_past_the_old_byte_bound_are_rendered(tmp):
     multibyte = base + ('é' * 33000)
     for name, body in (
             ('exact', exact), ('past', past), ('multibyte', multibyte)):
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')})
         assert result.returncode == 0, (name, result.stdout, result.stderr)
         renders = [call for call in calls if 'markdown' in call]
         assert len(renders) == 1, (name, calls)
-        assert f'text={body}' in renders[0], name
+        assert any(arg.startswith(f'text={body}\n\npr-gate-sentinel-')
+                   for arg in renders[0]), name
         assert len(_issue_lookups(calls)) == 1, calls
         _assert_no_mutation(calls)
 
@@ -313,7 +308,7 @@ def test_open_admissible_body_is_left_untouched(tmp):
             f'Refs {_issue_html(101, "acme/widget")} and '
             f'{_issue_html(102, "acme/widget")}'),
         repo='acme/widget')
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, _valid_body('Refs #101 and #102'),
         {'101': _issue('bob'), '102': _issue('carol')},
         actor='carol', repo='acme/widget', parser_crlf=True,
@@ -346,7 +341,7 @@ def test_claimed_literal_markdown_contexts_are_left_untouched(tmp):
              '<ul dir="auto">\n<li>A change</li>\n</ul>'))),
     )
     for index, (body, rendered) in enumerate(cases):
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / str(index), body, {'101': _issue('alice')},
             rendered_html=rendered)
         assert result.returncode == 0, (result.stdout, result.stderr)
@@ -365,7 +360,7 @@ def test_visible_template_prose_is_not_an_instruction_comment(tmp):
         ('Related Issues and Pull Requests', f'Fixes {_issue_html(101)}'),
         ('Changes', '<ul><li>One change</li></ul>'),
         ('Testing', _text_html('Ran the suite.')))
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_no_mutation(calls)
@@ -380,7 +375,7 @@ def test_layout_names_retained_template_instructions_separately(tmp):
         if 'bullet list of concrete changes' in comment)
     body = _valid_body().replace(
         '- One change', f'{instruction}\n- One change')
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')},
         rendered_html=_valid_html())
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -393,7 +388,7 @@ def test_retained_comment_is_detected_beside_visible_fingerprint(tmp):
         '- One change', '- <!-- optional --> optional')
     rendered = _valid_html(
         changes='<ul dir="auto"><li>optional</li></ul>')
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_not_closed(
@@ -405,7 +400,7 @@ def test_entity_spelling_does_not_hide_a_retained_comment(tmp):
                '- The literal template marker is '
                '&lt;!-- optional --&gt;.\n- One change.')
     body = _valid_body().replace('- One change', changes)
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')},
         rendered_html=_valid_html(
             changes=GITHUB_HTML['entity_instruction']))
@@ -420,7 +415,7 @@ def test_each_template_instruction_comment_is_detected(tmp):
     comments = re.findall(r'<!--.*?-->', template, re.DOTALL)
     failures = []
     for index, comment in enumerate(comments):
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / str(index), f'{comment}\n{_valid_body()}',
             {'101': _issue('alice')})
         try:
@@ -443,7 +438,7 @@ def test_open_body_reports_both_failed_conditions_once(tmp):
          f'Fixes {_issue_html(103)}'),
         ('Changes', '<ul><li>One change</li></ul>'),
         ('Testing', _text_html('Ran tests.')))
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'103': _issue('alicebob')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_not_closed(
@@ -452,7 +447,7 @@ def test_open_body_reports_both_failed_conditions_once(tmp):
 
 
 def test_open_body_without_a_raw_reference_is_closed(tmp):
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, 'No issue reference anywhere.', {},
         rendered_html='<p dir="auto">No issue reference anywhere.</p>')
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -461,9 +456,9 @@ def test_open_body_without_a_raw_reference_is_closed(tmp):
 
 
 def test_open_body_reports_each_single_failed_condition(tmp):
-    unclaimed, first = _run_workflow(
+    unclaimed, first = _run_complete_workflow(
         Path(tmp) / 'claim', _valid_body(), {'101': _issue()})
-    malformed, second = _run_workflow(
+    malformed, second = _run_complete_workflow(
         Path(tmp) / 'layout', _valid_body().replace('## Summary', '## Notes'),
         {'101': _issue('alice')}, rendered_html=_html_body(
             ('Notes', _text_html('One sentence.')),
@@ -480,7 +475,7 @@ def test_open_body_reports_each_single_failed_condition(tmp):
 
 def test_open_rendered_empty_changes_is_commented_without_closing(tmp):
     body = _valid_body().replace('- One change', '-')
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')},
         rendered_html=_valid_html(changes=GITHUB_HTML['empty_list']))
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -493,7 +488,7 @@ def test_open_image_only_optional_section_is_left_untouched(tmp):
     image = ('<p dir="auto"><img src="diagram.png" '
              'alt="migration diagram"></p>')
     rendered = _valid_html() + _html_body(('Breaking Changes', image))
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_no_mutation(calls)
@@ -506,7 +501,7 @@ def test_unanswerable_analysis_inputs_never_write(tmp):
         ('self-closing', 'owner/repo', _valid_html(changes='<p/>')),
     )
     for name, repository, rendered in cases:
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, _valid_body(), {'101': _issue('alice')},
             repo=repository, rendered_html=rendered)
         assert result.returncode != 0, (
@@ -516,7 +511,7 @@ def test_unanswerable_analysis_inputs_never_write(tmp):
 
 
 def test_link_destination_does_not_satisfy_the_claim(tmp):
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, _valid_body('[documentation](#101)'),
         {'101': _issue('alice')},
         rendered_html=_valid_html(
@@ -527,10 +522,10 @@ def test_link_destination_does_not_satisfy_the_claim(tmp):
 
 
 def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
-    name = 'Notes ``for #255``'
+    name = 'Notes for #255'
     body = _valid_body().replace(
         '## Testing', f'## {name}\nUnknown.\n\n## Testing')
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')}, rendered_html=_html_body(
             ('Summary', _text_html('One sentence.')),
             ('Related Issues and Pull Requests',
@@ -542,13 +537,19 @@ def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
     _assert_commented_not_closed(calls)
     endpoint = 'repos/owner/repo/issues/99/comments'
     comment = _body_from(next(call for call in calls if endpoint in call))
-    quoted = '``` Notes ``for #255`` ```'
+    quoted = PR_BODY._code_span(name)
     assert f'Section {quoted} is not defined by the template.' in comment
-    assert '#255' not in comment.replace(quoted, ''), comment
+    assert quoted.startswith('`') and quoted.endswith('`'), quoted
+    spans = [match.span() for match in re.finditer(
+        re.escape(quoted), comment)]
+    references = list(re.finditer(r'#[0-9]+', comment))
+    assert references, comment
+    assert all(any(start <= match.start() and match.end() <= end
+                   for start, end in spans) for match in references), comment
 
 
 def test_closed_owned_admissible_body_is_reopened(tmp):
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, _valid_body(), {'101': _issue('alice')},
         pull={'state': 'closed'}, history={
             'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT})
@@ -564,7 +565,7 @@ def test_closed_by_someone_else_is_never_changed(tmp):
     for name, body, timeline in cases:
         rendered = _valid_html() if body != 'bad body' else (
             '<p dir="auto">bad body</p>')
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')},
             pull={'state': 'closed'}, history={
                 'timeline': timeline, 'comments': MARKER_COMMENT},
@@ -576,7 +577,7 @@ def test_closed_by_someone_else_is_never_changed(tmp):
 def test_closed_owned_without_marker_is_not_changed(tmp):
     spoof = [{'id': 8, 'user': {'login': 'alice'}, 'body': CLOSE_MARKER}]
     for name, comments in [('absent', ()), ('spoofed', spoof)]:
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, _valid_body(), {'101': _issue('alice')},
             pull={'state': 'closed'}, history={
                 'timeline': _closed_by(BOT), 'comments': comments})
@@ -585,7 +586,7 @@ def test_closed_owned_without_marker_is_not_changed(tmp):
 
 
 def test_closed_owned_inadmissible_body_stays_closed(tmp):
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, 'bad body', {}, pull={'state': 'closed'}, history={
             'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT},
         rendered_html='<p dir="auto">bad body</p>')
@@ -597,7 +598,7 @@ def test_merged_pull_request_is_never_touched(tmp):
     for name, body in [('valid', _valid_body()), ('invalid', 'bad body')]:
         rendered = _valid_html() if name == 'valid' else (
             '<p dir="auto">bad body</p>')
-        calls, result = _run_workflow(
+        calls, result = _run_complete_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')},
             pull={'state': 'closed', 'merged': 'true'}, history={
                 'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT},
@@ -607,10 +608,10 @@ def test_merged_pull_request_is_never_touched(tmp):
 
 
 def test_unreadable_ownership_evidence_never_reopens(tmp):
-    first, one = _run_workflow(
+    first, one = _run_complete_workflow(
         Path(tmp) / 'timeline', _valid_body(), {}, pull={'state': 'closed'},
         history={'timeline_status': 502})
-    second, two = _run_workflow(
+    second, two = _run_complete_workflow(
         Path(tmp) / 'marker', _valid_body(), {}, pull={'state': 'closed'},
         history={'timeline': _closed_by(BOT), 'comments_status': 502})
     assert one.returncode == two.returncode == 0
@@ -624,7 +625,7 @@ def test_reference_limit_checks_twenty_and_tells_the_truth(tmp):
               for number in range(130, 150)}
     rendered_references = ' '.join(
         _issue_html(number) for number in range(130, 151))
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, _valid_body(references), issues,
         rendered_html=_valid_html(references=rendered_references))
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -642,7 +643,7 @@ def test_exactly_twenty_references_do_not_trigger_the_limit(tmp):
         'alice' if number == 179 else 'bob') for number in range(160, 180)}
     rendered = _valid_html(references=' '.join(
         _issue_html(number) for number in range(160, 180)))
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, _valid_body(references), issues, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert len(_issue_lookups(calls)) == 20, calls
@@ -650,12 +651,12 @@ def test_exactly_twenty_references_do_not_trigger_the_limit(tmp):
 
 
 def test_lookup_failures_keep_the_safe_direction(tmp):
-    missing, one = _run_workflow(
+    missing, one = _run_complete_workflow(
         Path(tmp) / 'missing', _valid_body('Refs #120 and #121'), {},
         rendered_html=_valid_html(
             references=(
                 f'Refs {_issue_html(120)} and {_issue_html(121)}')))
-    failed, two = _run_workflow(
+    failed, two = _run_complete_workflow(
         Path(tmp) / 'failed', _valid_body('Fixes #122'),
         {'122': {'_http_status': 502}},
         rendered_html=_valid_html(
@@ -669,7 +670,7 @@ def test_lookup_failures_keep_the_safe_direction(tmp):
 
 
 def test_pull_request_reference_does_not_satisfy_claim(tmp):
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, _valid_body(), {'101': _issue('alice', pull_request=True)})
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_not_closed(
@@ -677,7 +678,7 @@ def test_pull_request_reference_does_not_satisfy_claim(tmp):
 
 
 def test_failed_explanation_prevents_silent_state_change(tmp):
-    calls, result = _run_workflow(
+    calls, result = _run_complete_workflow(
         tmp, _valid_body(), {'101': _issue()}, comment_status=502)
     assert result.returncode != 0, (result.stdout, result.stderr)
     assert not any(any(arg.startswith('state=') for arg in call)
