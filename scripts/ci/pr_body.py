@@ -333,6 +333,9 @@ def _has_rendered_content(content):
 def _code_span(text):
     runs = [len(run) for run in _BACKTICKS.findall(text)]
     fence = '`' * (max(runs, default=0) + 1)
+    # Boundary spaces keep content backticks from joining the delimiter run.
+    if text.startswith('`') or text.endswith('`') or not text.strip():
+        text = f' {text} '
     return f'{fence}{text}{fence}'
 
 

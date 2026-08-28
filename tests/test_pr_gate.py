@@ -2,7 +2,6 @@
 """Pull-request workflow shell and state-table behavior."""
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSE_MARKER, MARKER_COMMENT, _GH_STUB,
+    BOT, CLOSE_MARKER, MARKER_COMMENT, PR_BODY, _GH_STUB,
     _assert_commented_then_closed, _assert_commented_then_reopened,
     _assert_no_mutation, _body_from, _closed_by, _issue, _issue_lookups,
     _layout_body, _run_workflow, _valid_body, _workflow, _workflow_script,
@@ -197,10 +196,10 @@ def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
     assert result.returncode == 0, (result.stdout, result.stderr)
     endpoint = 'repos/owner/repo/issues/99/comments'
     comment = _body_from(next(call for call in calls if endpoint in call))
-    quoted = '```Notes ``for #255`````'
+    quoted = '``` Notes ``for #255`` ```'
     assert f'Section {quoted} is not defined by the template.' in comment
-    without_name = comment.replace(quoted, '')
-    assert re.search(r'#[0-9]', without_name) is None, comment
+    synthetic = f'## Related Issues and Pull Requests\n{comment}\n'
+    assert PR_BODY.referenced_issues(synthetic) == [], comment
 
 
 def test_closed_owned_admissible_body_is_reopened(tmp):

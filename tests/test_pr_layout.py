@@ -93,18 +93,36 @@ def test_layout_ignores_headings_inside_raw_html_blocks(tmp):
     assert PR_BODY.layout_errors(body, TEMPLATE) == []
 
 
-def test_layout_quotes_unknown_names_as_safe_inline_code(tmp):
+def test_unknown_section_reasons_cannot_name_issues(tmp):
     del tmp
-    name = 'Notes ``for #255``'
-    body = _layout_body(
-        ('Summary', 'One sentence.'),
-        ('Related Issues and Pull Requests', 'Fixes #91'),
-        ('Changes', '- A change'),
-        ('Testing', 'Ran the suite.'),
-        (name, 'Unknown.'))
-    quoted = '```Notes ``for #255`````'
-    assert f'Section {quoted} is not defined by the template.' \
-        in PR_BODY.layout_errors(body, TEMPLATE)
+    names = (
+        'Notes for #255',
+        'Notes ` for #255',
+        '``` #255',
+        '#255 ```',
+        '`',
+        '`#255`',
+        '   #255   ',
+    )
+    leaks = []
+    for name in names:
+        body = _layout_body(
+            ('Summary', 'One sentence.'),
+            ('Related Issues and Pull Requests', 'Fixes #91'),
+            ('Changes', '- A change'),
+            ('Testing', 'Ran the suite.'),
+            (name, 'Unknown.'))
+        errors = PR_BODY.layout_errors(body, TEMPLATE)
+        reasons = [error for error in errors
+                   if 'is not defined by the template.' in error]
+        assert len(reasons) == 1, (name, errors)
+        synthetic = (
+            '## Related Issues and Pull Requests\n'
+            f'{reasons[0]}\n')
+        references = PR_BODY.referenced_issues(synthetic)
+        if references:
+            leaks.append((name, reasons[0], references))
+    assert not leaks, f'unsafe references: {leaks!r}'
 
 
 def main():
