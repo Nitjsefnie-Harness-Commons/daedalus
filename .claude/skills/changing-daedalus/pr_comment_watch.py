@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Emit one stdout line per new OR EDITED comment or review on a pull request.
 
-Intended to be armed as a Monitor, per RULES.md rule 3:
+Intended to be armed as a persistent watcher, normally through the
+`watch_all.py` aggregator beside it rather than on its own:
 
     python3 pr_comment_watch.py <pr-number>
 
