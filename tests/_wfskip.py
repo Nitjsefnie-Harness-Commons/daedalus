@@ -1,12 +1,9 @@
 """Evaluate and guard workflow jobs against implicit skip propagation."""
-import re
-
-from _ghexpr import evaluate_if
+from _ghexpr import evaluate_if, status_functions
 from _wfgraph import _job_if_expression, _job_names, _job_needs
 
 
-_STATUS_CHECK = re.compile(
-    r'\b(?:always|cancelled|failure)\s*\(\s*\)')
+_PROTECTIVE_STATUS_FUNCTIONS = frozenset(('always', 'cancelled', 'failure'))
 
 
 def evaluate_job_condition(workflow, job, event_name, needs, status):
@@ -25,6 +22,16 @@ def implicit_skip_violations(workflow):
     """Describe dependants that can inherit a conditional ancestor's skip."""
     jobs = _job_names(workflow)
     direct_needs = {job: set(_job_needs(workflow, job)) for job in jobs}
+    outputs = {'workflows': 'true', 'docs_only': 'false'}
+    context = {
+        'github': {'event_name': 'pull_request'},
+        'needs': {
+            job: {'result': 'success', 'outputs': outputs} for job in jobs
+        },
+        'status': {
+            'success': True, 'failure': False, 'cancelled': False,
+        },
+    }
     violations = []
     for job in jobs:
         ancestors = set()
@@ -36,7 +43,9 @@ def implicit_skip_violations(workflow):
             ancestors.add(ancestor)
             pending.extend(direct_needs[ancestor])
         condition = _job_if_expression(workflow, job)
-        if condition is not None and _STATUS_CHECK.search(condition):
+        if (condition is not None
+                and status_functions(condition, context)
+                & _PROTECTIVE_STATUS_FUNCTIONS):
             continue
         for ancestor in sorted(ancestors):
             if _job_if_expression(workflow, ancestor) is not None:

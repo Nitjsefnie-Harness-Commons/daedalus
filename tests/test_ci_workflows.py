@@ -18,7 +18,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wfgraph import _tests_yml  # noqa: E402
 from _wfskip import (evaluate_job_condition,  # noqa: E402
                      implicit_skip_violations)
 from _yamlread import job_mapping, job_scalar  # noqa: E402
@@ -217,20 +216,21 @@ def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
     """A skipped ancestor cannot hide a usable pull-request report."""
     del tmp
     cases = (
+        ('all-success', 'pull_request', 'success', True, False, False, True),
         ('pull request, coverage succeeded, ancestor skipped',
-         'pull_request', 'success', False, False, True),
-        ('coverage skipped', 'pull_request', 'skipped', False, False, False),
-        ('coverage failed', 'pull_request', 'failure', False, True, False),
-        ('push event', 'push', 'success', False, False, False),
+         'pull_request', 'success', False, False, False, True),
+        ('cancelled PR', 'pull_request', 'success', False, False, True, False),
+        ('coverage skipped', 'pull_request', 'skipped',
+         False, False, False, False),
+        ('coverage failed', 'pull_request', 'failure',
+         False, True, False, False),
+        ('push event', 'push', 'success', True, False, False, False),
     )
-    for name, event_name, coverage, success, failure, expected in cases:
-        status = {
-            'success': success,
-            'failure': failure,
-            'cancelled': False,
-        }
+    for (name, event_name, coverage, ok, failed, cancelled,
+         expected) in cases:
+        status = {'success': ok, 'failure': failed, 'cancelled': cancelled}
         expression, actual = evaluate_job_condition(
-            _tests_yml(), 'diff-coverage', event_name,
+            _tests_workflow(), 'diff-coverage', event_name,
             {'coverage': {'result': coverage}}, status)
         assert actual is expected, (name, expression, actual)
 
@@ -238,7 +238,7 @@ def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
 def test_skippable_ancestors_cannot_implicitly_skip_dependants(tmp):
     """Every dependant of a conditional job overrides the implicit gate."""
     del tmp
-    violations = implicit_skip_violations(_tests_yml())
+    violations = implicit_skip_violations(_tests_workflow())
     assert not violations, '\n'.join(violations)
 
 
