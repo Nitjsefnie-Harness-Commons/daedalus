@@ -9,6 +9,7 @@ anything. A browser that will not start is a skip; a worker that loads broken
 is a failure.
 """
 import contextlib
+import errno
 import http.server
 import json
 import shutil
@@ -26,6 +27,12 @@ from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
                         HOSTILE_EVAL_SCRIPT, PERFORMANCE_POISON_EVAL_SCRIPT,
                         PLAIN_EVAL_SCRIPT, STRICT_CSP_EVAL_SCRIPT)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+
+
+NODE_WEBSOCKET_PROBE = (
+    "process.exit(typeof WebSocket === 'function' ? 0 : 1)")
+NODE_PROBE_TIMEOUT = 10
+WINDOWS_COMMAND_TOO_LONG = 206
 
 
 class CDPTimeout(AssertionError):
@@ -46,10 +53,14 @@ class _EvalPageServer(http.server.ThreadingHTTPServer):
         with self._request_lock:
             self._request_paths.append(path)
 
-    def received_request(self, page_url):
+    def request_marker(self):
+        with self._request_lock:
+            return len(self._request_paths)
+
+    def received_request_since(self, page_url, marker):
         path = urllib.parse.urlsplit(page_url).path
         with self._request_lock:
-            return path in self._request_paths
+            return path in self._request_paths[marker:]
 
 
 _FIXTURE_SERVERS = {}
@@ -138,12 +149,24 @@ def cdp_call(node, target, method, params):
     return json.loads(result.stdout or '{}')
 
 
-def _fixture_request_arrived(page_url):
+def _fixture_request_marker(page_url):
     parts = urllib.parse.urlsplit(page_url)
     origin = f'{parts.scheme}://{parts.netloc}'
     with _FIXTURE_SERVERS_LOCK:
         server = _FIXTURE_SERVERS.get(origin)
-    return server is not None and server.received_request(page_url)
+    return None if server is None else (server, server.request_marker())
+
+
+def _fixture_request_arrived(page_url, marker):
+    if marker is None:
+        return False
+    server, request_index = marker
+    parts = urllib.parse.urlsplit(page_url)
+    origin = f'{parts.scheme}://{parts.netloc}'
+    with _FIXTURE_SERVERS_LOCK:
+        if _FIXTURE_SERVERS.get(origin) is not server:
+            return False
+    return server.received_request_since(page_url, request_index)
 
 
 def cdp_eval(node, target, expression):
@@ -172,6 +195,18 @@ def _browser_version(browser):
     return f'{browser} ({reported.stdout.strip() or reported.stderr.strip()})'
 
 
+def _raise_start_failure(label, executable, why):
+    # Most exec refusals describe the machine or binary. E2BIG instead
+    # describes the argument vector this harness built, so hiding it as an
+    # unavailable environment would excuse a repository-owned command defect.
+    if (why.errno == errno.E2BIG
+            or getattr(why, 'winerror', None) == WINDOWS_COMMAND_TOO_LONG):
+        raise AssertionError(
+            f'{label} command was too large to start: {executable}') from why
+    raise BrowserEnvironmentSkipped(
+        f'{label} could not be launched: {executable} — {why}') from why
+
+
 def browser_requirements():
     node = shutil.which('node')
     browser = next((path for name in (
@@ -183,12 +218,15 @@ def browser_requirements():
             'Chromium and Node are required for the real-page eval test')
     try:
         websocket = subprocess.run(
-            [node, '-e',
-             "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
-            cwd=ROOT, capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired) as why:
-        raise BrowserEnvironmentSkipped(
-            f'Node WebSocket probe could not run: {node} — {why}') from why
+            [node, '-e', NODE_WEBSOCKET_PROBE], cwd=ROOT,
+            capture_output=True, text=True, timeout=NODE_PROBE_TIMEOUT)
+    except OSError as why:
+        _raise_start_failure('Node WebSocket probe', node, why)
+    except subprocess.TimeoutExpired as why:
+        # The interpreter started, so its fixed program failing to terminate
+        # is the harness's defect rather than a missing machine capability.
+        raise AssertionError(
+            f'Node WebSocket probe did not finish: {node}') from why
     if websocket.returncode != 0:
         raise BrowserEnvironmentSkipped(
             'this Node runtime has no WebSocket client for CDP')
@@ -305,6 +343,17 @@ def ready_worker(node, workers):
     return None, reached, error
 
 
+def _cdp_channel_answers(node, target):
+    try:
+        cdp_call(node, target, 'Runtime.evaluate', {
+            'expression': '1',
+            'returnByValue': True,
+        })
+    except AssertionError:
+        return False
+    return True
+
+
 def worker_state(node, target):
     """What one worker says about itself, for a failure that names which."""
     try:
@@ -366,8 +415,7 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             browser_args, cwd=ROOT, stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as why:
-        raise BrowserEnvironmentSkipped(
-            f'Chromium could not be launched: {browser} — {why}') from why
+        _raise_start_failure('Chromium', browser, why)
     configuration_started = False
     try:
         page, workers, devtools_port = _wait_for_devtools(profile, process)
@@ -382,19 +430,30 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         # browsing session does.
         # Only this first navigation can still be environmental. Later calls
         # follow configuration and fail.
+        request_marker = _fixture_request_marker(page_url)
         try:
             cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
         except CDPTimeout as why:
-            if _fixture_request_arrived(page_url):
-                # Handler entry proves the browser reached our origin. A CDP
-                # timeout then means this fixture failed to satisfy it.
-                raise AssertionError(
-                    'the fixture received the first navigation request but '
-                    'did not satisfy it before the deadline: '
-                    f'{page_url}') from why
-            raise BrowserEnvironmentSkipped(
-                'the first fixture navigation timed out over CDP: '
-                f'{_browser_version(browser)} — {why}') from why
+            channel_answers = _cdp_channel_answers(node, page_target)
+            request_arrived = _fixture_request_arrived(
+                page_url, request_marker)
+            if not channel_answers:
+                raise BrowserEnvironmentSkipped(
+                    'the browser CDP channel stopped answering during the '
+                    'first fixture navigation: '
+                    f'{_browser_version(browser)}') from why
+            if not request_arrived:
+                raise BrowserEnvironmentSkipped(
+                    'the first fixture navigation never reached the fixture: '
+                    f'{_browser_version(browser)}') from why
+            # A channel that selectively loses the navigation reply but
+            # answers this probe is indistinguishable from a slow fixture.
+            # The realistic channel-loss case, where it stopped working, is
+            # caught above; the observations here cannot settle the synthetic
+            # selective-loss case without inventing another causal inference.
+            raise AssertionError(
+                'the fixture received the first navigation request but did '
+                f'not satisfy it before the deadline: {page_url}') from why
         deadline = time.time() + 30
         last_error = 'no evaluation was attempted'
         answered = False
