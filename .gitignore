@@ -46,6 +46,15 @@
 !/server.py
 !/setup.cfg
 
+# ─── .claude/skills/changing-daedalus ───
+!/.claude/
+!/.claude/skills/
+!/.claude/skills/changing-daedalus/
+!/.claude/skills/changing-daedalus/SKILL.md
+!/.claude/skills/changing-daedalus/ci_watch.py
+!/.claude/skills/changing-daedalus/pr_comment_watch.py
+!/.claude/skills/changing-daedalus/watch_all.py
+
 # ─── .githooks ───
 !/.githooks/
 !/.githooks/pre-commit
