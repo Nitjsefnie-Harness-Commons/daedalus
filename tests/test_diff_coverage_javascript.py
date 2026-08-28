@@ -57,7 +57,7 @@ def _run(tmp, *args):
     """Run the reporter inside the fixture directory."""
     return subprocess.run(
         [sys.executable, str(_SCRIPT), *args],
-        cwd=tmp,
+        cwd=tmp, env=_util.child_coverage('scrub'),
         capture_output=True, text=True, timeout=60)
 
 
