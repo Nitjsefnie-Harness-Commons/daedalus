@@ -62,6 +62,30 @@ def _target_name_nodes(target):
             yield from _target_name_nodes(part)
 
 
+def _subscript_bases(node):
+    """Names whose subscript or attribute this statement assigns into."""
+    if isinstance(node, ast.Assign):
+        targets = list(node.targets)
+    elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        targets = [node.target]
+    elif isinstance(node, ast.Delete):
+        targets = list(node.targets)
+    else:
+        return
+    while targets:
+        target = targets.pop()
+        if isinstance(target, (ast.List, ast.Tuple)):
+            targets.extend(target.elts)
+        elif isinstance(target, ast.Starred):
+            targets.append(target.value)
+        elif isinstance(target, (ast.Subscript, ast.Attribute)):
+            base = target.value
+            while isinstance(base, (ast.Subscript, ast.Attribute)):
+                base = base.value
+            if isinstance(base, ast.Name):
+                yield base.id
+
+
 def _literal_path_kind(value):
     if not isinstance(value, str):
         return _UNKNOWN_PATH
@@ -205,6 +229,10 @@ def _owned_path_names(scope):
                 trusted_copy)
         for target in targets:
             modelled.update(id(name) for name in _target_name_nodes(target))
+        # An element written into an owned container can be a checkout
+        # path, so the container stops being proof of anything.
+        for name in _subscript_bases(node):
+            bindings.setdefault(name, []).append(_UNKNOWN_PATH)
     # A binding form this pass does not model — a comprehension target, a
     # walrus, an except name — must clear ownership rather than inherit it.
     for node in _scope_nodes(scope):
