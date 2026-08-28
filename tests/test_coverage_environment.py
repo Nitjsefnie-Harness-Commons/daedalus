@@ -285,6 +285,31 @@ def test_a_rebound_declaration_helper_is_caught(tmp):
         for v in restored), restored
 
 
+def test_a_rebound_scrub_delegate_fails_in_a_real_module(tmp):
+    """A declaration rejects the value returned by a rebound scrub."""
+    relative = Path('tests/test_coverage_combine.py')
+    root, target = _real_module_copy(tmp, relative)
+    needle = "_ENV = _util.child_coverage('scrub')\n"
+    text = _module_text(target)
+    assert needle in text, 'the declaration binding shape changed'
+    mutated = text.replace(
+        needle,
+        "import os\n"
+        + "os.environ['COVERAGE_ROUND6_PROBE'] = 'must-not-leak'\n"
+        + "_util.coverage_free_environment = lambda env: dict(env)\n"
+        + needle, 1)
+    target.write_bytes(mutated.encode('utf-8'))
+    violations = _coverage_environment_violations(root)
+    assert not violations, violations
+    result = subprocess.run(
+        [sys.executable, '-c',
+         f"import runpy; runpy.run_path({str(target)!r})"],
+        cwd=root, env=_util.child_coverage('scrub'), capture_output=True,
+        text=True, timeout=30)
+    assert result.returncode != 0, result.stdout
+    assert 'COVERAGE_ROUND6_PROBE' in result.stderr, result.stderr
+
+
 def test_an_earlier_non_root_chdir_taints_an_inherited_cwd(tmp):
     """A launch without cwd= after os.chdir(tmp) must declare."""
     del tmp
@@ -334,7 +359,7 @@ subprocess.run(['python3', 'child.py'], cwd=tmp,
 """)
     assert violations == [
         'tests/synthetic.py::<module> declares keep without an allowlist '
-        'entry'], violations
+        + 'entry'], violations
 
 
 def test_an_allowlist_entry_without_a_keep_site_fails(tmp):
@@ -513,6 +538,27 @@ def test_child_coverage_declares_scrub_and_keep(tmp):
         pass
     else:
         raise AssertionError("child_coverage accepted mode 'maybe'")
+
+
+def test_child_coverage_rejects_a_leaking_scrub_result(tmp):
+    """Scrub mode validates the environment it is about to return."""
+    del tmp
+
+    def leaking_scrub(environment):
+        return dict(environment)
+
+    original = _util.coverage_free_environment
+    _util.coverage_free_environment = leaking_scrub
+    try:
+        environment = {'COVERAGE_PROCESS_START': 'must-not-leak'}
+        try:
+            _util.child_coverage('scrub', environment)
+        except ValueError as error:
+            assert 'COVERAGE_PROCESS_START' in str(error), error
+        else:
+            raise AssertionError('child_coverage returned a leaking scrub')
+    finally:
+        _util.coverage_free_environment = original
 
 
 def test_child_coverage_keep_requires_a_mapped_tree(tmp):
