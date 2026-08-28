@@ -120,6 +120,24 @@ def test_a_for_target_rebinding_away_from_ext_cmd_also_clears_the_alias(tmp):
         f'ordinary call: {violations}')
 
 
+def test_a_def_shadowing_an_alias_name_also_clears_it(tmp):
+    """Review found the walker skips over a nested def/async def/class
+    without ever visiting it, so a name it shadows never got cleared even
+    though the def itself rebinds that name in the enclosing scope."""
+    source = Path(tmp) / 'def_shadowed_sender.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab):\n"
+        "    send = _ext_cmd\n"
+        "    def send(*a, **k):\n"
+        "        return None\n"
+        "    return send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'def_shadowed_sender.py')
+    assert not violations, (
+        f'send was shadowed by a def and should read as an ordinary call: '
+        f'{violations}')
+
+
 def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
     """The other false-positive direction: declaring a local `send` alias
     must not reclassify every unrelated `.send()` method call in scope."""

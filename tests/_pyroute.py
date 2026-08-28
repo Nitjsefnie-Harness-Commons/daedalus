@@ -336,6 +336,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names):
     for statement in statements:
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef,
                                   ast.ClassDef)):
+            # Not walked into, but its own name is still a binding: a def
+            # or class that shadows an alias rebinds that name here just
+            # as much as an assignment would, and skipping straight past
+            # without clearing it left the alias reading as live under a
+            # name that no longer denotes it.
+            for _, aliases in pairs:
+                aliases.pop(statement.name, None)
             continue
         if isinstance(statement, ast.If):
             check_calls(statement.test, pairs)
