@@ -215,12 +215,37 @@ def _browser_version(browser):
 
 
 def _raise_start_failure(label, executable, why):
-    # E2BIG's limit is shared by argv and the inherited environment. Our
-    # commands are fixed and small, so it says the machine's process-start
-    # budget was spent, not that the argument vector we built was too large.
     if (why.errno != errno.E2BIG
             and getattr(why, 'winerror', None)
             == WINDOWS_COMMAND_TOO_LONG):
+        raise AssertionError(
+            f'{label} command was too large to start: {executable}') from why
+    if why.errno == errno.E2BIG:
+        # E2BIG combines argv and environment size; a minimal Python spawn
+        # observes whether the inherited environment alone crosses the limit.
+        try:
+            minimal = subprocess.run(
+                [sys.executable, '-c', ''], cwd=ROOT,
+                capture_output=True, text=True, timeout=NODE_PROBE_TIMEOUT)
+        except OSError as minimal_failure:
+            if minimal_failure.errno == errno.E2BIG:
+                raise BrowserEnvironmentSkipped(
+                    f'{label} could not be launched: {executable}; a minimal '
+                    'spawn under the same inherited environment also failed '
+                    'with E2BIG') from why
+            raise AssertionError(
+                f'{label} command was too large to start: {executable}; '
+                'the cause is undetermined because a minimal spawn failed'
+            ) from minimal_failure
+        except subprocess.SubprocessError as minimal_failure:
+            raise AssertionError(
+                f'{label} command was too large to start: {executable}; '
+                'the cause is undetermined because a minimal spawn failed'
+            ) from minimal_failure
+        if minimal.returncode != 0:
+            raise AssertionError(
+                f'{label} command was too large to start: {executable}; '
+                'the cause is undetermined because a minimal spawn failed')
         raise AssertionError(
             f'{label} command was too large to start: {executable}') from why
     raise BrowserEnvironmentSkipped(
