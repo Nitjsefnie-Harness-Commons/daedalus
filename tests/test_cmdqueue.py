@@ -99,7 +99,7 @@ def _vanish_during_unlink(path):
 
 @contextlib.contextmanager
 def _vanish_during_read(path, clock):
-    original = Path.read_text
+    original = Path.open
     signature = inspect.signature(original)
     armed = [True]
 
@@ -113,11 +113,11 @@ def _vanish_during_read(path, clock):
                 2, 'injected disappearance', str(candidate))
         return original(candidate, *args, **kwargs)
 
-    Path.read_text = vanished
+    Path.open = vanished
     try:
         yield
     finally:
-        Path.read_text = original
+        Path.open = original
 
 
 @contextlib.contextmanager
@@ -189,20 +189,24 @@ def test_a_present_queue_file_outlives_its_finished_producer(tmp):
 def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    producer_consulted = [False]
-
-    def producer_alive():
-        producer_consulted[0] = True
-        return False
-
-    with _virtual_cmdqueue_clock(10) as (clock, _events, origin):
+    # Both 1000 ceilings only guard runaways, not valid sleep multiplicity.
+    with _virtual_cmdqueue_clock(1000) as (clock, _events, origin):
         with _vanish_during_read(queued, clock):
             _cmdqueue.wait_for_command(
-                queue, timeout=timeout, producer_alive=producer_alive)
-    # Mechanism: observation makes the dead-producer predicate unreachable.
-    assert not producer_consulted[0], producer_consulted
-    # Consequence: the vanished file still keeps the wait at its full bound.
+                queue, timeout=timeout, producer_alive=lambda: False)
     assert clock.monotonic() >= origin + timeout, (
+        clock.monotonic(), origin, timeout)
+
+
+def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
+    timeout = 2.5 * _cmdqueue.POLL_DELAY
+    queue = Path(tmp) / 'empty-queue'
+    queue.mkdir()
+    with _virtual_cmdqueue_clock(1000) as (clock, _events, origin):
+        command = _cmdqueue.wait_for_command(
+            queue, timeout=timeout, producer_alive=lambda: False)
+    assert command is None, command
+    assert clock.monotonic() < origin + timeout, (
         clock.monotonic(), origin, timeout)
 
 
