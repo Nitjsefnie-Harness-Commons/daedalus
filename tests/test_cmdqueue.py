@@ -230,6 +230,7 @@ def test_a_present_queue_file_outlives_its_finished_producer(tmp):
 
 def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
+
     def observed_wait(remove_queue):
         queue, queued = _queued_file(tmp)
         with _virtual_cmdqueue_clock(
@@ -248,13 +249,13 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
     _queue, queue_end, queue_origin = observed_wait(True)
     assert baseline is None, baseline
     assert origin == base, (origin, base)
-    # Sterbenz makes deadline - now exact while its operands are within a
-    # factor of two, so adding it lands on the already-representable deadline.
+    # Sterbenz makes the exact remainder land on the represented deadline.
     endpoints = ((observed_end, origin), (base_end, base),
                  (queue_end, queue_origin))
     for end, start in endpoints:
         assert end == start + timeout, (end, start, timeout)
-    assert observed_end == base_end, (observed_end, base_end)
+    assert observed_end == base_end, (
+        'vanished-file wait did not match baseline', observed_end, base_end)
 
 
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
@@ -263,14 +264,11 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     expected_excess = _path_open_failure(queued, *excess_args)
     expected_binary = _path_open_failure(queued, mode='rb', encoding='utf-8')
     expected_buf = _path_open_failure(queued, buffering=-1.0, encoding='utf-8')
-    rejected_calls = (
-        ('excess arguments', excess_args, {}, expected_excess),
-        ('binary encoding', (),
-         {'mode': 'rb', 'encoding': 'utf-8'}, expected_binary),
-        ('value-equal wrong-type buffering', (),
-         {'buffering': -1.0, 'encoding': 'utf-8'},
-         expected_buf),
-    )
+    rejected_calls = (('excess arguments', excess_args, {}, expected_excess),
+                      ('binary encoding', (),
+                       {'mode': 'rb', 'encoding': 'utf-8'}, expected_binary),
+                      ('value-equal wrong-type buffering', (),
+                       {'buffering': -1.0, 'encoding': 'utf-8'}, expected_buf))
     with _virtual_cmdqueue_clock(_RUNAWAY_SLEEP_LIMIT) as (clock, _, _):
         injectors = (
             ('generic refusal',
@@ -278,8 +276,7 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
             ('first-read', _refuse_first_queue_read(queue), PermissionError),
             ('disappearance', _disappear_on_first_open(queued),
              FileNotFoundError),
-            ('vanish', _vanish_during_read(queued, clock), FileNotFoundError),
-        )
+            ('vanish', _vanish_during_read(queued, clock), FileNotFoundError))
         for label, injector, injected_type in injectors:
             before = queued.stat()
             candidate = Path(tmp) / f'exclusive-create-{label}'
@@ -295,10 +292,13 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
                     actual = _path_open_failure(queued, *args, **kwargs)
                     assert queued.exists(), f'{label} removed path for {case}'
                     after = queued.stat()
-                    assert actual == expected, (label, case, actual, expected)
-                    assert after == before, (label, case, after, before)
+                    assert actual == expected, ('target failure changed',
+                                                label, case, actual, expected)
+                    assert after == before, ('target path changed',
+                                             label, case, after, before)
                 injected = _path_open_failure(queued, encoding='utf-8')
-            assert injected[0] is injected_type, (label, injected)
+            assert injected[0] is injected_type, (
+                'fault was consumed by a rejected call', label, injected)
             assert open_failure is None, (label, open_failure)
             assert candidate.read_text('utf-8') == 'caller-owned content'
 
