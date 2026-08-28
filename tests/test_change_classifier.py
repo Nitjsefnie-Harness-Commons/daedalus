@@ -71,6 +71,7 @@ def test_exact_patterns_match_only_the_root_file(tmp):
     assert not mod.matches('LICENSE', 'licence')
     assert mod.matches('.gitignore', '.gitignore')
     assert not mod.matches('.gitignore', 'sub/.gitignore')
+    assert mod.matches('docs]', 'docs]')
 
 
 def test_an_unimplemented_pattern_shape_fails_closed(tmp):
@@ -86,8 +87,7 @@ def test_an_unimplemented_pattern_shape_fails_closed(tmp):
 
 
 def test_directory_glob_prefix_rejects_unimplemented_metacharacters(tmp):
-    # `docs?`/`docs[ab]` have no `/**` to strip and hit the literal-path
-    # branch instead, but still need to end up refused, not compared (#290).
+    # `docs?`/`docs[ab]` skip the `/**` strip, hit the literal branch (#290).
     del tmp
     mod = _classifier()
     cases = [(p, p.replace('/**', '/a.md'))
