@@ -39,7 +39,12 @@ def _job_section(workflow, job):
 
 
 def _job_needs(workflow, job):
-    """The job names listed under `needs:` on the named job."""
+    """The job names listed under `needs:` on the named job.
+
+    Workflows in this repository use one canonical source spelling; these
+    tests pin it, so a failure means the spelling changed rather than the
+    guard broke.
+    """
     names = []
     in_needs = False
     for line in _job_section(workflow, job)[1:]:
@@ -158,7 +163,12 @@ def _job_names_with_outputs(workflow):
 
 
 def _job_output_step_ids(workflow, job):
-    """Return step IDs referenced by a job's output expressions."""
+    """Return step IDs referenced by a job's output expressions.
+
+    Workflows in this repository use one canonical source spelling; these
+    tests pin it, so a failure means the spelling changed rather than the
+    guard broke.
+    """
     outputs = _job_output_mapping(workflow, job)
     if outputs is None:
         return set()
@@ -180,7 +190,12 @@ def _job_output_step_ids(workflow, job):
 
 
 def _job_if_expression(workflow, job):
-    """Return the complete job-level if expression, including continuations."""
+    """Return the complete job-level if expression, including continuations.
+
+    Workflows in this repository use one canonical source spelling; these
+    tests pin it, so a failure means the spelling changed rather than the
+    guard broke.
+    """
     source = _field_source(workflow, job, 'if')
     if source is None:
         return None
