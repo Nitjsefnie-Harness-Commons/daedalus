@@ -6,7 +6,6 @@ these tests pin each rule, the mutation-shaped regressions it exists to
 catch, and the behaviour of the _util.child_coverage declaration it
 reads.
 """
-import ast
 import os
 import shutil
 import subprocess
@@ -16,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _coverage_guard  # noqa: E402
 import _util  # noqa: E402
+from _control_writes import control_write_violations  # noqa: E402
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
 from _repo import ROOT  # noqa: E402
@@ -37,56 +37,93 @@ def _real_module_copy(tmp, relative):
 
 
 def _repository_write_lines():
-    """Writer calls whose path is derived from the checkout root."""
-    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
-    violations = []
-    for function in (node for node in ast.walk(tree)
-                     if isinstance(node, ast.FunctionDef)):
-        repository_names = {'ROOT'}
-        changed = True
-        while changed:
-            changed = False
-            for node in ast.walk(function):
-                if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-                    continue
-                value = node.value
-                if value is None or not any(
-                        isinstance(part, ast.Name)
-                        and part.id in repository_names
-                        for part in ast.walk(value)):
-                    continue
-                targets = (node.targets if isinstance(node, ast.Assign)
-                           else [node.target])
-                for target in targets:
-                    if (isinstance(target, ast.Name)
-                            and target.id not in repository_names):
-                        repository_names.add(target.id)
-                        changed = True
-        for node in ast.walk(function):
-            if not isinstance(node, ast.Call):
-                continue
-            if (isinstance(node.func, ast.Attribute)
-                    and node.func.attr in {'write_bytes', 'write_text'}
-                    and any(isinstance(part, ast.Name)
-                            and part.id in repository_names
-                            for part in ast.walk(node.func.value))):
-                violations.append(node.lineno)
-            if (isinstance(node.func, ast.Name)
-                    and node.func.id == 'open' and node.args
-                    and any(isinstance(part, ast.Name)
-                            and part.id in repository_names
-                            for part in ast.walk(node.args[0]))):
-                mode = node.args[1] if len(node.args) > 1 else None
-                if (isinstance(mode, ast.Constant)
-                        and 'w' in str(mode.value)):
-                    violations.append(node.lineno)
-    return violations
+    """Writes not provably below storage owned by their control."""
+    return control_write_violations(Path(__file__), ROOT)
 
 
 def test_controls_never_write_inside_the_repository(tmp):
     """A control may mutate copied content, never a checkout path."""
     del tmp
-    assert not _repository_write_lines(), _repository_write_lines()
+    violations = _repository_write_lines()
+    assert not violations, '\n'.join(violations)
+
+
+def test_write_control_refuses_a_tuple_bound_checkout_path(tmp):
+    """Tuple binding cannot hide a checkout path from the control."""
+    source = Path(tmp) / 'tuple-target.py'
+    source.write_text(
+        "def control(relative):\n"
+        "    root, target = ROOT, ROOT / relative\n"
+        "    target.write_bytes(b'mutated')\n",
+        encoding='utf-8')
+    original = globals()['__file__']
+    globals()['__file__'] = str(source)
+    try:
+        violations = _repository_write_lines()
+    finally:
+        globals()['__file__'] = original
+    assert violations == [
+        'tuple-target.py:3: write_bytes target path is not control-owned'
+    ], violations
+
+
+def test_write_control_resolves_only_control_owned_paths(tmp):
+    """Owned paths pass; unresolved and checkout paths fail closed."""
+    source = Path(tmp) / 'writer-shapes.py'
+    source.write_text(
+        "def test_controls(tmp, relative, manager, holder):\n"
+        "    root, target = _real_module_copy(tmp, relative)\n"
+        "    target.write_bytes(b'ok')\n"
+        "    first, *rest = _real_module_copy(tmp, relative)\n"
+        "    rest[0].write_text('ok')\n"
+        "    joined = os.path.join(tmp, 'safe')\n"
+        "    open(joined, 'w')\n"
+        "    open(joined, 'a')\n"
+        "    open(joined, 'x')\n"
+        "    open(joined, 'wb')\n"
+        "    open(joined, 'ab')\n"
+        "    open(joined, 'xb')\n"
+        "    checkout = os.path.join(ROOT, 'unsafe')\n"
+        "    open(checkout, 'w')\n"
+        "    open(checkout, 'a')\n"
+        "    open(checkout, 'x')\n"
+        "    open(checkout, 'wb')\n"
+        "    open(checkout, 'ab')\n"
+        "    open(checkout, 'xb')\n"
+        "    with manager() as named:\n"
+        "        named.write_text('unsafe')\n"
+        "    holder.path.write_bytes(b'unsafe')\n"
+        "ROOT.write_text('unsafe')\n"
+        "async def async_control(holder):\n"
+        "    holder.path.write_text('unsafe')\n"
+        "def helper(tmp):\n"
+        "    Path(tmp).write_text('unsafe')\n",
+        encoding='utf-8')
+    original = globals()['__file__']
+    globals()['__file__'] = str(source)
+    try:
+        violations = _repository_write_lines()
+    finally:
+        globals()['__file__'] = original
+    assert violations == [
+        "writer-shapes.py:14: open mode 'w' target path is not "
+        'control-owned',
+        "writer-shapes.py:15: open mode 'a' target path is not "
+        'control-owned',
+        "writer-shapes.py:16: open mode 'x' target path is not "
+        'control-owned',
+        "writer-shapes.py:17: open mode 'wb' target path is not "
+        'control-owned',
+        "writer-shapes.py:18: open mode 'ab' target path is not "
+        'control-owned',
+        "writer-shapes.py:19: open mode 'xb' target path is not "
+        'control-owned',
+        'writer-shapes.py:21: write_text target path is not control-owned',
+        'writer-shapes.py:22: write_bytes target path is not control-owned',
+        'writer-shapes.py:23: write_text target path is not control-owned',
+        'writer-shapes.py:25: write_text target path is not control-owned',
+        'writer-shapes.py:27: write_text target path is not control-owned',
+    ], violations
 
 
 def test_a_launch_with_a_provable_cwd_is_safe(tmp):
@@ -237,12 +274,15 @@ def test_a_declaration_name_cannot_be_aliased(tmp):
         + "_COVERAGE_ALIAS = _COVERAGE_ENV\n"
         + "_COVERAGE_ALIAS['COVERAGE_PROCESS_START'] = "
         + "os.environ['COVERAGE_PROCESS_START']\n", 1)
-    target.write_bytes(mutated.encode('utf-8'))
-    violations = _coverage_environment_violations(root)
-    assert any(
-        v.startswith(f'tests/test_diff_coverage.py:{line}:')
-        for v in violations), violations
-    shutil.copyfile(ROOT / relative, target)
+    original = target.read_bytes()
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations(root)
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
     restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
@@ -279,12 +319,15 @@ def test_a_rebound_declaration_helper_is_caught(tmp):
         needle,
         "_util.child_coverage = lambda _mode: dict(os.environ)\n"
         + needle, 1)
-    target.write_bytes(mutated.encode('utf-8'))
-    violations = _coverage_environment_violations(root)
-    assert any(
-        v.startswith(f'tests/test_diff_coverage.py:{line}:')
-        for v in violations), violations
-    shutil.copyfile(ROOT / relative, target)
+    original = target.read_bytes()
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations(root)
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
     restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
@@ -364,12 +407,15 @@ def test_shell_wrapped_python_in_a_temp_cwd_is_caught(tmp):
         "             str(_SCRIPT), '--coverage', str(coverage_xml),\n"
         "             '--diff', str(diff)], cwd=tmp,\n"
         "            capture_output=True, text=True, timeout=60)", 1)
-    target.write_bytes(mutated.encode('utf-8'))
-    violations = _coverage_environment_violations(root)
-    assert any(
-        v.startswith(f'tests/test_diff_coverage.py:{line}:')
-        for v in violations), violations
-    shutil.copyfile(ROOT / relative, target)
+    original = target.read_bytes()
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations(root)
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
     restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
@@ -404,13 +450,16 @@ def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
     replacement = "'--diff', str(diff)], cwd=tmp,"
     start = text.rindex('subprocess.run(', 0, text.index(needle))
     line = text[:start].count('\n') + 1
-    target.write_bytes(text.replace(
-        needle, replacement, 1).encode('utf-8'))
-    violations = _coverage_environment_violations(root)
-    assert any(
-        v.startswith(f'tests/test_diff_coverage.py:{line}:')
-        for v in violations), violations
-    shutil.copyfile(ROOT / relative, target)
+    original = target.read_bytes()
+    try:
+        target.write_bytes(text.replace(
+            needle, replacement, 1).encode('utf-8'))
+        violations = _coverage_environment_violations(root)
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
     restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{line}:')
@@ -451,12 +500,15 @@ def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
         "                          text=True, timeout=60)", 1)
     line = mutated[:mutated.index(
         'subprocess.run(command, cwd=tmp,')].count('\n') + 1
-    target.write_bytes(mutated.encode('utf-8'))
-    violations = _coverage_environment_violations(root)
-    assert any(
-        v.startswith(f'tests/test_diff_coverage.py:{line}:')
-        for v in violations), violations
-    shutil.copyfile(ROOT / relative, target)
+    original = target.read_bytes()
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations(root)
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
     restored = _coverage_environment_violations(root)
     assert not any(
         v.startswith(f'tests/test_diff_coverage.py:{restored_line}:')

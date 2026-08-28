@@ -214,6 +214,7 @@
 !/tests/_cmdqueue.py
 !/tests/_coverage_comment_steps.py
 !/tests/_coverage_guard.py
+!/tests/_control_writes.py
 !/tests/_dashnode.py
 !/tests/_evalpages.py
 !/tests/_ghexpr.py
