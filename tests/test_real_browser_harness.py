@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import types
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -506,6 +507,53 @@ def test_first_navigation_non_timeout_failure_stays_failure(tmp):
     assert process.terminated is True
     assert skipped is None, skipped
     assert str(failure) == 'CDP rejected navigation', failure
+
+
+def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
+    timeout_type = _realbrowser.CDPTimeout
+
+    def exercise(request_arrives):
+        calls = []
+        failure = None
+
+        def first_navigation(node, target, method, params):
+            assert (node, target, method) == (
+                'node-for-control', 'ws://page', 'Page.navigate')
+            assert params == {'url': page_url}, params
+            calls.append(method)
+            if request_arrives:
+                with urllib.request.urlopen(page_url, timeout=2) as reply:
+                    assert reply.status == 200, reply.status
+            raise timeout_type('controlled navigation timeout')
+
+        with _realbrowser.eval_page_server() as pages:
+            page_url = pages + '/plain.html'
+            with _fixture_runtime(
+                    tmp, first_navigation,
+                    subprocess_run=_browser_version):
+                try:
+                    with _enter_fixture(tmp, page_url):
+                        raise AssertionError('fixture yielded after timeout')
+                except _util.Skipped as why:
+                    raise AssertionError(
+                        'first navigation timeout was skipped') from why
+                except AssertionError as why:
+                    failure = why
+
+        assert calls == ['Page.navigate'], calls
+        return failure
+
+    failures = {
+        request_arrives: exercise(request_arrives)
+        for request_arrives in (False, True)
+    }
+
+    failure_type = getattr(
+        _realbrowser, 'FirstNavigationTimeout', None)
+    assert failure_type is not None, 'timeout has no observation-bearing type'
+    for request_arrives, failure in failures.items():
+        assert failure.__class__ is failure_type, failure
+        assert failure.request_arrived is request_arrives, failure
 
 
 def test_post_configuration_navigation_timeout_stays_failure(tmp):

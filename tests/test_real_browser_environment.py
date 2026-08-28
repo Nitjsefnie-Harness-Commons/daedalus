@@ -4,80 +4,13 @@ import errno
 import shutil
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _util  # noqa: E402
-from test_real_browser_harness import (  # noqa: E402
-    _browser_version, _enter_fixture, _fixture_runtime)
-
-
-def _navigation_timeout(tmp, *, request_arrives, channel_answers,
-                        seed_stale_request=False):
-    timeout_type = _realbrowser.CDPTimeout
-    calls = []
-
-    def cdp_call(node, target, method, params):
-        calls.append(method)
-        assert (node, target) == ('node-for-control', 'ws://page')
-        if method == 'Page.navigate':
-            assert params == {'url': page_url}, params
-            if request_arrives:
-                with urllib.request.urlopen(page_url, timeout=2) as reply:
-                    assert reply.status == 200, reply.status
-            raise timeout_type('controlled navigation timeout')
-        assert method == 'Runtime.evaluate', method
-        if not channel_answers:
-            raise timeout_type('controlled liveness timeout')
-        return {'result': {'value': 1}}
-
-    skipped = None
-    failure = None
-    with _realbrowser.eval_page_server() as pages:
-        page_url = pages + '/plain.html'
-        if seed_stale_request:
-            with urllib.request.urlopen(page_url, timeout=2) as reply:
-                assert reply.status == 200, reply.status
-        with _fixture_runtime(
-                tmp, cdp_call, subprocess_run=_browser_version):
-            try:
-                with _enter_fixture(tmp, page_url):
-                    raise AssertionError('fixture yielded after timeout')
-            except _util.Skipped as why:
-                skipped = why
-            except AssertionError as why:
-                failure = why
-    return skipped, failure, calls
-
-
-def test_navigation_timeout_skips_when_cdp_channel_is_dead(tmp):
-    skipped, failure, calls = _navigation_timeout(
-        tmp, request_arrives=True, channel_answers=False)
-    assert isinstance(skipped, _realbrowser.BrowserEnvironmentSkipped), skipped
-    assert failure is None, failure
-    assert calls == ['Page.navigate', 'Runtime.evaluate'], calls
-    assert '/controlled/chromium' in str(skipped), skipped
-
-
-def test_navigation_timeout_skips_when_live_channel_saw_no_new_request(tmp):
-    skipped, failure, calls = _navigation_timeout(
-        tmp, request_arrives=False, channel_answers=True,
-        seed_stale_request=True)
-    assert isinstance(skipped, _realbrowser.BrowserEnvironmentSkipped), skipped
-    assert failure is None, failure
-    assert calls == ['Page.navigate', 'Runtime.evaluate'], calls
-    assert '/controlled/chromium' in str(skipped), skipped
-
-
-def test_navigation_timeout_fails_when_channel_and_fixture_were_reached(tmp):
-    skipped, failure, calls = _navigation_timeout(
-        tmp, request_arrives=True, channel_answers=True)
-    assert skipped is None, skipped
-    assert failure is not None, 'live reached fixture did not fail'
-    assert calls == ['Page.navigate', 'Runtime.evaluate'], calls
+from test_real_browser_harness import _enter_fixture  # noqa: E402
 
 
 def _which_with(node):
