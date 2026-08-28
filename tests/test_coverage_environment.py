@@ -242,6 +242,9 @@ def test_rebinding_the_declaration_helper_is_a_violation(tmp):
                     "setattr(_util, 'child_coverage', lambda _mode: {})",
                     'setattr(_util, helper_name, lambda _mode: {})',
                     '_util = replacement',
+                    "globals()['_util'] = replacement",
+                    'globals()[helper_name] = replacement',
+                    "globals().update({'_util': replacement})",
                     'cc = None'):
         violations = _synthetic_violations(
             f"""import subprocess

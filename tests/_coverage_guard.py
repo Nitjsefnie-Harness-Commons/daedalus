@@ -431,10 +431,25 @@ def _rebinds_declaration(part, facts):
         return (part.id == _DECLARATION
                 or part.id in facts.declaration_functions
                 or part.id in facts.declaration_modules)
-    return (isinstance(part, ast.Attribute)
+    if (isinstance(part, ast.Attribute)
             and part.attr == _DECLARATION
             and isinstance(part.value, ast.Name)
-            and part.value.id in facts.declaration_modules)
+            and part.value.id in facts.declaration_modules):
+        return True
+    if not isinstance(part, ast.Subscript):
+        return False
+    namespace = part.value
+    if (not isinstance(namespace, ast.Call) or namespace.args
+            or namespace.keywords
+            or not isinstance(namespace.func, ast.Name)
+            or namespace.func.id != 'globals'):
+        return False
+    name = part.slice
+    return (not isinstance(name, ast.Constant)
+            or not isinstance(name.value, str)
+            or name.value == _DECLARATION
+            or name.value in facts.declaration_functions
+            or name.value in facts.declaration_modules)
 
 
 def _rebind_parts(target):
@@ -462,6 +477,19 @@ def _setattr_rebinds_declaration(node, facts):
             or name.value == _DECLARATION)
 
 
+def _mutates_module_namespace(node):
+    """Whether a call can rewrite a name returned by globals()."""
+    function = node.func
+    if (not isinstance(function, ast.Attribute)
+            or function.attr not in _MUTATING_METHODS | {'__setitem__'}):
+        return False
+    namespace = function.value
+    return (isinstance(namespace, ast.Call) and not namespace.args
+            and not namespace.keywords
+            and isinstance(namespace.func, ast.Name)
+            and namespace.func.id == 'globals')
+
+
 def _helper_rebind_violations(tree, facts, relative):
     """A module may never assign to child_coverage or its local alias.
 
@@ -472,7 +500,8 @@ def _helper_rebind_violations(tree, facts, relative):
     violations = []
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call)
-                and _setattr_rebinds_declaration(node, facts)):
+                and (_setattr_rebinds_declaration(node, facts)
+                     or _mutates_module_namespace(node))):
             violations.append(
                 f'{relative}:{node.lineno}: the module rebinds '
                 f'{_DECLARATION}')
