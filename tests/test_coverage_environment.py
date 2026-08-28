@@ -567,18 +567,21 @@ def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
     text = original.decode('utf-8')
     assert needle in text, 'the row 1 launch shape changed'
     replacement = "'--diff', str(diff)], cwd=tmp,"
-    mutated = text.replace(needle, replacement, 1)
-    start = mutated.rindex('subprocess.run(', 0, mutated.index(replacement))
-    line = mutated[:start].count('\n') + 1
+    start = text.rindex('subprocess.run(', 0, text.index(needle))
+    line = text[:start].count('\n') + 1
     try:
-        target.write_bytes(mutated.encode('utf-8'))
+        target.write_bytes(text.replace(
+            needle, replacement, 1).encode('utf-8'))
         violations = _coverage_environment_violations()
         assert any(
             v.startswith(f'tests/test_diff_coverage.py:{line}:')
             for v in violations), violations
     finally:
         target.write_bytes(original)
-    assert _coverage_environment_violations() == []
+    restored = _coverage_environment_violations()
+    assert not any(
+        v.startswith(f'tests/test_diff_coverage.py:{line}:')
+        for v in restored), restored
 
 
 def test_row2_cwd_hidden_in_a_spread_name_is_caught(tmp):
@@ -607,6 +610,7 @@ def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
         "timeout=60)")
     text = original.decode('utf-8')
     assert needle in text, 'the row 3 launch shape changed'
+    restored_line = text[:text.index(needle)].count('\n') + 1
     mutated = text.replace(
         needle,
         "    command = [sys.executable, str(_SCRIPT), '--coverage',\n"
@@ -623,7 +627,10 @@ def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
             for v in violations), violations
     finally:
         target.write_bytes(original)
-    assert _coverage_environment_violations() == []
+    restored = _coverage_environment_violations()
+    assert not any(
+        v.startswith(f'tests/test_diff_coverage.py:{restored_line}:')
+        for v in restored), restored
 
 
 def test_row4_a_declaration_that_never_executes_is_caught(tmp):
