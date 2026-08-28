@@ -138,6 +138,51 @@ def test_a_def_shadowing_an_alias_name_also_clears_it(tmp):
         f'{violations}')
 
 
+def test_a_rebinding_inside_a_loop_with_or_try_body_also_clears_the_alias(tmp):
+    """Review's other direction: a rebinding partway through a for/while/
+    with/try body was never applied before the calls in that body were
+    checked, so a name legitimately rebound away from a sender inside one
+    of these bodies still read as that sender and reported a false
+    violation on ordinary code."""
+    bodies = {
+        'for': "    for probe in probes:\n"
+               "        send = probe.dispatch\n"
+               "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+        'while': "    while probes:\n"
+                 "        send = probes.pop().dispatch\n"
+                 "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+        'with': "    with bridge.session() as send:\n"
+                "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+        'try': "    try:\n"
+               "        send = probe.dispatch\n"
+               "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n"
+               "    except OSError:\n"
+               "        pass\n",
+        'except-as': "    try:\n"
+                     "        pass\n"
+                     "    except OSError as send:\n"
+                     "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+        'nested-def': "    for _ in (1,):\n"
+                      "        def send(*a, **k):\n"
+                      "            return None\n"
+                      "        send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+    }
+    for label, body in bodies.items():
+        source = Path(tmp) / f'loop_rebound_sender_{label}.py'
+        source.write_text(
+            "async def focus_tab(chrome_tab, probes, bridge):\n"
+            "    send = bridge.ext_cmd\n"
+            + body
+            + "    return await send('_focus', 'focus-tab', "
+              "tabId=int(chrome_tab))\n",
+            encoding='utf-8')
+        violations = py_tab_routing_violations(
+            source, f'loop_rebound_sender_{label}.py')
+        assert not violations, (
+            f'{label}: send was rebound inside the body and should read as '
+            f'an ordinary call: {violations}')
+
+
 def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
     """The other false-positive direction: declaring a local `send` alias
     must not reclassify every unrelated `.send()` method call in scope."""
