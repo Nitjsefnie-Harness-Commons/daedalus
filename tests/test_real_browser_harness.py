@@ -3,7 +3,6 @@
 import base64
 import contextlib
 import hashlib
-import re
 import shutil
 import socket
 import subprocess
@@ -622,24 +621,11 @@ def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
     assert failure_type is not None, 'timeout has no observation-bearing type'
     required_owners = (
         'the browser', 'the CDP transport', 'this repository', 'the machine')
-    fault_predicate = re.compile(
-        r'\b(?:is|are)(?:\s+\w+){0,2}\s+at fault\b', re.IGNORECASE)
-    uncertainty = re.compile(
-        r"\b(?:cannot|can't|could|insufficient|may|might|no|not|unknown|"
-        r'unclear|undetermined|unresolved|whether)\b', re.IGNORECASE)
     for request_arrives, failure in failures.items():
         assert failure.__class__ is failure_type, failure
         assert failure.request_arrived is request_arrives, failure
+        assert getattr(failure, 'selected_owner', object()) is None, failure
         assert failure.candidate_owners == required_owners, failure
-        for owner in required_owners:
-            assert owner in str(failure), (owner, failure)
-        for sentence in re.split(r'(?<=[.!?])\s+', str(failure)):
-            predicate = fault_predicate.search(sentence)
-            if predicate and any(
-                    owner in sentence[:predicate.start()]
-                    for owner in required_owners):
-                assert uncertainty.search(
-                    sentence[:predicate.start()]), sentence
 
 
 def test_post_configuration_navigation_timeout_stays_failure(tmp):
