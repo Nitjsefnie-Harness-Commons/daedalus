@@ -164,11 +164,37 @@ def _is_extension_constant(node):
     return isinstance(node, ast.Constant) and node.value == 'extension'
 
 
-def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset()):
+def sender_aliases(scope):
+    """Local names bound to `ext_cmd`/`_ext_cmd` by a plain same-scope
+    assignment, e.g. `send = _ext_cmd` -- so a call through the alias is
+    judged the same as a call through the name it was bound to.
+
+    Only a bare `name = ext_cmd` (or `_ext_cmd`) counts. Anything less direct
+    -- attribute access, a call, a conditional value -- leaves the name
+    untracked, and a call through it still reads as an ordinary call rather
+    than as a typed sender.
+    """
+    aliases = {}
+    for node in _scope_nodes(scope):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not (isinstance(node.value, ast.Name)
+                and node.value.id in ('ext_cmd', '_ext_cmd')):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                aliases[target.id] = node.value.id
+    return aliases
+
+
+def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
+                        aliases=None):
     """Violations from one Call node, given the scope's tracked dicts."""
     func = node.func
     name = func.id if isinstance(func, ast.Name) else (
         func.attr if isinstance(func, ast.Attribute) else '')
+    if aliases:
+        name = aliases.get(name, name)
     if name in ('ext_cmd', '_ext_cmd'):
         found = []
         for kw in node.keywords:
@@ -236,7 +262,8 @@ def _py_calls_in(node):
     return [child for child in nodes if isinstance(child, ast.Call)]
 
 
-def _py_flow_violations(statements, states, rel, allowed_opaque_names):
+def _py_flow_violations(statements, states, rel, allowed_opaque_names,
+                        aliases=None):
     """Walk statements in order, retaining alternate `if` branch states."""
     violations = []
 
@@ -244,7 +271,7 @@ def _py_flow_violations(statements, states, rel, allowed_opaque_names):
         for call in _py_calls_in(node):
             for state in current_states:
                 violations.extend(_py_call_violations(
-                    call, state, rel, allowed_opaque_names))
+                    call, state, rel, allowed_opaque_names, aliases))
 
     for statement in statements:
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef,
@@ -256,13 +283,13 @@ def _py_flow_violations(statements, states, rel, allowed_opaque_names):
             body, body_states = _py_flow_violations(
                 statement.body,
                 [_copy_dict_state(state) for state in incoming], rel,
-                allowed_opaque_names)
+                allowed_opaque_names, aliases)
             violations.extend(body)
             if statement.orelse:
                 other, other_states = _py_flow_violations(
                     statement.orelse,
                     [_copy_dict_state(state) for state in incoming], rel,
-                    allowed_opaque_names)
+                    allowed_opaque_names, aliases)
                 violations.extend(other)
             else:
                 other_states = incoming
@@ -297,6 +324,6 @@ def py_tab_routing_violations(path, rel):
                 and scope.args.kwarg is not None):
             allowed_opaque = frozenset({scope.args.kwarg.arg})
         found, _ = _py_flow_violations(
-            statements, [{}], rel, allowed_opaque)
+            statements, [{}], rel, allowed_opaque, sender_aliases(scope))
         violations.extend(found)
     return list(dict.fromkeys(violations))
