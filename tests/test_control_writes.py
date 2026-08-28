@@ -44,7 +44,7 @@ def test_refuses_an_augmented_checkout_binding(tmp):
         encoding='utf-8')
     assert _violations(source) == [
         'augmented-target.py:4: write_bytes target path is not '
-        'control-owned'
+        + 'control-owned'
     ]
 
 
@@ -101,7 +101,7 @@ def test_recognises_path_open(tmp):
         encoding='utf-8')
     assert _violations(source) == [
         "path-open.py:3: Path.open mode 'wb' target path is not "
-        'control-owned'
+        + 'control-owned'
     ]
 
 
@@ -168,17 +168,17 @@ def test_resolves_only_control_owned_paths(tmp):
         encoding='utf-8')
     assert _violations(source) == [
         "writer-shapes.py:14: open mode 'w' target path is not "
-        'control-owned',
+        + 'control-owned',
         "writer-shapes.py:15: open mode 'a' target path is not "
-        'control-owned',
+        + 'control-owned',
         "writer-shapes.py:16: open mode 'x' target path is not "
-        'control-owned',
+        + 'control-owned',
         "writer-shapes.py:17: open mode 'wb' target path is not "
-        'control-owned',
+        + 'control-owned',
         "writer-shapes.py:18: open mode 'ab' target path is not "
-        'control-owned',
+        + 'control-owned',
         "writer-shapes.py:19: open mode 'xb' target path is not "
-        'control-owned',
+        + 'control-owned',
         'writer-shapes.py:21: write_text target path is not control-owned',
         'writer-shapes.py:22: write_bytes target path is not control-owned',
         'writer-shapes.py:23: write_text target path is not control-owned',

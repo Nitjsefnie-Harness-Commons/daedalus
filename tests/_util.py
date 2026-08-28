@@ -59,7 +59,14 @@ def child_coverage(mode, environment=None, cwd=None):
     if environment is None:
         environment = os.environ
     if mode == 'scrub':
-        return coverage_free_environment(environment)
+        scrubbed = coverage_free_environment(environment)
+        leaked = sorted(
+            name for name in scrubbed if name.startswith('COVERAGE_'))
+        if leaked:
+            raise ValueError(
+                "child_coverage('scrub') retained coverage names: "
+                + ', '.join(leaked))
+        return scrubbed
     if mode == 'keep':
         if cwd is None:
             raise ValueError(
