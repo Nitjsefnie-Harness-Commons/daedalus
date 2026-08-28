@@ -388,6 +388,7 @@ def _job_needs(workflow, job):
 
 
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
+STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
 
 
 def _aggregate_script(workflow):
@@ -432,13 +433,30 @@ def test_changes_job_exposes_every_classifier_output(tmp):
     assert not missing, missing
 
 
+def test_static_analysis_jobs_keep_their_required_ids_and_names(tmp):
+    del tmp
+    workflow = _tests_yml()
+    jobs = workflow.partition('\njobs:\n')[2]
+    job_ids = re.findall(r'^  ([A-Za-z0-9_-]+):$', jobs, re.MULTILINE)
+    gate_ids = [job for job in job_ids if job in GATE_JOBS]
+    assert set(gate_ids) == set(GATE_JOBS), (gate_ids, GATE_JOBS)
+    assert len(gate_ids) == len(set(gate_ids)) == len(GATE_JOBS), (
+        gate_ids)
+    for job in GATE_JOBS:
+        section = _job_section(workflow, job)
+        assert section[0] == f'  {job}:', job
+        assert not any(line.startswith('    name:') for line in section), job
+
+
 def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
     del tmp
     expected = ['changes', *GATE_JOBS]
     workflow = _tests_yml()
     for job in ('suites', 'wheel', 'coverage'):
         needs = _job_needs(workflow, job)
-        assert needs == expected, (job, needs, expected)
+        assert set(needs) == set(expected), (job, needs, expected)
+        assert len(needs) == len(set(needs)) == len(expected), (
+            job, needs, expected)
 
 
 def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
@@ -479,7 +497,9 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
 
 def test_actionlint_runs_only_when_workflow_paths_changed(tmp):
     del tmp
-    section = _job_section(_tests_yml(), 'actionlint')
+    workflow = _tests_yml()
+    assert _job_needs(workflow, 'actionlint') == ['changes']
+    section = _job_section(workflow, 'actionlint')
     expected = "    if: ${{ needs.changes.outputs.workflows == 'true' }}"
     conditions = [line for line in section if line.startswith('    if:')]
     assert conditions == [expected], conditions
@@ -584,18 +604,17 @@ def test_aggregate_script_accepts_only_intentional_gate_skips(tmp):
     result = _run_aggregate(docs_only)
     assert result.returncode == 0, (result.stdout, result.stderr)
 
-    result = _run_aggregate(dict(all_success, changes='skipped'))
-    assert result.returncode != 0, (result.stdout, result.stderr)
-    assert 'changes' in result.stderr, result.stderr
-
     for name in ('changes', *GATE_JOBS, 'suites'):
         result = _run_aggregate(dict(all_success, **{name: 'failure'}))
         assert result.returncode != 0, (name, result.stdout, result.stderr)
+
+    for name in STRICT_JOBS:
+        result = _run_aggregate(dict(all_success, **{name: 'skipped'}))
+        assert result.returncode != 0, (name, result.stdout, result.stderr)
+        assert name in result.stderr, result.stderr
+
     result = _run_aggregate(dict(all_success, actionlint='skipped'))
     assert result.returncode == 0, (result.stdout, result.stderr)
-    result = _run_aggregate(dict(all_success, pylint='skipped'))
-    assert result.returncode != 0, (result.stdout, result.stderr)
-    assert 'pylint' in result.stderr, result.stderr
     result = _run_aggregate(dict(all_success, suites='cancelled'))
     assert result.returncode != 0, (result.stdout, result.stderr)
 
