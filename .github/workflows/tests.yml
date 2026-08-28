@@ -277,6 +277,9 @@ jobs:
         # The buffer absorbs measurement variation — which suites reach a
         # subprocess before it exits, and which optional dependency set the
         # runner resolved — not a licence to regress into it.
+        # Namespace-package discovery exposed previously invisible unexecuted
+        # statements, moving the total from 88.8 to 88.0; the denominator grew,
+        # no code lost coverage, and the 1.5-point buffer stays unchanged.
         # Python measured: 88.0
         # Python floor: 86.5
         run: python -m coverage report --fail-under=86.5 --precision=1
