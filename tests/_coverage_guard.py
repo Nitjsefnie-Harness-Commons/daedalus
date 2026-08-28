@@ -161,11 +161,9 @@ class _ModuleFacts:
                         self.declaration_functions.add(bound)
                     if node.module == 'os' and alias.name == 'chdir':
                         self.chdir_callables.add(bound)
+        self._propagate_aliases(tree)
         for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
-                if _is_launch_alias(node, self.subprocess_modules):
-                    self.launch_callables.add(node.targets[0].id)
-            elif isinstance(node, ast.Call):
+            if isinstance(node, ast.Call):
                 function = node.func
                 is_chdir = (
                     isinstance(function, ast.Attribute)
@@ -181,6 +179,29 @@ class _ModuleFacts:
                                    node.args[0], self.shadowed_names))
                     self.chdir_calls.append((node.lineno, is_root))
         self._collect_bindings(tree.body)
+
+    def _propagate_aliases(self, tree):
+        """Follow plain-name aliases of a launch callable or _util.
+
+        Iterated to a fixpoint rather than read once, so an alias of an
+        alias resolves to the same object at any depth.
+        """
+        aliases = [(node.targets[0].id, node.value) for node in ast.walk(tree)
+                   if isinstance(node, ast.Assign) and len(node.targets) == 1
+                   and isinstance(node.targets[0], ast.Name)]
+        changed = True
+        while changed:
+            changed = False
+            for name, value in aliases:
+                if (name not in self.launch_callables
+                        and _is_launch_value(value, self)):
+                    self.launch_callables.add(name)
+                    changed = True
+                if (name not in self.declaration_modules
+                        and isinstance(value, ast.Name)
+                        and value.id in self.declaration_modules):
+                    self.declaration_modules.add(name)
+                    changed = True
 
     def _collect_bindings(self, statements):
         for node in statements:
@@ -220,15 +241,14 @@ class _ModuleFacts:
         return 'invalid'
 
 
-def _is_launch_alias(node, subprocess_modules):
-    """Whether an Assign binds a plain name to subprocess.run/Popen."""
-    if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-        return False
-    value = node.value
+def _is_launch_value(value, facts):
+    """Whether an expression is subprocess.run/Popen or a known alias."""
+    if isinstance(value, ast.Name):
+        return value.id in facts.launch_callables
     return (isinstance(value, ast.Attribute)
             and value.attr in {'run', 'Popen'}
             and isinstance(value.value, ast.Name)
-            and value.value.id in subprocess_modules)
+            and value.value.id in facts.subprocess_modules)
 
 
 def _launch_method(node, facts):
@@ -334,26 +354,65 @@ def _bare_name_problem(name, facts, tree):
     return None
 
 
+def _keyword_or_arg(call, name, position=None):
+    """A call's argument by keyword, else by position, else None."""
+    for keyword in call.keywords:
+        if keyword.arg == name:
+            return keyword.value
+    if position is None or len(call.args) <= position:
+        return None
+    return call.args[position]
+
+
+def _cwd_spelling(node, shadowed):
+    """A cwd expression with its str()/Path() wrappers removed."""
+    while (isinstance(node, ast.Call) and len(node.args) == 1
+           and not node.keywords and isinstance(node.func, ast.Name)
+           and node.func.id in {'str', 'Path'}
+           and node.func.id not in shadowed):
+        node = node.args[0]
+    return ast.unparse(node)
+
+
+def _keep_cwd_problem(node, call, facts):
+    """Why a keep does not prove its own launch's cwd, or None.
+
+    The runtime helper can only judge the path it is handed, so nothing
+    but this ties that path to the directory the child actually starts in.
+    """
+    if call is None:
+        return None
+    declared = _keyword_or_arg(call, 'cwd', 2)
+    launch = _keyword_or_arg(node, 'cwd')
+    if declared is None:
+        return f"{_DECLARATION}('keep') names no cwd"
+    if launch is None or (_cwd_spelling(declared, facts.shadowed_names)
+                          != _cwd_spelling(launch, facts.shadowed_names)):
+        return f"{_DECLARATION}('keep') cwd is not the launch's cwd"
+    return None
+
+
 def _declaration(node, facts, tree):
-    """(problem, mode) for the launch's env= keyword."""
+    """(problem, mode, call) for the launch's env= keyword."""
     env = None
     for keyword in node.keywords:
         if keyword.arg == 'env':
             env = keyword.value
     if env is None:
-        return 'declares no env=', None
+        return 'declares no env=', None, None
     mode = facts.declaration_mode(env)
     if mode == 'invalid':
-        return "env= mode must be the literal 'scrub' or 'keep'", None
+        return "env= mode must be the literal 'scrub' or 'keep'", None, None
     if mode is not None:
-        return None, mode
+        return None, mode, env
     if not isinstance(env, ast.Name):
         return (f'env={ast.unparse(env)} is not {_DECLARATION}(...) or a '
-                'name bound once to it', None)
+                'name bound once to it', None, None)
     problem = _bare_name_problem(env.id, facts, tree)
     if problem is not None:
-        return problem, None
-    return None, facts.declaration_mode(facts.module_bindings[env.id][0][1])
+        return problem, None, None
+    bound = facts.module_bindings[env.id][0][1]
+    return None, facts.declaration_mode(bound), bound
 
 
 def _check_launch(node, method, relative, function, facts, tree, keeps,
@@ -361,7 +420,9 @@ def _check_launch(node, method, relative, function, facts, tree, keeps,
     why = _unresolved_cwd(node, facts)
     if why is None:
         return
-    problem, mode = _declaration(node, facts, tree)
+    problem, mode, call = _declaration(node, facts, tree)
+    if problem is None and mode == 'keep':
+        problem = _keep_cwd_problem(node, call, facts)
     if problem is not None:
         violations.append(
             f'{relative}:{node.lineno}: subprocess.{method} {why} {problem}')
@@ -400,6 +461,21 @@ def _env_keyword_values(tree):
     return values
 
 
+def _namespace_lookups(tree):
+    """globals()/vars() subscripts, with the literal key where there is one."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Subscript):
+            continue
+        namespace = node.value
+        if (isinstance(namespace, ast.Call) and not namespace.args
+                and not namespace.keywords
+                and isinstance(namespace.func, ast.Name)
+                and namespace.func.id in {'globals', 'vars'}):
+            key = node.slice
+            yield node.lineno, (key.value if isinstance(key, ast.Constant)
+                                and isinstance(key.value, str) else None)
+
+
 def _declaration_name_violations(tree, facts, relative):
     """A declaration name appears at its binding and as env=, nowhere else.
 
@@ -409,7 +485,13 @@ def _declaration_name_violations(tree, facts, relative):
     """
     violations = []
     env_values = _env_keyword_values(tree)
-    for name in sorted(_declaration_names(facts)):
+    names = _declaration_names(facts)
+    for lineno, key in _namespace_lookups(tree):
+        if names and (key is None or key in names):
+            violations.append(
+                f'{relative}:{lineno}: the module namespace reaches '
+                f'declaration name {key or "computed at runtime"}')
+    for name in sorted(names):
         binding_line = facts.module_bindings[name][0][0]
         for node in ast.walk(tree):
             if not isinstance(node, ast.Name) or node.id != name:
