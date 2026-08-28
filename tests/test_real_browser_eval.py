@@ -15,9 +15,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _realbrowser import (browser_requirements, cdp_call,  # noqa: E402
-                          cdp_eval, eval_page_server, hostile_eval_matrix,
-                          real_eval, real_ext_command, real_extension_page)
+from _realbrowser import (BrowserEnvironmentSkipped,  # noqa: E402
+                          browser_requirements, cdp_call, cdp_eval,
+                          eval_page_server, hostile_eval_matrix, real_eval,
+                          real_ext_command, real_extension_page)
 from _repo import EXTENSION_ROOT  # noqa: E402
 sys.path.insert(0, str(_util.ROOT))
 import daedalus_cli.output as CLI_OUTPUT  # noqa: E402
@@ -117,6 +118,8 @@ def test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp):
                         extension_root=broken):
                     raise AssertionError(
                         'the fixture yielded with a worker that cannot boot')
+            except BrowserEnvironmentSkipped:
+                raise
             except _util.Skipped as skipped:
                 raise AssertionError(
                     'a broken extension was reported as an environment skip: '
@@ -153,12 +156,12 @@ def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):
                         tmp, bridge_url, token, page_url):
                     raise AssertionError(
                         'the fixture yielded a page that never reported ready')
-            except _util.Skipped as skipped:
-                if 'never finished loading the fixture page' in str(skipped):
-                    raise AssertionError(
-                        'page readiness was reported as an environment skip: '
-                        + str(skipped)) from skipped
+            except BrowserEnvironmentSkipped:
                 raise
+            except _util.Skipped as skipped:
+                raise AssertionError(
+                    'page readiness was reported as an environment skip: '
+                    + str(skipped)) from skipped
             except AssertionError as failure:
                 reported = str(failure)
             assert reported and '__evalPageReady' in reported, reported

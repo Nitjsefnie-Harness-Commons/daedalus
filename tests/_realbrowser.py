@@ -23,14 +23,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
-                        CDP_RESPONSE_DEADLINE_MS, HOSTILE_EVAL_SCRIPT,
-                        PERFORMANCE_POISON_EVAL_SCRIPT, PLAIN_EVAL_SCRIPT,
-                        STRICT_CSP_EVAL_SCRIPT)
+                        CDP_RESPONSE_DEADLINE_MS, CDP_TIMEOUT_EXIT_CODE,
+                        HOSTILE_EVAL_SCRIPT, PERFORMANCE_POISON_EVAL_SCRIPT,
+                        PLAIN_EVAL_SCRIPT, STRICT_CSP_EVAL_SCRIPT)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
 class CDPTimeout(AssertionError):
     """The JavaScript CDP harness reached its response deadline."""
+
+
+class BrowserEnvironmentSkipped(_util.Skipped):
+    """The browser installation could not reach a usable fixture state."""
 
 
 class _EvalPageHandler(http.server.BaseHTTPRequestHandler):
@@ -91,18 +95,35 @@ def eval_page_server():
 
 
 def cdp_call(node, target, method, params):
-    result = subprocess.run(
-        [node, '-e', CDP_CALL_HARNESS, target, method, json.dumps(params),
-         str(CDP_RESPONSE_DEADLINE_MS)],
-        cwd=ROOT, capture_output=True, text=True,
-        timeout=CDP_RESPONSE_DEADLINE_MS / 1000 + 5)
+    args = [node, '-e', CDP_CALL_HARNESS, target, method, json.dumps(params),
+            str(CDP_RESPONSE_DEADLINE_MS)]
+    try:
+        result = subprocess.run(
+            args, cwd=ROOT, capture_output=True, text=True,
+            timeout=CDP_RESPONSE_DEADLINE_MS / 1000 + 5)
+    except subprocess.TimeoutExpired as why:
+        raise CDPTimeout(
+            (None, why.stdout or '', why.stderr or '')) from why
     failure = (result.returncode, result.stdout, result.stderr)
-    if (result.returncode != 0
-            and result.stderr == 'CDP response timed out\n'):
+    if result.returncode == CDP_TIMEOUT_EXIT_CODE:
         raise CDPTimeout(failure)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout or '{}')
+
+
+def _fixture_url_answered(page_url):
+    try:
+        with urllib.request.urlopen(
+                page_url,
+                timeout=CDP_RESPONSE_DEADLINE_MS / 1000):
+            return True
+    except urllib.error.HTTPError as reply:
+        # A 404 still proves that the in-process fixture origin answered.
+        reply.close()
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def cdp_eval(node, target, expression):
@@ -138,13 +159,15 @@ def browser_requirements():
         'google-chrome-stable', 'chrome')
         if (path := shutil.which(name))), None)
     if not node or not browser:
-        _util.skip('Chromium and Node are required for the real-page eval test')
+        raise BrowserEnvironmentSkipped(
+            'Chromium and Node are required for the real-page eval test')
     websocket = subprocess.run(
         [node, '-e',
          "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
         cwd=ROOT, capture_output=True, text=True, timeout=10)
     if websocket.returncode != 0:
-        _util.skip('this Node runtime has no WebSocket client for CDP')
+        raise BrowserEnvironmentSkipped(
+            'this Node runtime has no WebSocket client for CDP')
     return node, browser
 
 
@@ -201,7 +224,8 @@ def _wait_for_devtools(profile, process):
     seen = 'it never wrote a DevTools port'
     while time.time() < deadline:
         if process.poll() is not None:
-            _util.skip('Chromium exited before DevTools became available')
+            raise BrowserEnvironmentSkipped(
+                'Chromium exited before DevTools became available')
         if port_file.exists():
             lines = port_file.read_text(encoding='utf-8').splitlines()
             if lines:
@@ -224,7 +248,7 @@ def _wait_for_devtools(profile, process):
     # one scanner — sees a function that returns a triple on one path and
     # falls off the end on the other. The raise says what happens without
     # asking anyone to resolve an annotation in another module.
-    raise _util.Skipped(
+    raise BrowserEnvironmentSkipped(
         'this browser never exposed the fixture page and an '
         f'extension service worker over DevTools — {seen}')
 
@@ -329,15 +353,19 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         # script's keepalive port is an event the worker listens for, so
         # loading the page is what revives it, exactly as an ordinary
         # browsing session does.
-        # This first navigation is still part of obtaining a usable browser.
-        # A timeout here is environmental; the same call after configuration
-        # exercises the extension and deliberately remains a hard failure.
+        # Only this first navigation can still be environmental: probe the
+        # same in-process fixture URL to separate browser reachability from a
+        # broken repository route. Later calls follow configuration and fail.
         try:
             cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
         except CDPTimeout as why:
-            _util.skip(
+            if not _fixture_url_answered(page_url):
+                raise AssertionError(
+                    'the fixture URL did not answer after the first '
+                    f'navigation timed out: {page_url}') from why
+            raise BrowserEnvironmentSkipped(
                 'the first fixture navigation timed out over CDP: '
-                f'{_browser_version(browser)} — {why}')
+                f'{_browser_version(browser)} — {why}') from why
         deadline = time.time() + 30
         last_error = 'no evaluation was attempted'
         answered = False
@@ -377,7 +405,7 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             # debugger connection to it was refused. Both say the browser
             # did not get as far as running the extension, which is where
             # the environment boundary sits.
-            _util.skip(
+            raise BrowserEnvironmentSkipped(
                 'this browser never let the extension worker be reached '
                 f'over the debugger: {_browser_version(browser)} — '
                 f'{last_error}')
