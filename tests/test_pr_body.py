@@ -2,6 +2,7 @@
 """Rendered pull-request body reference parsing and its CLI."""
 import subprocess
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -14,6 +15,15 @@ from _prgate import (  # noqa: E402
 
 REPOSITORY = 'Nitjsefnie-Harness-Commons/daedalus'
 RELATED = 'Related Issues and Pull Requests'
+
+
+class _CommentCollector(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.comments = []
+
+    def handle_comment(self, data):
+        self.comments.append(data)
 
 
 def _related(content, heading=RELATED):
@@ -166,16 +176,22 @@ def test_cli_rejects_an_unusable_render_response(tmp):
 
 def test_cli_prints_template_instruction_fingerprints(tmp):
     del tmp
+    template_path = ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md'
     result = subprocess.run(
         [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py'),
          '--instruction-fingerprints',
-         str(ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md')],
+         str(template_path)],
         input='', text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert 'The PR Report Contract, rendered as a form.' in lines
-    assert any(line.startswith('required: 1-2 sentences') for line in lines)
-    assert any(line.startswith('optional, last line.') for line in lines)
+    fingerprints = result.stdout.splitlines()
+    collector = _CommentCollector()
+    collector.feed(template_path.read_text(encoding='utf-8'))
+    collector.close()
+    comments = collector.comments
+    assert all(fingerprints), fingerprints
+    assert len(fingerprints) == len(comments), (fingerprints, comments)
+    assert all(any(fingerprint in comment for comment in comments)
+               for fingerprint in fingerprints), (fingerprints, comments)
 
 
 def test_cli_rejects_extra_arguments(tmp):
