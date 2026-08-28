@@ -665,7 +665,7 @@ def test_sibling_mutation_failure_names_module_type_and_handlers(tmp):
 
     result = subprocess.run(
         [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, env=_util.coverage_free_environment(os.environ),
+        cwd=export_root, env=_util.child_coverage('scrub'),
         capture_output=True, text=True, encoding='utf-8', timeout=30)
 
     assert result.returncode != 0, result.stdout
@@ -681,7 +681,7 @@ def test_worker_boundary_runs_without_untracked_node_modules(tmp):
     export_root = _tracked_tree(tmp)
     result = subprocess.run(
         [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, env=_util.coverage_free_environment(os.environ),
+        cwd=export_root, env=_util.child_coverage('scrub'),
         capture_output=True, text=True, encoding='utf-8', timeout=30)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
