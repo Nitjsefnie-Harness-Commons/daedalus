@@ -42,16 +42,20 @@ class CDPTimeout(AssertionError):
 class FirstNavigationTimeout(AssertionError):
     """A first navigation deadline with its in-process arrival observation."""
 
+    candidate_owners = (
+        'the browser', 'the CDP transport', 'this repository')
+
     def __init__(self, page_url, request_arrived):
         self.request_arrived = request_arrived
         arrival = ('received a request for that page'
                    if request_arrived
                    else 'did not receive a request for that page')
+        owners = ', '.join(self.candidate_owners[:-1])
+        ownership_candidates = f'{owners}, or {self.candidate_owners[-1]}'
         super().__init__(
             f'the first fixture navigation reached its deadline: {page_url}; '
             f'the in-process handler {arrival}. This does not by itself '
-            'establish whether the browser, the CDP transport, or this '
-            'repository is at fault')
+            f'establish whether {ownership_candidates} is at fault')
 
 
 class BrowserEnvironmentSkipped(_util.Skipped):
@@ -382,13 +386,13 @@ def real_extension_page(tmp, bridge_url, token, page_url,
 
     From the configuration step on, the browser has demonstrably worked and
     everything asserted is the extension's own behaviour, so those stay hard
-    failures. Loading the fixture page is on that side of the line: the page
-    and the script that sets __evalPageReady are files in this repository,
-    served by this suite's own origin, so a page that never reports ready is
-    a defect here rather than a property of the machine. Skipping the environment costs no coverage of the extension
-    source itself: this suite also runs background.js, content.js and page.js
-    under Node, which does not need a browser and fails outright if that
-    source is broken.
+    failures. Waiting for __evalPageReady is on that side of the line because
+    the readiness script is repository-owned. A timeout in the earlier first
+    navigation remains undetermined and is represented by
+    FirstNavigationTimeout. Skipping the environment costs no coverage of the
+    extension source itself: this suite also runs background.js, content.js
+    and page.js under Node, which does not need a browser and fails outright
+    if that source is broken.
     """
     node, browser = browser_requirements()
     profile = Path(tmp) / 'chromium-profile'
