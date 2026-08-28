@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _prgate_gh import GH_STUB as _GH_STUB  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
@@ -22,17 +23,6 @@ TEMPLATE = (ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md').read_text(
 BOT = 'github-actions[bot]'
 CLOSE_MARKER = '<!-- pr-gate: close -->'
 MARKER_COMMENT = [{'id': 7, 'user': {'login': BOT}, 'body': CLOSE_MARKER}]
-TIMELINE_QUERY = (
-    '.[] | select(.event == "closed")\n'
-    '      | (.actor.login // "__unreadable__")')
-COMMENTS_QUERY = (
-    '.[]\n      | select(.user.login == "github-actions[bot]")\n'
-    '      | select(.body | contains("<!-- pr-gate: close -->"))\n'
-    '      | .id')
-ISSUE_QUERY = (
-    'if has("pull_request") then empty else\n'
-    '      (.assignees[].login | "assignee:\\(.)") end')
-
 GITHUB_ISSUE_101 = (
     '<a class="issue-link js-issue-link" '
     'data-error-text="Failed to load title" data-id="5232098400" '
@@ -182,163 +172,6 @@ GITHUB_MARKDOWN = {
     'kbd_block': '<kbd>\n## literal heading\n</kbd>',
 }
 
-_GH_STUB = r"""#!/usr/bin/env python3
-import json, os, pathlib, re, sys
-fixtures = json.loads(pathlib.Path(os.environ['STUB_ISSUES']).read_text())
-calls = pathlib.Path(os.environ['STUB_CALLS'])
-argv = sys.argv[1:]
-TIMELINE_QUERY = (
-    '.[] | select(.event == "closed")\n'
-    '      | (.actor.login // "__unreadable__")')
-COMMENTS_QUERY = (
-    '.[]\n      | select(.user.login == "github-actions[bot]")\n'
-    '      | select(.body | contains("<!-- pr-gate: close -->"))\n'
-    '      | .id')
-ISSUE_QUERY = (
-    'if has("pull_request") then empty else\n'
-    '      (.assignees[].login | "assignee:\\(.)") end')
-recorded = []
-for arg in argv:
-    if arg.startswith(('body=@', 'text=@')):
-        body = pathlib.Path(arg[6:]).read_text(encoding='utf-8')
-        recorded.append(arg[:5] + body)
-    else:
-        recorded.append(arg)
-with calls.open('a', encoding='utf-8') as handle:
-    handle.write(json.dumps(recorded) + chr(10))
-if not argv or argv[0] != 'api':
-    print('unsupported gh command', file=sys.stderr)
-    raise SystemExit(2)
-endpoint = next((arg for arg in argv
-                 if arg == 'markdown' or arg.startswith('repos/')), '')
-def unsupported():
-    print('unsupported gh api call', file=sys.stderr)
-    raise SystemExit(2)
-if endpoint == 'markdown':
-    submitted = pathlib.Path(argv[3][6:]).read_text(encoding='utf-8') \
-        if len(argv) > 3 and argv[3].startswith('text=@') else ''
-    expected = os.environ['STUB_EXPECTED_BODY']
-    marker = re.fullmatch(
-        re.escape(expected)
-        + r'\n\n(pr-gate-sentinel-[0-9a-f]{64})\n', submitted)
-    if (len(argv) != 8 or argv[:3] != ['api', 'markdown', '-F']
-            or not argv[3].startswith('text=@')
-            or argv[4] != '-f' or argv[5] != 'mode=gfm'
-            or argv[6] != '-f'
-            or argv[7] != 'context=' + os.environ['STUB_EXPECTED_REPO']
-            or (submitted != expected and marker is None)):
-        unsupported()
-    status = int(os.environ.get('STUB_RENDER_STATUS', '200'))
-    if status != 200:
-        print(f'gh: HTTP {status}', file=sys.stderr)
-        raise SystemExit(1)
-    rendered = pathlib.Path(os.environ['STUB_RENDERED_HTML']).read_text()
-    if marker and os.environ.get('STUB_RENDER_COMPLETE', '1') == '1':
-        token = marker.group(1)
-        mangle = os.environ.get('STUB_SENTINEL_MANGLE', '')
-        if mangle == 'comment':
-            sentinel = (f'<p dir="auto">{token[:30]}'
-                        f'<!-- injected -->{token[30:]}</p>')
-        elif mangle == 'element':
-            sentinel = (f'<p dir="auto">{token[:30]}'
-                        f'<em>{token[30:]}</em></p>')
-        else:
-            sentinel = f'<p dir="auto">{token}</p>'
-        footnotes = '\n<section data-footnotes="" class="footnotes">'
-        if footnotes in rendered:
-            rendered = rendered.replace(
-                footnotes, f'\n{sentinel}{footnotes}', 1)
-        else:
-            rendered = f'{rendered}\n{sentinel}'
-        rendered += os.environ.get('STUB_RENDER_AFTER_SENTINEL', '')
-    print(rendered, end='')
-    raise SystemExit(0)
-if '/timeline?' in endpoint:
-    if (len(argv) != 5 or argv[:2] != ['api', '--paginate']
-            or argv[2] != endpoint or argv[3] != '--jq'):
-        unsupported()
-    status = fixtures.get('_timeline_status', 200)
-    if status != 200:
-        print(f'gh: HTTP {status}', file=sys.stderr)
-        raise SystemExit(1)
-    query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
-    if query != TIMELINE_QUERY:
-        unsupported()
-    for event in fixtures.get('_timeline', []):
-        if event.get('event') != 'closed':
-            continue
-        login = event.get('actor', {}).get('login')
-        if login is None:
-            login = '__unreadable__'
-        print(login or '')
-    raise SystemExit(0)
-if '/comments?' in endpoint:
-    if (len(argv) != 5 or argv[:2] != ['api', '--paginate']
-            or argv[2] != endpoint or argv[3] != '--jq'):
-        unsupported()
-    status = fixtures.get('_comments_status', 200)
-    if status != 200:
-        print(f'gh: HTTP {status}', file=sys.stderr)
-        raise SystemExit(1)
-    query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
-    if query != COMMENTS_QUERY:
-        unsupported()
-    for comment in fixtures.get('_comments', []):
-        if comment['user']['login'] != 'github-actions[bot]':
-            continue
-        if '<!-- pr-gate: close -->' not in comment['body']:
-            continue
-        print(comment['id'])
-    raise SystemExit(0)
-parts = endpoint.split('/')
-if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
-    if (len(argv) != 5 or argv[1] not in ('--include', '-i')
-            or argv[2] != endpoint or argv[3] != '--jq'):
-        unsupported()
-    issue = fixtures.get(parts[-1])
-    status = 404 if issue is None else issue.get('_http_status', 200)
-    if '--include' in argv or '-i' in argv:
-        reason = {200: 'OK', 404: 'Not Found'}.get(status, 'Error')
-        print(f'HTTP/2.0 {status} {reason}')
-        print('cache-control: private, max-age=60')
-        print('content-type: application/json; charset=utf-8')
-        print('x-github-media-type: github.v3; format=json')
-        print()
-    if status != 200:
-        print(f'gh: HTTP {status}', file=sys.stderr)
-        raise SystemExit(1)
-    query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
-    if query != ISSUE_QUERY:
-        unsupported()
-    if 'pull_request' in issue:
-        raise SystemExit(0)
-    for assignee in issue['assignees']:
-        print('assignee:' + assignee['login'])
-    raise SystemExit(0)
-if endpoint.endswith('/comments'):
-    if (len(argv) != 5 or argv[:2] != ['api', endpoint]
-            or argv[2] != '-F' or not argv[3].startswith('body=@')
-            or argv[4] != '--silent'):
-        unsupported()
-    if os.environ.get('STUB_COMMENT_STATUS'):
-        status = os.environ['STUB_COMMENT_STATUS']
-        print(f'gh: HTTP {status}', file=sys.stderr)
-        raise SystemExit(1)
-    raise SystemExit(0)
-if re.fullmatch(r'repos/[^/]+/[^/]+/pulls/[0-9]+', endpoint):
-    method = 'GET'
-    request = argv
-    if len(argv) >= 3 and argv[1] in ('-X', '--method'):
-        method = argv[2]
-        request = [argv[0], *argv[3:]]
-    if (method == 'PATCH' and request[1] == endpoint
-            and request[2:3] == ['-f']
-            and request[3:4] in (['state=open'], ['state=closed'])
-            and request[4:] == ['--silent']):
-        raise SystemExit(0)
-unsupported()
-"""
-
 _CRLF_PYTHON_STUB = r"""#!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == scripts/ci/pr_body.py ||
@@ -388,6 +221,7 @@ def _run_workflow(
         'parser_crlf', 'comment_status', 'pull', 'history',
         'rendered_html', 'render_status', 'render_complete',
         'render_after_sentinel', 'render_sentinel_mangle',
+        'current_pulls', 'pull_status', 'pull_statuses',
     }
     assert set(options) <= supported, sorted(set(options) - supported)
     parser_crlf = options.get('parser_crlf', False)
@@ -400,6 +234,9 @@ def _run_workflow(
         'render_complete', rendered_html is None)
     render_after_sentinel = options.get('render_after_sentinel', '')
     render_sentinel_mangle = options.get('render_sentinel_mangle', '')
+    current_pulls = options.get('current_pulls')
+    pull_status = options.get('pull_status')
+    pull_statuses = options.get('pull_statuses')
     pull = pull or {}
     history = history or {}
     state = pull.get('state', 'open')
@@ -408,6 +245,12 @@ def _run_workflow(
     comments = history.get('comments', ())
     timeline_status = history.get('timeline_status')
     comments_status = history.get('comments_status')
+    if current_pulls is None:
+        current_pulls = ({
+            'body': body,
+            'state': state,
+            'merged': str(merged).casefold() == 'true',
+        },)
     bash = shutil.which('bash')
     assert bash, 'bash is required to execute the pull-request body gate'
     workdir = Path(tmp) / 'workflow'
@@ -423,10 +266,15 @@ def _run_workflow(
     fixtures = dict(issues)
     fixtures['_timeline'] = list(timeline)
     fixtures['_comments'] = list(comments)
+    fixtures['_pull_snapshots'] = list(current_pulls)
     if timeline_status is not None:
         fixtures['_timeline_status'] = timeline_status
     if comments_status is not None:
         fixtures['_comments_status'] = comments_status
+    if pull_status is not None:
+        fixtures['_pull_status'] = pull_status
+    if pull_statuses is not None:
+        fixtures['_pull_statuses'] = list(pull_statuses)
     fixture_path.write_text(json.dumps(fixtures), encoding='utf-8')
     rendered_path = workdir / 'rendered.html'
     rendered_path.write_text(
@@ -441,7 +289,7 @@ def _run_workflow(
         'STUB_CALLS': str(calls_path),
         'STUB_REAL_PYTHON': sys.executable,
         'STUB_RENDERED_HTML': str(rendered_path),
-        'STUB_EXPECTED_BODY': body,
+        'STUB_EXPECTED_BODY': current_pulls[0]['body'] or '',
         'STUB_EXPECTED_REPO': repo,
         'STUB_RENDER_COMPLETE': '1' if render_complete else '0',
         'STUB_RENDER_AFTER_SENTINEL': render_after_sentinel,
@@ -464,6 +312,26 @@ def _run_workflow(
     calls = [json.loads(line) for line in calls_path.read_text(
         encoding='utf-8').splitlines()]
     return calls, result
+
+
+def _run_stub(tmp, *args):
+    workdir = Path(tmp) / 'gh-headers'
+    workdir.mkdir(exist_ok=True)
+    stub = workdir / 'gh'
+    stub.write_text(_GH_STUB, encoding='utf-8')
+    calls_path = workdir / 'calls.jsonl'
+    calls_path.write_text('', encoding='utf-8')
+    fixture_path = workdir / 'issues.json'
+    fixture_path.write_text(
+        json.dumps({'1': _issue('alice')}), encoding='utf-8')
+    env = {
+        **os.environ,
+        'STUB_ISSUES': str(fixture_path),
+        'STUB_CALLS': str(calls_path),
+    }
+    return subprocess.run(
+        [sys.executable, str(stub), *args], env=env,
+        capture_output=True, text=True, timeout=30)
 
 
 def _run_complete_workflow(tmp, body, issues, **options):
@@ -502,7 +370,9 @@ def _truncated_render_cases():
     )
     url = '[tracked issue](https://github.com/owner/repo/issues/101)'
     return tuple((name, body, rendered) for name, rendered in cases) + (
-        ('middle-url', _valid_body(url), _valid_html(changes='')),)
+        ('middle-url', _valid_body(url), _valid_html(changes='')),
+        ('unknown-source', _valid_body().replace('## Summary', '## Notes'),
+         _valid_html()),)
 
 
 def _sentinel_attack_cases():
@@ -575,13 +445,13 @@ def _assert_commented_then_closed(
         calls, *reasons, actor='alice', pr='99', repo='owner/repo'):
     comment_endpoint = f'repos/{repo}/issues/{pr}/comments'
     close_endpoint = f'repos/{repo}/pulls/{pr}'
-    comment_calls = [call for call in calls if comment_endpoint in call]
-    close_calls = [call for call in calls if close_endpoint in call]
+    writes = _write_calls(calls)
+    comment_calls = [call for call in writes if comment_endpoint in call]
+    close_calls = [call for call in writes if close_endpoint in call]
     assert len(comment_calls) == 1, calls
     assert len(close_calls) == 1, calls
     comment = comment_calls[0]
     close = close_calls[0]
-    writes = _write_calls(calls)
     assert writes == [comment, close], calls
     body = _body_from(comment)
     assert body.startswith(f'@{actor} — closing this automatically'), body
@@ -606,11 +476,12 @@ def _assert_commented_not_closed(
         calls, *reasons, actor='alice', pr='99', repo='owner/repo'):
     comment_endpoint = f'repos/{repo}/issues/{pr}/comments'
     close_endpoint = f'repos/{repo}/pulls/{pr}'
-    comment_calls = [call for call in calls if comment_endpoint in call]
+    writes = _write_calls(calls)
+    comment_calls = [call for call in writes if comment_endpoint in call]
     assert len(comment_calls) == 1, calls
-    assert not any(close_endpoint in call for call in calls), calls
+    assert not any(close_endpoint in call for call in writes), calls
     comment = comment_calls[0]
-    assert _write_calls(calls) == [comment], calls
+    assert writes == [comment], calls
     body = _body_from(comment)
     assert body.startswith(
         f'@{actor} — this pull request needs changes, but it remains open.'
@@ -630,13 +501,13 @@ def _assert_commented_then_reopened(
         calls, actor='alice', pr='99', repo='owner/repo'):
     comment_endpoint = f'repos/{repo}/issues/{pr}/comments'
     reopen_endpoint = f'repos/{repo}/pulls/{pr}'
-    comment_calls = [call for call in calls if comment_endpoint in call]
-    reopen_calls = [call for call in calls if reopen_endpoint in call]
+    writes = _write_calls(calls)
+    comment_calls = [call for call in writes if comment_endpoint in call]
+    reopen_calls = [call for call in writes if reopen_endpoint in call]
     assert len(comment_calls) == 1, calls
     assert len(reopen_calls) == 1, calls
     comment = comment_calls[0]
     reopen = reopen_calls[0]
-    writes = _write_calls(calls)
     assert writes == [comment, reopen], calls
     body = _body_from(comment)
     assert body.startswith(f'@{actor} —'), body

@@ -47,62 +47,69 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           ACTOR: ${{ github.event.pull_request.user.login }}
-          BODY: ${{ github.event.pull_request.body }}
-          STATE: ${{ github.event.pull_request.state }}
-          MERGED: ${{ github.event.pull_request.merged }}
         run: |
           set -euo pipefail
 
-          if [ "$MERGED" = true ]; then
-            exit 0
-          fi
-
-          owned_closed=0
-          if [ "$STATE" = closed ]; then
-            if ! closing_actors="$(gh api --paginate \
-              "repos/$REPO/issues/$PR/timeline?per_page=100" \
-              --jq '.[] | select(.event == "closed")
-                | (.actor.login // "__unreadable__")')"
-            then
-              echo 'could not establish who closed the pull request' >&2
-              exit 0
-            fi
-            closing_actor="$(printf '%s\n' "$closing_actors" \
-              | awk 'NF { actor = $0 } END { print actor }')"
-            if [ "$closing_actor" != 'github-actions[bot]' ]; then
-              exit 0
-            fi
-            if ! markers="$(gh api --paginate \
-              "repos/$REPO/issues/$PR/comments?per_page=100" \
-              --jq '.[]
-                | select(.user.login == "github-actions[bot]")
-                | select(.body | contains("<!-- pr-gate: close -->"))
-                | .id')"
-            then
-              echo 'could not establish whether the gate closed this' >&2
-              exit 0
-            fi
-            if [ -z "$markers" ]; then
-              exit 0
-            fi
-            owned_closed=1
-          elif [ "$STATE" != open ]; then
-            exit 0
-          fi
-
+          pull_file="$(mktemp)"
           body_file="$(mktemp)"
+          state_file="$(mktemp)"
+          merged_file="$(mktemp)"
+          decision_body_file="$(mktemp)"
+          decision_state_file="$(mktemp)"
+          decision_merged_file="$(mktemp)"
           render_body_file="$(mktemp)"
           rendered_file="$(mktemp)"
           analysis_file="$(mktemp)"
           reasons_file="$(mktemp)"
           comment_file="$(mktemp)"
-          trap 'rm -f "$body_file" "$render_body_file" "$rendered_file" \
+          trap 'rm -f "$pull_file" "$body_file" "$state_file" \
+            "$merged_file" "$decision_body_file" "$decision_state_file" \
+            "$decision_merged_file" "$render_body_file" "$rendered_file" \
             "$analysis_file" "$reasons_file" "$comment_file"' EXIT
-          printf '%s' "$BODY" > "$body_file"
+
+          fetch_pull() {
+            if ! gh api "repos/$REPO/pulls/$PR" > "$pull_file"; then
+              echo 'could not read the current pull request' >&2
+              return 1
+            fi
+            if ! python3 - "$pull_file" "$1" "$2" "$3" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+          body = payload.get('body')
+          state = payload.get('state')
+          merged = payload.get('merged')
+          if body is None:
+              body = ''
+          if (not isinstance(body, str) or state not in ('open', 'closed')
+                  or not isinstance(merged, bool)):
+              raise ValueError('pull request response has an invalid shape')
+          Path(sys.argv[2]).write_text(body, encoding='utf-8')
+          Path(sys.argv[3]).write_text(f'{state}\n', encoding='utf-8')
+          Path(sys.argv[4]).write_text(
+              f'{str(merged).lower()}\n', encoding='utf-8')
+          PY
+            then
+              echo 'could not read the current pull request fields' >&2
+              return 1
+            fi
+          }
+
+          if ! fetch_pull "$body_file" "$state_file" "$merged_file"; then
+            exit 1
+          fi
+          IFS= read -r MERGED < "$merged_file"
+          if [ "$MERGED" = true ]; then
+            exit 0
+          fi
+
           sentinel="$(python3 -c 'import secrets; print("pr-gate-sentinel-" + secrets.token_hex(32))')"
-          printf '%s\n\n%s\n' "$BODY" "$sentinel" > "$render_body_file"
+          cp "$body_file" "$render_body_file"
+          printf '\n\n%s\n' "$sentinel" >> "$render_body_file"
           source_has_reference=0
-          if grep -Eq '#[0-9]+' "$body_file"; then
+          if grep -Eiq '#[0-9]+|https?://(www\.)?github\.com/[^/[:space:]]+/[^/[:space:]]+/(issues|pull)/[0-9]+' "$body_file"; then
             source_has_reference=1
           else
             grep_status="$?"
@@ -167,6 +174,56 @@ jobs:
             echo 'This body names more than 20 issue references, so only the first 20 were checked.' >> "$reasons_file"
           elif [ "$claimed" -eq 0 ]; then
             echo 'No checked issue is assigned to you.' >> "$reasons_file"
+          fi
+
+          # Analysis belongs to the first current body, while state changes
+          # belong to a second snapshot taken at the decision boundary.
+          if ! fetch_pull "$decision_body_file" "$decision_state_file" \
+            "$decision_merged_file"
+          then
+            exit 1
+          fi
+          if ! cmp -s "$body_file" "$decision_body_file"; then
+            echo 'pull request body changed during validation' >&2
+            exit 1
+          fi
+          IFS= read -r STATE < "$decision_state_file"
+          IFS= read -r MERGED < "$decision_merged_file"
+          if [ "$MERGED" = true ]; then
+            exit 0
+          fi
+
+          owned_closed=0
+          if [ "$STATE" = closed ]; then
+            if ! closing_actors="$(gh api --paginate \
+              "repos/$REPO/issues/$PR/timeline?per_page=100" \
+              --jq '.[] | select(.event == "closed")
+                | (.actor.login // "__unreadable__")')"
+            then
+              echo 'could not establish who closed the pull request' >&2
+              exit 0
+            fi
+            closing_actor="$(printf '%s\n' "$closing_actors" \
+              | awk 'NF { actor = $0 } END { print actor }')"
+            if [ "$closing_actor" != 'github-actions[bot]' ]; then
+              exit 0
+            fi
+            if ! markers="$(gh api --paginate \
+              "repos/$REPO/issues/$PR/comments?per_page=100" \
+              --jq '.[]
+                | select(.user.login == "github-actions[bot]")
+                | select(.body | contains("<!-- pr-gate: close -->"))
+                | .id')"
+            then
+              echo 'could not establish whether the gate closed this' >&2
+              exit 0
+            fi
+            if [ -z "$markers" ]; then
+              exit 0
+            fi
+            owned_closed=1
+          elif [ "$STATE" != open ]; then
+            exit 0
           fi
 
           if [ ! -s "$reasons_file" ]; then
@@ -238,8 +295,8 @@ jobs:
           # closed if its explanation cannot be posted.
           gh api "repos/$REPO/issues/$PR/comments" \
             -F "body=@$comment_file" --silent
-          # Only the absence of any raw issue-number shape is unambiguous
-          # enough to justify closing contributor work.
+          # Render analysis may misstate a reason, but it cannot close a body
+          # that plainly carries any GitHub issue-reference source spelling.
           if [ "$source_has_reference" -eq 1 ]; then
             exit 0
           fi

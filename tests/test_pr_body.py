@@ -203,6 +203,9 @@ def test_render_sentinel_rejects_unusable_evidence(tmp):
         ('declaration', sentinel, f'<p>{sentinel[:30]}'
          f'<!DOCTYPE html>{sentinel[30:]}</p>'),
         ('entity', sentinel, f'<p>&#112;{sentinel[1:]}</p>'),
+        ('self-closing', sentinel, f'<p><br/>{sentinel}</p>'),
+        ('unknown-declaration', sentinel,
+         f'<p><![CDATA[evidence]]>{sentinel}</p>'),
     )
     accepted = []
     for name, value, rendered in cases:

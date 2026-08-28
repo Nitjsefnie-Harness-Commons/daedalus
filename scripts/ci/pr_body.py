@@ -339,18 +339,22 @@ def _source_has_missing_rendered_content(source, sections, template):
     rules = _template_rules(template)
     rendered = {item.key for item in sections
                 if _has_visible_text(item.text)}
+    source_sections = set()
     for index, heading in enumerate(headings):
         name = _heading_text(heading.group('text')).strip('*_~` ')
         key = name.casefold()
         if key not in rules:
             continue
+        source_sections.add(key)
         end = headings[index + 1].start() if index + 1 < len(headings) \
             else len(source)
         content = _TEMPLATE_COMMENT.sub('', source[heading.end():end])
         # This crude scan is only a veto; it can never authorize an action.
         if content.strip() and key not in rendered:
             return True
-    return False
+    # Render-only template sections prove substitution, never admissibility.
+    return any(item.key in rules and item.key not in source_sections
+               for item in sections)
 
 
 def layout_errors(rendered, template):

@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
 """Pull-request workflow shell and state-table behavior."""
-import json
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSE_MARKER, COMMENTS_QUERY, GITHUB_FOOTNOTE_HTML,
-    GITHUB_FOOTNOTE_MARKDOWN, GITHUB_HTML, GITHUB_MARKDOWN, ISSUE_QUERY,
-    MARKER_COMMENT, TIMELINE_QUERY, _GH_STUB,
+    BOT, CLOSE_MARKER, GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_MARKDOWN,
+    GITHUB_HTML, GITHUB_MARKDOWN, MARKER_COMMENT,
     _assert_commented_not_closed, _assert_commented_then_closed,
     _assert_commented_then_reopened, _assert_no_mutation,
     _assert_unusable_render, _body_from, _closed_by, _issue, _issue_lookups,
     _html_body, _issue_html, _layout_body, _run_complete_workflow,
-    _markdown_code_spans, _sentinel_attack_cases, _text_html,
+    _markdown_code_spans, _run_stub, _sentinel_attack_cases, _text_html,
     _truncated_render_cases, _valid_body, _valid_html, _workflow,
     _workflow_script, _write_calls,
 )
 from _repo import ROOT  # noqa: E402
+from _prgate_gh import (  # noqa: E402
+    COMMENTS_QUERY, ISSUE_QUERY, TIMELINE_QUERY,
+)
 from _yamlread import job_scalar, top_level_mapping  # noqa: E402
 from _yamlsteps import step_mappings  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
@@ -90,26 +89,6 @@ def test_pull_request_gate_uses_general_names(tmp):
     assert 'and reopen the same pull request' not in contributing
 
 
-def _run_stub(tmp, *args):
-    workdir = Path(tmp) / 'gh-headers'
-    workdir.mkdir(exist_ok=True)
-    stub = workdir / 'gh'
-    stub.write_text(_GH_STUB, encoding='utf-8')
-    calls_path = workdir / 'calls.jsonl'
-    calls_path.write_text('', encoding='utf-8')
-    fixture_path = workdir / 'issues.json'
-    fixture_path.write_text(
-        json.dumps({'1': _issue('alice')}), encoding='utf-8')
-    env = {
-        **os.environ,
-        'STUB_ISSUES': str(fixture_path),
-        'STUB_CALLS': str(calls_path),
-    }
-    return subprocess.run(
-        [sys.executable, str(stub), *args],
-        env=env, capture_output=True, text=True, timeout=30)
-
-
 def test_gh_stub_models_include_response_headers(tmp):
     for flag in ('--include', '-i'):
         result = _run_stub(
@@ -156,15 +135,17 @@ def test_gh_stub_rejects_wrong_write_methods_and_fields(tmp):
     assert 'unsupported gh api call' in reopen.stderr, reopen.stderr
 
 
-def test_workflow_renders_the_event_body_once_in_repository_context(tmp):
+def test_workflow_renders_the_current_body_once_in_repository_context(tmp):
     repository = 'acme/context-pin'
     actor = 'render-author'
     body = _valid_body('Fixes #101\n\nUnique render payload.')
+    stale = 'event body that must not reach the renderer'
     sentinels = []
     for index in range(2):
         calls, result = _run_complete_workflow(
-            Path(tmp) / str(index), body, {'101': _issue(actor)},
-            actor=actor, repo=repository)
+            Path(tmp) / str(index), stale, {'101': _issue(actor)},
+            actor=actor, repo=repository, current_pulls=({
+                'body': body, 'state': 'open', 'merged': False},))
         assert result.returncode == 0, (result.stdout, result.stderr)
         renders = [call for call in calls if 'markdown' in call]
         assert len(renders) == 1, calls
@@ -270,6 +251,16 @@ def test_render_failures_never_change_pull_request_state(tmp):
             Path(tmp) / name, _valid_body(), {'101': _issue('alice')},
             pull=pull, history=history, render_status=502)
         assert result.returncode != 0, (name, result.stdout, result.stderr)
+        _assert_no_mutation(calls)
+    current = {'body': _valid_body(), 'state': 'open', 'merged': False}
+    failures = (
+        ('pull-read', {'pull_statuses': (200, 502)}),
+        ('body-change', {'current_pulls': (
+            current, {**current, 'body': _valid_body('Fixes #102')})}),)
+    for name, options in failures:
+        calls, result = _run_complete_workflow(
+            Path(tmp) / name, _valid_body(), {}, **options)
+        assert result.returncode != 0, (result.stdout, result.stderr)
         _assert_no_mutation(calls)
 
 
@@ -436,18 +427,18 @@ def test_each_template_instruction_comment_is_detected(tmp):
 
 
 def test_open_body_reports_both_failed_conditions_once(tmp):
+    url = 'https://github.com/another/project/pull/103'
     body = _layout_body(
         ('Summary', ''),
-        ('Related Issues and Pull Requests', 'Fixes #103'),
+        ('Related Issues and Pull Requests', f'[tracked issue]({url})'),
         ('Changes', '- One change'), ('Testing', 'Ran tests.'))
     rendered = _html_body(
         ('Summary', ''),
-        ('Related Issues and Pull Requests',
-         f'Fixes {_issue_html(103)}'),
+        ('Related Issues and Pull Requests', _text_html('tracked issue')),
         ('Changes', '<ul><li>One change</li></ul>'),
         ('Testing', _text_html('Ran tests.')))
     calls, result = _run_complete_workflow(
-        tmp, body, {'103': _issue('alicebob')}, rendered_html=rendered)
+        tmp, body, {'103': _issue('alice')}, rendered_html=rendered)
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_not_closed(
         calls, 'No checked issue is assigned to you.',
@@ -464,8 +455,14 @@ def test_open_body_without_a_raw_reference_is_closed(tmp):
 
 
 def test_open_body_reports_each_single_failed_condition(tmp):
+    issue_url = 'https://github.com/owner/repo/issues/101'
+    good, admitted = _run_complete_workflow(
+        Path(tmp) / 'admitted', _valid_body(f'[tracked]({issue_url})'),
+        {'101': _issue('alice')}, rendered_html=_valid_html(
+            references=f'<a href="{issue_url}">tracked</a>'))
     unclaimed, first = _run_complete_workflow(
-        Path(tmp) / 'claim', _valid_body(), {'101': _issue()})
+        Path(tmp) / 'claim', _valid_body(f'[tracked]({issue_url})'), {},
+        rendered_html=_valid_html(references=_text_html('tracked')))
     malformed, second = _run_complete_workflow(
         Path(tmp) / 'layout', _valid_body().replace('## Summary', '## Notes'),
         {'101': _issue('alice')}, rendered_html=_html_body(
@@ -474,7 +471,8 @@ def test_open_body_reports_each_single_failed_condition(tmp):
              f'Fixes {_issue_html(101)}'),
             ('Changes', '<ul><li>One change</li></ul>'),
             ('Testing', _text_html('Ran the suite.'))))
-    assert first.returncode == second.returncode == 0
+    assert admitted.returncode == first.returncode == second.returncode == 0
+    _assert_no_mutation(good)
     _assert_commented_not_closed(
         unclaimed, 'No checked issue is assigned to you.')
     _assert_commented_not_closed(
@@ -514,7 +512,7 @@ def test_unanswerable_analysis_inputs_never_write(tmp):
             repo=repository, rendered_html=rendered)
         assert result.returncode != 0, (
             name, result.stdout, result.stderr)
-        assert 'could not analyze' in result.stderr, result.stderr
+        assert 'could not' in result.stderr, result.stderr
         _assert_no_mutation(calls)
 
 
@@ -553,11 +551,13 @@ def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
                    for start, end in spans) for match in references), comment
 
 
-def test_closed_owned_admissible_body_is_reopened(tmp):
+def test_stale_open_event_reopens_after_the_prior_close_lands(tmp):
+    current = {'body': _valid_body(), 'merged': False}
     calls, result = _run_complete_workflow(
         tmp, _valid_body(), {'101': _issue('alice')},
-        pull={'state': 'closed'}, history={
-            'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT})
+        pull={'state': 'open'}, current_pulls=(
+            {**current, 'state': 'open'}, {**current, 'state': 'closed'}),
+        history={'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT})
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_then_reopened(calls)
 
@@ -605,11 +605,11 @@ def test_merged_pull_request_is_never_touched(tmp):
             '<p dir="auto">bad body</p>')
         calls, result = _run_complete_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')},
-            pull={'state': 'closed', 'merged': 'true'}, history={
-                'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT},
+            pull={'state': 'open'}, current_pulls=({
+                'body': body, 'state': 'closed', 'merged': True},),
             rendered_html=rendered)
         assert result.returncode == 0, (name, result.stderr)
-        assert calls == [], calls
+        assert calls == [['api', 'repos/owner/repo/pulls/99']], calls
 
 
 def test_unreadable_ownership_evidence_never_reopens(tmp):
