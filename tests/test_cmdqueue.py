@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _bridge  # noqa: E402
 import _cmdqueue  # noqa: E402
+import _overlap  # noqa: E402
 import test_cli  # noqa: E402
 import test_mcp_server  # noqa: E402
 
@@ -274,6 +275,33 @@ def test_the_mcp_answer_helper_ignores_a_refused_leftover(tmp):
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
     assert queued['_did'] != stale_command['_did'], queued
     assert queued['type'] == 'reload', (queue, queued)
+
+
+def test_a_transient_read_refusal_returns_every_queued_command(tmp):
+    queue, first = _queued_file(tmp)
+    second = queue / '1700000000001_000002.json'
+    second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
+                      encoding='utf-8')
+    refusals = 2
+    with _refuse_path_operation(first, 'read_text', refusals) as calls:
+        commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
+    # Each refusal costs one polling pass; the next pass reads the file.
+    assert calls[0] == refusals + 1, calls
+    assert commands == [{'id': 'queued', 'type': 'reload'},
+                        {'id': 'second', 'type': 'reload'}], commands
+
+
+def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
+    queue, first = _queued_file(tmp)
+    second = queue / '1700000000001_000002.json'
+    second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
+                      encoding='utf-8')
+    refusals = 1
+    with _refuse_path_operation(first, 'read_text', refusals) as calls:
+        commands = _overlap._wait_for_client_commands(queue, 2)
+    assert calls[0] == refusals + 1, calls
+    assert commands == [{'id': 'queued', 'type': 'reload'},
+                        {'id': 'second', 'type': 'reload'}], commands
 
 
 if __name__ == '__main__':
