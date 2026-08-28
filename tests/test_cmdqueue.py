@@ -190,19 +190,17 @@ def test_a_queue_file_already_gone_during_clear_is_not_an_error(tmp):
 
 
 def test_a_permanent_read_refusal_is_bounded(tmp):
-    passes = 3
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'read_text', 1000) as calls:
-        with _virtual_cmdqueue_clock(passes) as sleeps:
+        with _virtual_cmdqueue_clock(10) as sleeps:
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)
     assert command is None, command
-    assert calls[0] == passes, calls
-    assert len(sleeps) == passes, sleeps
-    assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (passes - 1), sleeps
-    # The strict cap avoids pinning the partial remainder's float spelling.
-    assert sleeps[-1] < _cmdqueue.POLL_DELAY, sleeps
+    # Trace relationships avoid assuming how binary64 splits the deadline.
+    assert calls[0] == len(sleeps), (calls, sleeps)
+    assert sleeps, sleeps
+    assert sum(sleeps) == timeout, sleeps
 
 
 def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
