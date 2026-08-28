@@ -235,6 +235,7 @@
 !/tests/_prgate_race.py
 !/tests/_pyroute.py
 !/tests/_realbrowser.py
+!/tests/_realbrowser_errors.py
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_segments.py
