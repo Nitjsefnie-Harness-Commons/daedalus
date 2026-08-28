@@ -4,19 +4,21 @@ from _wfgraph import (
 )
 
 
-def _probe_context(needs, success, failure=False, cancelled=False):
+def _probe_context(needs, success):
     # Successful needs and full-run outputs are neutral for the graph probe.
     # Unknown output paths stay absent so an unsupported condition fails loud.
     outputs = {'workflows': 'true', 'docs_only': 'false'}
     return {
+        # Pull requests are where skipped actionlint ancestors hid this job.
+        # Event-sensitive conditions can classify differently on another event.
         'github': {'event_name': 'pull_request'},
         'needs': {
             job: {'result': 'success', 'outputs': outputs} for job in needs
         },
         'status': {
             'success': success,
-            'failure': failure,
-            'cancelled': cancelled,
+            'failure': False,
+            'cancelled': False,
         },
     }
 
@@ -25,22 +27,11 @@ def _skip_sensitive(workflow, job, needs):
     condition = _job_if_expression(workflow, job)
     if condition is None:
         return True
-    outcomes = {
-        'success': _job_condition_runs(
-            workflow, job, context=_probe_context(needs, True)),
-        'skipped': _job_condition_runs(
-            workflow, job, context=_probe_context(needs, False)),
-        'failure': _job_condition_runs(
-            workflow, job,
-            context=_probe_context(needs, False, failure=True)),
-        'cancelled': _job_condition_runs(
-            workflow, job,
-            context=_probe_context(needs, False, cancelled=True)),
-    }
-    if outcomes['success'] != outcomes['skipped']:
-        return not outcomes['skipped']
-    return (not outcomes['skipped']
-            and (outcomes['failure'] or outcomes['cancelled']))
+    success = _job_condition_runs(
+        workflow, job, context=_probe_context(needs, True))
+    skipped = _job_condition_runs(
+        workflow, job, context=_probe_context(needs, False))
+    return success != skipped and not skipped
 
 
 def implicit_skip_violations(workflow):

@@ -17,10 +17,9 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _tests_yml)
-import _wfpermissions  # noqa: E402
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
-from _yamlread import job_scalar  # noqa: E402
+from _yamlread import job_mapping, job_scalar  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
 
@@ -53,7 +52,6 @@ elif '--jq' in argv:
 
 
 def _claim_script():
-    """The `run:` block of claim.yml, dedented, ready for bash."""
     workflow = (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
         encoding='utf-8')
     _, marker, after = workflow.partition('        run: |\n')
@@ -67,7 +65,6 @@ def _claim_script():
 
 
 def _run_claim(tmp, body, assigned, actor='alice', refuse=False):
-    """Run the claim script against a stubbed gh; return (assignees, calls)."""
     bash = shutil.which('bash')
     assert bash, 'bash is required to execute the claim workflow script'
     workdir = Path(tmp) / f'claim-{abs(hash((body, tuple(assigned), actor, refuse)))}'
@@ -153,7 +150,6 @@ def test_the_claim_command_assigns_only_its_own_commenter(tmp):
 
 
 def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
-    """The properties that fail silently if someone tidies them away."""
     del tmp
     workflow = (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
         encoding='utf-8')
@@ -183,9 +179,24 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     assert '${{' not in after, 'an expression is interpolated into the script'
 
 
+def _assert_diff_coverage_permissions(workflow):
+    permissions = job_mapping(workflow, 'diff-coverage', 'permissions')
+    assert permissions == {'contents': 'read'}, (
+        f'unsafe decoded permissions: {permissions!r}')
+
+
+def _assert_permissions_mutation_refused(workflow):
+    try:
+        _assert_diff_coverage_permissions(workflow)
+    except AssertionError as error:
+        assert 'unsafe decoded permissions' in str(error), str(error)
+        return
+    raise AssertionError('widened decoded permissions were accepted')
+
+
 def test_diff_coverage_permissions_are_exactly_read_only(tmp):
     del tmp
-    _wfpermissions.assert_diff_coverage_permissions(_tests_yml())
+    _assert_diff_coverage_permissions(_tests_yml())
 
 
 def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
@@ -225,10 +236,12 @@ def test_skip_guard_uses_condition_behaviour_not_function_names(tmp):
     del tmp
     cases = {
         "github.event_name == 'pull_request' && 'cancelled()' != ''": True,
-        'cancelled()': True,
-        'failure()': True,
+        'cancelled()': False,
+        'failure()': False,
+        'failure() || cancelled()': False,
         '!success()': False,
         "github.event_name == 'push'": False,
+        None: True,
     }
     actual = {condition: suites_skip_violation(_tests_yml(), condition)
               for condition in cases}
@@ -242,7 +255,6 @@ def test_skippable_ancestors_cannot_implicitly_skip_dependants(tmp):
 
 
 def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
-    """Every import environment installs coverage.py from its sole pin."""
     del tmp
     pins = re.findall(r'^coverage==.*$',
                       (ROOT / 'requirements-test.txt').read_text(
@@ -274,18 +286,16 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
 
 
 def test_permission_whitespace_mutation_is_refused(tmp):
-    """Whitespace before the colon cannot hide pull-request write access."""
     del tmp
     workflow = _tests_yml()
     mutated = workflow.replace(
         '      contents: read\n',
         '      contents: read\n      pull-requests : write\n', 1)
     assert mutated != workflow, 'real permission mapping was not mutated'
-    _wfpermissions.assert_permissions_mutation_refused(mutated)
+    _assert_permissions_mutation_refused(mutated)
 
 
 def test_quoted_and_escaped_permission_keys_are_refused(tmp):
-    """Equivalent decoded keys cannot hide a widened permission grant."""
     del tmp
     workflow = _tests_yml()
     additions = (
@@ -297,11 +307,10 @@ def test_quoted_and_escaped_permission_keys_are_refused(tmp):
             '      contents: read\n',
             '      contents: read\n' + addition, 1)
         assert mutated != workflow, addition
-        _wfpermissions.assert_permissions_mutation_refused(mutated)
+        _assert_permissions_mutation_refused(mutated)
 
 
 def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
-    """Equivalent decoded mapping fields cannot hide the widened grant."""
     del tmp
     workflow = _tests_yml()
     replacements = (
@@ -314,11 +323,10 @@ def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
             field + '      contents: read\n'
             '      pull-requests: write\n', 1)
         assert mutated != workflow, field
-        _wfpermissions.assert_permissions_mutation_refused(mutated)
+        _assert_permissions_mutation_refused(mutated)
 
 
 def test_permission_values_and_unknown_keys_fail_closed(tmp):
-    """Decoded writes and unrecognised permission names are refused."""
     del tmp
     workflow = _tests_yml()
     mutations = (
@@ -332,7 +340,7 @@ def test_permission_values_and_unknown_keys_fail_closed(tmp):
     )
     for mutated in mutations:
         assert mutated != workflow, 'real permission mapping was not mutated'
-        _wfpermissions.assert_permissions_mutation_refused(mutated)
+        _assert_permissions_mutation_refused(mutated)
 
 
 def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
@@ -393,7 +401,6 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
 
 def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
     """The speed job's environment is exactly this routing expression.
-
     The speed job is the only one that checks out a pull request's own head
     and runs it. Everything else about the job is containment applied after
     that decision — a read-only token, no secrets, `pull_request` rather than
@@ -428,7 +435,6 @@ def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
 
 def test_the_speed_gate_throws_away_its_first_round(tmp):
     """The first suite a job runs is not one of the measured ones.
-
     A cold page cache is paid by whichever side goes first, and interleaving
     does not share it: across eight runs the baseline's first round exceeded
     its second by 19.14s on average and was the largest of the four totals
@@ -466,7 +472,6 @@ def test_the_speed_gate_throws_away_its_first_round(tmp):
 
 def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     """Before merge, and against the base SHA rather than the last release.
-
     The gate ran on push alone, so a regression was measured only after it had
     landed. Two details make the pull-request half mean anything: the baseline
     is the exact base SHA — the last release would fold every commit merged
@@ -526,7 +531,6 @@ def test_the_speed_gate_is_not_manually_dispatchable(tmp):
 
 
 def _pinned_actions():
-    """{action path: {sha: [workflow names]}} over every `uses:` in the tree."""
     used = {}
     pattern = re.compile(
         r'uses:\s*(?:>-\s*)?([\w.-]+/[\w./-]+)@([0-9a-f]{40})')
@@ -608,7 +612,6 @@ def test_a_release_attests_every_artifact_it_publishes(tmp):
 
 def test_one_action_family_is_pinned_to_one_version(tmp):
     """Two `uses:` lines from the same action must name the same commit.
-
     CodeQL refuses to run when `init` and `analyze` name different versions,
     and Dependabot treats them as two dependencies — so a bump arrived as two
     pull requests, each of which could only be red, and merging either one
@@ -634,7 +637,6 @@ def test_one_action_family_is_pinned_to_one_version(tmp):
 
 def test_dependabot_groups_an_action_used_under_more_than_one_path(tmp):
     """A component Dependabot sees as several dependencies moves as one.
-
     Grouping is what makes the proposal a state CI can pass: ungrouped, each
     half of `github/codeql-action` arrives alone and neither can be green.
     """
@@ -658,7 +660,6 @@ def test_dependabot_groups_an_action_used_under_more_than_one_path(tmp):
 
 def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     """Each dependency manifest in the tree has an ecosystem watching it.
-
     Dependabot covered `github-actions` alone while the Python pins — the mcp
     extra, the lint pins and the coverage pin — were frozen indefinitely. The
     check is keyed off what is tracked rather than off a remembered list, so a
