@@ -9,7 +9,45 @@ import ast
 from pathlib import PurePosixPath, PureWindowsPath
 
 
-def _is_root_spelling(node, shadowed_names=frozenset()):
+_ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
+
+
+def root_owner_names(tree):
+    """Names bound by importing a module whose ROOT is the checkout root.
+
+    An attribute is only a root spelling if the object it reads from is one
+    of those modules: `import os as behaviour` then `behaviour.ROOT = tmp`
+    spells the same thing and means something else. A name whose ROOT this
+    module assigns to, by statement or by `setattr`, is not one of them.
+    """
+    owners = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            owners.update(alias.asname or alias.name for alias in node.names
+                          if alias.name in _ROOT_MODULES)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id == 'setattr' and len(node.args) > 1):
+            owner, name = node.args[:2]
+            named_root = (not isinstance(name, ast.Constant)
+                          or name.value == 'ROOT')
+            if isinstance(owner, ast.Name) and named_root:
+                owners.discard(owner.id)
+            continue
+        else:
+            continue
+        for target in targets:
+            if (isinstance(target, ast.Attribute) and target.attr == 'ROOT'
+                    and isinstance(target.value, ast.Name)):
+                owners.discard(target.value.id)
+    return owners
+
+
+def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):
     """Whether an expression provably names the repository root."""
     if any(isinstance(part, ast.Name) and part.id in shadowed_names
            for part in ast.walk(node)):
@@ -18,16 +56,16 @@ def _is_root_spelling(node, shadowed_names=frozenset()):
         return True
     if (isinstance(node, ast.Attribute) and node.attr == 'ROOT'
             and isinstance(node.value, ast.Name)
-            and node.value.id in {'_util', 'behaviour'}):
+            and node.value.id in owners):
         return True
     if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
             and isinstance(node.right, ast.Constant)
             and _is_relative_literal(node.right.value)):
-        return _is_root_spelling(node.left, shadowed_names)
+        return _is_root_spelling(node.left, shadowed_names, owners)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id == 'str' and len(node.args) == 1
             and not node.keywords):
-        return _is_root_spelling(node.args[0], shadowed_names)
+        return _is_root_spelling(node.args[0], shadowed_names, owners)
     return False
 
 
