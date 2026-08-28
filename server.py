@@ -1443,11 +1443,14 @@ class Handler(BaseHTTPRequestHandler):
                 except segment_store.SegmentRecordError:
                     record = None
                 usage = (segment_store.usage(record)
-                         if record is not None else None)
+                         if record is not None
+                         and not segment_store.needs_recount(job) else None)
                 if usage is None:
-                    # A job minted before totals were kept, converted once.
-                    # This is the only scan left on this path, and no segment
-                    # written afterwards pays for it.
+                    # A job minted before totals were kept, or one whose
+                    # last write_usage never confirmed landing. Either way
+                    # the record can't be trusted, and this is the only
+                    # scan on this path, so nothing after it pays for it
+                    # again.
                     usage = segment_store.recount(seg_dir)
                     if usage is None:
                         return self._json(

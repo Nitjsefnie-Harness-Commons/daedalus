@@ -187,6 +187,24 @@ def new_record(token, stored_count=0, stored_bytes=0):
     }
 
 
+def _dirty_path(job):
+    """Where write_usage marks that job's totals may not have landed."""
+    path = record_path(job)
+    return path.with_name(f'.{path.name}.dirty')
+
+
+def needs_recount(job):
+    """Whether a previous write_usage for `job` may not have landed.
+
+    The mark goes down before the write it guards even starts, so it is
+    still there after a write that fails outright and after a crash
+    partway through one — both leave the record at its old totals, and
+    this is what stops the next read from trusting them. write_usage
+    clears it itself once the replace it guards has actually landed.
+    """
+    return _dirty_path(job).exists()
+
+
 def write_usage(job, count, stored):
     """Persist a job's totals, leaving every other field of its record alone.
 
@@ -201,21 +219,38 @@ def write_usage(job, count, stored):
         return
     if record is None:
         return
+    path = record_path(job)
+    dirty = _dirty_path(job)
+    # Set before the record write is even attempted: the segment this
+    # write is accounting for is already stored by the time we get here,
+    # so from this point on the record and the directory can disagree,
+    # whether because this write fails, or because the process dies
+    # before it finishes. The mark is what a later read checks instead of
+    # trusting whatever total the record still carries.
+    try:
+        dirty.write_text('', encoding='utf-8')
+    except OSError:
+        pass
     record['stored_count'] = count
     record['stored_bytes'] = stored
-    path = record_path(job)
     tmp = path.with_name(f'.{path.name}.tmp')
     try:
         tmp.write_text(json.dumps(record), encoding='utf-8')
         atomic_file.replace_atomically(tmp, path)
     except OSError:
-        # The segment itself is already stored, so a usage update that cannot
-        # be written leaves the record at its previous totals rather than
-        # failing the write that succeeded; the next one corrects it.
+        # The segment itself is already stored, so a usage update that
+        # cannot be written leaves the record at its previous totals —
+        # the mark above is what keeps the next read from trusting that,
+        # rather than the write that just failed quietly correcting it.
         try:
             tmp.unlink()
         except OSError:
             pass  # the next write of this record reuses the same temp name
+        return
+    try:
+        dirty.unlink()
+    except OSError:
+        pass  # a stale mark just costs one extra recount, never a missed one
 
 
 def log_timing(job, stored, marks):
