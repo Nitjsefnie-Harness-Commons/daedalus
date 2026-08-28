@@ -64,6 +64,22 @@ def test_invalid_repository_node_probe_is_harness_failure(tmp):
     assert failure.__class__ is AssertionError, failure
 
 
+def test_zero_exit_invalid_node_probe_is_harness_failure(tmp):
+    del tmp
+    node = shutil.which('node')
+    assert node, 'Node is required to execute the probe control'
+    failure = None
+    with mock.patch.object(
+            _realbrowser.shutil, 'which', _which_with(node)), \
+            mock.patch.object(_realbrowser, 'NODE_WEBSOCKET_PROBE', ''):
+        try:
+            _realbrowser.browser_requirements()
+        except Exception as why:  # noqa: BLE001
+            failure = why
+    assert failure.__class__ is AssertionError, failure
+    assert node in str(failure), failure
+
+
 def test_node_probe_absent_token_is_environment_skip(tmp):
     del tmp
     node = shutil.which('node')
