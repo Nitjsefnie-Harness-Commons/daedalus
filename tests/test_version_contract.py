@@ -158,19 +158,21 @@ def _duplicate_the_package_version(copy_root, second_value='0.22.0.2'):
     init_copy.write_text(text + f"\n__version__ = '{second_value}'\n", encoding='utf-8')
 
 
-def _duplicate_the_page_js_version(copy_root, second_value='9.9.9'):
+def _duplicate_the_page_js_version(copy_root, second_value='9.9.9', quote='"'):
     """Add a second `script: { version: ... }` assignment in the COPY's
-    `extension/page.js`, spelled with the other quote character.
+    `extension/page.js`, with the value spelled in a given quote style.
 
     This is the reproduction from #247: the site's own value uses a single
-    quote, and a plain object literal spelled with a double quote is just as
-    valid JavaScript, so a pattern that only recognizes one quote character
-    cannot see the second one at all.
+    quote, and a plain object literal spelled with a different quote is just
+    as valid JavaScript, so a pattern that only recognizes one quote
+    character cannot see the second one at all. `quote` also accepts a
+    backtick, the template-literal case review found on top of #247.
     """
     page_copy = copy_root / 'extension' / 'page.js'
     text = page_copy.read_text(encoding='utf-8')
     page_copy.write_text(
-        text + f'\nconst _dup = {{ info: {{ script: {{ version: "{second_value}" }} }} }};\n',
+        text + '\nconst _dup = { info: { script: { version: '
+        f'{quote}{second_value}{quote} }} }} }};\n',
         encoding='utf-8')
 
 
@@ -440,6 +442,38 @@ def test_check_versions_refuses_a_page_js_version_spelled_with_the_other_quote(t
     assert 'matches 2 times' in r.stderr, r.stderr
     assert desc in r.stderr, (desc, r.stderr)
     assert '9.9.9' in r.stderr, r.stderr
+
+
+def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
+    """The same duplicate, spelled with a backtick. Review on #247 pointed
+    out a template literal is a third valid way to write this string, and
+    the widened pattern needs to catch it the same as the other two."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, _pattern = checker.SITES[3]
+    assert path == 'extension/page.js', path
+    _duplicate_the_page_js_version(copy_root, quote='`')
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    assert desc in r.stderr, (desc, r.stderr)
+
+
+def test_check_versions_page_js_keys_are_assumed_bare(tmp):
+    """A deliberate limit, not an oversight: the page.js pattern matches the
+    keys `script` and `version` bare, so a duplicate that also quotes those
+    keys is a shape none of page.js's own sites use, and passes through
+    unseen. Documented here so a future change to the pattern's key
+    handling has a test to update rather than a silent behavior change."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    page_copy = copy_root / 'extension' / 'page.js'
+    text = page_copy.read_text(encoding='utf-8')
+    page_copy.write_text(
+        text + '\nconst _dup = { info: { "script": { "version": "9.9.9" } } };\n',
+        encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
 
 
 def test_check_versions_print_refuses_a_tree_that_disagrees(tmp):
