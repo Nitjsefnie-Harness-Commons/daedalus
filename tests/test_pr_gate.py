@@ -10,14 +10,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSE_MARKER, GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_MARKDOWN,
-    GITHUB_HTML, GITHUB_MARKDOWN, MARKER_COMMENT, PR_BODY, _GH_STUB,
+    BOT, CLOSE_MARKER, COMMENTS_QUERY, GITHUB_FOOTNOTE_HTML,
+    GITHUB_FOOTNOTE_MARKDOWN, GITHUB_HTML, GITHUB_MARKDOWN, ISSUE_QUERY,
+    MARKER_COMMENT, TIMELINE_QUERY, _GH_STUB,
     _assert_commented_not_closed, _assert_commented_then_closed,
     _assert_commented_then_reopened, _assert_no_mutation,
     _assert_unusable_render, _body_from, _closed_by, _issue, _issue_lookups,
     _html_body, _issue_html, _layout_body, _run_complete_workflow,
-    _sentinel_attack_cases, _text_html, _truncated_render_cases,
-    _valid_body, _valid_html, _workflow, _workflow_script, _write_calls,
+    _markdown_code_spans, _sentinel_attack_cases, _text_html,
+    _truncated_render_cases, _valid_body, _valid_html, _workflow,
+    _workflow_script, _write_calls,
 )
 from _repo import ROOT  # noqa: E402
 from _yamlread import job_scalar, top_level_mapping  # noqa: E402
@@ -112,7 +114,7 @@ def test_gh_stub_models_include_response_headers(tmp):
     for flag in ('--include', '-i'):
         result = _run_stub(
             tmp, 'api', flag, 'repos/owner/repo/issues/1',
-            '--jq', '.assignees[].login')
+            '--jq', ISSUE_QUERY)
         assert result.returncode == 0, result.stderr
         assert result.stdout.splitlines()[1:4] == [
             'cache-control: private, max-age=60',
@@ -135,17 +137,23 @@ def test_gh_stub_rejects_wrong_write_methods_and_fields(tmp):
     reopen = _run_stub(
         tmp, 'api', '-X', 'PATCH', 'repos/owner/repo/pulls/99',
         '-f', 'state=open', '-f', 'title=mutated', '--silent')
+    queries = (
+        (['api', '--paginate',
+          'repos/owner/repo/issues/99/timeline?per_page=100'], TIMELINE_QUERY),
+        (['api', '--paginate',
+          'repos/owner/repo/issues/99/comments?per_page=100'], COMMENTS_QUERY),
+        (['api', '--include', 'repos/owner/repo/issues/1'], ISSUE_QUERY),)
+    malformed = [_run_stub(tmp, *args, '--jq', query + ' broken')
+                 for args, query in queries]
+    alias = _run_stub(
+        tmp, 'api', '--method', 'PATCH', 'repos/owner/repo/pulls/99',
+        '-f', 'state=open', '--silent')
     assert comment.returncode != 0, comment.stdout
     assert reopen.returncode != 0, reopen.stdout
+    assert all(result.returncode != 0 for result in malformed), malformed
+    assert alias.returncode == 0, (alias.stdout, alias.stderr)
     assert 'unsupported gh api call' in comment.stderr, comment.stderr
     assert 'unsupported gh api call' in reopen.stderr, reopen.stderr
-
-
-def test_gh_stub_accepts_the_documented_method_alias(tmp):
-    result = _run_stub(
-        tmp, 'api', '--method', 'PATCH',
-        'repos/owner/repo/pulls/99', '-f', 'state=open', '--silent')
-    assert result.returncode == 0, (result.stdout, result.stderr)
 
 
 def test_workflow_renders_the_event_body_once_in_repository_context(tmp):
@@ -272,9 +280,9 @@ def test_unusable_render_responses_never_change_pull_request_state(tmp):
             'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT}),
     )
     for pull_name, pull, history in pulls:
-        for render_name, rendered in _truncated_render_cases():
+        for render_name, body, rendered in _truncated_render_cases():
             _assert_unusable_render(
-                Path(tmp) / f'{pull_name}-{render_name}', _valid_body(),
+                Path(tmp) / f'{pull_name}-{render_name}', body,
                 rendered, pull=pull, history=history)
 
 
@@ -474,7 +482,7 @@ def test_open_body_reports_each_single_failed_condition(tmp):
 
 
 def test_open_rendered_empty_changes_is_commented_without_closing(tmp):
-    body = _valid_body().replace('- One change', '-')
+    body = _valid_body().replace('- One change', '')
     calls, result = _run_complete_workflow(
         tmp, body, {'101': _issue('alice')},
         rendered_html=_valid_html(changes=GITHUB_HTML['empty_list']))
@@ -522,7 +530,7 @@ def test_link_destination_does_not_satisfy_the_claim(tmp):
 
 
 def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
-    name = 'Notes for #255'
+    name = 'Notes for #255 and #256'
     body = _valid_body().replace(
         '## Testing', f'## {name}\nUnknown.\n\n## Testing')
     calls, result = _run_complete_workflow(
@@ -537,11 +545,8 @@ def test_unknown_section_name_cannot_post_a_live_issue_reference(tmp):
     _assert_commented_not_closed(calls)
     endpoint = 'repos/owner/repo/issues/99/comments'
     comment = _body_from(next(call for call in calls if endpoint in call))
-    quoted = PR_BODY._code_span(name)
-    assert f'Section {quoted} is not defined by the template.' in comment
-    assert quoted.startswith('`') and quoted.endswith('`'), quoted
-    spans = [match.span() for match in re.finditer(
-        re.escape(quoted), comment)]
+    assert name in comment, comment
+    spans = _markdown_code_spans(comment)
     references = list(re.finditer(r'#[0-9]+', comment))
     assert references, comment
     assert all(any(start <= match.start() and match.end() <= end

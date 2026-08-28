@@ -14,13 +14,24 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-PR_BODY = _util.load(ROOT / 'scripts' / 'ci' / 'pr_body.py')
+PR_BODY = _util.load(
+    ROOT / 'scripts' / 'ci' / 'pr_body.py', 'scripts.ci.pr_body')
 SECTION = '## Related Issues and Pull Requests\n'
 TEMPLATE = (ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md').read_text(
     encoding='utf-8')
 BOT = 'github-actions[bot]'
 CLOSE_MARKER = '<!-- pr-gate: close -->'
 MARKER_COMMENT = [{'id': 7, 'user': {'login': BOT}, 'body': CLOSE_MARKER}]
+TIMELINE_QUERY = (
+    '.[] | select(.event == "closed")\n'
+    '      | (.actor.login // "__unreadable__")')
+COMMENTS_QUERY = (
+    '.[]\n      | select(.user.login == "github-actions[bot]")\n'
+    '      | select(.body | contains("<!-- pr-gate: close -->"))\n'
+    '      | .id')
+ISSUE_QUERY = (
+    'if has("pull_request") then empty else\n'
+    '      (.assignees[].login | "assignee:\\(.)") end')
 
 GITHUB_ISSUE_101 = (
     '<a class="issue-link js-issue-link" '
@@ -59,6 +70,25 @@ GITHUB_FOOTNOTE_HTML = (
     'data-footnote-backref="" aria-label="Back to reference 1" '
     'class="data-footnote-backref">↩</a></p>\n</li>\n</ol>\n'
     '</section>')
+GITHUB_FOOTNOTE_SENTINEL_HTML = (
+    '<h2 dir="auto">Summary</h2>\n<p dir="auto">One sentence.</p>\n'
+    '<h2 dir="auto">Related Issues and Pull Requests</h2>\n'
+    f'<p dir="auto">Fixes {GITHUB_ISSUE_101}</p>\n'
+    '<h2 dir="auto">Changes</h2>\n<p dir="auto">The behavior is pinned.'
+    '<sup><a href="#user-content-fn-1-d1601984b8b7bc49868fe3588f47dc29" '
+    'id="user-content-fnref-1-d1601984b8b7bc49868fe3588f47dc29" '
+    'data-footnote-ref="" aria-describedby="footnote-label">1</a></sup>'
+    '</p>\n<h2 dir="auto">Testing</h2>\n'
+    '<p dir="auto">Ran the suite.</p>\n<p dir="auto">pr-gate-sentinel-'
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</p>\n'
+    '<section data-footnotes="" class="footnotes"><h2 '
+    'id="footnote-label" class="sr-only" dir="auto">Footnotes</h2>\n'
+    '<ol dir="auto">\n<li id="user-content-fn-1-'
+    'd1601984b8b7bc49868fe3588f47dc29">\n'
+    '<p dir="auto">By a focused regression test. <a href="'
+    '#user-content-fnref-1-d1601984b8b7bc49868fe3588f47dc29" '
+    'data-footnote-backref="" aria-label="Back to reference 1" '
+    'class="data-footnote-backref">↩</a></p>\n</li>\n</ol>\n</section>')
 
 # These fragments are responses captured from GitHub's /markdown endpoint in
 # GFM mode with Nitjsefnie-Harness-Commons/daedalus as the context.
@@ -157,6 +187,16 @@ import json, os, pathlib, re, sys
 fixtures = json.loads(pathlib.Path(os.environ['STUB_ISSUES']).read_text())
 calls = pathlib.Path(os.environ['STUB_CALLS'])
 argv = sys.argv[1:]
+TIMELINE_QUERY = (
+    '.[] | select(.event == "closed")\n'
+    '      | (.actor.login // "__unreadable__")')
+COMMENTS_QUERY = (
+    '.[]\n      | select(.user.login == "github-actions[bot]")\n'
+    '      | select(.body | contains("<!-- pr-gate: close -->"))\n'
+    '      | .id')
+ISSUE_QUERY = (
+    'if has("pull_request") then empty else\n'
+    '      (.assignees[].login | "assignee:\\(.)") end')
 recorded = []
 for arg in argv:
     if arg.startswith(('body=@', 'text=@')):
@@ -194,7 +234,16 @@ if endpoint == 'markdown':
         raise SystemExit(1)
     rendered = pathlib.Path(os.environ['STUB_RENDERED_HTML']).read_text()
     if marker and os.environ.get('STUB_RENDER_COMPLETE', '1') == '1':
-        sentinel = f'<p dir="auto">{marker.group(1)}</p>'
+        token = marker.group(1)
+        mangle = os.environ.get('STUB_SENTINEL_MANGLE', '')
+        if mangle == 'comment':
+            sentinel = (f'<p dir="auto">{token[:30]}'
+                        f'<!-- injected -->{token[30:]}</p>')
+        elif mangle == 'element':
+            sentinel = (f'<p dir="auto">{token[:30]}'
+                        f'<em>{token[30:]}</em></p>')
+        else:
+            sentinel = f'<p dir="auto">{token}</p>'
         footnotes = '\n<section data-footnotes="" class="footnotes">'
         if footnotes in rendered:
             rendered = rendered.replace(
@@ -213,11 +262,13 @@ if '/timeline?' in endpoint:
         print(f'gh: HTTP {status}', file=sys.stderr)
         raise SystemExit(1)
     query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
+    if query != TIMELINE_QUERY:
+        unsupported()
     for event in fixtures.get('_timeline', []):
-        if 'event == "closed"' in query and event.get('event') != 'closed':
+        if event.get('event') != 'closed':
             continue
         login = event.get('actor', {}).get('login')
-        if login is None and '// "__unreadable__"' in query:
+        if login is None:
             login = '__unreadable__'
         print(login or '')
     raise SystemExit(0)
@@ -230,12 +281,12 @@ if '/comments?' in endpoint:
         print(f'gh: HTTP {status}', file=sys.stderr)
         raise SystemExit(1)
     query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
-    user = re.search(r'\.user\.login *== *"([^"]+)"', query)
-    marker = re.search(r'contains\("([^"]+)"\)', query)
+    if query != COMMENTS_QUERY:
+        unsupported()
     for comment in fixtures.get('_comments', []):
-        if user and comment['user']['login'] != user.group(1):
+        if comment['user']['login'] != 'github-actions[bot]':
             continue
-        if marker and marker.group(1) not in comment['body']:
+        if '<!-- pr-gate: close -->' not in comment['body']:
             continue
         print(comment['id'])
     raise SystemExit(0)
@@ -257,14 +308,12 @@ if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
         print(f'gh: HTTP {status}', file=sys.stderr)
         raise SystemExit(1)
     query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
-    if 'pull_request' in issue and 'has("pull_request")' in query:
+    if query != ISSUE_QUERY:
+        unsupported()
+    if 'pull_request' in issue:
         raise SystemExit(0)
-    if '.assignees' in query:
-        for assignee in issue['assignees']:
-            prefix = 'assignee:' if 'assignee:' in query else ''
-            print(prefix + assignee['login'])
-    else:
-        print(json.dumps(issue))
+    for assignee in issue['assignees']:
+        print('assignee:' + assignee['login'])
     raise SystemExit(0)
 if endpoint.endswith('/comments'):
     if (len(argv) != 5 or argv[:2] != ['api', endpoint]
@@ -338,7 +387,7 @@ def _run_workflow(
     supported = {
         'parser_crlf', 'comment_status', 'pull', 'history',
         'rendered_html', 'render_status', 'render_complete',
-        'render_after_sentinel',
+        'render_after_sentinel', 'render_sentinel_mangle',
     }
     assert set(options) <= supported, sorted(set(options) - supported)
     parser_crlf = options.get('parser_crlf', False)
@@ -350,6 +399,7 @@ def _run_workflow(
     render_complete = options.get(
         'render_complete', rendered_html is None)
     render_after_sentinel = options.get('render_after_sentinel', '')
+    render_sentinel_mangle = options.get('render_sentinel_mangle', '')
     pull = pull or {}
     history = history or {}
     state = pull.get('state', 'open')
@@ -395,6 +445,7 @@ def _run_workflow(
         'STUB_EXPECTED_REPO': repo,
         'STUB_RENDER_COMPLETE': '1' if render_complete else '0',
         'STUB_RENDER_AFTER_SENTINEL': render_after_sentinel,
+        'STUB_SENTINEL_MANGLE': render_sentinel_mangle,
         'GH_TOKEN': 'stub',
         'REPO': repo,
         'PR': pr,
@@ -422,6 +473,7 @@ def _run_complete_workflow(tmp, body, issues, **options):
 
 
 def _assert_unusable_render(tmp, body, rendered, **options):
+    options.setdefault('render_complete', True)
     calls, result = _run_workflow(
         tmp, body, {'101': _issue('alice')},
         rendered_html=rendered, **options)
@@ -431,7 +483,8 @@ def _assert_unusable_render(tmp, body, rendered, **options):
 
 
 def _truncated_render_cases():
-    return (
+    body = _valid_body()
+    cases = (
         ('empty', ''),
         ('plain', 'upstream returned plain text'),
         ('token', '<h2>Summary</h2><'),
@@ -447,17 +500,40 @@ def _truncated_render_cases():
             '<p dir="auto">Ran the suite.</p>', '')),
         ('middle-content', _valid_html(changes='')),
     )
+    url = '[tracked issue](https://github.com/owner/repo/issues/101)'
+    return tuple((name, body, rendered) for name, rendered in cases) + (
+        ('middle-url', _valid_body(url), _valid_html(changes='')),)
 
 
 def _sentinel_attack_cases():
     fake = 'pr-gate-sentinel-' + ('0' * 64)
     return (
         ('forged', f'{_valid_body()}\n{fake}\n',
-         f'{_valid_html()}\n<p dir="auto">{fake}</p>', {}),
+         f'{_valid_html()}\n<p dir="auto">{fake}</p>', {
+             'render_complete': False}),
         ('nonterminal', _valid_body(), _valid_html(), {
             'render_complete': True,
             'render_after_sentinel': '\n<p dir="auto">late</p>'}),
+        ('commented', _valid_body(), _valid_html(), {
+            'render_sentinel_mangle': 'comment'}),
+        ('nested', _valid_body(), _valid_html(), {
+            'render_sentinel_mangle': 'element'}),
     )
+
+
+def _markdown_code_spans(text):
+    runs = list(re.finditer(r'`+', text))
+    spans = []
+    index = 0
+    while index < len(runs):
+        opener = runs[index]
+        close = next((candidate for candidate in runs[index + 1:]
+                      if len(candidate.group()) == len(opener.group())), None)
+        if close is None:
+            break
+        spans.append((opener.start(), close.end()))
+        index = runs.index(close) + 1
+    return spans
 
 
 def _body_from(call):

@@ -195,6 +195,7 @@
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
 !/scripts/ci/pr_body.py
+!/scripts/ci/pr_render.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/time_tests.py

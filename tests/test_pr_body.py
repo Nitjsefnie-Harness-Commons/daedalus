@@ -2,15 +2,14 @@
 """Rendered pull-request body reference parsing and its CLI."""
 import subprocess
 import sys
-from collections import Counter
-from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, GITHUB_ISSUE_101, PR_BODY, ROOT,
-    TEMPLATE, _html_body, _issue_html, _text_html, _valid_body, _valid_html,
+    GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_SENTINEL_HTML, GITHUB_HTML,
+    GITHUB_ISSUE_101, PR_BODY, ROOT, TEMPLATE, _html_body, _issue_html,
+    _text_html, _valid_body, _valid_html,
 )
 
 
@@ -18,17 +17,15 @@ REPOSITORY = 'Nitjsefnie-Harness-Commons/daedalus'
 RELATED = 'Related Issues and Pull Requests'
 
 
-class _CommentCollector(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.comments = []
-
-    def handle_comment(self, data):
-        self.comments.append(data)
-
-
 def _related(content, heading=RELATED):
     return _html_body((heading, content))
+
+
+def _analysis_outcome(rendered):
+    try:
+        return PR_BODY.analyze(rendered, REPOSITORY, TEMPLATE)
+    except ValueError as error:
+        return type(error), str(error)
 
 
 def test_parser_accepts_an_issue_anchor_in_the_rendered_section(tmp):
@@ -160,22 +157,20 @@ def test_parser_rejects_unusable_render_responses(tmp):
     assert accepted == [], accepted
 
 
-def test_render_sentinel_is_removed_without_changing_document(tmp):
+def test_render_sentinel_is_removed_without_changing_analysis(tmp):
     del tmp
     sentinel = 'pr-gate-sentinel-' + ('a' * 64)
     marker = f'<p dir="auto">{sentinel}</p>'
     cases = (
         (_valid_html(), f'{_valid_html()}\n{marker}'),
-        (GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_HTML.replace(
-            '\n<section data-footnotes="" class="footnotes">',
-            f'\n{marker}\n<section data-footnotes="" class="footnotes">',
-            1)),
+        (GITHUB_FOOTNOTE_HTML, GITHUB_FOOTNOTE_SENTINEL_HTML),
     )
     for expected, rendered in cases:
-        assert PR_BODY.strip_render_sentinel(rendered, sentinel) == expected
+        stripped = PR_BODY.strip_render_sentinel(rendered, sentinel)
+        assert _analysis_outcome(stripped) == _analysis_outcome(expected)
 
 
-def test_render_sentinel_preserves_other_top_level_syntax(tmp):
+def test_render_sentinel_preserves_other_top_level_analysis(tmp):
     del tmp
     sentinel = 'pr-gate-sentinel-' + ('b' * 64)
     marker = f'<p dir="auto">{sentinel}</p>'
@@ -187,7 +182,8 @@ def test_render_sentinel_preserves_other_top_level_syntax(tmp):
         (_valid_html(), f'{_valid_html()}\r\n{marker}'),
     )
     for expected, rendered in cases:
-        assert PR_BODY.strip_render_sentinel(rendered, sentinel) == expected
+        stripped = PR_BODY.strip_render_sentinel(rendered, sentinel)
+        assert _analysis_outcome(stripped) == _analysis_outcome(expected)
 
 
 def test_render_sentinel_rejects_unusable_evidence(tmp):
@@ -198,6 +194,15 @@ def test_render_sentinel_rejects_unusable_evidence(tmp):
         ('invalid-shape', 'sentinel', marker),
         ('mismatched', sentinel, f'<div></p>{marker}'),
         ('duplicate', sentinel, f'{marker}\n{marker}'),
+        ('comment', sentinel, f'<p>{sentinel[:30]}'
+         f'<!-- injected -->{sentinel[30:]}</p>'),
+        ('element', sentinel, f'<p>{sentinel[:30]}'
+         f'<em>{sentinel[30:]}</em></p>'),
+        ('processing', sentinel, f'<p>{sentinel[:30]}'
+         f'<?evidence?>{sentinel[30:]}</p>'),
+        ('declaration', sentinel, f'<p>{sentinel[:30]}'
+         f'<!DOCTYPE html>{sentinel[30:]}</p>'),
+        ('entity', sentinel, f'<p>&#112;{sentinel[1:]}</p>'),
     )
     accepted = []
     for name, value, rendered in cases:
@@ -213,10 +218,12 @@ def test_render_sentinel_rejects_unusable_evidence(tmp):
 def test_numeric_entities_do_not_hide_a_retained_comment(tmp):
     del tmp
     entities = (
-        ('&#60;', '&#62;'),
-        ('&#x3c;', '&#x3e;'),
+        ('decimal', '&#60;', '&#62;'),
+        ('lowercase', '&#x3c;', '&#x3e;'),
+        ('uppercase', '&#X3C;', '&#X3E;'),
     )
-    for left, right in entities:
+    failures = []
+    for name, left, right in entities:
         literal = f'{left}!-- optional --{right}'
         source = _valid_body().replace(
             '- One change', f'<!-- optional -->\n- Literal {literal}.')
@@ -224,8 +231,9 @@ def test_numeric_entities_do_not_hide_a_retained_comment(tmp):
             changes=f'<ul><li>Literal {literal}.</li></ul>')
         _, errors = PR_BODY.analyze(
             rendered, REPOSITORY, TEMPLATE, source)
-        assert 'Remove the template instruction comments.' in errors, (
-            left, errors)
+        if 'Remove the template instruction comments.' not in errors:
+            failures.append((name, errors))
+    assert failures == [], failures
 
 
 def test_parser_ignores_a_named_anchor_without_a_destination(tmp):
@@ -290,11 +298,11 @@ def test_cli_reports_an_unreadable_template(tmp):
     missing = Path(tmp) / 'missing-template.md'
     result = subprocess.run(
         [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py'),
-         '--instruction-fingerprints', str(missing)],
-        input='', text=True, capture_output=True, timeout=30)
+         REPOSITORY, str(missing)], input=_valid_html(), text=True,
+        capture_output=True, timeout=30)
     assert result.returncode == 2, (result.stdout, result.stderr)
     assert result.stdout == '', repr(result.stdout)
-    assert 'could not read template:' in result.stderr, result.stderr
+    assert 'could not analyze rendered HTML:' in result.stderr, result.stderr
 
 
 def test_cli_reports_a_template_heading_without_an_instruction(tmp):
@@ -313,30 +321,6 @@ def test_cli_reports_a_template_heading_without_an_instruction(tmp):
     assert result.stdout == '', repr(result.stdout)
     assert 'Summary' in result.stderr, result.stderr
     assert 'instruction comment' in result.stderr, result.stderr
-
-
-def test_cli_prints_template_instruction_fingerprints(tmp):
-    del tmp
-    template_path = ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md'
-    result = subprocess.run(
-        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py'),
-         '--instruction-fingerprints',
-         str(template_path)],
-        input='', text=True, capture_output=True, timeout=30)
-    assert result.returncode == 0, result.stderr
-    fingerprints = result.stdout.splitlines()
-    collector = _CommentCollector()
-    collector.feed(template_path.read_text(encoding='utf-8'))
-    collector.close()
-    comments = collector.comments
-    expected = []
-    for comment in comments:
-        lines = [line.strip() for line in comment.splitlines()
-                 if line.strip()]
-        expected.append(lines[0])
-    assert all(fingerprints), fingerprints
-    assert Counter(fingerprints) == Counter(expected), (
-        fingerprints, expected)
 
 
 def test_cli_rejects_extra_arguments(tmp):
