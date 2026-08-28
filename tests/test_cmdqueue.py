@@ -28,8 +28,9 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
     def refused(candidate, *args, **kwargs):
         if operation == 'open':
-            # Native validation may open a read twice; keep it authoritative.
-            original(candidate, *args, **kwargs).close()
+            if candidate == path:
+                # Native validation adds one open per faulted call.
+                original(candidate, *args, **kwargs).close()
         else:
             try:
                 signature.bind(candidate, *args, **kwargs)
@@ -115,8 +116,8 @@ def _vanish_during_read(path, clock):
     armed = [True]
 
     def vanished(candidate, *args, **kwargs):
-        original(candidate, *args, **kwargs).close()
         if candidate == path and armed[0]:
+            original(candidate, *args, **kwargs).close()
             armed[0] = False
             clock.record_read()
             candidate.unlink()
@@ -136,8 +137,8 @@ def _disappear_on_first_open(path):
     armed = [True]
 
     def missing(candidate, *args, **kwargs):
-        original(candidate, *args, **kwargs).close()
         if candidate == path and armed[0]:
+            original(candidate, *args, **kwargs).close()
             armed[0] = False
             raise FileNotFoundError(2, 'injected disappearance', str(path))
         return original(candidate, *args, **kwargs)
@@ -155,9 +156,9 @@ def _refuse_first_queue_read(queue):
     refused_path = [None]
 
     def refused(candidate, *args, **kwargs):
-        original(candidate, *args, **kwargs).close()
         if (refused_path[0] is None and candidate.parent == queue
                 and candidate.suffix == '.json'):
+            original(candidate, *args, **kwargs).close()
             refused_path[0] = candidate
         if candidate == refused_path[0]:
             refused_path[0] = False
@@ -247,13 +248,11 @@ def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
         observed_end, baseline_end)
 
 
-def test_open_injectors_preserve_excess_binary_and_wrong_type_failures(
-        tmp):
+def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     queue, queued = _queued_file(tmp)
     excess_args = ('r', 1, -1, None, None, None, False, 'extra')
     expected_excess = _path_open_failure(queued, *excess_args)
-    expected_binary = _path_open_failure(
-        queued, mode='rb', encoding='utf-8')
+    expected_binary = _path_open_failure(queued, mode='rb', encoding='utf-8')
     expected_buffering = _path_open_failure(
         queued, buffering=-1.0, encoding='utf-8')
     rejected_calls = (
@@ -278,7 +277,15 @@ def test_open_injectors_preserve_excess_binary_and_wrong_type_failures(
         )
         for label, injector, injected_type in injectors:
             before = queued.stat()
+            candidate = Path(tmp) / f'exclusive-create-{label}'
+            assert not candidate.exists()
+            open_failure = None
             with injector:
+                try:
+                    with candidate.open(mode='x', encoding='utf-8') as opened:
+                        opened.write('caller-owned content')
+                except OSError as caught:
+                    open_failure = type(caught)
                 for failure, args, kwargs, expected in rejected_calls:
                     actual = _path_open_failure(queued, *args, **kwargs)
                     assert queued.exists(), (
@@ -292,6 +299,8 @@ def test_open_injectors_preserve_excess_binary_and_wrong_type_failures(
                 injected = _path_open_failure(queued, encoding='utf-8')
             assert injected[0] is injected_type, (
                 f'{label} fault was consumed by a rejected call', injected)
+            assert open_failure is None, (label, open_failure)
+            assert candidate.read_text('utf-8') == 'caller-owned content'
 
 
 def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
