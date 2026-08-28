@@ -739,8 +739,10 @@ jobs:
     # optional dependency, both read low for reasons a threshold cannot tell
     # apart. The ratchet in `coverage` is the gate.
     #
-    # Pull requests only: on a push there is no diff to be the coverage OF.
-    if: ${{ github.event_name == 'pull_request' }}
+    # Pull requests only, and only when coverage produced the artifact this
+    # job consumes. A skipped ancestor must not hide that successful result.
+    if: ${{ !cancelled() && needs.coverage.result == 'success'
+               && github.event_name == 'pull_request' }}
     needs: coverage
     runs-on: ubuntu-latest
     timeout-minutes: 10
