@@ -43,7 +43,6 @@ def _refuse_path_operation(path, operation, failures, clock=None):
                 remaining[0] -= 1
                 raise PermissionError(32, 'injected sharing violation')
         return original(candidate, *args, **kwargs)
-
     setattr(Path, operation, refused)
     try:
         yield calls
@@ -101,7 +100,6 @@ def _vanish_during_unlink(path):
             original(candidate, *args, **kwargs)
             raise FileNotFoundError(2, 'injected disappearance', str(path))
         return original(candidate, *args, **kwargs)
-
     Path.unlink = vanished
     try:
         yield
@@ -124,7 +122,6 @@ def _vanish_during_read(path, clock, remove_queue=False):
                 candidate.parent.rmdir()
             return original(candidate, *args, **kwargs)
         return original(candidate, *args, **kwargs)
-
     Path.open = vanished
     try:
         yield
@@ -143,7 +140,6 @@ def _disappear_on_first_open(path):
             armed[0] = False
             raise FileNotFoundError(2, 'injected disappearance', str(path))
         return original(candidate, *args, **kwargs)
-
     Path.open = missing
     try:
         yield
@@ -165,7 +161,6 @@ def _refuse_first_queue_read(queue):
             refused_path[0] = False
             raise PermissionError(32, 'injected sharing violation')
         return original(candidate, *args, **kwargs)
-
     Path.open = refused
     try:
         yield
@@ -205,7 +200,6 @@ def _redirect_stale_answer(queue, stale, stale_command):
             assert current is not None, 'the current command never appeared'
             body = dict(body, id=current['id'], _did=current['_did'])
         return original(url, body, **kwargs)
-
     _util.post_json = redirected
     try:
         yield
@@ -241,7 +235,6 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
         assert command is None, command
         assert not remove_queue or not queue.exists(), queue
         return queue, clock.monotonic(), origin
-
     queue, observed_end, origin = observed_wait(False)
     with _virtual_cmdqueue_clock(_RUNAWAY_SLEEP_LIMIT) as (clock, _, base):
         baseline = _cmdqueue.wait_for_command(queue, timeout=timeout)
@@ -270,6 +263,21 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
                        {'mode': 'rb', 'encoding': 'utf-8'}, expected_binary),
                       ('value-equal wrong-type buffering', (),
                        {'buffering': -1.0, 'encoding': 'utf-8'}, expected_buf))
+    original, underlying_opens = Path.open, [0]
+
+    def counted(candidate, *args, **kwargs):
+        underlying_opens[0] += candidate == queued
+        return original(candidate, *args, **kwargs)
+    Path.open = counted
+    try:
+        with _refuse_path_operation(queued, 'open', 1):
+            _path_open_failure(queued, encoding='utf-8')
+            underlying_opens[0] = 0
+            queued.open(mode='rt', encoding='utf-8').close()
+    finally:
+        Path.open = original
+    # This open count is the transparency contract, not an internal detail.
+    assert underlying_opens == [1], underlying_opens
     with _virtual_cmdqueue_clock(_RUNAWAY_SLEEP_LIMIT) as (clock, _, _):
         injectors = (
             ('generic refusal',
@@ -434,7 +442,6 @@ def test_wait_ends_early_when_the_producer_is_gone(tmp):
     def producer_alive():
         producer_calls.append(True)
         return False
-
     with _virtual_cmdqueue_clock(0) as (_clock, events, _origin):
         command = _cmdqueue.wait_for_command(
             queue, timeout=10, producer_alive=producer_alive)
@@ -446,8 +453,7 @@ def test_wait_ends_early_when_the_producer_is_gone(tmp):
 def test_the_cli_answer_helper_survives_a_transient_queue_read_refusal(tmp):
     bridge_env = {'DAEDALUS_TOKEN': test_cli.TOK, 'TOKEN': ''}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
-        env = test_cli.cli_env(DAEDALUS_URL=base,
-                               DAEDALUS_TOKEN=test_cli.TOK)
+        env = test_cli.cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=test_cli.TOK)
         queue = (Path(docroot) / 'commands'
                  / f'{test_cli.TOK}_extension')
         with _refuse_first_queue_read(queue):
@@ -474,16 +480,13 @@ def test_the_mcp_answer_helper_survives_a_transient_queue_read_refusal(tmp):
 def test_the_cli_answer_helper_ignores_a_refused_leftover(tmp):
     bridge_env = {'DAEDALUS_TOKEN': test_cli.TOK, 'TOKEN': ''}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
-        env = test_cli.cli_env(DAEDALUS_URL=base,
-                               DAEDALUS_TOKEN=test_cli.TOK)
-        # The real helper preserves exact payload and delivery-id shape;
-        # constructed leftovers repeatedly let reader changes evade it.
+        env = test_cli.cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=test_cli.TOK)
+        # Real payload and delivery ids keep stale-reader changes observable.
         first_code, first_out, first_err, stale_command = (
             test_cli._answer_one_ext_command(
                 base, docroot, ['ext-reload'], {}, env))
         assert first_code == 0, (first_code, first_out, first_err)
-        files = _bridge.queue_files(
-            docroot, f'{test_cli.TOK}_extension')
+        files = _bridge.queue_files(docroot, f'{test_cli.TOK}_extension')
         assert len(files) == 1, files
         stale = files[0]
         queue = stale.parent
@@ -503,8 +506,7 @@ def test_the_mcp_answer_helper_ignores_a_refused_leftover(tmp):
                   'DAEDALUS_MCP_PORT': '0'}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         mod = test_mcp_server._load_mcp(base)
-        # The real helper preserves exact payload and delivery-id shape;
-        # constructed leftovers repeatedly let reader changes evade it.
+        # Real payload and delivery ids keep stale-reader changes observable.
         _first_value, stale_command = test_mcp_server._answer_mcp_command(
             base, docroot, mod, mod.ext_reload, {})
         files = _bridge.queue_files(
@@ -604,7 +606,6 @@ def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
             raise FileNotFoundError(
                 2, 'injected transient read error', str(missing_file[0]))
         return original(candidate, *args, **kwargs)
-
     for refused_file in (first, second):
         for queued, command in zip(files, stale):
             queued.write_text(json.dumps(command), encoding='utf-8')
@@ -646,7 +647,6 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
     @contextlib.contextmanager
     def fake_bridge(bridge_tmp, env=None, output=None):
         yield 'http://bridge.test', str(docroot)
-
     original_bridge = _overlap._util.bridge
     original_overlap = _overlap.run_background_overlap
     original_wait = _cmdqueue.wait_for_commands
@@ -673,7 +673,6 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
 
     def client_argv(owner):
         return [sys.executable, '-c', 'pass']
-
     message = None
     _overlap._util.bridge = fake_bridge
     _overlap.run_background_overlap = failing_overlap
