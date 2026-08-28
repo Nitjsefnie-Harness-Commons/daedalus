@@ -3,7 +3,6 @@
 import contextlib
 import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,6 +33,30 @@ def _refuse_path_operation(path, operation, failures):
         yield calls
     finally:
         setattr(Path, operation, original)
+
+
+@contextlib.contextmanager
+def _virtual_cmdqueue_clock(max_sleeps):
+    original = _cmdqueue.time
+    now = [0.0]
+    sleeps = []
+
+    class Clock:
+        def monotonic(self):
+            return now[0]
+
+        def sleep(self, seconds):
+            if len(sleeps) >= max_sleeps:
+                raise AssertionError(
+                    f'virtual clock exceeded {max_sleeps} sleeps')
+            sleeps.append(seconds)
+            now[0] += seconds
+
+    _cmdqueue.time = Clock()
+    try:
+        yield sleeps
+    finally:
+        _cmdqueue.time = original
 
 
 @contextlib.contextmanager
@@ -167,13 +190,15 @@ def test_a_queue_file_already_gone_during_clear_is_not_an_error(tmp):
 
 
 def test_a_permanent_read_refusal_is_bounded(tmp):
+    passes = 3
     queue, queued = _queued_file(tmp)
-    started = time.monotonic()
-    with _refuse_path_operation(queued, 'read_text', 1000):
-        command = _cmdqueue.wait_for_command(queue, timeout=0.1)
-    elapsed = time.monotonic() - started
+    with _refuse_path_operation(queued, 'read_text', 1000) as calls:
+        with _virtual_cmdqueue_clock(passes) as sleeps:
+            command = _cmdqueue.wait_for_command(
+                queue, timeout=passes * _cmdqueue.POLL_DELAY)
     assert command is None, command
-    assert elapsed < 1, elapsed
+    assert calls[0] == passes, calls
+    assert sleeps == [_cmdqueue.POLL_DELAY] * passes, sleeps
 
 
 def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
@@ -192,11 +217,11 @@ def test_wait_returns_none_when_the_timeout_expires(tmp):
 
 def test_wait_ends_early_when_the_producer_is_gone(tmp):
     queue = Path(tmp) / 'missing-queue'
-    started = time.monotonic()
-    command = _cmdqueue.wait_for_command(
-        queue, timeout=10, producer_alive=lambda: False)
+    with _virtual_cmdqueue_clock(0) as sleeps:
+        command = _cmdqueue.wait_for_command(
+            queue, timeout=10, producer_alive=lambda: False)
     assert command is None, command
-    assert time.monotonic() - started < 1
+    assert sleeps == [], sleeps
 
 
 def test_the_cli_answer_helper_survives_a_transient_queue_read_refusal(tmp):
