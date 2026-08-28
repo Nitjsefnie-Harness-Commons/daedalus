@@ -135,7 +135,6 @@ def _run_shell_block(workdir, script, env):
 
 def _run_artifact_check(tmp, response, extra_env=None):
     """Run artifact-presence shell against one endpoint-shaped fixture."""
-    bash = _util.workflow_bash()
     workdir = Path(tmp) / 'artifact-check'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     _write_executable(workdir / 'bin' / 'gh', _GH_ARTIFACT_STUB)
@@ -409,7 +408,6 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
                        head_sha='B', pr_number='170', claimed='170',
                        body='### Coverage\n'):
     """Run one commenter block with a recording GitHub double."""
-    bash = _util.workflow_bash()
     workdir = Path(tmp) / block_name.replace(' ', '-')
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     _write_executable(workdir / 'bin' / 'gh', _GH_COMMENT_STUB)

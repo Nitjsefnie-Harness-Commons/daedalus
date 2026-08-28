@@ -47,7 +47,6 @@ def _endpoints(calls):
 
 def _run_resolve_block(tmp, event_numbers):
     """Run the Resolve block against a fork-aware recording double."""
-    bash = _util.workflow_bash()
     workdir = Path(tmp) / 'resolve'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     commenter._write_executable(  # pylint: disable=protected-access
