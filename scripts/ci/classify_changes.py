@@ -4,14 +4,14 @@
 tests.yml cannot filter its triggers by path (the contribution gates must
 report on every commit, and push and pull_request must filter alike), so the
 cheap run happens inside the workflow instead: this script reads the paths a
-run changed and emits the matrix the suites job should execute and whether
-the run was documentation-only.
+run changed and emits the matrix the suites job should execute, whether the
+run was documentation-only and whether it touched a workflow.
 
 Documentation is the same set speed.yml and version.yml ignore. Every
 fallback runs the FULL matrix: an event this script cannot identify, a file
-list it cannot read, or a list that may be truncated all cost a full run,
-because an API failure that under-runs would merge untested code while one
-that over-runs only wastes minutes.
+list it cannot read, or a list that may be truncated all over-run: an API
+failure that under-runs would merge untested code while one that over-runs
+only wastes minutes. An unreadable path list also runs the workflow gate.
 """
 import fnmatch
 import json
@@ -19,6 +19,8 @@ import os
 import subprocess
 
 DOCUMENTATION_PATTERNS = ('**/*.md', 'LICENSE', '.gitignore')
+
+WORKFLOW_PATTERNS = ('.github/workflows/**', '.github/dependabot.yml')
 
 # Every stable minor requires-python admits. 3.14 was accepted by the
 # metadata and executed nowhere, so the oldest and the newest supported
@@ -51,6 +53,8 @@ def matches(pattern, path):
         # Filter patterns are rooted: LICENSE selects LICENSE, never
         # sub/LICENSE or LICENSE.txt.
         return pattern == path
+    if pattern.endswith('/**') and pattern[:-3] and '*' not in pattern[:-3]:
+        return path.startswith(pattern[:-2])
     raise ValueError(f'unsupported pattern shape: {pattern!r}')
 
 
@@ -62,6 +66,16 @@ def is_documentation(path):
 def documentation_only(paths):
     """Whether `paths` is nonempty and every entry is documentation."""
     return bool(paths) and all(is_documentation(path) for path in paths)
+
+
+def is_workflow(path):
+    """Whether `path` is selected by any pattern in WORKFLOW_PATTERNS."""
+    return any(matches(pattern, path) for pattern in WORKFLOW_PATTERNS)
+
+
+def workflows_changed(paths):
+    """Whether any path is selected by WORKFLOW_PATTERNS."""
+    return bool(paths) and any(is_workflow(path) for path in paths)
 
 
 def _hex40(value):
@@ -107,16 +121,17 @@ def changed_paths(event, run):
 
 
 def classify(event, run):
-    """Return (documentation_only, matrix, reason)."""
+    """Return (documentation_only, matrix, workflows, reason)."""
     paths = changed_paths(event, run)
     if paths is None:
-        return (False, FULL_MATRIX,
+        return (False, FULL_MATRIX, True,
                 'could not read the changed paths; running the full matrix')
+    workflows = workflows_changed(paths)
     if documentation_only(paths):
-        return (True, DOCUMENTATION_MATRIX,
+        return (True, DOCUMENTATION_MATRIX, workflows,
                 f'documentation-only change: {len(paths)} paths')
     outside = sum(1 for path in paths if not is_documentation(path))
-    return (False, FULL_MATRIX,
+    return (False, FULL_MATRIX, workflows,
             f'{len(paths)} paths changed, {outside} outside documentation')
 
 
@@ -131,13 +146,14 @@ def event_from_environment(environ):
     }
 
 
-def write_outputs(path, documentation, matrix):
+def write_outputs(path, documentation, matrix, workflows):
     """Append the step outputs to the file `path` names."""
     if not path:
         return
     with open(path, 'a', encoding='utf-8') as handle:
         handle.write(f"docs_only={'true' if documentation else 'false'}\n")
         handle.write(f'matrix={json.dumps(matrix)}\n')
+        handle.write(f"workflows={'true' if workflows else 'false'}\n")
 
 
 def main(argv=None):
@@ -149,8 +165,9 @@ def main(argv=None):
             command, capture_output=True, text=True, check=True,
             timeout=60).stdout
 
-    documentation, matrix, reason = classify(event, run)
-    write_outputs(os.environ.get('GITHUB_OUTPUT'), documentation, matrix)
+    documentation, matrix, workflows, reason = classify(event, run)
+    write_outputs(os.environ.get('GITHUB_OUTPUT'), documentation, matrix,
+                  workflows)
     print(reason)
     return 0
 
