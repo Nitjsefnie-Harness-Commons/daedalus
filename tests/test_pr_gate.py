@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pull-request issue references and the workflow that enforces claims."""
+"""Pull-request body parsing and the workflow admission gate."""
 import json
 import os
 import re
@@ -16,7 +16,7 @@ from _yamlsteps import step_mappings  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 
 
-PR_CLAIM = _util.load(ROOT / 'scripts' / 'ci' / 'pr_claim.py')
+PR_BODY = _util.load(ROOT / 'scripts' / 'ci' / 'pr_body.py')
 SECTION = '## Related Issues and Pull Requests\n'
 _COMMENT_TAIL = (
     ' — closing this automatically, and it is recoverable: read on.\n\n'
@@ -83,8 +83,8 @@ if endpoint.endswith('/comments') and os.environ.get('STUB_COMMENT_STATUS'):
 
 _CRLF_PYTHON_STUB = r"""#!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == scripts/ci/pr_claim.py ||
-      "${1:-}" == */scripts/ci/pr_claim.py ]]; then
+if [[ "${1:-}" == scripts/ci/pr_body.py ||
+      "${1:-}" == */scripts/ci/pr_body.py ]]; then
   "$STUB_REAL_PYTHON" "$@" |
     "$STUB_REAL_PYTHON" -c 'import sys
 data = sys.stdin.buffer.read().replace(b"\r\n", b"\n")
@@ -96,17 +96,17 @@ fi
 
 
 def _workflow():
-    return (ROOT / '.github' / 'workflows' / 'pr-claim.yml').read_text(
+    return (ROOT / '.github' / 'workflows' / 'pr-gate.yml').read_text(
         encoding='utf-8')
 
 
 def _workflow_script():
-    """The pr-claim.yml run block, dedented and ready for Bash."""
+    """The pr-gate.yml run block, dedented and ready for Bash."""
     _, marker, after = _workflow().partition('        run: |\n')
-    assert marker, 'pr-claim.yml has no literal run block'
+    assert marker, 'pr-gate.yml has no literal run block'
     first = after.splitlines()[0]
     indent = len(first) - len(first.lstrip())
-    assert first.strip() and indent, 'pr-claim.yml run block has no body'
+    assert first.strip() and indent, 'pr-gate.yml run block has no body'
     lines = []
     for line in after.splitlines():
         if line.strip() and len(line) - len(line.lstrip()) < indent:
@@ -129,7 +129,7 @@ def _run_workflow(
         parser_crlf=False, comment_status=None):
     """Execute the real workflow shell against the controlled gh boundary."""
     bash = shutil.which('bash')
-    assert bash, 'bash is required to execute the pull-request claim gate'
+    assert bash, 'bash is required to execute the pull-request body gate'
     workdir = Path(tmp) / 'workflow'
     (workdir / 'bin').mkdir(parents=True)
     stub = workdir / 'bin' / 'gh'
@@ -194,23 +194,23 @@ def test_parser_accepts_a_reference_in_the_real_template(tmp):
         encoding='utf-8')
     body = template.replace('\nFixes #\n', '\nFixes #314\n', 1)
     assert body != template, 'the template no longer carries its Fixes marker'
-    assert PR_CLAIM.referenced_issues(body) == [314]
+    assert PR_BODY.referenced_issues(body) == [314]
 
 
 def test_parser_returns_nothing_for_empty_or_missing_sections(tmp):
     del tmp
-    assert PR_CLAIM.referenced_issues(None) == []
-    assert PR_CLAIM.referenced_issues('') == []
-    assert PR_CLAIM.referenced_issues('## Summary\nFixes #31\n') == []
-    assert PR_CLAIM.referenced_issues('Fixes #31\n') == []
-    assert PR_CLAIM.referenced_issues(SECTION + '\n## Changes\n') == []
+    assert PR_BODY.referenced_issues(None) == []
+    assert PR_BODY.referenced_issues('') == []
+    assert PR_BODY.referenced_issues('## Summary\nFixes #31\n') == []
+    assert PR_BODY.referenced_issues('Fixes #31\n') == []
+    assert PR_BODY.referenced_issues(SECTION + '\n## Changes\n') == []
 
 
 def test_parser_normalizes_windows_and_lone_carriage_returns(tmp):
     del tmp
     crlf = '# Summary\r\ntext\r\n' + SECTION.replace('\n', '\r\n')
-    assert PR_CLAIM.referenced_issues(crlf + 'Fixes #32\r\n') == [32]
-    assert PR_CLAIM.referenced_issues(
+    assert PR_BODY.referenced_issues(crlf + 'Fixes #32\r\n') == [32]
+    assert PR_BODY.referenced_issues(
         '# Summary\rtext\r' + SECTION.replace('\n', '\r') + '#33\r') == [33]
 
 
@@ -218,11 +218,11 @@ def test_parser_removes_complete_and_unterminated_html_comments(tmp):
     del tmp
     body = (SECTION + '<!-- hidden across\nFixes #40\n-->\n'
             'Fixes #41\n')
-    assert PR_CLAIM.referenced_issues(body) == [41]
+    assert PR_BODY.referenced_issues(body) == [41]
     body = SECTION + 'Fixes #42\n<!-- #43\nFixes #44\n'
-    assert PR_CLAIM.referenced_issues(body) == [42]
+    assert PR_BODY.referenced_issues(body) == [42]
     hidden_section = '<!--\n' + SECTION + 'Fixes #45\n-->'
-    assert PR_CLAIM.referenced_issues(hidden_section) == []
+    assert PR_BODY.referenced_issues(hidden_section) == []
 
 
 def test_parser_accepts_only_the_first_exact_atx_section_heading(tmp):
@@ -230,23 +230,23 @@ def test_parser_accepts_only_the_first_exact_atx_section_heading(tmp):
     body = ('   ### rELATED iSSUES AND pULL rEQUESTS   ###\n'
             'Fixes #50\n# Changes\nFixes #51\n'
             + SECTION + 'Fixes #52\n')
-    assert PR_CLAIM.referenced_issues(body) == [50]
-    assert PR_CLAIM.referenced_issues(
+    assert PR_BODY.referenced_issues(body) == [50]
+    assert PR_BODY.referenced_issues(
         '    ' + SECTION + 'Fixes #53\n') == []
-    assert PR_CLAIM.referenced_issues(
+    assert PR_BODY.referenced_issues(
         '## Related Issues and Pull Requests later\nFixes #54\n') == []
 
 
 def test_parser_stops_at_the_next_atx_heading(tmp):
     del tmp
     body = SECTION + 'Fixes #60\n###### Testing\nFixes #61\n'
-    assert PR_CLAIM.referenced_issues(body) == [60]
+    assert PR_BODY.referenced_issues(body) == [60]
 
 
 def test_parser_stops_at_a_setext_heading(tmp):
     del tmp
     body = SECTION + 'Fixes #62\nSummary\n-------\nFixes #63\n'
-    assert PR_CLAIM.referenced_issues(body) == [62]
+    assert PR_BODY.referenced_issues(body) == [62]
 
 
 def test_parser_does_not_treat_list_or_quote_as_setext_heading(tmp):
@@ -256,53 +256,53 @@ def test_parser_does_not_treat_list_or_quote_as_setext_heading(tmp):
         SECTION + '> Fixes #66\n---\n',
     ]
     for number, body in zip((65, 66), bodies):
-        assert PR_CLAIM.referenced_issues(body) == [number]
+        assert PR_BODY.referenced_issues(body) == [number]
 
 
 def test_parser_accepts_a_setext_section_heading(tmp):
     del tmp
     body = ('Related Issues and Pull Requests\n'
             '--------------------------------\n')
-    assert PR_CLAIM.referenced_issues(body + 'Fixes #67\n') == [67]
+    assert PR_BODY.referenced_issues(body + 'Fixes #67\n') == [67]
 
 
 def test_parser_ignores_atx_headings_inside_fenced_code(tmp):
     del tmp
     body = SECTION + '```markdown\n## Changes\n```\nFixes #64\n'
-    assert PR_CLAIM.referenced_issues(body) == [64]
+    assert PR_BODY.referenced_issues(body) == [64]
 
 
 def test_parser_keeps_comment_markers_inside_fenced_code_literal(tmp):
     del tmp
     body = ('## Summary\n```html\n<!-- a template comment\n```\n'
             + SECTION + 'Fixes #68\n')
-    assert PR_CLAIM.referenced_issues(body) == [68]
+    assert PR_BODY.referenced_issues(body) == [68]
     body = ('## Summary\n<!-- a hidden fence\n```\n-->\n'
             + SECTION + 'Fixes #69\n')
-    assert PR_CLAIM.referenced_issues(body) == [69]
+    assert PR_BODY.referenced_issues(body) == [69]
 
 
 def test_parser_removes_fenced_and_inline_code(tmp):
     del tmp
     body = (SECTION + '```text\nFixes #70\n```\nFixes #71\n'
             '~~~\nFixes #72\n')
-    assert PR_CLAIM.referenced_issues(body) == [71]
+    assert PR_BODY.referenced_issues(body) == [71]
     body = SECTION + 'Use `Fixes #73` or ``code ` #74``. Fixes #75\n'
-    assert PR_CLAIM.referenced_issues(body) == [75]
+    assert PR_BODY.referenced_issues(body) == [75]
     body = SECTION + 'A stray ` in prose does not hide Fixes #76\n'
-    assert PR_CLAIM.referenced_issues(body) == [76]
+    assert PR_BODY.referenced_issues(body) == [76]
 
 
 def test_parser_ignores_indented_code_blocks(tmp):
     del tmp
     body = SECTION + '    Fixes #77\nFixes #78\n'
-    assert PR_CLAIM.referenced_issues(body) == [78]
+    assert PR_BODY.referenced_issues(body) == [78]
 
 
 def test_parser_ignores_backslash_escaped_references(tmp):
     del tmp
     body = SECTION + r'Literal \#79, real #80.'
-    assert PR_CLAIM.referenced_issues(body) == [80]
+    assert PR_BODY.referenced_issues(body) == [80]
 
 
 def test_parser_accepts_emphasized_or_colon_section_headings(tmp):
@@ -313,7 +313,7 @@ def test_parser_accepts_emphasized_or_colon_section_headings(tmp):
         '=========================================\n',
     )
     for number, heading in zip((81, 82), headings):
-        assert PR_CLAIM.referenced_issues(
+        assert PR_BODY.referenced_issues(
             heading + f'Fixes #{number}\n') == [number]
 
 
@@ -321,33 +321,33 @@ def test_parser_filters_and_deduplicates_references_in_order(tmp):
     del tmp
     body = (SECTION + '#3 #1 #3 #0 abc#12 ##12 x_#13 '
             '(#42) and -#14\n')
-    assert PR_CLAIM.referenced_issues(body) == [3, 1, 42, 14]
+    assert PR_BODY.referenced_issues(body) == [3, 1, 42, 14]
 
 
 def test_parser_ignores_html_numeric_entities(tmp):
     del tmp
     body = SECTION + '&#8212; is an em dash. Fixes #15\n'
-    assert PR_CLAIM.referenced_issues(body) == [15]
+    assert PR_BODY.referenced_issues(body) == [15]
 
 
 def test_cli_prints_one_issue_number_per_line(tmp):
     del tmp
     result = subprocess.run(
-        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_claim.py')],
+        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py')],
         input=SECTION + 'Fixes #81 and #82 and #81\n', text=True,
         capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout == '81\n82\n', repr(result.stdout)
 
 
-def test_workflow_keeps_its_claim_gate_shape(tmp):
+def test_workflow_keeps_its_body_gate_shape(tmp):
     del tmp
     workflow = _workflow()
     assert top_level_mapping(workflow, 'permissions') == {
         'pull-requests': 'write',
         'issues': 'read',
     }
-    triggers = _workflow_triggers(workflow, 'pr-claim.yml')
+    triggers = _workflow_triggers(workflow, 'pr-gate.yml')
     assert set(triggers) == {'pull_request_target'}, sorted(triggers)
     types = next(
         line.partition('types:')[2].strip()
@@ -356,11 +356,11 @@ def test_workflow_keeps_its_claim_gate_shape(tmp):
     assert types == '[opened, edited, reopened]', types
     assert ('pull_request_target:  '
             '# zizmor: ignore[dangerous-triggers]') in workflow
-    condition = job_scalar(workflow, 'claim', 'if')
+    condition = job_scalar(workflow, 'gate', 'if')
     assert "github.event.pull_request.state == 'open'" in condition
     assert "github.event.pull_request.user.type != 'Bot'" in condition
     assert 'draft' not in condition.casefold(), condition
-    steps = step_mappings(workflow, 'claim')
+    steps = step_mappings(workflow, 'gate')
     checkout = [step for step in steps
                 if str(step.get('uses', '')).startswith('actions/checkout@')]
     assert len(checkout) == 1, steps
@@ -369,6 +369,23 @@ def test_workflow_keeps_its_claim_gate_shape(tmp):
     assert checkout[0].get('with') == {'persist-credentials': 'false'}
     assert '${{' not in _workflow_script(), (
         'an expression is interpolated into contributor-controlled shell')
+
+
+def test_pull_request_gate_uses_general_names(tmp):
+    del tmp
+    expected = (
+        ROOT / '.github' / 'workflows' / 'pr-gate.yml',
+        ROOT / 'scripts' / 'ci' / 'pr_body.py',
+        ROOT / 'tests' / 'test_pr_gate.py',
+    )
+    retired = (
+        ROOT / '.github' / 'workflows' / 'pr-claim.yml',
+        ROOT / 'scripts' / 'ci' / 'pr_claim.py',
+        ROOT / 'tests' / 'test_pr_claim.py',
+    )
+    assert all(path.is_file() for path in expected), expected
+    assert not any(path.exists() for path in retired), retired
+    assert _workflow().splitlines()[0] == 'name: pr gate'
 
 
 def test_workflow_uses_a_portable_comment_file(tmp):
@@ -557,7 +574,7 @@ def test_workflow_does_not_close_when_the_comment_fails(tmp):
 
 def main():
     return _util.runner(
-        _util.collect(globals()), tmp_prefix='prclaim_')
+        _util.collect(globals()), tmp_prefix='prgate_')
 
 
 if __name__ == '__main__':

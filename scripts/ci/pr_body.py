@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Find claimed issue references in a pull-request body."""
+"""Parse the pull-request body for repository admission checks."""
 import re
 import sys
 

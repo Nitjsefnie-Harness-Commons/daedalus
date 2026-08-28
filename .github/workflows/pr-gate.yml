@@ -1,4 +1,4 @@
-name: pr claim
+name: pr gate
 
 # `pull_request_target` is required because a fork's `pull_request` token is
 # read-only, so its comment and close would silently do nothing. This trigger
@@ -20,11 +20,11 @@ concurrency:
   # Opposite `claim.yml`: racing claims are two people who each need an
   # answer, while quick edits are two answers to one question and only the
   # newest body matters.
-  group: pr-claim-${{ github.event.pull_request.number }}
+  group: pr-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  claim:
+  gate:
     # An edit also fires on a closed pull request. Leave maintainer-closed
     # work alone, and do not spend a runner deciding that a bot is exempt.
     # This workflow never reopens anything.
@@ -40,7 +40,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Require a claimed issue
+      - name: Validate pull request body
         # The body is contributor-controlled. Expressions stay in `env:` and
         # are never interpolated into the shell that consumes it.
         env:
@@ -53,7 +53,7 @@ jobs:
           set -euo pipefail
 
           numbers="$(printf '%s' "$BODY" \
-            | python3 scripts/ci/pr_claim.py \
+            | python3 scripts/ci/pr_body.py \
             | tr -d '\r')"
           # The parser emits only digits and newlines; deliberate splitting
           # makes the complete list countable before any lookup.

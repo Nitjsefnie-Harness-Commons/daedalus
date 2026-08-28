@@ -68,7 +68,7 @@
 !/.github/workflows/claim.yml
 !/.github/workflows/codeql.yml
 !/.github/workflows/coverage-comment.yml
-!/.github/workflows/pr-claim.yml
+!/.github/workflows/pr-gate.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
 !/.github/workflows/speed.yml
@@ -194,7 +194,7 @@
 !/scripts/ci/diff_coverage.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
-!/scripts/ci/pr_claim.py
+!/scripts/ci/pr_body.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/time_tests.py
@@ -290,7 +290,7 @@
 !/tests/test_mcp_transport_guards.py
 !/tests/test_overlap_harness.py
 !/tests/test_path_safety.py
-!/tests/test_pr_claim.py
+!/tests/test_pr_gate.py
 !/tests/test_real_browser_eval.py
 !/tests/test_release_scan.py
 !/tests/test_repo_layout.py
