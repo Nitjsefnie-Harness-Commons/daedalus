@@ -211,11 +211,12 @@ def _browser_version(browser):
 
 
 def _raise_start_failure(label, executable, why):
-    # Most exec refusals describe the machine or binary. E2BIG instead
-    # describes the argument vector this harness built, so hiding it as an
-    # unavailable environment would excuse a repository-owned command defect.
-    if (why.errno == errno.E2BIG
-            or getattr(why, 'winerror', None) == WINDOWS_COMMAND_TOO_LONG):
+    # E2BIG's limit is shared by argv and the inherited environment. Our
+    # commands are fixed and small, so it says the machine's process-start
+    # budget was spent, not that the argument vector we built was too large.
+    if (why.errno != errno.E2BIG
+            and getattr(why, 'winerror', None)
+            == WINDOWS_COMMAND_TOO_LONG):
         raise AssertionError(
             f'{label} command was too large to start: {executable}') from why
     raise BrowserEnvironmentSkipped(
