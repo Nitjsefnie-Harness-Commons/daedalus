@@ -220,6 +220,7 @@
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py
 !/tests/_cmdqueue.py
+!/tests/_cmdqueue_faults.py
 !/tests/_control_writes.py
 !/tests/_coverage_comment_steps.py
 !/tests/_coverage_guard.py
