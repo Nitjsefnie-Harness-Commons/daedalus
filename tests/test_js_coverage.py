@@ -493,7 +493,8 @@ def test_real_node_dump_reports_executed_and_skipped_lines(tmp):
 
     completed = subprocess.run(
         [node, str(root / 'extension' / 'real.js')], cwd=str(root),
-        env=env, capture_output=True, text=True, timeout=30)
+        env=_util.child_coverage('scrub', env), capture_output=True,
+        text=True, timeout=30)
     assert completed.returncode == 0, (completed.stdout, completed.stderr)
     assert list(dumps.glob('coverage-*.json')), 'node wrote no coverage dump'
 
@@ -524,7 +525,8 @@ def test_real_node_dump_preserves_crlf_offsets(tmp):
     env['NODE_V8_COVERAGE'] = str(dumps)
 
     completed = subprocess.run(
-        [node, str(script)], cwd=str(root), env=env,
+        [node, str(script)], cwd=str(root),
+        env=_util.child_coverage('scrub', env),
         capture_output=True, text=True, timeout=30)
     assert completed.returncode == 0, (completed.stdout, completed.stderr)
 

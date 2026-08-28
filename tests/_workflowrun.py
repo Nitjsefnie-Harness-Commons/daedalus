@@ -30,10 +30,10 @@ def run_step(workdir, step, env, *, workflow=None, job=None):
         raise FileNotFoundError(
             f'workflow shell executable not found on PATH: {program}')
     command[0] = executable
-    child_env = _util.coverage_free_environment(_effective_environment(
-        workdir, workflow, job, step, env))
     return subprocess.run(
-        command, cwd=workdir, env=child_env,
+        command, cwd=workdir,
+        env=_util.child_coverage('scrub', _effective_environment(
+            workdir, workflow, job, step, env)),
         capture_output=True, text=True, timeout=60)
 
 

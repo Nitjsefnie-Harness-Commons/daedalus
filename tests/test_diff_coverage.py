@@ -6,7 +6,6 @@ these pin the two ways it could lie. Counting a blank line or a comment as
 missed would make the percentage depend on formatting; counting a file the
 report never measured would make it depend on which extras a runner resolved.
 """
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +18,7 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 import diff_coverage  # noqa: E402
 
 _SCRIPT = ROOT / 'scripts' / 'ci' / 'diff_coverage.py'
-_COVERAGE_ENV = _util.coverage_free_environment(os.environ)
+_COVERAGE_ENV = _util.child_coverage('scrub')
 
 _COVERAGE_XML = """<?xml version="1.0" ?>
 <coverage>
@@ -247,7 +246,7 @@ def test_real_workflow_diffs_binary_attributed_python_as_text(tmp):
     (repo / '.gitattributes').write_text(attributes, encoding='utf-8')
 
     done = subprocess.run(
-        command[:-2], cwd=repo,
+        command[:-2], cwd=repo, env=_COVERAGE_ENV,
         capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.stdout, done.stderr)
     patch = done.stdout
@@ -434,7 +433,7 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        cwd=tmp, capture_output=True, text=True, timeout=60)
+        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert '**33.3%** of added lines covered (1/3).' in done.stdout, (
         done.stdout)
@@ -467,7 +466,7 @@ def test_the_cli_reports_wholly_uncovered_numeric_lines(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        cwd=tmp, capture_output=True, text=True, timeout=60)
+        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (
         done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
@@ -494,7 +493,7 @@ def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        cwd=tmp, capture_output=True, text=True, timeout=60)
+        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
     assert done.stdout == _HALF_COVERED_OUTPUT, done.stdout
@@ -520,7 +519,7 @@ def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        cwd=tmp, capture_output=True, text=True, timeout=60)
+        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
     assert done.stdout == _HALF_COVERED_OUTPUT, done.stdout
@@ -549,7 +548,7 @@ def test_the_cli_names_an_unmeasured_uppercase_python_file(tmp):
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
-        cwd=tmp, capture_output=True, text=True, timeout=60)
+        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert done.stderr == '', done.stderr
     assert done.stdout == _UPPERCASE_UNMEASURED_OUTPUT, done.stdout

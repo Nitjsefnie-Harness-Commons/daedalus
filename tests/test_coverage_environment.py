@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Keep temporary-tree subprocesses out of Python coverage data."""
+"""Every test subprocess either runs provably safe or declares its env.
+
+A Python child that inherits COVERAGE_* into a working directory that
+[tool.coverage.paths] does not map back onto the repository records
+coverage against paths that vanish with the temporary tree, and a later
+`coverage combine` fails with `No source for code`. This guard fails
+CLOSED: it proves each launch safe, and a launch it cannot prove safe is
+a violation, so a spelling it does not understand can never slip past.
+"""
 import ast
 import os
 import subprocess
@@ -11,313 +19,495 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-_HELPER = 'coverage_free_environment'
-_ROOT_CWDS = frozenset({
-    'ROOT',
-    '_util.ROOT',
-    'str(ROOT)',
-    'str(_util.ROOT)',
-    'behaviour.ROOT',
+_DECLARATION = 'child_coverage'
+_NON_PYTHON_BASENAMES = frozenset({
+    'node', 'git', 'bash', 'sh', 'zsh', 'cmd', 'pwsh',
 })
-# `_run_checker` receives the `copy_root` built under the `*/tree` anchor.
-_MAPPED_PATH_NAMES = frozenset({'copy_root'})
-_ROOT = 'root'
-_MAPPED = 'mapped'
-_TEMP = 'temporary'
-_UNKNOWN = 'unknown'
-_PYTHON = 'python'
-_NODE = 'node'
-_GIT = 'git'
-_SHELL = 'shell'
-_UNKNOWN_COMMAND = 'unknown-command'
+_MUTATING_METHODS = frozenset({
+    'clear', 'pop', 'popitem', 'setdefault', 'update',
+})
+_ROOT_SPELLINGS = frozenset({
+    'ROOT', 'str(ROOT)', '_util.ROOT', 'str(_util.ROOT)',
+    'behaviour.ROOT', 'str(behaviour.ROOT)',
+})
 
-# Static analysis cannot resolve arbitrary values passed through getattr(),
-# eval(), or a command assembled by another module. Such wrappers must keep
-# using coverage_free_environment themselves; this guard only claims the
-# direct subprocess shapes it can prove.
-_STATIC_ANALYSIS_LIMITATION = (
-    'unresolved dynamic subprocess wrappers and command values are manual')
-
-
-class _State:
-    """Facts that remain useful while visiting one module or function."""
-
-    def __init__(self):
-        self.callables = {}
-        self.commands = {}
-        self.paths = {}
-        self.repo_paths = set()
-        self.subprocess_modules = {'subprocess'}
-        self.helper_modules = {'_util'}
-        self.helper_functions = {_HELPER}
-        self.safe_envs = set()
-        self.tainted_envs = set()
-        self.cwd = _ROOT
-
-    def child(self):
-        result = _State()
-        result.callables = dict(self.callables)
-        result.commands = dict(self.commands)
-        result.paths = dict(self.paths)
-        result.repo_paths = set(self.repo_paths)
-        result.subprocess_modules = set(self.subprocess_modules)
-        result.helper_modules = set(self.helper_modules)
-        result.helper_functions = set(self.helper_functions)
-        result.safe_envs = set(self.safe_envs)
-        result.tainted_envs = set(self.tainted_envs)
-        return result
+# The launches that declare 'keep', as module::function so an unrelated
+# edit above a site does not churn the list. A keep site with no entry
+# fails, and an entry with no keep site fails. Every tree below sits
+# under the `*/tree` anchor that [tool.coverage.paths] maps back onto
+# the repository (see pyproject.toml).
+_KEEP_ALLOWLIST = frozenset({
+    # The fixture hands the child a synthetic COVERAGE_PROCESS_START and
+    # asserts it arrives; a scrub would strip the very variable under test.
+    'tests/test_coverage_suites.py::_coverage_tree',
+    # run_tests.py is measured where it stands in the copied tree;
+    # scrubbing would report the file every one of those tests drives at 0%.
+    'tests/test_suite_runner.py::_runner_tree',
+    # The copied checker runs from the mapped copy so its lines count.
+    'tests/test_version_contract.py::_run_checker',
+    # Same mapped copy: drift detection is the checker's main path.
+    'tests/test_version_contract.py::test_check_versions_detects_drift',
+    # Same mapped copy: site completeness is asserted from its output.
+    'tests/test_version_contract.py::'
+    'test_check_versions_sites_all_present_in_copy',
+})
 
 
-def _binding_names(target):
-    if isinstance(target, ast.Name):
-        return {target.id}
-    if isinstance(target, (ast.List, ast.Tuple)):
-        return set().union(*(_binding_names(item) for item in target.elts))
-    return set()
+def _is_root_spelling(node):
+    """Whether an expression provably names the repository root."""
+    if ast.unparse(node) in _ROOT_SPELLINGS:
+        return True
+    if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
+            and isinstance(node.right, ast.Constant)
+            and isinstance(node.right.value, str)):
+        return _is_root_spelling(node.left)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'str' and len(node.args) == 1
+            and not node.keywords):
+        return _is_root_spelling(node.args[0])
+    return False
 
 
-def _is_helper_call(node, state):
-    if not isinstance(node, ast.Call):
+class _ModuleFacts:
+    """The syntactic facts one module's launches are judged against."""
+
+    def __init__(self, tree):
+        self.subprocess_modules = set()
+        self.launch_callables = set()
+        self.declaration_modules = set()
+        self.declaration_functions = set()
+        self.module_bindings = {}
+        self.chdir_calls = []
+        self._collect(tree)
+
+    def _collect(self, tree):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == 'subprocess':
+                        self.subprocess_modules.add(
+                            alias.asname or alias.name)
+                    if alias.name == '_util':
+                        self.declaration_modules.add(
+                            alias.asname or alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    if (node.module == 'subprocess'
+                            and alias.name in {'run', 'Popen'}):
+                        self.launch_callables.add(bound)
+                    if (node.module == '_util'
+                            and alias.name == _DECLARATION):
+                        self.declaration_functions.add(bound)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                if _is_launch_alias(node, self.subprocess_modules):
+                    self.launch_callables.add(node.targets[0].id)
+            elif isinstance(node, ast.Call):
+                function = node.func
+                if (isinstance(function, ast.Attribute)
+                        and function.attr == 'chdir'
+                        and isinstance(function.value, ast.Name)
+                        and function.value.id == 'os'):
+                    is_root = (bool(node.args)
+                               and _is_root_spelling(node.args[0]))
+                    self.chdir_calls.append((node.lineno, is_root))
+        self._collect_bindings(tree.body)
+
+    def _collect_bindings(self, statements):
+        for node in statements:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                continue
+            targets, value = [], None
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets, value = [node.target], node.value
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    self.module_bindings.setdefault(
+                        target.id, []).append((node.lineno, value))
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.stmt):
+                    self._collect_bindings([child])
+
+    def declaration_mode(self, node):
+        """The mode when `node` is a direct child_coverage(mode) call."""
+        if not isinstance(node, ast.Call) or not node.args:
+            return None
+        function = node.func
+        if isinstance(function, ast.Name):
+            if function.id not in self.declaration_functions:
+                return None
+        elif not (isinstance(function, ast.Attribute)
+                  and function.attr == _DECLARATION
+                  and isinstance(function.value, ast.Name)
+                  and function.value.id in self.declaration_modules):
+            return None
+        mode = node.args[0]
+        if (isinstance(mode, ast.Constant)
+                and mode.value in {'scrub', 'keep'}):
+            return mode.value
+        return 'invalid'
+
+
+def _is_launch_alias(node, subprocess_modules):
+    """Whether an Assign binds a plain name to subprocess.run/Popen."""
+    if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
         return False
-    function = node.func
-    if isinstance(function, ast.Name):
-        return function.id in state.helper_functions
-    return (isinstance(function, ast.Attribute)
-            and function.attr == _HELPER
-            and isinstance(function.value, ast.Name)
-            and function.value.id in state.helper_modules)
+    value = node.value
+    return (isinstance(value, ast.Attribute)
+            and value.attr in {'run', 'Popen'}
+            and isinstance(value.value, ast.Name)
+            and value.value.id in subprocess_modules)
 
 
-def _is_root_path(node):
-    """Whether an expression names the repository root explicitly."""
-    if ast.unparse(node) in _ROOT_CWDS:
-        return True
-    return (isinstance(node, ast.Attribute)
-            and node.attr == 'ROOT'
-            and isinstance(node.value, ast.Name)
-            and node.value.id in {'_util', 'behaviour'})
-
-
-def _combine_paths(*kinds):
-    if _UNKNOWN in kinds:
-        if _ROOT in kinds:
-            return _ROOT
-        return _UNKNOWN
-    if _MAPPED in kinds:
-        return _MAPPED
-    if _TEMP in kinds:
-        return _TEMP
-    return _ROOT
-
-
-def _path_kind(node, state):
-    """Classify a cwd expression against the configured coverage paths."""
-    if _is_root_path(node):
-        return _ROOT
-    if isinstance(node, ast.Name):
-        if node.id in _MAPPED_PATH_NAMES:
-            return _MAPPED
-        if node.id in state.paths:
-            return state.paths[node.id]
-        return _TEMP
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        if node.value in {'', '.'}:
-            return _ROOT
-        components = node.value.replace('\\', '/').split('/')
-        if 'tree' in components:
-            return _MAPPED
-        if node.value.startswith('/tmp/') or node.value == '/tmp':
-            return _TEMP
-        return _UNKNOWN
-    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
-        return _combine_paths(
-            _path_kind(node.left, state), _path_kind(node.right, state))
-    if isinstance(node, ast.JoinedStr):
-        return _UNKNOWN
-    if isinstance(node, ast.Call):
-        function = node.func
-        if (isinstance(function, ast.Name) and function.id == 'str'
-                and node.args):
-            return _path_kind(node.args[0], state)
-        if (isinstance(function, ast.Attribute)
-                and function.attr in {'resolve', 'absolute'}):
-            return _path_kind(function.value, state)
-        if (isinstance(function, ast.Attribute)
-                and function.attr == 'getcwd'):
-            return state.cwd
-        if (isinstance(function, ast.Attribute)
-                and function.attr == 'join'):
-            return _combine_paths(*(_path_kind(arg, state)
-                                    for arg in node.args))
-        if isinstance(function, ast.Name) and function.id == 'Path':
-            return (_path_kind(node.args[0], state)
-                    if node.args else _TEMP)
-        if isinstance(function, ast.Name) and function.id in {
-                'TemporaryDirectory', 'mkdtemp'}:
-            return _TEMP
-    return _UNKNOWN
-
-
-def _is_repo_expression(node, state):
-    """Whether an expression resolves to a source file in this checkout."""
-    if _is_root_path(node):
-        return True
-    if isinstance(node, ast.Name):
-        return node.id in state.repo_paths
-    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
-        return _is_repo_expression(node.left, state)
-    if isinstance(node, ast.Call):
-        function = node.func
-        if (isinstance(function, ast.Name) and function.id == 'str'
-                and node.args):
-            return _is_repo_expression(node.args[0], state)
-        if (isinstance(function, ast.Attribute)
-                and function.attr in {'resolve', 'absolute'}):
-            return _is_repo_expression(function.value, state)
-    return False
-
-
-def _executable_kind(node, state):
-    """Classify the first command word, conservatively for unknown names."""
-    if isinstance(node, ast.Name):
-        if node.id in state.commands:
-            return state.commands[node.id]
-        if node.id in {'node', 'node_path'}:
-            return _NODE
-        if node.id in {'git', 'git_path'}:
-            return _GIT
-        if node.id in {'bash', 'sh', 'zsh', 'shell'}:
-            return _SHELL
-        return _UNKNOWN_COMMAND
-    if isinstance(node, ast.Attribute):
-        if (isinstance(node.value, ast.Name)
-                and node.value.id == 'sys'
-                and node.attr == 'executable'):
-            return _PYTHON
-        return _PYTHON
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        name = node.value.replace('\\', '/').rsplit('/', 1)[-1].lower()
-        if name == 'node' or name.startswith('node.'):
-            return _NODE
-        if name == 'git' or name.startswith('git.'):
-            return _GIT
-        if name in {'bash', 'sh', 'zsh', 'cmd', 'pwsh'}:
-            return _SHELL
-        if name == 'python' or name.startswith('python3') \
-                or name.startswith('python2') or name == 'py.exe':
-            return _PYTHON
-        return _PYTHON
-    if isinstance(node, ast.Call):
-        function = node.func
-        if (isinstance(function, ast.Attribute)
-                and function.attr == 'which' and node.args):
-            return _executable_kind(node.args[0], state)
-    return _UNKNOWN_COMMAND
-
-
-def _command_kind(node, state):
-    if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
-        return _executable_kind(node.elts[0], state)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _command_kind(node.left, state)
-    if isinstance(node, ast.Subscript):
-        return _command_kind(node.value, state)
-    if isinstance(node, ast.Name) and node.id in state.commands:
-        return state.commands[node.id]
-    return _UNKNOWN_COMMAND
-
-
-def _command_script_is_repo(node, state):
-    if isinstance(node, (ast.List, ast.Tuple)) and len(node.elts) > 1:
-        return _is_repo_expression(node.elts[1], state)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _command_script_is_repo(node.left, state)
-    if isinstance(node, ast.Subscript):
-        return _command_script_is_repo(node.value, state)
-    return False
-
-
-def _subprocess_method(node, state):
+def _launch_method(node, facts):
+    """'run' or 'Popen' when `node` launches through subprocess."""
     function = node.func
     if (isinstance(function, ast.Attribute)
-            and function.attr in {'run', 'Popen'}):
-        if (isinstance(function.value, ast.Name)
-                and function.value.id in state.subprocess_modules):
-            return function.attr
-    if isinstance(function, ast.Name):
-        return state.callables.get(function.id)
+            and function.attr in {'run', 'Popen'}
+            and isinstance(function.value, ast.Name)
+            and function.value.id in facts.subprocess_modules):
+        return function.attr
+    if (isinstance(function, ast.Name)
+            and function.id in facts.launch_callables):
+        return function.id
     return None
 
 
-def _callable_binding(node, state):
-    if isinstance(node, ast.Attribute):
-        if (isinstance(node.value, ast.Name)
-                and node.value.id in state.subprocess_modules
-                and node.attr in {'run', 'Popen'}):
-            return node.attr
-    if isinstance(node, ast.Name):
-        return state.callables.get(node.id)
+def _first_command_literal(node):
+    """The first command word when it is a plain string literal."""
+    if not node.args:
+        return None
+    command = node.args[0]
+    while True:
+        if isinstance(command, (ast.List, ast.Tuple)) and command.elts:
+            command = command.elts[0]
+        elif (isinstance(command, ast.BinOp)
+              and isinstance(command.op, ast.Add)):
+            command = command.left
+        elif isinstance(command, ast.Subscript):
+            command = command.value
+        else:
+            break
+    if isinstance(command, ast.Constant) and isinstance(command.value, str):
+        return command.value
     return None
 
 
-def _cwd_expression(node):
-    """Return (cwd expression, explicit) including literal ``**`` mappings."""
+def _runs_no_python(node):
+    """A literal node/git/shell launch runs no Python and is exempt."""
+    first = _first_command_literal(node)
+    if first is None:
+        return False
+    basename = first.replace('\\', '/').rsplit('/', 1)[-1].lower()
+    return basename in _NON_PYTHON_BASENAMES
+
+
+def _unresolved_cwd(node, facts):
+    """Why the launch's working directory is not provably safe, or None."""
+    spread = False
     for keyword in node.keywords:
         if keyword.arg == 'cwd':
-            return keyword.value, True
-        if keyword.arg is None and isinstance(keyword.value, ast.Dict):
-            for key, value in zip(keyword.value.keys, keyword.value.values):
-                if (isinstance(key, ast.Constant) and key.value == 'cwd'):
-                    return value, True
-    return None, False
+            if _is_root_spelling(keyword.value):
+                return None
+            return f'cwd={ast.unparse(keyword.value)}'
+        if keyword.arg is None:
+            spread = True
+    if spread:
+        return 'cwd may arrive through a ** spread'
+    earlier = [line for line, is_root in facts.chdir_calls
+               if not is_root and line < node.lineno]
+    if earlier:
+        return f'os.chdir at line {earlier[0]} may have moved the cwd'
+    return None
 
 
-def _is_coverage_key(node):
-    return (isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and node.value.startswith('COVERAGE_'))
+def _assignment_target_lines(tree, name):
+    """Every line where `name` itself is an assignment target."""
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                lines.append(node.lineno)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                for part in ast.walk(target):
+                    if isinstance(part, ast.Name) and part.id == name:
+                        lines.append(node.lineno)
+    return lines
 
 
-def _mutation_taints_environment(node, state):
-    """Mark helper-derived env names unsafe when a coverage key can return."""
-    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
-        name = node.value.id
-        if name not in state.safe_envs:
-            return
-        key = node.slice
-        if _is_coverage_key(key) or not isinstance(key, ast.Constant):
-            state.tainted_envs.add(name)
-    elif isinstance(node, ast.Name):
-        state.safe_envs.discard(node.id)
-        state.tainted_envs.discard(node.id)
+def _mutation_lines(tree, name):
+    """Every line where `name` is mutated rather than plainly rebound."""
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = (node.targets if isinstance(node, ast.Assign)
+                       else [node.target])
+            for target in targets:
+                for part in ast.walk(target):
+                    if (isinstance(part, ast.Subscript)
+                            and isinstance(part.value, ast.Name)
+                            and part.value.id == name):
+                        lines.append(node.lineno)
+        elif isinstance(node, (ast.AugAssign, ast.Delete)):
+            targets = ([node.target] if isinstance(node, ast.AugAssign)
+                       else node.targets)
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    lines.append(node.lineno)
+                elif (isinstance(target, ast.Subscript)
+                      and isinstance(target.value, ast.Name)
+                      and target.value.id == name):
+                    lines.append(node.lineno)
+        elif (isinstance(node, ast.Call)
+              and isinstance(node.func, ast.Attribute)
+              and node.func.attr in _MUTATING_METHODS
+              and isinstance(node.func.value, ast.Name)
+              and node.func.value.id == name):
+            lines.append(node.lineno)
+    return lines
 
 
-def _env_is_safe(node, state):
-    return (_is_helper_call(node, state)
-            or (isinstance(node, ast.Name)
-                and node.id in state.safe_envs
-                and node.id not in state.tainted_envs))
+def _bare_name_problem(name, facts, tree):
+    """Why a bare env= name is no declaration, or None when it is one."""
+    bindings = facts.module_bindings.get(name, [])
+    if len(bindings) != 1:
+        return (f'env={name} has {len(bindings)} module-level bindings, '
+                'not exactly one')
+    target_lines = _assignment_target_lines(tree, name)
+    if len(target_lines) != 1:
+        return (f'env={name} is an assignment target at lines '
+                f'{target_lines}')
+    mutations = _mutation_lines(tree, name)
+    if mutations:
+        return f'env={name} is mutated at line {mutations[0]}'
+    if facts.declaration_mode(bindings[0][1]) not in {'scrub', 'keep'}:
+        return f'env={name} is not bound to {_DECLARATION}(...)'
+    return None
+
+
+def _declaration(node, facts, tree):
+    """(problem, mode) for the launch's env= keyword."""
+    env = None
+    for keyword in node.keywords:
+        if keyword.arg == 'env':
+            env = keyword.value
+    if env is None:
+        return 'declares no env=', None
+    mode = facts.declaration_mode(env)
+    if mode == 'invalid':
+        return "env= mode must be the literal 'scrub' or 'keep'", None
+    if mode is not None:
+        return None, mode
+    if not isinstance(env, ast.Name):
+        return (f'env={ast.unparse(env)} is not {_DECLARATION}(...) or a '
+                'name bound once to it', None)
+    problem = _bare_name_problem(env.id, facts, tree)
+    if problem is not None:
+        return problem, None
+    return None, facts.declaration_mode(facts.module_bindings[env.id][0][1])
+
+
+def _check_launch(node, method, relative, function, facts, tree, keeps,
+                  violations):
+    why = _unresolved_cwd(node, facts)
+    if why is None or _runs_no_python(node):
+        return
+    problem, mode = _declaration(node, facts, tree)
+    if problem is not None:
+        violations.append(
+            f'{relative}:{node.lineno}: subprocess.{method} {why} {problem}')
+    elif mode == 'keep':
+        keeps.append((relative, function))
+
+
+def _visit(node, relative, function, facts, tree, keeps, violations):
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _visit(child, relative, child.name, facts, tree, keeps,
+                   violations)
+            continue
+        if isinstance(child, ast.Call):
+            method = _launch_method(child, facts)
+            if method is not None:
+                _check_launch(child, method, relative, function, facts,
+                              tree, keeps, violations)
+        _visit(child, relative, function, facts, tree, keeps, violations)
+
+
+def _analyze(relative, source, keeps):
+    tree = ast.parse(source, filename=relative)
+    facts = _ModuleFacts(tree)
+    violations = []
+    _visit(tree, relative, '<module>', facts, tree, keeps, violations)
+    return violations
+
+
+def _keep_site(module, function):
+    return f'{module}::{function}'
+
+
+def _unlisted_keeps(keeps):
+    return [
+        f'{_keep_site(module, function)} declares keep without an '
+        'allowlist entry'
+        for module, function in keeps
+        if _keep_site(module, function) not in _KEEP_ALLOWLIST
+    ]
 
 
 def _synthetic_violations(source):
     """Run the guard over one source string for mutation-shaped cases."""
-    return _analyze_source('tests/synthetic.py', source)
+    keeps = []
+    violations = _analyze('tests/synthetic.py', source, keeps)
+    return violations + _unlisted_keeps(keeps)
 
 
-def test_guard_catches_alias_and_expanded_cwd(tmp):
-    """Aliases and ``**{'cwd': ...}`` cannot bypass the guard."""
+def _coverage_environment_violations():
+    violations = []
+    keeps = []
+    for path in sorted((ROOT / 'tests').glob('*.py')):
+        relative = path.relative_to(ROOT).as_posix()
+        violations.extend(_analyze(
+            relative, path.read_text(encoding='utf-8'), keeps))
+    violations.extend(_unlisted_keeps(keeps))
+    declared = {_keep_site(module, function) for module, function in keeps}
+    for entry in sorted(_KEEP_ALLOWLIST - declared):
+        violations.append(f'allowlisted keep site {entry} has no launch')
+    return violations
+
+
+def test_a_launch_with_a_provable_cwd_is_safe(tmp):
+    """Root spellings and an inherited root cwd need no declaration."""
+    del tmp
+    assert _synthetic_violations(
+        """import os
+import subprocess
+subprocess.run(['python3', 'child.py'])
+subprocess.run(['python3', 'a.py'], cwd=ROOT)
+subprocess.run(['python3', 'b.py'], cwd=str(ROOT))
+subprocess.run(['python3', 'c.py'], cwd=_util.ROOT)
+subprocess.run(['python3', 'd.py'], cwd=str(_util.ROOT))
+subprocess.run(['python3', 'e.py'], cwd=behaviour.ROOT)
+subprocess.run(['python3', 'f.py'], cwd=str(behaviour.ROOT))
+subprocess.run(['python3', 'g.py'], cwd=ROOT / 'fixtures')
+subprocess.run(['python3', 'h.py'], cwd=str(ROOT / 'fixtures'))
+subprocess.run(['python3', 'i.py'], cwd=ROOT / 'a' / 'b')
+os.chdir(ROOT)
+subprocess.run(['python3', 'j.py'])
+""") == []
+
+
+def test_a_literal_non_python_launch_is_safe(tmp):
+    """A string-literal node/git/shell first element runs no Python."""
+    del tmp
+    assert _synthetic_violations(
+        """import subprocess
+subprocess.run(['node', 'child.js'], cwd=tmp)
+subprocess.run(['git', 'status'], cwd=tmp)
+subprocess.run(['bash', '-c', 'true'], cwd=tmp)
+subprocess.run(['sh', 'script.sh'], cwd=tmp)
+subprocess.run(['zsh', 'script.sh'], cwd=tmp)
+subprocess.run(['cmd', '/c', 'ver'], cwd=tmp)
+subprocess.run(['pwsh', 'script.ps1'], cwd=tmp)
+""") == []
+
+
+def test_a_non_literal_first_element_is_treated_as_python(tmp):
+    """A name, attribute or call first element is Python to the guard."""
+    del tmp
+    for argv in ('node', "shutil.which('bash')"):
+        violations = _synthetic_violations(
+            f"""import subprocess
+subprocess.run([{argv}, 'x'], cwd=tmp)
+""")
+        assert len(violations) == 1, violations
+        assert 'tests/synthetic.py:2' in violations[0], violations
+
+
+def test_a_declaration_makes_an_unresolved_cwd_safe(tmp):
+    """Direct, imported and once-bound child_coverage calls declare."""
+    del tmp
+    assert _synthetic_violations(
+        """import subprocess
+import _util
+from _util import child_coverage
+_ENV = _util.child_coverage('scrub')
+subprocess.run(['python3', 'a.py'], cwd=tmp,
+               env=_util.child_coverage('scrub'))
+subprocess.run(['python3', 'b.py'], cwd=tmp, env=child_coverage('scrub'))
+def run():
+    subprocess.run(['python3', 'c.py'], cwd=tmp, env=_ENV)
+""") == []
+
+
+def test_an_unresolved_cwd_without_env_is_a_violation(tmp):
+    """An unresolved cwd with no env= names the file and line."""
     del tmp
     violations = _synthetic_violations(
         """import subprocess
-runner = subprocess.run
-runner(['python3', 'child.py'], **{'cwd': tmp})
+subprocess.run(['python3', 'child.py'], cwd=tmp)
+""")
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:2' in violations[0], violations
+    assert 'declares no env=' in violations[0], violations
+
+
+def test_an_env_built_from_os_environ_is_a_violation(tmp):
+    """Only a child_coverage call declares; a dict copy does not."""
+    del tmp
+    violations = _synthetic_violations(
+        """import os
+import subprocess
+subprocess.run(['python3', 'child.py'], cwd=tmp, env=dict(os.environ))
 """)
     assert len(violations) == 1, violations
     assert 'tests/synthetic.py:3' in violations[0], violations
 
 
-def test_guard_catches_inherited_temporary_cwd(tmp):
-    """A cwd changed with ``os.chdir`` applies to later child launches."""
+def test_a_function_local_declaration_name_is_a_violation(tmp):
+    """A bare env= name must be bound at module level, not in a function."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+import _util
+def run():
+    env = _util.child_coverage('scrub')
+    subprocess.run(['python3', 'child.py'], cwd=tmp, env=env)
+""")
+    assert len(violations) == 1, violations
+    assert '0 module-level bindings' in violations[0], violations
+
+
+def test_a_mutated_declaration_name_is_a_violation(tmp):
+    """Subscript writes, mutating methods and del break the binding."""
+    del tmp
+    for mutation in ("env['COVERAGE_PROCESS_START'] = 'x'",
+                     'env.update({})',
+                     'del env'):
+        violations = _synthetic_violations(
+            f"""import subprocess
+import _util
+env = _util.child_coverage('scrub')
+{mutation}
+subprocess.run(['python3', 'child.py'], cwd=tmp, env=env)
+""")
+        assert len(violations) == 1, (mutation, violations)
+        assert 'tests/synthetic.py:5' in violations[0], (mutation,
+                                                         violations)
+
+
+def test_an_earlier_non_root_chdir_taints_an_inherited_cwd(tmp):
+    """A launch without cwd= after os.chdir(tmp) must declare."""
     del tmp
     violations = _synthetic_violations(
         """import os
@@ -327,265 +517,154 @@ subprocess.run(['python3', 'child.py'])
 """)
     assert len(violations) == 1, violations
     assert 'tests/synthetic.py:4' in violations[0], violations
+    assert 'os.chdir' in violations[0], violations
 
 
-def test_guard_tracks_helper_environment_mutation(tmp):
-    """Restoring a coverage key after scrubbing makes the env unsafe."""
+def test_a_spread_of_any_kind_makes_the_cwd_unresolved(tmp):
+    """Even a literal dict spread is not resolved syntactically."""
     del tmp
     violations = _synthetic_violations(
         """import subprocess
-env = coverage_free_environment(os.environ)
-env['COVERAGE_PROCESS_START'] = 'pyproject.toml'
-subprocess.run(['python3', 'child.py'], cwd=tmp, env=env)
-""")
-    assert len(violations) == 1, violations
-    assert 'tests/synthetic.py:4' in violations[0], violations
-
-
-def test_guard_allows_mapped_and_non_python_launches(tmp):
-    """Mapped trees and Node/Git launches are outside this guard's class."""
-    del tmp
-    violations = _synthetic_violations(
-        """import subprocess
-subprocess.run(['python3', 'child.py'], cwd=Path(tmp) / 'tree')
-subprocess.run(['node', 'child.js'], cwd=tmp)
-subprocess.run(['git', 'status'], cwd=tmp)
-""")
-    assert violations == [], violations
-
-
-def test_guard_allows_a_real_repository_script_in_a_fixture_cwd(tmp):
-    """A real source path stays measurable even when fixtures are elsewhere."""
-    del tmp
-    violations = _synthetic_violations(
-        """import subprocess
-subprocess.run([sys.executable, str(ROOT / 'scripts' / 'ci' / 'tool.py')],
-               cwd=tmp)
-""")
-    assert violations == [], violations
-
-
-def test_guard_allows_a_repository_subdirectory_cwd(tmp):
-    """Repository subdirectories cannot leave source paths unmapped."""
-    del tmp
-    violations = _synthetic_violations(
-        """import subprocess
-subprocess.run(['python3', 'child.py'], cwd=ROOT / 'fixtures')
-""")
-    assert violations == [], violations
-
-
-def test_guard_requires_a_definite_tree_anchor(tmp):
-    """A conditional tree component may choose an unmapped directory."""
-    del tmp
-    violations = _synthetic_violations(
-        """import subprocess
-subprocess.run(['python3', 'child.py'],
-               cwd=Path(tmp) / ('tree' if use_tree else 'tracked'))
+subprocess.run(['python3', 'child.py'], **{'cwd': tmp})
 """)
     assert len(violations) == 1, violations
     assert 'tests/synthetic.py:2' in violations[0], violations
 
 
-def _bind_target(target, value, state):
-    if (isinstance(target, (ast.List, ast.Tuple))
-            and isinstance(value, (ast.List, ast.Tuple))):
-        for target_item, value_item in zip(target.elts, value.elts):
-            _bind_target(target_item, value_item, state)
-        return
-    names = _binding_names(target)
-    for name in names:
-        state.callables.pop(name, None)
-        state.commands.pop(name, None)
-        state.paths.pop(name, None)
-        state.repo_paths.discard(name)
-        state.safe_envs.discard(name)
-        state.tainted_envs.discard(name)
-    if len(names) != 1 or not isinstance(target, ast.Name):
-        return
-    name = target.id
-    if isinstance(value, ast.Name):
-        if value.id in state.callables:
-            state.callables[name] = state.callables[value.id]
-        if value.id in state.commands:
-            state.commands[name] = state.commands[value.id]
-        if value.id in state.paths:
-            state.paths[name] = state.paths[value.id]
-    method = _callable_binding(value, state)
-    if method is not None:
-        state.callables[name] = method
-    if _is_helper_call(value, state):
-        state.safe_envs.add(name)
-    path = _path_kind(value, state)
-    if path != _UNKNOWN:
-        state.paths[name] = path
-    if _is_repo_expression(value, state):
-        state.repo_paths.add(name)
+def test_a_keep_declaration_needs_an_allowlist_entry(tmp):
+    """A keep site the allowlist does not name is a violation."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+import _util
+subprocess.run(['python3', 'child.py'], cwd=tmp,
+               env=_util.child_coverage('keep'))
+""")
+    assert violations == [
+        'tests/synthetic.py::<module> declares keep without an allowlist '
+        'entry'], violations
 
 
-def _bind_command_target(target, iterable, state):
-    names = _binding_names(target)
-    if len(names) != 1 or not isinstance(target, ast.Name):
-        return
-    kinds = []
-    if isinstance(iterable, (ast.Tuple, ast.List)):
-        for item in iterable.elts:
-            kinds.append(_command_kind(item, state))
-    if kinds and all(kind == kinds[0] for kind in kinds):
-        state.commands[target.id] = kinds[0]
+def test_an_allowlist_entry_without_a_keep_site_fails(tmp):
+    """A stale entry is as much a failure as an unlisted site."""
+    del tmp
+    original = _KEEP_ALLOWLIST
+    globals()['_KEEP_ALLOWLIST'] = original | {'tests/synthetic.py::ghost'}
+    try:
+        violations = _coverage_environment_violations()
+    finally:
+        globals()['_KEEP_ALLOWLIST'] = original
+    assert ('allowlisted keep site tests/synthetic.py::ghost has no launch'
+            in violations), violations
 
 
-def _visit_call(node, state, relative, violations):
-    function = node.func
-    if (isinstance(function, ast.Attribute)
-            and function.attr == 'chdir'
-            and isinstance(function.value, ast.Name)
-            and function.value.id == 'os' and node.args):
-        state.cwd = _path_kind(node.args[0], state)
-        return
-    if (isinstance(function, ast.Attribute)
-            and isinstance(function.value, ast.Name)
-            and function.value.id in state.safe_envs
-            and function.attr in {
-                'clear', 'pop', 'popitem', 'setdefault', 'update'}):
-        state.tainted_envs.add(function.value.id)
-    method = _subprocess_method(node, state)
-    if method is None or not node.args:
-        return
-    command = _command_kind(node.args[0], state)
-    if command in {_NODE, _GIT, _UNKNOWN_COMMAND}:
-        return
-    cwd, explicit = _cwd_expression(node)
-    cwd_kind = (_path_kind(cwd, state) if explicit else state.cwd)
-    if cwd_kind in {_ROOT, _MAPPED}:
-        return
-    if command == _PYTHON and _command_script_is_repo(node.args[0], state):
-        return
-    env = next((keyword.value for keyword in node.keywords
-                if keyword.arg == 'env'), None)
-    if env is None or not _env_is_safe(env, state):
-        shown_cwd = ast.unparse(cwd) if explicit else '<inherited>'
-        violations.append(
-            f'{relative}:{node.lineno}: subprocess.{method} '
-            f'cwd={shown_cwd} lacks env={_HELPER}(...)')
+def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
+    """Deleting env= from a real repo-script launch in tmp is caught."""
+    del tmp
+    target = ROOT / 'tests' / 'test_diff_coverage.py'
+    original = target.read_bytes()
+    needle = "'--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,"
+    text = original.decode('utf-8')
+    assert needle in text, 'the row 1 launch shape changed'
+    replacement = "'--diff', str(diff)], cwd=tmp,"
+    mutated = text.replace(needle, replacement, 1)
+    start = mutated.rindex('subprocess.run(', 0, mutated.index(replacement))
+    line = mutated[:start].count('\n') + 1
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations()
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
+    assert _coverage_environment_violations() == []
 
 
-def _visit_expr(node, state, relative, violations):
-    if isinstance(node, ast.Call):
-        _visit_call(node, state, relative, violations)
-    for child in ast.iter_child_nodes(node):
-        if isinstance(node, ast.Call) and child is node.func:
-            continue
-        _visit_expr(child, state, relative, violations)
+def test_row2_cwd_hidden_in_a_spread_name_is_caught(tmp):
+    """A **kwargs spread is an unresolved cwd, so it must declare."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+kwargs = {'cwd': tmp}
+subprocess.run(['python3', 'child.py'], **kwargs)
+""")
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:3' in violations[0], violations
 
 
-def _visit_statement(node, state, relative, violations):
-    if isinstance(node, ast.Import):
-        for alias in node.names:
-            if alias.name == 'subprocess':
-                state.subprocess_modules.add(alias.asname or 'subprocess')
-            if alias.name == '_util':
-                state.helper_modules.add(alias.asname or '_util')
-        return
-    if isinstance(node, ast.ImportFrom):
-        if node.module == 'subprocess':
-            for alias in node.names:
-                if alias.name in {'run', 'Popen'}:
-                    state.callables[alias.asname or alias.name] = alias.name
-        if node.module == '_util':
-            for alias in node.names:
-                if alias.name == _HELPER:
-                    state.helper_functions.add(alias.asname or alias.name)
-        return
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        _visit_block(node.body, state.child(), relative, violations)
-        return
-    if isinstance(node, ast.ClassDef):
-        _visit_block(node.body, state.child(), relative, violations)
-        return
-    if isinstance(node, ast.Assign):
-        _visit_expr(node.value, state, relative, violations)
-        for target in node.targets:
-            _mutation_taints_environment(target, state)
-            _bind_target(target, node.value, state)
-        return
-    if isinstance(node, ast.AnnAssign):
-        if node.value is not None:
-            _visit_expr(node.value, state, relative, violations)
-            _mutation_taints_environment(node.target, state)
-            _bind_target(node.target, node.value, state)
-        return
-    if isinstance(node, ast.NamedExpr):
-        _visit_expr(node.value, state, relative, violations)
-        _mutation_taints_environment(node.target, state)
-        _bind_target(node.target, node.value, state)
-        return
-    if isinstance(node, ast.AugAssign):
-        _visit_expr(node.value, state, relative, violations)
-        _mutation_taints_environment(node.target, state)
-        return
-    if isinstance(node, ast.Delete):
-        for target in node.targets:
-            _mutation_taints_environment(target, state)
-        return
-    if isinstance(node, ast.For):
-        _visit_expr(node.iter, state, relative, violations)
-        _bind_command_target(node.target, node.iter, state)
-        _visit_block(node.body, state, relative, violations)
-        _visit_block(node.orelse, state, relative, violations)
-        return
-    if isinstance(node, (ast.If, ast.While)):
-        _visit_expr(node.test, state, relative, violations)
-        _visit_block(node.body, state, relative, violations)
-        _visit_block(node.orelse, state, relative, violations)
-        return
-    if isinstance(node, ast.Try):
-        _visit_block(node.body, state, relative, violations)
-        for handler in node.handlers:
-            _visit_block(handler.body, state, relative, violations)
-        _visit_block(node.orelse, state, relative, violations)
-        _visit_block(node.finalbody, state, relative, violations)
-        return
-    if isinstance(node, (ast.With, ast.AsyncWith)):
-        for item in node.items:
-            _visit_expr(item.context_expr, state, relative, violations)
-            if item.optional_vars is not None:
-                _bind_target(item.optional_vars, item.context_expr, state)
-        _visit_block(node.body, state, relative, violations)
-        return
-    _visit_expr(node, state, relative, violations)
+def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
+    """A named argv is treated as Python: mutating a real launch fails."""
+    del tmp
+    target = ROOT / 'tests' / 'test_diff_coverage.py'
+    original = target.read_bytes()
+    needle = (
+        "    done = subprocess.run(\n"
+        "        [sys.executable, str(_SCRIPT), '--coverage', "
+        "str(coverage_xml),\n"
+        "         '--diff', str(diff)],\n"
+        "        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, "
+        "timeout=60)")
+    text = original.decode('utf-8')
+    assert needle in text, 'the row 3 launch shape changed'
+    mutated = text.replace(
+        needle,
+        "    command = [sys.executable, str(_SCRIPT), '--coverage',\n"
+        "               str(coverage_xml), '--diff', str(diff)]\n"
+        "    done = subprocess.run(command, cwd=tmp, capture_output=True,\n"
+        "                          text=True, timeout=60)", 1)
+    line = mutated[:mutated.index(
+        'subprocess.run(command, cwd=tmp,')].count('\n') + 1
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        violations = _coverage_environment_violations()
+        assert any(
+            v.startswith(f'tests/test_diff_coverage.py:{line}:')
+            for v in violations), violations
+    finally:
+        target.write_bytes(original)
+    assert _coverage_environment_violations() == []
 
 
-def _visit_block(nodes, state, relative, violations):
-    for node in nodes:
-        _visit_statement(node, state, relative, violations)
+def test_row4_a_declaration_that_never_executes_is_caught(tmp):
+    """Two syntactic bindings violate even when one is unreachable."""
+    del tmp
+    violations = _synthetic_violations(
+        """import os
+import subprocess
+child_env = dict(os.environ)
+if False:
+    child_env = coverage_free_environment(os.environ)
+subprocess.run(['python3', 'child.py'], cwd=tmp, env=child_env)
+""")
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:6' in violations[0], violations
 
 
-def _analyze_source(relative, source):
-    tree = ast.parse(source, filename=relative)
-    violations = []
-    _visit_block(tree.body, _State(), relative, violations)
-    return violations
-
-
-def _coverage_environment_violations():
-    violations = []
-    for path in sorted((ROOT / 'tests').glob('*.py')):
-        relative = path.relative_to(ROOT).as_posix()
-        violations.extend(_analyze_source(
-            relative, path.read_text(encoding='utf-8')))
-    return violations
-
-
-def test_every_non_root_subprocess_scrubs_coverage(tmp):
-    """A temporary-tree subprocess cannot inherit the coverage collector."""
+def test_every_launch_is_proven_safe_or_declares(tmp):
+    """The whole tests/ tree under the fail-closed decision procedure."""
     del tmp
     violations = _coverage_environment_violations()
     assert not violations, '\n'.join(violations)
 
 
-def test_coverage_free_environment_scrubs_a_real_child(tmp):
-    """The shared helper removes every COVERAGE_* name from a child."""
+def test_child_coverage_declares_scrub_and_keep(tmp):
+    """The helper scrubs, copies, and rejects any other mode."""
+    del tmp
+    environment = {'COVERAGE_PROCESS_START': 'x', 'PATH': '/bin'}
+    assert _util.child_coverage('scrub', environment) == {'PATH': '/bin'}
+    kept = _util.child_coverage('keep', environment)
+    assert kept == environment and kept is not environment
+    try:
+        _util.child_coverage('maybe')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("child_coverage accepted mode 'maybe'")
+
+
+def test_child_coverage_scrubs_a_real_child(tmp):
+    """The declared scrub removes every COVERAGE_* name from a child."""
     probe = Path(tmp) / 'coverage-env-probe.py'
     probe.write_text(
         'import json, os\n'
@@ -597,11 +676,9 @@ def test_coverage_free_environment_scrubs_a_real_child(tmp):
         'COVERAGE_PROCESS_START': 'synthetic-config',
         'COVERAGE_CONTEXT': 'coverage-environment-test',
     })
-    helper = getattr(_util, _HELPER, None)
-    assert callable(helper), f'_util.{_HELPER} is missing'
-    child_env = _util.coverage_free_environment(parent)
     result = subprocess.run(
-        [sys.executable, str(probe)], cwd=tmp, env=child_env,
+        [sys.executable, str(probe)], cwd=tmp,
+        env=_util.child_coverage('scrub', parent),
         capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == '[]\n', result.stdout

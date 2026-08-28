@@ -163,8 +163,8 @@ def _coverage_tree(tmp, suites, unlaunchable=(), cpu_count=None):
             sitecustomize, encoding='utf-8')
     result = subprocess.run(
         [sys.executable, 'scripts/ci/coverage_suites.py'], cwd=str(root),
-        env=env, input='runner-only input\n', capture_output=True, text=True,
-        timeout=120)
+        env=_util.child_coverage('keep', env), input='runner-only input\n',
+        capture_output=True, text=True, timeout=120)
     records = root / 'coverage-invocations'
     invocations = [
         json.loads(record.read_text(encoding='utf-8'))

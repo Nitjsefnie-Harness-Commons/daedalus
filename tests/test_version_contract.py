@@ -92,7 +92,7 @@ def test_check_versions_detects_drift(tmp):
     assert n == 1, text
     init_copy.write_text(new_text, encoding='utf-8')
     r = subprocess.run([sys.executable, str(copy_root / 'scripts' / 'check_versions.py')],
-                       cwd=str(copy_root),
+                       cwd=str(copy_root), env=_util.child_coverage('keep'),
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
     assert 'FAIL' in r.stderr, r.stderr
@@ -105,7 +105,7 @@ def test_check_versions_sites_all_present_in_copy(tmp):
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     r = subprocess.run([sys.executable, str(copy_root / 'scripts' / 'check_versions.py')],
-                       cwd=str(copy_root),
+                       cwd=str(copy_root), env=_util.child_coverage('keep'),
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     expected = len({(p, d) for p, d, _ in checker.SITES})
@@ -127,7 +127,7 @@ def _versioned_git_tree(tmp):
                  ['git', 'add', '-A'],
                  ['git', 'commit', '-qm', 'versioned tree']):
         subprocess.run(
-            argv, cwd=str(copy_root),
+            argv, cwd=str(copy_root), env=_util.child_coverage('scrub'),
             capture_output=True,
             text=True, timeout=60, check=True)
     return copy_root, checker
@@ -168,7 +168,7 @@ def _run_checker(copy_root, *args):
     return subprocess.run(
         [sys.executable, str(copy_root / 'scripts' / 'check_versions.py'),
          *args],
-        cwd=str(copy_root),
+        cwd=str(copy_root), env=_util.child_coverage('keep'),
         capture_output=True, text=True, timeout=60)
 
 
