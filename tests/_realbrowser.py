@@ -16,7 +16,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -37,10 +36,32 @@ class BrowserEnvironmentSkipped(_util.Skipped):
     """The browser installation could not reach a usable fixture state."""
 
 
+class _EvalPageServer(http.server.ThreadingHTTPServer):
+    def __init__(self, address, handler):
+        super().__init__(address, handler)
+        self._request_lock = threading.Lock()
+        self._request_paths = []
+
+    def record_request(self, path):
+        with self._request_lock:
+            self._request_paths.append(path)
+
+    def received_request(self, page_url):
+        path = urllib.parse.urlsplit(page_url).path
+        with self._request_lock:
+            return path in self._request_paths
+
+
+_FIXTURE_SERVERS = {}
+_FIXTURE_SERVERS_LOCK = threading.Lock()
+
+
 class _EvalPageHandler(http.server.BaseHTTPRequestHandler):
     """Serve the real-page evaluator fixtures over one loopback origin."""
 
     def do_GET(self):
+        path = urllib.parse.urlsplit(self.path).path
+        self.server.record_request(path)
         pages = {
             '/hostile.html': (
                 b'<title>loading</title><body><script src="/hostile.js"></script></body>',
@@ -63,7 +84,7 @@ class _EvalPageHandler(http.server.BaseHTTPRequestHandler):
             '/plain.js': (
                 PLAIN_EVAL_SCRIPT.encode(), 'text/javascript', None),
         }
-        fixture = pages.get(urllib.parse.urlsplit(self.path).path)
+        fixture = pages.get(path)
         if fixture is None:
             self.send_error(404)
             return
@@ -82,16 +103,21 @@ class _EvalPageHandler(http.server.BaseHTTPRequestHandler):
 
 @contextlib.contextmanager
 def eval_page_server():
-    server = http.server.ThreadingHTTPServer(
+    server = _EvalPageServer(
         ('127.0.0.1', 0), _EvalPageHandler)
+    origin = f'http://127.0.0.1:{server.server_address[1]}'
+    with _FIXTURE_SERVERS_LOCK:
+        _FIXTURE_SERVERS[origin] = server
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     try:
-        yield f'http://127.0.0.1:{server.server_address[1]}'
+        yield origin
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=10)
+        with _FIXTURE_SERVERS_LOCK:
+            _FIXTURE_SERVERS.pop(origin, None)
 
 
 def cdp_call(node, target, method, params):
@@ -112,18 +138,12 @@ def cdp_call(node, target, method, params):
     return json.loads(result.stdout or '{}')
 
 
-def _fixture_url_answered(page_url):
-    try:
-        with urllib.request.urlopen(
-                page_url,
-                timeout=CDP_RESPONSE_DEADLINE_MS / 1000):
-            return True
-    except urllib.error.HTTPError as reply:
-        # A 404 still proves that the in-process fixture origin answered.
-        reply.close()
-        return True
-    except (OSError, ValueError):
-        return False
+def _fixture_request_arrived(page_url):
+    parts = urllib.parse.urlsplit(page_url)
+    origin = f'{parts.scheme}://{parts.netloc}'
+    with _FIXTURE_SERVERS_LOCK:
+        server = _FIXTURE_SERVERS.get(origin)
+    return server is not None and server.received_request(page_url)
 
 
 def cdp_eval(node, target, expression):
@@ -161,10 +181,14 @@ def browser_requirements():
     if not node or not browser:
         raise BrowserEnvironmentSkipped(
             'Chromium and Node are required for the real-page eval test')
-    websocket = subprocess.run(
-        [node, '-e',
-         "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
-        cwd=ROOT, capture_output=True, text=True, timeout=10)
+    try:
+        websocket = subprocess.run(
+            [node, '-e',
+             "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
+            cwd=ROOT, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as why:
+        raise BrowserEnvironmentSkipped(
+            f'Node WebSocket probe could not run: {node} — {why}') from why
     if websocket.returncode != 0:
         raise BrowserEnvironmentSkipped(
             'this Node runtime has no WebSocket client for CDP')
@@ -319,29 +343,32 @@ def real_extension_page(tmp, bridge_url, token, page_url,
     # one first, which is the order the CI legs see.
     loaded = ','.join(str(Path(item).resolve())
                       for item in (*extra_extensions, extension))
-    process = subprocess.Popen(
-        [
-            browser,
-            '--headless=new',
-            '--no-sandbox',
-            '--disable-gpu',
-            '--disable-dev-shm-usage',
-            '--no-first-run',
-            '--no-default-browser-check',
-            # Avoid a D-Bus secret-service probe whose reply timeout holds
-            # every network transaction. This temporary profile is discarded.
-            '--password-store=basic',
-            '--remote-allow-origins=*',
-            '--remote-debugging-port=0',
-            '--disable-extensions-except=' + loaded,
-            '--load-extension=' + loaded,
-            '--user-data-dir=' + str(profile),
-            'about:blank',
-        ],
-        cwd=ROOT,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL)
+    browser_args = [
+        browser,
+        '--headless=new',
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--no-default-browser-check',
+        # Avoid a D-Bus secret-service probe whose reply timeout holds
+        # every network transaction. This temporary profile is discarded.
+        '--password-store=basic',
+        '--remote-allow-origins=*',
+        '--remote-debugging-port=0',
+        '--disable-extensions-except=' + loaded,
+        '--load-extension=' + loaded,
+        '--user-data-dir=' + str(profile),
+        'about:blank',
+    ]
+    try:
+        process = subprocess.Popen(
+            browser_args, cwd=ROOT, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as why:
+        raise BrowserEnvironmentSkipped(
+            f'Chromium could not be launched: {browser} — {why}') from why
+    configuration_started = False
     try:
         page, workers, devtools_port = _wait_for_devtools(profile, process)
         page_target = page['webSocketDebuggerUrl']
@@ -353,16 +380,18 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         # script's keepalive port is an event the worker listens for, so
         # loading the page is what revives it, exactly as an ordinary
         # browsing session does.
-        # Only this first navigation can still be environmental: probe the
-        # same in-process fixture URL to separate browser reachability from a
-        # broken repository route. Later calls follow configuration and fail.
+        # Only this first navigation can still be environmental. Later calls
+        # follow configuration and fail.
         try:
             cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
         except CDPTimeout as why:
-            if not _fixture_url_answered(page_url):
+            if _fixture_request_arrived(page_url):
+                # Handler entry proves the browser reached our origin. A CDP
+                # timeout then means this fixture failed to satisfy it.
                 raise AssertionError(
-                    'the fixture URL did not answer after the first '
-                    f'navigation timed out: {page_url}') from why
+                    'the fixture received the first navigation request but '
+                    'did not satisfy it before the deadline: '
+                    f'{page_url}') from why
             raise BrowserEnvironmentSkipped(
                 'the first fixture navigation timed out over CDP: '
                 f'{_browser_version(browser)} — {why}') from why
@@ -410,6 +439,7 @@ def real_extension_page(tmp, bridge_url, token, page_url,
                 f'over the debugger: {_browser_version(browser)} — '
                 f'{last_error}')
 
+        configuration_started = True
         storage = json.dumps({
             'daedalus-token': token,
             'daedalus-server': bridge_url,
@@ -474,6 +504,14 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             time.sleep(0.05)
         raise AssertionError(
             f'extension did not register the eval fixture tab: {last_tabs!r}')
+    except BrowserEnvironmentSkipped as why:
+        if not configuration_started:
+            raise
+        # Once configuration starts, this fixture has established a usable
+        # browser; an environment label from later code cannot cross the line.
+        raise AssertionError(
+            'browser environment skip escaped after extension configuration: '
+            + str(why)) from why
     finally:
         process.terminate()
         try:

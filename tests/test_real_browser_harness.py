@@ -10,6 +10,8 @@ import sys
 import threading
 import time
 import types
+import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -167,10 +169,9 @@ def test_browser_launch_passes_basic_password_store_flag(tmp):
 
     assert len(launches) == 1, launches
     args = launches[0]
-    assert args[0] == '/controlled/chromium', args
-    assert args[-1] == 'about:blank', args
+    assert (args[0], args[-1]) == (
+        '/controlled/chromium', 'about:blank'), args
     assert args.count('--password-store=basic') == 1, args
-    assert process.terminated is True
     assert process.wait_timeouts == [10], process.wait_timeouts
 
 
@@ -374,7 +375,7 @@ def test_cdp_non_timeout_failure_stays_plain_assertion(tmp):
     assert 'CDP websocket failed' in str(failure), failure
 
 
-def test_first_navigation_timeout_skips_when_exact_fixture_url_answers(tmp):
+def test_first_navigation_timeout_skips_when_browser_sent_no_request(tmp):
     timeout_type = getattr(_realbrowser, 'CDPTimeout', AssertionError)
     environment_type = getattr(
         _realbrowser, 'BrowserEnvironmentSkipped', ())
@@ -395,7 +396,7 @@ def test_first_navigation_timeout_skips_when_exact_fixture_url_answers(tmp):
     with mock.patch.object(
             _realbrowser._EvalPageHandler, 'do_GET', record_get), \
             _realbrowser.eval_page_server() as pages:
-        page_url = pages + '/never-ready.html'
+        page_url = pages + '/plain.html'
         with _fixture_runtime(
                 tmp, first_navigation, subprocess_run=_browser_version) as (
                     process, launches):
@@ -407,77 +408,156 @@ def test_first_navigation_timeout_skips_when_exact_fixture_url_answers(tmp):
                 skipped = why
             except AssertionError as failure:
                 raise AssertionError(
-                    'an answered fixture URL stayed a failure') from failure
+                    'no fixture request arrived but the timeout failed'
+                ) from failure
 
-    assert len(launches) == 1, launches
-    assert process.terminated is True
-    assert skipped is not None, 'first navigation timeout did not skip'
+    assert len(launches) == 1 and process.terminated is True, launches
     assert isinstance(skipped, environment_type), skipped.__class__
-    assert requested == ['/never-ready.html'], requested
+    assert requested == [], requested
     assert '/controlled/chromium' in str(skipped), skipped
     assert 'Chromium 151.0.7922.169' in str(skipped), skipped
 
 
-def test_first_navigation_timeout_fails_when_exact_fixture_url_stalls(tmp):
+def test_first_navigation_timeout_fails_after_late_or_404_request(tmp):
     timeout_type = getattr(_realbrowser, 'CDPTimeout', AssertionError)
-    original_get = _realbrowser._EvalPageHandler.do_GET
-    requested = []
+    original_send = _realbrowser._EvalPageHandler.send_response
 
-    def first_navigation(node, target, method, params):
-        assert (node, target, method) == (
-            'node-for-control', 'ws://page', 'Page.navigate')
-        assert params == {'url': page_url}, params
-        raise timeout_type('CDP response timed out')
+    def exercise(path):
+        response_started = threading.Event()
+        release_response = threading.Event()
+        request_errors = []
+        request_thread = None
 
-    def stall_performance_page(handler):
-        requested.append(handler.path)
-        if handler.path == '/performance-poison.html':
-            time.sleep(0.1)
-        else:
-            original_get(handler)
+        def send_response(handler, code, message=None):
+            if handler.path == path and not response_started.is_set():
+                response_started.set()
+                if path == '/plain.html':
+                    assert release_response.wait(timeout=2)
+            return original_send(handler, code, message)
 
-    skipped = None
-    failure = None
-    with mock.patch.object(_realbrowser, 'CDP_RESPONSE_DEADLINE_MS', 50), \
-            mock.patch.object(
-                _realbrowser._EvalPageHandler, 'do_GET',
-                stall_performance_page), \
-            _realbrowser.eval_page_server() as pages:
-        page_url = pages + '/performance-poison.html'
-        with _fixture_runtime(
-                tmp, first_navigation, subprocess_run=_browser_version) as (
-                    process, launches):
-            try:
-                with _enter_fixture(tmp, page_url):
-                    raise AssertionError(
-                        'fixture yielded after navigation timeout')
-            except _util.Skipped as why:
-                skipped = why
-            except AssertionError as why:
-                failure = why
+        def first_navigation(node, target, method, params):
+            nonlocal request_thread
+            assert (node, target, method) == (
+                'node-for-control', 'ws://page', 'Page.navigate')
+            assert params == {'url': page_url}, params
 
-    assert len(launches) == 1, launches
-    assert process.terminated is True
-    assert requested == ['/performance-poison.html'], requested
-    assert skipped is None, skipped
-    assert failure is not None, 'a stalled fixture URL did not fail'
+            def request_page():
+                try:
+                    with urllib.request.urlopen(page_url, timeout=2):
+                        pass
+                except urllib.error.HTTPError:
+                    # The controlled 404 is the response this case requests.
+                    pass
+                except Exception as why:  # noqa: BLE001
+                    request_errors.append(why)
+
+            request_thread = threading.Thread(target=request_page)
+            request_thread.start()
+            assert response_started.wait(timeout=2)
+            if path != '/plain.html':
+                request_thread.join(timeout=2)
+            raise timeout_type('CDP response timed out')
+
+        skipped = None
+        failure = None
+        with mock.patch.object(
+                _realbrowser._EvalPageHandler, 'send_response',
+                send_response), \
+                _realbrowser.eval_page_server() as pages:
+            page_url = pages + path
+            with _fixture_runtime(
+                    tmp, first_navigation,
+                    subprocess_run=_browser_version) as (_process, _launches):
+                try:
+                    with _enter_fixture(tmp, page_url):
+                        raise AssertionError('fixture yielded after timeout')
+                except _util.Skipped as why:
+                    skipped = why
+                except AssertionError as why:
+                    failure = why
+            release_response.set()
+            request_thread.join(timeout=2)
+
+        assert not request_thread.is_alive() and not request_errors, path
+        assert skipped is None and failure is not None, (path, skipped)
+
+    for page_path in ('/plain.html', '/never-ready.html'):
+        exercise(page_path)
 
 
-def test_fixture_probe_derives_bound_and_uses_exact_url(tmp):
-    del tmp
-    requested = []
-
-    def no_reply(url, *, timeout):
-        requested.append((url, timeout))
-        raise OSError('controlled fixture silence')
-
-    page_url = 'http://127.0.0.1:43210/exact-fixture.html'
+def test_fixture_converts_only_post_configuration_environment_skips(tmp):
+    environment_type = _realbrowser.BrowserEnvironmentSkipped
+    before = environment_type('controlled pre-configuration failure')
+    survived = None
     with mock.patch.object(
-            _realbrowser, 'CDP_RESPONSE_DEADLINE_MS', 4321), \
+            _realbrowser, 'browser_requirements', side_effect=before):
+        try:
+            with _enter_fixture(tmp):
+                raise AssertionError('fixture yielded before configuration')
+        except environment_type as why:
+            survived = why
+    assert survived is before, survived
+
+    def navigate(node, target, method, params):
+        del node, target, method, params
+        return {}
+
+    def skip_after_configuration(node, target, expression):
+        del node, target
+        if 'chrome.storage.local.set' in expression:
+            return True
+        raise environment_type('controlled post-configuration failure')
+
+    failure = None
+    with _fixture_runtime(tmp, navigate) as (process, launches), \
             mock.patch.object(
-                _realbrowser.urllib.request, 'urlopen', no_reply):
-        assert _realbrowser._fixture_url_answered(page_url) is False
-    assert requested == [(page_url, 4.321)], requested
+                _realbrowser, 'cdp_eval', skip_after_configuration):
+        try:
+            with _enter_fixture(tmp):
+                raise AssertionError('fixture yielded after configuration')
+        except environment_type as why:
+            raise AssertionError(
+                'post-configuration environment skip escaped') from why
+        except AssertionError as why:
+            failure = why
+    assert len(launches) == 1 and process.terminated is True, launches
+    assert failure.__class__ is AssertionError, failure
+    assert isinstance(failure.__cause__, environment_type), failure.__cause__
+
+
+def test_process_start_failures_are_typed_environment_skips(tmp):
+    environment_type = _realbrowser.BrowserEnvironmentSkipped
+    bad_browser = Path(tmp) / 'chromium'
+    bad_browser.write_text('#!/missing/chromium-loader\n', encoding='utf-8')
+    bad_browser.chmod(0o755)
+    with mock.patch.object(
+            _realbrowser, 'browser_requirements',
+            return_value=('node-for-control', str(bad_browser))):
+        try:
+            with _enter_fixture(tmp):
+                raise AssertionError('unspawnable browser fixture yielded')
+        except environment_type as skipped:
+            assert str(bad_browser) in str(skipped), skipped
+            assert 'No such file or directory' in str(skipped), skipped
+
+    def which(name):
+        return {'node': '/controlled/node',
+                'chromium': '/controlled/chromium'}.get(name)
+
+    failures = (
+        OSError('controlled node spawn failure'),
+        subprocess.TimeoutExpired(['/controlled/node'], 10),
+    )
+    for process_failure in failures:
+        with mock.patch.object(_realbrowser.shutil, 'which', which), \
+                mock.patch.object(
+                    _realbrowser.subprocess, 'run',
+                    side_effect=process_failure):
+            try:
+                _realbrowser.browser_requirements()
+            except environment_type as skipped:
+                assert '/controlled/node' in str(skipped), skipped
+                assert str(process_failure) in str(skipped), skipped
 
 
 @contextlib.contextmanager
