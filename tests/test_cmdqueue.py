@@ -194,8 +194,11 @@ def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
         with _vanish_during_read(queued, clock):
             _cmdqueue.wait_for_command(
                 queue, timeout=timeout, producer_alive=lambda: False)
-    assert clock.monotonic() >= origin + timeout, (
-        clock.monotonic(), origin, timeout)
+    end = clock.monotonic()
+    assert end >= origin + timeout, (
+        'wait ended before timeout', end, origin, timeout)
+    assert end <= origin + timeout, (
+        'wait exceeded timeout', end, origin, timeout)
 
 
 def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
