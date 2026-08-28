@@ -47,20 +47,26 @@ _STATUS_FUNCTIONS = frozenset(('always', 'success', 'failure', 'cancelled'))
 
 def evaluate(expression, context):
     """Evaluate one expression to its Actions-style admitted value."""
-    value, _has_status_check = _evaluate(expression, context)
+    value, _status_functions = _evaluate(expression, context)
     return value
 
 
 def evaluate_if(expression, context):
     """Evaluate an ``if`` condition with Actions' default status check."""
-    value, has_status_check = _evaluate(expression, context)
-    if not has_status_check and not _status_value(context, 'success'):
+    value, status_checks = _evaluate(expression, context)
+    if not status_checks and not _status_value(context, 'success'):
         return False
     return _truthy(value)
 
 
+def status_functions(expression, context):
+    """Return the status function names parsed as calls in an expression."""
+    _value, functions = _evaluate(expression, context)
+    return functions
+
+
 def _evaluate(expression, context):
-    """Return an admitted value and whether its parse called a status check."""
+    """Return an admitted value and the status functions its parse called."""
     if not isinstance(expression, str):
         raise ExpressionError('expression must be a string')
     if len(expression) > MAX_SOURCE_LENGTH:
@@ -73,7 +79,7 @@ def _evaluate(expression, context):
     if not isinstance(context, Mapping):
         raise ExpressionError('context must be a mapping')
     parser = _Parser(_tokenize(source), context)
-    return parser.parse(), parser.has_status_check
+    return parser.parse(), parser.status_functions
 
 
 def _unwrap(expression):
@@ -187,12 +193,12 @@ class _Parser:
         self._context = context
         self._index = 0
         self._depth = 0
-        self._has_status_check = False
+        self._status_functions = set()
 
     @property
-    def has_status_check(self):
-        """Whether the completed parse called any status-check function."""
-        return self._has_status_check
+    def status_functions(self):
+        """The status function names parsed as calls."""
+        return frozenset(self._status_functions)
 
     def parse(self):
         value = self._parse_or()
@@ -267,7 +273,7 @@ class _Parser:
                 raise ExpressionError('status functions take no arguments')
             if name not in _STATUS_FUNCTIONS:
                 raise ExpressionError(f'unsupported function: {name}')
-            self._has_status_check = True
+            self._status_functions.add(name)
             return self._status_value(name)
         path = [name]
         while self._accept('.'):
