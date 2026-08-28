@@ -72,11 +72,11 @@ def test_an_unimplemented_pattern_shape_fails_closed(tmp):
     del tmp
     mod = _classifier()
     try:
-        mod.matches('docs/**', 'docs/a.md')
+        mod.matches('docs/*', 'docs/a.md')
     except ValueError:
         pass
     else:
-        raise AssertionError("'docs/**' was matched instead of refused")
+        raise AssertionError("'docs/*' was matched instead of refused")
 
 
 def test_star_star_pattern_compares_the_final_segment(tmp):
@@ -92,19 +92,62 @@ def test_star_star_pattern_compares_the_final_segment(tmp):
     assert mod.matches('**/doc*.md', 'doc1.md')
 
 
+def test_workflow_patterns_match_root_nested_and_dependabot_paths(tmp):
+    del tmp
+    mod = _classifier()
+    assert mod.is_workflow('.github/workflows/actionlint.yml')
+    assert mod.is_workflow('.github/workflows/nested/check.yml')
+    assert mod.is_workflow('.github/dependabot.yml')
+
+
+def test_workflow_patterns_reject_a_similarly_prefixed_path_and_source(tmp):
+    del tmp
+    mod = _classifier()
+    assert not mod.is_workflow('.github/workflowsx/a.yml')
+    assert not mod.is_workflow('scripts/server.py')
+
+
+def test_workflows_changed_reports_whether_any_path_matches(tmp):
+    del tmp
+    mod = _classifier()
+    assert mod.workflows_changed(['README.md', '.github/dependabot.yml'])
+    assert not mod.workflows_changed(['README.md', 'scripts/server.py'])
+
+
+def test_workflow_patterns_pin_the_actionlint_paths_filter(tmp):
+    """The next task deletes actionlint.yml, so this records its filter."""
+    del tmp
+    mod = _classifier()
+    assert mod.WORKFLOW_PATTERNS == (
+        '.github/workflows/**', '.github/dependabot.yml')
+
+
 def test_documentation_paths_classify_to_the_reduced_matrix(tmp):
     del tmp
     mod = _classifier()
     _calls, run = _recorder('README.md\ndocs/guide.md\nLICENSE\n')
-    docs_only, matrix, reason = mod.classify(_event(), run)
+    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is True, reason
+    assert workflows is False
     assert matrix == mod.DOCUMENTATION_MATRIX, matrix
     assert matrix == {'os': ['ubuntu-latest'], 'python': ['3.13']}, matrix
 
     _calls, run = _recorder('README.md\nserver.py\ndocs/guide.md\n')
-    docs_only, matrix, reason = mod.classify(_event(), run)
+    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
+    assert workflows is False
     assert matrix == mod.FULL_MATRIX, matrix
+
+
+def test_an_unreadable_path_list_overruns_the_workflow_gate(tmp):
+    del tmp
+    mod = _classifier()
+
+    def run(argv):
+        raise RuntimeError(f'api down for {argv}')
+
+    result = mod.classify(_event(), run)
+    assert result[2] is True, result
 
 
 def test_empty_and_missing_path_lists_run_the_full_matrix(tmp):
@@ -113,8 +156,9 @@ def test_empty_and_missing_path_lists_run_the_full_matrix(tmp):
     assert mod.documentation_only(()) is False
     assert mod.documentation_only(None) is False
     _calls, run = _recorder('\n')
-    docs_only, matrix, reason = mod.classify(_event(), run)
+    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
+    assert workflows is True
     assert matrix == mod.FULL_MATRIX, matrix
 
 
@@ -145,21 +189,22 @@ def test_unusable_events_never_call_the_api(tmp):
     del tmp
     mod = _classifier()
     calls, run = _recorder('README.md\n')
-    docs_only, matrix, _reason = mod.classify(
+    docs_only, matrix, workflows, _reason = mod.classify(
         _event(name='push', pull_request=None, before='0' * 40), run)
-    assert (docs_only, matrix) == (False, mod.FULL_MATRIX)
-    docs_only, matrix, _reason = mod.classify(
+    assert (docs_only, matrix, workflows) == (False, mod.FULL_MATRIX, True)
+    docs_only, matrix, workflows, _reason = mod.classify(
         _event(name='workflow_dispatch'), run)
-    assert (docs_only, matrix) == (False, mod.FULL_MATRIX)
+    assert (docs_only, matrix, workflows) == (False, mod.FULL_MATRIX, True)
     # A non-numeric PR number must not reach the API either: 'abc' is not
     # digits, and '²' isdigit() but is not an ASCII digit string.
     for bad_number in ('abc', '²', ''):
-        docs_only, matrix, _reason = mod.classify(
+        docs_only, matrix, workflows, _reason = mod.classify(
             _event(pull_request=bad_number), run)
-        assert (docs_only, matrix) == (False, mod.FULL_MATRIX), bad_number
-    docs_only, matrix, _reason = mod.classify(
+        assert (docs_only, matrix, workflows) == (
+            False, mod.FULL_MATRIX, True), bad_number
+    docs_only, matrix, workflows, _reason = mod.classify(
         _event(repository=None), run)
-    assert (docs_only, matrix) == (False, mod.FULL_MATRIX)
+    assert (docs_only, matrix, workflows) == (False, mod.FULL_MATRIX, True)
     assert calls == [], calls
 
 
@@ -170,8 +215,9 @@ def test_a_failed_read_falls_back_to_the_full_matrix(tmp):
     def run(argv):
         raise RuntimeError(f'api down for {argv}')
 
-    docs_only, matrix, reason = mod.classify(_event(), run)
+    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
+    assert workflows is True
     assert matrix == mod.FULL_MATRIX, matrix
     assert 'could not read' in reason, reason
 
@@ -182,9 +228,10 @@ def test_a_capped_push_file_list_falls_back_to_the_full_matrix(tmp):
     mod = _classifier()
     stdout = ''.join(f'docs/file{index}.md\n' for index in range(300))
     _calls, run = _recorder(stdout)
-    docs_only, matrix, reason = mod.classify(
+    docs_only, matrix, workflows, reason = mod.classify(
         _event(name='push', pull_request=None), run)
     assert docs_only is False, reason
+    assert workflows is True
     assert matrix == mod.FULL_MATRIX, matrix
 
 
@@ -199,32 +246,43 @@ def test_a_capped_pull_request_file_list_runs_the_full_matrix(tmp):
     mod = _classifier()
     stdout = ''.join(f'docs/file{index}.md\n' for index in range(3000))
     _calls, run = _recorder(stdout)
-    docs_only, matrix, reason = mod.classify(_event(), run)
+    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
+    assert workflows is True
     assert matrix == mod.FULL_MATRIX, matrix
 
 
-def test_write_outputs_appends_the_two_output_lines(tmp):
+def test_write_outputs_appends_the_three_output_lines(tmp):
     mod = _classifier()
     out = Path(tmp) / 'github_output'
     matrix = {'os': ['ubuntu-latest'], 'python': ['3.13']}
-    mod.write_outputs(str(out), True, matrix)
-    mod.write_outputs(str(out), False, matrix)
+    mod.write_outputs(str(out), True, matrix, True)
+    mod.write_outputs(str(out), False, matrix, False)
     text = out.read_text(encoding='utf-8')
     lines = text.splitlines()
     rendered = f'matrix={json.dumps(matrix)}'
-    assert lines == ['docs_only=true', rendered,
-                     'docs_only=false', rendered], lines
+    assert lines == ['docs_only=true', rendered, 'workflows=true',
+                     'docs_only=false', rendered, 'workflows=false'], lines
     assert json.loads(lines[1][len('matrix='):]) == matrix
     assert '\n' not in json.dumps(matrix)
-    assert text.count('\n') == 4 and text.endswith('\n'), repr(text)
+    assert text.count('\n') == 6 and text.endswith('\n'), repr(text)
+
+
+def test_write_outputs_appends_the_workflow_line(tmp):
+    mod = _classifier()
+    out = Path(tmp) / 'github_output'
+    matrix = {'os': ['ubuntu-latest'], 'python': ['3.13']}
+    mod.write_outputs(str(out), True, matrix, True)
+    lines = out.read_text(encoding='utf-8').splitlines()
+    assert lines == ['docs_only=true', f'matrix={json.dumps(matrix)}',
+                     'workflows=true'], lines
 
 
 def test_write_outputs_without_a_file_writes_nothing(tmp):
     del tmp
     mod = _classifier()
-    mod.write_outputs(None, True, mod.DOCUMENTATION_MATRIX)
-    mod.write_outputs('', True, mod.DOCUMENTATION_MATRIX)
+    mod.write_outputs(None, True, mod.DOCUMENTATION_MATRIX, True)
+    mod.write_outputs('', True, mod.DOCUMENTATION_MATRIX, True)
 
 
 def test_event_from_environment_maps_the_documented_variables(tmp):
@@ -456,7 +514,8 @@ def test_main_records_the_fallback_outputs_and_returns_zero(tmp):
     assert status == 0, status
     lines = out.read_text(encoding='utf-8').splitlines()
     assert lines == ['docs_only=false',
-                     f'matrix={json.dumps(mod.FULL_MATRIX)}'], lines
+                     f'matrix={json.dumps(mod.FULL_MATRIX)}',
+                     'workflows=true'], lines
 
 
 def main():
