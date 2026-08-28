@@ -18,6 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wfgraph import _tests_yml  # noqa: E402
+from _wfskip import (evaluate_job_condition,  # noqa: E402
+                     implicit_skip_violations)
 from _yamlread import job_mapping, job_scalar  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
@@ -208,6 +211,35 @@ def test_diff_coverage_permissions_are_exactly_read_only(tmp):
     """The job running pull-request code has only contents read access."""
     del tmp
     _assert_diff_coverage_permissions(_tests_workflow())
+
+
+def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
+    """A skipped ancestor cannot hide a usable pull-request report."""
+    del tmp
+    cases = (
+        ('pull request, coverage succeeded, ancestor skipped',
+         'pull_request', 'success', False, False, True),
+        ('coverage skipped', 'pull_request', 'skipped', False, False, False),
+        ('coverage failed', 'pull_request', 'failure', False, True, False),
+        ('push event', 'push', 'success', False, False, False),
+    )
+    for name, event_name, coverage, success, failure, expected in cases:
+        status = {
+            'success': success,
+            'failure': failure,
+            'cancelled': False,
+        }
+        expression, actual = evaluate_job_condition(
+            _tests_yml(), 'diff-coverage', event_name,
+            {'coverage': {'result': coverage}}, status)
+        assert actual is expected, (name, expression, actual)
+
+
+def test_skippable_ancestors_cannot_implicitly_skip_dependants(tmp):
+    """Every dependant of a conditional job overrides the implicit gate."""
+    del tmp
+    violations = implicit_skip_violations(_tests_yml())
+    assert not violations, '\n'.join(violations)
 
 
 def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
