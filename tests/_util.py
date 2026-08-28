@@ -41,7 +41,7 @@ def coverage_free_environment(environment):
     }
 
 
-def child_coverage(mode, environment=None):
+def child_coverage(mode, environment=None, cwd=None):
     """Declare whether one subprocess keeps the coverage collector.
 
     Every launch into a working directory the coverage paths do not map back
@@ -50,12 +50,24 @@ def child_coverage(mode, environment=None):
     the temporary tree, and 'keep' retains it where the tree is mapped and
     the child's coverage is wanted. The guard in
     tests/test_coverage_environment.py reads the declaration syntactically.
+
+    A 'keep' must also prove at runtime that its tree is mapped: pyproject's
+    [tool.coverage.paths] maps repo = [".", "*/tree"] and nothing else, so
+    the launch's cwd is required and must have a `tree` component. A renamed
+    directory fails here rather than later in `coverage report`.
     """
     if environment is None:
         environment = os.environ
     if mode == 'scrub':
         return coverage_free_environment(environment)
     if mode == 'keep':
+        if cwd is None:
+            raise ValueError(
+                "child_coverage('keep') requires the launch's cwd")
+        if 'tree' not in Path(cwd).parts:
+            raise ValueError(
+                "child_coverage('keep') outside a mapped '*/tree' tree: "
+                f'{cwd}')
         return dict(environment)
     raise ValueError(
         f"child_coverage mode must be 'scrub' or 'keep': {mode!r}")
