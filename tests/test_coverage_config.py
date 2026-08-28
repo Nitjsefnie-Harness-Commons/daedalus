@@ -12,6 +12,7 @@ from _repo import ROOT  # noqa: E402
 
 _ENV = _util.coverage_free_environment(os.environ)
 _RCFILE = ROOT / 'pyproject.toml'
+# Independent roots stop a source entry for one fixture satisfying both.
 _UNEXECUTED_FILES = (
     Path('orphaned_area') / 'never_reached.py',
     Path('miscellaneous_tree') / 'branch' / 'deeper'
@@ -53,7 +54,8 @@ def _coverage_rows(report):
         'Name', 'Stmts', 'Miss', 'Cover'], report
     rows = {}
     for line in lines[1:]:
-        if line and not line.strip('-'):
+        stripped = line.strip()
+        if not stripped or not stripped.strip('-'):
             continue
         columns = line.rsplit(maxsplit=3)
         assert len(columns) == 4, (
@@ -88,7 +90,7 @@ def test_unexecuted_python_in_nested_non_package_is_reported(tmp):
         assert rows.get(str(relative_path)) == (2, 2, 0.0), report
 
 
-def test_untracked_node_modules_python_is_not_reported(tmp):
+def test_node_modules_python_is_omitted_from_the_report(tmp):
     tmp = Path(tmp)
     _write_executed_files(tmp)
     third_party = tmp / _NODE_MODULE_FILE
@@ -118,7 +120,7 @@ def test_wrapped_forbidden_row_cannot_satisfy_negative_control(tmp):
     globals()['_coverage_report'] = lambda _cwd: report
     try:
         try:
-            test_untracked_node_modules_python_is_not_reported(tmp)
+            test_node_modules_python_is_omitted_from_the_report(tmp)
         except AssertionError as error:
             assert 'unparsed coverage row' in str(error), error
             return
@@ -126,6 +128,23 @@ def test_wrapped_forbidden_row_cannot_satisfy_negative_control(tmp):
             'the negative control accepted a wrapped forbidden row')
     finally:
         globals()['_coverage_report'] = original_report
+
+
+def test_whitespace_only_report_lines_are_ignored(tmp):
+    del tmp
+    report = (
+        'Name        Stmts   Miss  Cover\n'
+        '-------------------------------\n'
+        'driver.py       2      0   100%\n'
+        '   \n'
+        'ran.py          2      0   100%\n'
+        '-------------------------------\n'
+        'TOTAL           4      0   100%\n')
+
+    rows = _coverage_rows(report)
+
+    assert rows.get('driver.py') == (2, 0, 100.0), rows
+    assert rows.get('ran.py') == (2, 0, 100.0), rows
 
 
 if __name__ == '__main__':
