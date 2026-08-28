@@ -283,12 +283,15 @@ def test_a_transient_read_refusal_returns_every_queued_command(tmp):
     second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
                       encoding='utf-8')
     refusals = 2
-    with _refuse_path_operation(first, 'read_text', refusals) as calls:
-        commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
-    # Each refusal costs one polling pass; the next pass reads the file.
-    assert calls[0] == refusals + 1, calls
-    assert commands == [{'id': 'queued', 'type': 'reload'},
-                        {'id': 'second', 'type': 'reload'}], commands
+    expected = [{'id': 'queued', 'type': 'reload'},
+                {'id': 'second', 'type': 'reload'}]
+    for refused_file in (first, second):
+        with _refuse_path_operation(
+                refused_file, 'read_text', refusals) as calls:
+            commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
+        # Each refusal costs one polling pass; the next pass reads the file.
+        assert calls[0] == refusals + 1, calls
+        assert commands == expected, commands
 
 
 def test_the_overlap_command_wait_times_out_with_a_diagnostic(tmp):
@@ -313,11 +316,14 @@ def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
     second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
                       encoding='utf-8')
     refusals = 1
-    with _refuse_path_operation(first, 'read_text', refusals) as calls:
-        commands = _overlap._wait_for_client_commands(queue, 2)
-    assert calls[0] == refusals + 1, calls
-    assert commands == [{'id': 'queued', 'type': 'reload'},
-                        {'id': 'second', 'type': 'reload'}], commands
+    expected = [{'id': 'queued', 'type': 'reload'},
+                {'id': 'second', 'type': 'reload'}]
+    for refused_file in (first, second):
+        with _refuse_path_operation(
+                refused_file, 'read_text', refusals) as calls:
+            commands = _overlap._wait_for_client_commands(queue, 2)
+        assert calls[0] == refusals + 1, calls
+        assert commands == expected, commands
 
 
 def test_a_permanent_read_refusal_bounds_the_multi_command_wait(tmp):
@@ -325,12 +331,13 @@ def test_a_permanent_read_refusal_bounds_the_multi_command_wait(tmp):
     second = queue / '1700000000001_000002.json'
     second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
                       encoding='utf-8')
-    with _refuse_path_operation(first, 'read_text', 1000):
-        commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
-    assert commands is None, commands
+    for refused_file in (first, second):
+        with _refuse_path_operation(refused_file, 'read_text', 1000):
+            commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
+        assert commands is None, commands
 
 
-def test_a_queue_file_that_disappears_during_reads_is_retried(tmp):
+def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
     queue, first = _queued_file(tmp)
     second = queue / '1700000000001_000002.json'
     second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
@@ -341,7 +348,8 @@ def test_a_queue_file_that_disappears_during_reads_is_retried(tmp):
     def missing(candidate, *args, **kwargs):
         if candidate == first and armed[0]:
             armed[0] = False
-            raise FileNotFoundError(2, 'injected disappearance', str(first))
+            raise FileNotFoundError(
+                2, 'injected transient read error', str(first))
         return original(candidate, *args, **kwargs)
 
     Path.read_text = missing
@@ -351,6 +359,12 @@ def test_a_queue_file_that_disappears_during_reads_is_retried(tmp):
         Path.read_text = original
     assert commands == [{'id': 'queued', 'type': 'reload'},
                         {'id': 'second', 'type': 'reload'}], commands
+
+
+def test_the_multi_command_wait_honors_a_count_other_than_two(tmp):
+    queue, _queued = _queued_file(tmp)
+    commands = _cmdqueue.wait_for_commands(queue, 1, timeout=1)
+    assert commands == [{'id': 'queued', 'type': 'reload'}], commands
 
 
 def test_the_multi_command_wait_refuses_a_superset(tmp):
@@ -379,7 +393,7 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
     original_bridge = _overlap._util.bridge
     original_overlap = _overlap.run_background_overlap
     original_wait = _cmdqueue.wait_for_commands
-    original_read_text = Path.read_text
+    original_open = Path.open
     waits = [0]
     fired = [0]
 
@@ -387,14 +401,14 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
         if candidate.parent == queue and candidate.suffix == '.json':
             fired[0] += 1
             raise PermissionError(32, 'injected sharing violation')
-        return original_read_text(candidate, *args, **kwargs)
+        return original_open(candidate, *args, **kwargs)
 
     def wait_then_arm(directory, count, timeout):
         waits[0] += 1
         commands = original_wait(directory, count, timeout)
         # From here the caller must hold the parsed commands; any later
         # queue read is the untolerated read this branch removed.
-        Path.read_text = refused
+        Path.open = refused
         return commands
 
     def failing_overlap(*args, **kwargs):
@@ -418,7 +432,7 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
         _overlap._util.bridge = original_bridge
         _overlap.run_background_overlap = original_overlap
         _cmdqueue.wait_for_commands = original_wait
-        Path.read_text = original_read_text
+        Path.open = original_open
     assert waits == [1], waits
     assert message is not None, 'the injected overlap failure was accepted'
     assert 'injected overlap failure' in message, message
