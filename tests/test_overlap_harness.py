@@ -112,10 +112,13 @@ def _slow_result_server(post_delay=0):
             self.rfile.read(int(self.headers['Content-Length']))
             if post_delay:
                 time.sleep(post_delay)
-            self.send_response(200)
-            self.send_header('Content-Length', '2')
-            self.end_headers()
-            self.wfile.write(b'{}')
+            try:
+                self.send_response(200)
+                self.send_header('Content-Length', '2')
+                self.end_headers()
+                self.wfile.write(b'{}')
+            except OSError:
+                pass
 
         def do_GET(self):
             time.sleep(60)
