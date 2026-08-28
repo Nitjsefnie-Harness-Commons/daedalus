@@ -528,6 +528,9 @@ def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
 
         with _realbrowser.eval_page_server() as pages:
             page_url = pages + '/plain.html'
+            if not request_arrives:
+                with urllib.request.urlopen(page_url, timeout=2) as reply:
+                    assert reply.status == 200, reply.status
             with _fixture_runtime(
                     tmp, first_navigation,
                     subprocess_run=_browser_version):
