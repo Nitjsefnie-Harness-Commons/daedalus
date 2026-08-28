@@ -109,8 +109,7 @@ def _vanish_during_read(path, clock):
             armed[0] = False
             clock.record_read()
             candidate.unlink()
-            raise FileNotFoundError(
-                2, 'injected disappearance', str(candidate))
+            return original(candidate, *args, **kwargs)
         return original(candidate, *args, **kwargs)
 
     Path.open = vanished
@@ -189,7 +188,7 @@ def test_a_present_queue_file_outlives_its_finished_producer(tmp):
 def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    # Both 1000 ceilings only guard runaways, not valid sleep multiplicity.
+    # This ceiling only guards runaways, not valid sleep multiplicity.
     with _virtual_cmdqueue_clock(1000) as (clock, _events, origin):
         with _vanish_during_read(queued, clock):
             _cmdqueue.wait_for_command(
@@ -197,8 +196,27 @@ def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
     end = clock.monotonic()
     assert end >= origin + timeout, (
         'wait ended before timeout', end, origin, timeout)
-    assert end <= origin + timeout, (
-        'wait exceeded timeout', end, origin, timeout)
+    # One polling delay permits tiny overshoot while still catching runaways.
+    ceiling = origin + timeout + _cmdqueue.POLL_DELAY
+    assert end <= ceiling, (
+        'wait exceeded the timeout ceiling', end, ceiling, timeout)
+
+
+def test_vanishing_read_double_preserves_path_open_argument_errors(tmp):
+    _queue, queued = _queued_file(tmp)
+    failure = None
+    with _virtual_cmdqueue_clock(1) as (clock, _events, _origin):
+        try:
+            with _vanish_during_read(queued, clock):
+                with queued.open(mode='rb', encoding='utf-8'):
+                    pass
+        except (FileNotFoundError, ValueError) as caught:
+            failure = caught
+    assert not queued.exists(), (
+        'vanishing read double left the target file present')
+    assert isinstance(failure, ValueError), (
+        'vanishing read double bypassed Path.open argument validation',
+        failure)
 
 
 def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
@@ -208,9 +226,25 @@ def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
     with _virtual_cmdqueue_clock(1000) as (clock, _events, origin):
         command = _cmdqueue.wait_for_command(
             queue, timeout=timeout, producer_alive=lambda: False)
-    assert command is None, command
-    assert clock.monotonic() < origin + timeout, (
-        clock.monotonic(), origin, timeout)
+    end = clock.monotonic()
+    assert command is None, 'genuinely empty queue returned a command'
+    assert end < origin + timeout, (
+        'genuinely empty queue ignored the dead producer',
+        end, origin, timeout)
+
+
+def test_an_ignored_only_queue_lets_a_dead_producer_end_the_wait(tmp):
+    timeout = 2.5 * _cmdqueue.POLL_DELAY
+    queue, ignored = _queued_file(tmp)
+    with _virtual_cmdqueue_clock(1000) as (clock, _events, origin):
+        command = _cmdqueue.wait_for_command(
+            queue, timeout=timeout, producer_alive=lambda: False,
+            ignored_names={ignored.name})
+    end = clock.monotonic()
+    assert command is None, 'ignored-only queue returned a command'
+    assert end < origin + timeout, (
+        'ignored-only queue counted as an observed queue file',
+        end, origin, timeout)
 
 
 def test_a_queue_file_that_disappears_during_read_is_retried(tmp):
