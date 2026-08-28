@@ -225,6 +225,7 @@
 !/tests/_segments.py
 !/tests/_util.py
 !/tests/_wfcheckout.py
+!/tests/_wfgraph.py
 !/tests/_wfscalars.py
 !/tests/_worker_runtime.py
 !/tests/_worker_sources.py
