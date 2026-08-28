@@ -274,15 +274,18 @@ def _run_aggregate(workflow, results, through_bash=False):
     return _run_script(_aggregate_script(workflow), needs, through_bash)
 
 
-def _job_condition_runs(workflow, job, outputs):
-    """Evaluate one job condition with an all-success dependency context."""
+def _job_condition_runs(workflow, job, outputs=None, *, context=None):
+    """Use the shared expression semantics at a real job boundary."""
     expression = _job_if_expression(workflow, job)
     assert expression is not None, job
-    context = {
-        'github': {'event_name': 'push'},
-        'status': {'success': True, 'failure': False, 'cancelled': False},
-        'needs': {'changes': {'outputs': outputs}},
-    }
+    if context is None:
+        context = {
+            'github': {'event_name': 'push'},
+            'status': {
+                'success': True, 'failure': False, 'cancelled': False,
+            },
+            'needs': {'changes': {'outputs': outputs}},
+        }
     return evaluate_if(expression, context)
 
 
