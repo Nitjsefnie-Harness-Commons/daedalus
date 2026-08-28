@@ -5,7 +5,6 @@
 content hash was already seen -- and equal hashes do not imply equal data
 (issue #266). coverage_combine.py replaces it in CI so nothing is dropped.
 """
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +20,7 @@ _SAME_HASH = 'abcdef1234'
 # These subprocesses build and read fixture data files of their own; letting
 # the ambient COVERAGE_PROCESS_START hook measure them would record incidental
 # coverage under fixture paths this suite doesn't own.
-_ENV = _util.coverage_free_environment(os.environ)
+_ENV = _util.child_coverage('scrub')
 
 
 def _write_parallel_file(cwd, name_suffix, source_name, lines):
