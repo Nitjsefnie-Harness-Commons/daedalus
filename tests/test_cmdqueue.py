@@ -15,7 +15,7 @@ import test_mcp_server  # noqa: E402
 
 
 @contextlib.contextmanager
-def _refuse_path_operation(path, operation, failures):
+def _refuse_path_operation(path, operation, failures, clock=None):
     original = getattr(Path, operation)
     remaining = [failures]
     calls = [0]
@@ -23,6 +23,8 @@ def _refuse_path_operation(path, operation, failures):
     def refused(candidate, *args, **kwargs):
         if candidate == path:
             calls[0] += 1
+            if clock is not None:
+                clock.record_read()
             if remaining[0]:
                 remaining[0] -= 1
                 raise PermissionError(32, 'injected sharing violation')
@@ -39,22 +41,31 @@ def _refuse_path_operation(path, operation, failures):
 def _virtual_cmdqueue_clock(max_sleeps):
     original = _cmdqueue.time
     now = [0.0]
-    sleeps = []
+    events = []
+    sleep_count = [0]
+    # Read cost exposes stale deadline samples; the fallback avoids underflow.
+    read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
     class Clock:
         def monotonic(self):
             return now[0]
 
+        def record_read(self):
+            events.append(('read', read_cost))
+            now[0] += read_cost
+
         def sleep(self, seconds):
-            if len(sleeps) >= max_sleeps:
+            if sleep_count[0] >= max_sleeps:
                 raise AssertionError(
                     f'virtual clock exceeded {max_sleeps} sleeps')
-            sleeps.append(seconds)
+            sleep_count[0] += 1
+            events.append(('sleep', seconds))
             now[0] += seconds
 
-    _cmdqueue.time = Clock()
+    clock = Clock()
+    _cmdqueue.time = clock
     try:
-        yield sleeps
+        yield clock, events
     finally:
         _cmdqueue.time = original
 
@@ -192,18 +203,21 @@ def test_a_queue_file_already_gone_during_clear_is_not_an_error(tmp):
 def test_a_permanent_read_refusal_is_bounded(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    with _refuse_path_operation(queued, 'read_text', 1000) as calls:
-        with _virtual_cmdqueue_clock(10) as sleeps:
+    with _virtual_cmdqueue_clock(10) as (clock, events):
+        with _refuse_path_operation(
+                queued, 'read_text', 1000, clock=clock) as calls:
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)
+    sleeps = [duration for kind, duration in events if kind == 'sleep']
     assert command is None, command
-    # Trace relationships avoid assuming how binary64 splits the deadline.
     assert calls[0] == len(sleeps), (calls, sleeps)
     assert sleeps, sleeps
+    assert [kind for kind, _duration in events] == (
+        ['read', 'sleep'] * len(sleeps)), events
     assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), sleeps
     # An exact multiple can make the final sleep equal the polling delay.
     assert sleeps[-1] <= _cmdqueue.POLL_DELAY, sleeps
-    assert sum(sleeps) == timeout, sleeps
+    assert clock.monotonic() == timeout, (clock.monotonic(), timeout, events)
 
 
 def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
@@ -228,12 +242,12 @@ def test_wait_ends_early_when_the_producer_is_gone(tmp):
         producer_calls.append(True)
         return False
 
-    with _virtual_cmdqueue_clock(0) as sleeps:
+    with _virtual_cmdqueue_clock(0) as (_clock, events):
         command = _cmdqueue.wait_for_command(
             queue, timeout=10, producer_alive=producer_alive)
     assert command is None, command
     assert producer_calls, producer_calls
-    assert sleeps == [], sleeps
+    assert events == [], events
 
 
 def test_the_cli_answer_helper_survives_a_transient_queue_read_refusal(tmp):
