@@ -132,9 +132,7 @@ def _workflow_script():
 
 
 def _issue(*assignees, pull_request=False):
-    issue = {
-        'assignees': [{'login': login} for login in assignees],
-    }
+    issue = {'assignees': [{'login': login} for login in assignees]}
     if pull_request:
         issue['pull_request'] = {'url': 'https://github.com/pulls/0'}
     return issue
@@ -142,10 +140,16 @@ def _issue(*assignees, pull_request=False):
 
 def _run_workflow(
         tmp, body, issues, actor='alice', pr='99', repo='owner/repo',
-        parser_crlf=False, comment_status=None, state='open', merged='false',
-        timeline=(), comments=(), timeline_status=None,
-        comments_status=None):
+        parser_crlf=False, comment_status=None, pull=None, history=None):
     """Execute the real workflow shell against the controlled gh boundary."""
+    pull = pull or {}
+    history = history or {}
+    state = pull.get('state', 'open')
+    merged = pull.get('merged', 'false')
+    timeline = history.get('timeline', ())
+    comments = history.get('comments', ())
+    timeline_status = history.get('timeline_status')
+    comments_status = history.get('comments_status')
     bash = shutil.which('bash')
     assert bash, 'bash is required to execute the pull-request body gate'
     workdir = Path(tmp) / 'workflow'
@@ -244,8 +248,7 @@ def _assert_commented_then_reopened(
     assert 'state=open' in reopen, reopen
 
 
-def test_parser_accepts_a_reference_in_the_real_template(tmp):
-    del tmp
+def test_parser_accepts_a_reference_in_the_real_template(_tmp):
     template = (ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md').read_text(
         encoding='utf-8')
     body = template.replace('\nFixes #\n', '\nFixes #314\n', 1)
@@ -253,8 +256,7 @@ def test_parser_accepts_a_reference_in_the_real_template(tmp):
     assert PR_BODY.referenced_issues(body) == [314]
 
 
-def test_parser_returns_nothing_for_empty_or_missing_sections(tmp):
-    del tmp
+def test_parser_returns_nothing_for_empty_or_missing_sections(_tmp):
     assert PR_BODY.referenced_issues(None) == []
     assert PR_BODY.referenced_issues('') == []
     assert PR_BODY.referenced_issues('## Summary\nFixes #31\n') == []
@@ -262,16 +264,14 @@ def test_parser_returns_nothing_for_empty_or_missing_sections(tmp):
     assert PR_BODY.referenced_issues(SECTION + '\n## Changes\n') == []
 
 
-def test_parser_normalizes_windows_and_lone_carriage_returns(tmp):
-    del tmp
+def test_parser_normalizes_windows_and_lone_carriage_returns(_tmp):
     crlf = '# Summary\r\ntext\r\n' + SECTION.replace('\n', '\r\n')
     assert PR_BODY.referenced_issues(crlf + 'Fixes #32\r\n') == [32]
     assert PR_BODY.referenced_issues(
         '# Summary\rtext\r' + SECTION.replace('\n', '\r') + '#33\r') == [33]
 
 
-def test_parser_removes_complete_and_unterminated_html_comments(tmp):
-    del tmp
+def test_parser_removes_complete_and_unterminated_html_comments(_tmp):
     body = (SECTION + '<!-- hidden across\nFixes #40\n-->\n'
             'Fixes #41\n')
     assert PR_BODY.referenced_issues(body) == [41]
@@ -281,8 +281,7 @@ def test_parser_removes_complete_and_unterminated_html_comments(tmp):
     assert PR_BODY.referenced_issues(hidden_section) == []
 
 
-def test_parser_accepts_only_the_first_exact_atx_section_heading(tmp):
-    del tmp
+def test_parser_accepts_only_the_first_exact_atx_section_heading(_tmp):
     body = ('   ### rELATED iSSUES AND pULL rEQUESTS   ###\n'
             'Fixes #50\n# Changes\nFixes #51\n'
             + SECTION + 'Fixes #52\n')
@@ -293,14 +292,12 @@ def test_parser_accepts_only_the_first_exact_atx_section_heading(tmp):
         '## Related Issues and Pull Requests later\nFixes #54\n') == []
 
 
-def test_parser_stops_at_the_next_atx_heading(tmp):
-    del tmp
+def test_parser_stops_at_the_next_atx_heading(_tmp):
     body = SECTION + 'Fixes #60\n###### Testing\nFixes #61\n'
     assert PR_BODY.referenced_issues(body) == [60]
 
 
-def test_parser_stops_at_a_setext_heading(tmp):
-    del tmp
+def test_parser_stops_at_a_setext_heading(_tmp):
     body = SECTION + 'Fixes #62\nSummary\n-------\nFixes #63\n'
     assert PR_BODY.referenced_issues(body) == [62]
 
@@ -588,8 +585,9 @@ def test_open_body_reports_each_single_failed_condition(tmp):
 
 def test_closed_owned_admissible_body_is_reopened(tmp):
     calls, result = _run_workflow(
-        tmp, _valid_body(), {'101': _issue('alice')}, state='closed',
-        timeline=_closed_by(BOT), comments=MARKER_COMMENT)
+        tmp, _valid_body(), {'101': _issue('alice')},
+        pull={'state': 'closed'}, history={
+            'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT})
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_commented_then_reopened(calls)
 
@@ -601,8 +599,9 @@ def test_closed_by_someone_else_is_never_changed(tmp):
               _closed_by(BOT) + [{'event': 'closed', 'actor': {}}])]
     for name, body, timeline in cases:
         calls, result = _run_workflow(
-            Path(tmp) / name, body, {'101': _issue('alice')}, state='closed',
-            timeline=timeline, comments=MARKER_COMMENT)
+            Path(tmp) / name, body, {'101': _issue('alice')},
+            pull={'state': 'closed'}, history={
+                'timeline': timeline, 'comments': MARKER_COMMENT})
         assert result.returncode == 0, (name, result.stderr)
         _assert_no_mutation(calls)
 
@@ -612,15 +611,16 @@ def test_closed_owned_without_marker_is_not_changed(tmp):
     for name, comments in [('absent', ()), ('spoofed', spoof)]:
         calls, result = _run_workflow(
             Path(tmp) / name, _valid_body(), {'101': _issue('alice')},
-            state='closed', timeline=_closed_by(BOT), comments=comments)
+            pull={'state': 'closed'}, history={
+                'timeline': _closed_by(BOT), 'comments': comments})
         assert result.returncode == 0, (result.stdout, result.stderr)
         _assert_no_mutation(calls)
 
 
 def test_closed_owned_inadmissible_body_stays_closed(tmp):
     calls, result = _run_workflow(
-        tmp, 'bad body', {}, state='closed', timeline=_closed_by(BOT),
-        comments=MARKER_COMMENT)
+        tmp, 'bad body', {}, pull={'state': 'closed'}, history={
+            'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT})
     assert result.returncode == 0, (result.stdout, result.stderr)
     _assert_no_mutation(calls)
 
@@ -629,19 +629,19 @@ def test_merged_pull_request_is_never_touched(tmp):
     for name, body in [('valid', _valid_body()), ('invalid', 'bad body')]:
         calls, result = _run_workflow(
             Path(tmp) / name, body, {'101': _issue('alice')},
-            state='closed', merged='true', timeline=_closed_by(BOT),
-            comments=MARKER_COMMENT)
+            pull={'state': 'closed', 'merged': 'true'}, history={
+                'timeline': _closed_by(BOT), 'comments': MARKER_COMMENT})
         assert result.returncode == 0, (name, result.stderr)
         assert calls == [], calls
 
 
 def test_unreadable_ownership_evidence_never_reopens(tmp):
     first, one = _run_workflow(
-        Path(tmp) / 'timeline', _valid_body(), {}, state='closed',
-        timeline_status=502)
+        Path(tmp) / 'timeline', _valid_body(), {}, pull={'state': 'closed'},
+        history={'timeline_status': 502})
     second, two = _run_workflow(
-        Path(tmp) / 'marker', _valid_body(), {}, state='closed',
-        timeline=_closed_by(BOT), comments_status=502)
+        Path(tmp) / 'marker', _valid_body(), {}, pull={'state': 'closed'},
+        history={'timeline': _closed_by(BOT), 'comments_status': 502})
     assert one.returncode == two.returncode == 0
     _assert_no_mutation(first)
     _assert_no_mutation(second)
