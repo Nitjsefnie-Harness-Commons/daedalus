@@ -2,7 +2,6 @@
 """Executable contracts for the fork pull request fallback resolution."""
 import json
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -48,8 +47,7 @@ def _endpoints(calls):
 
 def _run_resolve_block(tmp, event_numbers):
     """Run the Resolve block against a fork-aware recording double."""
-    bash = shutil.which('bash')
-    assert bash, 'bash is required to execute the workflow shell'
+    bash = _util.workflow_bash()
     workdir = Path(tmp) / 'resolve'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     commenter._write_executable(  # pylint: disable=protected-access
