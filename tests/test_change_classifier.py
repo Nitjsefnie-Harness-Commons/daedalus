@@ -24,11 +24,12 @@ from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
     _workflow_path_filters, _workflow_triggers)
 from _yamlread import YAMLReadError, job_mapping  # noqa: E402
-from _ghexpr import evaluate, evaluate_if  # noqa: E402
+from _ghexpr import evaluate_if  # noqa: E402
 from _wfgraph import (  # noqa: E402
+    _actionlint_runs, _job_condition_runs,
     _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
-    _job_names_with_outputs, _job_step_ids, _tests_yml,
-    _run_script, aggregate_expected)
+    _job_names_with_outputs, _job_step_ids, _run_aggregate, _tests_yml,
+    aggregate_expected)
 
 
 def _classifier():
@@ -378,36 +379,6 @@ DOCS_ONLY_VALUES = ('true', 'false', '')
 AGGREGATE_RESULT_STATES = ('success', 'failure', 'cancelled', 'skipped')
 
 
-def _aggregate_script(workflow):
-    """The aggregate job's run block, dedented, ready for bash."""
-    section = '\n'.join(_job_section(workflow, 'aggregate'))
-    _, marker, after = section.partition('        run: |\n')
-    assert marker, 'aggregate has no run block shaped as this test expects'
-    lines = []
-    for line in after.splitlines():
-        if line.strip() and not line.startswith('          '):
-            break
-        lines.append(line[10:])
-    return '\n'.join(lines)
-
-
-def _run_aggregate(results, through_bash=False):
-    """Run the real aggregate script against one `needs` result mapping."""
-    needs = {name: {'result': result} for name, result in results.items()}
-    return _run_script(_aggregate_script(_tests_yml()), needs, through_bash)
-
-
-def _job_condition_runs(workflow, job, outputs):
-    """Evaluate one job condition with an all-success dependency context."""
-    expression = _job_if_expression(workflow, job)
-    assert expression is not None, job
-    context = {
-        'status': CONDITION_CONTEXTS[0][0],
-        'needs': {'changes': {'outputs': outputs}},
-    }
-    return evaluate_if(expression, context)
-
-
 def test_changes_job_permissions_are_exactly_read_only(tmp):
     del tmp
     permissions = job_mapping(_tests_yml(), 'changes', 'permissions')
@@ -514,21 +485,36 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
                     job, status, docs_only, expression)
 
 
-def test_actionlint_runs_only_when_workflow_paths_changed(tmp):
+def test_actionlint_survives_a_replacement_push_and_keeps_pr_behavior(tmp):
     del tmp
+    mod = _classifier()
     workflow = _tests_yml()
     assert _job_needs(workflow, 'actionlint') == ['changes']
-    section = _job_section(workflow, 'actionlint')
-    expected = "    if: ${{ needs.changes.outputs.workflows == 'true' }}"
-    conditions = [line for line in section if line.startswith('    if:')]
-    assert conditions == [expected], conditions
-    expression = conditions[0].strip()[len('if:'):].strip()
-    for workflows, should_run in (
-            ('true', True), ('false', False), ('', False)):
-        context = {'needs': {'changes': {'outputs': {
-            'workflows': workflows}}}}
-        assert evaluate(expression, context) is should_run, (
-            workflows, expression)
+    pushes = (
+        (_event(name='push', pull_request=None),
+         '.github/workflows/tests.yml\n'),
+        (_event(name='push', pull_request=None,
+                before='a' * 40, sha='c' * 40), 'README.md\n'),
+    )
+    classifications = []
+    runs = []
+    for event, paths in pushes:
+        _docs, _matrix, workflows, _reason = mod.classify(
+            event, _recorder(paths)[1])
+        classifications.append(workflows)
+        runs.append(_actionlint_runs(
+            workflow, event['name'], 'true' if workflows else 'false'))
+    assert classifications == [True, False], classifications
+    assert runs == [True, True], runs
+
+    for paths, expected in (('.github/workflows/tests.yml\n', True),
+                            ('README.md\n', False)):
+        _docs, _matrix, workflows, _reason = mod.classify(
+            _event(name='pull_request'), _recorder(paths)[1])
+        assert workflows is expected
+        assert _actionlint_runs(
+            workflow, 'pull_request', 'true' if workflows else 'false') is (
+                expected)
 
 
 def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
@@ -591,10 +577,19 @@ def test_aggregate_waits_on_every_job_it_checks(tmp):
 def test_aggregate_in_process_captures_exit_without_spawning(tmp):
     with mock.patch.object(subprocess, 'run',
                            side_effect=AssertionError('aggregate spawned')):
-        result = _run_aggregate({'changes': 'failure'})
+        result = _run_aggregate(_tests_yml(), {'changes': 'failure'})
     assert result.returncode == 1
     assert result.stdout == ''
     assert result.stderr == 'Dependencies not successful: changes=failure\n'
+
+
+def test_aggregate_failing_result_matches_the_bash_launcher(tmp):
+    del tmp
+    in_process = _run_aggregate(_tests_yml(), {'changes': 'failure'})
+    through_bash = _run_aggregate(
+        _tests_yml(), {'changes': 'failure'}, through_bash=True)
+    assert (in_process.returncode, in_process.stdout, in_process.stderr) == (
+        through_bash.returncode, through_bash.stdout, through_bash.stderr)
 
 
 def test_aggregate_script_accepts_only_tabled_results(tmp):
@@ -610,7 +605,7 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
     for name, accepted in AGGREGATE_ALLOWED_RESULTS.items():
         for result_name in AGGREGATE_RESULT_STATES:
             result = _run_aggregate(
-                dict(all_success, **{name: result_name}))
+                _tests_yml(), dict(all_success, **{name: result_name}))
             assert (result.returncode == 0) is (result_name in accepted), (
                 name, result_name, accepted, result.stdout, result.stderr)
 
@@ -621,7 +616,7 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
             results = dict(all_success, **dict(zip(names, result_names)))
             expected_success = aggregate_expected(
                 results, AGGREGATE_ALLOWED_RESULTS)
-            result = _run_aggregate(results)
+            result = _run_aggregate(_tests_yml(), results)
             assert (result.returncode == 0) is expected_success, (
                 names, result_names, result.stdout, result.stderr)
 
@@ -634,12 +629,13 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
             ('coverage', {'docs_only': 'true'})):
         docs_only[job] = 'success' if _job_condition_runs(
             workflow, job, outputs) else 'skipped'
-    result = _run_aggregate(docs_only)
+    result = _run_aggregate(_tests_yml(), docs_only)
     assert result.returncode == 0, (result.stdout, result.stderr)
     for name, result_name in docs_only.items():
         assert result_name in AGGREGATE_ALLOWED_RESULTS[name], (
             name, result_name)
-    bash_result = _run_aggregate(docs_only, through_bash=True)
+    bash_result = _run_aggregate(
+        _tests_yml(), docs_only, through_bash=True)
     assert (result.returncode, result.stdout, result.stderr) == (
         bash_result.returncode, bash_result.stdout, bash_result.stderr)
 

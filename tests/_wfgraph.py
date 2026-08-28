@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 
+from _ghexpr import evaluate, evaluate_if
 from _repo import ROOT
 from _yamlread import (
     _decoded_mapping_entry, _first_child, _indent, _lines, _meaningful,
@@ -252,3 +253,45 @@ def _job_if_expression(workflow, job):
         source = '\n'.join((
             'jobs:', f'  {job}:', f'    if: {" ".join(parts)}')) + '\n'
     return job_scalar(source, job, 'if')
+
+
+def _aggregate_script(workflow):
+    """The aggregate job's run block, dedented, ready for bash."""
+    section = '\n'.join(_job_section(workflow, 'aggregate'))
+    _, marker, after = section.partition('        run: |\n')
+    assert marker, 'aggregate has no run block shaped as this test expects'
+    lines = []
+    for line in after.splitlines():
+        if line.strip() and not line.startswith('          '):
+            break
+        lines.append(line[10:])
+    return '\n'.join(lines)
+
+
+def _run_aggregate(workflow, results, through_bash=False):
+    """Run the real aggregate script against one `needs` result mapping."""
+    needs = {name: {'result': result} for name, result in results.items()}
+    return _run_script(_aggregate_script(workflow), needs, through_bash)
+
+
+def _job_condition_runs(workflow, job, outputs):
+    """Evaluate one job condition with an all-success dependency context."""
+    expression = _job_if_expression(workflow, job)
+    assert expression is not None, job
+    context = {
+        'github': {'event_name': 'push'},
+        'status': {'success': True, 'failure': False, 'cancelled': False},
+        'needs': {'changes': {'outputs': outputs}},
+    }
+    return evaluate_if(expression, context)
+
+
+def _actionlint_runs(workflow, event_name, workflows):
+    """Evaluate actionlint's real condition for one event and output."""
+    expression = _job_if_expression(workflow, 'actionlint')
+    assert expression is not None
+    context = {
+        'github': {'event_name': event_name},
+        'needs': {'changes': {'outputs': {'workflows': workflows}}},
+    }
+    return evaluate(expression, context)
