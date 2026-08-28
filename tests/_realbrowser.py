@@ -29,8 +29,12 @@ from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
+WEBSOCKET_PRESENT_TOKEN = 'websocket-present'
+WEBSOCKET_ABSENT_TOKEN = 'websocket-absent'
 NODE_WEBSOCKET_PROBE = (
-    "process.exit(typeof WebSocket === 'function' ? 0 : 1)")
+    "process.stdout.write(typeof WebSocket === 'function' ? "
+    f'{json.dumps(WEBSOCKET_PRESENT_TOKEN)} : '
+    f'{json.dumps(WEBSOCKET_ABSENT_TOKEN)})')
 NODE_PROBE_TIMEOUT = 10
 WINDOWS_COMMAND_TOO_LONG = 206
 
@@ -272,9 +276,20 @@ def browser_requirements():
         # is the harness's defect rather than a missing machine capability.
         raise AssertionError(
             f'Node WebSocket probe did not finish: {node}') from why
+    # Exit status only says whether our program ran; distinct stdout tokens
+    # carry the capability answer without conflating it with probe failure.
     if websocket.returncode != 0:
+        raise AssertionError(
+            f'Node WebSocket probe failed: {node}; '
+            f'exit={websocket.returncode}, stdout={websocket.stdout!r}, '
+            f'stderr={websocket.stderr!r}')
+    if websocket.stdout == WEBSOCKET_ABSENT_TOKEN:
         raise BrowserEnvironmentSkipped(
             'this Node runtime has no WebSocket client for CDP')
+    if websocket.stdout != WEBSOCKET_PRESENT_TOKEN:
+        raise AssertionError(
+            f'Node WebSocket probe returned an invalid answer: {node}; '
+            f'stdout={websocket.stdout!r}')
     return node, browser
 
 

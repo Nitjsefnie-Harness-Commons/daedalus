@@ -48,6 +48,39 @@ def test_repository_node_probe_starts_and_terminates(tmp):
             node, '/controlled/chromium')
 
 
+def test_invalid_repository_node_probe_is_harness_failure(tmp):
+    del tmp
+    node = shutil.which('node')
+    assert node, 'Node is required to execute the probe control'
+    failure = None
+    with mock.patch.object(
+            _realbrowser.shutil, 'which', _which_with(node)), \
+            mock.patch.object(
+                _realbrowser, 'NODE_WEBSOCKET_PROBE', 'function {'):
+        try:
+            _realbrowser.browser_requirements()
+        except Exception as why:  # noqa: BLE001
+            failure = why
+    assert failure.__class__ is AssertionError, failure
+
+
+def test_node_probe_absent_token_is_environment_skip(tmp):
+    del tmp
+    node = shutil.which('node')
+    assert node, 'Node is required to execute the probe control'
+    absent_probe = "process.stdout.write('websocket-absent')"
+    skipped = None
+    with mock.patch.object(
+            _realbrowser.shutil, 'which', _which_with(node)), \
+            mock.patch.object(
+                _realbrowser, 'NODE_WEBSOCKET_PROBE', absent_probe):
+        try:
+            _realbrowser.browser_requirements()
+        except _realbrowser.BrowserEnvironmentSkipped as why:
+            skipped = why
+    assert skipped is not None, 'absent WebSocket token did not skip'
+
+
 def test_e2big_start_failure_skips_when_minimal_spawn_fails(tmp):
     del tmp
     too_large = OSError(errno.E2BIG, 'platform-dependent size refusal')
