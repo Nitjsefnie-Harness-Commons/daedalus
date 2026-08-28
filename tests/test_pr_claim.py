@@ -233,10 +233,37 @@ def test_parser_stops_at_a_setext_heading(tmp):
     assert PR_CLAIM.referenced_issues(body) == [62]
 
 
+def test_parser_does_not_treat_list_or_quote_as_setext_heading(tmp):
+    del tmp
+    bodies = [
+        SECTION + '- Fixes #65\n---\n',
+        SECTION + '> Fixes #66\n---\n',
+    ]
+    for number, body in zip((65, 66), bodies):
+        assert PR_CLAIM.referenced_issues(body) == [number]
+
+
+def test_parser_accepts_a_setext_section_heading(tmp):
+    del tmp
+    body = ('Related Issues and Pull Requests\n'
+            '--------------------------------\n')
+    assert PR_CLAIM.referenced_issues(body + 'Fixes #67\n') == [67]
+
+
 def test_parser_ignores_atx_headings_inside_fenced_code(tmp):
     del tmp
     body = SECTION + '```markdown\n## Changes\n```\nFixes #64\n'
     assert PR_CLAIM.referenced_issues(body) == [64]
+
+
+def test_parser_keeps_comment_markers_inside_fenced_code_literal(tmp):
+    del tmp
+    body = ('## Summary\n```html\n<!-- a template comment\n```\n'
+            + SECTION + 'Fixes #68\n')
+    assert PR_CLAIM.referenced_issues(body) == [68]
+    body = ('## Summary\n<!-- a hidden fence\n```\n-->\n'
+            + SECTION + 'Fixes #69\n')
+    assert PR_CLAIM.referenced_issues(body) == [69]
 
 
 def test_parser_removes_fenced_and_inline_code(tmp):
@@ -248,6 +275,30 @@ def test_parser_removes_fenced_and_inline_code(tmp):
     assert PR_CLAIM.referenced_issues(body) == [75]
     body = SECTION + 'A stray ` in prose does not hide Fixes #76\n'
     assert PR_CLAIM.referenced_issues(body) == [76]
+
+
+def test_parser_ignores_indented_code_blocks(tmp):
+    del tmp
+    body = SECTION + '    Fixes #77\nFixes #78\n'
+    assert PR_CLAIM.referenced_issues(body) == [78]
+
+
+def test_parser_ignores_backslash_escaped_references(tmp):
+    del tmp
+    body = SECTION + r'Literal \#79, real #80.'
+    assert PR_CLAIM.referenced_issues(body) == [80]
+
+
+def test_parser_accepts_emphasized_or_colon_section_headings(tmp):
+    del tmp
+    headings = (
+        '## **Related Issues and Pull Requests**:\n',
+        '__Related Issues and Pull Requests__:\n'
+        '=========================================\n',
+    )
+    for number, heading in zip((81, 82), headings):
+        assert PR_CLAIM.referenced_issues(
+            heading + f'Fixes #{number}\n') == [number]
 
 
 def test_parser_filters_and_deduplicates_references_in_order(tmp):

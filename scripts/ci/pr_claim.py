@@ -6,34 +6,117 @@ import sys
 
 _ATX_HEADING = re.compile(
     r'^ {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?[ \t]*$')
-_HTML_COMMENT = re.compile(r'<!--.*?(?:-->|$)', re.DOTALL)
 _FENCE = re.compile(r'^ {0,3}(?P<fence>`{3,}|~{3,})(?P<rest>.*)$')
 _SETEXT_UNDERLINE = re.compile(r'^ {0,3}(?:=+|-+)[ \t]*$')
+_THEMATIC_BREAK = re.compile(
+    r'^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$')
+_BLOCK_PREFIX = re.compile(
+    r'^ {0,3}(?:>[ \t]?|(?:[*+-]|[0-9]{1,9}[.)])[ \t]+)')
+_EMPHASIS = re.compile(
+    r'^(?P<marker>\*{1,3}|_{1,3})(?P<text>.+)(?P=marker)$')
 _BACKTICKS = re.compile(r'`+')
 _REFERENCE = re.compile(r'(?<![\w#&])#([0-9]+)')
 _SECTION = 'related issues and pull requests'
 
 
-def _remove_fenced_code(lines):
-    unfenced = []
+def _strip_comments(line, in_comment):
+    visible = []
+    cursor = 0
+    while cursor < len(line):
+        if in_comment:
+            end = line.find('-->', cursor)
+            if end < 0:
+                visible.append(' ' * (len(line) - cursor))
+                break
+            visible.append(' ' * (end + 3 - cursor))
+            cursor = end + 3
+            in_comment = False
+            continue
+        start = line.find('<!--', cursor)
+        if start < 0:
+            visible.append(line[cursor:])
+            break
+        visible.append(line[cursor:start])
+        visible.append(' ' * 4)
+        cursor = start + 4
+        in_comment = True
+    return ''.join(visible), in_comment
+
+
+def _remove_hidden_markdown(body):
+    visible_lines = []
     fence_close = None
-    for line in lines:
+    in_comment = False
+    for line in body.split('\n'):
         if fence_close is not None:
-            unfenced.append('')
+            visible_lines.append('')
             if fence_close.fullmatch(line):
                 fence_close = None
             continue
-        opening = _FENCE.match(line)
-        if opening is not None:
+        opening = None if in_comment else _FENCE.match(line)
+        if opening:
             fence = opening.group('fence')
             if fence[0] == '~' or '`' not in opening.group('rest'):
                 fence_close = re.compile(
                     rf'^ {{0,3}}{re.escape(fence[0])}'
                     rf'{{{len(fence)},}}[ \t]*$')
-                unfenced.append('')
+                visible_lines.append('')
                 continue
-        unfenced.append(line)
-    return unfenced
+        visible, in_comment = _strip_comments(line, in_comment)
+        visible_lines.append(visible)
+    return visible_lines
+
+
+def _heading_text(text):
+    text = text.strip()
+    if text.endswith(':'):
+        text = text[:-1].rstrip()
+    while True:
+        emphasis = _EMPHASIS.fullmatch(text)
+        if emphasis is None:
+            return text.casefold()
+        text = emphasis.group('text').strip()
+
+
+def _is_paragraph_line(line):
+    if not line.strip() or line.startswith(('    ', '\t')):
+        return False
+    if _ATX_HEADING.fullmatch(line) or _SETEXT_UNDERLINE.fullmatch(line):
+        return False
+    return not (_BLOCK_PREFIX.match(line) or _THEMATIC_BREAK.fullmatch(line))
+
+
+def _heading_at(lines, index):
+    heading = _ATX_HEADING.fullmatch(lines[index])
+    if heading is not None:
+        text = heading.group('text') or ''
+        text = re.sub(r'[ \t]+#+[ \t]*$', '', text)
+        return _heading_text(text), 1
+    if (index + 1 < len(lines)
+            and _is_paragraph_line(lines[index])
+            and _SETEXT_UNDERLINE.fullmatch(lines[index + 1])):
+        return _heading_text(lines[index]), 2
+    return None
+
+
+def _remove_indented_code(lines):
+    visible = []
+    may_start = True
+    in_code = False
+    for line in lines:
+        indented = line.startswith(('    ', '\t'))
+        if indented and (may_start or in_code):
+            visible.append('')
+            in_code = True
+            continue
+        if not line.strip():
+            visible.append(line)
+            may_start = True
+            continue
+        visible.append(line)
+        may_start = False
+        in_code = False
+    return visible
 
 
 def referenced_issues(body):
@@ -41,32 +124,28 @@ def referenced_issues(body):
         return []
 
     body = body.replace('\r\n', '\n').replace('\r', '\n')
-    body = _HTML_COMMENT.sub('', body)
-    lines = _remove_fenced_code(body.split('\n'))
+    lines = _remove_hidden_markdown(body)
 
     section_start = None
     section_end = len(lines)
-    for index, line in enumerate(lines):
-        heading = _ATX_HEADING.fullmatch(line)
-        if section_start is not None:
-            setext = (
-                line.strip()
-                and index + 1 < len(lines)
-                and _SETEXT_UNDERLINE.fullmatch(lines[index + 1]))
-            if heading is not None or setext:
-                section_end = index
-                break
-            continue
+    index = 0
+    while index < len(lines):
+        heading = _heading_at(lines, index)
         if heading is None:
+            index += 1
             continue
-        text = heading.group('text') or ''
-        text = re.sub(r'[ \t]+#+[ \t]*$', '', text).strip()
-        if text.casefold() == _SECTION:
-            section_start = index + 1
+        text, width = heading
+        if section_start is not None:
+            section_end = index
+            break
+        if text == _SECTION:
+            section_start = index + width
+        index += width
     if section_start is None:
         return []
 
-    source = '\n'.join(lines[section_start:section_end])
+    source = '\n'.join(
+        _remove_indented_code(lines[section_start:section_end]))
     without_code = []
     cursor = 0
     while True:
@@ -86,7 +165,13 @@ def referenced_issues(body):
 
     found = []
     seen = set()
-    for match in _REFERENCE.finditer(''.join(without_code)):
+    source = ''.join(without_code)
+    for match in _REFERENCE.finditer(source):
+        slash = match.start() - 1
+        while slash >= 0 and source[slash] == '\\':
+            slash -= 1
+        if (match.start() - slash - 1) % 2:
+            continue
         number = int(match.group(1))
         if number and number not in seen:
             seen.add(number)
