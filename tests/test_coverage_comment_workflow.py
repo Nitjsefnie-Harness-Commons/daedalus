@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -129,15 +128,14 @@ def _write_executable(path, content):
 def _run_shell_block(workdir, script, env):
     """Run a workflow shell block with coverage disabled in its children."""
     return subprocess.run(
-        [shutil.which('bash'), '-c', script], cwd=workdir,
+        [_util.workflow_bash(), '-c', script], cwd=workdir,
         env=_util.child_coverage('scrub', env),
         capture_output=True, text=True, timeout=60)
 
 
 def _run_artifact_check(tmp, response, extra_env=None):
     """Run artifact-presence shell against one endpoint-shaped fixture."""
-    bash = shutil.which('bash')
-    assert bash, 'bash is required to execute the workflow shell'
+    bash = _util.workflow_bash()
     workdir = Path(tmp) / 'artifact-check'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     _write_executable(workdir / 'bin' / 'gh', _GH_ARTIFACT_STUB)
@@ -411,8 +409,7 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
                        head_sha='B', pr_number='170', claimed='170',
                        body='### Coverage\n'):
     """Run one commenter block with a recording GitHub double."""
-    bash = shutil.which('bash')
-    assert bash, 'bash is required to execute the workflow shell'
+    bash = _util.workflow_bash()
     workdir = Path(tmp) / block_name.replace(' ', '-')
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     _write_executable(workdir / 'bin' / 'gh', _GH_COMMENT_STUB)

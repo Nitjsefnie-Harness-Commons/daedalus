@@ -4,9 +4,9 @@ import io
 import json
 import os
 import re
-import shutil
 import subprocess
 
+import _util
 from _ghexpr import evaluate, evaluate_if
 from _repo import ROOT
 from _yamlread import (
@@ -26,8 +26,7 @@ def _run_script(script, needs, through_bash=False):
     """Run an extracted workflow script and capture its result."""
     env = {**os.environ, 'NEEDS_JSON': json.dumps(needs)}
     if through_bash:
-        bash = shutil.which('bash')
-        assert bash, 'bash is required to execute the aggregate script'
+        bash = _util.workflow_bash()
         return subprocess.run([bash, '-c', script], env=env,
                               capture_output=True, text=True, timeout=60)
     source = '\n'.join(script.splitlines()[1:-1])

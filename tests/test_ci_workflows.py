@@ -7,7 +7,6 @@ inspection.
 import fnmatch
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -65,8 +64,7 @@ def _claim_script():
 
 
 def _run_claim(tmp, body, assigned, actor='alice', refuse=False):
-    bash = shutil.which('bash')
-    assert bash, 'bash is required to execute the claim workflow script'
+    bash = _util.workflow_bash()
     workdir = Path(tmp) / f'claim-{abs(hash((body, tuple(assigned), actor, refuse)))}'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     stub = workdir / 'bin' / 'gh'
