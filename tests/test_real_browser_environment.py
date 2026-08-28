@@ -48,17 +48,48 @@ def test_repository_node_probe_starts_and_terminates(tmp):
             node, '/controlled/chromium')
 
 
-def test_e2big_start_failure_is_environment_skip(tmp):
+def test_e2big_start_failure_skips_when_minimal_spawn_fails(tmp):
     del tmp
     too_large = OSError(errno.E2BIG, 'platform-dependent size refusal')
+    calls = []
+
+    def minimal_spawn(args, **kwargs):
+        del kwargs
+        calls.append(args)
+        raise OSError(errno.E2BIG, 'controlled minimal spawn refusal')
+
     skipped = None
-    try:
-        _realbrowser._raise_start_failure(
-            'Node WebSocket probe', '/controlled/node', too_large)
-    except _realbrowser.BrowserEnvironmentSkipped as why:
-        skipped = why
+    with mock.patch.object(_realbrowser.subprocess, 'run', minimal_spawn):
+        try:
+            _realbrowser._raise_start_failure(
+                'Node WebSocket probe', '/controlled/node', too_large)
+        except _realbrowser.BrowserEnvironmentSkipped as why:
+            skipped = why
     assert skipped is not None, 'E2BIG did not produce an environment skip'
     assert skipped.__cause__ is too_large, skipped.__cause__
+    assert calls == [[sys.executable, '-c', '']], calls
+
+
+def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
+    del tmp
+    too_large = OSError(errno.E2BIG, 'platform-dependent size refusal')
+    calls = []
+
+    def minimal_spawn(args, **kwargs):
+        del kwargs
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    failure = None
+    with mock.patch.object(_realbrowser.subprocess, 'run', minimal_spawn):
+        try:
+            _realbrowser._raise_start_failure(
+                'Node WebSocket probe', '/controlled/node', too_large)
+        except Exception as why:  # noqa: BLE001
+            failure = why
+    assert failure.__class__ is AssertionError, failure
+    assert failure.__cause__ is too_large, failure.__cause__
+    assert calls == [[sys.executable, '-c', '']], calls
 
 
 def test_nonterminating_node_probe_is_harness_failure(tmp):
