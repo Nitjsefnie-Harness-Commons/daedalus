@@ -36,6 +36,14 @@ def _real_module_copy(tmp, relative):
     return root, root / relative
 
 
+class _HidingEnvironment(dict):
+    """A mapping whose iteration hides what its items() still carries."""
+
+    def __iter__(self):
+        return (name for name in dict.__iter__(self)
+                if not name.startswith('COVERAGE_'))
+
+
 def _repository_write_lines():
     """Writes not provably below storage owned by their control."""
     return control_write_violations(Path(__file__), ROOT)
@@ -116,6 +124,19 @@ subprocess.run([{argv}, 'x'], cwd=tmp)
         assert 'tests/synthetic.py:2' in violations[0], violations
 
 
+def test_a_chain_of_launch_callable_aliases_is_followed(tmp):
+    """A launch through an alias of an alias still needs a declaration."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+_RUNNER = subprocess.run
+_INVOKE = _RUNNER
+_INVOKE(['python3', 'child.py'], cwd=tmp)
+""")
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:4' in violations[0], violations
+
+
 def test_a_declaration_makes_an_unresolved_cwd_safe(tmp):
     """Direct, imported and once-bound child_coverage calls declare."""
     del tmp
@@ -193,7 +214,8 @@ def test_a_declaration_name_used_elsewhere_is_a_violation(tmp):
     for appearance in ('alias = env',
                        'env["x"]',
                        'print(env)',
-                       'env.copy()'):
+                       'env.copy()',
+                       "globals()['env'].update({})"):
         violations = _synthetic_violations(
             f"""import subprocess
 import _util
@@ -256,6 +278,20 @@ subprocess.run(['python3', 'child.py'], cwd=tmp, env=_ENV)
 """)
         assert any('tests/synthetic.py:4' in v for v in violations), (
             binding, violations)
+
+
+def test_an_assignment_alias_of_the_helper_module_is_a_rebind(tmp):
+    """A name bound to _util by assignment is the same module object."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+import _util
+_HELPER = _util
+_HELPER.child_coverage = lambda _mode: {}
+_ENV = _util.child_coverage('scrub')
+subprocess.run(['python3', 'child.py'], cwd=tmp, env=_ENV)
+""")
+    assert any('tests/synthetic.py:4' in v for v in violations), violations
 
 
 def test_a_rebound_declaration_helper_is_caught(tmp):
@@ -360,6 +396,25 @@ subprocess.run(['python3', 'child.py'], cwd=tmp,
     assert violations == [
         'tests/synthetic.py::<module> declares keep without an allowlist '
         + 'entry'], violations
+
+
+def test_a_keep_must_declare_its_own_launch_cwd(tmp):
+    """A keep proving some other path proves nothing about the launch."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+import _util
+subprocess.run(['python3', 'child.py'], cwd=root,
+               env=_util.child_coverage('keep', cwd=other))
+""")
+    assert any("not the launch's cwd" in v for v in violations), violations
+    matched = _synthetic_violations(
+        """import subprocess
+import _util
+subprocess.run(['python3', 'child.py'], cwd=str(root),
+               env=_util.child_coverage('keep', cwd=root))
+""")
+    assert not any("launch's cwd" in v for v in matched), matched
 
 
 def test_an_allowlist_entry_without_a_keep_site_fails(tmp):
@@ -541,24 +596,30 @@ def test_child_coverage_declares_scrub_and_keep(tmp):
 
 
 def test_child_coverage_rejects_a_leaking_scrub_result(tmp):
-    """Scrub mode validates the environment it is about to return."""
+    """Scrub mode validates the environment it is about to return.
+
+    The second delegate leaks through `items()`, which is what subprocess
+    serializes, while hiding the same names from iteration.
+    """
     del tmp
 
     def leaking_scrub(environment):
         return dict(environment)
 
-    original = _util.coverage_free_environment
-    _util.coverage_free_environment = leaking_scrub
-    try:
-        environment = {'COVERAGE_PROCESS_START': 'must-not-leak'}
+    for delegate in (leaking_scrub, _HidingEnvironment):
+        original = _util.coverage_free_environment
+        _util.coverage_free_environment = delegate
         try:
-            _util.child_coverage('scrub', environment)
-        except ValueError as error:
-            assert 'COVERAGE_PROCESS_START' in str(error), error
-        else:
-            raise AssertionError('child_coverage returned a leaking scrub')
-    finally:
-        _util.coverage_free_environment = original
+            environment = {'COVERAGE_PROCESS_START': 'must-not-leak'}
+            try:
+                _util.child_coverage('scrub', environment)
+            except ValueError as error:
+                assert 'COVERAGE_PROCESS_START' in str(error), error
+            else:
+                raise AssertionError(
+                    f'child_coverage returned a leaking scrub: {delegate}')
+        finally:
+            _util.coverage_free_environment = original
 
 
 def test_child_coverage_keep_requires_a_mapped_tree(tmp):
@@ -572,6 +633,20 @@ def test_child_coverage_keep_requires_a_mapped_tree(tmp):
                 assert 'unmapped-runner' in str(error), error
         else:
             raise AssertionError(f'keep accepted cwd={cwd}')
+
+
+def test_child_coverage_keep_refuses_a_scrubbed_environment(tmp):
+    """A keep whose environment lost the collector is not keeping it."""
+    os.environ['COVERAGE_GUARD_PROBE'] = 'present'
+    try:
+        _util.child_coverage(
+            'keep', {'PATH': '/bin'}, cwd=Path(tmp) / 'tree')
+    except ValueError as error:
+        assert 'COVERAGE_GUARD_PROBE' in str(error), error
+    else:
+        raise AssertionError('keep accepted a scrubbed environment')
+    finally:
+        del os.environ['COVERAGE_GUARD_PROBE']
 
 
 def test_keep_outside_a_mapped_tree_fails_at_runtime(tmp):
