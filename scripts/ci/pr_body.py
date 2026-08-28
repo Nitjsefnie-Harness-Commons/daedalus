@@ -13,6 +13,7 @@ _BACKTICKS = re.compile(r'`+')
 _HEADING_LINE = re.compile(
     r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.+?)[ \t]*#*[ \t]*$',
     re.MULTILINE)
+_HTML_INTEGER = re.compile(r'[ \t\n\f\r]*(?P<digits>[0-9]+)')
 _REFERENCE_SHAPE = re.compile(
     r'#[0-9]|gh-[0-9]|issues/|pull/|://|%|&#|&num', re.IGNORECASE)
 _TEMPLATE_HEADING = re.compile(
@@ -27,7 +28,8 @@ _VOID_TAGS = frozenset((
 ))
 _MAX_ISSUE_DIGITS = 19
 _INVISIBLE_CHARACTERS = frozenset((
-    '\u034f', '\u115f', '\u1160', '\u2800', '\u3164', '\uffa0',
+    '\u034f', '\u115f', '\u1160', '\u180b', '\u180c', '\u180d',
+    '\u180f', '\u2800', '\u3164', '\uffa0',
 ))
 
 
@@ -92,6 +94,11 @@ def issue_number(href, repository):
     return number or None
 
 
+def _zero_html_integer(value):
+    match = _HTML_INTEGER.match(value)
+    return bool(match and not match.group('digits').strip('0'))
+
+
 class _RenderedBodyParser(HTMLParser):
     def __init__(self, repository):
         super().__init__(convert_charrefs=False)
@@ -134,7 +141,7 @@ class _RenderedBodyParser(HTMLParser):
         if tag == 'img':
             self._record_text(attributes.get('alt', ''))
             zero_size = any(
-                attributes.get(name, '').strip() == '0'
+                _zero_html_integer(attributes.get(name, ''))
                 for name in ('width', 'height'))
             if (self._heading_tag is None and self._key is not None
                     and attributes.get('src') and not zero_size):

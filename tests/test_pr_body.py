@@ -65,6 +65,30 @@ def test_parser_rejects_unusable_html(tmp):
     assert accepted == [], accepted
 
 
+def test_parser_rejects_unfinished_heading(tmp):
+    del tmp
+    try:
+        PR_BODY.parse_rendered('<h2>Summary', 'owner/repo')
+    except ValueError as error:
+        assert 'unfinished heading' in str(error), error
+    else:
+        raise AssertionError('unfinished heading was accepted')
+
+
+def test_parser_rejects_malformed_repositories(tmp):
+    del tmp
+    rendered = '<h2>Summary</h2><p>text</p>'
+    accepted = []
+    for repository in ('owner', 'a/b/c', '/'):
+        try:
+            PR_BODY.parse_rendered(rendered, repository)
+        except ValueError as error:
+            assert 'owner/name' in str(error), error
+        else:
+            accepted.append(repository)
+    assert accepted == [], accepted
+
+
 def test_visible_reference_fixtures_remain_visible(tmp):
     del tmp
     names = (
@@ -111,6 +135,34 @@ def test_nontext_reference_fixtures_remain_hidden(tmp):
         if name == 'html_attribute':
             assert sections[0].links == ('#101',)
     assert failures == [], failures
+
+
+def test_parser_ignores_named_anchor_without_href(tmp):
+    del tmp
+    rendered = _html_body(
+        ('Related Issues and Pull Requests', GITHUB_HTML['named_anchor']))
+    sections = PR_BODY.parse_rendered(rendered, REPOSITORY)
+    assert sections[0].links == ()
+    assert PR_BODY.referenced_issues(sections) == []
+
+
+def test_numeric_character_references_contribute_visible_text(tmp):
+    del tmp
+    rendered = _html_body(
+        ('Summary', '<p>&#35;101 &#x23;101</p>'))
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    assert sections[0].text.strip() == '#101 #101'
+
+
+def test_related_helpers_return_empty_without_related_section(tmp):
+    del tmp
+    sections = PR_BODY.parse_rendered(
+        _html_body(('Summary', '<p>text</p>')), 'owner/repo')
+    actual = (
+        PR_BODY.referenced_issues(sections),
+        PR_BODY.related_links(sections),
+    )
+    assert actual == ([], []), actual
 
 
 def test_issue_number_language(tmp):
@@ -196,8 +248,8 @@ def test_layout_treats_an_image_as_section_content(tmp):
 def test_layout_treats_invisible_text_as_empty(tmp):
     del tmp
     invisible = (
-        '\u200b', '\ufe0f', '\u034f', '\u115f', '\u1160', '\u3164',
-        '\uffa0', '\u2800')
+        '\u200b', '\ufe0f', '\u180b', '\u180c', '\u180d', '\u180f',
+        '\u034f', '\u115f', '\u1160', '\u3164', '\uffa0', '\u2800')
     for character in invisible:
         rendered = _valid_html(
             changes=f'<p dir="auto">{character}</p>')
@@ -213,6 +265,26 @@ def test_layout_treats_empty_or_invisible_images_as_empty(tmp):
         rendered = _valid_html(changes=image)
         assert 'Section "Changes" is empty.' in _layout_errors(
             rendered), image
+
+
+def test_layout_parses_image_dimensions_as_html_integers(tmp):
+    del tmp
+    cases = (
+        ('width="00"', True),
+        ('height="000"', True),
+        ('width=" 0"', True),
+        ('width="0px"', True),
+        ('width="10"', False),
+        ('width="01"', False),
+    )
+    failures = []
+    for attribute, expected_empty in cases:
+        image = f'<p><img src="diagram.png" alt="" {attribute}></p>'
+        errors = _layout_errors(_valid_html(changes=image))
+        empty = 'Section "Changes" is empty.' in errors
+        if empty != expected_empty:
+            failures.append((attribute, empty, expected_empty))
+    assert failures == [], failures
 
 
 def test_layout_rejects_a_template_heading_without_a_rule(tmp):
@@ -267,6 +339,21 @@ def test_unknown_section_reasons_escape_adversarial_names(tmp):
     reason = 'Section ``x`#1`` is not defined by the template.'
     assert reason in errors
     assert '#1' not in reason.replace('``x`#1``', '')
+
+
+def test_code_span_pads_backtick_boundaries_and_whitespace(tmp):
+    del tmp
+    cases = (
+        ('`start', '`` `start ``'),
+        ('end`', '`` end` ``'),
+        ('   ', '`     `'),
+    )
+    failures = [
+        (text, PR_BODY.code_span(text), expected)
+        for text, expected in cases
+        if PR_BODY.code_span(text) != expected
+    ]
+    assert failures == [], failures
 
 
 def test_retains_instruction_comment(tmp):
