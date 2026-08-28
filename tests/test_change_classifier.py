@@ -79,6 +79,35 @@ def test_an_unimplemented_pattern_shape_fails_closed(tmp):
         raise AssertionError("'docs/*' was matched instead of refused")
 
 
+def test_directory_glob_prefix_rejects_unimplemented_metacharacters(tmp):
+    del tmp
+    mod = _classifier()
+    for pattern in ('docs*/**', 'docs?/**', 'docs[ab]/**', 'docs]/**'):
+        path = pattern.replace('/**', '/a.md')
+        try:
+            mod.matches(pattern, path)
+        except ValueError:
+            continue
+        raise AssertionError(f'{pattern!r} was matched instead of refused')
+
+
+def test_nested_glob_shape_still_fails_closed(tmp):
+    del tmp
+    mod = _classifier()
+    try:
+        mod.matches('docs/**/*.md', 'docs/guide.md')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("'docs/**/*.md' was matched instead of refused")
+
+
+def test_directory_glob_does_not_match_the_directory_itself(tmp):
+    del tmp
+    mod = _classifier()
+    assert not mod.matches('.github/workflows/**', '.github/workflows')
+
+
 def test_star_star_pattern_compares_the_final_segment(tmp):
     """`**/rest` matches on the path's final segment, not the whole path.
 
