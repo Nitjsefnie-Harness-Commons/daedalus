@@ -2,6 +2,7 @@
 """Rendered pull-request body reference parsing and its CLI."""
 import subprocess
 import sys
+from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -36,18 +37,16 @@ def test_parser_accepts_an_issue_anchor_in_the_rendered_section(tmp):
     assert PR_BODY.referenced_issues(rendered) == [101]
 
 
-def test_parser_returns_nothing_for_empty_or_missing_sections(tmp):
+def test_parser_returns_nothing_for_missing_or_empty_sections(tmp):
     del tmp
     bodies = (
-        None,
-        '',
         _html_body(('Summary', f'Fixes {_issue_html(31)}')),
         '<p dir="auto">Fixes <a href="https://github.com/owner/repo/'
         'issues/31">#31</a></p>',
         _related(''),
     )
     assert [PR_BODY.referenced_issues(body) for body in bodies] == [
-        [], [], [], [], [],
+        [], [], [],
     ]
 
 
@@ -114,6 +113,7 @@ def test_parser_filters_repository_and_pull_request_targets(tmp):
     rendered = _related(
         f'{_issue_html(40, REPOSITORY)} '
         f'{_issue_html(41, "another/project")} '
+        '<a href="mailto:#43">#43</a> '
         '<a href="https://github.com/Nitjsefnie-Harness-Commons/'
         'daedalus/pull/42">#42</a>')
     assert PR_BODY.referenced_issues(rendered, REPOSITORY) == [40]
@@ -136,14 +136,61 @@ def test_parser_ignores_issue_numbers_too_wide_for_github(tmp):
     assert PR_BODY.referenced_issues(rendered, 'owner/repo') == []
 
 
-def test_parser_rejects_a_non_html_render_response(tmp):
+def test_parser_rejects_unusable_render_responses(tmp):
     del tmp
+    cases = (
+        '',
+        'upstream returned plain text',
+        '<h2>Summary</h2><',
+        '<h2>Summary</h2><p>text',
+        '<h2>Summary</h2><h2',
+        '<h2>Summary</h2><!-- unfinished',
+        '<h2>Summary',
+        '<h2>Summary<h3>Nested</h3></h2>',
+        '<h2>Summary</h2><p></div>',
+    )
+    accepted = []
+    for rendered in cases:
+        try:
+            PR_BODY.referenced_issues(rendered)
+        except ValueError as error:
+            assert 'rendered HTML' in str(error), error
+        else:
+            accepted.append(rendered)
+    assert accepted == [], accepted
+
+
+def test_parser_rejects_an_anchor_without_a_destination(tmp):
+    del tmp
+    rendered = _related('<p>Fixes <a>#101</a></p>')
     try:
-        PR_BODY.referenced_issues('upstream returned plain text')
+        PR_BODY.referenced_issues(rendered, REPOSITORY)
     except ValueError as error:
-        assert 'rendered HTML' in str(error), error
+        assert 'anchor' in str(error), error
     else:
-        raise AssertionError('a non-HTML render response was accepted')
+        raise AssertionError('an anchor without a destination was accepted')
+
+
+def test_parser_rejects_a_self_closing_content_element(tmp):
+    del tmp
+    rendered = _related('<p/>')
+    try:
+        PR_BODY.referenced_issues(rendered, REPOSITORY)
+    except ValueError as error:
+        assert 'self-closing' in str(error), error
+    else:
+        raise AssertionError('a self-closing content element was accepted')
+
+
+def test_parser_rejects_a_malformed_repository(tmp):
+    del tmp
+    rendered = _related('<p>No reference.</p>')
+    try:
+        PR_BODY.referenced_issues(rendered, 'missing-owner')
+    except ValueError as error:
+        assert 'owner/name' in str(error), error
+    else:
+        raise AssertionError('a malformed repository was accepted')
 
 
 def test_cli_emits_tagged_analysis_from_rendered_html(tmp):
@@ -174,6 +221,35 @@ def test_cli_rejects_an_unusable_render_response(tmp):
     assert 'rendered HTML' in result.stderr, result.stderr
 
 
+def test_cli_reports_an_unreadable_template(tmp):
+    missing = Path(tmp) / 'missing-template.md'
+    result = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py'),
+         '--instruction-fingerprints', str(missing)],
+        input='', text=True, capture_output=True, timeout=30)
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stdout == '', repr(result.stdout)
+    assert 'could not read template:' in result.stderr, result.stderr
+
+
+def test_cli_reports_a_template_heading_without_an_instruction(tmp):
+    template = Path(tmp) / 'template.md'
+    template.write_text(
+        '## Summary\n\n## Changes\n<!-- required: explain -->\n',
+        encoding='utf-8')
+    rendered = _html_body(
+        ('Summary', _text_html('Summary.')),
+        ('Changes', _text_html('Change.')))
+    result = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'pr_body.py'),
+         REPOSITORY, str(template)],
+        input=rendered, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stdout == '', repr(result.stdout)
+    assert 'Summary' in result.stderr, result.stderr
+    assert 'instruction comment' in result.stderr, result.stderr
+
+
 def test_cli_prints_template_instruction_fingerprints(tmp):
     del tmp
     template_path = ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md'
@@ -188,21 +264,25 @@ def test_cli_prints_template_instruction_fingerprints(tmp):
     collector.feed(template_path.read_text(encoding='utf-8'))
     collector.close()
     comments = collector.comments
+    expected = []
+    for comment in comments:
+        lines = [line.strip() for line in comment.splitlines()
+                 if line.strip()]
+        expected.append(lines[0])
     assert all(fingerprints), fingerprints
-    assert len(fingerprints) == len(comments), (fingerprints, comments)
-    assert all(any(fingerprint in comment for comment in comments)
-               for fingerprint in fingerprints), (fingerprints, comments)
+    assert Counter(fingerprints) == Counter(expected), (
+        fingerprints, expected)
 
 
 def test_cli_rejects_extra_arguments(tmp):
     del tmp
     script = str(ROOT / 'scripts' / 'ci' / 'pr_body.py')
     result = subprocess.run(
-        [sys.executable, script, REPOSITORY, 'template', 'extra'],
+        [sys.executable, script, REPOSITORY, 'template', 'source', 'extra'],
         input='', text=True, capture_output=True, timeout=30)
     assert result.returncode == 2, (result.stdout, result.stderr)
     assert result.stdout == '', repr(result.stdout)
-    usage = f'usage: {script} repository template\n'
+    usage = f'usage: {script} repository template [source-body]\n'
     assert result.stderr == usage, result.stderr
 
 

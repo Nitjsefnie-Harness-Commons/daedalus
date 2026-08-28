@@ -4,6 +4,7 @@ import re
 import sys
 from html.parser import HTMLParser
 from typing import NamedTuple
+from unicodedata import category
 from urllib.parse import urlsplit
 
 
@@ -14,6 +15,10 @@ _TEMPLATE_HEADING = re.compile(
 _TEMPLATE_TAG = re.compile(
     r'<!--\s*(?P<tag>required|conditional|optional)\b')
 _HEADING_TAGS = frozenset(f'h{depth}' for depth in range(1, 7))
+_VOID_TAGS = frozenset((
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+    'meta', 'param', 'source', 'track', 'wbr',
+))
 _MAX_ISSUE_DIGITS = 19
 _SECTION = 'related issues and pull requests'
 
@@ -74,9 +79,12 @@ def _issue_number(href, repository):
 class _RenderedBodyParser(HTMLParser):
     def __init__(self, repository):
         super().__init__(convert_charrefs=True)
+        _repository_parts(repository)
         self.repository = repository
         self.sections = []
         self.saw_element = False
+        self.visible_text = []
+        self._open_tags = []
         self._heading_tag = None
         self._heading_parts = []
         self._name = None
@@ -87,24 +95,51 @@ class _RenderedBodyParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         self.saw_element = True
         tag = tag.casefold()
+        if tag not in _VOID_TAGS:
+            self._open_tags.append(tag)
         if tag in _HEADING_TAGS:
+            if self._heading_tag is not None:
+                raise ValueError(
+                    'rendered HTML contains nested headings')
             self._finish_section()
             self._heading_tag = tag
             self._heading_parts = []
             return
-        if tag != 'a' or self._heading_tag is not None or self._key is None:
+        if tag == 'img':
+            alt = next((value for name, value in attrs
+                        if name.casefold() == 'alt'), None)
+            self._record_text(alt or '')
+            if self._heading_tag is None and self._key is not None:
+                self._text.append('\ufffc')
             return
-        href = next((value for name, value in attrs
-                     if name.casefold() == 'href'), None)
+        if tag != 'a':
+            return
+        destinations = [value for name, value in attrs
+                        if name.casefold() == 'href']
+        if not destinations:
+            raise ValueError(
+                'rendered HTML contains an anchor without a destination')
+        if self._heading_tag is not None or self._key is None:
+            return
+        href = destinations[0]
         number = _issue_number(href, self.repository)
         if number is not None:
             self._issues.append(number)
 
     def handle_startendtag(self, tag, attrs):
+        tag = tag.casefold()
+        if tag not in _VOID_TAGS:
+            raise ValueError(
+                'rendered HTML contains a self-closing content element')
         self.handle_starttag(tag, attrs)
 
     def handle_endtag(self, tag):
-        if tag.casefold() != self._heading_tag:
+        tag = tag.casefold()
+        if not self._open_tags or self._open_tags[-1] != tag:
+            raise ValueError(
+                'rendered HTML contains mismatched element boundaries')
+        self._open_tags.pop()
+        if tag != self._heading_tag:
             return
         name = _heading_text(''.join(self._heading_parts))
         self._name = name
@@ -115,15 +150,25 @@ class _RenderedBodyParser(HTMLParser):
         self._heading_parts = []
 
     def handle_data(self, data):
+        self._record_text(data)
+
+    def _record_text(self, data):
+        self.visible_text.append(data)
         if self._heading_tag is not None:
             self._heading_parts.append(data)
         elif self._key is not None:
             self._text.append(data)
 
     def finish(self):
+        if not self.saw_element:
+            raise ValueError('input is not usable rendered HTML')
+        if self.rawdata:
+            raise ValueError('rendered HTML is structurally incomplete')
         super().close()
         if self._heading_tag is not None:
             raise ValueError('rendered HTML contains an unfinished heading')
+        if any(tag not in _HEADING_TAGS for tag in self._open_tags):
+            raise ValueError('rendered HTML contains an unfinished element')
         self._finish_section()
 
     def _finish_section(self):
@@ -138,26 +183,29 @@ class _RenderedBodyParser(HTMLParser):
         self._issues = []
 
 
-def _parse_rendered(rendered, repository=None):
+def _rendered_body(rendered, repository=None):
     rendered = rendered or ''
     parser = _RenderedBodyParser(repository)
     parser.feed(rendered)
     parser.finish()
-    if rendered.strip() and not parser.saw_element:
-        raise ValueError('input is not usable rendered HTML')
-    return parser.sections
+    return parser
+
+
+def _parse_rendered(rendered, repository=None):
+    return _rendered_body(rendered, repository).sections
 
 
 def _template_rules(template):
     headings = list(_TEMPLATE_HEADING.finditer(template))
     rules = {}
     for index, heading in enumerate(headings):
+        name = _heading_text(heading.group('text'))
         end = headings[index + 1].start() if index + 1 < len(headings) \
             else len(template)
         tag = _TEMPLATE_TAG.search(template[heading.end():end])
         if tag is None:
-            continue
-        name = _heading_text(heading.group('text'))
+            raise ValueError(
+                f'template section "{name}" has no instruction comment')
         rules[name.casefold()] = _Rule(name, tag.group('tag'), index)
     return rules
 
@@ -170,6 +218,20 @@ def instruction_fingerprints(template):
         if lines:
             fingerprints.append(lines[0])
     return fingerprints
+
+
+def _normalise_newlines(text):
+    return text.replace('\r\n', '\n').replace('\r', '\n')
+
+
+def _retains_instruction_comment(source, rendered_text, template):
+    source = _normalise_newlines(source)
+    rendered_text = _normalise_newlines(rendered_text)
+    for match in _TEMPLATE_COMMENT.finditer(template):
+        comment = _normalise_newlines(match.group(0))
+        if source.count(comment) > rendered_text.count(comment):
+            return True
+    return False
 
 
 def _referenced_issues(sections):
@@ -218,7 +280,8 @@ def _layout_errors(sections, template):
             errors.append(f'Section "{rule.name}" is out of order.')
         else:
             last_index = rule.index
-        if not section.text.strip():
+        if not any(not char.isspace() and category(char) != 'Cf'
+                   for char in section.text):
             errors.append(f'Section "{rule.name}" is empty.')
     for key, rule in rules.items():
         if rule.tag == 'required' and key not in seen:
@@ -230,9 +293,13 @@ def layout_errors(rendered, template):
     return _layout_errors(_parse_rendered(rendered), template)
 
 
-def analyze(rendered, repository, template):
-    sections = _parse_rendered(rendered, repository)
-    return _referenced_issues(sections), _layout_errors(sections, template)
+def analyze(rendered, repository, template, source=None):
+    document = _rendered_body(rendered, repository)
+    errors = _layout_errors(document.sections, template)
+    if source is not None and _retains_instruction_comment(
+            source, ''.join(document.visible_text), template):
+        errors.append('Remove the template instruction comments.')
+    return _referenced_issues(document.sections), errors
 
 
 def _read_template(path):
@@ -241,7 +308,8 @@ def _read_template(path):
 
 
 def _usage():
-    print(f'usage: {sys.argv[0]} repository template', file=sys.stderr)
+    print(f'usage: {sys.argv[0]} repository template [source-body]',
+          file=sys.stderr)
 
 
 def main():
@@ -254,13 +322,14 @@ def main():
         for fingerprint in instruction_fingerprints(template):
             print(fingerprint)
         return 0
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         _usage()
         return 2
     rendered = sys.stdin.read()
     try:
         template = _read_template(sys.argv[2])
-        issues, errors = analyze(rendered, sys.argv[1], template)
+        source = _read_template(sys.argv[3]) if len(sys.argv) == 4 else None
+        issues, errors = analyze(rendered, sys.argv[1], template, source)
     except (OSError, ValueError) as error:
         print(f'could not analyze rendered HTML: {error}', file=sys.stderr)
         return 2

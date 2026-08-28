@@ -42,6 +42,41 @@ def test_layout_rejects_constructs_that_render_as_empty(tmp):
             rendered, TEMPLATE), name
 
 
+def test_layout_treats_an_image_as_section_content(tmp):
+    del tmp
+    images = (
+        '<p dir="auto"><img src="diagram.png" '
+        'alt="migration diagram"></p>',
+        '<p dir="auto"><img src="diagram.png"></p>',
+        '<p dir="auto"><img src="diagram.png"/></p>',
+    )
+    for image in images:
+        rendered = _valid_html() + _html_body(('Breaking Changes', image))
+        assert PR_BODY.layout_errors(rendered, TEMPLATE) == [], image
+
+
+def test_layout_treats_zero_width_text_as_empty(tmp):
+    del tmp
+    rendered = _valid_html(changes='<p dir="auto">\u200b</p>')
+    assert 'Section "Changes" is empty.' in PR_BODY.layout_errors(
+        rendered, TEMPLATE)
+
+
+def test_layout_rejects_a_template_heading_without_a_rule(tmp):
+    del tmp
+    template = '## Summary\n\n## Changes\n<!-- required: explain -->\n'
+    rendered = _html_body(
+        ('Summary', _text_html('Summary.')),
+        ('Changes', _text_html('Change.')))
+    try:
+        PR_BODY.layout_errors(rendered, template)
+    except ValueError as error:
+        assert 'Summary' in str(error), error
+        assert 'instruction comment' in str(error), error
+    else:
+        raise AssertionError('a section without a template rule was ignored')
+
+
 def test_layout_reports_unknown_duplicate_and_out_of_order_sections(tmp):
     del tmp
     rendered = _html_body(

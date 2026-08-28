@@ -118,9 +118,9 @@ calls = pathlib.Path(os.environ['STUB_CALLS'])
 argv = sys.argv[1:]
 recorded = []
 for arg in argv:
-    if arg.startswith('body=@'):
+    if arg.startswith(('body=@', 'text=@')):
         body = pathlib.Path(arg[6:]).read_text(encoding='utf-8')
-        recorded.append('body=' + body)
+        recorded.append(arg[:5] + body)
     else:
         recorded.append(arg)
 with calls.open('a', encoding='utf-8') as handle:
@@ -129,15 +129,18 @@ if not argv or argv[0] != 'api':
     print('unsupported gh command', file=sys.stderr)
     raise SystemExit(2)
 endpoint = next((arg for arg in argv
-                 if arg == '/markdown' or arg.startswith('repos/')), '')
+                 if arg == 'markdown' or arg.startswith('repos/')), '')
 def unsupported():
     print('unsupported gh api call', file=sys.stderr)
     raise SystemExit(2)
-if endpoint == '/markdown':
-    if (len(argv) != 8 or argv[:3] != ['api', '/markdown', '-F']
+if endpoint == 'markdown':
+    if (len(argv) != 8 or argv[:3] != ['api', 'markdown', '-F']
             or not argv[3].startswith('text=@')
             or argv[4] != '-f' or argv[5] != 'mode=gfm'
-            or argv[6] != '-f' or not argv[7].startswith('context=')):
+            or argv[6] != '-f'
+            or argv[7] != 'context=' + os.environ['STUB_EXPECTED_REPO']
+            or pathlib.Path(argv[3][6:]).read_text(encoding='utf-8')
+            != os.environ['STUB_EXPECTED_BODY']):
         unsupported()
     status = int(os.environ.get('STUB_RENDER_STATUS', '200'))
     if status != 200:
@@ -218,10 +221,15 @@ if endpoint.endswith('/comments'):
         raise SystemExit(1)
     raise SystemExit(0)
 if re.fullmatch(r'repos/[^/]+/[^/]+/pulls/[0-9]+', endpoint):
-    if (len(argv) == 7 and argv[:3] == ['api', '-X', 'PATCH']
-            and argv[3] == endpoint and argv[4] == '-f'
-            and argv[5] in ('state=open', 'state=closed')
-            and argv[6:] == ['--silent']):
+    method = 'GET'
+    request = argv
+    if len(argv) >= 3 and argv[1] in ('-X', '--method'):
+        method = argv[2]
+        request = [argv[0], *argv[3:]]
+    if (method == 'PATCH' and request[1] == endpoint
+            and request[2:3] == ['-f']
+            and request[3:4] in (['state=open'], ['state=closed'])
+            and request[4:] == ['--silent']):
         raise SystemExit(0)
 unsupported()
 """
@@ -323,6 +331,8 @@ def _run_workflow(
         'STUB_CALLS': str(calls_path),
         'STUB_REAL_PYTHON': sys.executable,
         'STUB_RENDERED_HTML': str(rendered_path),
+        'STUB_EXPECTED_BODY': body,
+        'STUB_EXPECTED_REPO': repo,
         'GH_TOKEN': 'stub',
         'REPO': repo,
         'PR': pr,
@@ -355,9 +365,13 @@ def _write_calls(calls):
         if call[0] != 'api':
             writes.append(call)
             continue
-        if '/markdown' in call:
+        if 'markdown' in call:
             continue
-        method = call[call.index('-X') + 1] if '-X' in call else 'GET'
+        method = 'GET'
+        for flag in ('-X', '--method'):
+            if flag in call:
+                method = call[call.index(flag) + 1]
+                break
         fields = {'-f', '-F', '--field', '--raw-field'}
         if method != 'GET' or fields.intersection(call):
             writes.append(call)
@@ -400,8 +414,8 @@ def _assert_commented_then_closed(
     assert '/claim' in body, body
     assert 'reopen it automatically' in body, body
     assert 'Then reopen this same pull request.' not in body, body
-    assert close == [
-        'api', '-X', 'PATCH', close_endpoint,
+    assert _normalise_method(close) == [
+        'PATCH', 'api', close_endpoint,
         '-f', 'state=closed', '--silent'], close
 
 
@@ -422,9 +436,17 @@ def _assert_commented_then_reopened(
     assert 'reopening it automatically' in body, body
     assert comment == [
         'api', comment_endpoint, '-F', f'body={body}', '--silent'], comment
-    assert reopen == [
-        'api', '-X', 'PATCH', reopen_endpoint,
+    assert _normalise_method(reopen) == [
+        'PATCH', 'api', reopen_endpoint,
         '-f', 'state=open', '--silent'], reopen
+
+
+def _normalise_method(call):
+    for flag in ('-X', '--method'):
+        if flag in call:
+            index = call.index(flag)
+            return [call[index + 1], *call[:index], *call[index + 2:]]
+    return ['GET', *call]
 
 
 def _layout_body(*sections):
