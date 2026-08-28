@@ -142,6 +142,18 @@ def test_carrier_json_object_equality_reflects_duplicate_keys(tmp):
     assert duplicated == {'job': 'b'}, dict(duplicated)
 
 
+def test_carrier_json_object_inequality_against_a_non_dict_stays_true(tmp):
+    """`__eq__` against a non-dict falls through to `dict.__eq__`, which
+    returns `NotImplemented` rather than `False` -- and `NotImplemented` is
+    truthy, so a `__ne__` that just negated it would report these as equal."""
+    del tmp
+    auth = _auth_module()
+    carrier = json.loads('{"job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
+    for other in (5, None, 'job', [1]):
+        assert carrier != other, (carrier, other)
+        assert not (carrier == other), (carrier, other)
+
+
 def test_live_listeners_keep_auth_state_and_body_limits_separate(tmp):
     test_mcp_server._need_deps()
     if importlib.util.find_spec('uvicorn') is None:
