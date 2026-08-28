@@ -173,7 +173,7 @@ def test_a_keep_declaration_needs_an_allowlist_entry(tmp):
         """import subprocess
 import _util
 subprocess.run(['python3', 'child.py'], cwd=tmp,
-               env=_util.child_coverage('keep'))
+               env=_util.child_coverage('keep', cwd=tmp))
 """)
     assert violations == [
         'tests/synthetic.py::<module> declares keep without an allowlist '
@@ -327,11 +327,10 @@ def test_every_launch_is_proven_safe_or_declares(tmp):
 
 
 def test_child_coverage_declares_scrub_and_keep(tmp):
-    """The helper scrubs, copies, and rejects any other mode."""
-    del tmp
+    """The helper scrubs, keeps in a mapped tree, and rejects bad modes."""
     environment = {'COVERAGE_PROCESS_START': 'x', 'PATH': '/bin'}
     assert _util.child_coverage('scrub', environment) == {'PATH': '/bin'}
-    kept = _util.child_coverage('keep', environment)
+    kept = _util.child_coverage('keep', environment, cwd=Path(tmp) / 'tree')
     assert kept == environment and kept is not environment
     try:
         _util.child_coverage('maybe')
@@ -339,6 +338,42 @@ def test_child_coverage_declares_scrub_and_keep(tmp):
         pass
     else:
         raise AssertionError("child_coverage accepted mode 'maybe'")
+
+
+def test_child_coverage_keep_requires_a_mapped_tree(tmp):
+    """A keep outside the '*/tree' anchor fails where it is declared."""
+    for cwd in (None, Path(tmp) / 'unmapped-runner'):
+        try:
+            _util.child_coverage('keep', {}, cwd=cwd)
+        except ValueError as error:
+            if cwd is not None:
+                assert 'unmapped-runner' in str(error), error
+        else:
+            raise AssertionError(f'keep accepted cwd={cwd}')
+
+
+def test_keep_outside_a_mapped_tree_fails_at_runtime(tmp):
+    """Renaming the runner's tree anchor trips the keep declaration."""
+    target = ROOT / 'tests' / 'test_suite_runner.py'
+    original = target.read_bytes()
+    needle = "    root = Path(tmp) / under / 'tree'"
+    text = _module_text(target)
+    assert needle in text, 'the runner tree anchor shape changed'
+    mutated = text.replace(
+        needle, "    root = Path(tmp) / under / 'unmapped-runner'", 1)
+    try:
+        target.write_bytes(mutated.encode('utf-8'))
+        module = _util.load(target, 'suite_runner_unmapped')
+        try:
+            module._runner_tree(
+                tmp, {'test_ok.py': 'def test_ok(tmp):\n    del tmp\n'})
+        except ValueError as error:
+            assert 'unmapped-runner' in str(error), error
+        else:
+            raise AssertionError(
+                'a keep launch outside a mapped tree ran unchallenged')
+    finally:
+        target.write_bytes(original)
 
 
 def test_child_coverage_scrubs_a_real_child(tmp):

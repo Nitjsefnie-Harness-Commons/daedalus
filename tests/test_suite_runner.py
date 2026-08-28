@@ -178,7 +178,7 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
         env['PYTHONIOENCODING'] = runner_encoding
     return subprocess.run(
         [sys.executable, 'run_tests.py'], cwd=str(root),
-        env=_util.child_coverage('keep', env),
+        env=_util.child_coverage('keep', env, cwd=root),
         capture_output=True, text=True,
         encoding=runner_encoding or 'utf-8', timeout=300,
         preexec_fn=before_exec)
