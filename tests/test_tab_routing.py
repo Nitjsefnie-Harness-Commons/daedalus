@@ -101,6 +101,25 @@ def test_a_name_rebound_away_from_ext_cmd_stops_reading_as_a_sender(tmp):
         f'ordinary call: {violations}')
 
 
+def test_a_for_target_rebinding_away_from_ext_cmd_also_clears_the_alias(tmp):
+    """The rebind check above only covered a plain assignment. Review found
+    a `for` target rebinds the same name too, and it wasn't clearing the
+    alias either — the loop here never even runs, but the name is still
+    rebound by the act of writing the loop."""
+    source = Path(tmp) / 'for_rebound_sender.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab, bridge):\n"
+        "    send = bridge.ext_cmd\n"
+        "    for send in (bridge.get,):\n"
+        "        pass\n"
+        "    return await send('/tabs', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'for_rebound_sender.py')
+    assert not violations, (
+        f'send was rebound by the for target and should read as an '
+        f'ordinary call: {violations}')
+
+
 def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
     """The other false-positive direction: declaring a local `send` alias
     must not reclassify every unrelated `.send()` method call in scope."""
