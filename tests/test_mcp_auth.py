@@ -129,6 +129,19 @@ def test_malformed_json_is_not_a_duplicate_carrier(tmp):
     assert result is None, result
 
 
+def test_carrier_json_object_equality_reflects_duplicate_keys(tmp):
+    """Two bodies collapsing to the same dict must stay distinguishable when
+    only one of them repeated a key — that repeat is otherwise invisible."""
+    del tmp
+    auth = _auth_module()
+    single = json.loads('{"job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
+    duplicated = json.loads(
+        '{"job": "a", "job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
+    assert dict(single) == dict(duplicated), (dict(single), dict(duplicated))
+    assert single != duplicated
+    assert duplicated == {'job': 'b'}, dict(duplicated)
+
+
 def test_live_listeners_keep_auth_state_and_body_limits_separate(tmp):
     test_mcp_server._need_deps()
     if importlib.util.find_spec('uvicorn') is None:

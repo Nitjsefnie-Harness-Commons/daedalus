@@ -45,6 +45,12 @@ class CarrierJSONObject(dict):
     inherited dict equality would report two bodies as the same request when
     only one of them repeated a key. Comparison against a plain dict is
     unchanged.
+
+    `__ne__` is overridden alongside `__eq__` rather than left to the
+    default: `dict` defines its own `__ne__`, so simply overriding `__eq__`
+    here does not make `!=` consistent with it — without this, `!=` would
+    silently fall back to plain dict inequality and miss the very duplicate
+    key `==` exists to catch.
     """
 
     def __init__(self, pairs):
@@ -55,6 +61,9 @@ class CarrierJSONObject(dict):
         if isinstance(other, CarrierJSONObject):
             return super().__eq__(other) and self.pairs == other.pairs
         return super().__eq__(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
 
 def job_carrier_names(request_body):
