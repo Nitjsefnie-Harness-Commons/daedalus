@@ -205,6 +205,23 @@ def needs_recount(job):
     return _dirty_path(job).exists()
 
 
+def mark_dirty(job):
+    """Establish the durable "this job's totals may go stale" marker.
+
+    Returns whether it actually landed. A caller about to make this job's
+    stored bytes disagree with its record — publishing a new segment, or
+    about to overwrite the record itself — has to know that before it
+    goes ahead: swallowing this failure and proceeding anyway is the same
+    shape #203 was filed about, one layer further down, since a write
+    that then also fails leaves neither a marker nor a correct record.
+    """
+    try:
+        _dirty_path(job).write_text('', encoding='utf-8')
+    except OSError:
+        return False
+    return True
+
+
 def write_usage(job, count, stored):
     """Persist a job's totals, leaving every other field of its record alone.
 
@@ -212,6 +229,12 @@ def write_usage(job, count, stored):
     unreadable is left alone rather than replaced: the mint is the only
     writer allowed to answer for corruption, and overwriting here would
     destroy the owner and capability a resume depends on.
+
+    Callers are responsible for having called mark_dirty(job) themselves
+    before whatever made this update necessary took effect — a segment
+    publish, or a recount — since only they know when that was. This only
+    clears the mark, and only once the record write it guards has
+    actually landed.
     """
     try:
         record = load_record(job)
@@ -221,16 +244,6 @@ def write_usage(job, count, stored):
         return
     path = record_path(job)
     dirty = _dirty_path(job)
-    # Set before the record write is even attempted: the segment this
-    # write is accounting for is already stored by the time we get here,
-    # so from this point on the record and the directory can disagree,
-    # whether because this write fails, or because the process dies
-    # before it finishes. The mark is what a later read checks instead of
-    # trusting whatever total the record still carries.
-    try:
-        dirty.write_text('', encoding='utf-8')
-    except OSError:
-        pass
     record['stored_count'] = count
     record['stored_bytes'] = stored
     tmp = path.with_name(f'.{path.name}.tmp')
@@ -240,8 +253,9 @@ def write_usage(job, count, stored):
     except OSError:
         # The segment itself is already stored, so a usage update that
         # cannot be written leaves the record at its previous totals —
-        # the mark above is what keeps the next read from trusting that,
-        # rather than the write that just failed quietly correcting it.
+        # the caller's mark is what keeps the next read from trusting
+        # that, rather than the write that just failed quietly correcting
+        # it.
         try:
             tmp.unlink()
         except OSError:
