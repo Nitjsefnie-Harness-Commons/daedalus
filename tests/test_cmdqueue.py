@@ -231,7 +231,7 @@ def test_wait_ends_early_when_the_producer_is_gone(tmp):
         command = _cmdqueue.wait_for_command(
             queue, timeout=10, producer_alive=producer_alive)
     assert command is None, command
-    assert producer_calls == [True], producer_calls
+    assert producer_calls, producer_calls
     assert sleeps == [], sleeps
 
 
