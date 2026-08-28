@@ -66,7 +66,8 @@ def test_browser_exit_before_devtools_is_environment_skip(tmp):
         with mock.patch.object(_realbrowser.time, 'time', clock), \
                 mock.patch.object(_realbrowser.time, 'sleep', sleeper):
             failure = _call_failure(
-                lambda: _realbrowser._wait_for_devtools(tmp, process))
+                lambda observed=process: _realbrowser._wait_for_devtools(
+                    tmp, observed))
         assert failure.__class__ is (
             _realbrowser.BrowserEnvironmentSkipped), failure
         assert clock.call_count == 2, (exit_code, clock.call_count)
