@@ -61,11 +61,19 @@ MCP_OLD_NAMES = (
 def _tracked_python(root=ROOT):
     root = Path(root)
     listed = subprocess.run(
-        ['git', '-C', str(root), 'ls-files', '-z', '*.py'],
+        ['git', '-C', str(root), 'ls-files', '-sz', '*.py'],
         capture_output=True, check=True, timeout=30)
-    paths = [path for path in listed.stdout.decode(
-        'utf-8', 'surrogateescape').split('\0') if path]
-    assert paths, 'Git returned no tracked Python files'
+    entries = [entry for entry in listed.stdout.decode(
+        'utf-8', 'surrogateescape').split('\0') if entry]
+    assert entries, 'Git returned no tracked Python files'
+    paths = [entry.split('\t', 1)[1] for entry in entries]
+    # A symlink checks out as an ordinary file wherever core.symlinks is
+    # off, so the recorded mode is the only reliable witness.
+    recorded = sorted(
+        entry.split('\t', 1)[1] for entry in entries
+        if not entry.split(' ', 1)[0].startswith('100'))
+    assert not recorded, (
+        f'tracked Python paths not recorded as regular files: {recorded}')
     missing = sorted(
         path for path in paths
         if (root / path).is_symlink() or not (root / path).is_file())
@@ -89,6 +97,38 @@ def test_the_inventory_refuses_a_missing_tracked_python_file(tmp):
     else:
         raise AssertionError(
             'the layout inventory accepted a missing tracked Python file')
+
+
+def test_the_inventory_refuses_a_tracked_symlink_blob(tmp):
+    """A module recorded as a symlink is refused however it checks out."""
+    tree = Path(tmp) / 'tree'
+    subprocess.run(
+        ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
+        check=True, timeout=30)
+    subprocess.run(
+        ['git', '-C', str(tree), 'config', 'core.symlinks', 'false'],
+        check=True, timeout=30)
+    target = tree / 'symlink-target'
+    target.write_text('auth.py')
+    blob = subprocess.run(
+        ['git', '-C', str(tree), 'hash-object', '-w', str(target)],
+        capture_output=True, check=True, text=True, timeout=30).stdout.strip()
+    target.unlink()
+    module = 'daedalus_mcp/server.py'
+    subprocess.run(
+        ['git', '-C', str(tree), 'update-index', '--add', '--cacheinfo',
+         f'120000,{blob},{module}'], check=True, timeout=30)
+    (tree / module).unlink()
+    subprocess.run(
+        ['git', '-C', str(tree), 'checkout-index', '-f', '--', module],
+        check=True, timeout=30)
+    try:
+        _tracked_python(tree)
+    except AssertionError as exc:
+        assert module in str(exc), str(exc)
+    else:
+        raise AssertionError(
+            'the layout inventory accepted a tracked symlink blob')
 
 
 def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
