@@ -27,11 +27,10 @@ def _refuse_path_operation(path, operation, failures, clock=None):
     calls = [0]
 
     def refused(candidate, *args, **kwargs):
-        if operation == 'open':
-            if candidate == path:
-                # Native validation adds one open per faulted call.
-                original(candidate, *args, **kwargs).close()
-        else:
+        if operation == 'open' and candidate == path and remaining[0]:
+            # Native validation adds one open per faulted call.
+            original(candidate, *args, **kwargs).close()
+        elif operation != 'open':
             try:
                 signature.bind(candidate, *args, **kwargs)
             except TypeError:
@@ -111,7 +110,7 @@ def _vanish_during_unlink(path):
 
 
 @contextlib.contextmanager
-def _vanish_during_read(path, clock):
+def _vanish_during_read(path, clock, remove_queue=False):
     original = Path.open
     armed = [True]
 
@@ -121,6 +120,8 @@ def _vanish_during_read(path, clock):
             armed[0] = False
             clock.record_read()
             candidate.unlink()
+            if remove_queue:
+                candidate.parent.rmdir()
             return original(candidate, *args, **kwargs)
         return original(candidate, *args, **kwargs)
 
@@ -227,25 +228,33 @@ def test_a_present_queue_file_outlives_its_finished_producer(tmp):
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
 
-def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
+def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
-    queue, queued = _queued_file(tmp)
-    with _virtual_cmdqueue_clock(
-            _RUNAWAY_SLEEP_LIMIT) as (clock, _events, origin):
-        with _vanish_during_read(queued, clock):
-            observed = _cmdqueue.wait_for_command(
-                queue, timeout=timeout, producer_alive=lambda: False)
-    observed_end = clock.monotonic()
-    with _virtual_cmdqueue_clock(
-            _RUNAWAY_SLEEP_LIMIT) as (clock, _events, baseline_origin):
+    def observed_wait(remove_queue):
+        queue, queued = _queued_file(tmp)
+        with _virtual_cmdqueue_clock(
+                _RUNAWAY_SLEEP_LIMIT) as (clock, _, origin):
+            with _vanish_during_read(queued, clock, remove_queue):
+                command = _cmdqueue.wait_for_command(
+                    queue, timeout=timeout, producer_alive=lambda: False)
+        assert command is None, command
+        assert not remove_queue or not queue.exists(), queue
+        return queue, clock.monotonic(), origin
+
+    queue, observed_end, origin = observed_wait(False)
+    with _virtual_cmdqueue_clock(_RUNAWAY_SLEEP_LIMIT) as (clock, _, base):
         baseline = _cmdqueue.wait_for_command(queue, timeout=timeout)
-    baseline_end = clock.monotonic()
-    assert observed is None, observed
+    base_end = clock.monotonic()
+    _queue, queue_end, queue_origin = observed_wait(True)
     assert baseline is None, baseline
-    assert origin == baseline_origin, (origin, baseline_origin)
-    assert observed_end == baseline_end, (
-        'vanished-file wait did not match a normal timeout',
-        observed_end, baseline_end)
+    assert origin == base, (origin, base)
+    # Sterbenz makes deadline - now exact while its operands are within a
+    # factor of two, so adding it lands on the already-representable deadline.
+    endpoints = ((observed_end, origin), (base_end, base),
+                 (queue_end, queue_origin))
+    for end, start in endpoints:
+        assert end == start + timeout, (end, start, timeout)
+    assert observed_end == base_end, (observed_end, base_end)
 
 
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
@@ -253,27 +262,23 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     excess_args = ('r', 1, -1, None, None, None, False, 'extra')
     expected_excess = _path_open_failure(queued, *excess_args)
     expected_binary = _path_open_failure(queued, mode='rb', encoding='utf-8')
-    expected_buffering = _path_open_failure(
-        queued, buffering=-1.0, encoding='utf-8')
+    expected_buf = _path_open_failure(queued, buffering=-1.0, encoding='utf-8')
     rejected_calls = (
         ('excess arguments', excess_args, {}, expected_excess),
         ('binary encoding', (),
          {'mode': 'rb', 'encoding': 'utf-8'}, expected_binary),
         ('value-equal wrong-type buffering', (),
          {'buffering': -1.0, 'encoding': 'utf-8'},
-         expected_buffering),
+         expected_buf),
     )
-    with _virtual_cmdqueue_clock(
-            _RUNAWAY_SLEEP_LIMIT) as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(_RUNAWAY_SLEEP_LIMIT) as (clock, _, _):
         injectors = (
             ('generic refusal',
              _refuse_path_operation(queued, 'open', 1), PermissionError),
-            ('first-read refusal',
-             _refuse_first_queue_read(queue), PermissionError),
-            ('disappearance',
-             _disappear_on_first_open(queued), FileNotFoundError),
-            ('vanishing read',
-             _vanish_during_read(queued, clock), FileNotFoundError),
+            ('first-read', _refuse_first_queue_read(queue), PermissionError),
+            ('disappearance', _disappear_on_first_open(queued),
+             FileNotFoundError),
+            ('vanish', _vanish_during_read(queued, clock), FileNotFoundError),
         )
         for label, injector, injected_type in injectors:
             before = queued.stat()
@@ -286,19 +291,14 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
                         opened.write('caller-owned content')
                 except OSError as caught:
                     open_failure = type(caught)
-                for failure, args, kwargs, expected in rejected_calls:
+                for case, args, kwargs, expected in rejected_calls:
                     actual = _path_open_failure(queued, *args, **kwargs)
-                    assert queued.exists(), (
-                        f'{label} removed path for {failure}')
+                    assert queued.exists(), f'{label} removed path for {case}'
                     after = queued.stat()
-                    assert actual == expected, (
-                        f'{label} changed {failure} failure',
-                        actual, expected)
-                    assert after == before, (
-                        f'{label} changed path for {failure}', after, before)
+                    assert actual == expected, (label, case, actual, expected)
+                    assert after == before, (label, case, after, before)
                 injected = _path_open_failure(queued, encoding='utf-8')
-            assert injected[0] is injected_type, (
-                f'{label} fault was consumed by a rejected call', injected)
+            assert injected[0] is injected_type, (label, injected)
             assert open_failure is None, (label, open_failure)
             assert candidate.read_text('utf-8') == 'caller-owned content'
 
