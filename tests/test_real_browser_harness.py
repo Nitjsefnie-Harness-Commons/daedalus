@@ -108,7 +108,7 @@ def test_cdp_eval_preserves_typed_evaluation_failure(tmp):
         try:
             _realbrowser.cdp_eval(
                 'node-for-control', 'ws://worker', 'controlled probe')
-        except Exception as why:  # noqa: BLE001
+        except _realbrowser.CDPEvaluationError as why:
             failure = why
     assert failure.__class__ is _realbrowser.CDPEvaluationError, failure
     assert failure.response is response, failure.response
