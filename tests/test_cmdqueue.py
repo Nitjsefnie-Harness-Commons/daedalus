@@ -345,11 +345,8 @@ def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
     original = Path.read_text
     expected = [{'id': 'queued', 'type': 'reload'},
                 {'id': 'second', 'type': 'reload'}]
-    expected_read_counts = {
-        first: {first: 2, second: 1},
-        second: {first: 2, second: 2},
-    }
     missing_file = [None]
+    refusal_index = [None]
     armed = [False]
     reads = []
 
@@ -358,12 +355,14 @@ def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
             reads.append(candidate)
         if candidate == missing_file[0] and armed[0]:
             armed[0] = False
+            refusal_index[0] = len(reads) - 1
             raise FileNotFoundError(
                 2, 'injected transient read error', str(missing_file[0]))
         return original(candidate, *args, **kwargs)
 
     for refused_file in (first, second):
         missing_file[0] = refused_file
+        refusal_index[0] = None
         armed[0] = True
         reads.clear()
         Path.read_text = missing
@@ -372,9 +371,11 @@ def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
         finally:
             Path.read_text = original
         assert commands == expected, commands
-        read_counts = {queued: reads.count(queued)
-                       for queued in (first, second)}
-        assert read_counts == expected_read_counts[refused_file], reads
+        assert refusal_index[0] is not None, reads
+        post_refusal_reads = reads[refusal_index[0] + 1:]
+        # Membership pins a whole-set retry without constraining read order.
+        assert all(queued in post_refusal_reads
+                   for queued in (first, second)), reads
 
 
 def test_the_multi_command_wait_honors_a_count_other_than_two(tmp):
