@@ -13,9 +13,9 @@ import itertools
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -27,7 +27,8 @@ from _yamlread import YAMLReadError, job_mapping  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _wfgraph import (  # noqa: E402
     _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
-    _job_names_with_outputs, _job_step_ids, _tests_yml)
+    _job_names_with_outputs, _job_step_ids, _tests_yml,
+    _run_script, aggregate_expected)
 
 
 def _classifier():
@@ -390,14 +391,10 @@ def _aggregate_script(workflow):
     return '\n'.join(lines)
 
 
-def _run_aggregate(results):
+def _run_aggregate(results, through_bash=False):
     """Run the real aggregate script against one `needs` result mapping."""
-    bash = shutil.which('bash')
-    assert bash, 'bash is required to execute the aggregate script'
     needs = {name: {'result': result} for name, result in results.items()}
-    env = {**os.environ, 'NEEDS_JSON': json.dumps(needs)}
-    return subprocess.run([bash, '-c', _aggregate_script(_tests_yml())],
-                          env=env, capture_output=True, text=True, timeout=60)
+    return _run_script(_aggregate_script(_tests_yml()), needs, through_bash)
 
 
 def _job_condition_runs(workflow, job, outputs):
@@ -409,13 +406,6 @@ def _job_condition_runs(workflow, job, outputs):
         'needs': {'changes': {'outputs': outputs}},
     }
     return evaluate_if(expression, context)
-
-
-def _aggregate_expected(results):
-    """Return the pointwise result-table verdict for one dependency mapping."""
-    return all(
-        result in AGGREGATE_ALLOWED_RESULTS[name]
-        for name, result in results.items())
 
 
 def test_changes_job_permissions_are_exactly_read_only(tmp):
@@ -598,6 +588,15 @@ def test_aggregate_waits_on_every_job_it_checks(tmp):
         needs, expected)
 
 
+def test_aggregate_in_process_captures_exit_without_spawning(tmp):
+    with mock.patch.object(subprocess, 'run',
+                           side_effect=AssertionError('aggregate spawned')):
+        result = _run_aggregate({'changes': 'failure'})
+    assert result.returncode == 1
+    assert result.stdout == ''
+    assert result.stderr == 'Dependencies not successful: changes=failure\n'
+
+
 def test_aggregate_script_accepts_only_tabled_results(tmp):
     """The aggregate result domain is one contract for every dependency."""
     del tmp
@@ -620,7 +619,8 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
         for result_names in itertools.product(
                 AGGREGATE_RESULT_STATES, repeat=2):
             results = dict(all_success, **dict(zip(names, result_names)))
-            expected_success = _aggregate_expected(results)
+            expected_success = aggregate_expected(
+                results, AGGREGATE_ALLOWED_RESULTS)
             result = _run_aggregate(results)
             assert (result.returncode == 0) is expected_success, (
                 names, result_names, result.stdout, result.stderr)
@@ -639,6 +639,9 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
     for name, result_name in docs_only.items():
         assert result_name in AGGREGATE_ALLOWED_RESULTS[name], (
             name, result_name)
+    bash_result = _run_aggregate(docs_only, through_bash=True)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        bash_result.returncode, bash_result.stdout, bash_result.stderr)
 
 
 def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
