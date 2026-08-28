@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Pull-request issue references and the workflow that enforces claims."""
+import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -7,10 +10,113 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _yamlread import job_scalar, top_level_mapping  # noqa: E402
+from _yamlsteps import step_mappings  # noqa: E402
+from _workflows import _workflow_triggers  # noqa: E402
 
 
 PR_CLAIM = _util.load(ROOT / 'scripts' / 'ci' / 'pr_claim.py')
 SECTION = '## Related Issues and Pull Requests\n'
+
+_GH_STUB = r"""#!/usr/bin/env python3
+import json, os, pathlib, sys
+fixtures = json.loads(pathlib.Path(os.environ['STUB_ISSUES']).read_text())
+calls = pathlib.Path(os.environ['STUB_CALLS'])
+argv = sys.argv[1:]
+with calls.open('a', encoding='utf-8') as handle:
+    handle.write(json.dumps(argv) + chr(10))
+endpoint = next((arg for arg in argv if arg.startswith('repos/')), '')
+parts = endpoint.split('/')
+if len(parts) == 5 and parts[-2] == 'issues' and parts[-1].isdigit():
+    issue = fixtures.get(parts[-1])
+    if issue is None:
+        raise SystemExit(1)
+    query = argv[argv.index('--jq') + 1] if '--jq' in argv else ''
+    if 'pull_request' in issue and 'has("pull_request")' in query:
+        raise SystemExit(0)
+    if '.assignees' in query:
+        for assignee in issue['assignees']:
+            print(assignee['login'])
+    else:
+        print(json.dumps(issue))
+"""
+
+
+def _workflow():
+    return (ROOT / '.github' / 'workflows' / 'pr-claim.yml').read_text(
+        encoding='utf-8')
+
+
+def _workflow_script():
+    """The pr-claim.yml run block, dedented and ready for Bash."""
+    _, marker, after = _workflow().partition('        run: |\n')
+    assert marker, 'pr-claim.yml has no literal run block'
+    lines = []
+    for line in after.splitlines():
+        if line.strip() and not line.startswith('          '):
+            break
+        lines.append(line[10:])
+    return chr(10).join(lines)
+
+
+def _issue(*assignees, pull_request=False):
+    issue = {
+        'number': 0,
+        'state': 'open',
+        'assignees': [{'login': login} for login in assignees],
+    }
+    if pull_request:
+        issue['pull_request'] = {'url': 'https://github.com/pulls/0'}
+    return issue
+
+
+def _run_workflow(tmp, body, issues, actor='alice', pr='99'):
+    """Execute the real workflow shell against the controlled gh boundary."""
+    bash = shutil.which('bash')
+    assert bash, 'bash is required to execute the pull-request claim gate'
+    workdir = Path(tmp) / 'workflow'
+    (workdir / 'bin').mkdir(parents=True)
+    stub = workdir / 'bin' / 'gh'
+    stub.write_text(_GH_STUB, encoding='utf-8')
+    stub.chmod(0o755)
+    fixture_path = workdir / 'issues.json'
+    fixture_path.write_text(json.dumps(issues), encoding='utf-8')
+    calls_path = workdir / 'calls.jsonl'
+    calls_path.write_text('', encoding='utf-8')
+    env = {
+        **os.environ,
+        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
+        'STUB_ISSUES': str(fixture_path),
+        'STUB_CALLS': str(calls_path),
+        'GH_TOKEN': 'stub',
+        'REPO': 'owner/repo',
+        'PR': pr,
+        'ACTOR': actor,
+        'BODY': body,
+    }
+    result = subprocess.run(
+        [bash, '-c', _workflow_script()], cwd=ROOT, env=env,
+        capture_output=True, text=True, timeout=60)
+    calls = [json.loads(line) for line in calls_path.read_text(
+        encoding='utf-8').splitlines()]
+    return calls, result
+
+
+def _assert_commented_then_closed(calls, pr='99'):
+    comment_endpoint = f'repos/owner/repo/issues/{pr}/comments'
+    close_endpoint = f'repos/owner/repo/pulls/{pr}'
+    comment_calls = [call for call in calls if comment_endpoint in call]
+    close_calls = [call for call in calls if close_endpoint in call]
+    assert len(comment_calls) == 1, calls
+    assert len(close_calls) == 1, calls
+    comment = comment_calls[0]
+    close = close_calls[0]
+    assert calls.index(comment) < calls.index(close), calls
+    body = next(arg[5:] for arg in comment if arg.startswith('body='))
+    assert '/claim' in body, body
+    assert 'Then reopen this same pull request.' in body, body
+    assert '-X' in close and close[close.index('-X') + 1] == 'PATCH', close
+    assert 'state=closed' in close, close
 
 
 def test_parser_accepts_a_reference_in_the_real_template(tmp):
@@ -92,6 +198,92 @@ def test_cli_prints_one_issue_number_per_line(tmp):
         capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout == '81\n82\n', repr(result.stdout)
+
+
+def test_workflow_keeps_its_claim_gate_shape(tmp):
+    del tmp
+    workflow = _workflow()
+    assert top_level_mapping(workflow, 'permissions') == {
+        'pull-requests': 'write',
+        'issues': 'read',
+    }
+    triggers = _workflow_triggers(workflow, 'pr-claim.yml')
+    assert set(triggers) == {'pull_request_target'}, sorted(triggers)
+    types = next(
+        line.partition('types:')[2].strip()
+        for line in triggers['pull_request_target']
+        if line.strip().startswith('types:'))
+    assert types == '[opened, edited, reopened]', types
+    assert ('pull_request_target:  '
+            '# zizmor: ignore[dangerous-triggers]') in workflow
+    condition = job_scalar(workflow, 'claim', 'if')
+    assert "github.event.pull_request.state == 'open'" in condition
+    assert "github.event.pull_request.user.type != 'Bot'" in condition
+    steps = step_mappings(workflow, 'claim')
+    checkout = [step for step in steps
+                if str(step.get('uses', '')).startswith('actions/checkout@')]
+    assert len(checkout) == 1, steps
+    assert checkout[0]['uses'] == (
+        'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1')
+    assert checkout[0].get('with') == {'persist-credentials': 'false'}
+    assert '${{' not in _workflow_script(), (
+        'an expression is interpolated into contributor-controlled shell')
+
+
+def test_workflow_passes_for_an_issue_assigned_to_the_author(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #101\n', {'101': _issue('alice')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(calls) == 1, calls
+    assert 'repos/owner/repo/issues/101' in calls[0], calls
+    assert 'issue 101' in result.stdout, result.stdout
+
+
+def test_workflow_closes_when_the_issue_belongs_to_someone_else(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #102\n', {'102': _issue('bob')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_closes_when_the_issue_is_unassigned(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #103\n', {'103': _issue()})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_closes_when_the_body_references_nothing(tmp):
+    calls, result = _run_workflow(tmp, '## Summary\nNo issue here.\n', {})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_does_not_accept_a_pull_request_number(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #104\n',
+        {'104': _issue('alice', pull_request=True)})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_skips_a_missing_issue_without_failing(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Fixes #105\n', {})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert any('repos/owner/repo/issues/105' in call for call in calls), calls
+    _assert_commented_then_closed(calls)
+
+
+def test_workflow_passes_when_only_the_second_issue_matches(tmp):
+    calls, result = _run_workflow(
+        tmp, SECTION + 'Refs #106 and #107\n',
+        {'106': _issue('bob'), '107': _issue('alice')})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(calls) == 2, calls
+    assert 'repos/owner/repo/issues/106' in calls[0], calls
+    assert 'repos/owner/repo/issues/107' in calls[1], calls
+    assert 'issue 107' in result.stdout, result.stdout
 
 
 def main():

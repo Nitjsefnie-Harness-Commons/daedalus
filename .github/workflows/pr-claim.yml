@@ -1,0 +1,106 @@
+name: pr claim
+
+# `pull_request_target` is required because a fork's `pull_request` token is
+# read-only, so its comment and close would silently do nothing. This trigger
+# runs the base branch's workflow with a writable token. It is safe here
+# because checkout keeps the default base ref, the job runs no pull-request
+# code, and only the body's TEXT crosses into the script through the
+# environment.
+on:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers]
+    types: [opened, edited, reopened]
+
+# pull-requests: write explains and closes; issues: read checks assignment.
+# The job reads no tree beyond the base checkout.
+permissions:
+  pull-requests: write
+  issues: read
+
+concurrency:
+  # Opposite `claim.yml`: racing claims are two people who each need an
+  # answer, while quick edits are two answers to one question and only the
+  # newest body matters.
+  group: pr-claim-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claim:
+    # An edit also fires on a closed pull request. Leave maintainer-closed
+    # work alone, and do not spend a runner deciding that a bot is exempt.
+    # This workflow never reopens anything.
+    if: >-
+      github.event.pull_request.state == 'open'
+      && github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Require a claimed issue
+        # The body is contributor-controlled. Expressions stay in `env:` and
+        # are never interpolated into the shell that consumes it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTOR: ${{ github.event.pull_request.user.login }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          numbers="$(printf '%s' "$BODY" \
+            | python3 scripts/ci/pr_claim.py)"
+          for N in $numbers; do
+            if ! assignees="$(gh api "repos/$REPO/issues/$N" \
+              --jq 'if has("pull_request") then empty else
+                .assignees[].login end')"
+            then
+              continue
+            fi
+            if printf '%s\n' "$assignees" | grep -Fxq "$ACTOR"; then
+              echo "pull request $PR is covered by claimed issue $N"
+              exit 0
+            fi
+          done
+
+          comment="$(
+            printf '@%s%s%s\n\n' "$ACTOR" \
+              ' — closing this automatically, and it is' \
+              ' recoverable: read on.'
+            printf '%s%s\n' \
+              'A pull request here has to name the issue it resolves,' \
+              ' in its'
+            printf '%s%s\n' \
+              '**Related Issues and Pull Requests** section, and that' \
+              ' issue has to be'
+            printf '%s%s\n' \
+              'assigned to you before you start. This one does not,' \
+              ' so nothing tells other'
+            printf '%s\n\n' 'contributors that the work is taken.'
+            printf '%s\n\n' 'Two steps, in this order:'
+            printf '%s%s\n' \
+              "1. Comment \`/claim\` on the issue you are fixing. That" \
+              ' assigns it to you, no'
+            printf '%s\n' '   write access needed — see CONTRIBUTING.md.'
+            printf '%s%s\n' \
+              "2. Edit this pull request's body so its **Related Issues" \
+              ' and Pull Requests**'
+            printf '%s%s\n\n' \
+              "   section names that issue: \`Fixes #<issue>\`,"\
+              ' with the real number.'
+            printf '%s%s\n' \
+              'Then reopen this same pull request. A closed pull request' \
+              ' still accepts edits'
+            printf '%s%s\n' \
+              'and comments, so there is no need to open a second one' \
+              ' and nothing here is'
+            printf '%s\n' 'lost.'
+          )"
+          gh api "repos/$REPO/issues/$PR/comments" \
+            -f body="$comment" --silent
+          gh api -X PATCH "repos/$REPO/pulls/$PR" \
+            -f state=closed --silent

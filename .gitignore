@@ -68,6 +68,7 @@
 !/.github/workflows/claim.yml
 !/.github/workflows/codeql.yml
 !/.github/workflows/coverage-comment.yml
+!/.github/workflows/pr-claim.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
 !/.github/workflows/speed.yml
