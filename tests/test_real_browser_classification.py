@@ -46,6 +46,8 @@ def test_indeterminate_e2big_diagnostics_are_harness_failures(tmp):
                 'Node WebSocket probe', '/controlled/node', too_large))
         assert failure.__class__ is AssertionError, failure
         assert '/controlled/node' in str(failure), failure
+        if isinstance(outcome, subprocess.CompletedProcess):
+            assert failure.__cause__ is None, failure.__cause__
 
 
 def test_missing_browser_requirements_are_environment_skip(tmp):
@@ -61,6 +63,30 @@ def test_browser_exit_before_devtools_is_environment_skip(tmp):
     failure = _call_failure(
         lambda: _realbrowser._wait_for_devtools(tmp, process))
     assert failure.__class__ is _realbrowser.BrowserEnvironmentSkipped, failure
+
+
+def test_live_browser_reaches_ready_devtools_targets(tmp):
+    page = {'type': 'page', 'webSocketDebuggerUrl': 'ws://page'}
+    worker = {
+        'type': 'service_worker',
+        'url': 'chrome-extension://controlled/background.js',
+        'webSocketDebuggerUrl': 'ws://worker',
+    }
+    (Path(tmp) / 'DevToolsActivePort').write_text(
+        '9222\n', encoding='utf-8')
+    process = mock.Mock()
+    process.poll.return_value = None
+    try:
+        with mock.patch.object(
+                _realbrowser, '_devtools_targets',
+                return_value=[page, worker]), \
+                mock.patch.object(
+                    _realbrowser.time, 'time', side_effect=(0, 0)):
+            actual = _realbrowser._wait_for_devtools(tmp, process)
+    except _realbrowser.BrowserEnvironmentSkipped as why:
+        raise AssertionError(
+            'live Chromium was classified as having exited') from why
+    assert actual == (page, [worker], '9222'), actual
 
 
 def test_devtools_start_deadline_is_environment_skip(tmp):
@@ -107,6 +133,42 @@ def test_unreachable_worker_is_environment_skip(tmp):
 def _navigate(node, target, method, params):
     del node, target, method, params
     return {}
+
+
+def test_ready_page_and_listed_tab_yield_fixture(tmp):
+    page_url = 'http://127.0.0.1:2/plain.html'
+    evaluations = []
+
+    def successful_eval(node, target, expression):
+        del node, target
+        evaluations.append(expression)
+        if 'chrome.storage.local.set' in expression:
+            return True
+        if expression == 'globalThis.__evalPageReady === true':
+            return True
+        if expression == 'registerAllTabs()':
+            return None
+        raise AssertionError('unexpected successful-fixture evaluation')
+
+    moments = iter((0, 0, 0, 0, 0, 16, 16))
+
+    def clock():
+        return next(moments, 32)
+
+    tabs = [{'tabId': 'controlled-tab', 'url': page_url}]
+    with _fixture_runtime(tmp, _navigate) as (process, launches), \
+            mock.patch.object(_realbrowser, 'cdp_eval', successful_eval), \
+            mock.patch.object(
+                _realbrowser._util, 'get_json', return_value=(200, tabs)), \
+            mock.patch.object(_realbrowser.time, 'time', clock), \
+            mock.patch.object(_realbrowser.time, 'sleep'):
+        with _enter_fixture(tmp, page_url) as actual:
+            assert actual == (
+                'node-for-control', 'ws://page', 'controlled-tab')
+    assert len(launches) == 1, launches
+    assert process.terminated is True, process.terminated
+    assert any('__evalPageReady' in item for item in evaluations), evaluations
+    assert evaluations[-1] == 'registerAllTabs()', evaluations
 
 
 def test_page_readiness_timeout_is_repository_failure(tmp):
@@ -172,12 +234,64 @@ def test_extension_command_delivery_timeout_is_repository_failure(tmp):
     assert failure.__class__ is AssertionError, failure
 
 
+def test_extension_matching_delivery_returns_result(tmp):
+    del tmp
+    result = {
+        'deliveryId': 'controlled-delivery',
+        'resultGeneration': 'controlled-generation',
+        'value': 4,
+    }
+    with mock.patch.object(
+            _realbrowser._util, 'request',
+            return_value=(200, '{"did":"controlled-delivery"}')), \
+            mock.patch.object(
+                _realbrowser._util, 'get_json', return_value=(200, result)), \
+            mock.patch.object(
+                _realbrowser.time, 'time', side_effect=(0, 0, 21)), \
+            mock.patch.object(_realbrowser.time, 'sleep'):
+        actual = _realbrowser.real_ext_command(
+            'http://127.0.0.1:1', 'controltoken',
+            'controlled-command', {})
+    assert actual is result, actual
+
+
 def test_eval_delivery_timeout_is_repository_failure(tmp):
     del tmp
     failure = _delivery_timeout(lambda: _realbrowser.real_eval(
         'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
         'controlled-eval', '2 + 2'))
     assert failure.__class__ is AssertionError, failure
+
+
+def test_eval_matching_delivery_returns_and_consumes_result(tmp):
+    del tmp
+    result = {
+        'deliveryId': 'controlled-delivery',
+        'resultGeneration': 'controlled-generation',
+        'value': 4,
+    }
+    reads = []
+
+    def get_json(url):
+        reads.append(url)
+        if 'consume=1' in url:
+            return 200, {'consumed': True}
+        return 200, result
+
+    with mock.patch.object(
+            _realbrowser._util, 'request',
+            return_value=(200, '{"did":"controlled-delivery"}')), \
+            mock.patch.object(_realbrowser._util, 'get_json', get_json), \
+            mock.patch.object(
+                _realbrowser.time, 'time', side_effect=(0, 0, 21)), \
+            mock.patch.object(_realbrowser.time, 'sleep'):
+        actual = _realbrowser.real_eval(
+            'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
+            'controlled-eval', '2 + 2')
+    assert actual is result, actual
+    assert len(reads) == 2, reads
+    assert 'consume=1' in reads[-1], reads
+    assert 'expected=controlled-generation' in reads[-1], reads
 
 
 def main():
