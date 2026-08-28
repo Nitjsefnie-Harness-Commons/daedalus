@@ -1455,6 +1455,12 @@ class Handler(BaseHTTPRequestHandler):
                     if usage is None:
                         return self._json(
                             500, {'error': 'segment storage failure'})
+                    # Persisted now, whether or not this request's own
+                    # write goes on to be accepted: a rejected write never
+                    # reaches the write_usage call below, so without this
+                    # every later rejection on this job would pay for the
+                    # same full scan again and never clear the mark.
+                    segment_store.write_usage(job, *usage)
                 stored_count, stored_bytes = usage
                 if marks is not None:
                     marks.append(('usage', time.perf_counter()))
@@ -1472,6 +1478,17 @@ class Handler(BaseHTTPRequestHandler):
                         413, {'error': 'segment count limit exceeded'})
                 if stored_bytes - replaced_bytes + len(raw) > max_bytes:
                     return self._json(413, {'error': 'job byte limit exceeded'})
+                # Marked before the segment is published, not after: once
+                # the .ts file lands, this job's true storage can already
+                # disagree with its record, and a crash between here and
+                # the write_usage call below must not be the one window
+                # where that disagreement leaves no trace at all. Refusing
+                # the write outright when even this cannot be established
+                # is the alternative #203 asks for to a mark that fails
+                # silently and lets the write through unaccounted.
+                if not segment_store.mark_dirty(job):
+                    return self._json(
+                        500, {'error': 'segment storage failure'})
                 try:
                     tmp.write_bytes(raw)
                     atomic_file.replace_atomically(tmp, final)
@@ -1624,6 +1641,7 @@ class Handler(BaseHTTPRequestHandler):
                     if reconciled is not None and (
                             record.get('stored_count'),
                             record.get('stored_bytes')) != reconciled:
+                        segment_store.mark_dirty(job)
                         segment_store.write_usage(job, *reconciled)
                     return self._json(200, {'ok': True, 'sig': sig})
 

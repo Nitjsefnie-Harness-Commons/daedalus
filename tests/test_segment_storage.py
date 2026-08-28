@@ -444,6 +444,77 @@ def test_a_failing_accounting_write_still_leaves_the_quota_enforced(tmp):
         assert record['stored_count'] == 0, record
 
 
+def test_a_write_that_cannot_mark_itself_dirty_is_refused_not_published(tmp):
+    """If the mark itself cannot be written, the segment must not land either
+    (#203): an unmarked write that then also fails to update the record would
+    leave neither a trace nor a correct total.
+    """
+    fault_dir = Path(tmp) / 'fault-injection'
+    fault_dir.mkdir()
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import pathlib\n'
+        '_real_write_text = pathlib.Path.write_text\n'
+        'def _fail_dirty_write(self, *a, **kw):\n'
+        '    if str(self).endswith(".dirty"):\n'
+        '        raise OSError("injected marker write failure")\n'
+        '    return _real_write_text(self, *a, **kw)\n'
+        'pathlib.Path.write_text = _fail_dirty_write\n',
+        encoding='utf-8')
+    env = {'PYTHONPATH': str(fault_dir)}
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        job = seg_job()
+        _, minted = mint_job(base, TOK, job)
+        sig = minted['sig']
+        status, body = post_segment(base, job, sig, '0', payload=b'abc')
+        assert status == 500, (status, body)
+        seg_dir = Path(docroot) / 'segments' / job
+        assert not list(seg_dir.glob('*.ts')), list(seg_dir.iterdir())
+        record_path = Path(docroot) / 'segments' / f'{job}.json'
+        record = json.loads(record_path.read_text(encoding='utf-8'))
+        assert record['stored_count'] == 0, record
+
+
+def test_a_recount_reconciles_and_clears_the_mark_before_a_rejection(tmp):
+    """A write that lands under a stale mark reconciles the record from the
+    mark's own scan and clears it before this request's own quota is checked
+    against that scan (#203) — a rejection must not be the one outcome that
+    leaves the next request paying for the same full scan again.
+    """
+    fault_dir = Path(tmp) / 'fault-injection'
+    fault_dir.mkdir()
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import os\n'
+        '_real_replace = os.replace\n'
+        '_json_replaces = [0]\n'
+        'def _fail_one_record_replace(src, dst):\n'
+        '    if str(dst).endswith(".json"):\n'
+        '        _json_replaces[0] += 1\n'
+        '        if _json_replaces[0] == 2:\n'
+        '            raise OSError("injected accounting write failure")\n'
+        '    return _real_replace(src, dst)\n'
+        'os.replace = _fail_one_record_replace\n',
+        encoding='utf-8')
+    env = {
+        'PYTHONPATH': str(fault_dir),
+        'DAEDALUS_MAX_SEGMENT_INDEX': '10',
+        'DAEDALUS_MAX_SEGMENTS_PER_JOB': '1',
+        'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '100',
+    }
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        job = seg_job()
+        _, minted = mint_job(base, TOK, job)
+        sig = minted['sig']
+        status0, _ = post_segment(base, job, sig, '0', payload=b'abc')
+        status1, body1 = post_segment(base, job, sig, '1', payload=b'abc')
+        assert status0 == 200, status0
+        assert status1 == 413, (status1, body1)
+        record_path = Path(docroot) / 'segments' / f'{job}.json'
+        record = json.loads(record_path.read_text(encoding='utf-8'))
+        assert record['stored_count'] == 1, record
+        dirty_path = Path(docroot) / 'segments' / f'.{job}.json.dirty'
+        assert not dirty_path.exists(), 'mark should have cleared on reconcile'
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segstorage_')
 
