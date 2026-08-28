@@ -18,6 +18,8 @@ from _workflows import _workflow_triggers  # noqa: E402
 
 PR_BODY = _util.load(ROOT / 'scripts' / 'ci' / 'pr_body.py')
 SECTION = '## Related Issues and Pull Requests\n'
+TEMPLATE = (ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md').read_text(
+    encoding='utf-8')
 _COMMENT_TAIL = (
     ' — closing this automatically, and it is recoverable: read on.\n\n'
     """A pull request here has to name the issue it resolves, in its
@@ -338,6 +340,56 @@ def test_cli_prints_one_issue_number_per_line(tmp):
         capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout == '81\n82\n', repr(result.stdout)
+
+
+def _layout_body(*sections):
+    return '\n\n'.join(
+        f'## {title}\n{content}' for title, content in sections) + '\n'
+
+
+def test_layout_accepts_required_sections_without_optional_footer(tmp):
+    del tmp
+    body = _layout_body(
+        ('Summary', 'One sentence.'),
+        ('Related Issues and Pull Requests', 'Fixes #91'),
+        ('Changes', '- One change'),
+        ('Testing', 'Ran the suite.'))
+    assert PR_BODY.layout_errors(body, TEMPLATE) == []
+
+
+def test_layout_reports_each_missing_or_empty_section(tmp):
+    del tmp
+    body = _layout_body(
+        ('Related Issues and Pull Requests', 'Fixes #91'),
+        ('Changes', ''),
+        ('Testing', 'Ran the suite.'),
+        ('Breaking Changes', ''))
+    errors = PR_BODY.layout_errors(body, TEMPLATE)
+    assert 'Required section "Summary" is missing.' in errors
+    assert 'Section "Changes" is empty.' in errors
+    assert 'Section "Breaking Changes" is empty.' in errors
+
+
+def test_layout_reports_unknown_duplicate_and_out_of_order_sections(tmp):
+    del tmp
+    body = _layout_body(
+        ('Summary', 'First.'),
+        ('Changes', '- Too early'),
+        ('Notes', 'Unknown.'),
+        ('Summary', 'Again.'),
+        ('Related Issues and Pull Requests', 'Fixes #91'),
+        ('Testing', 'Ran the suite.'))
+    errors = PR_BODY.layout_errors(body, TEMPLATE)
+    assert 'Section "Notes" is not defined by the template.' in errors
+    assert 'Section "Summary" appears more than once.' in errors
+    assert 'Section "Related Issues and Pull Requests" is out of order.' \
+        in errors
+
+
+def test_layout_names_retained_template_instructions_separately(tmp):
+    del tmp
+    errors = PR_BODY.layout_errors(TEMPLATE, TEMPLATE)
+    assert 'Remove the template instruction comments.' in errors
 
 
 def test_workflow_keeps_its_body_gate_shape(tmp):
