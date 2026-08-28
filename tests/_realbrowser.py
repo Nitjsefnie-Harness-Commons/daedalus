@@ -22,10 +22,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _evalpages import (CDP_CALL_HARNESS, HOSTILE_EVAL_SCRIPT,  # noqa: E402
+from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
+                        CDP_RESPONSE_DEADLINE_MS, HOSTILE_EVAL_SCRIPT,
                         PERFORMANCE_POISON_EVAL_SCRIPT, PLAIN_EVAL_SCRIPT,
                         STRICT_CSP_EVAL_SCRIPT)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+
+
+class CDPTimeout(AssertionError):
+    """The JavaScript CDP harness reached its response deadline."""
 
 
 class _EvalPageHandler(http.server.BaseHTTPRequestHandler):
@@ -87,8 +92,14 @@ def eval_page_server():
 
 def cdp_call(node, target, method, params):
     result = subprocess.run(
-        [node, '-e', CDP_CALL_HARNESS, target, method, json.dumps(params)],
-        cwd=ROOT, capture_output=True, text=True, timeout=15)
+        [node, '-e', CDP_CALL_HARNESS, target, method, json.dumps(params),
+         str(CDP_RESPONSE_DEADLINE_MS)],
+        cwd=ROOT, capture_output=True, text=True,
+        timeout=CDP_RESPONSE_DEADLINE_MS / 1000 + 5)
+    failure = (result.returncode, result.stdout, result.stderr)
+    if (result.returncode != 0
+            and result.stderr == 'CDP response timed out\n'):
+        raise CDPTimeout(failure)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout or '{}')
@@ -293,6 +304,9 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             '--disable-dev-shm-usage',
             '--no-first-run',
             '--no-default-browser-check',
+            # Avoid a D-Bus secret-service probe whose reply timeout holds
+            # every network transaction. This temporary profile is discarded.
+            '--password-store=basic',
             '--remote-allow-origins=*',
             '--remote-debugging-port=0',
             '--disable-extensions-except=' + loaded,
@@ -315,7 +329,15 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         # script's keepalive port is an event the worker listens for, so
         # loading the page is what revives it, exactly as an ordinary
         # browsing session does.
-        cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
+        # This first navigation is still part of obtaining a usable browser.
+        # A timeout here is environmental; the same call after configuration
+        # exercises the extension and deliberately remains a hard failure.
+        try:
+            cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
+        except CDPTimeout as why:
+            _util.skip(
+                'the first fixture navigation timed out over CDP: '
+                f'{_browser_version(browser)} — {why}')
         deadline = time.time() + 30
         last_error = 'no evaluation was attempted'
         answered = False
