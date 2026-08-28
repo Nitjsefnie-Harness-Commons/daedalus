@@ -49,9 +49,11 @@ def matches(pattern, path):
         # GitHub's `*` does not cross a `/`, so only the final segment of
         # the path is compared against the rest of the pattern.
         return fnmatch.fnmatchcase(path.rsplit('/', 1)[-1], pattern[3:])
-    if '*' not in pattern:
+    if not any(char in pattern for char in '*?['):
         # Filter patterns are rooted: LICENSE selects LICENSE, never
-        # sub/LICENSE or LICENSE.txt.
+        # sub/LICENSE or LICENSE.txt. A pattern carrying `?` or a bracket
+        # class isn't a literal path either, and falls through to the
+        # refusal below instead, since neither is implemented here.
         return pattern == path
     if (pattern.endswith('/**') and pattern[:-3]
             and not any(char in pattern[:-3] for char in '*?[]')):
