@@ -13,7 +13,8 @@ _BACKTICKS = re.compile(r'`+')
 _HEADING_LINE = re.compile(
     r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.+?)[ \t]*#*[ \t]*$',
     re.MULTILINE)
-_HTML_INTEGER = re.compile(r'[ \t\n\f\r]*(?P<digits>[0-9]+)')
+_HTML_DIMENSION = re.compile(
+    r'[ \t\n\f\r]*(?P<integer>[0-9]+)(?:\.(?P<fraction>[0-9]*))?')
 _REFERENCE_SHAPE = re.compile(
     r'#[0-9]|gh-[0-9]|issues/|pull/|://|%|&#|&num', re.IGNORECASE)
 _TEMPLATE_HEADING = re.compile(
@@ -94,9 +95,12 @@ def issue_number(href, repository):
     return number or None
 
 
-def _zero_html_integer(value):
-    match = _HTML_INTEGER.match(value)
-    return bool(match and not match.group('digits').strip('0'))
+def _zero_html_dimension(value):
+    match = _HTML_DIMENSION.match(value)
+    if match is None:
+        return False
+    digits = match.group('integer') + (match.group('fraction') or '')
+    return not digits.strip('0')
 
 
 class _RenderedBodyParser(HTMLParser):
@@ -141,7 +145,7 @@ class _RenderedBodyParser(HTMLParser):
         if tag == 'img':
             self._record_text(attributes.get('alt', ''))
             zero_size = any(
-                _zero_html_integer(attributes.get(name, ''))
+                _zero_html_dimension(attributes.get(name, ''))
                 for name in ('width', 'height'))
             if (self._heading_tag is None and self._key is not None
                     and attributes.get('src') and not zero_size):

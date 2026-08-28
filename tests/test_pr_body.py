@@ -267,15 +267,24 @@ def test_layout_treats_empty_or_invisible_images_as_empty(tmp):
             rendered), image
 
 
-def test_layout_parses_image_dimensions_as_html_integers(tmp):
+def test_layout_parses_html_image_dimension_values(tmp):
     del tmp
     cases = (
         ('width="00"', True),
         ('height="000"', True),
         ('width=" 0"', True),
         ('width="0px"', True),
+        ('width="0.5"', False),
+        ('height="0.5"', False),
+        ('width="0.0"', True),
+        ('width=".5"', False),
+        ('width="0."', True),
+        ('width="00.000x"', True),
         ('width="10"', False),
         ('width="01"', False),
+        ('width="+0"', False),
+        ('width="-0"', False),
+        ('width=""', False),
     )
     failures = []
     for attribute, expected_empty in cases:
