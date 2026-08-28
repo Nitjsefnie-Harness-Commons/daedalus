@@ -343,39 +343,35 @@ def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
     second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
                       encoding='utf-8')
     original = Path.read_text
-    expected = [{'id': 'queued', 'type': 'reload'},
-                {'id': 'second', 'type': 'reload'}]
+    files = (first, second)
+    stale = [{'id': 'stale-first', 'type': 'reload'},
+             {'id': 'stale-second', 'type': 'reload'}]
+    fresh = [{'id': 'fresh-first', 'type': 'reload'},
+             {'id': 'fresh-second', 'type': 'reload'}]
     missing_file = [None]
-    refusal_index = [None]
     armed = [False]
-    reads = []
 
     def missing(candidate, *args, **kwargs):
-        if candidate in (first, second):
-            reads.append(candidate)
         if candidate == missing_file[0] and armed[0]:
             armed[0] = False
-            refusal_index[0] = len(reads) - 1
+            # Rewrite both so freshness proves a retry for either read order.
+            for queued, command in zip(files, fresh):
+                queued.write_text(json.dumps(command), encoding='utf-8')
             raise FileNotFoundError(
                 2, 'injected transient read error', str(missing_file[0]))
         return original(candidate, *args, **kwargs)
 
     for refused_file in (first, second):
+        for queued, command in zip(files, stale):
+            queued.write_text(json.dumps(command), encoding='utf-8')
         missing_file[0] = refused_file
-        refusal_index[0] = None
         armed[0] = True
-        reads.clear()
         Path.read_text = missing
         try:
             commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
         finally:
             Path.read_text = original
-        assert commands == expected, commands
-        assert refusal_index[0] is not None, reads
-        post_refusal_reads = reads[refusal_index[0] + 1:]
-        # Membership pins a whole-set retry without constraining read order.
-        assert all(queued in post_refusal_reads
-                   for queued in (first, second)), reads
+        assert commands == fresh, commands
 
 
 def test_the_multi_command_wait_honors_a_count_other_than_two(tmp):
