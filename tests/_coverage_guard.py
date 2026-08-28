@@ -14,9 +14,6 @@ import ast
 from _repo import ROOT
 
 _DECLARATION = 'child_coverage'
-_NON_PYTHON_BASENAMES = frozenset({
-    'node', 'git', 'bash', 'sh', 'zsh', 'cmd', 'pwsh',
-})
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
@@ -171,35 +168,6 @@ def _launch_method(node, facts):
     return None
 
 
-def _first_command_literal(node):
-    """The first command word when it is a plain string literal."""
-    if not node.args:
-        return None
-    command = node.args[0]
-    while True:
-        if isinstance(command, (ast.List, ast.Tuple)) and command.elts:
-            command = command.elts[0]
-        elif (isinstance(command, ast.BinOp)
-              and isinstance(command.op, ast.Add)):
-            command = command.left
-        elif isinstance(command, ast.Subscript):
-            command = command.value
-        else:
-            break
-    if isinstance(command, ast.Constant) and isinstance(command.value, str):
-        return command.value
-    return None
-
-
-def _runs_no_python(node):
-    """A literal node/git/shell launch runs no Python and is exempt."""
-    first = _first_command_literal(node)
-    if first is None:
-        return False
-    basename = first.replace('\\', '/').rsplit('/', 1)[-1].lower()
-    return basename in _NON_PYTHON_BASENAMES
-
-
 def _unresolved_cwd(node, facts):
     """Why the launch's working directory is not provably safe, or None."""
     spread = False
@@ -314,7 +282,7 @@ def _declaration(node, facts, tree):
 def _check_launch(node, method, relative, function, facts, tree, keeps,
                   violations):
     why = _unresolved_cwd(node, facts)
-    if why is None or _runs_no_python(node):
+    if why is None:
         return
     problem, mode = _declaration(node, facts, tree)
     if problem is not None:
