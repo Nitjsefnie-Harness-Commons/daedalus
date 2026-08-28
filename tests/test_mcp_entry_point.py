@@ -59,5 +59,36 @@ def test_the_mcp_server_runs_by_absolute_file_path(tmp):
             proc.wait(timeout=10)
 
 
+def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
+    """A direct symlink launch must resolve package imports from the target."""
+    env = _util.coverage_free_environment(os.environ)
+    env.pop('PYTHONPATH', None)
+    env.update({
+        'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:1',
+        'DAEDALUS_MCP_PORT': '0',
+        'PYTHONDONTWRITEBYTECODE': '1',
+        'PYTHONUNBUFFERED': '1',
+    })
+    script = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
+    link = Path(tmp) / 'bin' / 'server.py'
+    link.parent.mkdir()
+    link.symlink_to(script)
+    proc = subprocess.Popen(
+        [sys.executable, str(link)], cwd=tmp, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    output = _util.drain_lines(proc)
+    try:
+        port = _await_mcp_listener(
+            proc, output, _util.startup_timeout())
+        assert port > 0, output
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=10)
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
