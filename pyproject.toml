@@ -75,7 +75,15 @@ parallel = true
 # those children ARE, reports a fraction of what the suites actually execute.
 sigterm = true
 source = ["."]
-omit = ["tests/*", ".venv/*", "build/*", "dist/*", "*/site-packages/*"]
+omit = [
+    "tests/*",
+    ".venv/*",
+    "build/*",
+    "dist/*",
+    "*/site-packages/*",
+    # Untracked third-party JavaScript dependencies can ship Python files.
+    "node_modules/*",
+]
 
 [tool.coverage.paths]
 # The runner's own tests copy run_tests.py into a temp tree and run it where
@@ -85,4 +93,6 @@ omit = ["tests/*", ".venv/*", "build/*", "dist/*", "*/site-packages/*"]
 repo = [".", "*/tree"]
 
 [tool.coverage.report]
+# Without this, unexecuted files below non-package directories are absent.
+include_namespace_packages = true
 exclude_also = ["if __name__ == .__main__.:"]
