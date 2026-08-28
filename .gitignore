@@ -275,6 +275,7 @@
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
 !/tests/test_mcp_auth.py
+!/tests/test_mcp_entry_point.py
 !/tests/test_mcp_refusal_drain.py
 !/tests/test_mcp_server.py
 !/tests/test_mcp_tools.py

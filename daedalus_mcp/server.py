@@ -13,6 +13,11 @@ import contextlib
 import os, socket, sys, threading
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+
+if __package__ in (None, ''):
+    sys.path.insert(
+        0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from daedalus_mcp import auth
 from daedalus_mcp import request_guard
 from daedalus_mcp import tools_cookies
