@@ -12,7 +12,7 @@ a violation, so a spelling it does not understand can never slip past.
 import ast
 
 from _coverage_scopes import (
-    _is_root_spelling, _scope_shadows, _shadowed_names)
+    _is_root_spelling, _scope_shadows, _shadowed_names, root_owner_names)
 
 _DECLARATION = 'child_coverage'
 _LAUNCHERS = frozenset(
@@ -47,6 +47,7 @@ class _ModuleFacts:
 
     def __init__(self, tree):
         self.shadowed_names = _shadowed_names(tree)
+        self.root_owners = root_owner_names(tree)
         self.scope_shadows = _scope_shadows(tree)
         self.module_shadows = set(self.scope_shadows[tree])
         if 'ROOT' not in self.shadowed_names:
@@ -96,7 +97,8 @@ class _ModuleFacts:
                 if is_chdir:
                     is_root = (bool(node.args)
                                and _is_root_spelling(
-                                   node.args[0], self.shadowed_names))
+                                   node.args[0], self.shadowed_names,
+                                   self.root_owners))
                     self.chdir_calls.append((node.lineno, is_root))
         self._collect_bindings(tree.body)
 
@@ -121,6 +123,11 @@ class _ModuleFacts:
                         and isinstance(value, ast.Name)
                         and value.id in self.declaration_modules):
                     self.declaration_modules.add(name)
+                    changed = True
+                if (name not in self.subprocess_modules
+                        and isinstance(value, ast.Name)
+                        and value.id in self.subprocess_modules):
+                    self.subprocess_modules.add(name)
                     changed = True
 
     def _collect_bindings(self, statements):
@@ -190,7 +197,8 @@ def _unresolved_cwd(node, facts, shadowed):
     spread = False
     for keyword in node.keywords:
         if keyword.arg == 'cwd':
-            if _is_root_spelling(keyword.value, shadowed):
+            if _is_root_spelling(keyword.value, shadowed,
+                                 facts.root_owners):
                 return None
             return f'cwd={ast.unparse(keyword.value)}'
         if keyword.arg is None:
