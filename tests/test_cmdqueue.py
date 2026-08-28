@@ -200,6 +200,9 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     # Trace relationships avoid assuming how binary64 splits the deadline.
     assert calls[0] == len(sleeps), (calls, sleeps)
     assert sleeps, sleeps
+    assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), sleeps
+    # An exact multiple can make the final sleep equal the polling delay.
+    assert sleeps[-1] <= _cmdqueue.POLL_DELAY, sleeps
     assert sum(sleeps) == timeout, sleeps
 
 
