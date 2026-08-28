@@ -11,8 +11,6 @@ a violation, so a spelling it does not understand can never slip past.
 """
 import ast
 
-from _repo import ROOT
-
 _DECLARATION = 'child_coverage'
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
@@ -413,11 +411,11 @@ def _synthetic_violations(source):
     return violations + _unlisted_keeps(keeps)
 
 
-def _coverage_environment_violations():
+def _coverage_environment_violations(root):
     violations = []
     keeps = []
-    for path in sorted((ROOT / 'tests').glob('*.py')):
-        relative = path.relative_to(ROOT).as_posix()
+    for path in sorted((root / 'tests').glob('*.py')):
+        relative = path.relative_to(root).as_posix()
         violations.extend(_analyze(
             relative, path.read_text(encoding='utf-8'), keeps))
     violations.extend(_unlisted_keeps(keeps))
