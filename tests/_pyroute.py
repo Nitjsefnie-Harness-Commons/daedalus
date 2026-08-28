@@ -177,18 +177,36 @@ def _resolve_sender_name(expr, aliases):
     return None
 
 
+def _rebound_names(node):
+    """Every local name `node` can rebind, in any binding form: a plain or
+    annotated assignment, a `for`/`with`/`except` target, or an import."""
+    nodes = [node, *_scope_nodes(node)]
+    names = {n.id for n in nodes
+             if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+    names |= {(a.asname or a.name).split('.')[0]
+              for n in nodes if isinstance(n, (ast.Import, ast.ImportFrom))
+              for a in n.names}
+    names |= {n.name for n in nodes
+              if isinstance(n, ast.ExceptHandler) and n.name}
+    return names
+
+
 def _apply_alias_statement(node, aliases):
     """Track a same-scope alias of ext_cmd/_ext_cmd, in the same
-    source-ordered pass the dict tracking below runs in -- an alias is
-    exactly as order- and branch-sensitive as a payload dict is, so it
-    can't be collected in a single whole-scope pass without going stale.
+    source-ordered pass the dict tracking below runs in, since an alias is
+    exactly as order- and branch-sensitive as a payload dict is and can't
+    be collected in a single whole-scope pass without going stale.
 
-    A name whose new value resolves to neither sender is cleared rather
-    than left alone, so a sender rebound to something else stops reading
-    as one. Resolving through `aliases` here (not just a literal name)
-    is what makes `a = _ext_cmd` followed later by `b = a` recognise `b`
-    too, one hop at a time, in source order.
+    Every name this statement can rebind is cleared first, in whatever
+    form that rebinding takes, so a sender rebound through a `for` target
+    or a `with ... as` (not just a plain assignment) stops reading as one
+    too. Only a plain or annotated assignment can then re-establish an
+    alias; resolving through `aliases` here, not just a literal name, is
+    what makes `a = _ext_cmd` followed later by `b = a` recognize `b` too,
+    one hop at a time, in source order.
     """
+    for name in _rebound_names(node):
+        aliases.pop(name, None)
     if isinstance(node, ast.Assign):
         targets = node.targets
     elif isinstance(node, ast.AnnAssign) and node.value is not None:
@@ -196,12 +214,10 @@ def _apply_alias_statement(node, aliases):
     else:
         return
     resolved = _resolve_sender_name(node.value, aliases)
-    for target in targets:
-        if isinstance(target, ast.Name):
-            if resolved is not None:
+    if resolved is not None:
+        for target in targets:
+            if isinstance(target, ast.Name):
                 aliases[target.id] = resolved
-            else:
-                aliases.pop(target.id, None)
 
 
 def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
