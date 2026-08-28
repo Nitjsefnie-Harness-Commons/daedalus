@@ -10,16 +10,12 @@ CLOSED: it proves each launch safe, and a launch it cannot prove safe is
 a violation, so a spelling it does not understand can never slip past.
 """
 import ast
+from pathlib import PurePosixPath, PureWindowsPath
 
 _DECLARATION = 'child_coverage'
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
-_ROOT_SPELLINGS = frozenset({
-    'ROOT', 'str(ROOT)', '_util.ROOT', 'str(_util.ROOT)',
-    'behaviour.ROOT', 'str(behaviour.ROOT)',
-})
-
 # The launches that declare 'keep', as module::function so an unrelated
 # edit above a site does not churn the list. A keep site with no entry
 # fails, and an entry with no keep site fails. Every tree below sits
@@ -42,29 +38,104 @@ _KEEP_ALLOWLIST = frozenset({
 })
 
 
-def _is_root_spelling(node):
+def _is_root_spelling(node, shadowed_names=frozenset()):
     """Whether an expression provably names the repository root."""
-    if ast.unparse(node) in _ROOT_SPELLINGS:
+    if any(isinstance(part, ast.Name) and part.id in shadowed_names
+           for part in ast.walk(node)):
+        return False
+    if isinstance(node, ast.Name) and node.id == 'ROOT':
+        return True
+    if (isinstance(node, ast.Attribute) and node.attr == 'ROOT'
+            and isinstance(node.value, ast.Name)
+            and node.value.id in {'_util', 'behaviour'}):
         return True
     if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
             and isinstance(node.right, ast.Constant)
-            and isinstance(node.right.value, str)):
-        return _is_root_spelling(node.left)
+            and _is_relative_literal(node.right.value)):
+        return _is_root_spelling(node.left, shadowed_names)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id == 'str' and len(node.args) == 1
             and not node.keywords):
-        return _is_root_spelling(node.args[0])
+        return _is_root_spelling(node.args[0], shadowed_names)
     return False
+
+
+def _is_relative_literal(value):
+    """Whether a literal path stays relative on POSIX and Windows."""
+    if not isinstance(value, str):
+        return False
+    paths = (PurePosixPath(value), PureWindowsPath(value))
+    return all(not path.anchor and '..' not in path.parts for path in paths)
+
+
+def _is_repository_root_binding(value):
+    """Whether a module assignment derives the checkout root."""
+    if (isinstance(value, ast.Attribute) and value.attr == 'ROOT'
+            and isinstance(value.value, ast.Name)
+            and value.value.id == '_util'):
+        return True
+    if (not isinstance(value, ast.Subscript)
+            or not isinstance(value.slice, ast.Constant)
+            or value.slice.value != 1):
+        return False
+    parents = value.value
+    if not isinstance(parents, ast.Attribute) or parents.attr != 'parents':
+        return False
+    resolved = parents.value
+    if (not isinstance(resolved, ast.Call) or resolved.args
+            or resolved.keywords
+            or not isinstance(resolved.func, ast.Attribute)
+            or resolved.func.attr != 'resolve'):
+        return False
+    constructor = resolved.func.value
+    return (isinstance(constructor, ast.Call)
+            and isinstance(constructor.func, ast.Name)
+            and constructor.func.id == 'Path'
+            and len(constructor.args) == 1 and not constructor.keywords
+            and isinstance(constructor.args[0], ast.Name)
+            and constructor.args[0].id == '__file__')
+
+
+def _shadowed_names(tree):
+    """Names whose source value is replaced somewhere in the module."""
+    names = {node.id for node in ast.walk(tree)
+             if isinstance(node, ast.Name)
+             and isinstance(node.ctx, (ast.Store, ast.Del))}
+    names.update(node.arg for node in ast.walk(tree)
+                 if isinstance(node, ast.arg))
+    names.update(node.name for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef,
+                                      ast.AsyncFunctionDef, ast.ClassDef)))
+    names.update(node.name for node in ast.walk(tree)
+                 if isinstance(node, ast.ExceptHandler) and node.name)
+    root_values = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == 'ROOT'
+               for target in targets):
+            root_values.append(value)
+    if (root_values and not {'Path', '_util'} & names
+            and all(_is_repository_root_binding(value)
+                    for value in root_values)):
+        names.discard('ROOT')
+    return names
 
 
 class _ModuleFacts:
     """The syntactic facts one module's launches are judged against."""
 
     def __init__(self, tree):
+        self.shadowed_names = _shadowed_names(tree)
         self.subprocess_modules = set()
         self.launch_callables = set()
         self.declaration_modules = set()
         self.declaration_functions = set()
+        self.chdir_callables = set()
         self.module_bindings = {}
         self.chdir_calls = []
         self._collect(tree)
@@ -88,18 +159,26 @@ class _ModuleFacts:
                     if (node.module == '_util'
                             and alias.name == _DECLARATION):
                         self.declaration_functions.add(bound)
+                    if node.module == 'os' and alias.name == 'chdir':
+                        self.chdir_callables.add(bound)
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
                 if _is_launch_alias(node, self.subprocess_modules):
                     self.launch_callables.add(node.targets[0].id)
             elif isinstance(node, ast.Call):
                 function = node.func
-                if (isinstance(function, ast.Attribute)
-                        and function.attr == 'chdir'
-                        and isinstance(function.value, ast.Name)
-                        and function.value.id == 'os'):
+                is_chdir = (
+                    isinstance(function, ast.Attribute)
+                    and function.attr == 'chdir'
+                    and isinstance(function.value, ast.Name)
+                    and function.value.id == 'os')
+                is_chdir = (is_chdir
+                            or isinstance(function, ast.Name)
+                            and function.id in self.chdir_callables)
+                if is_chdir:
                     is_root = (bool(node.args)
-                               and _is_root_spelling(node.args[0]))
+                               and _is_root_spelling(
+                                   node.args[0], self.shadowed_names))
                     self.chdir_calls.append((node.lineno, is_root))
         self._collect_bindings(tree.body)
 
@@ -171,7 +250,7 @@ def _unresolved_cwd(node, facts):
     spread = False
     for keyword in node.keywords:
         if keyword.arg == 'cwd':
-            if _is_root_spelling(keyword.value):
+            if _is_root_spelling(keyword.value, facts.shadowed_names):
                 return None
             return f'cwd={ast.unparse(keyword.value)}'
         if keyword.arg is None:
@@ -350,11 +429,37 @@ def _rebinds_declaration(part, facts):
     """Whether an assignment target names the declaration helper."""
     if isinstance(part, ast.Name):
         return (part.id == _DECLARATION
-                or part.id in facts.declaration_functions)
+                or part.id in facts.declaration_functions
+                or part.id in facts.declaration_modules)
     return (isinstance(part, ast.Attribute)
             and part.attr == _DECLARATION
             and isinstance(part.value, ast.Name)
             and part.value.id in facts.declaration_modules)
+
+
+def _rebind_parts(target):
+    """Assignment parts that themselves receive a new value."""
+    if isinstance(target, ast.Starred):
+        yield from _rebind_parts(target.value)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for part in target.elts:
+            yield from _rebind_parts(part)
+    else:
+        yield target
+
+
+def _setattr_rebinds_declaration(node, facts):
+    """Whether setattr may replace the imported declaration helper."""
+    if (not isinstance(node.func, ast.Name) or node.func.id != 'setattr'
+            or len(node.args) < 2):
+        return False
+    owner, name = node.args[:2]
+    if (not isinstance(owner, ast.Name)
+            or owner.id not in facts.declaration_modules):
+        return False
+    return (not isinstance(name, ast.Constant)
+            or not isinstance(name.value, str)
+            or name.value == _DECLARATION)
 
 
 def _helper_rebind_violations(tree, facts, relative):
@@ -366,6 +471,12 @@ def _helper_rebind_violations(tree, facts, relative):
     """
     violations = []
     for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and _setattr_rebinds_declaration(node, facts)):
+            violations.append(
+                f'{relative}:{node.lineno}: the module rebinds '
+                f'{_DECLARATION}')
+            continue
         if isinstance(node, ast.Assign):
             targets = node.targets
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
@@ -373,7 +484,7 @@ def _helper_rebind_violations(tree, facts, relative):
         else:
             continue
         for target in targets:
-            for part in ast.walk(target):
+            for part in _rebind_parts(target):
                 if _rebinds_declaration(part, facts):
                     violations.append(
                         f'{relative}:{node.lineno}: the module rebinds '

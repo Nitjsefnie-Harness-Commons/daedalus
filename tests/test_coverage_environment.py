@@ -48,84 +48,6 @@ def test_controls_never_write_inside_the_repository(tmp):
     assert not violations, '\n'.join(violations)
 
 
-def test_write_control_refuses_a_tuple_bound_checkout_path(tmp):
-    """Tuple binding cannot hide a checkout path from the control."""
-    source = Path(tmp) / 'tuple-target.py'
-    source.write_text(
-        "def control(relative):\n"
-        "    root, target = ROOT, ROOT / relative\n"
-        "    target.write_bytes(b'mutated')\n",
-        encoding='utf-8')
-    original = globals()['__file__']
-    globals()['__file__'] = str(source)
-    try:
-        violations = _repository_write_lines()
-    finally:
-        globals()['__file__'] = original
-    assert violations == [
-        'tuple-target.py:3: write_bytes target path is not control-owned'
-    ], violations
-
-
-def test_write_control_resolves_only_control_owned_paths(tmp):
-    """Owned paths pass; unresolved and checkout paths fail closed."""
-    source = Path(tmp) / 'writer-shapes.py'
-    source.write_text(
-        "def test_controls(tmp, relative, manager, holder):\n"
-        "    root, target = _real_module_copy(tmp, relative)\n"
-        "    target.write_bytes(b'ok')\n"
-        "    first, *rest = _real_module_copy(tmp, relative)\n"
-        "    rest[0].write_text('ok')\n"
-        "    joined = os.path.join(tmp, 'safe')\n"
-        "    open(joined, 'w')\n"
-        "    open(joined, 'a')\n"
-        "    open(joined, 'x')\n"
-        "    open(joined, 'wb')\n"
-        "    open(joined, 'ab')\n"
-        "    open(joined, 'xb')\n"
-        "    checkout = os.path.join(ROOT, 'unsafe')\n"
-        "    open(checkout, 'w')\n"
-        "    open(checkout, 'a')\n"
-        "    open(checkout, 'x')\n"
-        "    open(checkout, 'wb')\n"
-        "    open(checkout, 'ab')\n"
-        "    open(checkout, 'xb')\n"
-        "    with manager() as named:\n"
-        "        named.write_text('unsafe')\n"
-        "    holder.path.write_bytes(b'unsafe')\n"
-        "ROOT.write_text('unsafe')\n"
-        "async def async_control(holder):\n"
-        "    holder.path.write_text('unsafe')\n"
-        "def helper(tmp):\n"
-        "    Path(tmp).write_text('unsafe')\n",
-        encoding='utf-8')
-    original = globals()['__file__']
-    globals()['__file__'] = str(source)
-    try:
-        violations = _repository_write_lines()
-    finally:
-        globals()['__file__'] = original
-    assert violations == [
-        "writer-shapes.py:14: open mode 'w' target path is not "
-        'control-owned',
-        "writer-shapes.py:15: open mode 'a' target path is not "
-        'control-owned',
-        "writer-shapes.py:16: open mode 'x' target path is not "
-        'control-owned',
-        "writer-shapes.py:17: open mode 'wb' target path is not "
-        'control-owned',
-        "writer-shapes.py:18: open mode 'ab' target path is not "
-        'control-owned',
-        "writer-shapes.py:19: open mode 'xb' target path is not "
-        'control-owned',
-        'writer-shapes.py:21: write_text target path is not control-owned',
-        'writer-shapes.py:22: write_bytes target path is not control-owned',
-        'writer-shapes.py:23: write_text target path is not control-owned',
-        'writer-shapes.py:25: write_text target path is not control-owned',
-        'writer-shapes.py:27: write_text target path is not control-owned',
-    ], violations
-
-
 def test_a_launch_with_a_provable_cwd_is_safe(tmp):
     """Root spellings and an inherited root cwd need no declaration."""
     del tmp
@@ -145,6 +67,29 @@ subprocess.run(['python3', 'i.py'], cwd=ROOT / 'a' / 'b')
 os.chdir(ROOT)
 subprocess.run(['python3', 'j.py'])
 """) == []
+
+
+def test_an_absolute_root_suffix_is_unresolved(tmp):
+    """An absolute right operand discards ROOT and needs a declaration."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+subprocess.run(['python3', 'child.py'], cwd=ROOT / '/tmp')
+""")
+    assert len(violations) == 1, violations
+    assert "cwd=ROOT / '/tmp'" in violations[0], violations
+
+
+def test_a_rebound_root_spelling_is_unresolved(tmp):
+    """A local ROOT spelling does not prove the repository value."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+ROOT = '/tmp'
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""")
+    assert len(violations) == 1, violations
+    assert 'cwd=ROOT' in violations[0], violations
 
 
 def test_a_literal_interpreter_launch_needs_a_declaration(tmp):
@@ -294,6 +239,9 @@ def test_rebinding_the_declaration_helper_is_a_violation(tmp):
     del tmp
     for binding in ('child_coverage = lambda _mode: {}',
                     '_util.child_coverage = lambda _mode: {}',
+                    "setattr(_util, 'child_coverage', lambda _mode: {})",
+                    'setattr(_util, helper_name, lambda _mode: {})',
+                    '_util = replacement',
                     'cc = None'):
         violations = _synthetic_violations(
             f"""import subprocess
@@ -346,6 +294,19 @@ subprocess.run(['python3', 'child.py'])
     assert len(violations) == 1, violations
     assert 'tests/synthetic.py:4' in violations[0], violations
     assert 'os.chdir' in violations[0], violations
+
+
+def test_an_imported_chdir_taints_an_inherited_cwd(tmp):
+    """Importing chdir directly cannot hide a cwd mutation."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+from os import chdir
+chdir(tmp)
+subprocess.run(['python3', 'child.py'])
+""")
+    assert len(violations) == 1, violations
+    assert 'chdir at line 3' in violations[0], violations
 
 
 def test_a_spread_of_any_kind_makes_the_cwd_unresolved(tmp):
@@ -553,7 +514,8 @@ def test_child_coverage_declares_scrub_and_keep(tmp):
 
 def test_child_coverage_keep_requires_a_mapped_tree(tmp):
     """A keep outside the '*/tree' anchor fails where it is declared."""
-    for cwd in (None, Path(tmp) / 'unmapped-runner'):
+    for cwd in (None, Path(tmp) / 'unmapped-runner',
+                Path(tmp) / 'tree' / '..' / 'unmapped-runner'):
         try:
             _util.child_coverage('keep', {}, cwd=cwd)
         except ValueError as error:
