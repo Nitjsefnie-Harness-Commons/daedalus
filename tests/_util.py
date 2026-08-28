@@ -54,12 +54,17 @@ def child_coverage(mode, environment=None, cwd=None):
     A 'keep' must also prove at runtime that its tree is mapped: pyproject's
     [tool.coverage.paths] maps repo = [".", "*/tree"] and nothing else, so
     the launch's cwd is required and must have a `tree` component. A renamed
-    directory fails here rather than later in `coverage report`.
+    directory fails here rather than later in `coverage report`. It proves
+    the retention too: an environment the caller already scrubbed keeps
+    nothing, so a collector name this process carries must survive into the
+    child's.
     """
     if environment is None:
         environment = os.environ
     if mode == 'scrub':
-        scrubbed = coverage_free_environment(environment)
+        # subprocess serializes env.items(), so the returned mapping is
+        # rebuilt from that view and validated there.
+        scrubbed = dict(coverage_free_environment(environment).items())
         leaked = sorted(
             name for name in scrubbed if name.startswith('COVERAGE_'))
         if leaked:
@@ -76,7 +81,15 @@ def child_coverage(mode, environment=None, cwd=None):
             raise ValueError(
                 "child_coverage('keep') outside a mapped '*/tree' tree: "
                 f'{cwd}')
-        return dict(environment)
+        kept = dict(environment.items())
+        dropped = sorted(
+            name for name in os.environ
+            if name.startswith('COVERAGE_') and name not in kept)
+        if dropped:
+            raise ValueError(
+                "child_coverage('keep') dropped coverage names: "
+                + ', '.join(dropped))
+        return kept
     raise ValueError(
         f"child_coverage mode must be 'scrub' or 'keep': {mode!r}")
 
