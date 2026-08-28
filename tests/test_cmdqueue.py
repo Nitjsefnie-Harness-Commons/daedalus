@@ -291,6 +291,22 @@ def test_a_transient_read_refusal_returns_every_queued_command(tmp):
                         {'id': 'second', 'type': 'reload'}], commands
 
 
+def test_the_overlap_command_wait_times_out_with_a_diagnostic(tmp):
+    queue, _queued = _queued_file(tmp)
+    original = _overlap._CLIENT_COMMAND_WAIT_S
+    _overlap._CLIENT_COMMAND_WAIT_S = 0.1
+    try:
+        message = None
+        try:
+            _overlap._wait_for_client_commands(queue, 2)
+        except AssertionError as failure:
+            message = str(failure)
+    finally:
+        _overlap._CLIENT_COMMAND_WAIT_S = original
+    assert message == 'timed out waiting for both same-id client commands', \
+        message
+
+
 def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
     queue, first = _queued_file(tmp)
     second = queue / '1700000000001_000002.json'
@@ -302,6 +318,111 @@ def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
     assert calls[0] == refusals + 1, calls
     assert commands == [{'id': 'queued', 'type': 'reload'},
                         {'id': 'second', 'type': 'reload'}], commands
+
+
+def test_a_permanent_read_refusal_bounds_the_multi_command_wait(tmp):
+    queue, first = _queued_file(tmp)
+    second = queue / '1700000000001_000002.json'
+    second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
+                      encoding='utf-8')
+    with _refuse_path_operation(first, 'read_text', 1000):
+        commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
+    assert commands is None, commands
+
+
+def test_a_queue_file_that_disappears_during_reads_is_retried(tmp):
+    queue, first = _queued_file(tmp)
+    second = queue / '1700000000001_000002.json'
+    second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
+                      encoding='utf-8')
+    original = Path.read_text
+    armed = [True]
+
+    def missing(candidate, *args, **kwargs):
+        if candidate == first and armed[0]:
+            armed[0] = False
+            raise FileNotFoundError(2, 'injected disappearance', str(first))
+        return original(candidate, *args, **kwargs)
+
+    Path.read_text = missing
+    try:
+        commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
+    finally:
+        Path.read_text = original
+    assert commands == [{'id': 'queued', 'type': 'reload'},
+                        {'id': 'second', 'type': 'reload'}], commands
+
+
+def test_the_multi_command_wait_refuses_a_superset(tmp):
+    queue, _first = _queued_file(tmp)
+    for name in ('1700000000001_000002.json', '1700000000002_000003.json'):
+        (queue / name).write_text(
+            json.dumps({'id': name, 'type': 'reload'}), encoding='utf-8')
+    commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
+    assert commands is None, commands
+
+
+def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
+    token = 'overlap-caller-token'
+    docroot = Path(tmp) / 'docroot'
+    queue = docroot / 'commands' / f'{token}_extension'
+    queue.mkdir(parents=True)
+    for name, domain in (('1700000000000_000001.json', 'owner-a'),
+                         ('1700000000001_000002.json', 'owner-b')):
+        (queue / name).write_text(json.dumps({'domain': domain}),
+                                  encoding='utf-8')
+
+    @contextlib.contextmanager
+    def fake_bridge(bridge_tmp, env=None, output=None):
+        yield 'http://fake-bridge', str(docroot)
+
+    original_bridge = _overlap._util.bridge
+    original_overlap = _overlap.run_background_overlap
+    original_wait = _cmdqueue.wait_for_commands
+    original_read_text = Path.read_text
+    waits = [0]
+    fired = [0]
+
+    def refused(candidate, *args, **kwargs):
+        if candidate.parent == queue and candidate.suffix == '.json':
+            fired[0] += 1
+            raise PermissionError(32, 'injected sharing violation')
+        return original_read_text(candidate, *args, **kwargs)
+
+    def wait_then_arm(directory, count, timeout):
+        waits[0] += 1
+        commands = original_wait(directory, count, timeout)
+        # From here the caller must hold the parsed commands; any later
+        # queue read is the untolerated read this branch removed.
+        Path.read_text = refused
+        return commands
+
+    def failing_overlap(*args, **kwargs):
+        raise AssertionError('injected overlap failure')
+
+    def client_argv(owner):
+        return [sys.executable, '-c', 'pass']
+
+    message = None
+    _overlap._util.bridge = fake_bridge
+    _overlap.run_background_overlap = failing_overlap
+    _cmdqueue.wait_for_commands = wait_then_arm
+    try:
+        try:
+            _overlap.run_same_id_client_overlap(
+                tmp, ['owner-a', 'owner-b'], client_argv, {}, token,
+                'unused-background')
+        except AssertionError as failure:
+            message = str(failure)
+    finally:
+        _overlap._util.bridge = original_bridge
+        _overlap.run_background_overlap = original_overlap
+        _cmdqueue.wait_for_commands = original_wait
+        Path.read_text = original_read_text
+    assert waits == [1], waits
+    assert message is not None, 'the injected overlap failure was accepted'
+    assert 'injected overlap failure' in message, message
+    assert fired == [0], fired
 
 
 if __name__ == '__main__':
