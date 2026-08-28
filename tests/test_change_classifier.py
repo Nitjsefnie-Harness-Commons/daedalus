@@ -22,11 +22,11 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
     _workflow_path_filters, _workflow_triggers)
-from _yamlread import job_mapping  # noqa: E402
+from _yamlread import YAMLReadError, job_mapping  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _wfgraph import (  # noqa: E402
     _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
-    _job_step_ids, _tests_yml)
+    _job_names_with_outputs, _job_step_ids, _tests_yml)
 
 
 def _classifier():
@@ -353,7 +353,25 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
 
 
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
-STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
+AGGREGATE_ALLOWED_RESULTS = {
+    'changes': frozenset(('success',)),
+    'pycodestyle': frozenset(('success',)),
+    'pylint': frozenset(('success',)),
+    'pyright': frozenset(('success',)),
+    'eslint': frozenset(('success',)),
+    'actionlint': frozenset(('success', 'skipped')),
+    'suites': frozenset(('success', 'skipped')),
+    # wheel is intentionally not strict: its condition skips only after a
+    # failed or cancelled dependency, and aggregate rejects that dependency.
+    'wheel': frozenset(('success', 'skipped')),
+    'coverage': frozenset(('success', 'skipped')),
+}
+CONDITION_CONTEXTS = (
+    ({'success': True, 'failure': False, 'cancelled': False}, True),
+    ({'success': False, 'failure': False, 'cancelled': False}, True),
+    ({'success': False, 'failure': True, 'cancelled': False}, False),
+    ({'success': False, 'failure': False, 'cancelled': True}, False),
+)
 
 
 def _aggregate_script(workflow):
@@ -401,9 +419,40 @@ def test_changes_job_exposes_every_classifier_output(tmp):
 def test_changes_job_outputs_reference_existing_step_ids(tmp):
     del tmp
     workflow = _tests_yml()
-    referenced = _job_output_step_ids(workflow, 'changes')
-    declared = _job_step_ids(workflow, 'changes')
-    assert referenced <= declared, (referenced, declared)
+    output_jobs = _job_names_with_outputs(workflow)
+    assert set(output_jobs) == {'changes'}, output_jobs
+    assert len(output_jobs) == len(set(output_jobs)) == 1, output_jobs
+    for job in output_jobs:
+        referenced = _job_output_step_ids(workflow, job)
+        declared = _job_step_ids(workflow, job)
+        assert referenced <= declared, (job, referenced, declared)
+
+
+def test_changes_job_rejects_an_unrecognized_output_expression(tmp):
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  changes:\n'
+        '    outputs:\n'
+        "      ghost: ${{ steps[format('mi{0}', 'ssing')].outputs.value }}\n"
+        '    steps:\n'
+        '      - id: classify\n')
+    try:
+        _job_output_step_ids(workflow, 'changes')
+    except (AssertionError, ValueError, YAMLReadError):
+        return
+    raise AssertionError('unrecognized output expression was accepted')
+
+
+def test_job_if_expression_decodes_a_structural_block_scalar(tmp):
+    del tmp
+    workflow = (
+        'jobs:\n'
+        '  sample:\n'
+        '    if: >-\n'
+        '      ${{ !cancelled() && !failure() }}\n')
+    assert _job_if_expression(workflow, 'sample') == (
+        '${{ !cancelled() && !failure() }}')
 
 
 def test_static_analysis_jobs_keep_their_required_ids_and_names(tmp):
@@ -436,15 +485,10 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
         tmp):
     del tmp
     workflow = _tests_yml()
-    contexts = (
-        ({'success': False, 'failure': False, 'cancelled': False}, True),
-        ({'success': False, 'failure': True, 'cancelled': False}, False),
-        ({'success': False, 'failure': False, 'cancelled': True}, False),
-    )
     for job in ('suites', 'wheel', 'coverage'):
         expression = _job_if_expression(workflow, job)
         assert expression is not None, job
-        for status, should_run in contexts:
+        for status, should_run in CONDITION_CONTEXTS:
             context = {
                 'status': status,
                 'needs': {'changes': {'outputs': {'docs_only': 'false'}}},
@@ -504,69 +548,56 @@ def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
     expression = _job_if_expression(_tests_yml(), 'coverage')
     assert expression is not None
 
-    def runs(docs_only):
+    def runs(docs_only, status):
         context = {
-            'status': {
-                'success': False,
-                'failure': False,
-                'cancelled': False,
-            },
+            'status': status,
             'needs': {'changes': {'outputs': {'docs_only': docs_only}}},
         }
         return evaluate_if(expression, context)
 
-    assert runs('true') is False
-    assert runs('false') is True
-    # '' is both an empty emission and what a missing output resolves to.
-    assert runs('') is True
+    for status, should_run in CONDITION_CONTEXTS:
+        assert runs('true', status) is False
+        assert runs('false', status) is should_run
+        # '' is both an empty emission and what a missing output resolves to.
+        assert runs('', status) is should_run
 
 
 def test_aggregate_waits_on_every_job_it_checks(tmp):
     del tmp
     needs = _job_needs(_tests_yml(), 'aggregate')
-    expected = ('changes', *GATE_JOBS, 'suites', 'wheel', 'coverage')
+    expected = tuple(AGGREGATE_ALLOWED_RESULTS)
     assert set(needs) == set(expected), (needs, expected)
     assert len(needs) == len(set(needs)) == len(expected), (
         needs, expected)
 
 
-def test_aggregate_script_accepts_only_intentional_gate_skips(tmp):
-    """The accept-skipped behaviour, exercised by running the real script.
-
-    This is the case that goes green for the wrong reason when the strict
-    set or the accepted results drift, so the fixtures below run the
-    workflow's own shell rather than a reading of it.
-    """
+def test_aggregate_script_accepts_only_tabled_results(tmp):
+    """The aggregate result domain is one contract for every dependency."""
     del tmp
-    all_success = {
-        'changes': 'success',
-        **{name: 'success' for name in GATE_JOBS},
-        'suites': 'success',
-        'wheel': 'success',
-        'coverage': 'success',
-    }
-    result = _run_aggregate(all_success)
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    expected = tuple(AGGREGATE_ALLOWED_RESULTS)
+    needs = _job_needs(_tests_yml(), 'aggregate')
+    assert set(needs) == set(expected), (needs, expected)
+    assert len(needs) == len(set(needs)) == len(expected), (
+        needs, expected)
 
+    all_success = {name: 'success' for name in expected}
+    for name, accepted in AGGREGATE_ALLOWED_RESULTS.items():
+        for result_name in ('success', 'failure', 'cancelled', 'skipped'):
+            result = _run_aggregate(
+                dict(all_success, **{name: result_name}))
+            assert (result.returncode == 0) is (result_name in accepted), (
+                name, result_name, accepted, result.stdout, result.stderr)
+
+    # Documentation-only runs skip actionlint, suites, and coverage; wheel
+    # still builds the artifact. Every one of these statuses is table-allowed.
     docs_only = dict(
         all_success, actionlint='skipped', suites='skipped',
         coverage='skipped')
     result = _run_aggregate(docs_only)
     assert result.returncode == 0, (result.stdout, result.stderr)
-
-    for name in ('changes', *GATE_JOBS, 'suites', 'wheel', 'coverage'):
-        result = _run_aggregate(dict(all_success, **{name: 'failure'}))
-        assert result.returncode != 0, (name, result.stdout, result.stderr)
-
-    for name in STRICT_JOBS:
-        result = _run_aggregate(dict(all_success, **{name: 'skipped'}))
-        assert result.returncode != 0, (name, result.stdout, result.stderr)
-        assert name in result.stderr, result.stderr
-
-    result = _run_aggregate(dict(all_success, actionlint='skipped'))
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    result = _run_aggregate(dict(all_success, suites='cancelled'))
-    assert result.returncode != 0, (result.stdout, result.stderr)
+    for name, result_name in docs_only.items():
+        assert result_name in AGGREGATE_ALLOWED_RESULTS[name], (
+            name, result_name)
 
 
 def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
