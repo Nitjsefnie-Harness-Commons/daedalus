@@ -92,7 +92,7 @@ def test_directory_glob_prefix_rejects_unimplemented_metacharacters(tmp):
     mod = _classifier()
     cases = [(p, p.replace('/**', '/a.md'))
              for p in ('docs*/**', 'docs?/**', 'docs[ab]/**', 'docs]/**')]
-    cases += [('docs?', 'docs?'), ('docs[ab]', 'docs[ab]')]
+    cases += [(p, v) for p in ('docs?', 'docs[ab]') for v in (p, 'docsa')]
     for pattern, path in cases:
         try:
             mod.matches(pattern, path)
