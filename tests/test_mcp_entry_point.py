@@ -74,7 +74,8 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
     link.parent.mkdir()
     link.symlink_to(script)
     proc = subprocess.Popen(
-        [sys.executable, str(link)], cwd=tmp, env=env,
+        [sys.executable, str(link)], cwd=tmp,
+        env=_util.coverage_free_environment(env),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     output = _util.drain_lines(proc)
     try:
@@ -110,7 +111,8 @@ print('ROOT_COUNTS', *counts)
     server = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
     loaded = subprocess.run(
         [sys.executable, '-c', probe, str(_util.ROOT / 'tests'), str(server)],
-        cwd=tmp, env=env, capture_output=True, text=True, timeout=30)
+        cwd=tmp, env=_util.coverage_free_environment(env),
+        capture_output=True, text=True, timeout=30)
     assert loaded.returncode == 0, loaded.stdout + loaded.stderr
     marker = next(
         line for line in loaded.stdout.splitlines()
