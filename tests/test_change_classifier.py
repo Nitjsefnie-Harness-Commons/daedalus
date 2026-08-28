@@ -86,10 +86,14 @@ def test_an_unimplemented_pattern_shape_fails_closed(tmp):
 
 
 def test_directory_glob_prefix_rejects_unimplemented_metacharacters(tmp):
+    # `docs?`/`docs[ab]` have no `/**` to strip and hit the literal-path
+    # branch instead, but still need to end up refused, not compared (#290).
     del tmp
     mod = _classifier()
-    for pattern in ('docs*/**', 'docs?/**', 'docs[ab]/**', 'docs]/**'):
-        path = pattern.replace('/**', '/a.md')
+    cases = [(p, p.replace('/**', '/a.md'))
+             for p in ('docs*/**', 'docs?/**', 'docs[ab]/**', 'docs]/**')]
+    cases += [('docs?', 'docs?'), ('docs[ab]', 'docs[ab]')]
+    for pattern, path in cases:
         try:
             mod.matches(pattern, path)
         except ValueError:
