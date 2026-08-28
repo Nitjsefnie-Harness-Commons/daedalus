@@ -10,9 +10,13 @@ CLOSED: it proves each launch safe, and a launch it cannot prove safe is
 a violation, so a spelling it does not understand can never slip past.
 """
 import ast
-from pathlib import PurePosixPath, PureWindowsPath
+
+from _coverage_scopes import (
+    _is_root_spelling, _scope_shadows, _shadowed_names)
 
 _DECLARATION = 'child_coverage'
+_LAUNCHERS = frozenset(
+    {'run', 'Popen', 'call', 'check_call', 'check_output'})
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
@@ -38,99 +42,15 @@ _KEEP_ALLOWLIST = frozenset({
 })
 
 
-def _is_root_spelling(node, shadowed_names=frozenset()):
-    """Whether an expression provably names the repository root."""
-    if any(isinstance(part, ast.Name) and part.id in shadowed_names
-           for part in ast.walk(node)):
-        return False
-    if isinstance(node, ast.Name) and node.id == 'ROOT':
-        return True
-    if (isinstance(node, ast.Attribute) and node.attr == 'ROOT'
-            and isinstance(node.value, ast.Name)
-            and node.value.id in {'_util', 'behaviour'}):
-        return True
-    if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
-            and isinstance(node.right, ast.Constant)
-            and _is_relative_literal(node.right.value)):
-        return _is_root_spelling(node.left, shadowed_names)
-    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == 'str' and len(node.args) == 1
-            and not node.keywords):
-        return _is_root_spelling(node.args[0], shadowed_names)
-    return False
-
-
-def _is_relative_literal(value):
-    """Whether a literal path stays relative on POSIX and Windows."""
-    if not isinstance(value, str):
-        return False
-    paths = (PurePosixPath(value), PureWindowsPath(value))
-    return all(not path.anchor and '..' not in path.parts for path in paths)
-
-
-def _is_repository_root_binding(value):
-    """Whether a module assignment derives the checkout root."""
-    if (isinstance(value, ast.Attribute) and value.attr == 'ROOT'
-            and isinstance(value.value, ast.Name)
-            and value.value.id == '_util'):
-        return True
-    if (not isinstance(value, ast.Subscript)
-            or not isinstance(value.slice, ast.Constant)
-            or value.slice.value != 1):
-        return False
-    parents = value.value
-    if not isinstance(parents, ast.Attribute) or parents.attr != 'parents':
-        return False
-    resolved = parents.value
-    if (not isinstance(resolved, ast.Call) or resolved.args
-            or resolved.keywords
-            or not isinstance(resolved.func, ast.Attribute)
-            or resolved.func.attr != 'resolve'):
-        return False
-    constructor = resolved.func.value
-    return (isinstance(constructor, ast.Call)
-            and isinstance(constructor.func, ast.Name)
-            and constructor.func.id == 'Path'
-            and len(constructor.args) == 1 and not constructor.keywords
-            and isinstance(constructor.args[0], ast.Name)
-            and constructor.args[0].id == '__file__')
-
-
-def _shadowed_names(tree):
-    """Names whose source value is replaced somewhere in the module."""
-    names = {node.id for node in ast.walk(tree)
-             if isinstance(node, ast.Name)
-             and isinstance(node.ctx, (ast.Store, ast.Del))}
-    names.update(node.arg for node in ast.walk(tree)
-                 if isinstance(node, ast.arg))
-    names.update(node.name for node in ast.walk(tree)
-                 if isinstance(node, (ast.FunctionDef,
-                                      ast.AsyncFunctionDef, ast.ClassDef)))
-    names.update(node.name for node in ast.walk(tree)
-                 if isinstance(node, ast.ExceptHandler) and node.name)
-    root_values = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
-            continue
-        if any(isinstance(target, ast.Name) and target.id == 'ROOT'
-               for target in targets):
-            root_values.append(value)
-    if (root_values and not {'Path', '_util'} & names
-            and all(_is_repository_root_binding(value)
-                    for value in root_values)):
-        names.discard('ROOT')
-    return names
-
-
 class _ModuleFacts:
     """The syntactic facts one module's launches are judged against."""
 
     def __init__(self, tree):
         self.shadowed_names = _shadowed_names(tree)
+        self.scope_shadows = _scope_shadows(tree)
+        self.module_shadows = set(self.scope_shadows[tree])
+        if 'ROOT' not in self.shadowed_names:
+            self.module_shadows.discard('ROOT')
         self.subprocess_modules = set()
         self.launch_callables = set()
         self.declaration_modules = set()
@@ -154,7 +74,7 @@ class _ModuleFacts:
                 for alias in node.names:
                     bound = alias.asname or alias.name
                     if (node.module == 'subprocess'
-                            and alias.name in {'run', 'Popen'}):
+                            and alias.name in _LAUNCHERS):
                         self.launch_callables.add(bound)
                     if (node.module == '_util'
                             and alias.name == _DECLARATION):
@@ -242,11 +162,11 @@ class _ModuleFacts:
 
 
 def _is_launch_value(value, facts):
-    """Whether an expression is subprocess.run/Popen or a known alias."""
+    """Whether an expression is a subprocess launcher or a known alias."""
     if isinstance(value, ast.Name):
         return value.id in facts.launch_callables
     return (isinstance(value, ast.Attribute)
-            and value.attr in {'run', 'Popen'}
+            and value.attr in _LAUNCHERS
             and isinstance(value.value, ast.Name)
             and value.value.id in facts.subprocess_modules)
 
@@ -255,7 +175,7 @@ def _launch_method(node, facts):
     """'run' or 'Popen' when `node` launches through subprocess."""
     function = node.func
     if (isinstance(function, ast.Attribute)
-            and function.attr in {'run', 'Popen'}
+            and function.attr in _LAUNCHERS
             and isinstance(function.value, ast.Name)
             and function.value.id in facts.subprocess_modules):
         return function.attr
@@ -265,22 +185,24 @@ def _launch_method(node, facts):
     return None
 
 
-def _unresolved_cwd(node, facts):
+def _unresolved_cwd(node, facts, shadowed):
     """Why the launch's working directory is not provably safe, or None."""
     spread = False
     for keyword in node.keywords:
         if keyword.arg == 'cwd':
-            if _is_root_spelling(keyword.value, facts.shadowed_names):
+            if _is_root_spelling(keyword.value, shadowed):
                 return None
             return f'cwd={ast.unparse(keyword.value)}'
         if keyword.arg is None:
             spread = True
     if spread:
         return 'cwd may arrive through a ** spread'
-    earlier = [line for line, is_root in facts.chdir_calls
-               if not is_root and line < node.lineno]
-    if earlier:
-        return f'os.chdir at line {earlier[0]} may have moved the cwd'
+    # Not `line < node.lineno`: a helper defined above the chdir is still
+    # called after it, so any non-root chdir in the module taints an
+    # inherited cwd.
+    moved = [line for line, is_root in facts.chdir_calls if not is_root]
+    if moved:
+        return f'os.chdir at line {moved[0]} may have moved the cwd'
     return None
 
 
@@ -364,17 +286,17 @@ def _keyword_or_arg(call, name, position=None):
     return call.args[position]
 
 
-def _cwd_spelling(node, shadowed):
+def _cwd_core(node, shadowed):
     """A cwd expression with its str()/Path() wrappers removed."""
     while (isinstance(node, ast.Call) and len(node.args) == 1
            and not node.keywords and isinstance(node.func, ast.Name)
            and node.func.id in {'str', 'Path'}
            and node.func.id not in shadowed):
         node = node.args[0]
-    return ast.unparse(node)
+    return node
 
 
-def _keep_cwd_problem(node, call, facts):
+def _keep_cwd_problem(node, call, shadowed):
     """Why a keep does not prove its own launch's cwd, or None.
 
     The runtime helper can only judge the path it is handed, so nothing
@@ -386,8 +308,15 @@ def _keep_cwd_problem(node, call, facts):
     launch = _keyword_or_arg(node, 'cwd')
     if declared is None:
         return f"{_DECLARATION}('keep') names no cwd"
-    if launch is None or (_cwd_spelling(declared, facts.shadowed_names)
-                          != _cwd_spelling(launch, facts.shadowed_names)):
+    if launch is None:
+        return f"{_DECLARATION}('keep') cwd is not the launch's cwd"
+    core = _cwd_core(declared, shadowed)
+    # Equal spellings are not equal values: two `next(paths)` operands
+    # unparse the same and yield different directories, so the shared cwd
+    # has to be one name looked up twice.
+    if not isinstance(core, ast.Name):
+        return f"{_DECLARATION}('keep') cwd is not a plain name"
+    if core.id != getattr(_cwd_core(launch, shadowed), 'id', None):
         return f"{_DECLARATION}('keep') cwd is not the launch's cwd"
     return None
 
@@ -416,13 +345,13 @@ def _declaration(node, facts, tree):
 
 
 def _check_launch(node, method, relative, function, facts, tree, keeps,
-                  violations):
-    why = _unresolved_cwd(node, facts)
+                  violations, shadowed):
+    why = _unresolved_cwd(node, facts, shadowed)
     if why is None:
         return
     problem, mode, call = _declaration(node, facts, tree)
     if problem is None and mode == 'keep':
-        problem = _keep_cwd_problem(node, call, facts)
+        problem = _keep_cwd_problem(node, call, shadowed)
     if problem is not None:
         violations.append(
             f'{relative}:{node.lineno}: subprocess.{method} {why} {problem}')
@@ -430,18 +359,23 @@ def _check_launch(node, method, relative, function, facts, tree, keeps,
         keeps.append((relative, function))
 
 
-def _visit(node, relative, function, facts, tree, keeps, violations):
+def _visit(node, relative, function, facts, tree, keeps, violations,
+           shadowed=None):
+    if shadowed is None:
+        shadowed = frozenset(facts.module_shadows)
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _visit(child, relative, child.name, facts, tree, keeps,
-                   violations)
+                   violations,
+                   shadowed | facts.scope_shadows.get(child, set()))
             continue
         if isinstance(child, ast.Call):
             method = _launch_method(child, facts)
             if method is not None:
                 _check_launch(child, method, relative, function, facts,
-                              tree, keeps, violations)
-        _visit(child, relative, function, facts, tree, keeps, violations)
+                              tree, keeps, violations, shadowed)
+        _visit(child, relative, function, facts, tree, keeps, violations,
+               shadowed)
 
 
 def _declaration_names(facts):
@@ -470,7 +404,7 @@ def _namespace_lookups(tree):
         if (isinstance(namespace, ast.Call) and not namespace.args
                 and not namespace.keywords
                 and isinstance(namespace.func, ast.Name)
-                and namespace.func.id in {'globals', 'vars'}):
+                and namespace.func.id in {'globals', 'locals', 'vars'}):
             key = node.slice
             yield node.lineno, (key.value if isinstance(key, ast.Constant)
                                 and isinstance(key.value, str) else None)
@@ -507,6 +441,29 @@ def _declaration_name_violations(tree, facts, relative):
     return violations
 
 
+def _is_module_namespace(node, facts):
+    """Whether an expression is a mapping of module names.
+
+    `globals()`, `locals()` and `vars()` at module scope, and the
+    `__dict__` or `vars(...)` of an imported helper module: assigning
+    through any of them rebinds the name it keys.
+    """
+    if (isinstance(node, ast.Attribute) and node.attr == '__dict__'
+            and isinstance(node.value, ast.Name)
+            and node.value.id in facts.declaration_modules):
+        return True
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+        return False
+    if node.func.id in {'globals', 'locals'}:
+        return not node.args and not node.keywords
+    if node.func.id != 'vars':
+        return False
+    if not node.args:
+        return not node.keywords
+    return (len(node.args) == 1 and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in facts.declaration_modules)
+
+
 def _rebinds_declaration(part, facts):
     """Whether an assignment target names the declaration helper."""
     if isinstance(part, ast.Name):
@@ -520,11 +477,7 @@ def _rebinds_declaration(part, facts):
         return True
     if not isinstance(part, ast.Subscript):
         return False
-    namespace = part.value
-    if (not isinstance(namespace, ast.Call) or namespace.args
-            or namespace.keywords
-            or not isinstance(namespace.func, ast.Name)
-            or namespace.func.id != 'globals'):
+    if not _is_module_namespace(part.value, facts):
         return False
     name = part.slice
     return (not isinstance(name, ast.Constant)
@@ -559,17 +512,13 @@ def _setattr_rebinds_declaration(node, facts):
             or name.value == _DECLARATION)
 
 
-def _mutates_module_namespace(node):
-    """Whether a call can rewrite a name returned by globals()."""
+def _mutates_module_namespace(node, facts):
+    """Whether a call can rewrite a name in a module namespace."""
     function = node.func
     if (not isinstance(function, ast.Attribute)
             or function.attr not in _MUTATING_METHODS | {'__setitem__'}):
         return False
-    namespace = function.value
-    return (isinstance(namespace, ast.Call) and not namespace.args
-            and not namespace.keywords
-            and isinstance(namespace.func, ast.Name)
-            and namespace.func.id == 'globals')
+    return _is_module_namespace(function.value, facts)
 
 
 def _helper_rebind_violations(tree, facts, relative):
@@ -583,7 +532,7 @@ def _helper_rebind_violations(tree, facts, relative):
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call)
                 and (_setattr_rebinds_declaration(node, facts)
-                     or _mutates_module_namespace(node))):
+                     or _mutates_module_namespace(node, facts))):
             violations.append(
                 f'{relative}:{node.lineno}: the module rebinds '
                 f'{_DECLARATION}')
