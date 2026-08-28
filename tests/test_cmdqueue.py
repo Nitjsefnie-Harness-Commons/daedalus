@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fault controls for test-side command queue readers."""
 import contextlib
+import inspect
 import json
 import math
 import sys
@@ -97,6 +98,29 @@ def _vanish_during_unlink(path):
 
 
 @contextlib.contextmanager
+def _vanish_during_read(path, clock):
+    original = Path.read_text
+    signature = inspect.signature(original)
+    armed = [True]
+
+    def vanished(candidate, *args, **kwargs):
+        signature.bind(candidate, *args, **kwargs)
+        if candidate == path and armed[0]:
+            armed[0] = False
+            clock.record_read()
+            candidate.unlink()
+            raise FileNotFoundError(
+                2, 'injected disappearance', str(candidate))
+        return original(candidate, *args, **kwargs)
+
+    Path.read_text = vanished
+    try:
+        yield
+    finally:
+        Path.read_text = original
+
+
+@contextlib.contextmanager
 def _refuse_first_queue_read(queue):
     original = Path.read_text
     refused_path = [None]
@@ -160,6 +184,26 @@ def test_a_present_queue_file_outlives_its_finished_producer(tmp):
         command = _cmdqueue.wait_for_command(
             queue, timeout=1, producer_alive=lambda: False)
     assert command == {'id': 'queued', 'type': 'reload'}, command
+
+
+def test_an_observed_then_vanished_file_keeps_dead_producer_wait_bounded(tmp):
+    timeout = 2.5 * _cmdqueue.POLL_DELAY
+    queue, queued = _queued_file(tmp)
+    producer_consulted = [False]
+
+    def producer_alive():
+        producer_consulted[0] = True
+        return False
+
+    with _virtual_cmdqueue_clock(10) as (clock, _events, origin):
+        with _vanish_during_read(queued, clock):
+            _cmdqueue.wait_for_command(
+                queue, timeout=timeout, producer_alive=producer_alive)
+    # Mechanism: observation makes the dead-producer predicate unreachable.
+    assert not producer_consulted[0], producer_consulted
+    # Consequence: the vanished file still keeps the wait at its full bound.
+    assert clock.monotonic() >= origin + timeout, (
+        clock.monotonic(), origin, timeout)
 
 
 def test_a_queue_file_that_disappears_during_read_is_retried(tmp):
