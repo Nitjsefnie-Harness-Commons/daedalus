@@ -26,7 +26,8 @@ from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
                         CDP_RESPONSE_DEADLINE_MS, CDP_TIMEOUT_EXIT_CODE,
                         HOSTILE_EVAL_SCRIPT, PERFORMANCE_POISON_EVAL_SCRIPT,
                         PLAIN_EVAL_SCRIPT, STRICT_CSP_EVAL_SCRIPT)
-from _realbrowser_errors import CDPEvaluationError  # noqa: E402
+from _realbrowser_errors import (CDPEvaluationError, CDPTimeout,  # noqa: E402
+                                 FirstNavigationTimeout)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
@@ -38,29 +39,6 @@ NODE_WEBSOCKET_PROBE = (
     f'{json.dumps(WEBSOCKET_ABSENT_TOKEN)})')
 NODE_PROBE_TIMEOUT = 10
 WINDOWS_COMMAND_TOO_LONG = 206
-
-
-class CDPTimeout(AssertionError):
-    """The JavaScript CDP harness reached its response deadline."""
-
-
-class FirstNavigationTimeout(AssertionError):
-    """A first navigation deadline with its in-process arrival observation."""
-
-    candidate_owners = (
-        'the browser', 'the CDP transport', 'this repository', 'the machine')
-
-    def __init__(self, page_url, request_arrived):
-        self.request_arrived = request_arrived
-        arrival = ('received a request for that page'
-                   if request_arrived
-                   else 'did not receive a request for that page')
-        owners = ', '.join(self.candidate_owners[:-1])
-        ownership_candidates = f'{owners}, or {self.candidate_owners[-1]}'
-        super().__init__(
-            f'the first fixture navigation reached its deadline: {page_url}; '
-            f'the in-process handler {arrival}. This does not by itself '
-            f'establish whether {ownership_candidates} is at fault')
 
 
 class BrowserEnvironmentSkipped(_util.Skipped):
@@ -443,6 +421,17 @@ def real_extension_page(tmp, bridge_url, token, page_url,
     node, browser = browser_requirements()
     profile = Path(tmp) / 'chromium-profile'
     extension = (extension_root or EXTENSION_ROOT).resolve()
+    manifest = json.loads(
+        (extension / 'manifest.json').read_text(encoding='utf-8'))
+    background = manifest.get('background', {})
+    declared_worker = (background.get('service_worker')
+                       if isinstance(background, dict) else None)
+    if isinstance(declared_worker, str) and declared_worker:
+        worker_path = (extension / declared_worker).resolve()
+        if not worker_path.is_file():
+            raise AssertionError(
+                f'extension manifest declares a missing service worker: '
+                f'{worker_path}')
     # Ours last: a browser that carries an extension of its own lists that
     # one first, which is the order the CI legs see.
     loaded = ','.join(str(Path(item).resolve())
@@ -624,7 +613,10 @@ def real_ext_command(bridge_url, token, cmd_id, payload):
     """Send a typed extension command and return its delivered result."""
     body = {'token': token, 'tab': 'extension', 'id': cmd_id, **payload}
     status, raw = _util.request(bridge_url + '/command', 'PUT', body=body)
-    assert status == 200, (status, raw)
+    if status != 200:
+        raise AssertionError(
+            f'extension command {cmd_id!r} was rejected by the bridge: '
+            f'status={status}, response={raw!r}')
     sent = json.loads(raw)
     deadline = time.time() + 20
     query = urllib.parse.urlencode({'token': token, 'tab': 'extension'})
@@ -645,7 +637,10 @@ def real_eval(bridge_url, token, tab_id, cmd_id, code):
             'id': cmd_id,
             'code': code,
         })
-    assert status == 200, (status, raw)
+    if status != 200:
+        raise AssertionError(
+            f'eval command {cmd_id!r} was rejected by the bridge: '
+            f'status={status}, response={raw!r}')
     sent = json.loads(raw)
     deadline = time.time() + 20
     query = urllib.parse.urlencode({'token': token, 'tab': tab_id})
@@ -662,9 +657,12 @@ def real_eval(bridge_url, token, tab_id, cmd_id, code):
                     'consume': '1',
                     'expected': generation,
                 })
-                consumed_status, _consumed = _util.get_json(
+                consumed_status, consumed = _util.get_json(
                     bridge_url + '/result?' + consume)
-                assert consumed_status == 200, consumed_status
+                if consumed_status != 200:
+                    raise AssertionError(
+                        f'eval {cmd_id!r} conditional consume failed: '
+                        f'status={consumed_status}, response={consumed!r}')
             return body
         time.sleep(0.05)
     raise AssertionError(f'eval {cmd_id!r} did not return its delivery result')
