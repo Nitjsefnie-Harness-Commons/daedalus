@@ -45,7 +45,7 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
     assert not accepted, f'scanners accepted an empty Git enumeration: {accepted}'
 
 
-def test_release_scanner_enumeration_matches_a_throwaway_repository(tmp):
+def test_release_enumeration_control_does_not_pin_repository_file_count(tmp):
     global ROOT
     release = Path(tmp) / 'enumeration-release'
     release.mkdir()
@@ -53,23 +53,13 @@ def test_release_scanner_enumeration_matches_a_throwaway_repository(tmp):
         (release / name).write_text(name + '\n', encoding='utf-8')
     subprocess.run(['git', '-C', str(release), 'init', '-q'], check=True)
     subprocess.run(
-        ['git', '-C', str(release), 'config',
-         'user.email', 'test@example.com'], check=True)
-    subprocess.run(
-        ['git', '-C', str(release), 'config', 'user.name', 'Release Test'],
-        check=True)
-    subprocess.run(
         ['git', '-C', str(release), 'add', '--',
          'one.txt', 'two.txt', 'three.txt'], check=True)
-    subprocess.run(
-        ['git', '-C', str(release), 'commit', '-qm', 'fixtures'], check=True)
 
     real_root = ROOT
     ROOT = release
     try:
-        assert (
-            test_release_scanner_enumeration_matches_tracked_files(
-                tmp) is None)
+        test_release_scanner_enumeration_matches_tracked_files(tmp)
     finally:
         ROOT = real_root
 
