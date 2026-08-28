@@ -31,6 +31,21 @@ def test_positional_dict_copy_is_opaque_but_later_tab_write_is_tracked(tmp):
     assert keys['tab'][0] == 2
 
 
+def test_a_local_alias_of_ext_cmd_is_judged_the_same_as_calling_it_directly(tmp):
+    """A sender that reaches ext_cmd through a same-scope local alias must
+    not slip past the guard just because the call site spells a different
+    name (#224)."""
+    source = Path(tmp) / 'aliased_sender.py'
+    source.write_text(
+        "async def focus_tab(chrome_tab):\n"
+        "    send = _ext_cmd\n"
+        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        encoding='utf-8')
+    violations = py_tab_routing_violations(source, 'aliased_sender.py')
+    assert violations, 'the alias should be caught the same way a direct call is'
+    assert 'ext_cmd keyword `tab`' in violations[0], violations
+
+
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     r"""`tab` routes to a server queue; `tabId` names a browser tab.
 
