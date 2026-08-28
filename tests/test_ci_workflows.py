@@ -215,22 +215,22 @@ def test_diff_coverage_permissions_are_exactly_read_only(tmp):
 def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
     """A skipped ancestor cannot hide a usable pull-request report."""
     del tmp
+    workflow = _tests_workflow()
     cases = (
         ('all-success', 'pull_request', 'success', True, False, False, True),
         ('pull request, coverage succeeded, ancestor skipped',
          'pull_request', 'success', False, False, False, True),
         ('cancelled PR', 'pull_request', 'success', False, False, True, False),
-        ('coverage skipped', 'pull_request', 'skipped',
-         False, False, False, False),
-        ('coverage failed', 'pull_request', 'failure',
-         False, True, False, False),
-        ('push event', 'push', 'success', True, False, False, False),
+        ('cov skipped', 'pull_request', 'skipped', False, False, False, False),
+        ('cov failed', 'pull_request', 'failure', False, True, False, False),
+        *((f'event {event}', event, 'success', True, False, False,
+           event == 'pull_request') for event in _trigger_names(workflow)),
     )
     for (name, event_name, coverage, ok, failed, cancelled,
          expected) in cases:
         status = {'success': ok, 'failure': failed, 'cancelled': cancelled}
         expression, actual = evaluate_job_condition(
-            _tests_workflow(), 'diff-coverage', event_name,
+            workflow, 'diff-coverage', event_name,
             {'coverage': {'result': coverage}}, status)
         assert actual is expected, (name, expression, actual)
 
