@@ -10,6 +10,7 @@ over it.
 import ast
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -23,6 +24,111 @@ def _generator_flow(initial, effect, *steps, iterable='(1,)'):
     lines = [f'send = b.{initial}',
              f'gen = ((send := b.{effect}) for _ in {iterable})', *steps]
     return '\n    '.join(lines)
+
+
+def _focus_flow(initial, effect, *steps, iterable='[1]'):
+    lines = [f'send = {initial}',
+             f'gen = ((send := {effect}) for _ in {iterable})', *steps,
+             "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"]
+    return '\n'.join(lines)
+
+
+def _tracked_focus_verdict(tmp, body):
+    source = ROOT / 'daedalus_cli' / 'commands_browser.py'
+    tree = ast.parse(source.read_text(encoding='utf-8'))
+    function = next(node for node in tree.body
+                    if isinstance(node, ast.FunctionDef)
+                    and node.name == 'do_focus_tab')
+    function.body = ast.parse(body).body
+    ast.fix_missing_locations(tree)
+    mutated = Path(tmp) / 'commands_browser.py'
+    mutated.write_text(ast.unparse(tree) + '\n', encoding='utf-8')
+    calls = []
+
+    def ext_cmd(*args, **kwargs):
+        calls.append((args, kwargs))
+        return 0
+
+    namespace = {
+        'ext_cmd': ext_cmd,
+        'ordinary': lambda *args, **kwargs: 0,
+    }
+    isolated = ast.Module(body=[function], type_ignores=[])
+    ast.fix_missing_locations(isolated)
+    # pylint: disable-next=exec-used
+    exec(compile(isolated, str(mutated), 'exec'), namespace)
+    namespace['do_focus_tab'](
+        SimpleNamespace(chrome_tab=323, flag=True, values=(1, 2)))
+    violations = py_tab_routing_violations(mutated, mutated.name)
+    return bool(calls), bool(violations)
+
+
+def test_generator_break_tracks_only_remaining_effects(tmp):
+    cases = [
+        ('one-setting', _focus_flow(
+            'ordinary', 'ext_cmd', 'for _ in gen: break',
+            'send = ordinary', 'list(gen)'), False),
+        ('one-clearing', _focus_flow(
+            'ext_cmd', 'ordinary', 'for _ in gen: break',
+            'send = ext_cmd', 'list(gen)'), True),
+        ('two-setting', _focus_flow(
+            'ordinary', 'ext_cmd', 'for _ in gen: break',
+            'send = ordinary', 'list(gen)', iterable='[1, 2]'), True),
+        ('two-clearing', _focus_flow(
+            'ext_cmd', 'ordinary', 'for _ in gen: break',
+            'send = ext_cmd', 'list(gen)', iterable='[1, 2]'), False),
+        ('empty', _focus_flow(
+            'ext_cmd', 'ordinary', 'for _ in gen: break',
+            'send = ext_cmd', 'list(gen)', iterable='[]'), True),
+        ('unknown', _focus_flow(
+            'ordinary', 'ext_cmd', 'for _ in gen: break',
+            'send = ordinary', 'list(gen)', iterable='args.values'), True),
+    ]
+    observed = [(label, *_tracked_focus_verdict(tmp, body))
+                for label, body, _ in cases]
+    expected = [(label, sender, sender) for label, _, sender in cases]
+    assert observed == expected, observed
+
+
+def test_builtin_consumers_follow_python_scope_identity(tmp):
+    unbound = ('try:\n    list(gen)\nexcept UnboundLocalError:\n'
+               '    pass')
+    local_walrus = ('try:\n    sorted(gen, key=(sorted := ordinary))\n'
+                    'except UnboundLocalError:\n    pass')
+    cases = [
+        ('later-local-setting', _focus_flow(
+            'ordinary', 'ext_cmd', unbound,
+            'if args.flag:\n    list = ordinary'), False),
+        ('later-local-clearing', _focus_flow(
+            'ext_cmd', 'ordinary', unbound,
+            'if args.flag:\n    list = ordinary'), True),
+        ('walrus-local-setting', _focus_flow(
+            'ordinary', 'ext_cmd', local_walrus), False),
+        ('walrus-local-clearing', _focus_flow(
+            'ext_cmd', 'ordinary', local_walrus), True),
+        ('deleted-local-setting', _focus_flow(
+            'ordinary', 'ext_cmd', 'list = ordinary', 'del list', unbound),
+         False),
+        ('deleted-local-clearing', _focus_flow(
+            'ext_cmd', 'ordinary', 'list = ordinary', 'del list', unbound),
+         True),
+        ('deleted-global-setting', _focus_flow(
+            'ordinary', 'ext_cmd', 'global list', 'list = ordinary',
+            'del list', 'list(gen)'), True),
+        ('deleted-global-clearing', _focus_flow(
+            'ext_cmd', 'ordinary', 'global list', 'list = ordinary',
+            'del list', 'list(gen)'), False),
+        ('frozen-global-builtin', _focus_flow(
+            'ordinary', 'ext_cmd', 'global sorted',
+            'sorted(gen, key=(sorted := ordinary))'), True),
+        ('frozen-global-builtin-clearing', _focus_flow(
+            'ext_cmd', 'ordinary', 'global sorted',
+            'sorted(gen, key=(sorted := ordinary))'), False),
+    ]
+    observed = [(label, *_tracked_focus_verdict(tmp, body))
+                for label, body, _ in cases]
+    expected = [(label, sender, sender) for label, _, sender in cases]
+    assert observed == expected, observed
 
 
 def test_positional_dict_copy_is_opaque_but_later_tab_write_is_tracked(tmp):
@@ -114,6 +220,10 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         _generator_flow('ext_cmd', 'get', 'flag and list(gen)'),
         _generator_flow('get', 'ext_cmd', 'if flag: list(gen)'),
         _generator_flow('ext_cmd', 'get', 'if flag: list(gen)'),
+        "if flag:\n        send = b.ext_cmd\n"
+        "    else:\n        send = b.get",
+        "if flag:\n        send = b.get\n"
+        "    else:\n        send = b.ext_cmd",
         _generator_flow('ext_cmd', 'get', 'for _ in gen: pass',
                         'send = b.ext_cmd', 'list(gen)'),
         _generator_flow('ext_cmd', 'get',
@@ -235,165 +345,46 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         assert not py_tab_routing_violations(source, source.name), body
 
 
-def test_a_name_rebound_away_from_ext_cmd_stops_reading_as_a_sender(tmp):
-    source = Path(tmp) / 'rebound_sender.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab):\n"
-        "    send = _ext_cmd\n"
-        "    send = some_other_function\n"
-        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'rebound_sender.py')
-    assert not violations, (
-        'send was rebound away from ext_cmd and should read as an '
-        f'ordinary call: {violations}')
-
-
-def test_a_for_target_rebinding_away_from_ext_cmd_also_clears_the_alias(tmp):
-    source = Path(tmp) / 'for_rebound_sender.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab, bridge):\n"
-        "    send = bridge.ext_cmd\n"
-        "    for send in (bridge.get,):\n"
-        "        pass\n"
-        "    return await send('/tabs', tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'for_rebound_sender.py')
-    assert not violations, (
-        f'send was rebound by the for target and should read as an '
-        f'ordinary call: {violations}')
-
-
-def test_a_def_shadowing_an_alias_name_also_clears_it(tmp):
-    source = Path(tmp) / 'def_shadowed_sender.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab):\n"
-        "    send = _ext_cmd\n"
-        "    def send(*a, **k):\n"
-        "        return None\n"
-        "    return send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'def_shadowed_sender.py')
-    assert not violations, (
-        f'send was shadowed by a def and should read as an ordinary call: '
-        f'{violations}')
-
-
-def test_a_rebinding_inside_a_loop_with_or_try_body_also_clears_the_alias(tmp):
+def test_rebinding_forms_clear_sender_aliases_without_method_guessing(tmp):
     bodies = {
-        'for': "    for probe in probes:\n"
-               "        send = probe.dispatch\n"
-               "        await send('_focus', 'probe-tab', "
-               "tab=int(chrome_tab))\n",
-        'while': "    while probes:\n"
-                 "        send = probes.pop().dispatch\n"
-                 "        await send('_focus', 'probe-tab', "
-                 "tab=int(chrome_tab))\n",
-        'with': "    with bridge.session() as send:\n"
-                "        await send('_focus', 'probe-tab', "
-                "tab=int(chrome_tab))\n",
-        'try': "    try:\n"
-               "        send = probe.dispatch\n"
-               "        await send('_focus', 'probe-tab', "
-               "tab=int(chrome_tab))\n"
-               "    except OSError:\n"
-               "        pass\n",
-        'except-as': "    try:\n"
-                     "        pass\n"
-                     "    except OSError as send:\n"
-                     "        await send('_focus', 'probe-tab', "
-                     "tab=int(chrome_tab))\n",
-        'nested-def': "    for _ in (1,):\n"
-                      "        def send(*a, **k):\n"
-                      "            return None\n"
-                      "        send('_focus', 'probe-tab', "
-                      "tab=int(chrome_tab))\n",
+        'assignment': "send = b.ext_cmd\nsend = b.get\n"
+                      "return await send('x', 'y', tab=tab)",
+        'for-target': "send = b.ext_cmd\nfor send in (b.get,): pass\n"
+                      "return await send('x', 'y', tab=tab)",
+        'definition': "send = b.ext_cmd\ndef send(*a, **k): pass\n"
+                      "return send('x', 'y', tab=tab)",
+        'for-body': "send = b.ext_cmd\nfor _ in values:\n"
+                    "    send = b.get\n    await send(tab=tab)\nreturn None",
+        'while-body': "send = b.ext_cmd\nwhile values:\n"
+                      "    send = b.get\n    await send(tab=tab)\n"
+                      "    break\nreturn None",
+        'with-body': "send = b.ext_cmd\nwith b as send:\n"
+                     "    await send(tab=tab)\nreturn None",
+        'try-body': "send = b.ext_cmd\ntry:\n    send = b.get\n"
+                    "    await send(tab=tab)\nexcept OSError: "
+                    "pass\nreturn None",
+        'except-as': "send = b.ext_cmd\ntry: raise OSError\n"
+                     "except OSError as send:\n    await send(tab=tab)\n"
+                     "return None",
+        'nested-def': "send = b.ext_cmd\nfor _ in values:\n"
+                      "    def send(*a, **k): pass\n"
+                      "    send(tab=tab)\nreturn None",
+        'attribute': "send = b.ext_cmd\n"
+                     "return await b.send('x', 'y', tab=tab)",
     }
+    patterns = ["object() as send", "{'s': send}", "[_, *send]",
+                "{'a': 1, **send}", "BaseException(args=send)"]
+    bodies.update((f'match-{index}', "send = b.ext_cmd\nmatch b.mode:\n"
+                   f"    case {pattern}:\n        await send(tab=tab)\n"
+                   "return None") for index, pattern in enumerate(patterns))
+    source = Path(tmp) / 'rebound_sender.py'
     for label, body in bodies.items():
-        source = Path(tmp) / f'loop_rebound_sender_{label}.py'
+        indented = body.replace('\n', '\n    ')
         source.write_text(
-            "async def focus_tab(chrome_tab, probes, bridge):\n"
-            "    send = bridge.ext_cmd\n"
-            + body
-            + "    return await send('_focus', 'focus-tab', "
-              "tabId=int(chrome_tab))\n",
+            f"async def f(b, tab, values):\n    {indented}\n",
             encoding='utf-8')
-        violations = py_tab_routing_violations(
-            source, f'loop_rebound_sender_{label}.py')
-        assert not violations, (
-            f'{label}: send was rebound inside the body and should read as '
-            f'an ordinary call: {violations}')
-
-
-def test_a_match_case_pattern_rebinding_an_alias_also_clears_it(tmp):
-    patterns = {
-        'as': "        case object() as send:\n",
-        'mapping-value': "        case {'s': send}:\n",
-        'star': "        case [_, *send]:\n",
-        'mapping-rest': "        case {'a': 1, **send}:\n",
-        'class-kwarg': "        case BaseException(args=send):\n",
-    }
-    for label, pattern in patterns.items():
-        source = Path(tmp) / f'match_rebound_sender_{label}.py'
-        source.write_text(
-            "async def focus_tab(chrome_tab, bridge):\n"
-            "    send = bridge.ext_cmd\n"
-            "    match bridge.mode:\n"
-            + pattern
-            + "            await send('_focus', 'probe-tab', "
-              "tab=int(chrome_tab))\n"
-              "    return await send('_focus', 'focus-tab', "
-              "tabId=int(chrome_tab))\n",
-            encoding='utf-8')
-        violations = py_tab_routing_violations(
-            source, f'match_rebound_sender_{label}.py')
-        assert not violations, (
-            f'{label}: send was rebound by the case pattern and should read '
-            f'as an ordinary call: {violations}')
-
-
-def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
-    source = Path(tmp) / 'unrelated_dot_send.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab, sink):\n"
-        "    send = _ext_cmd\n"
-        "    return await sink.send('_focus', 'focus-tab', "
-        "tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'unrelated_dot_send.py')
-    assert not violations, (
-        f'sink.send() names an attribute, not the local send: {violations}')
-
-
-def _if_else_alias_source(*, alias_in_if):
-    sender_branch = "        send = bridge.ext_cmd\n"
-    other_branch = "        send = _legacy_sender\n"
-    first, second = ((sender_branch, other_branch) if alias_in_if
-                     else (other_branch, sender_branch))
-    return (
-        "async def focus_tab(chrome_tab, legacy, bridge):\n"
-        "    if legacy:\n"
-        f"{first}"
-        "    else:\n"
-        f"{second}"
-        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n")
-
-
-def test_an_if_branch_alias_is_caught_regardless_of_which_branch_binds_it(tmp):
-    if_source = Path(tmp) / 'if_branch_alias.py'
-    if_source.write_text(_if_else_alias_source(alias_in_if=True),
-                         encoding='utf-8')
-    else_source = Path(tmp) / 'else_branch_alias.py'
-    else_source.write_text(_if_else_alias_source(alias_in_if=False),
-                           encoding='utf-8')
-
-    if_violations = py_tab_routing_violations(
-        if_source, 'if_branch_alias.py')
-    else_violations = py_tab_routing_violations(
-        else_source, 'else_branch_alias.py')
-    assert if_violations, 'the alias bound in the if branch must be caught'
-    assert else_violations, (
-        'the alias bound in the else branch must be caught too')
+        found = py_tab_routing_violations(source, source.name)
+        assert not found, (label, found)
 
 
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
@@ -401,9 +392,11 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     Resolved or possible typed-command senders may route only to 'extension';
     eval payloads legitimately route by tab. Python aliases, payloads, and
     deferred generators follow source-ordered flow. Structural iteration and
-    unshadowed builtin consumers apply generator effects; normal loops exhaust
-    them while reachable breaks retain partial state. Arbitrary calls,
-    methods, callable aliases, and lazy adapters do not prove consumption.
+    Python-resolved builtin consumers apply generator effects; normal loops
+    exhaust them while breaks retain only possible remaining effects. Local
+    binding is scope-wide, and deleting a global shadow restores builtin
+    fallback. Arbitrary calls, methods, callable aliases, and lazy adapters
+    do not prove consumption.
     Unknown names,
     opaque/nonliteral payload construction, and later named-object type writes
     remain unenforced. JavaScript names are file-wide and source-ordered; its
