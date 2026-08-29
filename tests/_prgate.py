@@ -30,12 +30,6 @@ GITHUB_ISSUE_101 = (
     'issues/101/hovercard" href="https://github.com/'
     'Nitjsefnie-Harness-Commons/daedalus/issues/101">#101</a>')
 
-GITHUB_FOOTNOTE_MARKDOWN = (
-    '## Summary\nOne sentence.\n\n'
-    '## Related Issues and Pull Requests\nFixes #101\n\n'
-    '## Changes\nThe behavior is pinned.[^1]\n\n'
-    '[^1]: By a focused regression test.\n\n'
-    '## Testing\nRan the suite.')
 GITHUB_FOOTNOTE_HTML = (
     '<h2 dir="auto">Summary</h2>\n'
     '<p dir="auto">One sentence.</p>\n'
@@ -132,24 +126,6 @@ GITHUB_HTML = {
         'style="max-width: 100%;"></a></p>'),
 }
 
-GITHUB_MARKDOWN = {
-    'nested_list': '- Tracking:\n    - Fixes #101',
-    'paragraph_continuation': (
-        'This fixes the tracked bug,\n    Fixes #101'),
-    'escaped_backticks': r'Literal backticks: \`Fixes #101\`',
-    'angle_prose': 'Fixes <issue #101>',
-    'undefined_reference': '[documentation][issue #101]',
-    'malformed_inline': '[documentation](issue #101)',
-    'balanced_destination': (
-        '[documentation](https://example.com/a_(b)#101)'),
-    'quoted_attribute': (
-        '<a title="1 > 0" href="#101">documentation</a>'),
-    'multiline_attribute': (
-        '<a\n href="#101"\n title="documentation">docs</a>'),
-    'image_destination': '![documentation](#101)',
-    'kbd_block': '<kbd>\n## literal heading\n</kbd>',
-}
-
 
 def _layout_body(*sections):
     return '\n\n'.join(
@@ -214,11 +190,16 @@ import sys
 def finish(status, data):
     reasons = {
         200: 'OK', 201: 'Created', 404: 'Not Found', 500: 'Error'}
-    print(f'HTTP/2.0 {status} {reasons.get(status, "Response")}')
-    print('content-type: application/json')
+    if status == 200 and fixtures.get('no_reason'):
+        print(f'HTTP/2 {status}')
+    else:
+        print(f'HTTP/2.0 {status} {reasons.get(status, "Response")}')
+    content_type = ('text/html; charset=utf-8'
+                    if endpoint == 'markdown' else 'application/json')
+    print(f'content-type: {content_type}')
     print()
     if data is not None:
-        print(json.dumps(data))
+        print(data if endpoint == 'markdown' else json.dumps(data))
     raise SystemExit(0 if 200 <= status < 300 else 1)
 
 
@@ -265,6 +246,12 @@ if fixtures.get('non_json'):
 if fixtures.get('no_separator'):
     print('HTTP/2.0 200 OK')
     print('content-type: application/json')
+    raise SystemExit(0)
+if fixtures.get('unsupported_media'):
+    print('HTTP/2.0 200 OK')
+    print('content-type: application/octet-stream')
+    print()
+    print('not an API representation')
     raise SystemExit(0)
 if fixtures.get('unparsable'):
     print('first gh failure line', file=sys.stderr)
@@ -320,6 +307,8 @@ class FakeApi:
         self.pull = pull
         self.issues = issues or {}
         self.comments = list(comments)
+        self.next_comment_id = max(
+            [99, *(item['id'] for item in self.comments)]) + 1
         self.timeline = list(timeline)
         self.rendered = _valid_html() if rendered is None else rendered
         self.fail = set(fail)
@@ -343,17 +332,32 @@ class FakeApi:
                 return _Response(200, self.pull)
             if method == 'PATCH':
                 self.pull['state'] = payload['state']
+                event = ('closed' if payload['state'] == 'closed'
+                         else 'reopened')
+                self.timeline.append({
+                    'event': event, 'actor': {'login': BOT}})
                 return _Response(200, self.pull)
         if endpoint == 'markdown' and method == 'POST':
             return _Response(200, self.rendered)
         if (endpoint == 'repos/owner/repo/issues/99/comments'
                 and method == 'POST'):
-            return _Response(201, {'id': 100, 'body': payload['body']})
+            comment = {
+                'id': self.next_comment_id,
+                'user': {'login': BOT},
+                'body': payload['body'],
+            }
+            self.next_comment_id += 1
+            self.comments.append(comment)
+            return _Response(201, comment)
         match = re.fullmatch(
             r'repos/owner/repo/issues/comments/([0-9]+)', endpoint)
         if match and method == 'PATCH':
-            return _Response(200, {'id': int(match.group(1)),
-                                   'body': payload['body']})
+            comment_id = int(match.group(1))
+            for comment in self.comments:
+                if comment['id'] == comment_id:
+                    comment['body'] = payload['body']
+                    return _Response(200, comment)
+            raise AssertionError(f'comment {comment_id} does not exist')
         match = re.fullmatch(
             r'repos/owner/repo/issues/([0-9]+)', endpoint)
         if match and method == 'GET':
@@ -373,6 +377,21 @@ class FakeApi:
         if endpoint == 'repos/owner/repo/issues/99/timeline':
             return _Response(200, self.timeline)
         raise AssertionError(f'unmodelled: GET {endpoint}')
+
+
+class _RaceApi(FakeApi):
+    def __init__(self, *, transition, **kwargs):
+        super().__init__(**kwargs)
+        self.transition = transition
+
+    def request(self, method, endpoint, payload=None):
+        if method == 'POST' and endpoint == 'markdown':
+            event = self.transition
+            self.transition = None
+            self.pull['state'] = 'closed' if event == 'closed' else 'open'
+            self.timeline.append({
+                'event': event, 'actor': {'login': 'maintainer'}})
+        return super().request(method, endpoint, payload)
 
 
 def _gate_module():
@@ -435,6 +454,67 @@ def _execute_without_runtime_escape(api, body):
         return _execute(api, body)
     except RuntimeError as error:
         raise AssertionError('paginate error escaped run') from error
+
+
+def _assert_two_run_replay():
+    api = _api(
+        issues={},
+        rendered=_valid_html(references=_text_html('none')))
+    code, writes, output, error = _execute(api, _valid_body('none'))
+    assert (code, output, error) == (0, 'closed\n', '')
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments'),
+        ('PATCH', 'repos/owner/repo/pulls/99')]
+    assert api.pull['state'] == 'closed'
+
+    api.issues = {'101': _issue('alice')}
+    api.rendered = _valid_html()
+    code, writes, output, error = _execute(api, _valid_body())
+    assert (code, output, error) == (0, 'reopened\n', '')
+    assert _write_sequence(writes[2:]) == [
+        ('PATCH', 'repos/owner/repo/issues/comments/100'),
+        ('PATCH', 'repos/owner/repo/pulls/99')]
+    assert api.pull['state'] == 'open'
+    assert len(api.comments) == 1
+    assert CLOSED_MARKER not in api.comments[0]['body'].splitlines()
+
+
+def _assert_state_races_abort():
+    cases = (
+        (
+            _RaceApi(
+                transition='closed', pull=_pull(), issues={},
+                rendered=_valid_html(references=_text_html('none'))),
+            _valid_body('none'),
+        ),
+        (
+            _RaceApi(
+                transition='reopened', pull=_pull('closed'),
+                issues={'101': _issue('alice')},
+                comments=[_gate_comment(closed=True)],
+                timeline=[_closed_event()]),
+            _valid_body(),
+        ),
+    )
+    for api, body in cases:
+        code, writes, output, error = _execute(api, body)
+        assert (code, output) == (1, '')
+        assert writes == []
+        assert error == (
+            'pr gate failed: pull request state changed during analysis\n')
+
+
+def _assert_closer_race_aborts():
+    api = _RaceApi(
+        transition='closed', pull=_pull('closed'),
+        issues={'101': _issue('alice')},
+        comments=[_gate_comment(closed=True)],
+        timeline=[_closed_event()])
+    code, writes, output, error = _execute(api, _valid_body())
+    assert (code, output) == (1, '')
+    assert writes == []
+    assert error == (
+        'pr gate failed: pull request closer changed during analysis\n')
 
 
 def _write_sequence(writes):

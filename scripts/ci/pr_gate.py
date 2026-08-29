@@ -80,11 +80,25 @@ class GhApi:
             separator = lines.index('')
         except ValueError as error:
             raise RuntimeError('could not read gh response headers') from error
+        headers = {}
+        for line in lines[1:separator]:
+            name, found, value = line.partition(':')
+            if found:
+                headers[name.lower()] = value.strip()
         body = '\n'.join(lines[separator + 1:])
-        try:
-            data = json.loads(body) if body else None
-        except json.JSONDecodeError as error:
-            raise RuntimeError('could not parse gh response body') from error
+        media_type = headers.get('content-type', '').partition(';')[0].lower()
+        if media_type == 'text/html':
+            data = body
+        elif media_type == 'application/json' or media_type.endswith('+json'):
+            try:
+                data = json.loads(body) if body else None
+            except json.JSONDecodeError as error:
+                raise RuntimeError(
+                    'could not parse gh response body') from error
+        else:
+            detail = media_type or 'missing'
+            raise RuntimeError(
+                f'unsupported gh response media type: {detail}')
         return Response(int(match.group(1)), data)
 
     def paginate(self, endpoint: str) -> Response:
@@ -149,11 +163,29 @@ def _gate_comment(comments):
 
 
 def _closed_by_gate(timeline, comment):
-    closed = [event for event in timeline if event.get('event') == 'closed']
-    actor = (closed[-1].get('actor') or {}).get('login') if closed else None
+    actor = _latest_closer(timeline)
     body = (comment or {}).get('body') or ''
     lines = (line.rstrip('\r') for line in body.splitlines())
     return actor == BOT and CLOSED_MARKER in lines
+
+
+def _latest_closer(timeline):
+    closed = [event for event in timeline if event.get('event') == 'closed']
+    return ((closed[-1].get('actor') or {}).get('login')
+            if closed else None)
+
+
+def _revalidate(api, pull_endpoint, state, timeline_endpoint=None,
+                closer=None):
+    pull = _read(api, 'GET', pull_endpoint)
+    if not isinstance(pull, dict):
+        raise _GateError('pull request response is not an object')
+    if pull.get('state') != state:
+        raise _GateError('pull request state changed during analysis')
+    if timeline_endpoint is not None:
+        timeline = _page(api, timeline_endpoint)
+        if _latest_closer(timeline) != closer:
+            raise _GateError('pull request closer changed during analysis')
 
 
 def _claim(api, repo, issues, actor):
@@ -247,9 +279,11 @@ def _run(api, repo, pr, actor, template):
     comments = _page(
         api, f'repos/{repo}/issues/{pr}/comments')
     comment = _gate_comment(comments)
+    timeline_endpoint = f'repos/{repo}/issues/{pr}/timeline'
+    closer = None
     if state == 'closed':
-        timeline = _page(
-            api, f'repos/{repo}/issues/{pr}/timeline')
+        timeline = _page(api, timeline_endpoint)
+        closer = _latest_closer(timeline)
         if not _closed_by_gate(timeline, comment):
             print(f'pull request {pr} was not closed by the gate')
             return 0
@@ -280,10 +314,13 @@ def _run(api, repo, pr, actor, template):
 
     if not reasons:
         if state == 'closed':
+            _revalidate(
+                api, pull_endpoint, state, timeline_endpoint, closer)
             _write_comment(api, repo, pr, comment, _reopen_text(actor))
             _write(api, 'PATCH', pull_endpoint, {'state': 'open'})
             print('reopened')
         elif comment is not None:
+            _revalidate(api, pull_endpoint, state)
             _write_comment(api, repo, pr, comment, _resolved_text(actor))
             print(f'covered by claimed issue {claimed}')
         else:
@@ -291,12 +328,14 @@ def _run(api, repo, pr, actor, template):
         return 0
 
     if state == 'closed':
+        _revalidate(api, pull_endpoint, state)
         _write_comment(
             api, repo, pr, comment,
             _inadmissible_text(actor, reasons, True))
         print('commented')
         return 0
 
+    _revalidate(api, pull_endpoint, state)
     _write_comment(
         api, repo, pr, comment,
         _inadmissible_text(actor, reasons, closable))

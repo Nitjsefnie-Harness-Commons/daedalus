@@ -12,7 +12,9 @@ import _util  # noqa: E402
 from _prgate import (  # noqa: E402
     BOT, CLOSED_FIRST, GITHUB_HTML, MARKER, OPEN_FIRST, REOPEN_FIRST,
     RESOLVED_FIRST, TEMPLATE,
-    _api, _assert_gate_message, _assert_no_writes, _assert_script_error,
+    _api, _assert_closer_race_aborts, _assert_gate_message,
+    _assert_no_writes, _assert_script_error, _assert_state_races_abort,
+    _assert_two_run_replay,
     _capture, _closed_event, _comment_body, _comment_page_fields, _execute,
     _execute_without_runtime_escape, _gate_comment, _gate_module, _html_body,
     _inline_marker_comment, _issue, _issue_gets, _issue_html, _layout_body,
@@ -297,6 +299,16 @@ def test_unreadable_closed_timeline_fails_without_writes(tmp):
         'repos/owner/repo/issues/99/timeline\n')
 
 
+def test_state_changes_during_analysis_abort_writes(tmp):
+    del tmp
+    _assert_state_races_abort()
+
+
+def test_latest_closer_change_during_analysis_aborts_reopen(tmp):
+    del tmp
+    _assert_closer_race_aborts()
+
+
 def test_merged_pull_returns_before_comments_or_render(tmp):
     del tmp
     api = _api(merged=True, fail={'comments', 'markdown'})
@@ -384,12 +396,7 @@ def test_failed_comment_write_prevents_state_change(tmp):
 
 def test_one_edit_self_heals_gate_closed_state(tmp):
     del tmp
-    api = _api(
-        state='closed', comments=[_gate_comment(closed=True)],
-        timeline=[_closed_event()])
-    code, _writes, _output, _error = _execute(api, _valid_body())
-    assert code == 0
-    assert api.pull['state'] == 'open'
+    _assert_two_run_replay()
 
 
 def test_unknown_section_name_cannot_inject_a_live_reference(tmp):
@@ -424,7 +431,8 @@ def test_workflow_shape(tmp):
             for _indent, key, value in options] == [
                 ('types', ['opened', 'edited', 'reopened'])]
     assert top_level_mapping(workflow, 'permissions') == {
-        'pull-requests': 'write', 'issues': 'read'}
+        'contents': 'read', 'pull-requests': 'write',
+        'issues': 'read'}
     assert '  cancel-in-progress: false\n' in workflow
     assert 'cancel-in-progress: true' not in workflow
     job_header = workflow.partition('    steps:\n')[0]
@@ -447,13 +455,7 @@ def test_workflow_shape(tmp):
 
 
 def test_script_runs_through_gh_on_path(tmp):
-    fixtures = {
-        'pull': {'body': _valid_body(), 'state': 'open', 'merged': False},
-        'comments': [],
-        'timeline': [],
-        'rendered': _valid_html(),
-        'issues': {'101': _issue('alice')},
-    }
+    fixtures = _script_fixtures()
     result, calls = _run_script(tmp, fixtures)
     assert result.returncode == 0, (result.stdout, result.stderr, calls)
     assert _recorded_writes(calls) == []
@@ -529,6 +531,17 @@ def test_gh_response_requires_a_header_body_separator(tmp):
     _assert_script_error(
         tmp, _script_fixtures(no_separator=True),
         'could not read gh response headers')
+
+
+def test_gh_response_rejects_an_unknown_media_type(tmp):
+    _assert_script_error(
+        tmp, _script_fixtures(unsupported_media=True),
+        'unsupported gh response media type: application/octet-stream')
+
+
+def test_reasonless_status_line_is_accepted(tmp):
+    result, calls = _run_script(tmp, _script_fixtures(no_reason=True))
+    assert (result.returncode, _recorded_writes(calls)) == (0, [])
 
 
 def test_paginated_page_must_be_a_list(tmp):
@@ -668,14 +681,7 @@ def test_gh_stub_refuses_unmodelled_calls(tmp):
 
 
 def test_unparsable_gh_failure_reports_one_stderr_line(tmp):
-    fixtures = {
-        'pull': {'body': _valid_body(), 'state': 'open', 'merged': False},
-        'comments': [],
-        'timeline': [],
-        'rendered': _valid_html(),
-        'issues': {'101': _issue('alice')},
-        'unparsable': True,
-    }
+    fixtures = _script_fixtures(unparsable=True)
     result, _calls = _run_script(tmp, fixtures)
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert result.stderr.splitlines() == [
