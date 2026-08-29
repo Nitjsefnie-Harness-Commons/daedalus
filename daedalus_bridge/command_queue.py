@@ -150,8 +150,8 @@ def enqueue(cmd_dir, token, tab, cmd):
         cmd = {**cmd, '_did': seq}
         tmp, destination = qdir / f'.{seq}.tmp', qdir / f'{seq}.json'
         try:
-            tmp.write_text(
-                json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
+            atomic_file.write_text_retrying(
+                tmp, json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
             atomic_file.replace_atomically(str(tmp), str(destination))
         except (OSError, UnicodeEncodeError):
             # A refused enqueue must not leave its hidden temp behind: the
