@@ -1,6 +1,7 @@
 """Fault-injection controls for test-side command queue readers."""
 import contextlib
 import inspect
+import os
 import sys
 from pathlib import Path
 
@@ -12,23 +13,34 @@ import _cmdqueue  # noqa: E402
 _STALLED_SLEEP_LIMIT = 1000
 
 
+def _target_key(candidate):
+    """Return the comparable path of a receiver, or None if unsupported."""
+    try:
+        return os.fspath(candidate)
+    except TypeError:
+        return None
+
+
 @contextlib.contextmanager
 def _refuse_path_operation(path, operation, failures, clock=None):
     original = getattr(Path, operation)
     signature = inspect.signature(original)
+    target_key = _target_key(path)
     remaining = [failures]
     calls = [0]
 
     def refused(candidate, *args, **kwargs):
-        if operation == 'open' and candidate == path and remaining[0]:
+        candidate_key = _target_key(candidate)
+        if (operation == 'open' and candidate_key == target_key
+                and remaining[0]):
             # Native validation adds one open per faulted call.
-            original(candidate, *args, **kwargs).close()
+            original(path, *args, **kwargs).close()
         elif operation != 'open':
             try:
                 signature.bind(candidate, *args, **kwargs)
             except TypeError:
                 return original(candidate, *args, **kwargs)
-        if candidate == path:
+        if candidate_key == target_key:
             calls[0] += 1
             if clock is not None:
                 clock.record_read()
@@ -47,7 +59,7 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 @contextlib.contextmanager
 def _virtual_cmdqueue_clock(max_sleeps=None):
     original = _cmdqueue.time
-    # A large power-of-two scale keeps even subnormal polling delays distinct.
+    # A large power-of-two origin exposes sleeps too small to move the clock.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
     now = [origin]
     events = []
@@ -72,13 +84,14 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
             if max_sleeps is not None and sleep_count[0] >= max_sleeps:
                 raise AssertionError(
                     f'virtual clock exceeded {max_sleeps} sleeps')
-            stalled[0] = 0 if seconds else stalled[0] + 1
+            advanced = now[0] + seconds
+            stalled[0] = 0 if advanced > now[0] else stalled[0] + 1
             if stalled[0] >= _STALLED_SLEEP_LIMIT:
                 raise AssertionError(
                     f'virtual clock made no progress in {stalled[0]} sleeps')
             sleep_count[0] += 1
             events.append(('sleep', seconds))
-            now[0] += seconds
+            now[0] = advanced
 
     clock = Clock()
     _cmdqueue.time = clock
@@ -110,17 +123,18 @@ def _vanish_during_unlink(path):
 @contextlib.contextmanager
 def _vanish_during_read(path, clock, remove_queue=False):
     original = Path.open
+    target_key = _target_key(path)
     armed = [True]
 
     def vanished(candidate, *args, **kwargs):
-        if candidate == path and armed[0]:
-            original(candidate, *args, **kwargs).close()
+        if _target_key(candidate) == target_key and armed[0]:
+            original(path, *args, **kwargs).close()
             armed[0] = False
             clock.record_read()
-            candidate.unlink()
+            path.unlink()
             if remove_queue:
-                candidate.parent.rmdir()
-            return original(candidate, *args, **kwargs)
+                path.parent.rmdir()
+            return original(path, *args, **kwargs)
         return original(candidate, *args, **kwargs)
 
     Path.open = vanished
@@ -133,11 +147,12 @@ def _vanish_during_read(path, clock, remove_queue=False):
 @contextlib.contextmanager
 def _disappear_on_first_open(path):
     original = Path.open
+    target_key = _target_key(path)
     armed = [True]
 
     def missing(candidate, *args, **kwargs):
-        if candidate == path and armed[0]:
-            original(candidate, *args, **kwargs).close()
+        if _target_key(candidate) == target_key and armed[0]:
+            original(path, *args, **kwargs).close()
             armed[0] = False
             raise FileNotFoundError(2, 'injected disappearance', str(path))
         return original(candidate, *args, **kwargs)
@@ -152,14 +167,17 @@ def _disappear_on_first_open(path):
 @contextlib.contextmanager
 def _refuse_first_queue_read(queue):
     original = Path.open
+    queue_key = _target_key(queue)
     refused_path = [None]
 
     def refused(candidate, *args, **kwargs):
-        if (refused_path[0] is None and candidate.parent == queue
-                and candidate.suffix == '.json'):
-            original(candidate, *args, **kwargs).close()
-            refused_path[0] = candidate
-        if candidate == refused_path[0]:
+        candidate_key = _target_key(candidate)
+        if (refused_path[0] is None and candidate_key is not None
+                and os.path.dirname(candidate_key) == queue_key
+                and os.path.splitext(candidate_key)[1] == '.json'):
+            original(candidate_key, *args, **kwargs).close()
+            refused_path[0] = candidate_key
+        if candidate_key is not None and candidate_key == refused_path[0]:
             refused_path[0] = False
             raise PermissionError(32, 'injected sharing violation')
         return original(candidate, *args, **kwargs)
