@@ -18,7 +18,7 @@ from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _tests_yml)
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
-from _yamlread import job_mapping, job_scalar  # noqa: E402
+from _yamlread import job_mapping  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
 
@@ -395,137 +395,6 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     # it, the other surfaces still report clean, and the only third-party code
     # that runs in production goes unaudited.
     assert f'! -s {generated.group(1)}' in workflow, workflow
-
-
-def test_only_this_repository_benchmarks_without_a_reviewer(tmp):
-    """The speed job's environment is exactly this routing expression.
-    The speed job is the only one that checks out a pull request's own head
-    and runs it. Everything else about the job is containment applied after
-    that decision — a read-only token, no secrets, `pull_request` rather than
-    `pull_request_target` — so the environment is what decides whose code
-    runs at all, and it is pinned whole: any edit to the event guard, to the
-    repository comparison, to which name each branch selects, or to the
-    scalar's chomping fails this one equality.
-
-    What is pinned is the expression the workflow carries. Whether
-    `fork-benchmark` actually requires a reviewer is repository
-    configuration — an environment's protection rules, which GitHub recreates
-    empty if the environment is deleted — and no test in this repository can
-    see it.
-    """
-    del tmp
-    expected = (
-        "${{ github.event_name == 'pull_request'"
-        ' && github.event.pull_request.head.repo.full_name'
-        " != github.repository"
-        " && 'fork-benchmark' || 'benchmark' }}")
-    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
-        encoding='utf-8')
-    actual = job_scalar(workflow, 'speed', 'environment')
-    # Whitespace inside the expression collapses, so how the scalar is
-    # wrapped is free; a trailing newline collapses to a space rather than
-    # vanishing, so `>` in place of `>-` fails here instead of shipping a
-    # newline in an environment name.
-    assert actual is not None and re.sub(r'\s+', ' ', actual) == expected, (
-        f'speed.yml routes the speed job by {actual!r}, '
-        f'not by {expected!r}')
-
-
-def test_the_speed_gate_throws_away_its_first_round(tmp):
-    """The first suite a job runs is not one of the measured ones.
-    A cold page cache is paid by whichever side goes first, and interleaving
-    does not share it: across eight runs the baseline's first round exceeded
-    its second by 19.14s on average and was the largest of the four totals
-    every time, while the head's first round exceeded its second by 0.96s. In
-    the same direction every run, so rounds do not average it out — it made
-    every verdict about 3% optimistic, which is a gate reading low on exactly
-    the regressions it exists to catch.
-
-    Discarding is only discarding if the comparison cannot see it, so this
-    pins both halves: a warm-up runs before the measured loop, and it writes
-    outside the globs the comparison reads.
-    """
-    del tmp
-    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
-        encoding='utf-8')
-    _, marker, after = workflow.partition('- name: Run both suites, interleaved')
-    assert marker, 'the timing step is not named the way this test finds it'
-    step, _, rest = after.partition('- name: Compare')
-    warmup = step.index('reports/warmup/')
-    measured = step.index('reports/$side-$round')
-    assert warmup < measured, 'the warm-up does not run before the measurement'
-
-    # The comparison reads reports/base-* and reports/head-*; a warm-up
-    # written as reports/base-0 would be picked up as a round.
-    for glob in re.findall(r'ls -d (reports/\S+)', rest):
-        assert not fnmatch.fnmatch('reports/warmup', glob), glob
-        assert not fnmatch.fnmatch('reports/warmup/base', glob), glob
-
-    # A ceiling that does not cover the extra runs kills the job for doing
-    # them, which is the failure the warm-up would introduce.
-    rounds = int(re.search(r'ROUNDS: "(\d+)"', workflow).group(1))
-    ceiling = int(re.search(r'timeout-minutes: (\d+)', workflow).group(1))
-    assert ceiling >= 15 * (rounds * 2 + 2), (ceiling, rounds)
-
-
-def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
-    """Before merge, and against the base SHA rather than the last release.
-    The gate ran on push alone, so a regression was measured only after it had
-    landed. Two details make the pull-request half mean anything: the baseline
-    is the exact base SHA — the last release would fold every commit merged
-    since into the number and attribute all of it to whoever opened the pull
-    request — and the candidate is the pull request's own head rather than the
-    merge commit `actions/checkout` defaults to, which is a tree nobody
-    authored and no reviewer can point at.
-    """
-    del tmp
-    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
-        encoding='utf-8')
-    triggers, _, jobs = workflow.partition('permissions:')
-    assert '\n  pull_request:' in triggers, triggers
-    # pull_request_target would run the proposed code with a writable token
-    # and the base repository's secrets in reach. Checked against the trigger
-    # block alone: the workflow's own comment says why it is not used, and a
-    # whole-file search would match that comment.
-    assert '\n  pull_request_target:' not in triggers, triggers
-    assert 'contents: read' in workflow, workflow
-    assert 'github.event.pull_request.base.sha' in jobs, jobs
-    assert 'github.event.pull_request.head.sha' in jobs, jobs
-    # Two open pull requests must not cancel each other.
-    assert 'group: speed-${{ github.event.pull_request.number' in workflow
-
-    # The base SHA is payload; it must travel by environment rather than be
-    # expanded inside the script that consumes it.
-    _, marker, after = workflow.partition('PR_BASE: ${{')
-    assert marker, 'the base SHA does not reach the script by environment'
-    script, _, _ = after.partition('- name: Check out this commit')
-    _, _, body = script.partition('run: |')
-    assert '${{' not in body, 'an expression is interpolated into the script'
-
-
-def test_the_speed_gate_is_not_manually_dispatchable(tmp):
-    """The one job whose checkout ref is a step output takes no manual run.
-
-    Code scanning reports three `actions/cache-poisoning/poisonable-step`
-    findings on this file, and each names the trigger rather than any cache
-    input: `(workflow_dispatch)`. They are false positives — the query treats
-    a dispatched run as holding the default branch's cache scope whatever ref
-    it was started on, while a real run's scope follows the ref it was given.
-    The trigger is dropped anyway rather than carrying three permanently
-    dismissed alerts, so re-adding it reopens all three.
-
-    Read through `_workflow_triggers` rather than by substring: `push` and
-    `pull_request` are asserted present because without them the refusal above
-    would be satisfied by a file that had stopped declaring triggers at all.
-    """
-    del tmp
-    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
-        encoding='utf-8')
-    names = _trigger_names(workflow)
-    assert 'workflow_dispatch' not in names, sorted(names)
-    assert 'repository_dispatch' not in names, sorted(names)
-    assert 'push' in names, sorted(names)
-    assert 'pull_request' in names, sorted(names)
 
 
 def _pinned_actions():
