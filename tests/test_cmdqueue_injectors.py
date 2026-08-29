@@ -22,8 +22,20 @@ from _cmdqueue_faults import (  # noqa: E402
 
 
 def _has_numeric_token(message, value):
-    pattern = rf'(?<![\d.]){re.escape(value)}(?![\d.])'
-    return re.search(pattern, message) is not None
+    pattern = r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?'
+    return value in re.findall(pattern, message)
+
+
+def test_numeric_token_requires_the_whole_literal(_tmp):
+    cases = (
+        ('50.000', '50.000s', ('150.000', '-50.000', '+50.000',
+                               '50.000e1', '50.000E+1')),
+        ('10', '10 sleeps', ('100', '-10', '+10', '10e1', '10E-1')),
+        ('0', '0 sleeps', ()))
+    for value, accepted, rejected in cases:
+        assert _has_numeric_token(accepted, value), (accepted, value)
+        assert not any(
+            _has_numeric_token(item, value) for item in rejected), rejected
 
 
 def _identifies_runaway(message):
