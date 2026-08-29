@@ -1,6 +1,7 @@
 """Fault-injection controls for test-side command queue readers."""
 import contextlib
 import inspect
+import json
 import os
 import sys
 from pathlib import Path
@@ -11,6 +12,15 @@ import _cmdqueue  # noqa: E402
 # A runaway sleeps without advancing the clock; a valid wait may sleep any
 # number of times, because every positive sleep consumes its deadline.
 _STALLED_SLEEP_LIMIT = 1000
+
+
+def _queued_file(tmp, name='1700000000000_000001.json'):
+    queue = Path(tmp) / 'queue'
+    queue.mkdir(exist_ok=True)
+    queued = queue / name
+    queued.write_text(json.dumps({'id': 'queued', 'type': 'reload'}),
+                      encoding='utf-8')
+    return queue, queued
 
 
 def _target_key(candidate):
