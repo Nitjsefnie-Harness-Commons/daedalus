@@ -13,8 +13,9 @@ BACKOFF_CAP = 2.0
 
 
 def settle(cleanup, *, sleep=time.sleep):
-    """Retry PermissionError on an exponential backoff, 0.05s to a 2.0s cap."""
+    """Run cleanup, retrying PermissionError until the attempts run out."""
     delay = BACKOFF_START
+    failure: PermissionError
     for attempt in range(ATTEMPTS):
         try:
             cleanup()
