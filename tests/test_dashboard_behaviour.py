@@ -9,8 +9,12 @@ a Node VM rather than reading them where a run can answer instead.
 """
 import json
 import re
+import subprocess
 import sys
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
@@ -107,14 +111,13 @@ process.stdout.write(JSON.stringify({
   retryTimers: timers.filter((item) => item.delay === 500).length,
 }));
 phase('dashboard harness finished');
-""", bounded_steps=0)
+""", bounded_steps=0, arguments=(ROOT / 'extension' / 'content.js',))
 
 
 def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
     """A retired port callback cannot clear or replace the current port."""
     del tmp
-    result = _dashnode.run_dashboard_node(
-        _CONTENT_KEEPALIVE_HARNESS, ROOT / 'extension' / 'content.js')
+    result = _dashnode.run_dashboard_node(_CONTENT_KEEPALIVE_HARNESS)
     actual = json.loads(result.stdout)
     assert actual == {
         'portCount': 2,
@@ -191,14 +194,13 @@ function response(status, data) {
   phase('dashboard call settled');
   phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=2)
+""", bounded_steps=2, arguments=(ROOT / 'dashboard' / 'api.js',))
 
 
 def test_dashboard_failed_consume_is_not_a_success(tmp):
     """The dashboard must reject when its matching-result consume fails."""
     del tmp
-    _dashnode.run_dashboard_node(
-        _DASHBOARD_CONSUME_HARNESS, ROOT / 'dashboard' / 'api.js')
+    _dashnode.run_dashboard_node(_DASHBOARD_CONSUME_HARNESS)
 
 
 _DASHBOARD_WORLD_HARNESS = _dashnode.DashboardNodeHarness(r"""
@@ -224,15 +226,14 @@ const fs = require('fs');
   phase('dashboard call settled');
   phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=1)
+""", bounded_steps=1, arguments=(
+    ROOT / 'dashboard' / 'sections' / '_util.js',))
 
 
 def test_dashboard_labels_eval_world_as_a_channel(tmp):
     """Dashboard text presents `world` only as execution-channel metadata."""
     del tmp
-    result = _dashnode.run_dashboard_node(
-        _DASHBOARD_WORLD_HARNESS,
-        ROOT / 'dashboard' / 'sections' / '_util.js')
+    result = _dashnode.run_dashboard_node(_DASHBOARD_WORLD_HARNESS)
     assert json.loads(result.stdout) == [
         'channel=cdp',
         'channel=page-main',
@@ -397,13 +398,12 @@ process.stdout.write(JSON.stringify({
 }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=5, module=True)
+""", bounded_steps=5, module=True, arguments=(
+    ROOT / 'dashboard' / 'sections' / '_util.js',))
 
 
 def _run_tab_selector_harness():
-    result = _dashnode.run_dashboard_node(
-        _TAB_SELECTOR_HARNESS,
-        ROOT / 'dashboard' / 'sections' / '_util.js')
+    result = _dashnode.run_dashboard_node(_TAB_SELECTOR_HARNESS)
     return json.loads(result.stdout)
 
 
@@ -470,6 +470,145 @@ def test_no_dashboard_export_is_unreferenced(tmp):
                 continue
             unused.append(f'{path.relative_to(ROOT).as_posix()}: {name}')
     assert not unused, f'exported but referenced nowhere: {unused}'
+
+
+class _ControlledProcess:
+    def __init__(self, pid, command, outcomes, events):
+        self.pid, self.command = pid, command
+        self.outcomes, self.events = list(outcomes), events
+        self.returncode = self.stdout = self.stderr = None
+
+    def communicate(self, timeout):
+        self.events.append(('communicate', self.pid, timeout))
+        outcome = self.outcomes.pop(0)
+        if callable(outcome):
+            return outcome(self)
+        kind, self.returncode, stdout, stderr = outcome
+        if kind == 'timeout':
+            raise subprocess.TimeoutExpired(
+                self.command, timeout, output=stdout, stderr=stderr)
+        return stdout, stderr
+
+    def kill(self):
+        self.events.append(('kill', self.pid))
+        self.returncode = -9
+
+    def wait(self, timeout):
+        self.events.append(('wait', self.pid, timeout))
+        raise subprocess.TimeoutExpired(self.command, timeout)
+
+
+def _controlled_run(platform, *specs, before_popen=None):
+    pending, events, diagnostic = list(specs), [], StringIO()
+
+    def popen(command, **_options):
+        pid, outcomes = pending.pop(0)
+        if before_popen:
+            before_popen(pid, events)
+        events.append(('popen', pid, tuple(command)))
+        return _ControlledProcess(pid, command, outcomes, events)
+
+    with patch.object(sys, 'platform', platform), \
+            patch.object(_dashnode.shutil, 'which', return_value='/node'), \
+            patch.object(_dashnode.subprocess, 'Popen', popen), \
+            redirect_stderr(diagnostic):
+        try:
+            outcome = _dashnode.run_dashboard_node(
+                _dashnode.DashboardNodeHarness('', 0))
+        except AssertionError as failure:
+            outcome = str(failure)
+    return outcome, events, diagnostic.getvalue()
+
+
+def _timeout(stdout='', stderr=''):
+    return 'timeout', None, stdout, stderr
+
+
+def _result(code, stdout='', stderr=''):
+    return 'result', code, stdout, stderr
+
+
+def test_windows_retries_one_outer_timeout_then_returns_success(tmp):
+    del tmp
+    result, events, diagnostic = _controlled_run(
+        'win32', (101, [_timeout(), _result(-9, 'first', 'error')]),
+        (202, [_result(0, 'second success', 'second stderr')]))
+    assert result.stdout == 'second success', result
+    assert [event[:2] for event in events] == [
+        ('popen', 101), ('communicate', 101), ('kill', 101),
+        ('communicate', 101), ('popen', 202), ('communicate', 202)], events
+    assert diagnostic.count('\n') == 1, diagnostic
+    expected = ('recovered', 'attempt 1', 'pid 101')
+    assert all(part in diagnostic for part in expected), diagnostic
+
+
+def test_two_windows_outer_timeouts_keep_both_attempt_records(tmp):
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (301, [_timeout(), _result(
+            -9, 'complete one', '[phase] dashboard module imported\n')]),
+        (302, [_timeout(), _result(
+            -9, 'complete two', '[phase] dashboard call settled\n')]))
+    expected = ('after 2 attempts', 'attempt 1:', 'attempt 2:', 'pid: 301',
+                'pid: 302', "executable: '/node'", "argv: ('/node',",
+                'outer timeout: 5s', 'kill issued: yes',
+                'drain outcome: completed', 'return code: -9',
+                'last phase: dashboard module imported',
+                'last phase: dashboard call settled', 'complete one',
+                'complete two')
+    assert all(part in failure for part in expected), failure
+    assert [event[0] for event in events].count('popen') == 2, events
+
+
+def test_non_windows_outer_timeout_does_not_retry(tmp):
+    del tmp
+    failure, events, _ = _controlled_run(
+        'linux', (401, [_timeout(), _result(-9)]))
+    assert failure.startswith('dashboard node outer timeout after 1 attempt')
+    assert 'attempt 1:' in failure and 'pid: 401' in failure, failure
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_windows_deterministic_failure_after_retry_does_not_retry(tmp):
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (501, [_result(
+            7, 'deterministic output', 'deterministic error')]),
+        (502, [_result(0, 'wrong retry')]))
+    assert isinstance(failure, str), failure
+    assert all(part in failure for part in (
+        'deterministic output', 'deterministic error')), failure
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_retry_launch_waits_for_first_child_cleanup(tmp):
+    del tmp
+
+    def finish(process):
+        process.events.append(('drain-complete', process.pid))
+        process.returncode = -9
+        return '', ''
+
+    def before_popen(pid, events):
+        if pid == 602:
+            assert ('drain-complete', 601) in events, events
+
+    result, events, _ = _controlled_run(
+        'win32', (601, [_timeout(), finish]),
+        (602, [_result(0, 'success')]), before_popen=before_popen)
+    assert result.stdout == 'success', result
+    assert events.index(('drain-complete', 601)) < next(
+        i for i, event in enumerate(events) if event[:2] == ('popen', 602))
+
+
+def test_windows_does_not_retry_when_child_cleanup_cannot_finish(tmp):
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (701, [_timeout(), _timeout('partial', 'error')]),
+        (702, [_result(0, 'wrong overlap')]))
+    assert isinstance(failure, str), failure
+    assert 'drain outcome: timed out' in failure, failure
+    assert [event[0] for event in events].count('popen') == 1, events
 
 
 def main():
