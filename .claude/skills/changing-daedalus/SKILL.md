@@ -13,12 +13,22 @@ being read.
 | Situation | Where it is governed |
 |---|---|
 | Implementing any feature or fix | `superpowers:test-driven-development` |
+| Multi-task implementation | Required SDD workflow below |
+| Subagent dispatch | `agent-routing` |
 | A bug, a test failure, or behaviour you cannot explain | `superpowers:systematic-debugging` |
 | About to say something works, passes, or is done | `superpowers:verification-before-completion` |
 | Writing a pull request or issue body | `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE/issue.md` |
 | Architecture, endpoints, exact field names | `AGENTS.md` |
 | Piping a runner, a trailing status echo, an `|| true` fallback | `bash-harness-antipatterns` |
 | Contribution conventions and the guard-per-layer rule | `CONTRIBUTING.md` |
+
+For an implementation plan with independent tasks in the current session:
+
+- **REQUIRED SUB-SKILL:** Use `superpowers:subagent-driven-development`.
+- **REQUIRED PATCH:** Read `subagent-driven-development-patch` whenever that
+  skill is loaded or run; it overrides the reviewer-model guidance and carries
+  the lead-orchestrates rule.
+- **REQUIRED ROUTING:** Read `agent-routing` before every subagent dispatch.
 
 ## Running the suites
 
