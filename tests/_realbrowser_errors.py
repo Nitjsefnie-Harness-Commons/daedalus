@@ -1,4 +1,5 @@
 """Typed real-browser failures shared across fixture boundaries."""
+import json
 
 
 class CDPEvaluationError(AssertionError):
@@ -19,21 +20,18 @@ class FirstNavigationTimeout(AssertionError):
     candidate_owners = (
         'the browser', 'the CDP transport', 'this repository', 'the machine')
 
-    @staticmethod
-    def render_owner_selection(selected_owner):
-        return ('no owner selected' if selected_owner is None
-                else f'owner selected: {selected_owner}')
-
     def __init__(self, page_url, request_arrived):
+        self.page_url = page_url
         self.request_arrived = request_arrived
         self.selected_owner = None
-        arrival = ('received a request for that page'
-                   if request_arrived
-                   else 'did not receive a request for that page')
-        owners = ', '.join(self.candidate_owners[:-1])
-        ownership_candidates = f'{owners}, or {self.candidate_owners[-1]}'
-        owner_selection = self.render_owner_selection(self.selected_owner)
         super().__init__(
-            f'the first fixture navigation reached its deadline: {page_url}; '
-            f'the in-process handler {arrival}. {owner_selection}; '
-            f'candidates are {ownership_candidates}')
+            f'{type(self).__name__}: '
+            + json.dumps(self.record(), sort_keys=True))
+
+    def record(self):
+        return {
+            'page_url': self.page_url,
+            'request_arrived': self.request_arrived,
+            'candidate_owners': list(self.candidate_owners),
+            'selected_owner': self.selected_owner,
+        }
