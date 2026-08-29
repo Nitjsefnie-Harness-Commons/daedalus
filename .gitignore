@@ -309,6 +309,7 @@
 !/tests/test_mcp_tools.py
 !/tests/test_mcp_transport.py
 !/tests/test_mcp_transport_guards.py
+!/tests/test_overlap_client_state.py
 !/tests/test_overlap_harness.py
 !/tests/test_path_safety.py
 !/tests/test_pr_body.py

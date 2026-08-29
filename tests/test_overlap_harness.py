@@ -6,7 +6,6 @@ the real Node subprocess boundary and the exact evidence returned to Python.
 """
 import contextlib
 import http.server
-import os
 import re
 import subprocess
 import sys
@@ -184,22 +183,6 @@ def _assert_step_trace(failure, labels):
             ) from mismatch
 
 
-def _client_env():
-    env = dict(os.environ)
-    for key in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID'):
-        env.pop(key, None)
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    return env
-
-
-def _cookie_client_argv(owner):
-    return [
-        sys.executable, '-c',
-        'from daedalus_cli.cli import main; main()',
-        'cookies', '--domain', owner, '--timeout', '120',
-    ]
-
-
 def test_run_background_overlap_accepts_a_short_inner_bound(tmp):
     """A caller can shorten diagnostic bounds without changing production."""
     actual = _overlap.run_background_overlap(
@@ -345,8 +328,9 @@ def test_real_overlap_bridge_defaults_to_the_durable_token_path(tmp):
     with mock.patch.object(_overlap._util, 'bridge', recording_bridge):
         try:
             _overlap.run_same_id_client_overlap(
-                tmp, ['missing-owner'], _cookie_client_argv, _client_env(),
-                token, _util.ROOT / 'extension' / 'background.js')
+                tmp, ['missing-owner'], _overlap.cookie_client_argv,
+                _overlap.client_env(), token,
+                _util.ROOT / 'extension' / 'background.js')
         except AssertionError as failure:
             message = str(failure)
             assert 'missing cookie completion for missing-owner' in message
@@ -372,8 +356,8 @@ def test_real_overlap_success_path_waits_for_clients_without_a_bound(tmp):
     with mock.patch.object(
             _overlap, 'client_states', recording_client_states):
         actual = _overlap.run_same_id_client_overlap(
-            tmp, ['owner-a', 'owner-b'], _cookie_client_argv, _client_env(),
-            'overlap-client-token',
+            tmp, ['owner-a', 'owner-b'], _overlap.cookie_client_argv,
+            _overlap.client_env(), 'overlap-client-token',
             _util.ROOT / 'extension' / 'background.js')
     assert actual == {
         owner: {
@@ -390,8 +374,8 @@ def test_real_overlap_failure_keeps_harness_and_live_client_states(tmp):
     message = None
     try:
         _overlap.run_same_id_client_overlap(
-            tmp, ['missing-owner'], _cookie_client_argv, _client_env(),
-            'overlap-client-token',
+            tmp, ['missing-owner'], _overlap.cookie_client_argv,
+            _overlap.client_env(), 'overlap-client-token',
             _util.ROOT / 'extension' / 'background.js')
     except AssertionError as failure:
         message = str(failure)
@@ -524,11 +508,16 @@ def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
 
 
 def test_client_states_records_a_killed_clients_held_pipes(tmp):
-    """A grandchild-held pipe makes the second timeout diagnostic data."""
+    """A grandchild-held pipe makes the second timeout diagnostic data.
+
+    The killed client's own output already reached the pipe, so the drain
+    timeout must record what it read rather than discard it.
+    """
     ready_path = Path(tmp) / 'grandchild.ready'
     client = (
         'import subprocess, sys, time\n'
         'from pathlib import Path\n'
+        'print("held-pipe-marker", flush=True)\n'
         'grandchild = subprocess.Popen('
         '[sys.executable, "-c", "import time; time.sleep(10)"])\n'
         'target = Path(sys.argv[1])\n'
@@ -551,7 +540,7 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
     state = states['pipe-owner']
     assert state['stillRunning'] is True, state
     assert state['returncode'] is None, state
-    assert state['stdout'] == '', state
+    assert state['stdout'] == 'held-pipe-marker', state
     assert state['stderr'] == '', state
     assert state['drainTimedOut'] is True, state
 
