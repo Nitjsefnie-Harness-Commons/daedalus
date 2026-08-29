@@ -180,6 +180,32 @@ subprocess.run(command, shell=True, cwd=tmp)
     assert "as 'bash -c true'" in bound[0], bound
 
 
+def test_a_quoted_leading_word_is_a_violation(tmp):
+    """The shell still runs bash when the leading word carries quotes."""
+    del tmp
+    violations = _synthetic("""import subprocess
+subprocess.run('"bash" -c true', shell=True, cwd=tmp)
+""")
+    assert violations == [
+        "tests/synthetic.py:2: run resolves the workflow shell as "
+        """'"bash" -c true', not workflow_bash()"""], violations
+    single = _synthetic("""import subprocess
+subprocess.run("'bash' -c true", shell=True, cwd=tmp)
+""")
+    assert len(single) == 1, single
+    assert "as \"'bash' -c true\"" in single[0], single
+
+
+def test_a_quoted_non_shell_leading_word_is_clean(tmp):
+    """Quotes change the spelling, never the leading word's meaning."""
+    del tmp
+    for command in ('"python3" -c true', "'python3' -c true"):
+        escaped = command.replace("'", "\\'")
+        assert _synthetic(f"""import subprocess
+subprocess.run('{escaped}', shell=True, cwd=tmp)
+""") == [], command
+
+
 def test_a_command_string_without_the_flag_is_not_a_program(tmp):
     """Only `shell=True` makes the string a command rather than an argv."""
     del tmp
