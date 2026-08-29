@@ -183,6 +183,38 @@ def test_a_rebinding_inside_a_loop_with_or_try_body_also_clears_the_alias(tmp):
             f'an ordinary call: {violations}')
 
 
+def test_a_match_case_pattern_rebinding_an_alias_also_clears_it(tmp):
+    """A `case` pattern binds through `MatchAs.name`, `MatchStar.name` and
+    `MatchMapping.rest` -- plain strings, not `Name` nodes in `Store`
+    context -- so a name-context sweep alone never sees them, and a
+    sender alias rebound by a pattern stayed live across the whole
+    `match` body."""
+    patterns = {
+        'as': "        case object() as send:\n",
+        'mapping-value': "        case {'s': send}:\n",
+        'star': "        case [_, *send]:\n",
+        'mapping-rest': "        case {'a': 1, **send}:\n",
+        'class-kwarg': "        case BaseException(args=send):\n",
+    }
+    for label, pattern in patterns.items():
+        source = Path(tmp) / f'match_rebound_sender_{label}.py'
+        source.write_text(
+            "async def focus_tab(chrome_tab, bridge):\n"
+            "    send = bridge.ext_cmd\n"
+            "    match bridge.mode:\n"
+            + pattern
+            + "            await send('_focus', 'probe-tab', "
+              "tab=int(chrome_tab))\n"
+              "    return await send('_focus', 'focus-tab', "
+              "tabId=int(chrome_tab))\n",
+            encoding='utf-8')
+        violations = py_tab_routing_violations(
+            source, f'match_rebound_sender_{label}.py')
+        assert not violations, (
+            f'{label}: send was rebound by the case pattern and should read '
+            f'as an ordinary call: {violations}')
+
+
 def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
     """The other false-positive direction: declaring a local `send` alias
     must not reclassify every unrelated `.send()` method call in scope."""
