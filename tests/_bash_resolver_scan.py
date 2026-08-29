@@ -6,15 +6,18 @@ A workflow-shell test resolves Bash through `_util.workflow_bash()` so Windows
 cannot select the WSL launcher; a call site that resolves that shell any other
 way is invisible until the slow Windows leg reaches it. This scan reads the
 test tree syntactically and names every subprocess launch whose program element
-reaches that shell by another route: a literal spelling of the executable, or a
-`shutil.which` of one.
+reaches that shell by another route: a literal spelling of the executable, a
+`shell=True` command string whose leading word is one, or a `shutil.which` of
+one.
 
 Recognition is enumerated, and a program element the analysis cannot read is
 not judged — a shell computed at runtime, a name the scan cannot bind to a
-value (a parameter, an import, a walrus), or a `which` of a non-literal name,
-the route `tests/_workflowrun.py` uses for whatever a workflow `shell:`
-template names. That boundary is where to look first when this scan passes
-something it should not.
+value (a parameter, an import, a walrus), a name chain longer than the
+`_MAX_PROGRAM_DEPTH` links the resolution follows, or a `which` of a
+non-literal name, the route `tests/_workflowrun.py` uses for whatever a
+workflow `shell:` template names. So is a `shell=True` command whose leading
+word is not a literal spelling. That boundary is where to look first when this
+scan passes something it should not.
 """
 import ast
 import re
@@ -39,7 +42,8 @@ def _binding_of(node):
     else:
         return (), None
     names = [part.id for target in targets for part in ast.walk(target)
-             if isinstance(part, ast.Name)]
+             if isinstance(part, ast.Name)
+             and isinstance(part.ctx, ast.Store)]
     return names, value
 
 
@@ -55,7 +59,7 @@ def _scope_layout(tree):
     def record(scope, node):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                  ast.ClassDef)):
+                                  ast.ClassDef, ast.Lambda)):
                 bindings[child] = {}
                 parents[child] = scope
                 record(child, child)
@@ -167,6 +171,23 @@ def _names_shell(value):
     return _ANY_SEPARATOR.split(value)[-1].lower() in _SHELL_NAMES
 
 
+def _command_names_shell(value):
+    """Whether a command string's leading word names the shell executable."""
+    if not isinstance(value, str) or not value:
+        return False
+    words = value.split()
+    return bool(words) and _names_shell(words[0])
+
+
+def _shell_is_true(call):
+    """Whether the launch provably carries `shell=True`."""
+    for keyword in call.keywords:
+        if keyword.arg == 'shell':
+            return (isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True)
+    return False
+
+
 def _is_resolver_call(node, facts):
     function = node.func
     if isinstance(function, ast.Attribute):
@@ -187,10 +208,12 @@ def _is_which_call(node, facts):
             and function.id in facts.which_functions)
 
 
-def _route(value, facts):
+def _route(value, facts, shell=False):
     """How `value` reaches the workflow shell, or None when unreadable."""
     if isinstance(value, ast.Constant):
-        return 'shell' if _names_shell(value.value) else None
+        named = _names_shell(value.value) or (
+            shell and _command_names_shell(value.value))
+        return 'shell' if named else None
     if not isinstance(value, ast.Call):
         return None
     if _is_resolver_call(value, facts):
@@ -208,6 +231,7 @@ def _program_values(node, facts, scope, depth=0):
     An argv literal contributes its first element and a name the values it is
     bound to where the launch stands, so a site that binds the resolver's
     result stays clean and one that binds a spelling is read as what it is.
+    The walk follows `_MAX_PROGRAM_DEPTH` links and judges nothing beyond it.
     """
     if depth > _MAX_PROGRAM_DEPTH or node is None:
         return []
@@ -224,8 +248,9 @@ def _program_values(node, facts, scope, depth=0):
 
 def _check_launch(node, method, scope, facts, relative, violations):
     argv = node.args[0] if node.args else _argument(node, 'args', 0)
+    shell = _shell_is_true(node)
     for value in _program_values(argv, facts, scope):
-        if _route(value, facts) != 'shell':
+        if _route(value, facts, shell) != 'shell':
             continue
         violations.append(
             f'{relative}:{node.lineno}: {method} resolves the workflow shell '
@@ -235,7 +260,7 @@ def _check_launch(node, method, scope, facts, relative, violations):
 def _visit(node, scope, facts, relative, violations):
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                              ast.ClassDef)):
+                              ast.ClassDef, ast.Lambda)):
             _visit(child, child, facts, relative, violations)
             continue
         if not isinstance(child, ast.Call):
