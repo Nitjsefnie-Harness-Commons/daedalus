@@ -243,6 +243,7 @@
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_segments.py
+!/tests/_speedharness.py
 !/tests/_teardown.py
 !/tests/_util.py
 !/tests/_wfcheckout.py
@@ -331,6 +332,7 @@
 !/tests/test_segment_write_retry.py
 !/tests/test_speed_gate.py
 !/tests/test_speed_measurement.py
+!/tests/test_speed_wait.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_stream_service.py
 !/tests/test_suite_runner.py

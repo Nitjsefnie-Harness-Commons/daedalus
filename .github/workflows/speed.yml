@@ -59,18 +59,24 @@ name: speed
 # number nobody can act on and a whole-tree benchmark is one long queue.
 #
 # `correctness` measures nothing. It waits for the tests workflow's aggregate
-# check on THIS commit — the same SHA this run is attached to — and fails
-# unless that check passed, which is what keeps the cells below from spending
-# six whole-suite executions on a tree whose tests are red.
+# check on the commit the tests run attaches its check runs to — the pull
+# request's head, or the pushed commit where there is no pull request — and
+# fails unless that check passed, which is what keeps the cells below from
+# spending six whole-suite executions on a tree whose tests are red.
 #
 # `timed` is the matrix. Each cell owns one disjoint slice of `tests/` and
 # carries the whole measurement inside it: two checkouts, one virtualenv per
 # side, a discarded warm-up, interleaved measured rounds, and the comparison.
 # A cell fails when ITS comparison fails, so a slowdown is attributable to a
-# slice of the suite rather than buried in a 55-minute total.
+# slice of the suite rather than buried in a 55-minute total. Its `name:` is
+# static on purpose: a skipped matrix job still creates one check run, named
+# after the job's `name:` verbatim, and an expression there would print the
+# raw template into that name whenever the cells never started.
 #
 # `speed` is the single verdict and the only cell-independent check name. It
-# requires the matrix and fails when any cell failed.
+# requires the matrix and fails when any cell failed, and it builds the
+# per-cell table out of the verdict record each cell left in the artifact it
+# uploaded — never out of check runs, which a skipped cell leaves none of.
 
 on:
   push:
@@ -137,60 +143,90 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          # github.sha is the merge commit on a pull request and the pushed
-          # commit otherwise, which is exactly the commit the tests workflow's
-          # aggregate check run attaches to. It travels by environment rather
-          # than being expanded inside the script: a SHA from a payload is
-          # caller-controlled text.
-          SHA: ${{ github.sha }}
+          # The commit the tests workflow attaches its check runs to: the pull
+          # request's head, or the pushed commit where there is no pull
+          # request. It is the same commit the cells below check out, and it
+          # is never `github.sha` on a pull request, which names the merge
+          # commit — a commit this repository's checks never attach to, so a
+          # wait on it would burn its whole bound on a green tree. It travels
+          # by environment rather than being expanded inside the script: a
+          # SHA from a payload is caller-controlled text.
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         # The name below is the tests workflow's aggregate job, spelled
         # exactly as that job's `name:` prints it. Nothing else in this
         # repository carries that name, and tests/test_speed_gate.py holds
         # the two files to the same string.
         #
-        # Three endings, none of them a silent pass: the aggregate passed and
+        # Four endings, none of them a silent pass: the aggregate passed and
         # the measurement may start; the aggregate concluded anything else and
-        # this job fails, which is what skips the cells; or the bound ran out
+        # this job fails, which is what skips the cells; the bound ran out
         # without a completed aggregate — a missing gate is not a passing one,
-        # so that fails too. A skipped or cancelled aggregate is treated as a
-        # failure rather than as a wait that should continue.
+        # so that fails too; or enough consecutive polls saw no check run at
+        # all, which is this run aimed at a commit nothing will ever check
+        # rather than a reason to keep waiting. A failed read is reported as
+        # one and waited out under the same bound, instead of being mistaken
+        # for an empty commit.
         run: |
           aggregate='Aggregate workflow checks'
           tries=45
           attempt=0
+          blind=5
+          blind_count=0
           while [ "$attempt" -lt "$tries" ]; do
             attempt=$((attempt + 1))
-            states="$(gh api --paginate -H 'Cache-Control: no-cache' \
+            if ! states="$(gh api --paginate -H 'Cache-Control: no-cache' \
                       "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
                       --jq '.check_runs[]
-                            | "\(.name)\t\(.status)\t\(.conclusion // "")"')"
-            found="$(printf '%s\n' "$states" \
+                            | "\(.name)\t\(.status)\t\(.conclusion // "")"'
+                      )"; then
+              echo "The checks on $SHA could not be read; waiting" \
+                   "(attempt $attempt of $tries)" >&2
+              sleep 60
+              continue
+            fi
+            found="$(printf '%s\n' "$states" | sort -u \
               | awk -F'\t' -v name="$aggregate" \
                      '$1 == name { print $2 "\t" $3 }')"
-            if [ -n "$found" ]; then
-              pending="$(printf '%s\n' "$found" \
-                | awk -F'\t' '$2 != "completed" { n++ } END { print n + 0 }')"
-              failed="$(printf '%s\n' "$found" \
-                | awk -F'\t' \
-                       '$2 == "completed" && $3 != "success" { n++ } END {
-                          print n + 0 }')"
-              if [ "$failed" -gt 0 ]; then
-                echo "The correctness aggregate on $SHA did not pass:" >&2
-                printf '%s\n' "$found" >&2
-                echo "Speed benchmarks a tree only once its tests pass, so" >&2
-                echo "there is nothing here worth measuring." >&2
+            if [ -z "$found" ]; then
+              blind_count=$((blind_count + 1))
+              if [ "$blind_count" -ge "$blind" ]; then
+                echo "No check runs at all on $SHA after $blind" \
+                     "attempts." >&2
+                echo "Check runs appear within moments of the tests" >&2
+                echo "workflow starting, so nothing on this commit will" >&2
+                echo "ever carry them: on a pull request event the checks" >&2
+                echo "attach to the head commit, never the merge commit" >&2
+                echo "github.sha names." >&2
                 exit 1
               fi
-              if [ "$pending" -eq 0 ]; then
-                echo "Correctness aggregate on $SHA passed."
-                exit 0
-              fi
-              echo "waiting: the aggregate is still running" \
+              echo "waiting: no check runs on $SHA yet" \
                    "(attempt $attempt of $tries)"
-            else
-              echo "waiting: no aggregate check run on $SHA yet" \
-                   "(attempt $attempt of $tries)"
+              sleep 60
+              continue
             fi
+            blind_count=0
+            # `found` rows are status TAB conclusion: the name was stripped
+            # selecting them, so the status is field one and the conclusion
+            # field two.
+            pending="$(printf '%s\n' "$found" \
+              | awk -F'\t' '$1 != "completed" { n++ } END { print n + 0 }')"
+            failed="$(printf '%s\n' "$found" \
+              | awk -F'\t' \
+                     '$1 == "completed" && $2 != "success" { n++ } END {
+                        print n + 0 }')"
+            if [ "$failed" -gt 0 ]; then
+              echo "The correctness aggregate on $SHA did not pass:" >&2
+              printf '%s\n' "$found" >&2
+              echo "Speed benchmarks a tree only once its tests pass, so" >&2
+              echo "there is nothing here worth measuring." >&2
+              exit 1
+            fi
+            if [ "$pending" -eq 0 ]; then
+              echo "Correctness aggregate on $SHA passed."
+              exit 0
+            fi
+            echo "waiting: the aggregate is still running" \
+                 "(attempt $attempt of $tries)"
             sleep 60
           done
           echo "No completed '$aggregate' check run on $SHA within $tries" >&2
@@ -199,7 +235,12 @@ jobs:
           exit 1
 
   timed:
-    name: timed (${{ matrix.group }})
+    # Static, and free of expressions on purpose: a matrix job this run never
+    # started still gets one check run, named after this field verbatim, and
+    # an expression here would print the raw template into that name. A cell
+    # that did run still gets its group appended by GitHub, and attributes
+    # itself to the verdict job through the record it uploads.
+    name: timed
     needs: [correctness]
     runs-on: ubuntu-latest
 
@@ -451,7 +492,11 @@ jobs:
           # set -f keeps the glob metacharacters away from the shell's own
           # pathname expansion — they have to reach the instrument as
           # patterns — and the unquoted expansion below is what turns the
-          # matrix's space-separated list into one argument per glob.
+          # matrix's space-separated list into one argument per glob. It is
+          # turned off again before the step's own globs run: the guard that
+          # checks every round's reports below has to expand those globs,
+          # and under noglob it would stat one literal path and report a
+          # step that measured everything as having produced nothing.
           set -f
           selection=()
           if [ -n "$SUITES_ONLY" ]; then
@@ -462,6 +507,7 @@ jobs:
             # shellcheck disable=SC2086,SC2206
             selection+=(--except $SUITES_EXCEPT)
           fi
+          set +f
 
           mkdir -p reports
           # Round 0 is thrown away. It is written outside the reports/base-*
@@ -509,6 +555,7 @@ jobs:
           ls -la reports/*/
 
       - name: Compare
+        id: compare
         if: steps.baseline.outputs.point != ''
         env:
           BASE_LABEL: ${{ steps.baseline.outputs.point }}
@@ -526,6 +573,25 @@ jobs:
             --base-label "$BASE_LABEL" \
             --require-measurements \
             --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Record the cell verdict
+        # Runs whenever the cell did work, a failed comparison included: the
+        # cell that failed its comparison is exactly the one whose verdict
+        # the final job has to be able to show, and it reads these records
+        # out of the artifacts rather than out of check runs, which a cell
+        # that never started leaves none of behind.
+        if: ${{ !cancelled() && steps.baseline.outputs.point != '' }}
+        env:
+          GROUP: ${{ matrix.group }}
+          VERDICT: ${{ steps.compare.outcome }}
+        run: |
+          mkdir -p reports
+          case "$VERDICT" in
+            success) verdict=pass ;;
+            *) verdict=fail ;;
+          esac
+          printf '{"group": "%s", "verdict": "%s"}\n' "$GROUP" "$verdict" \
+            > reports/verdict.json
 
       - name: Upload the duration summaries
         if: ${{ !cancelled() && steps.baseline.outputs.point != '' }}
@@ -546,12 +612,22 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      # Every cell that measured uploaded one artifact named after its group,
+      # and each carries the group's verdict beside its reports. A pattern
+      # that matches nothing is fine: it is what a run with no baseline to
+      # measure against looks like, and the verdict step explains an empty
+      # table rather than failing the job for having nothing to read.
+      - name: Fetch the cells' verdicts
+        # actions/download-artifact v7.0.0
+        uses: >-
+          actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          pattern: speed-durations-*
+          path: cells
+
       - name: Aggregate the cell verdicts
         if: ${{ always() }}
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
           # The needs results are the verdict; they reach the script by
           # environment because a needs result is workflow state, and no
           # expression is interpolated into the script itself. `cancelled()`
@@ -562,7 +638,8 @@ jobs:
         # A cancelled run produced no measurement and gets no verdict. A red
         # aggregate is the signal that the tree is broken, and this job says
         # so instead of failing again on cells that never ran. Any other time,
-        # the cells ran, and one failed cell fails this job.
+        # the cells ran, and one failed cell fails this job — while the table
+        # beside that verdict is read out of what the cells themselves wrote.
         run: |
           if [ "$CORRECTNESS" = "cancelled" ] || [ "$TIMED" = "cancelled" ]; then
             {
@@ -585,20 +662,27 @@ jobs:
             exit 0
           fi
 
-          # Each cell's check run is named after its group, so the rows below
-          # come from the cells' own conclusions rather than from a list
-          # restated here. A read that fails is reported and leaves the table
-          # empty rather than inventing verdicts; the job's own verdict still
-          # comes from the matrix result alone.
-          if ! cells="$(gh api --paginate -H 'Cache-Control: no-cache' \
-                          "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
-                          --jq '.check_runs[]
-                                | select(.name | startswith("timed ("))
-                                | "\(.name)\t\(.conclusion // .status)"')"; then
-            echo "The cells' check runs could not be read:" >&2
-            printf '%s\n' "$cells" >&2
-            cells=""
-          fi
+          # Each measuring cell uploaded a verdict record named after the
+          # group it benchmarked, so the rows below come from the cells'
+          # own conclusions rather than from a list restated here. A record
+          # that cannot be read is reported and left out of the table rather
+          # than turned into a verdict; the job's own verdict still comes
+          # from the matrix result alone.
+          table="$(for record in cells/*/verdict.json; do
+            [ -f "$record" ] || continue
+            line="$(cat "$record")"
+            group="${line#*'{"group": "'}"
+            verdict="${line#*', "verdict": "'}"
+            if [ "$group" = "$line" ] || [ "$verdict" = "$line" ]; then
+              echo "Unreadable verdict record: $record" >&2
+              continue
+            fi
+            group="${group%%\"*}"
+            verdict="${verdict%%\"*}"
+            # shellcheck disable=SC2016  # the backticks are markdown
+            printf '| %s | %s | `speed-durations-%s` |\n' \
+              "$group" "$verdict" "$group"
+          done)"
 
           {
             echo "### Test speed"
@@ -610,14 +694,12 @@ jobs:
             echo
             echo "| cell | verdict | durations artifact |"
             echo "|---|---|---|"
-            printf '%s\n' "$cells" | sort -u | awk -F'\t' '$1 != "" {
-              group = substr($1, 8, length($1) - 8)
-              printf "| %s | %s | `speed-durations-%s` |\n", group, $2, group
-            }'
-            if [ -z "$cells" ]; then
+            printf '%s\n' "$table"
+            if [ -z "$table" ]; then
               echo
-              echo "The cells' check runs could not be read, so the table is" \
-                   "empty; the verdict came from the matrix job."
+              echo "No cell uploaded a verdict, so the table is empty. On a" \
+                   "green run that means no release existed to measure" \
+                   "against; the verdict still came from the matrix job."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
