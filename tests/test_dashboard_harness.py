@@ -570,7 +570,7 @@ def test_accessibility_field_case_uses_the_shared_runner(tmp):
             accessibility.test_field_associates_every_label_with_its_control(
                 None)
         except SharedRunnerReached:
-            pass
+            pass  # The sentinel proves the shared boundary was reached.
         else:
             raise AssertionError(
                 'accessibility field case bypassed run_dashboard_node')
