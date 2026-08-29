@@ -20,8 +20,10 @@ content is preserved and must not match the whitespace-tolerant bound pattern.
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from _jsread import blank_js_comments
 from _repo import ROOT
@@ -107,6 +109,7 @@ class DashboardNodeHarness:
     source: str
     bounded_steps: int
     module: bool = False
+    arguments: tuple[str | Path, ...] = ()
 
     def __post_init__(self):
         unsupported = _ambiguous_bound_shape(self.source)
@@ -156,63 +159,164 @@ def _latest_output(latest, earlier):
     return _output_text(earlier)
 
 
-def run_dashboard_node(harness, *arguments,
-                       step_timeout=_DASHBOARD_STEP_TIMEOUT_S,
-                       process_grace=_DASHBOARD_PROCESS_GRACE_S):
-    """Run one dashboard JavaScript harness with captured output."""
+@dataclass(frozen=True)
+class _OuterTimeoutAttempt:
+    attempt: int
+    pid: int
+    argv: tuple[str, ...]
+    timeout_s: float
+    kill_issued: bool
+    drain_outcome: str
+    returncode: int | None
+    stdout: str
+    stderr: str
+    last_phase: str
+    drain_duration_s: float
+    duration_s: float
+
+
+class _DashboardOuterTimeout(Exception):
+    def __init__(self, record, *, retryable=True):
+        super().__init__()
+        self.record = record
+        self.retryable = retryable
+
+
+def _close_process_pipes(process):
+    if process.stdout is not None:
+        process.stdout.close()
+    if process.stderr is not None:
+        process.stderr.close()
+
+
+def _format_timeout_attempt(record):
+    return (
+        f'attempt {record.attempt}:\n'
+        f'  pid: {record.pid}\n'
+        f'  executable: {record.argv[0]!r}\n'
+        f'  argv: {record.argv!r}\n'
+        f'  outer timeout: {record.timeout_s}s\n'
+        f'  kill issued: {"yes" if record.kill_issued else "no"}\n'
+        f'  drain outcome: {record.drain_outcome}\n'
+        f'  return code: {record.returncode!r}\n'
+        f'  duration: {record.duration_s:.3f}s\n'
+        '  dashboard harness outer backstop timed out after '
+        f'{record.timeout_s}s; '
+        f'drain timed out: '
+        f'{"yes" if record.drain_outcome == "timed out" else "no"}; '
+        f'drain took {record.drain_duration_s:.3f}s; '
+        f'last phase: {record.last_phase}; '
+        f'stdout: {record.stdout!r}; stderr: {record.stderr!r}')
+
+
+def _run_dashboard_node_once(
+        harness: DashboardNodeHarness, *, attempt: int
+) -> subprocess.CompletedProcess[str]:
+    """Run one dashboard JavaScript harness child with captured output."""
     node = shutil.which('node')
     if not node:
         raise AssertionError('node is required to execute dashboard harnesses')
     options = ['--input-type=module'] if harness.module else []
-    step_timeout_ms = round(step_timeout * 1000)
+    step_timeout_ms = round(_DASHBOARD_STEP_TIMEOUT_S * 1000)
     timeout_source = (
         f'const _dashnodeStepTimeoutMs = {step_timeout_ms};\n')
     command = [
         node, *options, '--eval',
         _DASHBOARD_PRELUDE + timeout_source + harness.source,
-        *map(str, arguments),
+        *map(str, harness.arguments),
     ]
+    started = time.monotonic()
     process = subprocess.Popen(
         command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding='utf-8', errors='replace')
-    timeout = dashboard_child_timeout(
-        harness.bounded_steps, step_timeout, process_grace)
+    timeout = (
+        harness.bounded_steps * _DASHBOARD_STEP_TIMEOUT_S
+        + _DASHBOARD_PROCESS_GRACE_S)
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
         process.kill()
-        drain_timed_out = False
+        cleanup_failure = None
         drain_started = time.monotonic()
         try:
             stdout, stderr = process.communicate(
                 timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
         except subprocess.TimeoutExpired as drain_failure:
-            drain_timed_out = True
-            drain_seconds = time.monotonic() - drain_started
+            drain_outcome = 'timed out'
             stdout = _latest_output(drain_failure.stdout, failure.stdout)
             stderr = _latest_output(drain_failure.stderr, failure.stderr)
-            if process.stdout is not None:
-                process.stdout.close()
-            if process.stderr is not None:
-                process.stderr.close()
+            _close_process_pipes(process)
+            try:
+                process.wait(timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
+            except subprocess.TimeoutExpired as wait_failure:
+                cleanup_failure = wait_failure
+        except Exception as drain_failure:  # pylint: disable=W0718
+            drain_outcome = (
+                f'raised {type(drain_failure).__name__}: {drain_failure}')
+            stdout = _output_text(failure.stdout)
+            stderr = _output_text(failure.stderr)
+            _close_process_pipes(process)
             try:
                 process.wait(timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
             except subprocess.TimeoutExpired:
-                # Preserve the recorded drain failure instead of replacing
-                # it with another exception from this diagnostic helper.
                 pass
+            cleanup_failure = drain_failure
         else:
-            drain_seconds = time.monotonic() - drain_started
+            drain_outcome = 'completed'
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
         last_phase = phases[-1] if phases else 'none recorded'
-        raise AssertionError(
-            f'dashboard harness outer backstop timed out after {timeout}s; '
-            f'drain timed out: {"yes" if drain_timed_out else "no"}; '
-            f'drain took {drain_seconds:.3f}s; '
-            f'last phase: {last_phase}; stdout: {stdout!r}; '
-            f'stderr: {stderr!r}'
-        ) from failure
+        drain_duration = time.monotonic() - drain_started
+        record = _OuterTimeoutAttempt(
+            attempt=attempt,
+            pid=process.pid,
+            argv=tuple(command),
+            timeout_s=timeout,
+            kill_issued=True,
+            drain_outcome=drain_outcome,
+            returncode=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            last_phase=last_phase,
+            drain_duration_s=drain_duration,
+            duration_s=time.monotonic() - started,
+        )
+        timeout_failure = _DashboardOuterTimeout(
+            record, retryable=cleanup_failure is None)
+        raise timeout_failure from (cleanup_failure or failure)
     if process.returncode != 0:
         raise AssertionError((process.returncode, stdout, stderr))
     return subprocess.CompletedProcess(
         command, process.returncode, stdout, stderr)
+
+
+def run_dashboard_node(
+        harness: DashboardNodeHarness
+) -> subprocess.CompletedProcess[str]:
+    """Run a dashboard harness, retrying one Windows outer timeout."""
+    attempts = 2 if sys.platform == 'win32' else 1
+    timeout_records = []
+    for attempt in range(1, attempts + 1):
+        try:
+            result = _run_dashboard_node_once(harness, attempt=attempt)
+        except _DashboardOuterTimeout as failure:
+            timeout_records.append(failure.record)
+            if failure.retryable and attempt < attempts:
+                continue
+            count = len(timeout_records)
+            suffix = 'attempt' if count == 1 else 'attempts'
+            records = '\n'.join(
+                _format_timeout_attempt(record)
+                for record in timeout_records)
+            raise AssertionError(
+                f'dashboard node outer timeout after {count} {suffix}\n'
+                f'{records}') from failure
+        if timeout_records:
+            record = timeout_records[0]
+            sys.stderr.write(
+                'dashboard node recovered after outer timeout: '
+                f'attempt 1, pid {record.pid}, '
+                f'drain {record.drain_outcome}, '
+                f'last phase {record.last_phase}\n')
+        return result
+    raise AssertionError(
+        'dashboard node retry loop completed without a result')
