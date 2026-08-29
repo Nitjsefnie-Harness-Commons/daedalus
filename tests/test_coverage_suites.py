@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -72,21 +73,46 @@ def acquire():
             time.sleep(0.01)
 
 
+def append_event(marker):
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            with events_path.open('a', encoding='utf-8') as events:
+                events.write(f'{marker}{Path(__file__).name}\n')
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f'timed out appending event to {events_path}')
+            time.sleep(0.01)
+
+
+def release():
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            lock.rmdir()
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f'timed out removing lock directory {lock}')
+            time.sleep(0.01)
+
+
 acquire()
 try:
-    with events_path.open('a', encoding='utf-8') as events:
-        events.write(f'+{Path(__file__).name}\n')
+    append_event('+')
 finally:
-    lock.rmdir()
+    release()
 
 time.sleep(0.5)
 
 acquire()
 try:
-    with events_path.open('a', encoding='utf-8') as events:
-        events.write(f'-{Path(__file__).name}\n')
+    append_event('-')
 finally:
-    lock.rmdir()
+    release()
 """
 
 
@@ -111,12 +137,38 @@ def acquire():
             time.sleep(0.01)
 
 
+def append_event(marker):
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            with events_path.open('a', encoding='utf-8') as events:
+                events.write(f'{marker}{Path(__file__).name}\n')
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f'timed out appending event to {events_path}')
+            time.sleep(0.01)
+
+
+def release():
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            lock.rmdir()
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f'timed out removing lock directory {lock}')
+            time.sleep(0.01)
+
+
 acquire()
 try:
-    with events_path.open('a', encoding='utf-8') as events:
-        events.write(f'+{Path(__file__).name}\n')
+    append_event('+')
 finally:
-    lock.rmdir()
+    release()
 
 os._exit(1)
 """
@@ -206,6 +258,19 @@ def _group(stdout, name):
     return stdout[start:end]
 
 
+def _read_events(path):
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            return path.read_text(encoding='utf-8').splitlines(
+                keepends=True)
+        except PermissionError as exc:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f'timed out reading event log {path}') from exc
+            time.sleep(0.01)
+
+
 def _replay_events(lines):
     lines = list(lines)
     if lines and not lines[-1].endswith('\n'):
@@ -224,6 +289,7 @@ def _replay_events(lines):
 
     opened = {}
     paired_indices = set()
+    paired_names = set()
     orphans = set()
     for index, (marker, name) in enumerate(events):
         if marker == '+':
@@ -234,6 +300,7 @@ def _replay_events(lines):
             opened[name] = index
         elif name in opened:
             paired_indices.update((opened.pop(name), index))
+            paired_names.add(name)
         else:
             orphans.add(name)
 
@@ -247,7 +314,7 @@ def _replay_events(lines):
             peak = max(peak, len(active))
         else:
             active.remove(name)
-    return peak, set(opened), orphans
+    return peak, paired_names, set(opened), orphans
 
 
 def test_every_suite_is_measured_in_its_own_parallel_mode_process(tmp):
@@ -299,19 +366,28 @@ def test_suites_run_concurrently(tmp):
 
 def test_worker_pool_reaches_but_never_exceeds_cpu_count(tmp):
     """Four suites on two reported CPUs must reach a peak of exactly two."""
-    result, _invocations = _coverage_tree(tmp, {
+    suites = {
         f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
         for number in range(4)
-    }, cpu_count=2)
+    }
+    result, _invocations = _coverage_tree(tmp, suites, cpu_count=2)
     assert result.returncode == 0, (result.stdout, result.stderr)
     events_path = Path(tmp) / 'tree' / 'tests' / 'events.log'
-    lines = events_path.read_text(encoding='utf-8').splitlines(
-        keepends=True)
-    peak, unpaired, orphans = _replay_events(lines)
+    lines = _read_events(events_path)
+    peak, paired_names, unpaired, orphans = _replay_events(lines)
+    expected_names = set(suites)
+    assert paired_names == expected_names, (
+        f'paired worker suites differ: expected {sorted(expected_names)}, '
+        f'observed {sorted(paired_names)}; log: {lines!r}')
     assert not unpaired, (
         f'unpaired worker suites {sorted(unpaired)} in log: {lines!r}')
     assert not orphans, (
         f'orphan worker suite closes {sorted(orphans)} in log: {lines!r}')
+    failure_marker = '(suite did not pass; its coverage still counts)'
+    for name in suites:
+        group = _group(result.stdout, name)
+        assert failure_marker not in group, (
+            f'{name} was reported failed: {group!r}')
     assert peak == 2, f'worker pool paired peak was {peak}: {lines!r}'
 
 
@@ -325,8 +401,11 @@ def test_replay_exposes_a_three_suite_peak(_tmp):
         '-test_b.py\n',
         '-test_c.py\n',
     ]
-    peak, unpaired, orphans = _replay_events(lines)
+    peak, paired_names, unpaired, orphans = _replay_events(lines)
     assert peak == 3, f'peak lost from event log: {lines!r}'
+    assert paired_names == {
+        'test_a.py', 'test_b.py', 'test_c.py'
+    }, f'paired suites lost from complete log: {lines!r}'
     assert not unpaired, f'unpaired suite in complete log: {unpaired}'
     assert not orphans, f'orphan close in complete log: {orphans}'
 
@@ -334,8 +413,9 @@ def test_replay_exposes_a_three_suite_peak(_tmp):
 def test_replay_reports_a_close_without_an_open(_tmp):
     """A close event without a matching open must name its suite."""
     line = '-test_orphan.py\n'
-    peak, unpaired, orphans = _replay_events([line])
+    peak, paired_names, unpaired, orphans = _replay_events([line])
     assert peak == 0, f'orphan log line changed peak: {line!r}'
+    assert not paired_names, f'orphan log line paired a suite: {line!r}'
     assert not unpaired, f'orphan log line opened a suite: {line!r}'
     assert orphans == {'test_orphan.py'}, (
         f'orphan log line not reported: {line!r}')
@@ -344,8 +424,10 @@ def test_replay_reports_a_close_without_an_open(_tmp):
 def test_replay_ignores_a_torn_trailing_line(_tmp):
     """A final event without its newline must not enter the replay."""
     lines = ['+test_complete.py\n', '-test_complete.py\n', '+test_torn.py']
-    peak, unpaired, orphans = _replay_events(lines)
+    peak, paired_names, unpaired, orphans = _replay_events(lines)
     assert peak == 1, f'torn log tail changed peak: {lines[-1]!r}'
+    assert paired_names == {'test_complete.py'}, (
+        f'torn log tail changed paired suites: {lines[-1]!r}')
     assert not unpaired, f'torn log tail opened a suite: {lines[-1]!r}'
     assert not orphans, f'torn log tail closed a suite: {lines[-1]!r}'
 
@@ -358,10 +440,55 @@ def test_replay_finds_two_well_formed_overlapping_windows(_tmp):
         '-test_a.py\n',
         '-test_b.py\n',
     ]
-    peak, unpaired, orphans = _replay_events(lines)
+    peak, paired_names, unpaired, orphans = _replay_events(lines)
     assert peak == 2, f'paired event peak was not two: {lines!r}'
+    assert paired_names == {'test_a.py', 'test_b.py'}, (
+        f'paired suites missing from complete log: {lines!r}')
     assert not unpaired, f'unpaired suite in complete log: {unpaired}'
     assert not orphans, f'orphan close in complete log: {orphans}'
+
+
+def test_replay_excludes_an_unpaired_open_from_the_peak(_tmp):
+    """A dead suite's open event must not inflate paired concurrency."""
+    lines = [
+        '+test_dead.py\n',
+        '+test_a.py\n',
+        '+test_b.py\n',
+        '-test_a.py\n',
+        '-test_b.py\n',
+    ]
+    peak, paired_names, unpaired, orphans = _replay_events(lines)
+    assert peak == 2, f'unpaired open changed paired peak: {lines!r}'
+    assert paired_names == {'test_a.py', 'test_b.py'}, (
+        f'paired suites missing beside dead suite: {lines!r}')
+    assert unpaired == {'test_dead.py'}, (
+        f'dead suite was not unpaired: {lines!r}')
+    assert not orphans, f'orphan close beside dead suite: {lines!r}'
+
+
+def test_replay_rejects_an_invalid_complete_line(_tmp):
+    """A complete event with an invalid marker must name its log line."""
+    line = 'xtest_a.py\n'
+    try:
+        _replay_events([line])
+    except AssertionError as exc:
+        assert 'line 1' in str(exc), f'invalid line not named: {exc}'
+        assert repr(line) in str(exc), f'invalid log text not named: {exc}'
+    else:
+        raise AssertionError(f'invalid event log line accepted: {line!r}')
+
+
+def test_replay_rejects_a_duplicate_open(_tmp):
+    """A second open for one suite must name its duplicate log line."""
+    line = '+test_a.py\n'
+    lines = [line, line]
+    try:
+        _replay_events(lines)
+    except AssertionError as exc:
+        assert 'line 2' in str(exc), f'duplicate line not named: {exc}'
+        assert repr(line) in str(exc), f'duplicate log text not named: {exc}'
+    else:
+        raise AssertionError(f'duplicate event log line accepted: {lines!r}')
 
 
 def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
@@ -377,16 +504,16 @@ def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
     result, _invocations = _coverage_tree(tmp, suites, cpu_count=2)
     assert result.returncode == 0, (result.stdout, result.stderr)
     events_path = Path(tmp) / 'tree' / 'tests' / 'events.log'
-    lines = events_path.read_text(encoding='utf-8').splitlines(
-        keepends=True)
-    peak, unpaired, orphans = _replay_events(lines)
+    lines = _read_events(events_path)
+    peak, _paired_names, unpaired, orphans = _replay_events(lines)
     assert unpaired == {dying_suite}, (
         f'{dying_suite} was not the sole unpaired suite: {lines!r}')
     assert not orphans, f'orphan close in event log: {lines!r}'
     failed_group = _group(result.stdout, dying_suite)
     assert ('  (suite did not pass; its coverage still counts)'
             in failed_group), f'{dying_suite} group: {failed_group!r}'
-    assert peak == 2, f'paired event log breached cap: {lines!r}'
+    assert peak == 2, (
+        f'paired event peak was {peak}, expected 2: {lines!r}')
 
 
 def test_each_suite_output_is_one_contiguous_group(tmp):
