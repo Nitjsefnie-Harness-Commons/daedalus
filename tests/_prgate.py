@@ -197,6 +197,8 @@ def finish(status, data):
     content_type = ('text/html; charset=utf-8'
                     if endpoint == 'markdown' else 'application/json')
     print(f'content-type: {content_type}')
+    if fixtures.get('duplicate_content_type'):
+        print(f'Content-Type: {content_type}')
     print()
     if data is not None:
         print(data if endpoint == 'markdown' else json.dumps(data))
@@ -380,18 +382,48 @@ class FakeApi:
 
 
 class _RaceApi(FakeApi):
-    def __init__(self, *, transition, **kwargs):
+    def __init__(self, *, transition, trigger='markdown', number=1,
+                 **kwargs):
         super().__init__(**kwargs)
         self.transition = transition
+        self.trigger = trigger
+        self.number = number
+        self.pull_reads = 0
+
+    def _transition(self):
+        event = self.transition
+        self.transition = None
+        if event == 'merged':
+            self.pull['merged'] = True
+            return
+        if event == 'reclosed':
+            self.pull['state'] = 'closed'
+            self.timeline.extend([
+                {'event': 'reopened', 'actor': {'login': 'maintainer'}},
+                _closed_event('maintainer'),
+            ])
+            return
+        self.pull['state'] = 'closed' if event == 'closed' else 'open'
+        self.timeline.append({
+            'event': event, 'actor': {'login': 'maintainer'}})
 
     def request(self, method, endpoint, payload=None):
         if method == 'POST' and endpoint == 'markdown':
-            event = self.transition
-            self.transition = None
-            self.pull['state'] = 'closed' if event == 'closed' else 'open'
-            self.timeline.append({
-                'event': event, 'actor': {'login': 'maintainer'}})
-        return super().request(method, endpoint, payload)
+            if self.trigger == 'markdown' and self.transition is not None:
+                self._transition()
+        if method == 'GET' and endpoint.endswith('/pulls/99'):
+            self.pull_reads += 1
+            if (self.transition is not None
+                    and self.trigger == 'pull-read'
+                    and self.pull_reads == self.number):
+                self._transition()
+        response = super().request(method, endpoint, payload)
+        if (self.transition is not None
+                and self.trigger == 'after-write'
+                and len(self.writes) == self.number
+                and 200 <= response.status < 300):
+            self._transition()
+        return response
 
 
 def _gate_module():
@@ -454,67 +486,6 @@ def _execute_without_runtime_escape(api, body):
         return _execute(api, body)
     except RuntimeError as error:
         raise AssertionError('paginate error escaped run') from error
-
-
-def _assert_two_run_replay():
-    api = _api(
-        issues={},
-        rendered=_valid_html(references=_text_html('none')))
-    code, writes, output, error = _execute(api, _valid_body('none'))
-    assert (code, output, error) == (0, 'closed\n', '')
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments'),
-        ('PATCH', 'repos/owner/repo/pulls/99')]
-    assert api.pull['state'] == 'closed'
-
-    api.issues = {'101': _issue('alice')}
-    api.rendered = _valid_html()
-    code, writes, output, error = _execute(api, _valid_body())
-    assert (code, output, error) == (0, 'reopened\n', '')
-    assert _write_sequence(writes[2:]) == [
-        ('PATCH', 'repos/owner/repo/issues/comments/100'),
-        ('PATCH', 'repos/owner/repo/pulls/99')]
-    assert api.pull['state'] == 'open'
-    assert len(api.comments) == 1
-    assert CLOSED_MARKER not in api.comments[0]['body'].splitlines()
-
-
-def _assert_state_races_abort():
-    cases = (
-        (
-            _RaceApi(
-                transition='closed', pull=_pull(), issues={},
-                rendered=_valid_html(references=_text_html('none'))),
-            _valid_body('none'),
-        ),
-        (
-            _RaceApi(
-                transition='reopened', pull=_pull('closed'),
-                issues={'101': _issue('alice')},
-                comments=[_gate_comment(closed=True)],
-                timeline=[_closed_event()]),
-            _valid_body(),
-        ),
-    )
-    for api, body in cases:
-        code, writes, output, error = _execute(api, body)
-        assert (code, output) == (1, '')
-        assert writes == []
-        assert error == (
-            'pr gate failed: pull request state changed during analysis\n')
-
-
-def _assert_closer_race_aborts():
-    api = _RaceApi(
-        transition='closed', pull=_pull('closed'),
-        issues={'101': _issue('alice')},
-        comments=[_gate_comment(closed=True)],
-        timeline=[_closed_event()])
-    code, writes, output, error = _execute(api, _valid_body())
-    assert (code, output) == (1, '')
-    assert writes == []
-    assert error == (
-        'pr gate failed: pull request closer changed during analysis\n')
 
 
 def _write_sequence(writes):
@@ -654,6 +625,44 @@ def _comment_body(write):
 
 def _assert_no_writes(writes):
     assert writes == [], writes
+
+
+def _assert_script_runs_through_gh_on_path(tmp):
+    fixtures = _script_fixtures()
+    result, calls = _run_script(tmp, fixtures)
+    assert result.returncode == 0, (result.stdout, result.stderr, calls)
+    assert _recorded_writes(calls) == []
+    forbidden = set('&|<>^')
+    assert all(
+        forbidden.isdisjoint(argument) for call in calls
+        for argument in call['argv']), calls
+
+    body = _valid_body('none')
+    fixtures = {
+        **fixtures,
+        'pull': {'body': body, 'state': 'open', 'merged': False},
+        'rendered': _valid_html(references=_text_html('none')),
+        'issues': {},
+    }
+    other = Path(tmp) / 'closable'
+    other.mkdir()
+    result, calls = _run_script(other, fixtures)
+    assert result.returncode == 0, (result.stdout, result.stderr, calls)
+    assert all(
+        forbidden.isdisjoint(argument) for call in calls
+        for argument in call['argv']), calls
+    writes = _recorded_writes(calls)
+    assert [(method, endpoint) for method, endpoint, _payload in writes] == [
+        ('POST', 'repos/owner/repo/issues/99/comments'),
+        ('PATCH', 'repos/owner/repo/pulls/99')]
+    comment = writes[0][2]['body']
+    assert writes[1][2] == {'state': 'closed'}
+    assert any(
+        call['input'] == {
+            'text': body, 'mode': 'gfm', 'context': 'owner/repo'}
+        for call in calls)
+    assert all(comment not in argument for call in calls
+               for argument in call['argv'])
 
 
 def _markdown_code_spans(text):

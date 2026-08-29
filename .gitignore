@@ -231,6 +231,7 @@
 !/tests/_jsroute.py
 !/tests/_overlap.py
 !/tests/_prgate.py
+!/tests/_prgate_race.py
 !/tests/_pyroute.py
 !/tests/_realbrowser.py
 !/tests/_relayharness.py
