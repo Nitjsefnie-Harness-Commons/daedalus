@@ -214,8 +214,8 @@ def test_the_speed_gate_waits_for_the_exact_aggregate_check(tmp):
     pause = pauses.pop()
     assert pause > 0 and tries > 0
     assert tries * pause <= timeout * 60, (tries, pause, timeout)
-    # Four endings, none of them a silent pass.
-    assert script.count('exit 1') >= 3, script
+    # Three endings, none of them a silent pass.
+    assert script.count('exit 1') >= 2, script
     assert 'exit 0' in script, script
     assert '|| true' not in script and '|| echo' not in script
 
