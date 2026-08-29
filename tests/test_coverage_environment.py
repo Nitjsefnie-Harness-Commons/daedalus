@@ -106,6 +106,23 @@ subprocess.run(['python3', 'child.py'], cwd=ROOT)
     assert 'cwd=ROOT' in violations[0], violations
 
 
+def test_an_inner_scope_binding_leaves_the_module_launch_alone(tmp):
+    """A lambda walrus and a def parameter bind their own scope: this pin
+    watches `_coverage_scopes._scope_shadows` from the guard's side, where
+    attribution drift reads as a module shadow."""
+    del tmp
+    drifted = _synthetic_violations(
+        """import subprocess
+import _util
+handler = lambda: (_util := read_config())
+def launch(_util):
+    subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+subprocess.run(['python3', 'other.py'], cwd=_util.ROOT)
+""")
+    assert len(drifted) == 1, drifted
+    assert 'tests/synthetic.py:5:' in drifted[0], drifted
+
+
 def test_a_literal_interpreter_launch_needs_a_declaration(tmp):
     """node/git/shell literals run whatever they are handed: declare."""
     del tmp
