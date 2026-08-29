@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """Pull-request gate state transitions and write ordering."""
-import contextlib
-import io
-import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _prgate  # noqa: E402
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSED_MARKER, GITHUB_HTML, MARKER, FakeApi, TEMPLATE,
-    _assert_no_writes, _comment_body, _html_body, _issue, _issue_html,
-    _layout_body, _markdown_code_spans, _text_html, _valid_body,
-    _valid_html, run_gate,
+    BOT, GITHUB_HTML, MARKER, TEMPLATE,
+    _api, _assert_gate_message, _assert_no_writes, _closed_event,
+    _capture, _comment_body, _execute, _gate_comment, _gate_module,
+    _html_body,
+    _inline_marker_comment, _issue, _issue_gets, _issue_html, _layout_body,
+    _markdown_code_spans, _PaginationApi, _recorded_writes, _run_script,
+    _runtime_error, _script_fixtures, _text_html, _valid_body, _valid_html,
+    _write_gh_stub, _write_sequence,
 )
 from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
@@ -31,58 +32,11 @@ OPEN_FIRST = (
 CLOSED_FIRST = (
     '@alice — closing this automatically; it is recoverable, read on.')
 RESOLVED_FIRST = (
-    '@alice — every condition now passes; nothing further is needed from you.')
+    '@alice — every condition now passes; nothing further is needed '
+    'from you.')
 REOPEN_FIRST = (
-    '@alice — the body now names a claimed issue and matches the pull request')
-
-
-def _pull(state='open', merged=False):
-    return {'body': '', 'state': state, 'merged': merged}
-
-
-def _api(*, state='open', merged=False, issues=None, **kwargs):
-    if issues is None:
-        issues = {'101': _issue('alice')}
-    return FakeApi(
-        pull=_pull(state, merged), issues=issues, **kwargs)
-
-
-def _gate_comment(closed=False):
-    lines = ['old gate message', MARKER]
-    if closed:
-        lines.append(CLOSED_MARKER)
-    return {'id': 7, 'user': {'login': BOT}, 'body': '\n'.join(lines)}
-
-
-def _closed_event(actor=BOT):
-    return {'event': 'closed', 'actor': {'login': actor}}
-
-
-def _execute(api, body):
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        code, writes = run_gate(api, body)
-    return code, writes, output.getvalue()
-
-
-def _write_sequence(writes):
-    return [(method, endpoint) for method, endpoint, _payload in writes]
-
-
-def _assert_gate_message(write, first, reasons=(), closed=False):
-    body = _comment_body(write)
-    lines = body.splitlines()
-    assert lines[0] == first, body
-    assert MARKER in lines, body
-    assert (CLOSED_MARKER in lines) is closed, body
-    for reason in reasons:
-        assert f'- {reason}' in lines, (reason, body)
-    return body
-
-
-def _issue_gets(api):
-    return [call for call in api.calls if re.fullmatch(
-        r'repos/owner/repo/issues/[0-9]+', call[1])]
+    '@alice — the body now names a claimed issue and matches the pull '
+    'request')
 
 
 def _workflow():
@@ -90,64 +44,9 @@ def _workflow():
         encoding='utf-8')
 
 
-def _write_gh_stub(tmp):
-    source = getattr(_prgate, 'GH_STUB', None)
-    assert isinstance(source, str), 'GH_STUB is not implemented'
-    directory = Path(tmp) / 'bin'
-    directory.mkdir()
-    if os.name == 'nt':
-        script = directory / 'gh.py'
-        script.write_text(source, encoding='utf-8')
-        command = directory / 'gh.bat'
-        command.write_text(
-            '@python "%~dp0gh.py" %*\n', encoding='utf-8')
-    else:
-        command = directory / 'gh'
-        command.write_text(source, encoding='utf-8')
-        command.chmod(0o755)
-    return directory, command
-
-
-def _run_script(tmp, fixtures):
-    directory, _command = _write_gh_stub(tmp)
-    fixtures_path = Path(tmp) / 'fixtures.json'
-    fixtures_path.write_text(json.dumps(fixtures), encoding='utf-8')
-    calls_path = Path(tmp) / 'calls.jsonl'
-    calls_path.write_text('', encoding='utf-8')
-    environment = {
-        **os.environ,
-        'PATH': f'{directory}{os.pathsep}{os.environ["PATH"]}',
-        'GH_TOKEN': 'stub',
-        'REPO': 'owner/repo',
-        'PR': '99',
-        'ACTOR': 'alice',
-        'STUB_FIXTURES': str(fixtures_path),
-        'STUB_CALLS': str(calls_path),
-    }
-    result = subprocess.run(
-        [sys.executable, 'scripts/ci/pr_gate.py'], cwd=ROOT,
-        env=environment, capture_output=True, text=True, timeout=30)
-    calls = [json.loads(line) for line in calls_path.read_text(
-        encoding='utf-8').splitlines()]
-    return result, calls
-
-
-def _recorded_writes(calls):
-    writes = []
-    for call in calls:
-        argv = call['argv']
-        if '-X' not in argv:
-            continue
-        method = argv[argv.index('-X') + 1]
-        endpoint = argv[argv.index('-X') + 2]
-        if method != 'GET' and endpoint != 'markdown':
-            writes.append((method, endpoint, call['input']))
-    return writes
-
-
 def test_admissible_open_without_prior_comment_does_not_write(tmp):
     del tmp
-    code, writes, output = _execute(_api(), _valid_body())
+    code, writes, output, _error = _execute(_api(), _valid_body())
     assert code == 0
     _assert_no_writes(writes)
     assert '101' in output, output
@@ -156,17 +55,66 @@ def test_admissible_open_without_prior_comment_does_not_write(tmp):
 def test_admissible_open_resolves_a_prior_gate_comment(tmp):
     del tmp
     api = _api(comments=[_gate_comment()])
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     assert _write_sequence(writes) == [
         ('PATCH', 'repos/owner/repo/issues/comments/7')]
     _assert_gate_message(writes[0], RESOLVED_FIRST)
 
 
+def test_inline_marker_mention_is_not_a_closed_gate_comment(tmp):
+    del tmp
+    api = _api(
+        state='closed', comments=[_inline_marker_comment()],
+        timeline=[_closed_event()])
+    code, writes, _output, _error = _execute(api, _valid_body())
+    assert code == 0
+    _assert_no_writes(writes)
+    assert api.pull['state'] == 'closed'
+
+
+def test_inline_marker_mention_does_not_replace_a_new_comment(tmp):
+    del tmp
+    api = _api(
+        comments=[_inline_marker_comment()],
+        issues={'101': _issue('bob')})
+    code, writes, _output, _error = _execute(api, _valid_body())
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments')]
+
+
+def test_contributor_marker_comment_is_not_selected(tmp):
+    del tmp
+    comment = {
+        'id': 55,
+        'user': {'login': 'alice'},
+        'body': f'contributor note\n{MARKER}',
+    }
+    code, writes, _output, _error = _execute(
+        _api(comments=[comment]), _valid_body())
+    assert code == 0
+    _assert_no_writes(writes)
+
+
+def test_earliest_bot_marker_comment_is_selected(tmp):
+    del tmp
+    later = {
+        'id': 8,
+        'user': {'login': BOT},
+        'body': f'later gate message\n{MARKER}',
+    }
+    code, writes, _output, _error = _execute(
+        _api(comments=[_gate_comment(), later]), _valid_body())
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('PATCH', 'repos/owner/repo/issues/comments/7')]
+
+
 def test_unclaimed_issue_comments_without_closing(tmp):
     del tmp
     api = _api(issues={'101': _issue('bob')})
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
@@ -176,7 +124,8 @@ def test_unclaimed_issue_comments_without_closing(tmp):
 
 def test_missing_issue_comments_without_closing(tmp):
     del tmp
-    code, writes, _output = _execute(_api(issues={}), _valid_body())
+    code, writes, _output, _error = _execute(
+        _api(issues={}), _valid_body())
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
@@ -187,7 +136,7 @@ def test_missing_issue_comments_without_closing(tmp):
 def test_pull_request_reference_comments_without_closing(tmp):
     del tmp
     api = _api(issues={'101': _issue(pull_request=True)})
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
@@ -205,7 +154,8 @@ def test_layout_failure_with_reference_comments_then_closes(tmp):
         ('Related Issues and Pull Requests', f'Fixes {_issue_html(101)}'),
         ('Changes', _text_html('One change')),
         ('Testing', _text_html('Ran the suite.')))
-    code, writes, _output = _execute(_api(rendered=rendered), body)
+    code, writes, _output, _error = _execute(
+        _api(rendered=rendered), body)
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments'),
@@ -220,7 +170,7 @@ def test_related_without_reference_comments_then_closes(tmp):
     del tmp
     body = _valid_body('see the tracker')
     rendered = _valid_html(references=_text_html('see the tracker'))
-    code, writes, _output = _execute(
+    code, writes, _output, _error = _execute(
         _api(issues={}, rendered=rendered), body)
     assert code == 0
     assert _write_sequence(writes) == [
@@ -238,7 +188,7 @@ def test_reference_outside_related_does_not_protect_from_close(tmp):
     summary = f'<p dir="auto">Summary references {_issue_html(101)}.</p>'
     rendered = _valid_html(references=_text_html('none')).replace(
         _text_html('One sentence.'), summary)
-    code, writes, _output = _execute(
+    code, writes, _output, _error = _execute(
         _api(issues={}, rendered=rendered), body)
     assert code == 0
     assert _write_sequence(writes) == [
@@ -251,7 +201,7 @@ def test_reference_outside_related_does_not_protect_from_close(tmp):
 
 def test_none_body_reports_all_required_sections_and_closes(tmp):
     del tmp
-    code, writes, _output = _execute(
+    code, writes, _output, _error = _execute(
         _api(issues={}, rendered='<p dir="auto"></p>'), None)
     assert code == 0
     assert _write_sequence(writes) == [
@@ -271,7 +221,7 @@ def test_retained_instruction_comment_closes(tmp):
     instruction = re.search(r'<!--.*?-->', TEMPLATE, re.DOTALL).group(0)
     body = _valid_body().replace(
         '- One change', f'- One change\n{instruction}')
-    code, writes, _output = _execute(_api(), body)
+    code, writes, _output, _error = _execute(_api(), body)
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments'),
@@ -286,7 +236,7 @@ def test_fenced_reference_protects_from_close_without_lookup(tmp):
     body = _valid_body('```\nFixes #101\n```')
     rendered = _valid_html(references=GITHUB_HTML['fenced_code'])
     api = _api(issues={}, rendered=rendered)
-    code, writes, _output = _execute(api, body)
+    code, writes, _output, _error = _execute(api, body)
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
@@ -300,7 +250,7 @@ def test_gate_closed_admissible_pull_is_commented_then_reopened(tmp):
     api = _api(
         state='closed', comments=[_gate_comment(closed=True)],
         timeline=[_closed_event()])
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     assert _write_sequence(writes) == [
         ('PATCH', 'repos/owner/repo/issues/comments/7'),
@@ -316,7 +266,7 @@ def test_gate_closed_inadmissible_pull_updates_comment_and_stays_closed(tmp):
     api = _api(
         state='closed', issues={}, comments=[_gate_comment(closed=True)],
         timeline=[_closed_event()], rendered=rendered)
-    code, writes, _output = _execute(api, body)
+    code, writes, _output, _error = _execute(api, body)
     assert code == 0
     assert _write_sequence(writes) == [
         ('PATCH', 'repos/owner/repo/issues/comments/7')]
@@ -330,7 +280,7 @@ def test_human_closed_pull_is_not_written(tmp):
     api = _api(
         state='closed', comments=[_gate_comment(closed=True)],
         timeline=[_closed_event('alice')])
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     _assert_no_writes(writes)
 
@@ -340,7 +290,7 @@ def test_bot_timeline_without_closed_marker_is_not_gate_owned(tmp):
     api = _api(
         state='closed', comments=[_gate_comment()],
         timeline=[_closed_event()])
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     _assert_no_writes(writes)
 
@@ -350,15 +300,18 @@ def test_unreadable_closed_timeline_fails_without_writes(tmp):
     api = _api(
         state='closed', comments=[_gate_comment(closed=True)],
         timeline=[_closed_event()], fail={'timeline'})
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, error = _execute(api, _valid_body())
     assert code == 1
     _assert_no_writes(writes)
+    assert error == (
+        'pr gate failed: GitHub returned 500 for '
+        'repos/owner/repo/issues/99/timeline\n')
 
 
 def test_merged_pull_returns_before_comments_or_render(tmp):
     del tmp
     api = _api(merged=True, fail={'comments', 'markdown'})
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     _assert_no_writes(writes)
     assert api.calls == [
@@ -368,21 +321,32 @@ def test_merged_pull_returns_before_comments_or_render(tmp):
 def test_unusable_render_fails_without_writes(tmp):
     del tmp
     cases = (
-        _api(fail={'markdown'}),
-        _api(rendered='<h2>Summary</h2><p'),
+        (
+            _api(fail={'markdown'}),
+            'pr gate failed: GitHub returned 500 for markdown\n',
+        ),
+        (
+            _api(rendered='<h2>Summary</h2><p'),
+            'pr gate failed: could not analyze rendered body: '
+            'rendered HTML is structurally incomplete\n',
+        ),
     )
-    for api in cases:
-        code, writes, _output = _execute(api, _valid_body())
+    for api, expected in cases:
+        code, writes, _output, error = _execute(api, _valid_body())
         assert code == 1
         _assert_no_writes(writes)
+        assert error == expected
 
 
 def test_issue_lookup_failure_fails_without_writes(tmp):
     del tmp
     api = _api(fail={'issues/101'})
-    code, writes, _output = _execute(api, _valid_body())
+    code, writes, _output, error = _execute(api, _valid_body())
     assert code == 1
     _assert_no_writes(writes)
+    assert error == (
+        'pr gate failed: GitHub returned 500 for '
+        'repos/owner/repo/issues/101\n')
 
 
 def test_reference_limit_checks_only_twenty_and_reports_overflow(tmp):
@@ -393,7 +357,7 @@ def test_reference_limit_checks_only_twenty_and_reports_overflow(tmp):
         _issue_html(number) for number in numbers))
     issues = {str(number): _issue('bob') for number in numbers}
     api = _api(issues=issues, rendered=rendered)
-    code, writes, _output = _execute(api, body)
+    code, writes, _output, _error = _execute(api, body)
     assert code == 0
     assert len(_issue_gets(api)) == 20
     reason = ('This body names more than 20 issue references, so only the '
@@ -406,7 +370,7 @@ def test_reference_limit_checks_only_twenty_and_reports_overflow(tmp):
     rendered = _valid_html(references=' '.join(
         _issue_html(number) for number in numbers))
     api = _api(issues=issues, rendered=rendered)
-    code, writes, _output = _execute(api, body)
+    code, writes, _output, _error = _execute(api, body)
     assert code == 0
     assert len(_issue_gets(api)) == 20
     assert reason not in _comment_body(writes[0])
@@ -419,11 +383,14 @@ def test_failed_comment_write_prevents_state_change(tmp):
     api = _api(
         issues={}, rendered=rendered,
         fail={'POST repos/owner/repo/issues/99/comments'})
-    code, writes, _output = _execute(api, body)
+    code, writes, _output, error = _execute(api, body)
     assert code == 1
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
     assert api.pull['state'] == 'open'
+    assert error == (
+        'pr gate failed: GitHub returned 500 for '
+        'repos/owner/repo/issues/99/comments\n')
 
 
 def test_one_edit_self_heals_gate_closed_state(tmp):
@@ -431,7 +398,7 @@ def test_one_edit_self_heals_gate_closed_state(tmp):
     api = _api(
         state='closed', comments=[_gate_comment(closed=True)],
         timeline=[_closed_event()])
-    code, _writes, _output = _execute(api, _valid_body())
+    code, _writes, _output, _error = _execute(api, _valid_body())
     assert code == 0
     assert api.pull['state'] == 'open'
 
@@ -441,7 +408,8 @@ def test_unknown_section_name_cannot_inject_a_live_reference(tmp):
     name = 'x`#1'
     body = _valid_body() + f'\n## {name}\nUnknown.\n'
     rendered = _valid_html() + _html_body((name, _text_html('Unknown.')))
-    code, writes, _output = _execute(_api(rendered=rendered), body)
+    code, writes, _output, _error = _execute(
+        _api(rendered=rendered), body)
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments'),
@@ -500,6 +468,10 @@ def test_script_runs_through_gh_on_path(tmp):
     result, calls = _run_script(tmp, fixtures)
     assert result.returncode == 0, (result.stdout, result.stderr, calls)
     assert _recorded_writes(calls) == []
+    forbidden = set('&|<>^')
+    assert all(
+        forbidden.isdisjoint(argument) for call in calls
+        for argument in call['argv']), calls
 
     body = _valid_body('none')
     fixtures = {
@@ -512,6 +484,9 @@ def test_script_runs_through_gh_on_path(tmp):
     other.mkdir()
     result, calls = _run_script(other, fixtures)
     assert result.returncode == 0, (result.stdout, result.stderr, calls)
+    assert all(
+        forbidden.isdisjoint(argument) for call in calls
+        for argument in call['argv']), calls
     writes = _recorded_writes(calls)
     assert [(method, endpoint) for method, endpoint, _payload in writes] == [
         ('POST', 'repos/owner/repo/issues/99/comments'),
@@ -524,6 +499,127 @@ def test_script_runs_through_gh_on_path(tmp):
         for call in calls)
     assert all(comment not in argument for call in calls
                for argument in call['argv'])
+
+
+def test_gh_absent_from_path_is_reported(tmp):
+    empty = Path(tmp) / 'empty'
+    empty.mkdir()
+    gate = _gate_module()
+    with mock.patch.dict(os.environ, {'PATH': str(empty)}):
+        api = gate.GhApi()
+    assert api.gh is None
+    assert _runtime_error(
+        lambda: api.request('GET', 'repos/owner/repo/pulls/99')) == (
+            'gh was not found on PATH')
+
+
+def test_gh_oserror_is_reported(tmp):
+    target = Path(tmp) / 'not-executable'
+    target.write_text('not executable', encoding='utf-8')
+    target.chmod(0o644)
+    api = _gate_module().GhApi()
+    api.gh = str(target)
+    error = _runtime_error(
+        lambda: api.request('GET', 'repos/owner/repo/pulls/99'))
+    assert error.startswith('could not run gh: '), error
+
+
+def test_invalid_gh_status_line_is_reported(tmp):
+    result, _calls = _run_script(tmp, _script_fixtures(bad_status=True))
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert result.stderr == (
+        'pr gate failed: could not read gh response: '
+        'no HTTP status in output\n')
+
+
+def test_non_json_gh_body_is_reported(tmp):
+    result, _calls = _run_script(tmp, _script_fixtures(non_json=True))
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert result.stderr == (
+        'pr gate failed: could not parse gh response body\n')
+
+
+def test_paginated_page_must_be_a_list(tmp):
+    del tmp
+    gate = _gate_module()
+    api = _PaginationApi([gate.Response(200, {'items': []})])
+    error = _runtime_error(
+        lambda: gate.GhApi.paginate(api, 'repos/x/issues/1/comments'))
+    assert error == 'paginated gh response is not a list'
+
+
+def test_pagination_short_page_uses_safe_fields(tmp):
+    del tmp
+    gate = _gate_module()
+    api = _PaginationApi([gate.Response(200, [1, 2])])
+    response = gate.GhApi.paginate(api, 'repos/x/issues/1/comments')
+    assert response == gate.Response(200, [1, 2])
+    assert api.calls == [
+        ('GET', 'repos/x/issues/1/comments', None,
+         ('per_page=100', 'page=1'))]
+
+
+def test_pagination_stops_after_fifty_full_pages(tmp):
+    del tmp
+    gate = _gate_module()
+    pages = [gate.Response(200, list(range(100))) for _ in range(51)]
+    api = _PaginationApi(pages)
+    error = _runtime_error(
+        lambda: gate.GhApi.paginate(api, 'repos/x/issues/1/comments'))
+    assert error == 'gh pagination exceeded 50 pages'
+    assert len(api.calls) == 50
+
+
+def test_runtime_error_is_reported_by_run(tmp):
+    del tmp
+    api = _api()
+
+    def fail_request(_method, _endpoint, _payload=None):
+        raise RuntimeError('transport unavailable')
+
+    api.request = fail_request
+    code, writes, _output, error = _execute(api, _valid_body())
+    assert code == 1
+    _assert_no_writes(writes)
+    assert error == 'pr gate failed: transport unavailable\n'
+
+
+def test_pull_response_must_be_an_object(tmp):
+    del tmp
+    gate = _gate_module()
+    api = _api()
+    request = api.request
+
+    def wrong_pull(method, endpoint, payload=None):
+        if method == 'GET' and endpoint.endswith('/pulls/99'):
+            return gate.Response(200, [])
+        return request(method, endpoint, payload)
+
+    api.request = wrong_pull
+    code, writes, _output, error = _execute(api, _valid_body())
+    assert code == 1
+    _assert_no_writes(writes)
+    assert error == 'pr gate failed: pull request response is not an object\n'
+
+
+def test_markdown_response_must_be_text(tmp):
+    del tmp
+    code, writes, _output, error = _execute(
+        _api(rendered={'html': 'not text'}), _valid_body())
+    assert code == 1
+    _assert_no_writes(writes)
+    assert error == 'pr gate failed: markdown response is not text\n'
+
+
+def test_main_reports_missing_repo(tmp):
+    del tmp
+    gate = _gate_module()
+    with mock.patch.dict(os.environ):
+        os.environ.pop('REPO', None)
+        code, output, error = _capture(gate.main)
+    assert code == 1
+    assert output == ''
+    assert error == "pr gate failed: 'REPO'\n"
 
 
 def test_gh_stub_refuses_unmodelled_calls(tmp):
@@ -540,6 +636,14 @@ def test_gh_stub_refuses_unmodelled_calls(tmp):
     }
     result = subprocess.run(
         [str(command), 'api', 'repos/owner/repo/labels'],
+        env=environment, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert 'unsupported' in result.stderr, result.stderr
+
+    stub = directory / ('gh.py' if os.name == 'nt' else 'gh')
+    result = subprocess.run(
+        [sys.executable, str(stub), 'api', '--include', '-X', 'GET',
+         'repos/owner/repo/issues/99/comments?per_page=100&page=1'],
         env=environment, capture_output=True, text=True, timeout=30)
     assert result.returncode == 2, (result.stdout, result.stderr)
     assert 'unsupported' in result.stderr, result.stderr

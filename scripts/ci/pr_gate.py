@@ -50,10 +50,15 @@ class GhApi:
 
     def request(self, method: str, endpoint: str,
                 payload: dict | None = None) -> Response:
+        return self._request(method, endpoint, payload)
+
+    def _request(self, method, endpoint, payload=None, fields=()):
         if self.gh is None:
             raise RuntimeError('gh was not found on PATH')
         arguments = [
             self.gh, 'api', '--include', '-X', method, endpoint]
+        for field in fields:
+            arguments.extend(('-f', field))
         with tempfile.TemporaryDirectory(prefix='pr-gate-') as directory:
             if payload:
                 path = Path(directory) / 'payload.json'
@@ -84,10 +89,10 @@ class GhApi:
 
     def paginate(self, endpoint: str) -> Response:
         items = []
-        separator = '&' if '?' in endpoint else '?'
         for page in range(1, 51):
-            response = self.request(
-                'GET', f'{endpoint}{separator}page={page}')
+            response = self._request(
+                'GET', endpoint,
+                fields=('per_page=100', f'page={page}'))
             if response.status != 200:
                 return response
             if not isinstance(response.data, list):
@@ -137,7 +142,8 @@ def _gate_comment(comments):
     for comment in comments:
         user = comment.get('user') or {}
         body = comment.get('body') or ''
-        if user.get('login') == BOT and MARKER in body:
+        lines = (line.rstrip('\r') for line in body.splitlines())
+        if user.get('login') == BOT and MARKER in lines:
             return comment
     return None
 
@@ -146,7 +152,8 @@ def _closed_by_gate(timeline, comment):
     closed = [event for event in timeline if event.get('event') == 'closed']
     actor = (closed[-1].get('actor') or {}).get('login') if closed else None
     body = (comment or {}).get('body') or ''
-    return actor == BOT and CLOSED_MARKER in body
+    lines = (line.rstrip('\r') for line in body.splitlines())
+    return actor == BOT and CLOSED_MARKER in lines
 
 
 def _claim(api, repo, issues, actor):
@@ -206,8 +213,8 @@ Fix every item above, including these two repository requirements:
 
 def _reopen_text(actor):
     return (
-        f'@{actor} — the body now names a claimed issue and matches the pull '
-        'request\ntemplate, so I am reopening it automatically.\n'
+        f'@{actor} — the body now names a claimed issue and matches '
+        'the pull request\ntemplate, so I am reopening it automatically.\n'
         f'{MARKER}\n')
 
 
@@ -238,11 +245,11 @@ def _run(api, repo, pr, actor, template):
         return 0
 
     comments = _page(
-        api, f'repos/{repo}/issues/{pr}/comments?per_page=100')
+        api, f'repos/{repo}/issues/{pr}/comments')
     comment = _gate_comment(comments)
     if state == 'closed':
         timeline = _page(
-            api, f'repos/{repo}/issues/{pr}/timeline?per_page=100')
+            api, f'repos/{repo}/issues/{pr}/timeline')
         if not _closed_by_gate(timeline, comment):
             print(f'pull request {pr} was not closed by the gate')
             return 0
