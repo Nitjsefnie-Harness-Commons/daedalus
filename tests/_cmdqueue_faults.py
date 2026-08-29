@@ -17,7 +17,8 @@ def _target_key(candidate):
     """Decode path spellings so str and bytes receivers share one key."""
     try:
         return os.fsdecode(os.fspath(candidate))
-    except TypeError:
+    except Exception:
+        # Let Path.open keep its native receiver/argument validation order.
         return None
 
 
@@ -34,7 +35,7 @@ def _refuse_path_operation(path, operation, failures, clock=None):
         if (operation == 'open' and candidate_key == target_key
                 and remaining[0]):
             # Native validation adds one open per faulted call.
-            original(path, *args, **kwargs).close()
+            original(candidate, *args, **kwargs).close()
         elif operation != 'open':
             try:
                 signature.bind(candidate, *args, **kwargs)
@@ -128,7 +129,7 @@ def _vanish_during_read(path, clock, remove_queue=False):
 
     def vanished(candidate, *args, **kwargs):
         if _target_key(candidate) == target_key and armed[0]:
-            original(path, *args, **kwargs).close()
+            original(candidate, *args, **kwargs).close()
             armed[0] = False
             clock.record_read()
             path.unlink()
@@ -152,7 +153,7 @@ def _disappear_on_first_open(path):
 
     def missing(candidate, *args, **kwargs):
         if _target_key(candidate) == target_key and armed[0]:
-            original(path, *args, **kwargs).close()
+            original(candidate, *args, **kwargs).close()
             armed[0] = False
             raise FileNotFoundError(2, 'injected disappearance', str(path))
         return original(candidate, *args, **kwargs)
