@@ -88,6 +88,8 @@ def test_an_exhausted_write_retry_still_answers_500(tmp):
         record_path = Path(docroot) / 'segments' / f'{job}.json'
         record = json.loads(record_path.read_text(encoding='utf-8'))
         assert record['stored_count'] == 0, record
+        dirty_path = Path(docroot) / 'segments' / f'.{job}.json.dirty'
+        assert dirty_path.is_file(), 'refused publish must leave its mark'
 
 
 def test_mint_record_write_retries_transient_refusal(tmp):
@@ -211,8 +213,8 @@ def test_an_exhausted_marker_refusal_refuses_the_segment(tmp):
 def test_a_non_permission_error_is_not_retried(tmp):
     """A refusal outside the transient class fails fast: one attempt only."""
     with _bridge_with(tmp, (
-            '_log = pathlib.Path(__file__).resolve().parent.parent \\\n'
-            '    / "docroot" / "refusals.txt"\n'
+            'import os\n'
+            '_log = pathlib.Path(os.environ["DAEDALUS_DIR"], "refusals.txt")\n'
             'def _refuse_every_temp_write(path, data):\n'
             '    if path.name.endswith(".ts.tmp"):\n'
             '        with _log.open("a", encoding="utf-8") as handle:\n'
