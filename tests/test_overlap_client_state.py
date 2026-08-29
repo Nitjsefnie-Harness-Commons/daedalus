@@ -6,6 +6,7 @@ added by the issue 280 review round live here: what `client_states` does with
 `grace=None`, which diagnosis kind answers first, what the silent diagnosis
 refuses to name, and the real caller that routes its states through them.
 """
+import subprocess
 import sys
 from unittest import mock
 from pathlib import Path
@@ -41,6 +42,54 @@ def test_client_states_hands_grace_none_to_the_client_unbounded(tmp):
     assert state == {
         'stillRunning': False, 'returncode': 0,
         'stdout': 'client output', 'stderr': '', 'drainTimedOut': False,
+    }, state
+
+
+class _DrainExpiresCarryingOutput:
+    """A killed client whose second drain expires holding what was read.
+
+    A real deadline raises `TimeoutExpired` carrying the bytes read before it
+    even under `text=True`, so the stub raises the same shape on its second
+    `communicate`.
+    """
+
+    stdout = None
+    stderr = None
+    returncode = None
+
+    def __init__(self):
+        self.timeouts = []
+
+    def communicate(self, timeout):
+        self.timeouts.append(timeout)
+        if len(self.timeouts) == 1:
+            raise subprocess.TimeoutExpired('held-client', timeout)
+        raise subprocess.TimeoutExpired(
+            'held-client', timeout,
+            output=b'held-pipe-marker\n', stderr=b'held-pipe-warning\n')
+
+    def kill(self):
+        """A kill the stub survives, as a real killed client's pipes do."""
+
+    def wait(self, timeout=None):
+        raise subprocess.TimeoutExpired('held-client', timeout)
+
+
+def test_client_states_records_the_output_a_timed_out_drain_held(tmp):
+    """A drain that expires records the partial output it had already read.
+
+    The deadline exception attaches whatever the reader won before it, so the
+    state recorded for a killed client must carry that output beside
+    `drainTimedOut` rather than replace it with nothing.
+    """
+    del tmp
+    state = _overlap.client_states(
+        {'held-owner': _DrainExpiresCarryingOutput()}, grace=0.1,
+        killed_pipe_release=0.1)['held-owner']
+    assert state == {
+        'stillRunning': True, 'returncode': None,
+        'stdout': 'held-pipe-marker', 'stderr': 'held-pipe-warning',
+        'drainTimedOut': True,
     }, state
 
 
