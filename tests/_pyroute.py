@@ -179,8 +179,9 @@ def _resolve_sender_name(expr, aliases):
 
 def _rebound_names(node):
     """Every local name `node` can rebind, in any binding form: a plain or
-    annotated assignment, a `for`/`with`/`except` target, an import, or a
-    nested def/async def/class whose own name shadows it.
+    annotated assignment, a `for`/`with`/`except` target, a `case` pattern
+    capture, an import, or a nested def/async def/class whose own name
+    shadows it.
 
     The last one needs the unrestricted `ast.walk` rather than
     `_scope_nodes`, which deliberately never descends into a nested
@@ -197,6 +198,10 @@ def _rebound_names(node):
               for a in n.names}
     names |= {n.name for n in nodes
               if isinstance(n, ast.ExceptHandler) and n.name}
+    names |= {n.name for n in nodes
+              if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name}
+    names |= {n.rest for n in nodes
+              if isinstance(n, ast.MatchMapping) and n.rest}
     names |= {n.name for n in ast.walk(node)
               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
                                 ast.ClassDef)) and n is not node}
