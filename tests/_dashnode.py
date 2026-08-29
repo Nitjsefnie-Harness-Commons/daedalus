@@ -17,11 +17,13 @@ direction because `blank_js_comments` requires a consumer that meets an
 unmodelled shape to report a violation rather than stay silent. Other string
 content is preserved and must not match the whitespace-tolerant bound pattern.
 """
+import ctypes
 import re
 import shutil
 import subprocess
 import sys
 import time
+from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -182,11 +184,70 @@ class _DashboardOuterTimeout(Exception):
         self.retryable = retryable
 
 
+def _cancel_windows_synchronous_io(thread):
+    native_id = thread.native_id
+    if native_id is None:
+        raise RuntimeError('dashboard reader thread has no native id')
+    win_dll = getattr(ctypes, 'WinDLL')
+    get_last_error = getattr(ctypes, 'get_last_error')
+    win_error = getattr(ctypes, 'WinError')
+    kernel32 = win_dll('kernel32', use_last_error=True)
+    open_thread = kernel32.OpenThread
+    open_thread.argtypes = (
+        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_thread.restype = wintypes.HANDLE
+    cancel_io = kernel32.CancelSynchronousIo
+    cancel_io.argtypes = (wintypes.HANDLE,)
+    cancel_io.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    handle = open_thread(0x0001, False, native_id)
+    if not handle:
+        raise win_error(get_last_error())
+    try:
+        if not cancel_io(handle):
+            error = get_last_error()
+            if error != 1168:
+                raise win_error(error)
+    finally:
+        close_handle(handle)
+
+
 def _close_process_pipes(process):
     if process.stdout is not None:
         process.stdout.close()
     if process.stderr is not None:
         process.stderr.close()
+
+
+def _finish_windows_pipe_readers(process, deadline):
+    pairs = (
+        (process.stdout, getattr(process, 'stdout_thread', None)),
+        (process.stderr, getattr(process, 'stderr_thread', None)),
+    )
+    if any(stream is not None and thread is None
+           for stream, thread in pairs):
+        raise RuntimeError('dashboard process reader thread is missing')
+    threads = tuple(
+        thread for stream, thread in pairs
+        if stream is not None and thread is not None)
+    failures = []
+    for thread in threads:
+        if thread.is_alive():
+            try:
+                _cancel_windows_synchronous_io(thread)
+            except Exception as failure:  # pylint: disable=W0718
+                failures.append(failure)
+    for thread in threads:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    alive = tuple(thread for thread in threads if thread.is_alive())
+    if alive:
+        raise RuntimeError('dashboard process reader cleanup timed out')
+    _close_process_pipes(process)
+    if failures:
+        raise RuntimeError(
+            'dashboard process reader cancellation failed') from failures[0]
 
 
 def _format_timeout_attempt(record):
@@ -245,24 +306,32 @@ def _run_dashboard_node_once(
             drain_outcome = 'timed out'
             stdout = _latest_output(drain_failure.stdout, failure.stdout)
             stderr = _latest_output(drain_failure.stderr, failure.stderr)
-            _close_process_pipes(process)
-            try:
-                process.wait(timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
-            except subprocess.TimeoutExpired as wait_failure:
-                cleanup_failure = wait_failure
         except Exception as drain_failure:  # pylint: disable=W0718
             drain_outcome = (
                 f'raised {type(drain_failure).__name__}: {drain_failure}')
             stdout = _output_text(failure.stdout)
             stderr = _output_text(failure.stderr)
-            _close_process_pipes(process)
-            try:
-                process.wait(timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
-            except subprocess.TimeoutExpired:
-                pass
             cleanup_failure = drain_failure
         else:
             drain_outcome = 'completed'
+        if drain_outcome != 'completed':
+            cleanup_deadline = (
+                time.monotonic() + _DASHBOARD_DRAIN_TIMEOUT_S)
+            try:
+                if sys.platform == 'win32':
+                    _finish_windows_pipe_readers(
+                        process, cleanup_deadline)
+                else:
+                    _close_process_pipes(process)
+            except Exception as settle_failure:  # pylint: disable=W0718
+                if cleanup_failure is None:
+                    cleanup_failure = settle_failure
+            try:
+                process.wait(timeout=max(
+                    0.0, cleanup_deadline - time.monotonic()))
+            except subprocess.TimeoutExpired as wait_failure:
+                if cleanup_failure is None:
+                    cleanup_failure = wait_failure
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
         last_phase = phases[-1] if phases else 'none recorded'
         drain_duration = time.monotonic() - drain_started
