@@ -216,7 +216,7 @@ def mark_dirty(job):
     that then also fails leaves neither a marker nor a correct record.
     """
     try:
-        _dirty_path(job).write_text('', encoding='utf-8')
+        atomic_file.write_text_retrying(_dirty_path(job), '')
     except OSError:
         return False
     return True
@@ -248,7 +248,7 @@ def write_usage(job, count, stored):
     record['stored_bytes'] = stored
     tmp = path.with_name(f'.{path.name}.tmp')
     try:
-        tmp.write_text(json.dumps(record), encoding='utf-8')
+        atomic_file.write_text_retrying(tmp, json.dumps(record))
         atomic_file.replace_atomically(tmp, path)
     except OSError:
         # The segment itself is already stored, so a usage update that
