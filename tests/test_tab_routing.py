@@ -183,6 +183,45 @@ def test_a_rebinding_inside_a_loop_with_or_try_body_also_clears_the_alias(tmp):
             f'an ordinary call: {violations}')
 
 
+def test_a_match_case_capture_rebinding_the_alias_also_clears_it(tmp):
+    """Review found `_rebound_names` never collected a name a `match` case
+    captures, since `MatchAs.name`/`MatchStar.name`/`MatchMapping.rest`
+    are plain strings rather than `Name` nodes in `Store` context. `match`
+    is already in `_UNWALKED_BODY`, so a capture there stayed live under
+    the pre-match alias for every call in the body."""
+    cases = {
+        'as-pattern': "    match bridge.mode:\n"
+                      "        case object() as send:\n"
+                      "            pass\n",
+        'mapping-key': "    match bridge.mode:\n"
+                       "        case {'s': send}:\n"
+                       "            pass\n",
+        'star-pattern': "    match bridge.mode:\n"
+                        "        case [_, *send]:\n"
+                        "            pass\n",
+        'mapping-rest': "    match bridge.mode:\n"
+                        "        case {'a': 1, **send}:\n"
+                        "            pass\n",
+        'class-keyword': "    match bridge.mode:\n"
+                         "        case BaseException(args=send):\n"
+                         "            pass\n",
+    }
+    for label, body in cases.items():
+        source = Path(tmp) / f'match_rebound_sender_{label}.py'
+        source.write_text(
+            "async def focus_tab(chrome_tab, bridge):\n"
+            "    send = bridge.ext_cmd\n"
+            + body
+            + "    return await send('_focus', 'focus-tab', "
+              "tab=int(chrome_tab))\n",
+            encoding='utf-8')
+        violations = py_tab_routing_violations(
+            source, f'match_rebound_sender_{label}.py')
+        assert not violations, (
+            f'{label}: send was rebound by the match case and should read '
+            f'as an ordinary call: {violations}')
+
+
 def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
     """The other false-positive direction: declaring a local `send` alias
     must not reclassify every unrelated `.send()` method call in scope."""
@@ -198,7 +237,7 @@ def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
 
 
 def _if_else_alias_source(*, alias_in_if):
-    """Two branches, only one of which binds `send` to a real sender --
+    """Two branches, only one of which binds `send` to a real sender, and
     the other binds it to something unrelated. Both spellings hand `tab`
     to whichever sender actually runs, so both must be caught the same
     way regardless of which branch happens to come first in the file."""
@@ -217,7 +256,7 @@ def _if_else_alias_source(*, alias_in_if):
 
 def test_an_if_branch_alias_is_caught_regardless_of_which_branch_binds_it(tmp):
     """Two programs that only differ in which branch binds the real sender
-    must both be caught -- the verdict must not depend on whether the
+    must both be caught: the verdict must not depend on whether the
     sender happens to be assigned in the `if` or the `else` (#224)."""
     if_source = Path(tmp) / 'if_branch_alias.py'
     if_source.write_text(_if_else_alias_source(alias_in_if=True), encoding='utf-8')

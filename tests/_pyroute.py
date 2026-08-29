@@ -165,9 +165,9 @@ def _is_extension_constant(node):
 
 
 def _resolve_sender_name(expr, aliases):
-    """The sender name ('ext_cmd' or '_ext_cmd') `expr` denotes -- directly,
-    through an attribute access, or through one level of an alias already
-    in `aliases` -- or None if it denotes neither."""
+    """The sender name ('ext_cmd' or '_ext_cmd') `expr` denotes, whether
+    directly, through an attribute access, or through one level of an
+    alias already in `aliases`; None if it denotes neither."""
     if isinstance(expr, ast.Name):
         if expr.id in ('ext_cmd', '_ext_cmd'):
             return expr.id
@@ -179,15 +179,16 @@ def _resolve_sender_name(expr, aliases):
 
 def _rebound_names(node):
     """Every local name `node` can rebind, in any binding form: a plain or
-    annotated assignment, a `for`/`with`/`except` target, an import, or a
-    nested def/async def/class whose own name shadows it.
+    annotated assignment, a `for`/`with`/`except` target, an import, a
+    `match` case's capture pattern, or a nested def/async def/class whose
+    own name shadows it.
 
     The last one needs the unrestricted `ast.walk` rather than
     `_scope_nodes`, which deliberately never descends into a nested
-    function -- exactly right for the dict and call tracking above, which
-    must not read a nested function's body as this scope's code, but wrong
-    here: the nested function's NAME still rebinds in the enclosing scope
-    whether or not its body is ever walked.
+    function, since that's exactly right for the dict and call tracking
+    above (which must not read a nested function's body as this scope's
+    code) but wrong here: the nested function's NAME still rebinds in the
+    enclosing scope whether or not its body is ever walked.
     """
     nodes = [node, *_scope_nodes(node)]
     names = {n.id for n in nodes
@@ -200,6 +201,10 @@ def _rebound_names(node):
     names |= {n.name for n in ast.walk(node)
               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
                                 ast.ClassDef)) and n is not node}
+    names |= {n.name for n in nodes
+              if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name}
+    names |= {n.rest for n in nodes
+              if isinstance(n, ast.MatchMapping) and n.rest}
     return names
 
 
@@ -302,7 +307,7 @@ def _copy_state_pair(pair):
 
 def _dedupe_state_pairs(pairs):
     """Collapse pairs whose (dict-state signature, alias map) is equivalent
-    for this routing contract -- a call after the branch is still checked
+    for this routing contract. A call after the branch is still checked
     against every surviving pair, so a sender alias true on only one
     branch still gets caught, as long as two pairs whose alias maps
     actually differ are kept as two entries rather than folded into one
