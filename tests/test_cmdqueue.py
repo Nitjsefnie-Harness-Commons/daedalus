@@ -100,14 +100,22 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     queue, queued = _queued_file(tmp)
 
+    class PathProtocolExplosion(BaseException):
+        pass
+
     class RefusingReceiver:
         def __fspath__(self):
             raise RuntimeError('receiver evaluated before argument validation')
 
+    class ExplodingReceiver:
+        def __fspath__(self):
+            raise PathProtocolExplosion('path protocol exploded')
+
     def path_failure(operation, receiver, *args, **kwargs):
         try:
             result = getattr(Path, operation)(receiver, *args, **kwargs)
-        except (OSError, RuntimeError, TypeError, ValueError) as caught:
+        except (OSError, RuntimeError, TypeError, ValueError,
+                PathProtocolExplosion) as caught:
             filename = getattr(caught, 'filename', None)
             return type(caught), str(caught), type(filename), filename
         if operation == 'open':
@@ -115,13 +123,32 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
         raise AssertionError(
             f'Path.{operation} accepted the control arguments')
 
+    def open_outcome(opener, receiver, *args, write=None, **kwargs):
+        try:
+            with opener(receiver, *args, **kwargs) as opened:
+                outcome = (opened.mode, opened.tell(), opened.readable(),
+                           opened.writable())
+                if write is not None:
+                    outcome += (opened.write(write),)
+        except (OSError, RuntimeError, TypeError, ValueError,
+                PathProtocolExplosion) as caught:
+            filename = getattr(caught, 'filename', None)
+            return ('raised', type(caught), str(caught),
+                    type(filename), filename)
+        return 'returned', outcome
+
     refusing_receiver = RefusingReceiver()
+    exploding_receiver = ExplodingReceiver()
     invalid_mode = {'mode': None}
     expected_mode = path_failure(
         'open', refusing_receiver, **invalid_mode)
+    expected_exploding_mode = path_failure(
+        'open', exploding_receiver, **invalid_mode)
     excess_unlink = (False, 'extra')
     expected_unlink = path_failure(
         'unlink', refusing_receiver, *excess_unlink)
+    expected_exploding_unlink = path_failure(
+        'unlink', exploding_receiver, *excess_unlink)
     bytes_receiver = os.fsencode(str(queued))
     expected_bytes = path_failure('open', bytes_receiver, mode='x')
     excess_args = ('r', 1, -1, None, None, None, False, 'extra')
@@ -150,6 +177,11 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     assert underlying_opens == [1], (
         'exhausted fault reran native-validation probe', underlying_opens)
     with _refuse_path_operation(queued, 'unlink', 1) as unlink_calls:
+        actual_exploding_unlink = path_failure(
+            'unlink', exploding_receiver, *excess_unlink)
+        assert actual_exploding_unlink == expected_exploding_unlink, (
+            'unlink exposed the injector path-protocol probe',
+            actual_exploding_unlink, expected_exploding_unlink)
         actual_unlink = path_failure(
             'unlink', refusing_receiver, *excess_unlink)
         assert actual_unlink == expected_unlink, (
@@ -167,18 +199,57 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     assert queued.exists(), 'unlink control removed the target path'
     with _virtual_cmdqueue_clock() as (clock, _, _):
         injectors = (
-            ('generic refusal',
-             _refuse_path_operation(queued, 'open', 1), PermissionError),
-            ('first-read', _refuse_first_queue_read(queue), PermissionError),
-            ('disappearance', _disappear_on_first_open(queued),
-             FileNotFoundError),
-            ('vanish', _vanish_during_read(queued, clock), FileNotFoundError))
-        for label, injector, injected_type in injectors:
+            ('generic refusal', _refuse_path_operation, (queued, 'open', 1)),
+            ('first-read', _refuse_first_queue_read, (queue,)),
+            ('disappearance', _disappear_on_first_open, (queued,)),
+            ('vanish', _vanish_during_read, (queued, clock)))
+        for label, injector, injector_args in injectors:
+            with injector(*injector_args):
+                expected_injected = open_outcome(
+                    Path.open, queued, encoding='utf-8')
+            for mode in ('w', 'a'):
+                queued.write_text('seed', encoding='utf-8')
+                expected_write = open_outcome(
+                    original, queued, mode=mode, encoding='utf-8',
+                    write=mode)
+                queued.write_text('seed', encoding='utf-8')
+                underlying_opens[0] = 0
+                Path.open = counted
+                try:
+                    with injector(*injector_args):
+                        actual_write = open_outcome(
+                            Path.open, queued, mode=mode,
+                            encoding='utf-8', write=mode)
+                        write_opens = underlying_opens[0]
+                        target_present = queued.exists()
+                        after_write = open_outcome(
+                            Path.open, queued, encoding='utf-8')
+                finally:
+                    Path.open = original
+                assert actual_write == expected_write, (
+                    'target non-read open changed', label, mode,
+                    actual_write, expected_write)
+                assert write_opens == 1, (
+                    'target non-read open count changed', label, mode,
+                    write_opens)
+                assert target_present, (
+                    'target non-read open applied injector effects',
+                    label, mode)
+                assert after_write == expected_injected, (
+                    'target non-read open consumed the read fault',
+                    label, mode, after_write, expected_injected)
+            queued.write_text(json.dumps({'id': 'queued', 'type': 'reload'}),
+                              encoding='utf-8')
             before = queued.stat()
             candidate = Path(tmp) / f'exclusive-create-{label}'
             assert not candidate.exists()
             open_failure = None
-            with injector:
+            with injector(*injector_args):
+                actual_exploding_mode = path_failure(
+                    'open', exploding_receiver, **invalid_mode)
+                assert actual_exploding_mode == expected_exploding_mode, (
+                    'open exposed the injector path-protocol probe',
+                    label, actual_exploding_mode, expected_exploding_mode)
                 actual_mode = path_failure(
                     'open', refusing_receiver, **invalid_mode)
                 assert actual_mode == expected_mode, (
@@ -202,8 +273,9 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
                                                 label, case, actual, expected)
                     assert after == before, ('target path changed',
                                              label, case, after, before)
-                injected = _path_open_failure(queued, encoding='utf-8')
-            assert injected[0] is injected_type, (
+                injected = open_outcome(
+                    Path.open, queued, encoding='utf-8')
+            assert injected == expected_injected, (
                 'fault was consumed by a rejected call', label, injected)
             assert open_failure is None, (label, open_failure)
             assert candidate.read_text('utf-8') == 'caller-owned content'
