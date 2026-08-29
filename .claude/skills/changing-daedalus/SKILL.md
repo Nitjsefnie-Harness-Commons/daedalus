@@ -207,10 +207,19 @@ than under it. If no such argument exists, that line is untested code the
 change is adding, and it gets a test. Put the argument in the pull request
 body, where a reviewer meets the same comment.
 
-**The `speed` suite may be ignored**, and issue 148 against it stays
-deferred - do not fix it. It also outlasts every other check on a
-head, so any "all checks concluded" condition must exclude it or it never
-fires.
+**Read the live Checks API before the first push, not after the first red.**
+A shape pin over a workflow file cannot see where GitHub attaches check runs
+or what it names them, and both differ by event and by job state: here a
+`pull_request` run attaches its checks to the pull request's head commit,
+never to the merge commit `github.sha` names - which on this repository
+carries none at all - and a skipped matrix job creates one check run named
+after the job's `name:` verbatim, template expression included. Query
+`commits/<sha>/check-runs` for both the head and the merge commit and read
+the names back before building anything that waits on or reads those names;
+the expensive teacher is a wait that burns its whole bound on a commit
+nothing ever checked.
+
+
 
 ## Before and during a branch
 
