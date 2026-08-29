@@ -1,11 +1,4 @@
-"""Which key a Python client writes the routing field under.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
-This reads client source with `ast`, following payload dictionaries and sender
-aliases through assignments, control flow, imports and nested functions.
-An unproved sender expression is reported as unprovable rather than clean.
-"""
+"""Follow Python payloads and report unproved sender aliases."""
 import ast
 
 
@@ -24,12 +17,7 @@ _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
 
 
 def _merge_payload_keys(keys, spread, spread_node):
-    """Apply one Python mapping spread to tracked payload keys.
-
-    An unresolved spread makes the resulting `tab` value opaque. A later
-    explicit `tab` write clears that uncertainty because dict construction is
-    ordered and the later value wins.
-    """
+    """Apply a spread; a later explicit tab clears opaque uncertainty."""
     if spread is None:
         keys[_OPAQUE_TAB_SPREAD] = (spread_node.lineno, spread_node)
         return
@@ -42,12 +30,7 @@ def _merge_payload_keys(keys, spread, spread_node):
 
 
 def payload_keys(expr, dicts):
-    """Tracked string keys, or None for a wholly opaque expression.
-
-    `**spread` of a tracked name merges, `dict(k=v, ...)` is the same mapping
-    spelled as a call, and an unresolved spread records an opaque `tab` value
-    instead of trusting the literal keys around it.
-    """
+    """Return tracked string keys, or None for a wholly opaque expression."""
     if isinstance(expr, ast.Name):
         return dicts.get(expr.id)
     if isinstance(expr, ast.Dict):
@@ -78,8 +61,7 @@ def payload_keys(expr, dicts):
 
 
 def _update_keys(call, dicts):
-    """The keys `d.update(...)` merges: the positional mapping when it
-    resolves, plus keywords. None when any part is opaque."""
+    """Return keys merged by d.update, or None when any part is opaque."""
     keys = {}
     if call.args:
         merged = payload_keys(call.args[0], dicts)
@@ -141,15 +123,9 @@ def _apply_dict_statement(node, dicts):
 
 
 def dict_assignments(scope):
-    """Map local names to their string keys: {name: {key: (lineno, value)}}.
+    """Map local names to string keys, retaining only provable mutations.
 
-    A literal `d = {...}` (annotated or not) or `d = dict(...)` resets the
-    name; `d['k'] = v`, `d.update({...})` and `d |= {...}` add keys; last
-    write wins, so `d = {'tab': 'extension'}` followed by `d['tab'] = tid`
-    records `tid`. Only constant string keys are tracked. A wholly opaque
-    rebinding or mutation (`d = f()`, `d.update(f())`, `d |= g()`) drops the
-    name from tracking from that point rather than trusting keys it may have
-    replaced; an unresolved `**` inside a dict retains an opaque-tab marker.
+    Opaque rebinding drops a name; unresolved spreads retain an opaque marker.
     """
     dicts = {}
     nodes = [n for n in _scope_nodes(scope)
@@ -232,18 +208,20 @@ def _apply_alias_statement(node, aliases):
                    node, (ast.AnnAssign, ast.AugAssign)) else None)
     if targets is None:
         return
-    for name in set().union(*(_bound_names(target) for target in targets)):
-        aliases.pop(name, None)
+    bindings = {}
     if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
         for target in targets:
-            _bind_alias_target(target, node.value, aliases)
+            _bind_alias_target(target, node.value, aliases, bindings)
+    for name in set().union(*(_bound_names(target) for target in targets)):
+        aliases.pop(name, None)
+    aliases.update(bindings)
 
 
-def _bind_alias_target(target, value, aliases):
+def _bind_alias_target(target, value, aliases, bindings):
     if isinstance(target, ast.Name):
         resolved = _resolve_sender_name(value, aliases)
         if resolved is not None:
-            aliases[target.id] = resolved
+            bindings[target.id] = resolved
         return
     if not isinstance(target, (ast.Tuple, ast.List)):
         return
@@ -260,11 +238,11 @@ def _bind_alias_target(target, value, aliases):
                        if suffix else ())]
     if pairs is not None:
         for nested_target, nested_value in pairs:
-            _bind_alias_target(nested_target, nested_value, aliases)
+            _bind_alias_target(nested_target, nested_value, aliases, bindings)
         return
     if _resolve_sender_name(value, aliases) is not None:
         for name in _bound_names(target):
-            aliases[name] = _UNPROVABLE_SENDER
+            bindings[name] = _UNPROVABLE_SENDER
 
 
 def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
@@ -416,8 +394,17 @@ def _record_exit(exits, kind, pairs):
         exits[kind].extend(_copy_state_pair(pair) for pair in pairs)
 
 
-def _known_nonempty_iterable(expr):
-    return isinstance(expr, (ast.Tuple, ast.List, ast.Set)) and bool(expr.elts)
+def _argument_defaults(args):
+    return [*args.defaults,
+            *(default for default in args.kw_defaults if default is not None)]
+
+
+def _literal_iterable_nonempty(expr):
+    if not isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
+        return None
+    states = [_literal_iterable_nonempty(item.value)
+              if isinstance(item, ast.Starred) else True for item in expr.elts]
+    return True if True in states else None if None in states else False
 
 
 def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
@@ -428,13 +415,19 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         return [_copy_state_pair(pair) for pair in found]
 
     def check_expression(node, current_pairs):
-        if node is None or isinstance(node, ast.Lambda):
+        if node is None:
+            return current_pairs
+        if isinstance(node, ast.Lambda):
+            for default in _argument_defaults(node.args):
+                current_pairs = check_expression(default, current_pairs)
             return current_pairs
         if isinstance(node, ast.NamedExpr):
             current_pairs = check_expression(node.value, current_pairs)
             for _, aliases in current_pairs:
+                bindings = {}
+                _bind_alias_target(node.target, node.value, aliases, bindings)
                 aliases.pop(node.target.id, None)
-                _bind_alias_target(node.target, node.value, aliases)
+                aliases.update(bindings)
             return current_pairs
         if isinstance(node, ast.BoolOp):
             current_pairs = check_expression(node.values[0], current_pairs)
@@ -477,19 +470,23 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(node, _COMPREHENSIONS):
             entered = check_expression(node.generators[0].iter, current_pairs)
             active = copied(entered)
+            may_skip = False
             for index, generator in enumerate(node.generators):
                 if index:
                     active = check_expression(generator.iter, active)
+                cardinality = _literal_iterable_nonempty(generator.iter)
+                if cardinality is False:
+                    skipped = entered if may_skip else []
+                    return _dedupe_state_pairs([*skipped, *active])
                 for condition in generator.ifs:
                     active = check_expression(condition, active)
+                may_skip |= bool(generator.ifs) or cardinality is not True
             results = [node.key, node.value] if isinstance(
                 node, ast.DictComp) else [node.elt]
             for result in results:
                 active = check_expression(result, active)
             if isinstance(node, ast.GeneratorExp):
                 return entered
-            may_skip = any(g.ifs or not _known_nonempty_iterable(g.iter)
-                           for g in node.generators)
             skipped = entered if may_skip else []
             return _dedupe_state_pairs([*skipped, *active])
         if isinstance(node, ast.Dict):
@@ -507,6 +504,10 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     for statement in statements:  # pylint: disable=too-many-nested-blocks
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            values = [*statement.decorator_list,
+                      *_argument_defaults(statement.args)]
+            for value in values:
+                pairs = check_expression(value, pairs)
             for _, aliases in pairs:
                 aliases.pop(statement.name, None)
             nested, _ = _py_flow_violations(
@@ -547,7 +548,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             incoming = [_copy_state_pair(pair) for pair in pairs]
             zero_pairs = incoming
             if (isinstance(statement, (ast.For, ast.AsyncFor))
-                    and _known_nonempty_iterable(statement.iter)):
+                    and _literal_iterable_nonempty(statement.iter) is True):
                 zero_pairs = []
             target_names = (_bound_names(statement.target)
                             if isinstance(statement, (ast.For, ast.AsyncFor))
@@ -688,11 +689,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 def py_tab_routing_violations(path, rel):
     """`tab` set to a non-'extension' value on a typed command sent from `path`.
 
-    Typed means: routed through ext_cmd/_ext_cmd (which themselves inject
-    `tab: 'extension'`), or sent to /command carrying a `type` key. Eval
-    payloads carry `code` instead of `type` and route BY tab legitimately —
-    `_send_eval` sets `payload['tab'] = tab_id` and is correct — so they are
-    exempt by structure, not by naming convention.
+    Typed means routed through ext_cmd/_ext_cmd or sent to /command with a
+    `type` key. Eval payloads carry `code` and legitimately route by tab.
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
     violations, _ = _py_flow_violations(

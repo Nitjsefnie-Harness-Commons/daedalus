@@ -72,9 +72,17 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         "([send], other) = ([b.ext_cmd], None)",
         "send, *other = b.ext_cmd, None",
         "send, other = wrap(b.ext_cmd)",
+        "send = b.ext_cmd\n    other, send = send, None\n"
+        "    return await other('x', 'y', tab=tab)",
+        "send = b.ext_cmd\n    send, other = wrap(send)",
+        "send = b.get\n    inner = lambda x=(send := b.ext_cmd): x",
+        "send = b.get\n    def inner(x=(send := b.ext_cmd)): pass",
+        "send = b.get\n    @(send := b.ext_cmd)\n    def inner(): pass",
         "return await (send := b.ext_cmd)('x', 'y', tab=tab)",
         "(send := b.ext_cmd)",
         "[(send := b.ext_cmd) for _ in values]",
+        "send = b.ext_cmd\n    [(send := b.get) for _ in [*()]]",
+        "send = b.get\n    [(send := b.ext_cmd) for _ in [None, *()]]",
         "flag and (send := b.ext_cmd)",
         "((send := b.ext_cmd) if flag else (send := b.get))",
         "send = b.ext_cmd\n    return await send((send := b.get), tab=tab)",
@@ -95,8 +103,15 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         "send, sender = b.get, b.ext_cmd",
         "send = b.ext_cmd\n    send, other = make_pair()",
         "send = b.ext_cmd\n    send, other = (b.get,)",
+        "send = b.ext_cmd\n    other, send = send, b.get",
+        "send = b.ext_cmd\n    send, other = wrap(b.get)",
+        "send = b.ext_cmd\n    inner = lambda x=(send := b.get): x",
+        "send = b.ext_cmd\n    def inner(x=(send := b.get)): pass",
+        "send = b.ext_cmd\n    @(send := b.get)\n    def inner(): pass",
         "send = b.ext_cmd\n    (send := b.get)",
         "send = b.ext_cmd\n    [(send := b.get) for _ in (1,)]",
+        "send = b.get\n    [(send := b.ext_cmd) for _ in [*()]]",
+        "send = b.ext_cmd\n    [(send := b.get) for _ in [None, *()]]",
         "def inner():\n        (send := b.ext_cmd)",
         "inner = lambda: (send := b.ext_cmd)",
     ]
@@ -321,9 +336,10 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     `type`, and eval genuinely routes by tab. Python payloads are followed
     through literals (annotated or not), `dict(...)`, subscript assignments,
     `update({...})`, `|= {...}` and source-ordered control flow. Sender aliases
-    are followed through imports, matching tuple/list destructuring,
-    assignment expressions (including eager comprehensions), nested functions
-    and compound statements; possible senders are reported as unprovable.
+    are followed through imports, simultaneous tuple/list destructuring,
+    assignment expressions (including definition-time defaults/decorators and
+    eager comprehensions), nested functions and compound statements; possible
+    senders are reported as unprovable.
     JavaScript inline literals, names initialized by object literals,
     aliases of those names, ternary initializers whose branches resolve,
     `Object.assign` writes, tracked object spreads, literal computed keys,
@@ -379,8 +395,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                   *(ROOT / 'daedalus_cli').glob('*.py')]
     senders_js = sorted((ROOT / 'dashboard').rglob('*.js'))
     scanned_py = [p for p in senders_py if p.is_file()]
-    # A floor, not a glob of whatever happens to exist: with the senders
-    # moved aside the scan above finds nothing and passes vacuously.
     assert len(scanned_py) >= 18, (
         f'found {len(scanned_py)} Python senders (daedalus_mcp/server.py + '
         'daedalus_mcp/tools_*.py + daedalus_cli/*.py), expected at least 18 — '
@@ -401,10 +415,7 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         "browser target is `tabId` and a typed command routes to "
         "`tab: 'extension'`:\n" + '\n'.join(violations))
 
-    # The scan above passing on a correct tree proves nothing by itself — the
-    # previous two versions of this guard passed on the real tree while
-    # missing every reversion an auditor tried. Each shape below is checked
-    # against the same scanner functions the tree scan uses.
+    # Exercise the same scanners against known-bad shapes as well as the tree.
     skipped_bodies = [
         "    for send in ():\n        pass\n",
         "    while False:\n        send = bridge.get\n",
@@ -494,9 +505,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                " 5000000, maxPostDataSize: 65536 }, note: 'padding padding"
                " padding padding padding padding padding padding', tab: tid });\n"
                "}\n"),
-        # The shapes a mutation sweep found this guard missing open on:
-        # annotated assignments (cli.py and daedalus_mcp/server.py spell every payload
-        # `fields: dict = {...}` / `cmd: dict = {...}`) ...
         ('py', "def f(args):\n"
                "    cmd: dict = {'id': '_x', 'type': 'close-tab', 'tab': 'extension'}\n"
                "    cmd['tab'] = int(args.chrome_tab)\n"
@@ -505,7 +513,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                "    fields: dict = {'css': 'x'}\n"
                "    fields['tab'] = t\n"
                "    return await _ext_cmd('_css', 'inject-css', **fields)\n"),
-        # ... payloads assembled without a literal in scope ...
         ('py', "def f(tid):\n"
                "    cmd = dict(id='_x', type='close-tab', tab=tid)\n"
                "    api('PUT', '/command', cmd)\n"),
@@ -517,8 +524,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                "    cmd = {'id': '_x', 'type': 'close-tab'}\n"
                "    cmd |= {'tab': tid}\n"
                "    api('PUT', '/command', cmd)\n"),
-        # ... a later unrelated re-declaration erasing an earlier violation
-        # (the live shape in dashboard/sections/cookies.js) ...
         ('js', "async function load() {\n"
                "  const fields = {};\n"
                "  fields.tab = Number(tabSel.value);\n"
@@ -552,18 +557,13 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                "        api('PUT', '/command', cmd)\n"
                "    else:\n"
                "        cmd['tab'] = 'extension'\n"),
-        # Object spreads and literal computed keys have ordinary runtime
-        # object semantics and therefore must participate in the scan.
         ('js', "async function f(tid) {\n"
                "  await extCmd('cdp', { ...{ ['tab']: tid } });\n"
                "}\n"),
-        # runCommand accepts named objects as well as inline literals.
         ('js', "async function f(tid) {\n"
                "  const command = { type: 'cdp', tab: tid };\n"
                "  await runCommand(command);\n"
                "}\n"),
-        # api.js applies opts after `tab: 'extension'`, so the third argument
-        # can really retarget a typed command.
         ('js', "async function f(target) {\n"
                "  await extCmd('cdp', {}, { tab: target });\n"
                "}\n"),
