@@ -248,8 +248,8 @@ Fix every item above, including these two repository requirements:
 2. Edit this same pull request so its sections match the pull request
    template. Its **Related Issues and Pull Requests** section must name
    the claimed issue by its real number. Any reference counts, so write
-   `Fixes #<issue>` when merging this should close the issue and a plain
-   `#<issue>` when it should not.
+   `Fixes #<issue>` when merging this should close the issue and
+   `References #<issue>` when it should not.
 
 {ending}
 """
