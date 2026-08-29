@@ -34,6 +34,21 @@ from pathlib import Path
 _RESULT = re.compile(r'^\s+(PASS|FAIL|SKIP|ERROR)\s+(\S+)')
 
 
+def selected(name, only, except_globs):
+    """Whether one suite file is inside the selection the caller asked for.
+
+    Globs are matched against the suite file NAME the way pathlib matches a
+    pattern that carries no separator: the whole name, with `*` never crossing
+    a directory boundary. `--except` is applied first, so `--only '*'` minus
+    the globs another group already claims is exactly that group's complement.
+    """
+    if any(Path(name).match(glob) for glob in except_globs or ()):
+        return False
+    if not only:
+        return True
+    return any(Path(name).match(glob) for glob in only)
+
+
 def time_suite(python, suite, cwd):
     """Every passing test in one suite, with the seconds it took."""
     durations = {}
@@ -64,14 +79,26 @@ def main(argv=None):
                         help='interpreter to run that checkout with')
     parser.add_argument('--out', required=True,
                         help='directory to write one JSON per suite into')
+    parser.add_argument(
+        '--only', nargs='+', metavar='GLOB',
+        help='time only the suites whose file name matches one of these '
+             'globs; without it every suite runs')
+    parser.add_argument(
+        '--except', nargs='+', default=(), dest='except_globs',
+        metavar='GLOB',
+        help='drop the suites whose file name matches one of these globs, '
+             'applied before --only')
     args = parser.parse_args(argv)
 
     tree = Path(args.tree).resolve()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    suites = sorted((tree / 'tests').glob('test_*.py'))
+    found = sorted((tree / 'tests').glob('test_*.py'))
+    suites = [suite for suite in found
+              if selected(suite.name, args.only, args.except_globs)]
     if not suites:
-        print(f'no suites found under {tree}', file=sys.stderr)
+        print(f'no suites found under {tree}' if not found else
+              f'no suite under {tree} matches the selection', file=sys.stderr)
         return 1
     timed = 0
     for suite in suites:
