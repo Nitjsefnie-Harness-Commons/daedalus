@@ -35,7 +35,11 @@ _bridge_started = False
 
 
 def workflow_bash():
-    """Resolve Git-for-Windows Bash through PATH, not a bare WSL launcher."""
+    """Resolve Git-for-Windows Bash through PATH, not a bare WSL launcher.
+
+    On Windows, a bare program name can select the system WSL launcher ahead of
+    the Git-for-Windows Bash executable on PATH.
+    """
     bash = shutil.which('bash')
     if not bash:
         raise AssertionError('bash is required to execute the workflow shell')
