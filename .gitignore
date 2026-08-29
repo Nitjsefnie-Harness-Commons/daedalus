@@ -236,6 +236,7 @@
 !/tests/_prgate.py
 !/tests/_prgate_race.py
 !/tests/_pyroute.py
+!/tests/_pyroute_state.py
 !/tests/_realbrowser.py
 !/tests/_realbrowser_controls.py
 !/tests/_realbrowser_errors.py

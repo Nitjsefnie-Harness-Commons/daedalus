@@ -1,19 +1,39 @@
 """Follow Python payloads and report unproved sender aliases."""
 import ast
 
+from _pyroute_state import (COMPREHENSIONS as _COMPREHENSIONS,
+                            OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
+                            UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
+                            FlowState, apply_alias_statement,
+                            argument_defaults, bind_alias_target, bound_names,
+                            callable_state, class_functions, clear_names,
+                            dedupe_states, function_allowed_opaque,
+                            is_extension_constant, literal_iterable_nonempty,
+                            new_exits, rebound_names, record_exit,
+                            resolve_sender_name, scope_nodes, state_signature)
 
-def _scope_nodes(scope):
-    for child in ast.iter_child_nodes(scope):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            continue
-        yield child
-        yield from _scope_nodes(child)
-
-
-_OPAQUE_TAB_SPREAD = object()
-_UNPROVABLE_SENDER = '?ext_cmd'
-_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
-                   ast.GeneratorExp)
+_apply_alias_statement = apply_alias_statement
+_argument_defaults = argument_defaults
+_bind_alias_target = bind_alias_target
+_bound_names = bound_names
+_callable_state = callable_state
+_class_functions = class_functions
+_clear_names = clear_names
+_copy_state_pair = FlowState.copy
+_dedupe_state_pairs = dedupe_states
+_function_allowed_opaque = function_allowed_opaque
+_is_extension_constant = is_extension_constant
+_new_exits = new_exits
+_rebound_names = rebound_names
+_record_exit = record_exit
+_resolve_sender_name = resolve_sender_name
+_scope_nodes = scope_nodes
+_state_pair_signature = state_signature
+_EAGER_ITERABLE_CALLS = frozenset({
+    'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
+})
+_EAGER_ITERABLE_METHODS = frozenset({'extend', 'join', 'update', 'writelines'})
+_PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
 
 
 def _merge_payload_keys(keys, spread, spread_node):
@@ -135,116 +155,6 @@ def dict_assignments(scope):
     return dicts
 
 
-def _is_extension_constant(node):
-    return isinstance(node, ast.Constant) and node.value == 'extension'
-
-
-def _resolve_sender_name(expr, aliases):
-    if isinstance(expr, ast.Name):
-        if expr.id in ('ext_cmd', '_ext_cmd'):
-            return expr.id
-        return aliases.get(expr.id)
-    if (isinstance(expr, ast.Attribute)
-            and expr.attr in ('ext_cmd', '_ext_cmd')):
-        return expr.attr
-    for child in ast.walk(expr):
-        if (isinstance(child, ast.Name)
-                and (child.id in ('ext_cmd', '_ext_cmd')
-                     or aliases.get(child.id) in (
-                         'ext_cmd', '_ext_cmd', _UNPROVABLE_SENDER))):
-            return _UNPROVABLE_SENDER
-        if (isinstance(child, ast.Attribute)
-                and child.attr in ('ext_cmd', '_ext_cmd')):
-            return _UNPROVABLE_SENDER
-        if (isinstance(child, ast.Constant)
-                and child.value in ('ext_cmd', '_ext_cmd')):
-            return _UNPROVABLE_SENDER
-    return None
-
-
-def _rebound_names(node):
-    """Names rebound by `node`, excluding scoped comprehension targets."""
-    nodes = [node, *_scope_nodes(node)]
-    comprehension_targets = {
-        target
-        for parent in nodes if isinstance(parent, _COMPREHENSIONS)
-        for generator in parent.generators
-        for target in ast.walk(generator.target)
-        if isinstance(target, ast.Name)
-    }
-    names = {n.id for n in nodes
-             if isinstance(n, ast.Name)
-             and n not in comprehension_targets
-             and isinstance(n.ctx, (ast.Store, ast.Del))}
-    names |= {(a.asname or a.name).split('.')[0]
-              for n in nodes if isinstance(n, (ast.Import, ast.ImportFrom))
-              for a in n.names}
-    names |= {n.name for n in nodes
-              if isinstance(n, ast.ExceptHandler) and n.name}
-    names |= {n.name for n in nodes
-              if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name}
-    names |= {n.rest for n in nodes
-              if isinstance(n, ast.MatchMapping) and n.rest}
-    names |= {n.name for n in ast.walk(node)
-              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                ast.ClassDef)) and n is not node}
-    return names
-
-
-def _apply_alias_statement(node, aliases):
-    if isinstance(node, ast.ImportFrom):
-        for imported in node.names:
-            local = imported.asname or imported.name
-            aliases.pop(local, None)
-            if imported.name in ('ext_cmd', '_ext_cmd'):
-                aliases[local] = imported.name
-        return
-    if isinstance(node, ast.Import):
-        for imported in node.names:
-            aliases.pop((imported.asname or imported.name).split('.')[0], None)
-        return
-    targets = (node.targets if isinstance(node, (ast.Assign, ast.Delete))
-               else [node.target] if isinstance(
-                   node, (ast.AnnAssign, ast.AugAssign)) else None)
-    if targets is None:
-        return
-    bindings = {}
-    if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
-        for target in targets:
-            _bind_alias_target(target, node.value, aliases, bindings)
-    for name in set().union(*(_bound_names(target) for target in targets)):
-        aliases.pop(name, None)
-    aliases.update(bindings)
-
-
-def _bind_alias_target(target, value, aliases, bindings):
-    if isinstance(target, ast.Name):
-        resolved = _resolve_sender_name(value, aliases)
-        if resolved is not None:
-            bindings[target.id] = resolved
-        return
-    if not isinstance(target, (ast.Tuple, ast.List)):
-        return
-    pairs = None
-    if isinstance(value, (ast.Tuple, ast.List)):
-        stars = [i for i, item in enumerate(target.elts)
-                 if isinstance(item, ast.Starred)]
-        if not stars and len(target.elts) == len(value.elts):
-            pairs = zip(target.elts, value.elts)
-        elif len(stars) == 1 and len(value.elts) >= len(target.elts) - 1:
-            star, suffix = stars[0], len(target.elts) - stars[0] - 1
-            pairs = [*zip(target.elts[:star], value.elts[:star]),
-                     *(zip(target.elts[-suffix:], value.elts[-suffix:])
-                       if suffix else ())]
-    if pairs is not None:
-        for nested_target, nested_value in pairs:
-            _bind_alias_target(nested_target, nested_value, aliases, bindings)
-        return
-    if _resolve_sender_name(value, aliases) is not None:
-        for name in _bound_names(target):
-            bindings[name] = _UNPROVABLE_SENDER
-
-
 def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
                         sender_name=None):
     func = node.func
@@ -300,113 +210,6 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
     return []
 
 
-def _copy_state_pair(pair):
-    return ({n: v.copy() for n, v in pair[0].items()}, dict(pair[1]))
-
-
-def _state_pair_signature(pair):
-    state, aliases = pair
-    signature = []
-    for name, keys in sorted(state.items()):
-        tab = ('opaque' if _OPAQUE_TAB_SPREAD in keys else 'absent'
-               if 'tab' not in keys else 'extension'
-               if _is_extension_constant(keys['tab'][1]) else 'other')
-        signature.append((name, 'type' in keys, tab))
-    return (tuple(signature), tuple(sorted(aliases.items())))
-
-
-def _dedupe_state_pairs(pairs):
-    found = {}
-    for pair in pairs:
-        found.setdefault(_state_pair_signature(pair), pair)
-    return list(found.values())
-
-
-def _inherited_aliases(pairs):
-    inherited = {}
-    names = {name for _, aliases in pairs for name in aliases}
-    for name in names:
-        values = [aliases.get(name) for _, aliases in pairs]
-        first = values[0]
-        if first is not None and all(value == first for value in values):
-            inherited[name] = first
-        elif any(value is not None for value in values):
-            inherited[name] = _UNPROVABLE_SENDER
-    return inherited
-
-
-def _function_aliases(node, pairs):
-    aliases = _inherited_aliases(pairs)
-    positional = [*node.args.posonlyargs, *node.args.args]
-    parameters = [*positional, *node.args.kwonlyargs]
-    if node.args.vararg is not None:
-        parameters.append(node.args.vararg)
-    if node.args.kwarg is not None:
-        parameters.append(node.args.kwarg)
-    for parameter in parameters:
-        aliases.pop(parameter.arg, None)
-    defaults = zip(positional[-len(node.args.defaults):], node.args.defaults)
-    if not node.args.defaults:
-        defaults = ()
-    for parameter, default in [*defaults, *zip(
-            node.args.kwonlyargs, node.args.kw_defaults)]:
-        if default is None:
-            continue
-        resolved = _resolve_sender_name(default, _inherited_aliases(pairs))
-        if resolved is not None:
-            aliases[parameter.arg] = resolved
-    return aliases
-
-
-def _function_allowed_opaque(node):
-    return (frozenset({node.args.kwarg.arg})
-            if node.name in ('ext_cmd', '_ext_cmd')
-            and node.args.kwarg is not None else frozenset())
-
-
-def _class_functions(node):
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            yield child
-        else:
-            yield from _class_functions(child)
-
-
-def _bound_names(target):
-    return {node.id for node in ast.walk(target)
-            if isinstance(node, ast.Name)
-            and isinstance(node.ctx, (ast.Store, ast.Del))}
-
-
-def _clear_names(pairs, names):
-    for state, aliases in pairs:
-        for name in names:
-            state.pop(name, None)
-            aliases.pop(name, None)
-
-
-def _new_exits():
-    return {'break': [], 'continue': [], 'terminal': []}
-
-
-def _record_exit(exits, kind, pairs):
-    if exits is not None:
-        exits[kind].extend(_copy_state_pair(pair) for pair in pairs)
-
-
-def _argument_defaults(args):
-    return [*args.defaults,
-            *(default for default in args.kw_defaults if default is not None)]
-
-
-def _literal_iterable_nonempty(expr):
-    if not isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
-        return None
-    states = [_literal_iterable_nonempty(item.value)
-              if isinstance(item, ast.Starred) else True for item in expr.elts]
-    return True if True in states else None if None in states else False
-
-
 def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         flow_exits=None):
     violations = []
@@ -414,59 +217,170 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
     def copied(found):
         return [_copy_state_pair(pair) for pair in found]
 
+    def expression_value(node, state):
+        if isinstance(node, ast.GeneratorExp):
+            return node
+        if isinstance(node, ast.Name) and node.id in state.generators:
+            return state.generators[node.id]
+        if isinstance(node, (ast.NamedExpr, ast.Starred)):
+            child = node.value
+            if id(child) in state.evaluated:
+                return state.evaluated[id(child)]
+        if isinstance(node, (ast.Tuple, ast.List)):
+            values = [state.evaluated.get(id(item)) for item in node.elts]
+            if any(value is not None
+                   and not isinstance(value, ast.GeneratorExp)
+                   for value in values):
+                return _UNPROVABLE_SENDER
+        return _resolve_sender_name(node, state.aliases)
+
+    def remember(node, current_pairs):
+        for state in current_pairs:
+            state.evaluated[id(node)] = expression_value(node, state)
+        return current_pairs
+
+    def generator_for(expr, state):
+        if isinstance(expr, ast.GeneratorExp):
+            return expr
+        if isinstance(expr, ast.Name):
+            return state.generators.get(expr.id)
+        value = state.evaluated.get(id(expr))
+        return value if isinstance(value, ast.GeneratorExp) else None
+
+    def generator_nonempty(generator):
+        states = [literal_iterable_nonempty(clause.iter)
+                  for clause in generator.generators]
+        if False in states:
+            return False
+        if all(state is True for state in states) and not any(
+                clause.ifs for clause in generator.generators):
+            return True
+        return None
+
+    def iterable_nonempty(expr, current_pairs):
+        states = []
+        for state in current_pairs:
+            generator = generator_for(expr, state)
+            states.append(generator_nonempty(generator) if generator
+                          else literal_iterable_nonempty(expr))
+        return states[0] if states and all(
+            value is states[0] for value in states) else None
+
+    def consume_generator(generator, current_pairs):
+        entered = copied(current_pairs)
+        active = copied(current_pairs)
+        may_skip = False
+        for index, clause in enumerate(generator.generators):
+            if index:
+                active = check_expression(clause.iter, active)
+            cardinality = iterable_nonempty(clause.iter, active)
+            active = consume_iterable(clause.iter, active, exhaust=True)
+            if cardinality is False:
+                skipped = entered if may_skip else []
+                return _dedupe_state_pairs([*skipped, *active])
+            for condition in clause.ifs:
+                active = check_expression(condition, active)
+            may_skip |= bool(clause.ifs) or cardinality is not True
+        results = [generator.key, generator.value] if isinstance(
+            generator, ast.DictComp) else [generator.elt]
+        for result in results:
+            active = check_expression(result, active)
+        skipped = entered if may_skip else []
+        return _dedupe_state_pairs([*skipped, *active])
+
+    def consume_iterable(expr, current_pairs, exhaust):
+        outputs = []
+        for state in current_pairs:
+            generator = generator_for(expr, state)
+            if generator is None:
+                outputs.append(state)
+                continue
+            consumed = consume_generator(generator, [state])
+            if exhaust:
+                for output in consumed:
+                    output.generators = {
+                        name: value
+                        for name, value in output.generators.items()
+                        if value is not generator}
+            outputs.extend(consumed)
+        return _dedupe_state_pairs(outputs)
+
     def check_expression(node, current_pairs):
         if node is None:
             return current_pairs
         if isinstance(node, ast.Lambda):
-            for default in _argument_defaults(node.args):
+            defaults = _argument_defaults(node.args)
+            for default in defaults:
                 current_pairs = check_expression(default, current_pairs)
-            return current_pairs
+            if defaults:
+                nested = [_callable_state(node.args, current_pairs)]
+                check_expression(node.body, nested)
+            return remember(node, current_pairs)
         if isinstance(node, ast.NamedExpr):
             current_pairs = check_expression(node.value, current_pairs)
-            for _, aliases in current_pairs:
-                bindings = {}
-                _bind_alias_target(node.target, node.value, aliases, bindings)
-                aliases.pop(node.target.id, None)
-                aliases.update(bindings)
-            return current_pairs
+            for state in current_pairs:
+                bindings = ({}, {})
+                _bind_alias_target(node.target, node.value, state, bindings)
+                state.aliases.pop(node.target.id, None)
+                state.generators.pop(node.target.id, None)
+                state.aliases.update(bindings[0])
+                state.generators.update(bindings[1])
+            return remember(node, current_pairs)
         if isinstance(node, ast.BoolOp):
             current_pairs = check_expression(node.values[0], current_pairs)
             for value in node.values[1:]:
                 current_pairs = _dedupe_state_pairs([
                     *copied(current_pairs),
                     *check_expression(value, copied(current_pairs))])
-            return current_pairs
+            return remember(node, current_pairs)
         if isinstance(node, ast.IfExp):
             tested = check_expression(node.test, current_pairs)
             body = check_expression(node.body, copied(tested))
             other = check_expression(node.orelse, copied(tested))
-            return _dedupe_state_pairs([*body, *other])
+            return remember(node, _dedupe_state_pairs([*body, *other]))
         if isinstance(node, ast.Compare):
             active = check_expression(node.left, current_pairs)
             finished = []
             for comparator in node.comparators:
                 active = check_expression(comparator, active)
                 finished.extend(copied(active))
-            return _dedupe_state_pairs([*finished, *active])
+            return remember(
+                node, _dedupe_state_pairs([*finished, *active]))
         if isinstance(node, ast.Call):
             callees = check_expression(node.func, current_pairs)
             arguments = sorted([*node.args,
                                 *(kw.value for kw in node.keywords)],
                                key=lambda n: (n.lineno, n.col_offset))
             outputs = []
-            for state, aliases in callees:
-                sender = aliases.get(node.func.target.id) if isinstance(
+            for state in callees:
+                sender = state.aliases.get(node.func.target.id) if isinstance(
                     node.func, ast.NamedExpr) else _resolve_sender_name(
-                        node.func, aliases)
-                current = [(state, aliases)]
+                        node.func, state.aliases)
+                current = [state]
                 for argument in arguments:
                     current = check_expression(argument, current)
-                for current_state, _ in current:
+                call_name = (node.func.id if isinstance(node.func, ast.Name)
+                             else None)
+                method = (node.func.attr if isinstance(
+                    node.func, ast.Attribute) else None)
+                if call_name in _EAGER_ITERABLE_CALLS or method in (
+                        _EAGER_ITERABLE_METHODS):
+                    for argument in node.args:
+                        current = consume_iterable(
+                            argument, current, exhaust=True)
+                elif call_name in _PARTIAL_ITERABLE_CALLS and node.args:
+                    current = consume_iterable(
+                        node.args[0], current, exhaust=False)
+                for current_state in current:
                     found = _py_call_violations(
-                        node, current_state, rel, allowed_opaque_names, sender)
+                        node, current_state.dicts, rel,
+                        allowed_opaque_names, sender)
                     violations.extend(found)
                 outputs.extend(current)
-            return _dedupe_state_pairs(outputs)
+            return remember(node, _dedupe_state_pairs(outputs))
+        if isinstance(node, ast.GeneratorExp):
+            entered = check_expression(node.generators[0].iter, current_pairs)
+            return remember(node, entered)
         if isinstance(node, _COMPREHENSIONS):
             entered = check_expression(node.generators[0].iter, current_pairs)
             active = copied(entered)
@@ -474,10 +388,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for index, generator in enumerate(node.generators):
                 if index:
                     active = check_expression(generator.iter, active)
-                cardinality = _literal_iterable_nonempty(generator.iter)
+                cardinality = iterable_nonempty(generator.iter, active)
+                active = consume_iterable(
+                    generator.iter, active, exhaust=True)
                 if cardinality is False:
                     skipped = entered if may_skip else []
-                    return _dedupe_state_pairs([*skipped, *active])
+                    return remember(node, _dedupe_state_pairs(
+                        [*skipped, *active]))
                 for condition in generator.ifs:
                     active = check_expression(condition, active)
                 may_skip |= bool(generator.ifs) or cardinality is not True
@@ -485,10 +402,14 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 node, ast.DictComp) else [node.elt]
             for result in results:
                 active = check_expression(result, active)
-            if isinstance(node, ast.GeneratorExp):
-                return entered
             skipped = entered if may_skip else []
-            return _dedupe_state_pairs([*skipped, *active])
+            return remember(
+                node, _dedupe_state_pairs([*skipped, *active]))
+        if isinstance(node, ast.Starred):
+            current_pairs = check_expression(node.value, current_pairs)
+            current_pairs = consume_iterable(
+                node.value, current_pairs, exhaust=True)
+            return remember(node, current_pairs)
         if isinstance(node, ast.Dict):
             children = [child for item in zip(node.keys, node.values)
                         for child in item if child is not None]
@@ -496,7 +417,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             children = ast.iter_child_nodes(node)
         for child in children:
             current_pairs = check_expression(child, current_pairs)
-        return current_pairs
+        return remember(node, current_pairs)
 
     def walk(parts, current_pairs, exits=flow_exits):
         return _py_flow_violations(
@@ -508,17 +429,18 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                       *_argument_defaults(statement.args)]
             for value in values:
                 pairs = check_expression(value, pairs)
-            for _, aliases in pairs:
-                aliases.pop(statement.name, None)
+            for state in pairs:
+                state.aliases.pop(statement.name, None)
+                state.generators.pop(statement.name, None)
             nested, _ = _py_flow_violations(
-                statement.body,
-                [({}, _function_aliases(statement, pairs))], rel,
+                statement.body, [_callable_state(statement.args, pairs)], rel,
                 _function_allowed_opaque(statement))
             violations.extend(nested)
             continue
         if isinstance(statement, ast.ClassDef):
-            for _, aliases in pairs:
-                aliases.pop(statement.name, None)
+            for state in pairs:
+                state.aliases.pop(statement.name, None)
+                state.generators.pop(statement.name, None)
             nested, _ = _py_flow_violations(
                 list(_class_functions(statement)),
                 [_copy_state_pair(pair) for pair in pairs], rel,
@@ -545,10 +467,12 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             header = (statement.iter if isinstance(
                 statement, (ast.For, ast.AsyncFor)) else statement.test)
             pairs = check_expression(header, pairs)
+            if isinstance(statement, (ast.For, ast.AsyncFor)):
+                pairs = consume_iterable(header, pairs, exhaust=False)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             zero_pairs = incoming
             if (isinstance(statement, (ast.For, ast.AsyncFor))
-                    and _literal_iterable_nonempty(statement.iter) is True):
+                    and iterable_nonempty(statement.iter, pairs) is True):
                 zero_pairs = []
             target_names = (_bound_names(statement.target)
                             if isinstance(statement, (ast.For, ast.AsyncFor))
@@ -589,14 +513,15 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 if item.optional_vars is None:
                     continue
                 names = _bound_names(item.optional_vars)
-                for state, aliases in entered:
+                for state in entered:
                     resolved = _resolve_sender_name(
-                        item.context_expr, aliases)
+                        item.context_expr, state.aliases)
                     for name in names:
-                        state.pop(name, None)
-                        aliases.pop(name, None)
+                        state.dicts.pop(name, None)
+                        state.aliases.pop(name, None)
+                        state.generators.pop(name, None)
                         if resolved is not None:
-                            aliases[name] = resolved
+                            state.aliases[name] = resolved
             found, pairs = walk(statement.body, entered)
             violations.extend(found)
             continue
@@ -668,9 +593,15 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             pairs = _dedupe_state_pairs([*incoming, *case_pairs])
             continue
         pairs = check_expression(statement, pairs)
-        for state, aliases in pairs:
-            _apply_dict_statement(statement, state)
-            _apply_alias_statement(statement, aliases)
+        targets = (statement.targets if isinstance(statement, ast.Assign)
+                   else [statement.target] if isinstance(
+                       statement, ast.AnnAssign) else ())
+        if any(isinstance(target, (ast.Tuple, ast.List))
+               for target in targets):
+            pairs = consume_iterable(statement.value, pairs, exhaust=True)
+        for state in pairs:
+            _apply_dict_statement(statement, state.dicts)
+            _apply_alias_statement(statement, state)
         if isinstance(statement, (ast.Return, ast.Raise)):
             _record_exit(flow_exits, 'terminal', pairs)
             pairs = []
@@ -694,5 +625,5 @@ def py_tab_routing_violations(path, rel):
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
     violations, _ = _py_flow_violations(
-        tree.body, [({}, {})], rel, frozenset())
+        tree.body, [FlowState({}, {}, {}, {})], rel, frozenset())
     return list(dict.fromkeys(violations))
