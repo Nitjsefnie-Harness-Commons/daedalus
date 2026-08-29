@@ -7,6 +7,7 @@ worker, while the Python helpers keep its subprocesses observable when an
 overlap stalls.
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -354,7 +355,7 @@ def client_states(processes, grace,
 
 
 def assert_clients_exited(states, posted):
-    """Raise one diagnostic assertion per kind of client outcome that failed.
+    """Raise at most one diagnostic assertion: the first failing kind.
 
     A client that outlived its grace and one that exited non-zero having
     written nothing are different failures: diagnosing the second as the first
@@ -382,6 +383,24 @@ def _wait_for_client_commands(queue, count):
         raise AssertionError(
             'timed out waiting for both same-id client commands')
     return commands
+
+
+def client_env():
+    """A client environment, minus any bridge coordinates this process has."""
+    env = dict(os.environ)
+    for key in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID'):
+        env.pop(key, None)
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    return env
+
+
+def cookie_client_argv(owner):
+    """The argv of a real `cookies` client for one owner."""
+    return [
+        sys.executable, '-c',
+        'from daedalus_cli.cli import main; main()',
+        'cookies', '--domain', owner, '--timeout', '120',
+    ]
 
 
 def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
