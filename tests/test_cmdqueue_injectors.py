@@ -2,6 +2,7 @@
 """Transparency controls for test-side command queue fault injectors."""
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -18,6 +19,20 @@ from _cmdqueue_faults import (  # noqa: E402
     _vanish_during_read,
     _virtual_cmdqueue_clock,
 )
+
+
+def _has_numeric_token(message, value):
+    pattern = rf'(?<![\d.]){re.escape(value)}(?![\d.])'
+    return re.search(pattern, message) is not None
+
+
+def _identifies_runaway(message):
+    return (
+        'runaway' in message
+        or ('elapsed' in message
+            and any(word in message for word in ('guard', 'limit')))
+        or ('origin' in message
+            and any(word in message for word in ('past', 'beyond'))))
 
 
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
@@ -636,9 +651,9 @@ def test_virtual_clock_bounds_a_wait_that_never_ends(_tmp):
     assert abs(elapsed - expected_elapsed) < 1e-6, elapsed
     message = str(failure).lower()
     assert 'virtual clock' in message, message
-    assert ('elapsed guard' in message
-            or 'past its origin' in message), message
-    assert f'{_RUNAWAY_ELAPSED:.3f}' in message, message
+    assert _identifies_runaway(message), message
+    assert _has_numeric_token(
+        message, f'{_RUNAWAY_ELAPSED:.3f}'), message
 
 
 def test_virtual_clock_keeps_explicit_sleep_ceilings(_tmp):
@@ -662,8 +677,9 @@ def test_virtual_clock_keeps_explicit_sleep_ceilings(_tmp):
         message = str(failure).lower()
         assert 'virtual clock' in message, message
         assert 'sleep' in message, message
-        assert ('ceiling' in message or 'exceeded' in message), message
-        assert str(max_sleeps) in message, message
+        assert any(word in message for word in (
+            'ceiling', 'maximum', 'limit', 'exceeded')), message
+        assert _has_numeric_token(message, str(max_sleeps)), message
 
 
 if __name__ == '__main__':
