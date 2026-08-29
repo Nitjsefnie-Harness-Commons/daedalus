@@ -156,18 +156,17 @@ def _output_text(value):
 
 
 def _latest_output(latest, earlier):
-    latest_text = _output_text(latest)
-    earlier_text = _output_text(earlier)
-    if not latest_text:
-        return earlier_text
-    if not earlier_text or latest_text.startswith(earlier_text):
-        return latest_text
-    if earlier_text.startswith(latest_text):
-        return earlier_text
-    overlap = min(len(earlier_text), len(latest_text))
-    while overlap and not earlier_text.endswith(latest_text[:overlap]):
-        overlap -= 1
-    return earlier_text + latest_text[overlap:]
+    if not latest:
+        return earlier
+    if not earlier:
+        return latest
+    if isinstance(latest, bytes) and isinstance(earlier, bytes):
+        if latest.startswith(earlier):
+            return latest
+        if earlier.startswith(latest):
+            return earlier
+        return earlier + latest
+    return _output_text(earlier) + _output_text(latest)
 
 
 @dataclass(frozen=True)
@@ -266,7 +265,7 @@ def _settled_windows_output(process, name):
     chunks = getattr(process, f'_{name}_buff', None)
     if not chunks:
         return ''
-    return ''.join(_output_text(chunk) for chunk in chunks)
+    return chunks[0]
 
 
 def _format_timeout_attempt(record):
@@ -356,6 +355,8 @@ def _run_dashboard_node_once(
                     _settled_windows_output(process, 'stdout'), stdout)
                 stderr = _latest_output(
                     _settled_windows_output(process, 'stderr'), stderr)
+        stdout = _output_text(stdout)
+        stderr = _output_text(stderr)
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
         last_phase = phases[-1] if phases else 'none recorded'
         drain_duration = time.monotonic() - drain_started
