@@ -28,27 +28,22 @@ _CONTENT_KEEPALIVE_HARNESS = _dashnode.DashboardNodeHarness(r"""
 phase('dashboard harness started');
 const fs = require('fs');
 const vm = require('vm');
-
 const timers = [];
 const intervals = [];
 const ports = [];
 let nextId = 0;
-
 function scheduled(collection, callback, delay) {
   const item = { id: ++nextId, callback, delay, cleared: false };
   collection.push(item);
   return item.id;
 }
-
 function clearScheduled(collection, id) {
   const item = collection.find((candidate) => candidate.id === id);
   if (item) item.cleared = true;
 }
-
 function eventTarget(listeners) {
   return { addListener(listener) { listeners.push(listener); } };
 }
-
 const windowObject = {
   addEventListener() {},
   postMessage() {},
@@ -91,7 +86,6 @@ const context = vm.createContext({
   clearInterval: (id) => clearScheduled(intervals, id),
   console: { log() {}, error() {} },
 });
-
 phase('dashboard module import started');
 vm.runInContext(
   fs.readFileSync(process.argv[1], 'utf8'), context,
@@ -104,7 +98,6 @@ const secondInterval = intervals[intervals.length - 1];
 for (const listener of ports[0].disconnectListeners) listener();
 secondInterval.callback();
 phase('dashboard call settled');
-
 process.stdout.write(JSON.stringify({
   portCount: ports.length,
   port2Pings: ports[1].messages.length,
@@ -115,9 +108,8 @@ phase('dashboard harness finished');
 """, bounded_steps=0, arguments=(ROOT / 'extension' / 'content.js',))
 
 
-def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
+def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(_tmp):
     """A retired port callback cannot clear or replace the current port."""
-    del tmp
     result = _dashnode.run_dashboard_node(_CONTENT_KEEPALIVE_HARNESS)
     actual = json.loads(result.stdout)
     assert actual == {
@@ -131,7 +123,6 @@ def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(tmp):
 _DASHBOARD_CONSUME_HARNESS = _dashnode.DashboardNodeHarness(r"""
 phase('dashboard harness started');
 const fs = require('fs');
-
 function response(status, data) {
   return {
     ok: status >= 200 && status < 300,
@@ -141,7 +132,6 @@ function response(status, data) {
     text: async () => JSON.stringify(data),
   };
 }
-
 (async () => {
   const tokenKey = 'daedalus-token';
   globalThis.localStorage = {
@@ -149,7 +139,6 @@ function response(status, data) {
     setItem: () => {},
   };
   globalThis.setTimeout = callback => { callback(); return 0; };
-
   let commandSent = false;
   globalThis.fetch = async (target, init = {}) => {
     const method = init.method || 'GET';
@@ -170,7 +159,6 @@ function response(status, data) {
       world: 'page:cdp',
     });
   };
-
   phase('dashboard module import started');
   const source = fs.readFileSync(process.argv[1], 'utf8');
   const moduleUrl = 'data:text/javascript;base64,'
@@ -198,16 +186,14 @@ function response(status, data) {
 """, bounded_steps=2, arguments=(ROOT / 'dashboard' / 'api.js',))
 
 
-def test_dashboard_failed_consume_is_not_a_success(tmp):
+def test_dashboard_failed_consume_is_not_a_success(_tmp):
     """The dashboard must reject when its matching-result consume fails."""
-    del tmp
     _dashnode.run_dashboard_node(_DASHBOARD_CONSUME_HARNESS)
 
 
 _DASHBOARD_WORLD_HARNESS = _dashnode.DashboardNodeHarness(r"""
 phase('dashboard harness started');
 const fs = require('fs');
-
 (async () => {
   phase('dashboard module import started');
   const source = fs.readFileSync(process.argv[1], 'utf8');
@@ -231,9 +217,8 @@ const fs = require('fs');
     ROOT / 'dashboard' / 'sections' / '_util.js',))
 
 
-def test_dashboard_labels_eval_world_as_a_channel(tmp):
+def test_dashboard_labels_eval_world_as_a_channel(_tmp):
     """Dashboard text presents `world` only as execution-channel metadata."""
-    del tmp
     result = _dashnode.run_dashboard_node(_DASHBOARD_WORLD_HARNESS)
     assert json.loads(result.stdout) == [
         'channel=cdp',
@@ -277,17 +262,10 @@ _CONSTANT_MARKUP = re.compile(
     r'|`(?:[^`\\$]|\\.|\$(?!\{))*`)$')
 
 
-def test_dashboard_never_builds_markup_from_a_value(tmp):
-    """innerHTML in the dashboard is only ever a constant.
-
-    Several catch paths concatenated an error string — or an
-    extension-supplied reason — into innerHTML, so text the dashboard did not
-    author could become markup. The rule enforced here is the one that keeps
-    itself true: a value reaches the page through text nodes or the `h`
-    helper, never through markup, so an assignment that is not a literal is a
-    violation whatever the value happens to be today. `+=` never qualifies.
+def test_dashboard_never_builds_markup_from_a_value(_tmp):
+    """Reject nonliteral innerHTML, including `+=`.
+    Untrusted values must reach the page through text nodes or the `h` helper.
     """
-    del tmp
     violations = []
     sources = sorted((ROOT / 'dashboard').rglob('*.js'))
     assert sources, 'no dashboard sources found'
@@ -306,7 +284,6 @@ def test_dashboard_never_builds_markup_from_a_value(tmp):
 
 _TAB_SELECTOR_HARNESS = _dashnode.DashboardNodeHarness(r"""
 import { pathToFileURL } from 'node:url';
-
 phase('dashboard harness started');
 (async () => {
 // Enough DOM for `h` and `clear`; the controller under test is real.
@@ -338,7 +315,6 @@ globalThis.document = {
   createElement: (tag) => new El(tag),
   createTextNode: (t) => ({ tag: '#text', text: String(t), children: [] }),
 };
-
 // pathToFileURL, not the bare path: Node's ESM loader accepts only file://
 // URLs, and on Windows an absolute path starts with a drive letter it reads
 // as an unsupported URL scheme ('d:').
@@ -348,18 +324,15 @@ const { bindTabSelector } = await bounded(
   'dashboard module import', _dashnodeStepTimeoutMs,
 );
 phase('dashboard module imported');
-
 let tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'second' }];
 const listeners = [];
 const select = new El('select');
 const api = { get: async () => tabs };
 const bus = { on: (fn) => listeners.push(fn) };
-
 function emit(type) {
   for (const fn of listeners) fn({ type });
 }
 const settle = () => new Promise((r) => setTimeout(r, 0));
-
 phase('dashboard call started');
 bindTabSelector(select, {
   getToken: () => 'tok', api, bus, placeholder: '(active tab)',
@@ -367,7 +340,6 @@ bindTabSelector(select, {
 await bounded(
   settle(), 'initial tab selector render', _dashnodeStepTimeoutMs);
 const initial = select.options.map((o) => o.value);
-
 select.value = '22';
 tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'RETITLED' }];
 emit('tab-updated');
@@ -377,7 +349,6 @@ const afterUpdate = {
   labels: select.options.map((o) => o.label),
   selected: select.value,
 };
-
 tabs = [{ tabId: '11', title: 'first' }];
 emit('tab-unregistered');
 await bounded(
@@ -386,14 +357,12 @@ const afterUnregister = {
   offered: select.options.map((o) => o.value),
   selected: select.value,
 };
-
 tabs = [{ tabId: '11', title: 'first' }, { tabId: '33', title: 'third' }];
 emit('tabs-synced');
 await bounded(
   settle(), 'tab sync refresh', _dashnodeStepTimeoutMs);
 const afterSync = select.options.map((o) => o.value);
 phase('dashboard call settled');
-
 process.stdout.write(JSON.stringify({
   initial, afterUpdate, afterUnregister, afterSync,
 }));
@@ -408,15 +377,10 @@ def _run_tab_selector_harness():
     return json.loads(result.stdout)
 
 
-def test_a_tab_selector_follows_every_lifecycle_event(tmp):
-    """One selector, refreshed by all three events, offering only live tabs.
-
-    Four sections refreshed on `tabs-synced` alone, so a tab that had been
-    retitled or unregistered stayed offered — and selectable — until a full
-    sync happened to arrive. A selection also survived unconditionally, which
-    is how a command ended up aimed at a tab that no longer existed.
+def test_a_tab_selector_follows_every_lifecycle_event(_tmp):
+    """One selector follows all events and offers only live tabs.
+    A removed selection must not survive until the next full tab sync.
     """
-    del tmp
     seen = _run_tab_selector_harness()
     assert seen['initial'] == ['', '11', '22'], seen
 
@@ -433,9 +397,8 @@ def test_a_tab_selector_follows_every_lifecycle_event(tmp):
     assert seen['afterSync'] == ['', '11', '33'], seen
 
 
-def test_every_tab_selector_uses_the_shared_controller(tmp):
+def test_every_tab_selector_uses_the_shared_controller(_tmp):
     """No section keeps a private copy to drift out of step again."""
-    del tmp
     private = []
     for path in sorted((ROOT / 'dashboard' / 'sections').glob('*.js')):
         text = path.read_text(encoding='utf-8')
@@ -444,14 +407,8 @@ def test_every_tab_selector_uses_the_shared_controller(tmp):
     assert not private, private
 
 
-def test_no_dashboard_export_is_unreferenced(tmp):
-    """A public module surface nothing imports is untested code.
-
-    Three of them accumulated — getBinary, evalOn and debounce — and each was
-    found the same way, by someone happening to search for the name. This is
-    the search, run every time.
-    """
-    del tmp
+def test_no_dashboard_export_is_unreferenced(_tmp):
+    """A public module surface nothing imports is untested code."""
     root = ROOT / 'dashboard'
     sources = {path: path.read_text(encoding='utf-8')
                for path in sorted(root.rglob('*.js'))}
@@ -474,9 +431,13 @@ def test_no_dashboard_export_is_unreferenced(tmp):
 
 
 class _ControlledReader:
-    def __init__(self, name, native_id, events):
+    def __init__(self, name, native_id, events, *, finished=False,
+                 stuck=False):
         self.name, self.native_id, self.events = name, native_id, events
         self.cancelled, self.finished = threading.Event(), threading.Event()
+        self.stuck = stuck
+        if finished:
+            self.finished.set()
 
     def cancel(self):
         self.events.append(('reader-cancel', self.name))
@@ -487,7 +448,7 @@ class _ControlledReader:
 
     def join(self, timeout):
         self.events.append(('reader-join', self.name, timeout))
-        if self.cancelled.is_set():
+        if self.cancelled.is_set() and not self.stuck:
             self.finished.set()
 
 
@@ -501,19 +462,39 @@ class _ControlledPipe:
             f'{self.name} closed before its reader finished')
 
 
+class _LiveReaderBuffer:
+    def __init__(self, name, events):
+        self.name, self.events = name, events
+
+    def __bool__(self):
+        self.events.append(('buffer-read', self.name))
+        return False
+
+
 class _ControlledProcess:
     def __init__(self, pid, command, outcomes, events, *, wait_succeeds=False,
-                 held_readers=False):
+                 held_readers=False, reader_buffers=None, stuck_reader=None):
         self.pid, self.command = pid, command
         self.outcomes, self.events = list(outcomes), events
         self.wait_succeeds = wait_succeeds
         self.returncode = self.stdout = self.stderr = None
+        held_readers |= reader_buffers is not None
         if held_readers:
-            self.stdout_thread = _ControlledReader('stdout', pid * 2, events)
-            self.stderr_thread = _ControlledReader(
-                'stderr', pid * 2 + 1, events)
+            buffers = reader_buffers or {}
+
+            def reader(name, native_id):
+                return _ControlledReader(
+                    name, native_id, events, finished=name in buffers,
+                    stuck=stuck_reader == name)
+            self.stdout_thread = reader('stdout', pid * 2)
+            self.stderr_thread = reader('stderr', pid * 2 + 1)
             self.stdout = _ControlledPipe('stdout', self.stdout_thread, events)
             self.stderr = _ControlledPipe('stderr', self.stderr_thread, events)
+            if reader_buffers is not None:
+                for name in ('stdout', 'stderr'):
+                    value = ([buffers[name]] if name in buffers
+                             else _LiveReaderBuffer(name, events))
+                    setattr(self, f'_{name}_buff', value)
 
     def communicate(self, timeout):
         self.events.append(('communicate', self.pid, timeout))
@@ -575,8 +556,7 @@ def _result(code, stdout='', stderr=''):
     return 'result', code, stdout, stderr
 
 
-def test_windows_retries_one_outer_timeout_then_returns_success(tmp):
-    del tmp
+def test_windows_retries_one_outer_timeout_then_returns_success(_tmp):
     result, events, diagnostic = _controlled_run(
         'win32', (101, [_timeout(), _result(-9, 'first', 'error')]),
         (202, [_result(0, 'second success', 'second stderr')]))
@@ -589,8 +569,7 @@ def test_windows_retries_one_outer_timeout_then_returns_success(tmp):
     assert all(part in diagnostic for part in expected), diagnostic
 
 
-def test_two_windows_outer_timeouts_keep_both_attempt_records(tmp):
-    del tmp
+def test_two_windows_outer_timeouts_keep_both_attempt_records(_tmp):
     failure, events, _ = _controlled_run(
         'win32', (301, [_timeout(), _result(
             -9, 'complete one', '[phase] dashboard module imported\n')]),
@@ -607,8 +586,7 @@ def test_two_windows_outer_timeouts_keep_both_attempt_records(tmp):
     assert [event[0] for event in events].count('popen') == 2, events
 
 
-def test_non_windows_outer_timeout_does_not_retry(tmp):
-    del tmp
+def test_non_windows_outer_timeout_does_not_retry(_tmp):
     failure, events, _ = _controlled_run(
         'linux', (401, [_timeout(), _result(-9)]))
     assert failure.startswith('dashboard node outer timeout after 1 attempt')
@@ -616,8 +594,7 @@ def test_non_windows_outer_timeout_does_not_retry(tmp):
     assert [event[0] for event in events].count('popen') == 1, events
 
 
-def test_windows_deterministic_failure_after_retry_does_not_retry(tmp):
-    del tmp
+def test_windows_deterministic_failure_after_retry_does_not_retry(_tmp):
     failure, events, _ = _controlled_run(
         'win32', (501, [_result(
             7, 'deterministic output', 'deterministic error')]),
@@ -628,9 +605,7 @@ def test_windows_deterministic_failure_after_retry_does_not_retry(tmp):
     assert [event[0] for event in events].count('popen') == 1, events
 
 
-def test_retry_launch_waits_for_first_child_cleanup(tmp):
-    del tmp
-
+def test_retry_launch_waits_for_first_child_cleanup(_tmp):
     def finish(process):
         process.events.append(('drain-complete', process.pid))
         process.returncode = -9
@@ -648,8 +623,7 @@ def test_retry_launch_waits_for_first_child_cleanup(tmp):
         i for i, event in enumerate(events) if event[:2] == ('popen', 602))
 
 
-def test_windows_does_not_retry_when_child_cleanup_cannot_finish(tmp):
-    del tmp
+def test_windows_does_not_retry_when_child_cleanup_cannot_finish(_tmp):
     failure, events, _ = _controlled_run(
         'win32', (701, [_timeout(), _timeout('partial', 'error')]),
         (702, [_result(0, 'wrong overlap')]))
@@ -658,20 +632,46 @@ def test_windows_does_not_retry_when_child_cleanup_cannot_finish(tmp):
     assert [event[0] for event in events].count('popen') == 1, events
 
 
-def test_windows_does_not_retry_after_timed_out_drain_is_reaped(tmp):
-    del tmp
+def test_windows_does_not_retry_after_timed_out_drain_is_reaped(_tmp):
     failure, events, _ = _controlled_run(
         'win32', (801, [_timeout(), _timeout('partial', 'error')],
                   {'wait_succeeds': True}),
         (802, [_result(0, 'wrong retry')]))
     assert isinstance(failure, str), failure
     assert 'drain outcome: timed out' in failure, failure
+    assert "stdout: 'partial'; stderr: 'error'" in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
     assert [event[0] for event in events].count('wait') == 1, events
 
 
-def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(tmp):
-    del tmp
+def test_windows_preserves_only_completed_cpython_reader_buffers(_tmp):
+    failure, _, _ = _controlled_run(
+        'win32', (1001, [
+            _timeout(b'prefix ', b'early error\n'),
+            _timeout(b'prefix middle ', None)], {
+                'wait_succeeds': True,
+                'reader_buffers': {
+                    'stdout': b'prefix middle end',
+                    'stderr': b'[phase] buffered phase\nbuffered error',
+                }}))
+    assert "stdout: 'prefix middle end'" in failure, failure
+    assert failure.count('prefix middle end') == 1, failure
+    assert "stderr: 'early error\\n[phase] buffered phase\\n" \
+        "buffered error'" in failure
+    assert 'last phase: buffered phase' in failure, failure
+
+    sibling, events, _ = _controlled_run(
+        'win32', (1002, [_timeout(None, None), _timeout(None, None)], {
+            'wait_succeeds': True,
+            'reader_buffers': {'stdout': b'completed sibling'},
+            'stuck_reader': 'stderr',
+        }))
+    assert "stdout: 'completed sibling'; stderr: ''" in sibling, sibling
+    assert ('buffer-read', 'stderr') not in events, events
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
     failure, events, _ = _controlled_run(
         'win32', (901, [_timeout(), _timeout('partial', 'error')],
                   {'wait_succeeds': True, 'held_readers': True}),

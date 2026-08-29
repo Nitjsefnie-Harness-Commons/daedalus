@@ -156,9 +156,18 @@ def _output_text(value):
 
 
 def _latest_output(latest, earlier):
-    if latest not in (None, b'', ''):
-        return _output_text(latest)
-    return _output_text(earlier)
+    latest_text = _output_text(latest)
+    earlier_text = _output_text(earlier)
+    if not latest_text:
+        return earlier_text
+    if not earlier_text or latest_text.startswith(earlier_text):
+        return latest_text
+    if earlier_text.startswith(latest_text):
+        return earlier_text
+    overlap = min(len(earlier_text), len(latest_text))
+    while overlap and not earlier_text.endswith(latest_text[:overlap]):
+        overlap -= 1
+    return earlier_text + latest_text[overlap:]
 
 
 @dataclass(frozen=True)
@@ -250,6 +259,16 @@ def _finish_windows_pipe_readers(process, deadline):
             'dashboard process reader cancellation failed') from failures[0]
 
 
+def _settled_windows_output(process, name):
+    thread = getattr(process, f'{name}_thread', None)
+    if thread is None or thread.is_alive():
+        return ''
+    chunks = getattr(process, f'_{name}_buff', None)
+    if not chunks:
+        return ''
+    return ''.join(_output_text(chunk) for chunk in chunks)
+
+
 def _format_timeout_attempt(record):
     return (
         f'attempt {record.attempt}:\n'
@@ -332,6 +351,11 @@ def _run_dashboard_node_once(
             except subprocess.TimeoutExpired as wait_failure:
                 if cleanup_failure is None:
                     cleanup_failure = wait_failure
+            if sys.platform == 'win32':
+                stdout = _latest_output(
+                    _settled_windows_output(process, 'stdout'), stdout)
+                stderr = _latest_output(
+                    _settled_windows_output(process, 'stderr'), stderr)
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
         last_phase = phases[-1] if phases else 'none recorded'
         drain_duration = time.monotonic() - drain_started
