@@ -31,6 +31,17 @@ def _await_mcp_listener(proc, output, timeout):
         + _util._startup_observations(proc, output, timeout))
 
 
+def _cleanup_mcp(proc):
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=10)
+    proc._daedalus_drain_thread.join()
+    proc.stdout.close()
+
+
 def test_the_mcp_server_runs_by_absolute_file_path(tmp):
     """Direct-file execution must bootstrap package imports from any cwd."""
     env = dict(os.environ)
@@ -52,12 +63,7 @@ def test_the_mcp_server_runs_by_absolute_file_path(tmp):
             proc, output, _util.startup_timeout())
         assert port > 0, output
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=10)
+        _cleanup_mcp(proc)
 
 
 def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
@@ -84,12 +90,10 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
             proc, output, _util.startup_timeout())
         assert port > 0, output
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=10)
+        _cleanup_mcp(proc)
+    assert proc.stdout.closed
+    drain = getattr(proc, '_daedalus_drain_thread')
+    assert not drain.is_alive()
 
 
 def test_flat_loading_the_mcp_server_does_not_change_sys_path(tmp):
