@@ -352,9 +352,9 @@ def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
         return original(candidate, *args, **kwargs)
 
     def open_outcome(opener, receiver, mode):
+        open_kwargs = {} if 'b' in mode else {'encoding': 'utf-8'}
         try:
-            with opener(
-                    receiver, mode=mode, encoding='utf-8') as opened:
+            with opener(receiver, mode=mode, **open_kwargs) as opened:
                 state = (opened.tell(), opened.readable(),
                          opened.writable())
         except OSError as caught:
@@ -379,35 +379,32 @@ def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
             ('vanish', _vanish_during_read,
              (queued, clock), FileNotFoundError))
         for label, injector, injector_args, injected_type in injectors:
-            for mode in ('w+', 'a+', 'x+'):
-                native = Path(tmp) / f'native-{label}-{mode}'
-                if mode == 'x+':
-                    queued.unlink(missing_ok=True)
-                else:
-                    native.write_text('seed', encoding='utf-8')
-                    queued.write_text('seed', encoding='utf-8')
+            for mode in ('w+', '+w', 'wb+', 'a+', '+a', 'x+', '+x'):
+                queued.write_text('seed', encoding='utf-8')
                 underlying_opens[0] = 0
-                expected = open_outcome(counted, native, mode)
+                expected = open_outcome(counted, queued, mode)
                 expected_opens = underlying_opens[0]
-                expected_content = file_content(native)
+                expected_content = file_content(queued)
+                queued.write_text('seed', encoding='utf-8')
                 underlying_opens[0] = 0
                 Path.open = counted
                 try:
                     with injector(*injector_args) as state:
                         actual = open_outcome(Path.open, queued, mode)
                         actual_opens = underlying_opens[0]
-                        actual_content = file_content(queued)
                         fault = open_outcome(Path.open, queued, 'r')
                         if state is not None:
                             assert state == [1], (label, mode, state)
                 finally:
                     Path.open = original
+                actual_content = file_content(queued)
                 assert actual == expected, (
                     label, mode, actual, expected)
                 assert actual_opens == expected_opens, (
                     label, mode, actual_opens, expected_opens)
-                assert actual_content == expected_content, (
-                    label, mode, actual_content, expected_content)
+                if label != 'vanish':
+                    assert actual_content == expected_content, (
+                        label, mode, actual_content, expected_content)
                 assert fault[0] == 'raised', (label, mode, fault)
                 assert fault[1][0] is injected_type, (
                     label, mode, fault, injected_type)

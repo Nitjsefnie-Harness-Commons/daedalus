@@ -35,15 +35,21 @@ def _target_key(candidate):
         return None
 
 
-def _plain_read(handle):
-    """A call that creates or truncates is not the read an injector faults."""
-    return handle.readable() and handle.mode[0] not in 'wax'
+def _plain_read(handle, args, kwargs):
+    """A call that creates or truncates is not the read an injector faults.
+
+    The real API has already accepted this call, so its mode is a valid
+    spelling and only has to be searched, never parsed. The handle cannot
+    answer instead: a truncating `wb+` reports its mode as `rb+`.
+    """
+    mode = kwargs.get('mode', args[0] if args else 'r')
+    return handle.readable() and not set(mode) & set('wax')
 
 
 def _native_read_handle(original, candidate, args, kwargs):
     """Return a non-readable open for the caller; None for a real read."""
     handle = original(candidate, *args, **kwargs)
-    if _plain_read(handle):
+    if _plain_read(handle, args, kwargs):
         handle.close()
         return None
     return handle
@@ -80,7 +86,8 @@ def _refuse_path_operation(path, operation, failures, clock=None):
             # A call the real API refuses performed no operation, so it is
             # neither counted nor recorded as one.
             result = original(candidate, *args, **kwargs)
-            if operation == 'open' and not _plain_read(result):
+            if operation == 'open' and not _plain_read(
+                    result, args, kwargs):
                 return result
             calls[0] += 1
             if clock is not None:
