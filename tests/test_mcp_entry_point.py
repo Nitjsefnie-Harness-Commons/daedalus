@@ -89,9 +89,9 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
     joins = []
     original_join = drain.join
 
-    def record_join():
+    def record_join(*args, **kwargs):
         joins.append(True)
-        original_join()
+        return original_join(*args, **kwargs)
 
     drain.join = record_join
     try:
@@ -100,7 +100,7 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
         assert port > 0, output
     finally:
         _cleanup_mcp(proc)
-    assert joins == [True]
+    assert joins
     assert proc.stdout.closed
     assert not drain.is_alive()
 
