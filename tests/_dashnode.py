@@ -281,7 +281,7 @@ def _run_dashboard_node_once(
             duration_s=time.monotonic() - started,
         )
         timeout_failure = _DashboardOuterTimeout(
-            record, retryable=cleanup_failure is None)
+            record, retryable=drain_outcome == 'completed')
         raise timeout_failure from (cleanup_failure or failure)
     if process.returncode != 0:
         raise AssertionError((process.returncode, stdout, stderr))
