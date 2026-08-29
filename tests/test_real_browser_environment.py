@@ -9,6 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
+import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
 from test_real_browser_harness import _enter_fixture  # noqa: E402
 
@@ -47,7 +48,8 @@ def test_repository_node_probe_starts_and_terminates(tmp):
     del tmp
     node = shutil.which('node')
     if not node:
-        _util.skip('Node is absent, so its repository probe cannot be checked')
+        _realbrowser_controls.control_requirement_missing(
+            'Node is absent, so its repository probe cannot be checked')
     capability = subprocess.run(
         [node, '-e',
          "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
@@ -65,7 +67,8 @@ def test_repository_node_probe_starts_and_terminates(tmp):
                 raise AssertionError(
                     f'the repository probe skipped capable Node {node}'
                 ) from why
-            _util.skip('Node is present but lacks the required WebSocket')
+            _realbrowser_controls.control_requirement_missing(
+                'Node is present but lacks the required WebSocket')
     assert capability.returncode == 0, (
         'the repository probe accepted Node without WebSocket', node)
     assert requirements == (node, '/controlled/chromium'), requirements
@@ -75,7 +78,8 @@ def test_repository_worker_probe_matches_declared_functions(tmp):
     del tmp
     node = shutil.which('node')
     if not node:
-        _util.skip('Node is absent, so the worker probe cannot be checked')
+        _realbrowser_controls.control_requirement_missing(
+            'Node is absent, so the worker probe cannot be checked')
 
     def evaluate(declarations):
         program = (
@@ -244,8 +248,8 @@ def test_oversized_browser_command_is_harness_failure(tmp):
 
 
 def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='realbrowserenvironment_')
+    return _realbrowser_controls.run_controls(
+        globals(), tmp_prefix='realbrowserenvironment_')
 
 
 if __name__ == '__main__':

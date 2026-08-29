@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
 from _realbrowser import (BrowserEnvironmentSkipped,  # noqa: E402
                           browser_requirements, cdp_call, cdp_eval,
@@ -303,9 +304,8 @@ def test_cdp_eval_throw_is_terminal(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='realbrowser_',
-                        requires='Chromium and Node')
+    return _realbrowser_controls.run_real_browser_tests(
+        globals(), tmp_prefix='realbrowser_', requires='Chromium and Node')
 
 
 if __name__ == '__main__':

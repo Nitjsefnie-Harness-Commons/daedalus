@@ -10,12 +10,10 @@ is a failure.
 """
 import contextlib
 import errno
-import http.server
 import json
 import shutil
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -23,11 +21,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
-                        CDP_RESPONSE_DEADLINE_MS, CDP_TIMEOUT_EXIT_CODE,
-                        HOSTILE_EVAL_SCRIPT, PERFORMANCE_POISON_EVAL_SCRIPT,
-                        PLAIN_EVAL_SCRIPT, STRICT_CSP_EVAL_SCRIPT)
+                        CDP_RESPONSE_DEADLINE_MS, CDP_TIMEOUT_EXIT_CODE)
 from _realbrowser_errors import (CDPEvaluationError, CDPTimeout,  # noqa: E402
                                  FirstNavigationTimeout)
+from _realbrowser_pages import (_fixture_request_arrived,  # noqa: E402
+                                _fixture_request_marker, eval_page_server)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
@@ -43,94 +41,6 @@ WINDOWS_COMMAND_TOO_LONG = 206
 
 class BrowserEnvironmentSkipped(_util.Skipped):
     """The browser installation could not reach a usable fixture state."""
-
-
-class _EvalPageServer(http.server.ThreadingHTTPServer):
-    def __init__(self, address, handler):
-        super().__init__(address, handler)
-        self._request_lock = threading.Lock()
-        self._request_paths = []
-
-    def record_request(self, path):
-        with self._request_lock:
-            self._request_paths.append(path)
-
-    def request_marker(self):
-        with self._request_lock:
-            return len(self._request_paths)
-
-    def received_request_since(self, page_url, marker):
-        path = urllib.parse.urlsplit(page_url).path
-        with self._request_lock:
-            return path in self._request_paths[marker:]
-
-
-_FIXTURE_SERVERS = {}
-_FIXTURE_SERVERS_LOCK = threading.Lock()
-
-
-class _EvalPageHandler(http.server.BaseHTTPRequestHandler):
-    """Serve the real-page evaluator fixtures over one loopback origin."""
-
-    def do_GET(self):
-        path = urllib.parse.urlsplit(self.path).path
-        self.server.record_request(path)
-        pages = {
-            '/hostile.html': (
-                b'<title>loading</title><body><script src="/hostile.js"></script></body>',
-                'text/html', None),
-            '/hostile.js': (
-                HOSTILE_EVAL_SCRIPT.encode(), 'text/javascript', None),
-            '/strict.html': (
-                b'<title>loading</title><body><script src="/strict.js"></script></body>',
-                'text/html', "default-src 'self'; script-src 'self'"),
-            '/strict.js': (
-                STRICT_CSP_EVAL_SCRIPT.encode(), 'text/javascript', None),
-            '/performance-poison.html': (
-                b'<title>loading</title><body><script src="/performance-poison.js"></script></body>',
-                'text/html', None),
-            '/performance-poison.js': (
-                PERFORMANCE_POISON_EVAL_SCRIPT.encode(), 'text/javascript', None),
-            '/plain.html': (
-                b'<title>loading</title><body><script src="/plain.js"></script></body>',
-                'text/html', None),
-            '/plain.js': (
-                PLAIN_EVAL_SCRIPT.encode(), 'text/javascript', None),
-        }
-        fixture = pages.get(path)
-        if fixture is None:
-            self.send_error(404)
-            return
-        body, content_type, csp = fixture
-        self.send_response(200)
-        self.send_header('Content-Type', content_type)
-        if csp:
-            self.send_header('Content-Security-Policy', csp)
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
-        del format, args
-
-
-@contextlib.contextmanager
-def eval_page_server():
-    server = _EvalPageServer(
-        ('127.0.0.1', 0), _EvalPageHandler)
-    origin = f'http://127.0.0.1:{server.server_address[1]}'
-    with _FIXTURE_SERVERS_LOCK:
-        _FIXTURE_SERVERS[origin] = server
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    try:
-        yield origin
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=10)
-        with _FIXTURE_SERVERS_LOCK:
-            _FIXTURE_SERVERS.pop(origin, None)
 
 
 def cdp_call(node, target, method, params):
@@ -149,26 +59,6 @@ def cdp_call(node, target, method, params):
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout or '{}')
-
-
-def _fixture_request_marker(page_url):
-    parts = urllib.parse.urlsplit(page_url)
-    origin = f'{parts.scheme}://{parts.netloc}'
-    with _FIXTURE_SERVERS_LOCK:
-        server = _FIXTURE_SERVERS.get(origin)
-    return None if server is None else (server, server.request_marker())
-
-
-def _fixture_request_arrived(page_url, marker):
-    if marker is None:
-        return False
-    server, request_index = marker
-    parts = urllib.parse.urlsplit(page_url)
-    origin = f'{parts.scheme}://{parts.netloc}'
-    with _FIXTURE_SERVERS_LOCK:
-        if _FIXTURE_SERVERS.get(origin) is not server:
-            return False
-    return server.received_request_since(page_url, request_index)
 
 
 def cdp_eval(node, target, expression):
@@ -298,8 +188,8 @@ def _devtools_targets(port):
         return json.load(reply)
 
 
-def _worker_targets(targets):
-    """Every service worker that could be an extension's background worker.
+def _worker_targets(targets, declared):
+    """Every service worker whose script is declared by the extension.
 
     More than one extension can be loaded at once, and a CI runner's browser
     carries one of its own, so this is a list rather than the first match:
@@ -308,10 +198,10 @@ def _worker_targets(targets):
     """
     return [item for item in targets
             if item.get('type') == 'service_worker'
-            and item.get('url', '').endswith('/background.js')]
+            and item.get('url', '').endswith('/' + declared)]
 
 
-def _wait_for_devtools(profile, process):
+def _wait_for_devtools(profile, process, declared):
     """Wait for the DevTools endpoint, the page, and a background worker.
 
     Everything this waits on is the browser starting, not the extension
@@ -336,7 +226,7 @@ def _wait_for_devtools(profile, process):
                     targets = _devtools_targets(port)
                     page = next((item for item in targets
                                  if item.get('type') == 'page'), None)
-                    workers = _worker_targets(targets)
+                    workers = _worker_targets(targets, declared)
                     if page and workers:
                         return page, workers, port
                     seen = (f'{len(targets)} targets on port {port}, '
@@ -395,6 +285,46 @@ def worker_state(node, target):
         return f'could not be read back: {why}'
 
 
+def declared_worker(extension):
+    """Return the validated manifest worker path relative to the extension."""
+    extension = Path(extension).resolve()
+    manifest_path = extension / 'manifest.json'
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as why:
+        raise AssertionError(
+            f'extension manifest is unreadable: {manifest_path}: {why}'
+        ) from why
+    background = (manifest.get('background')
+                  if isinstance(manifest, dict) else None)
+    declared = (background.get('service_worker')
+                if isinstance(background, dict) else None)
+    if not isinstance(declared, str) or not declared:
+        raise AssertionError(
+            f'extension manifest declares no service worker: {manifest_path}')
+    worker_path = (extension / declared).resolve()
+    if not worker_path.is_relative_to(extension):
+        raise AssertionError(
+            'extension manifest declares a service worker outside the '
+            f'extension: {worker_path}')
+    if not worker_path.is_file():
+        raise AssertionError(
+            'extension manifest declares a missing service worker: '
+            f'{worker_path}')
+    return worker_path.relative_to(extension).as_posix()
+
+
+@contextlib.contextmanager
+def _environment_verdicts_closed():
+    """Turn an environment skip after configuration into a hard failure."""
+    try:
+        yield
+    except BrowserEnvironmentSkipped as why:
+        raise AssertionError(
+            'browser environment skip escaped after extension configuration: '
+            + str(why)) from why
+
+
 @contextlib.contextmanager
 def real_extension_page(tmp, bridge_url, token, page_url,
                         extension_root=None, extra_extensions=()):
@@ -421,17 +351,7 @@ def real_extension_page(tmp, bridge_url, token, page_url,
     node, browser = browser_requirements()
     profile = Path(tmp) / 'chromium-profile'
     extension = (extension_root or EXTENSION_ROOT).resolve()
-    manifest = json.loads(
-        (extension / 'manifest.json').read_text(encoding='utf-8'))
-    background = manifest.get('background', {})
-    declared_worker = (background.get('service_worker')
-                       if isinstance(background, dict) else None)
-    if isinstance(declared_worker, str) and declared_worker:
-        worker_path = (extension / declared_worker).resolve()
-        if not worker_path.is_file():
-            raise AssertionError(
-                f'extension manifest declares a missing service worker: '
-                f'{worker_path}')
+    worker_script = declared_worker(extension)
     # Ours last: a browser that carries an extension of its own lists that
     # one first, which is the order the CI legs see.
     loaded = ','.join(str(Path(item).resolve())
@@ -460,9 +380,9 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as why:
         _raise_start_failure('Chromium', browser, why)
-    configuration_started = False
     try:
-        page, workers, devtools_port = _wait_for_devtools(profile, process)
+        page, workers, devtools_port = _wait_for_devtools(
+            profile, process, worker_script)
         page_target = page['webSocketDebuggerUrl']
         # Load the page before waiting on the worker. An MV3 worker goes
         # dormant on its own after about thirty idle seconds, and evaluating
@@ -483,123 +403,12 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             # the navigation reply from arriving before the deadline.
             raise FirstNavigationTimeout(
                 page_url, request_arrived) from why
-        deadline = time.time() + 30
-        last_error = 'no evaluation was attempted'
-        answered = False
-        worker_target = None
-        while time.time() < deadline:
-            worker_target, reached, error = ready_worker(node, workers)
-            answered = answered or reached
-            if worker_target:
-                break
-            last_error = error
-            try:
-                workers = _worker_targets(_devtools_targets(devtools_port))
-            except (OSError, ValueError) as why:
-                last_error = f'listing DevTools targets failed: {why}'
-            # Every attempt spawns one node process per candidate to
-            # speak CDP, so this polls twice a second rather than twenty
-            # times. Polling faster bought nothing on the runner that was
-            # failing here, and a two-core machine pays for every spawn.
-            time.sleep(0.5)
-        if worker_target is None:
-            # Two different states wear the same timeout. A worker that
-            # answers is one this machine can reach, so what it says about
-            # itself is the extension's own behaviour and stays a failure —
-            # that is the case the injected-fault test drives. A worker that
-            # never answers at all has not been reached: the browser lists a
-            # target and refuses every debugger connection to it, which is a
-            # property of the machine and skips like the launch steps do.
-            if answered:
-                states = [worker_state(node, item['webSocketDebuggerUrl'])
-                          for item in workers]
-                raise AssertionError(
-                    'the extension service worker never finished loading: '
-                    'DevTools exposed its target and the fixture page was '
-                    f'loaded to wake it. Last: {last_error}. Worker states: '
-                    f'{states}')
-            # Never reached at all: the target vanished, or every
-            # debugger connection to it was refused. Both say the browser
-            # did not get as far as running the extension, which is where
-            # the environment boundary sits.
-            raise BrowserEnvironmentSkipped(
-                'this browser never let the extension worker be reached '
-                f'over the debugger: {_browser_version(browser)} — '
-                f'{last_error}')
-
-        configuration_started = True
-        storage = json.dumps({
-            'daedalus-token': token,
-            'daedalus-server': bridge_url,
-        })
-        configure = (
-            '(async () => { await chrome.storage.local.set(' + storage
-            + '); await loadConfig(); ensureKeepAlive(); stopStream(); '
-            + 'startStream(); '
-            + 'return config.token === ' + json.dumps(token)
-            + ' && config.serverUrl === ' + json.dumps(bridge_url)
-            + '; })()')
-        deadline = time.time() + 30
-        while True:
-            try:
-                configured = cdp_eval(node, worker_target, configure)
-            except AssertionError as failure:
-                configured = f'the call failed: {failure}'
-            if configured is True or time.time() >= deadline:
-                break
-            # An MV3 worker stops when it goes idle and the next event starts
-            # a fresh one, so the worker that answered a moment ago can be
-            # gone by the time it is configured. Look it up again rather than
-            # reporting the browser's own lifecycle as this extension's
-            # failure to take its configuration.
-            time.sleep(0.5)
-            try:
-                workers = _worker_targets(_devtools_targets(devtools_port))
-            except (OSError, ValueError):
-                workers = []
-            replacement, _reached, _error = ready_worker(node, workers)
-            if replacement:
-                worker_target = replacement
-        assert configured is True, (
-            f'extension worker did not load test configuration ({configured!r}'
-            f'). Worker state: {worker_state(node, worker_target)}')
-        cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
-
-        deadline = time.time() + 15
-        while time.time() < deadline:
-            if cdp_eval(
-                    node, page_target,
-                    'globalThis.__evalPageReady === true') is True:
-                break
-            time.sleep(0.25)  # one node process per attempt; see above
-        else:
-            raise AssertionError(
-                'the fixture page never set __evalPageReady: ' + page_url)
-
-        cdp_eval(node, worker_target, 'registerAllTabs()')
-        deadline = time.time() + 15
-        last_tabs = None
-        while time.time() < deadline:
-            status, tabs = _util.get_json(
-                bridge_url + '/tabs?' + urllib.parse.urlencode({'token': token}))
-            last_tabs = (status, tabs)
-            match = next((item for item in tabs
-                          if page_url in item.get('url', '')), None) \
-                if status == 200 and isinstance(tabs, list) else None
-            if match:
-                yield node, page_target, match['tabId']
-                return
-            time.sleep(0.05)
-        raise AssertionError(
-            f'extension did not register the eval fixture tab: {last_tabs!r}')
-    except BrowserEnvironmentSkipped as why:
-        if not configuration_started:
-            raise
-        # Once configuration starts, this fixture has established a usable
-        # browser; an environment label from later code cannot cross the line.
-        raise AssertionError(
-            'browser environment skip escaped after extension configuration: '
-            + str(why)) from why
+        worker_target = _reached_worker(
+            node, browser, workers, devtools_port, worker_script)
+        with _environment_verdicts_closed():
+            yield from _configured_fixture(
+                node, bridge_url, token, worker_target, devtools_port,
+                worker_script, page_target, page_url)
     finally:
         process.terminate()
         try:
@@ -607,6 +416,101 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=10)
+
+
+def _reached_worker(node, browser, workers, devtools_port, worker_script):
+    """Return the target after this extension's worker answers its probe."""
+    deadline = time.time() + 30
+    last_error = 'no evaluation was attempted'
+    answered = False
+    while time.time() < deadline:
+        worker_target, reached, error = ready_worker(node, workers)
+        answered = answered or reached
+        if worker_target:
+            return worker_target
+        last_error = error
+        try:
+            workers = _worker_targets(
+                _devtools_targets(devtools_port), worker_script)
+        except (OSError, ValueError) as why:
+            last_error = f'listing DevTools targets failed: {why}'
+        time.sleep(0.5)
+    if answered:
+        states = [worker_state(node, item['webSocketDebuggerUrl'])
+                  for item in workers]
+        raise AssertionError(
+            'the extension service worker never finished loading: '
+            'DevTools exposed its target and the fixture page was '
+            f'loaded to wake it. Last: {last_error}. Worker states: '
+            f'{states}')
+    raise BrowserEnvironmentSkipped(
+        'this browser never let the extension worker be reached '
+        f'over the debugger: {_browser_version(browser)} — {last_error}')
+
+
+def _configured_fixture(node, bridge_url, token, worker_target,
+                        devtools_port, worker_script, page_target, page_url):
+    """Configure the reached worker, load the page, and yield the tab."""
+    storage = json.dumps({
+        'daedalus-token': token,
+        'daedalus-server': bridge_url,
+    })
+    configure = (
+        '(async () => { await chrome.storage.local.set(' + storage
+        + '); await loadConfig(); ensureKeepAlive(); stopStream(); '
+        + 'startStream(); '
+        + 'return config.token === ' + json.dumps(token)
+        + ' && config.serverUrl === ' + json.dumps(bridge_url)
+        + '; })()')
+    deadline = time.time() + 30
+    while True:
+        try:
+            configured = cdp_eval(node, worker_target, configure)
+        except AssertionError as failure:
+            configured = f'the call failed: {failure}'
+        if configured is True or time.time() >= deadline:
+            break
+        time.sleep(0.5)
+        try:
+            workers = _worker_targets(
+                _devtools_targets(devtools_port), worker_script)
+        except (OSError, ValueError):
+            workers = []
+        replacement, _reached, _error = ready_worker(node, workers)
+        if replacement:
+            worker_target = replacement
+    assert configured is True, (
+        f'extension worker did not load test configuration ({configured!r}'
+        f'). Worker state: {worker_state(node, worker_target)}')
+    cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
+
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if cdp_eval(
+                node, page_target,
+                'globalThis.__evalPageReady === true') is True:
+            break
+        time.sleep(0.25)
+    else:
+        raise AssertionError(
+            'the fixture page never set __evalPageReady: ' + page_url)
+
+    cdp_eval(node, worker_target, 'registerAllTabs()')
+    deadline = time.time() + 15
+    last_tabs = None
+    while time.time() < deadline:
+        query = urllib.parse.urlencode({'token': token})
+        status, tabs = _util.get_json(bridge_url + '/tabs?' + query)
+        last_tabs = (status, tabs)
+        match = next((item for item in tabs
+                      if page_url in item.get('url', '')), None) \
+            if status == 200 and isinstance(tabs, list) else None
+        if match:
+            yield node, page_target, match['tabId']
+            return
+        time.sleep(0.05)
+    raise AssertionError(
+        f'extension did not register the eval fixture tab: {last_tabs!r}')
 
 
 def real_ext_command(bridge_url, token, cmd_id, payload):

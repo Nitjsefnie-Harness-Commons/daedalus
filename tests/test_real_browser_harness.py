@@ -3,6 +3,7 @@
 import base64
 import contextlib
 import hashlib
+import json
 import shutil
 import socket
 import subprocess
@@ -17,6 +18,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _evalpages  # noqa: E402
 import _realbrowser  # noqa: E402
+import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
 import test_real_browser_eval as _real_browser_eval  # noqa: E402
 
@@ -77,9 +79,10 @@ def _devtools_ready(expected_profile, expected_process):
         'webSocketDebuggerUrl': 'ws://worker',
     }]
 
-    def wait_for_devtools(profile, process):
+    def wait_for_devtools(profile, process, declared_worker):
         assert Path(profile) == expected_profile, profile
         assert process is expected_process, process
+        assert declared_worker == 'background.js', declared_worker
         return page, workers, '9222'
 
     return wait_for_devtools, page, workers
@@ -214,9 +217,10 @@ def _successful_run_recorder(recorded):
 
 
 def test_browser_launch_passes_basic_password_store_flag(tmp):
-    def stop_after_launch(profile, process):
+    def stop_after_launch(profile, process, declared_worker):
         assert Path(profile) == Path(tmp) / 'chromium-profile', profile
         assert isinstance(process, _ProcessDouble), process
+        assert declared_worker == 'background.js', declared_worker
         raise _util.Skipped('launch captured')
 
     popen, process, launches, _profile = _popen_double(tmp)
@@ -442,14 +446,19 @@ def test_cdp_non_timeout_failure_stays_plain_assertion(tmp):
 def test_fixture_converts_only_post_configuration_environment_skips(tmp):
     environment_type = _realbrowser.BrowserEnvironmentSkipped
     before = environment_type('controlled pre-configuration failure')
+    popen, _process, launches, _profile = _popen_double(tmp)
     survived = None
     with mock.patch.object(
-            _realbrowser, 'browser_requirements', side_effect=before):
+            _realbrowser, 'browser_requirements', _browser_requirements), \
+            mock.patch.object(_realbrowser.subprocess, 'Popen', popen), \
+            mock.patch.object(
+                _realbrowser, '_wait_for_devtools', side_effect=before):
         try:
             with _enter_fixture(tmp):
                 raise AssertionError('fixture yielded before configuration')
-        except environment_type as why:
+        except _util.Skipped as why:
             survived = why
+    assert len(launches) == 1, launches
     assert survived is before, survived
 
     def navigate(node, target, method, params):
@@ -609,7 +618,7 @@ def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
                     failure = why
 
         assert calls == ['Page.navigate'], calls
-        return failure
+        return page_url, failure
 
     failures = {
         request_arrives: exercise(request_arrives)
@@ -619,16 +628,25 @@ def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
     failure_type = getattr(
         _realbrowser, 'FirstNavigationTimeout', None)
     assert failure_type is not None, 'timeout has no observation-bearing type'
-    required_owners = (
-        'the browser', 'the CDP transport', 'this repository', 'the machine')
-    for request_arrives, failure in failures.items():
+    required_owners = [
+        'the browser', 'the CDP transport', 'this repository', 'the machine']
+    for request_arrives, (page_url, failure) in failures.items():
         assert failure.__class__ is failure_type, failure
-        assert failure.request_arrived is request_arrives, failure
-        assert getattr(failure, 'selected_owner', object()) is None, failure
-        owner_selection = failure.render_owner_selection(
-            failure.selected_owner)
-        assert owner_selection in str(failure), failure
-        assert failure.candidate_owners == required_owners, failure
+        record = {
+            'page_url': failure.page_url,
+            'request_arrived': failure.request_arrived,
+            'candidate_owners': list(failure.candidate_owners),
+            'selected_owner': failure.selected_owner,
+        }
+        assert record == {
+            'page_url': page_url,
+            'request_arrived': request_arrives,
+            'candidate_owners': required_owners,
+            'selected_owner': None,
+        }, record
+        assert str(failure) == (
+            f'{failure_type.__name__}: '
+            + json.dumps(record, sort_keys=True)), str(failure)
 
 
 def test_post_configuration_navigation_timeout_stays_failure(tmp):
@@ -667,8 +685,8 @@ def test_post_configuration_navigation_timeout_stays_failure(tmp):
 
 
 def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='realbrowserharness_')
+    return _realbrowser_controls.run_controls(
+        globals(), tmp_prefix='realbrowserharness_')
 
 
 if __name__ == '__main__':
