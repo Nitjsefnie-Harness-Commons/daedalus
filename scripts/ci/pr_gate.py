@@ -33,6 +33,7 @@ OVERFLOW_REASON = (
 UNCLAIMED_REASON = 'No checked issue is assigned to you.'
 INSTRUCTION_REASON = 'Remove the template instruction comments.'
 _STATUS_LINE = re.compile(r'^HTTP/\S+ ([0-9]{3})(?: |$)')
+_NO_CLOSER = object()
 
 
 class Response(NamedTuple):
@@ -84,7 +85,11 @@ class GhApi:
         for line in lines[1:separator]:
             name, found, value = line.partition(':')
             if found:
-                headers[name.lower()] = value.strip()
+                key = name.lower()
+                if key == 'content-type' and key in headers:
+                    raise RuntimeError(
+                        'duplicate gh response header: content-type')
+                headers[key] = value.strip()
         body = '\n'.join(lines[separator + 1:])
         media_type = headers.get('content-type', '').partition(';')[0].lower()
         if media_type == 'text/html':
@@ -176,16 +181,21 @@ def _latest_closer(timeline):
 
 
 def _revalidate(api, pull_endpoint, state, timeline_endpoint=None,
-                closer=None):
+                closer=_NO_CLOSER):
     pull = _read(api, 'GET', pull_endpoint)
     if not isinstance(pull, dict):
         raise _GateError('pull request response is not an object')
-    if pull.get('state') != state:
-        raise _GateError('pull request state changed during analysis')
+    current_closer = _NO_CLOSER
     if timeline_endpoint is not None:
         timeline = _page(api, timeline_endpoint)
-        if _latest_closer(timeline) != closer:
-            raise _GateError('pull request closer changed during analysis')
+        current_closer = _latest_closer(timeline)
+    if pull.get('merged'):
+        raise _GateError('pull request was merged during analysis')
+    if pull.get('state') != state:
+        raise _GateError('pull request state changed during analysis')
+    if closer is not _NO_CLOSER and current_closer != closer:
+        raise _GateError('pull request closer changed during analysis')
+    return current_closer
 
 
 def _claim(api, repo, issues, actor):
@@ -317,6 +327,8 @@ def _run(api, repo, pr, actor, template):
             _revalidate(
                 api, pull_endpoint, state, timeline_endpoint, closer)
             _write_comment(api, repo, pr, comment, _reopen_text(actor))
+            _revalidate(
+                api, pull_endpoint, state, timeline_endpoint, closer)
             _write(api, 'PATCH', pull_endpoint, {'state': 'open'})
             print('reopened')
         elif comment is not None:
@@ -328,18 +340,25 @@ def _run(api, repo, pr, actor, template):
         return 0
 
     if state == 'closed':
-        _revalidate(api, pull_endpoint, state)
+        _revalidate(
+            api, pull_endpoint, state, timeline_endpoint, closer)
         _write_comment(
             api, repo, pr, comment,
             _inadmissible_text(actor, reasons, True))
         print('commented')
         return 0
 
-    _revalidate(api, pull_endpoint, state)
+    if closable:
+        closer = _revalidate(
+            api, pull_endpoint, state, timeline_endpoint)
+    else:
+        _revalidate(api, pull_endpoint, state)
     _write_comment(
         api, repo, pr, comment,
         _inadmissible_text(actor, reasons, closable))
     if closable:
+        _revalidate(
+            api, pull_endpoint, state, timeline_endpoint, closer)
         _write(api, 'PATCH', pull_endpoint, {'state': 'closed'})
         print('closed')
     else:

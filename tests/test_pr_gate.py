@@ -12,15 +12,23 @@ import _util  # noqa: E402
 from _prgate import (  # noqa: E402
     BOT, CLOSED_FIRST, GITHUB_HTML, MARKER, OPEN_FIRST, REOPEN_FIRST,
     RESOLVED_FIRST, TEMPLATE,
-    _api, _assert_closer_race_aborts, _assert_gate_message,
-    _assert_no_writes, _assert_script_error, _assert_state_races_abort,
-    _assert_two_run_replay,
+    _api, _assert_gate_message, _assert_no_writes, _assert_script_error,
+    _assert_script_runs_through_gh_on_path,
     _capture, _closed_event, _comment_body, _comment_page_fields, _execute,
     _execute_without_runtime_escape, _gate_comment, _gate_module, _html_body,
     _inline_marker_comment, _issue, _issue_gets, _issue_html, _layout_body,
     _markdown_code_spans, _PaginationApi, _recorded_writes, _run_script,
     _runtime_error, _script_fixtures, _text_html, _valid_body, _valid_html,
     _write_gh_stub, _write_sequence,
+)
+from _prgate_race import (  # noqa: E402
+    _assert_closed_admissible_reclose_aborts_state,
+    _assert_closed_inadmissible_reclose_aborts,
+    _assert_closer_race_aborts,
+    _assert_open_closable_human_close_aborts_state,
+    _assert_open_closable_merge_aborts_comment,
+    _assert_open_resolved_human_close_aborts_comment,
+    _assert_state_races_abort, _assert_two_run_replay,
 )
 from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
@@ -309,6 +317,26 @@ def test_latest_closer_change_during_analysis_aborts_reopen(tmp):
     _assert_closer_race_aborts()
 
 
+def test_closed_inadmissible_human_reclose_aborts_comment_patch(_tmp):
+    _assert_closed_inadmissible_reclose_aborts()
+
+
+def test_closed_admissible_reclose_after_comment_aborts_reopen(_tmp):
+    _assert_closed_admissible_reclose_aborts_state()
+
+
+def test_open_admissible_human_close_aborts_resolved_comment_patch(_tmp):
+    _assert_open_resolved_human_close_aborts_comment()
+
+
+def test_open_closable_human_close_after_comment_landed_aborts_state(_tmp):
+    _assert_open_closable_human_close_aborts_state()
+
+
+def test_open_closable_merge_aborts_before_comment(_tmp):
+    _assert_open_closable_merge_aborts_comment()
+
+
 def test_merged_pull_returns_before_comments_or_render(tmp):
     del tmp
     api = _api(merged=True, fail={'comments', 'markdown'})
@@ -455,41 +483,7 @@ def test_workflow_shape(tmp):
 
 
 def test_script_runs_through_gh_on_path(tmp):
-    fixtures = _script_fixtures()
-    result, calls = _run_script(tmp, fixtures)
-    assert result.returncode == 0, (result.stdout, result.stderr, calls)
-    assert _recorded_writes(calls) == []
-    forbidden = set('&|<>^')
-    assert all(
-        forbidden.isdisjoint(argument) for call in calls
-        for argument in call['argv']), calls
-
-    body = _valid_body('none')
-    fixtures = {
-        **fixtures,
-        'pull': {'body': body, 'state': 'open', 'merged': False},
-        'rendered': _valid_html(references=_text_html('none')),
-        'issues': {},
-    }
-    other = Path(tmp) / 'closable'
-    other.mkdir()
-    result, calls = _run_script(other, fixtures)
-    assert result.returncode == 0, (result.stdout, result.stderr, calls)
-    assert all(
-        forbidden.isdisjoint(argument) for call in calls
-        for argument in call['argv']), calls
-    writes = _recorded_writes(calls)
-    assert [(method, endpoint) for method, endpoint, _payload in writes] == [
-        ('POST', 'repos/owner/repo/issues/99/comments'),
-        ('PATCH', 'repos/owner/repo/pulls/99')]
-    comment = writes[0][2]['body']
-    assert writes[1][2] == {'state': 'closed'}
-    assert any(
-        call['input'] == {
-            'text': body, 'mode': 'gfm', 'context': 'owner/repo'}
-        for call in calls)
-    assert all(comment not in argument for call in calls
-               for argument in call['argv'])
+    _assert_script_runs_through_gh_on_path(tmp)
 
 
 def test_gh_absent_from_path_is_reported(tmp):
@@ -537,6 +531,12 @@ def test_gh_response_rejects_an_unknown_media_type(tmp):
     _assert_script_error(
         tmp, _script_fixtures(unsupported_media=True),
         'unsupported gh response media type: application/octet-stream')
+
+
+def test_gh_response_rejects_duplicate_content_type(tmp):
+    _assert_script_error(
+        tmp, _script_fixtures(duplicate_content_type=True),
+        'duplicate gh response header: content-type')
 
 
 def test_reasonless_status_line_is_accepted(tmp):
