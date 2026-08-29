@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
@@ -472,12 +473,47 @@ def test_no_dashboard_export_is_unreferenced(tmp):
     assert not unused, f'exported but referenced nowhere: {unused}'
 
 
+class _ControlledReader:
+    def __init__(self, name, native_id, events):
+        self.name, self.native_id, self.events = name, native_id, events
+        self.cancelled, self.finished = threading.Event(), threading.Event()
+
+    def cancel(self):
+        self.events.append(('reader-cancel', self.name))
+        self.cancelled.set()
+
+    def is_alive(self):
+        return not self.finished.is_set()
+
+    def join(self, timeout):
+        self.events.append(('reader-join', self.name, timeout))
+        if self.cancelled.is_set():
+            self.finished.set()
+
+
+class _ControlledPipe:
+    def __init__(self, name, reader, events):
+        self.name, self.reader, self.events = name, reader, events
+
+    def close(self):
+        self.events.append(('pipe-close', self.name))
+        assert not self.reader.is_alive(), (
+            f'{self.name} closed before its reader finished')
+
+
 class _ControlledProcess:
-    def __init__(self, pid, command, outcomes, events, wait_succeeds=False):
+    def __init__(self, pid, command, outcomes, events, *, wait_succeeds=False,
+                 held_readers=False):
         self.pid, self.command = pid, command
         self.outcomes, self.events = list(outcomes), events
         self.wait_succeeds = wait_succeeds
         self.returncode = self.stdout = self.stderr = None
+        if held_readers:
+            self.stdout_thread = _ControlledReader('stdout', pid * 2, events)
+            self.stderr_thread = _ControlledReader(
+                'stderr', pid * 2 + 1, events)
+            self.stdout = _ControlledPipe('stdout', self.stdout_thread, events)
+            self.stderr = _ControlledPipe('stderr', self.stderr_thread, events)
 
     def communicate(self, timeout):
         self.events.append(('communicate', self.pid, timeout))
@@ -503,19 +539,25 @@ class _ControlledProcess:
 
 def _controlled_run(platform, *specs, before_popen=None):
     pending, events, diagnostic = list(specs), [], StringIO()
+    clock = iter(value / 10 for value in range(100))
 
     def popen(command, **_options):
         pid, outcomes, *wait_options = pending.pop(0)
-        wait_succeeds = wait_options[0] if wait_options else False
+        options = wait_options[0] if wait_options else {}
         if before_popen:
             before_popen(pid, events)
         events.append(('popen', pid, tuple(command)))
-        return _ControlledProcess(
-            pid, command, outcomes, events, wait_succeeds)
+        return _ControlledProcess(pid, command, outcomes, events, **options)
+
+    def cancel_reader(thread):
+        thread.cancel()
 
     with patch.object(sys, 'platform', platform), \
             patch.object(_dashnode.shutil, 'which', return_value='/node'), \
             patch.object(_dashnode.subprocess, 'Popen', popen), \
+            patch.object(_dashnode, '_cancel_windows_synchronous_io',
+                         cancel_reader, create=True), \
+            patch.object(_dashnode.time, 'monotonic', lambda: next(clock)), \
             redirect_stderr(diagnostic):
         try:
             outcome = _dashnode.run_dashboard_node(
@@ -619,12 +661,35 @@ def test_windows_does_not_retry_when_child_cleanup_cannot_finish(tmp):
 def test_windows_does_not_retry_after_timed_out_drain_is_reaped(tmp):
     del tmp
     failure, events, _ = _controlled_run(
-        'win32', (801, [_timeout(), _timeout('partial', 'error')], True),
+        'win32', (801, [_timeout(), _timeout('partial', 'error')],
+                  {'wait_succeeds': True}),
         (802, [_result(0, 'wrong retry')]))
     assert isinstance(failure, str), failure
     assert 'drain outcome: timed out' in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
     assert [event[0] for event in events].count('wait') == 1, events
+
+
+def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(tmp):
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (901, [_timeout(), _timeout('partial', 'error')],
+                  {'wait_succeeds': True, 'held_readers': True}),
+        (902, [_result(0, 'wrong retry')]))
+    assert failure.startswith('dashboard node outer timeout after 1 attempt')
+    assert 'drain outcome: timed out' in failure, failure
+    steps = [event[:2] for event in events]
+    required = [
+        ('kill', 901), ('reader-cancel', 'stdout'),
+        ('reader-cancel', 'stderr'), ('reader-join', 'stdout'),
+        ('reader-join', 'stderr'), ('pipe-close', 'stdout'),
+        ('pipe-close', 'stderr'), ('wait', 901)]
+    positions = [steps.index(step) for step in required]
+    assert positions == sorted(positions), events
+    budgets = [event[2] for event in events
+               if event[0] in ('reader-join', 'wait')]
+    assert budgets[0] > budgets[1] > budgets[2] >= 0, budgets
+    assert [event[0] for event in events].count('popen') == 1, events
 
 
 def main():
