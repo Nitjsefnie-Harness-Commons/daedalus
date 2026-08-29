@@ -6,6 +6,10 @@ from dataclasses import dataclass
 OPAQUE_TAB_SPREAD = object()
 UNPROVABLE_SENDER = '?ext_cmd'
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+BUILTIN_CONSUMERS = frozenset({
+    'all', 'any', 'dict', 'frozenset', 'list', 'max', 'min', 'next', 'set',
+    'sorted', 'sum', 'tuple',
+})
 
 
 @dataclass
@@ -16,11 +20,13 @@ class FlowState:
     aliases: dict
     generators: dict
     evaluated: dict
+    builtin_shadows: set
 
     def copy(self):
         return FlowState(
             {name: keys.copy() for name, keys in self.dicts.items()},
-            dict(self.aliases), dict(self.generators), dict(self.evaluated))
+            dict(self.aliases), dict(self.generators), dict(self.evaluated),
+            set(self.builtin_shadows))
 
 
 def scope_nodes(scope):
@@ -138,6 +144,7 @@ def apply_alias_statement(node, state):
     if isinstance(node, ast.ImportFrom):
         for imported in node.names:
             local = imported.asname or imported.name
+            state.builtin_shadows.update({local} & BUILTIN_CONSUMERS)
             aliases.pop(local, None)
             state.generators.pop(local, None)
             if imported.name in ('ext_cmd', '_ext_cmd'):
@@ -146,6 +153,7 @@ def apply_alias_statement(node, state):
     if isinstance(node, ast.Import):
         for imported in node.names:
             local = (imported.asname or imported.name).split('.')[0]
+            state.builtin_shadows.update({local} & BUILTIN_CONSUMERS)
             aliases.pop(local, None)
             state.generators.pop(local, None)
         return
@@ -158,7 +166,9 @@ def apply_alias_statement(node, state):
     if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
         for target in targets:
             bind_alias_target(target, node.value, state, bindings)
-    for name in set().union(*(bound_names(target) for target in targets)):
+    names = set().union(*(bound_names(target) for target in targets))
+    state.builtin_shadows.update(names & BUILTIN_CONSUMERS)
+    for name in names:
         aliases.pop(name, None)
         state.generators.pop(name, None)
     aliases.update(bindings[0])
@@ -185,7 +195,7 @@ def state_signature(state):
         (key, value_signature(value))
         for key, value in state.evaluated.items()))
     return (tuple(payloads), tuple(sorted(state.aliases.items())),
-            generators, evaluated)
+            generators, evaluated, tuple(sorted(state.builtin_shadows)))
 
 
 def dedupe_states(states):
@@ -232,6 +242,8 @@ def merged_evaluated_value(default, states):
 def callable_state(args, states):
     aliases = inherited_aliases(states)
     generators = inherited_generators(states)
+    builtin_shadows = set().union(
+        *(state.builtin_shadows for state in states))
     positional = [*args.posonlyargs, *args.args]
     parameters = [*positional, *args.kwonlyargs]
     if args.vararg is not None:
@@ -241,6 +253,7 @@ def callable_state(args, states):
     for parameter in parameters:
         aliases.pop(parameter.arg, None)
         generators.pop(parameter.arg, None)
+        builtin_shadows.update({parameter.arg} & BUILTIN_CONSUMERS)
     defaults = zip(positional[-len(args.defaults):], args.defaults)
     if not args.defaults:
         defaults = ()
@@ -253,7 +266,7 @@ def callable_state(args, states):
             generators[parameter.arg] = resolved
         elif resolved is not None:
             aliases[parameter.arg] = resolved
-    return FlowState({}, aliases, generators, {})
+    return FlowState({}, aliases, generators, {}, builtin_shadows)
 
 
 def function_allowed_opaque(node):
@@ -272,6 +285,7 @@ def class_functions(node):
 
 def clear_names(states, names):
     for state in states:
+        state.builtin_shadows.update(names & BUILTIN_CONSUMERS)
         for name in names:
             state.dicts.pop(name, None)
             state.aliases.pop(name, None)
