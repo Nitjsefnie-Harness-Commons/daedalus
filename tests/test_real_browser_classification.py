@@ -9,6 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
+import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
 from test_real_browser_harness import (  # noqa: E402
     _browser_version, _enter_fixture, _fixture_runtime)
@@ -95,7 +96,7 @@ def test_browser_exit_before_devtools_is_environment_skip(tmp):
                 mock.patch.object(_realbrowser.time, 'sleep', sleeper):
             failure = _call_failure(
                 lambda observed=process: _realbrowser._wait_for_devtools(
-                    tmp, observed))
+                    tmp, observed, 'background.js'))
         assert failure.__class__ is (
             _realbrowser.BrowserEnvironmentSkipped), failure
         assert clock.call_count == 2, (exit_code, clock.call_count)
@@ -120,7 +121,8 @@ def test_live_browser_reaches_ready_devtools_targets(tmp):
                 return_value=[page, worker]), \
                 mock.patch.object(
                     _realbrowser.time, 'time', side_effect=(0, 0)):
-            actual = _realbrowser._wait_for_devtools(tmp, process)
+            actual = _realbrowser._wait_for_devtools(
+                tmp, process, 'background.js')
     except _realbrowser.BrowserEnvironmentSkipped as why:
         raise AssertionError(
             'live Chromium was classified as having exited') from why
@@ -134,7 +136,8 @@ def test_devtools_start_deadline_is_environment_skip(tmp):
             _realbrowser.time, 'time', side_effect=(0, 31)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         failure = _call_failure(
-            lambda: _realbrowser._wait_for_devtools(tmp, process))
+            lambda: _realbrowser._wait_for_devtools(
+                tmp, process, 'background.js'))
     assert failure.__class__ is _realbrowser.BrowserEnvironmentSkipped, failure
 
 
@@ -430,8 +433,8 @@ def test_hostile_page_setup_failure_is_repository_failure(tmp):
 
 
 def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='realbrowserclassification_')
+    return _realbrowser_controls.run_controls(
+        globals(), tmp_prefix='realbrowserclassification_')
 
 
 if __name__ == '__main__':
