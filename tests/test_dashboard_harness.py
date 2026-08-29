@@ -197,7 +197,6 @@ def test_phase_records_a_harness_checkpoint(tmp):
 
 
 def test_runner_keeps_its_one_harness_public_signature(tmp):
-    """The public boundary takes one typed harness and returns text output."""
     del tmp
     signature = inspect.signature(_dashnode.run_dashboard_node)
     assert list(signature.parameters) == ['harness'], signature
@@ -208,7 +207,6 @@ def test_runner_keeps_its_one_harness_public_signature(tmp):
 
 
 def test_one_launch_helper_has_attempt_as_keyword_only(tmp):
-    """One launch is isolated behind the private attempt-numbered helper."""
     del tmp
     helper = getattr(_dashnode, '_run_dashboard_node_once', None)
     assert helper is not None, '_run_dashboard_node_once is missing'
@@ -558,7 +556,6 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
 
 
 def test_accessibility_field_case_uses_the_shared_runner(tmp):
-    """The real field case reaches the shared process boundary."""
     del tmp
 
     class SharedRunnerReached(Exception):
