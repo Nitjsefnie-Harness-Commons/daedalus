@@ -11,6 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
+import _realbrowser_pages  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -186,6 +187,42 @@ def test_closed_region_converts_only_the_environment_verdict(tmp):
     assert outcomes['failure'].__class__ is AssertionError, outcomes
     assert str(outcomes['failure']) == 'controlled failure', outcomes
     assert outcomes['bare'].__class__ is _util.Skipped, outcomes
+
+
+def test_page_server_start_failure_releases_registry_and_socket(tmp):
+    del tmp
+    start_failure = RuntimeError('controlled thread start failure')
+    captured = {}
+    server_type = _realbrowser_pages._EvalPageServer
+
+    def capture_server(*args, **kwargs):
+        server = server_type(*args, **kwargs)
+        captured['server'] = server
+        return server
+
+    failure = None
+    with mock.patch.object(
+            _realbrowser_pages, '_EvalPageServer', capture_server), \
+            mock.patch.object(
+                _realbrowser_pages.threading.Thread, 'start',
+                side_effect=start_failure):
+        try:
+            with _realbrowser_pages.eval_page_server():
+                raise AssertionError('server yielded after start failure')
+        except RuntimeError as why:
+            failure = why
+
+    server = captured['server']
+    with _realbrowser_pages._FIXTURE_SERVERS_LOCK:
+        registered = dict(_realbrowser_pages._FIXTURE_SERVERS)
+        _realbrowser_pages._FIXTURE_SERVERS.clear()
+    socket_closed = server.socket.fileno() == -1
+    if not socket_closed:
+        server.server_close()
+
+    assert failure is start_failure, failure
+    assert registered == {}, list(registered)
+    assert socket_closed is True, socket_closed
 
 
 def main():
