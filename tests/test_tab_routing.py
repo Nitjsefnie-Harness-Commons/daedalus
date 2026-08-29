@@ -75,14 +75,48 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         "send = b.ext_cmd\n    other, send = send, None\n"
         "    return await other('x', 'y', tab=tab)",
         "send = b.ext_cmd\n    send, other = wrap(send)",
+        "send = b.ext_cmd\n    other, send = send, (send := b.get)\n"
+        "    return await other('x', 'y', tab=tab)",
+        "send = b.get\n    send, other = (send := b.ext_cmd), send\n"
+        "    return await other('x', 'y', tab=tab)",
         "send = b.get\n    inner = lambda x=(send := b.ext_cmd): x",
         "send = b.get\n    def inner(x=(send := b.ext_cmd)): pass",
         "send = b.get\n    @(send := b.ext_cmd)\n    def inner(): pass",
+        "send = b.ext_cmd\n    def inner(other=send, "
+        "reset=(send := b.get)):\n        return await other(tab=tab)",
+        "send = b.get\n    def inner(reset=(send := b.ext_cmd), "
+        "other=send):\n        return await other(tab=tab)",
+        "send = b.ext_cmd\n    inner = lambda other=send, "
+        "reset=(send := b.get): other(tab=tab)\n    return await inner()",
+        "send = b.get\n    @(send := b.ext_cmd)\n"
+        "    def inner(other=send):\n        return await other(tab=tab)",
         "return await (send := b.ext_cmd)('x', 'y', tab=tab)",
         "(send := b.ext_cmd)",
         "[(send := b.ext_cmd) for _ in values]",
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*()]]",
         "send = b.get\n    [(send := b.ext_cmd) for _ in [None, *()]]",
+        "send = b.ext_cmd\n    [(send := b.get) for _ in [*{}]]",
+        "send = b.get\n    [(send := b.ext_cmd) for _ in [*{'x': 1}]]",
+        "send = b.ext_cmd\n    [(send := b.get) for _ in [*{**{}}]]",
+        "send = b.get\n    [(send := b.ext_cmd) for _ in [*{**{'x': 1}}]]",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
+        "    list(gen)",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
+        "    alias = gen\n    tuple(alias)",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
+        "    for _ in gen: pass",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
+        "    [value for value in gen]",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
+        "    flag and list(gen)",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
+        "    flag and list(gen)",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
+        "    if flag: list(gen)",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
+        "    if flag: list(gen)",
+        "send = b.get\n    tuple((send := b.ext_cmd) for _ in (1,))",
         "flag and (send := b.ext_cmd)",
         "((send := b.ext_cmd) if flag else (send := b.get))",
         "send = b.ext_cmd\n    return await send((send := b.get), tab=tab)",
@@ -105,13 +139,42 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         "send = b.ext_cmd\n    send, other = (b.get,)",
         "send = b.ext_cmd\n    other, send = send, b.get",
         "send = b.ext_cmd\n    send, other = wrap(b.get)",
+        "send = b.get\n    other, send = send, (send := b.ext_cmd)\n"
+        "    return await other('x', 'y', tab=tab)",
+        "send = b.ext_cmd\n    send, other = (send := b.get), send\n"
+        "    return await other('x', 'y', tab=tab)",
         "send = b.ext_cmd\n    inner = lambda x=(send := b.get): x",
         "send = b.ext_cmd\n    def inner(x=(send := b.get)): pass",
         "send = b.ext_cmd\n    @(send := b.get)\n    def inner(): pass",
+        "send = b.get\n    def inner(other=send, "
+        "reset=(send := b.ext_cmd)):\n        return await other(tab=tab)\n"
+        "    send = b.get",
+        "send = b.ext_cmd\n    def inner(reset=(send := b.get), "
+        "other=send):\n        return await other(tab=tab)",
+        "send = b.get\n    inner = lambda other=send, "
+        "reset=(send := b.ext_cmd): other(tab=tab)\n    return await inner()",
+        "send = b.ext_cmd\n    @(send := b.get)\n"
+        "    def inner(other=send):\n        return await other(tab=tab)",
         "send = b.ext_cmd\n    (send := b.get)",
         "send = b.ext_cmd\n    [(send := b.get) for _ in (1,)]",
         "send = b.get\n    [(send := b.ext_cmd) for _ in [*()]]",
         "send = b.ext_cmd\n    [(send := b.get) for _ in [None, *()]]",
+        "send = b.get\n    [(send := b.ext_cmd) for _ in [*{}]]",
+        "send = b.ext_cmd\n    [(send := b.get) for _ in [*{'x': 1}]]",
+        "send = b.get\n    [(send := b.ext_cmd) for _ in [*{**{}}]]",
+        "send = b.ext_cmd\n    [(send := b.get) for _ in [*{**{'x': 1}}]]",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
+        "    list(gen)",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
+        "    alias = gen\n    tuple(alias)",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
+        "    for _ in gen: pass",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
+        "    [value for value in gen]",
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in ())\n"
+        "    list(gen)",
+        "send = b.ext_cmd\n    tuple((send := b.get) for _ in (1,))",
         "def inner():\n        (send := b.ext_cmd)",
         "inner = lambda: (send := b.ext_cmd)",
     ]
@@ -315,80 +378,38 @@ def test_an_if_branch_alias_is_caught_regardless_of_which_branch_binds_it(tmp):
 
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     r"""`tab` routes to a server queue; `tabId` names a browser tab.
-
-    Overloading them is not hypothetical: screenshot, CDP and the tabs panel
-    all sent the browser target as `tab`, which the server strips for routing,
-    so those buttons silently captured the active tab instead of the selected
-    one. One sender also wrote the target over the routing value and sent the
-    command to a queue nothing drains.
-
-    This checks the SENDERS rather than the wire. A test that builds the
-    payload itself passes while a sender that builds it wrongly ships — which
-    is exactly what happened to the first version of this fix: the wire test
-    was green and `dashboard/sections/tabs.js` was still wrong.
-
-    What is enforced: in resolved or conservatively identified sender shapes in
-    daedalus_mcp/, daedalus_cli/ and dashboard/, a typed extension command
-    (one routed
-    through ext_cmd/_ext_cmd/extCmd/runCommand, or sent to /command with a
-    visible `type` key) may carry `tab` only as the literal 'extension'. The
-    eval path is exempt by structure: eval payloads carry `code` instead of
-    `type`, and eval genuinely routes by tab. Python payloads are followed
-    through literals (annotated or not), `dict(...)`, subscript assignments,
-    `update({...})`, `|= {...}` and source-ordered control flow. Sender aliases
-    are followed through imports, simultaneous tuple/list destructuring,
-    assignment expressions (including definition-time defaults/decorators and
-    eager comprehensions), nested functions and compound statements; possible
-    senders are reported as unprovable.
-    JavaScript inline literals, names initialized by object literals,
-    aliases of those names, ternary initializers whose branches resolve,
-    `Object.assign` writes, tracked object spreads, literal computed keys,
-    same-name direct `tab` property assignments, calls to same-file helpers
-    that return the object they built, and the third extCmd argument are
-    checked in source order. An object handed to any other call stops being
-    provable there, and an unprovable object reaching a sender is reported
-    rather than trusted — a helper that writes through its parameter cannot
-    be followed, so it is not silently believed.
+    This checks senders rather than reconstructing payloads at the wire.
+    Enforced: resolved or possible typed-command senders in daedalus_mcp/,
+    daedalus_cli/ and dashboard/ may carry `tab` only as 'extension'. Eval
+    payloads carry `code` and legitimately route by tab. Python payloads are
+    followed through literals, dict operations, and source-ordered flow;
+    sender aliases through imports, simultaneous destructuring, assignment
+    expressions, definition-time expressions, comprehensions, functions, and
+    compound statements. Possible senders are reported as unprovable.
+    Deferred generators follow direct name aliases and apply in for/async-for,
+    eager-comprehension, starred/unpacking, and recognized consumer contexts.
+    Exhaustive builtins are dict/frozenset/list/max/min/set/sorted/sum/tuple;
+    methods are extend/join/update/writelines. all/any/next merge a partial
+    consumption path. These boundaries are iteration contracts, not call-site
+    examples. JavaScript literal/name/spread/helper senders remain checked in
+    source order; escaped objects become unprovable.
 
     What is NOT enforced:
-    - A name this scanner never saw assigned — a parameter or unrelated
-      import — is unknown rather than unprovable, and unknown stays silent.
-      That is what keeps `extCmd('fetch-timings', opts)` and the
-      `...opts` spread inside `extCmd` itself quiet; the third-argument
-      check covers the override those spreads could carry.
-    - A Python /command payload built by a non-`dict(...)` call or by
-      `dict(...)` with a positional argument is skipped. An untracked
-      `**spread` after a visible `type` is rejected, but an untracked spread
-      with no visible `type` could introduce both `type` and `tab` without
-      being recognized as a typed payload.
-    - A Python dict rebound to or mutated through an opaque expression
-      (`d = f()`, `d.update(f())`, `d |= g()`) is dropped from tracking from
-      that point rather than trusted on stale keys; a later `d['tab'] = ...`
-      is tracked again.
-    - Unmatched Python tuple/list destructuring invalidates every target.
-      Visible sender syntax is unprovable; other values become unknown.
-    - Computed keys other than string literals are skipped. Inline object
-      spreads and spreads of tracked names, plus literal computed keys such
-      as `['tab']`, are checked; a spread of an unknown name is skipped.
-    - For a named runCommand object, `type`/`code` are read from its literal
-      initializer; later property assignments to those two keys are not
-      tracked. `.tab` and `['tab']` assignments are tracked through the name
-      and through an alias of it.
-    - A helper is resolved from its first declaration in the file, and only
-      through three levels of helper calls.
-    - JavaScript name state is file-wide and source-ordered, not
-      block-scoped or execution-ordered: a call is judged against every
-      same-named assignment that precedes it in the file — including ones in
-      other functions — and an assignment written after the call is
-      invisible to it even when it runs first.
-    - The JavaScript mask does not understand regex literals: a literal
-      containing a quote character (e.g. `s.replace(/['"]/g, '')`) would be
-      read as the start of a string, blanking real code up to the next quote
-      and under-reporting everything after it. The dashboard's regex literal
-      patterns today are `/\s+/g`, `/^\./`, `/\s+/`,
-      `/\.(png|jpe?g|gif|webp)$/i` and `/\.(png|jpe?g)$/i`; none contains a
-      quote, so nothing is masked wrongly — but adding one with a quote
-      silently weakens this guard.
+    - Never-assigned names are unknown and silent.
+    - Non-dict call-built /command payloads are skipped; an untracked spread
+      without visible `type` may introduce both `type` and `tab` unseen.
+    - Opaque dict rebindings/mutations drop tracking until a visible write.
+    - Unmatched destructuring invalidates targets; senders are unprovable.
+    - Nonliteral computed keys and unknown-name spreads are skipped.
+    - Named runCommand objects track initializer `type`/`code` and later tab
+      writes, but not later `type`/`code` writes.
+    - Helpers resolve their first declaration through three call levels.
+    - Arbitrary Python calls and lazy adapters do not prove generator
+      consumption; only syntax or APIs whose contracts request iteration do.
+    - JavaScript name state is file-wide and source-ordered, not block-scoped
+      or execution-ordered.
+    - The JavaScript mask does not understand regex literals containing quote
+      characters; current dashboard regex literals contain none.
     """
     senders_py = [ROOT / 'daedalus_mcp' / 'server.py',
                   *(ROOT / 'daedalus_mcp').glob('tools_*.py'),
@@ -415,7 +436,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         "browser target is `tabId` and a typed command routes to "
         "`tab: 'extension'`:\n" + '\n'.join(violations))
 
-    # Exercise the same scanners against known-bad shapes as well as the tree.
     skipped_bodies = [
         "    for send in ():\n        pass\n",
         "    while False:\n        send = bridge.get\n",
@@ -533,22 +553,16 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                "  const fields = { url: q };\n"
                "  extCmd('set-cookie', fields);\n"
                "}\n"),
-        # ... and the bracket form, which must still be caught now that
-        # comment/string mentions of it are filtered out.
         ('js', "async function f(tid) {\n"
                "  const fields = {};\n"
                "  fields['tab'] = tid;\n"
                "  await extCmd('screenshot', fields);\n"
                "}\n"),
-        # An opaque spread after the visible routing value can replace it at
-        # runtime; visible keys must not make that spread look safe.
         ('py', "def f(tid):\n"
                "    spread = build_fields(tid)\n"
                "    cmd = {'id': '_x', 'type': 'close-tab',"
                " 'tab': 'extension', **spread}\n"
                "    api('PUT', '/command', cmd)\n"),
-        # Calls are checked against the state that reaches the call, not the
-        # flattened final assignment from a mutually exclusive branch.
         ('py', "def f(flag, tid):\n"
                "    cmd = {'id': '_x', 'type': 'close-tab',"
                " 'tab': 'extension'}\n"
@@ -567,10 +581,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         ('js', "async function f(target) {\n"
                "  await extCmd('cdp', {}, { tab: target });\n"
                "}\n"),
-        # Shapes that used to be disclosed gaps, each promoted here when it
-        # started being caught: an alias, a helper writing through its
-        # parameter, a ternary initializer, an Object.assign write, and a
-        # helper that returns the object it built.
         ('js', "async function f(tid) {\n"
                "  const fields = {};\n"
                "  const alias = fields;\n"
@@ -628,15 +638,10 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         ('js', "async function f(tid) {\n"
                "  await extCmd('screenshot', { tabId: Number(tid) });\n"
                "}\n"),
-        # An annotated assignment used correctly: the annotation changes
-        # nothing, and tabId was never the routing field.
         ('py', "async def f(chrome_tab):\n"
                "    fields: dict = {'css': 'x'}\n"
                "    fields['tabId'] = int(chrome_tab)\n"
                "    return await _ext_cmd('_css', 'inject-css', **fields)\n"),
-        # A bracket-form mention inside a comment is not code: it used to
-        # crash the scanner (no later `=`) or invent a violation (a later
-        # `let done = false;` supplied a garbage value span).
         ('js', "async function f(fields) {\n"
                "  // never do fields['tab'] = Number(tabSel.value) here\n"
                "  await extCmd('cookies', fields);\n"
@@ -650,16 +655,11 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     ]
 
     disclosed_js_limits = [
-        # Name state is file-wide and source-ordered rather than scoped and
-        # execution-ordered: an assignment written after the call is invisible
-        # to it even when it runs first.
         ('assignment after the call that runs before it',
          "async function send() {\n"
          "  await extCmd('screenshot', fields);\n"
          "}\n"
          "const fields = { tab: 'not-extension' };\n"),
-        # A name this scanner never saw assigned — a parameter, an import —
-        # is unknown rather than unprovable, and unknown stays silent.
         ('fields arriving as a parameter',
          "async function f(fields) {\n"
          "  await extCmd('screenshot', fields);\n"
