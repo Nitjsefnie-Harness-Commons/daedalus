@@ -14,9 +14,9 @@ _STALLED_SLEEP_LIMIT = 1000
 
 
 def _target_key(candidate):
-    """Return the comparable path of a receiver, or None if unsupported."""
+    """Decode path spellings so str and bytes receivers share one key."""
     try:
-        return os.fspath(candidate)
+        return os.fsdecode(os.fspath(candidate))
     except TypeError:
         return None
 
