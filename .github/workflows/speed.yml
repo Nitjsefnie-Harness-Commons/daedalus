@@ -145,7 +145,7 @@ jobs:
           SHA: ${{ github.sha }}
         # The name below is the tests workflow's aggregate job, spelled
         # exactly as that job's `name:` prints it. Nothing else in this
-        # repository carries that name, and tests/test_ci_workflows.py holds
+        # repository carries that name, and tests/test_speed_gate.py holds
         # the two files to the same string.
         #
         # Three endings, none of them a silent pass: the aggregate passed and
