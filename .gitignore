@@ -322,6 +322,7 @@
 !/tests/test_segment_jobs.py
 !/tests/test_segment_storage.py
 !/tests/test_segment_store.py
+!/tests/test_segment_write_retry.py
 !/tests/test_speed_measurement.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_stream_service.py
