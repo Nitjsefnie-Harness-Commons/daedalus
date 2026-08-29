@@ -54,7 +54,7 @@ def atomic_result_write(path, data):
     """Replace one result slot only after its temp file is fully written."""
     tmp = path.parent / f'.result-{uuid.uuid4().hex}.tmp'
     try:
-        tmp.write_bytes(data)
+        atomic_file.write_bytes_retrying(tmp, data)
         atomic_file.replace_atomically(tmp, path)
     except OSError:
         try:
