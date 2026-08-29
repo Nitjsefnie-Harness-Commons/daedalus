@@ -247,7 +247,9 @@ Fix every item above, including these two repository requirements:
    no write access needed — see CONTRIBUTING.md.
 2. Edit this same pull request so its sections match the pull request
    template. Its **Related Issues and Pull Requests** section must name
-   the claimed issue as `Fixes #<issue>`, with the real number.
+   the claimed issue by its real number. Any reference counts, so write
+   `Fixes #<issue>` when merging this should close the issue and a plain
+   `#<issue>` when it should not.
 
 {ending}
 """
