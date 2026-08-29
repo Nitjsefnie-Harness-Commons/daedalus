@@ -16,8 +16,10 @@ value (a parameter, an import, a walrus), a name chain longer than the
 `_MAX_PROGRAM_DEPTH` links the resolution follows, or a `which` of a
 non-literal name, the route `tests/_workflowrun.py` uses for whatever a
 workflow `shell:` template names. So is a `shell=True` command whose leading
-word is not a literal spelling. That boundary is where to look first when this
-scan passes something it should not.
+word is not a literal spelling, and so is a command string the module
+computes (`'bash -c ' + script`), which no constant-side judgement reaches.
+That boundary is where to look first when this scan passes something it
+should not.
 """
 import ast
 import re
@@ -176,7 +178,7 @@ def _command_names_shell(value):
     if not isinstance(value, str) or not value:
         return False
     words = value.split()
-    return bool(words) and _names_shell(words[0])
+    return bool(words) and _names_shell(words[0].strip('"\''))
 
 
 def _shell_is_true(call):
