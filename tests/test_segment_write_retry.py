@@ -63,6 +63,8 @@ def test_segment_temp_write_retries_transient_refusal(tmp):
         seg_dir = Path(docroot) / 'segments' / job
         assert sorted(path.name for path in seg_dir.glob('*.ts')) == [
             '000000.ts', '000001.ts']
+        assert (seg_dir / '000000.ts').read_bytes() == b'abc'
+        assert (seg_dir / '000001.ts').read_bytes() == b'de'
         assert list(seg_dir.glob('*.tmp')) == [], list(seg_dir.glob('*.tmp'))
 
 
@@ -179,6 +181,56 @@ def test_dirty_marker_write_retries_transient_refusal(tmp):
         record = json.loads(record_path.read_text(encoding='utf-8'))
         assert (record['stored_count'], record['stored_bytes']) == (1, 3), \
             record
+
+
+def test_an_exhausted_marker_refusal_refuses_the_segment(tmp):
+    """A marker that can never land publishes nothing: 500, nothing stored."""
+    with _bridge_with(tmp, (
+            'def _refuse_every_marker_write(path, data, **kw):\n'
+            '    if str(path).endswith(".dirty"):\n'
+            f'        raise {_REFUSAL}\n'
+            '    return _real_write_text(path, data, **kw)\n'
+            'pathlib.Path.write_text = _refuse_every_marker_write\n')) as (
+            base, docroot):
+        job = seg_job()
+        _, minted = mint_job(base, TOK, job)
+        sig = minted['sig']
+        status, body = post_segment(base, job, sig, '0', payload=b'abc')
+        assert status == 500, (status, body)
+        seg_dir = Path(docroot) / 'segments' / job
+        assert list(seg_dir.glob('*.ts')) == [], list(seg_dir.glob('*.ts'))
+        assert list(seg_dir.glob('*.tmp')) == [], list(seg_dir.glob('*.tmp'))
+        record_path = Path(docroot) / 'segments' / f'{job}.json'
+        record = json.loads(record_path.read_text(encoding='utf-8'))
+        assert (record['stored_count'], record['stored_bytes']) == (0, 0), \
+            record
+        marker = Path(docroot) / 'segments' / f'.{job}.json.dirty'
+        assert not marker.exists(), 'a refused mark left a marker behind'
+
+
+def test_a_non_permission_error_is_not_retried(tmp):
+    """A refusal outside the transient class fails fast: one attempt only."""
+    with _bridge_with(tmp, (
+            '_log = pathlib.Path(__file__).resolve().parent.parent \\\n'
+            '    / "docroot" / "refusals.txt"\n'
+            'def _refuse_every_temp_write(path, data):\n'
+            '    if path.name.endswith(".ts.tmp"):\n'
+            '        with _log.open("a", encoding="utf-8") as handle:\n'
+            '            handle.write("refused\\n")\n'
+            '        raise OSError("injected permanent failure")\n'
+            '    return _real_write_bytes(path, data)\n'
+            'pathlib.Path.write_bytes = _refuse_every_temp_write\n')) as (
+            base, docroot):
+        job = seg_job()
+        _, minted = mint_job(base, TOK, job)
+        sig = minted['sig']
+        status, body = post_segment(base, job, sig, '0', payload=b'abc')
+        assert status == 500, (status, body)
+        refusals = Path(docroot) / 'refusals.txt'
+        assert refusals.read_text(encoding='utf-8') == 'refused\n'
+        seg_dir = Path(docroot) / 'segments' / job
+        assert list(seg_dir.glob('*.ts')) == [], list(seg_dir.glob('*.ts'))
+        assert list(seg_dir.glob('*.tmp')) == [], list(seg_dir.glob('*.tmp'))
 
 
 def main():
