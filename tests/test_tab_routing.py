@@ -31,6 +31,25 @@ def test_positional_dict_copy_is_opaque_but_later_tab_write_is_tracked(tmp):
     assert keys['tab'][0] == 2
 
 
+def test_unfollowable_sender_aliases_are_reported_as_unprovable(tmp):
+    """Expressions containing a possible sender receive the cautious error."""
+    expressions = [
+        "getattr(bridge, 'ext_cmd')",
+        'bridge.ext_cmd if cond else bridge.ext_cmd',
+        'lambda *a, **k: bridge.ext_cmd(*a, **k)',
+    ]
+    source = Path(tmp) / 'unprovable_sender.py'
+    for index, expression in enumerate(expressions):
+        source.write_text(
+            "async def f(bridge, cond):\n"
+            f"    send = {expression}\n"
+            f"    return await send('_x', 'focus-tab', tab={index})\n",
+            encoding='utf-8')
+        violations = py_tab_routing_violations(source, 'unprovable_sender.py')
+        assert violations, expression
+        assert 'may be ext_cmd' in violations[0], violations
+
+
 def test_a_local_alias_of_ext_cmd_is_judged_like_a_direct_call(tmp):
     """A sender that reaches ext_cmd through a same-scope local alias must
     not slip past the guard just because the call site spells a different
@@ -289,7 +308,7 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     is exactly what happened to the first version of this fix: the wire test
     was green and `dashboard/sections/tabs.js` was still wrong.
 
-    What is enforced: in statically resolved sender shapes in
+    What is enforced: in resolved or conservatively identified sender shapes in
     daedalus_mcp/, daedalus_cli/ and dashboard/, a typed extension command
     (one routed
     through ext_cmd/_ext_cmd/extCmd/runCommand, or sent to /command with a
@@ -297,7 +316,9 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     eval path is exempt by structure: eval payloads carry `code` instead of
     `type`, and eval genuinely routes by tab. Python payloads are followed
     through literals (annotated or not), `dict(...)`, subscript assignments,
-    `update({...})`, `|= {...}`, source order and `if`/`else` branches.
+    `update({...})`, `|= {...}` and source-ordered control flow. Sender aliases
+    are followed through imports, nested functions and compound statements;
+    expressions containing a possible sender are reported as unprovable.
     JavaScript inline literals, names initialized by object literals,
     aliases of those names, ternary initializers whose branches resolve,
     `Object.assign` writes, tracked object spreads, literal computed keys,
@@ -309,8 +330,8 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     be followed, so it is not silently believed.
 
     What is NOT enforced:
-    - A name this scanner never saw assigned — a parameter, an import — is
-      unknown rather than unprovable, and unknown stays silent. That is what
+    - A name this scanner never saw assigned — a parameter or unrelated import
+      — is unknown rather than unprovable, and unknown stays silent. That is what
       keeps `extCmd('fetch-timings', opts)` and the `...opts` spread inside
       `extCmd` itself quiet; the third-argument check covers the override
       those spreads could carry.
@@ -319,9 +340,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
       `**spread` after a visible `type` is rejected, but an untracked spread
       with no visible `type` could introduce both `type` and `tab` without
       being recognized as a typed payload.
-    - Python control flow other than straight-line code and `if`/`else` is
-      not modeled. Assignments inside loops, `try`, `with`, or `match` may be
-      inspected against incomplete state.
     - A Python dict rebound to or mutated through an opaque expression
       (`d = f()`, `d.update(f())`, `d |= g()`) is dropped from tracking from
       that point rather than trusted on stale keys; a later `d['tab'] = ...`
@@ -380,7 +398,56 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     # previous two versions of this guard passed on the real tree while
     # missing every reversion an auditor tried. Each shape below is checked
     # against the same scanner functions the tree scan uses.
+    skipped_bodies = [
+        "    for send in ():\n        pass\n",
+        "    while False:\n        send = bridge.get\n",
+        "    try:\n        pass\n"
+        "    except OSError as send:\n        pass\n",
+        "    match 0:\n        case 1 as send:\n            pass\n",
+    ]
+    entered_bodies = [
+        "    try:\n        send = bridge.ext_cmd\n"
+        "        return await send('x', 'y', tab=x)\n"
+        "    except OSError:\n        return None\n",
+        "    async with bridge.session():\n"
+        "        send = bridge.ext_cmd\n"
+        "        return await send('x', 'y', tab=x)\n",
+        "    for item in xs:\n        send = bridge.ext_cmd\n"
+        "        await send('x', 'y', tab=x)\n",
+        "    while xs:\n        send = bridge.ext_cmd\n"
+        "        await send('x', 'y', tab=x)\n        break\n",
+    ]
     reversions = [
+        ('py', "from daedalus_cli.invoke import ext_cmd as send\n"
+               "send('x', 'y', tab=301)\n"),
+        ('py', "import daedalus_cli.invoke as inv\n"
+               "inv.ext_cmd('x', 'y', tab=302)\n"),
+        ('py', "async def f(bridge):\n"
+               "    send = bridge.ext_cmd; [send for send in ()]\n"
+               "    return await send('x', 'y', tab=308)\n"),
+        ('py', "def f():\n    send = _ext_cmd\n"
+               "    async def inner():\n"
+               "        return await send('x', 'y', tab=307)\n"),
+        ('py', "def f():\n    return None\n"
+               "    async def inner(tab):\n"
+               "        return await _ext_cmd('x', 'y', tab=tab)\n"),
+        ('py', "async def f(bridge, send=bridge.ext_cmd):\n"
+               "    return await send('x', 'y', tab=306)\n"),
+        ('py', "class Tabs:\n    async def focus(self, tab):\n"
+               "        return await _ext_cmd('x', 'y', tab=tab)\n"),
+        ('py', "class Tabs:\n    if enabled:\n"
+               "        async def focus(self, tab):\n"
+               "            return await _ext_cmd('x', 'y', tab=tab)\n"),
+        ('py', "async def f(bridge, xs):\n    for i in xs:\n"
+               "        if i:\n            send = bridge.ext_cmd\n"
+               "        else:\n            await send('x', 'y', tab=i)\n"),
+        ('py', "async def f(bridge, xs):\n    send = bridge.ext_cmd\n"
+               "    for x in xs:\n        send = x.get\n        break\n"
+               "    return await send('x', 'y', tab=310)\n"),
+        ('py', "async def f(bridge):\n    try:\n"
+               "        send = bridge.ext_cmd\n        bridge.fail()\n"
+               "    except OSError:\n"
+               "        return await send('x', 'y', tab=311)\n"),
         ('py', "async def f(chrome_tab):\n"
                "    fields = {}\n"
                "    fields['tab'] = str(chrome_tab)\n"
@@ -523,8 +590,18 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                "  await extCmd('screenshot', build(tid));\n"
                "}\n"),
     ]
+    reversions.extend(
+        ('py', "async def f(bridge):\n    send = bridge.ext_cmd\n"
+         + body + "    return await send('x', 'y', tab=309)\n")
+        for body in skipped_bodies)
+    reversions.extend(
+        ('py', "async def f(bridge, x, xs):\n" + body)
+        for body in entered_bodies)
 
     legitimate = [
+        ('py', "def f():\n    send = _ext_cmd\n"
+               "    async def inner(send):\n"
+               "        return await send('x', 'y', tab=307)\n"),
         ('py', "async def f(cmd_id, code, tab_id):\n"
                "    payload = {'id': cmd_id, 'code': code}\n"
                "    payload['tab'] = tab_id\n"
