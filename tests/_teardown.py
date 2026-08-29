@@ -26,6 +26,7 @@ def settle(cleanup, *, sleep=time.sleep):
             delay = min(delay * 2, BACKOFF_CAP)
         else:
             return True
-    print(f'  WARN  teardown abandoned after {ATTEMPTS} attempts: '
-          f'{type(failure).__name__}: {failure}')
+    where = getattr(failure, 'filename', None) or failure
+    print(f'  WARN  teardown abandoned after {ATTEMPTS} attempts: {where}: '
+          f'{type(failure).__name__}: {failure.strerror or failure}')
     return False
