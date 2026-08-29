@@ -193,6 +193,16 @@ def _valid_html(references=None, changes=None, repo='owner/repo'):
 BOT = 'github-actions[bot]'
 MARKER = '<!-- pr-gate -->'
 CLOSED_MARKER = '<!-- pr-gate: closed -->'
+OPEN_FIRST = (
+    '@alice — this pull request needs changes before it can be reviewed.')
+CLOSED_FIRST = (
+    '@alice — closing this automatically; it is recoverable, read on.')
+RESOLVED_FIRST = (
+    '@alice — every condition now passes; nothing further is needed '
+    'from you.')
+REOPEN_FIRST = (
+    '@alice — the body now names a claimed issue and matches the pull '
+    'request')
 
 GH_STUB = r'''#!/usr/bin/env python3
 import json
@@ -252,6 +262,10 @@ if fixtures.get('non_json'):
     print()
     print('not JSON')
     raise SystemExit(0)
+if fixtures.get('no_separator'):
+    print('HTTP/2.0 200 OK')
+    print('content-type: application/json')
+    raise SystemExit(0)
 if fixtures.get('unparsable'):
     print('first gh failure line', file=sys.stderr)
     print('second gh failure line', file=sys.stderr)
@@ -269,6 +283,8 @@ page = re.fullmatch(
     r'repos/owner/repo/issues/99/(comments|timeline)', endpoint)
 if (page and method == 'GET' and fields.get('per_page') == '100'
         and fields.get('page', '').isdigit() and len(fields) == 2):
+    if int(fields['page']) == fixtures.get('fail_page'):
+        finish(500, {'message': 'fixture page failure'})
     values = fixtures[page.group(1)]
     offset = (int(fields['page']) - 1) * 100
     finish(200, values[offset:offset + 100])
@@ -300,13 +316,14 @@ def _issue(*assignees, pull_request=False):
 
 class FakeApi:
     def __init__(self, *, pull, issues=None, comments=(), timeline=(),
-                 rendered=None, fail=()):
+                 rendered=None, fail=(), paginate_error=None):
         self.pull = pull
         self.issues = issues or {}
         self.comments = list(comments)
         self.timeline = list(timeline)
         self.rendered = _valid_html() if rendered is None else rendered
         self.fail = set(fail)
+        self.paginate_error = paginate_error
         self.calls = []
         self.writes = []
 
@@ -347,6 +364,8 @@ class FakeApi:
 
     def paginate(self, endpoint):
         self.calls.append(('GET', endpoint, None))
+        if self.paginate_error is not None:
+            raise RuntimeError(self.paginate_error)
         if self._failed('GET', endpoint):
             return _Response(500, None)
         if endpoint == 'repos/owner/repo/issues/99/comments':
@@ -409,6 +428,13 @@ def _execute(api, body):
           contextlib.redirect_stderr(error)):
         code, writes = run_gate(api, body)
     return code, writes, output.getvalue(), error.getvalue()
+
+
+def _execute_without_runtime_escape(api, body):
+    try:
+        return _execute(api, body)
+    except RuntimeError as error:
+        raise AssertionError('paginate error escaped run') from error
 
 
 def _write_sequence(writes):
@@ -482,6 +508,25 @@ def _recorded_writes(calls):
         if method != 'GET' and endpoint != 'markdown':
             writes.append((method, endpoint, call['input']))
     return writes
+
+
+def _comment_page_fields(calls):
+    fields = []
+    for call in calls:
+        argv = call['argv']
+        if len(argv) < 5 or not argv[4].endswith('/comments'):
+            continue
+        fields.extend(
+            argv[index] for index in range(1, len(argv))
+            if argv[index - 1] == '-f' and argv[index].startswith('page='))
+    return fields
+
+
+def _assert_script_error(tmp, fixtures, message):
+    result, calls = _run_script(tmp, fixtures)
+    assert result.returncode == 1, (result.stdout, result.stderr, calls)
+    assert _recorded_writes(calls) == []
+    assert result.stderr == f'pr gate failed: {message}\n'
 
 
 def _capture(call):

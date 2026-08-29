@@ -10,10 +10,11 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, GITHUB_HTML, MARKER, TEMPLATE,
-    _api, _assert_gate_message, _assert_no_writes, _closed_event,
-    _capture, _comment_body, _execute, _gate_comment, _gate_module,
-    _html_body,
+    BOT, CLOSED_FIRST, GITHUB_HTML, MARKER, OPEN_FIRST, REOPEN_FIRST,
+    RESOLVED_FIRST, TEMPLATE,
+    _api, _assert_gate_message, _assert_no_writes, _assert_script_error,
+    _capture, _closed_event, _comment_body, _comment_page_fields, _execute,
+    _execute_without_runtime_escape, _gate_comment, _gate_module, _html_body,
     _inline_marker_comment, _issue, _issue_gets, _issue_html, _layout_body,
     _markdown_code_spans, _PaginationApi, _recorded_writes, _run_script,
     _runtime_error, _script_fixtures, _text_html, _valid_body, _valid_html,
@@ -25,18 +26,6 @@ from _workflows import (  # noqa: E402
 )
 from _yamlread import job_scalar, top_level_mapping  # noqa: E402
 from _yamlsteps import step_mappings  # noqa: E402
-
-
-OPEN_FIRST = (
-    '@alice — this pull request needs changes before it can be reviewed.')
-CLOSED_FIRST = (
-    '@alice — closing this automatically; it is recoverable, read on.')
-RESOLVED_FIRST = (
-    '@alice — every condition now passes; nothing further is needed '
-    'from you.')
-REOPEN_FIRST = (
-    '@alice — the body now names a claimed issue and matches the pull '
-    'request')
 
 
 def _workflow():
@@ -525,18 +514,21 @@ def test_gh_oserror_is_reported(tmp):
 
 
 def test_invalid_gh_status_line_is_reported(tmp):
-    result, _calls = _run_script(tmp, _script_fixtures(bad_status=True))
-    assert result.returncode == 1, (result.stdout, result.stderr)
-    assert result.stderr == (
-        'pr gate failed: could not read gh response: '
-        'no HTTP status in output\n')
+    _assert_script_error(
+        tmp, _script_fixtures(bad_status=True),
+        'could not read gh response: no HTTP status in output')
 
 
 def test_non_json_gh_body_is_reported(tmp):
-    result, _calls = _run_script(tmp, _script_fixtures(non_json=True))
-    assert result.returncode == 1, (result.stdout, result.stderr)
-    assert result.stderr == (
-        'pr gate failed: could not parse gh response body\n')
+    _assert_script_error(
+        tmp, _script_fixtures(non_json=True),
+        'could not parse gh response body')
+
+
+def test_gh_response_requires_a_header_body_separator(tmp):
+    _assert_script_error(
+        tmp, _script_fixtures(no_separator=True),
+        'could not read gh response headers')
 
 
 def test_paginated_page_must_be_a_list(tmp):
@@ -559,6 +551,20 @@ def test_pagination_short_page_uses_safe_fields(tmp):
          ('per_page=100', 'page=1'))]
 
 
+def test_executable_pagination_advances_page_fields(tmp):
+    comments = [{} for _index in range(201)]
+    result, calls = _run_script(
+        tmp, _script_fixtures(comments=comments))
+    assert result.returncode == 0, (result.stdout, result.stderr, calls)
+    assert _comment_page_fields(calls) == ['page=1', 'page=2', 'page=3']
+
+
+def test_non_200_second_page_fails_without_writes(tmp):
+    _assert_script_error(
+        tmp, _script_fixtures(comments=[{}] * 150, fail_page=2),
+        'GitHub returned 500 for repos/owner/repo/issues/99/comments')
+
+
 def test_pagination_stops_after_fifty_full_pages(tmp):
     del tmp
     gate = _gate_module()
@@ -568,6 +574,18 @@ def test_pagination_stops_after_fifty_full_pages(tmp):
         lambda: gate.GhApi.paginate(api, 'repos/x/issues/1/comments'))
     assert error == 'gh pagination exceeded 50 pages'
     assert len(api.calls) == 50
+    assert api.calls[0][3][-1] == 'page=1'
+    assert api.calls[-1][3][-1] == 'page=50'
+
+
+def test_paginate_runtime_error_is_reported_by_run(tmp):
+    del tmp
+    api = _api(paginate_error='boom')
+    code, writes, _output, error = _execute_without_runtime_escape(
+        api, _valid_body())
+    assert code == 1
+    _assert_no_writes(writes)
+    assert error == 'pr gate failed: boom\n'
 
 
 def test_runtime_error_is_reported_by_run(tmp):
