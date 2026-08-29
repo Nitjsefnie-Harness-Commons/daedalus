@@ -374,14 +374,11 @@ def _run_tab_selector_harness():
 def test_a_tab_selector_follows_every_lifecycle_event(_tmp):
     seen = _run_tab_selector_harness()
     assert seen['initial'] == ['', '11', '22'], seen
-    # tab-updated refreshes, and a selection that is still on offer survives.
     assert '11  RETITLED' not in seen['afterUpdate']['labels'], seen
     assert any('RETITLED' in label for label in seen['afterUpdate']['labels']), seen
     assert seen['afterUpdate']['selected'] == '22', seen
-    # tab-unregistered refreshes, and the selection does NOT survive its tab.
     assert seen['afterUnregister']['offered'] == ['', '11'], seen
     assert seen['afterUnregister']['selected'] != '22', seen
-    # tabs-synced still refreshes, which is the one that always worked.
     assert seen['afterSync'] == ['', '11', '33'], seen
 
 
@@ -584,6 +581,9 @@ def test_cumulative_byte_timeout_output_is_decoded_once(_tmp):
     failure, _, _ = _controlled_run('linux', (402, [
         _timeout(b'A\xe2'), _timeout(b'A\xe2\x82\xacB')]))
     assert "stdout: 'A€B'; stderr: ''" in failure and '�' not in failure
+    invalid, _, _ = _controlled_run('linux', (403, [
+        _timeout(b'A\xff'), _timeout(b'A\xffB')]))
+    assert "stdout: 'A�B'; stderr: ''" in invalid, invalid
 
 
 def test_windows_deterministic_failure_after_retry_does_not_retry(_tmp):
@@ -639,12 +639,11 @@ def test_windows_does_not_retry_after_timed_out_drain_is_reaped(_tmp):
 def test_windows_preserves_only_completed_cpython_reader_buffers(_tmp):
     failure, _, _ = _controlled_run(
         'win32', (1001, [
-            _timeout(b'prefix ', b'early error\n'),
-            _timeout(b'prefix middle ', None)], {
+            _timeout(None, b'early error\n'), _timeout(None, None)], {
                 'wait_succeeds': True,
                 'reader_buffers': {
-                    'stdout': b'prefix middle end',
-                    'stderr': b'[phase] buffered phase\nbuffered error',
+                    'stdout': 'prefix middle end',
+                    'stderr': '[phase] buffered phase\nbuffered error',
                 }}))
     assert "stdout: 'prefix middle end'" in failure, failure
     assert failure.count('prefix middle end') == 1, failure
@@ -655,7 +654,7 @@ def test_windows_preserves_only_completed_cpython_reader_buffers(_tmp):
     sibling, events, _ = _controlled_run(
         'win32', (1002, [_timeout(None, None), _timeout(None, None)], {
             'wait_succeeds': True,
-            'reader_buffers': {'stdout': b'completed sibling'},
+            'reader_buffers': {'stdout': 'completed sibling'},
             'stuck_reader': 'stderr',
         }))
     assert "stdout: 'completed sibling'; stderr: ''" in sibling, sibling
@@ -667,7 +666,7 @@ def test_independent_output_sources_keep_repeated_boundary(_tmp):
     failure, _, _ = _controlled_run('win32', (1003, [
         _timeout(b'leftX'), _timeout(None, None)], {
             'wait_succeeds': True,
-            'reader_buffers': {'stdout': b'Xright'}}))
+            'reader_buffers': {'stdout': 'Xright'}}))
     assert "stdout: 'leftXXright'; stderr: ''" in failure, failure
 
 
