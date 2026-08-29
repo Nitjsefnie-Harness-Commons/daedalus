@@ -9,12 +9,11 @@ anything passes everything.
 """
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
@@ -300,7 +299,11 @@ def test_every_static_label_names_a_control(tmp):
     assert not dangling, '\n'.join(dangling)
 
 
-_FIELD_HARNESS = r"""
+_FIELD_HARNESS = _dashnode.DashboardNodeHarness(r"""
+import { pathToFileURL } from 'node:url';
+
+phase('dashboard harness started');
+(async () => {
 // Enough DOM for `h`; the helpers under test are the real ones.
 class El {
   constructor(tag) {
@@ -325,8 +328,12 @@ globalThis.document = {
   createTextNode: (t) => ({ tag: '#text', text: String(t), children: [] }),
 };
 
-const { pathToFileURL } = await import('node:url');
-const { h, field, spacer } = await import(pathToFileURL(process.argv[1]).href);
+phase('dashboard module import started');
+const { h, field, spacer } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
+phase('dashboard module imported');
 
 function describe(pair) {
   const [label, control] = pair;
@@ -339,11 +346,13 @@ function describe(pair) {
   };
 }
 
+phase('dashboard call started');
 const first = describe(field('url', h('input', { type: 'text' })));
 const second = describe(field('name', h('select', {})));
 const preset = describe(field('code', h('textarea', { id: 'chosen-id' })));
 const styled = describe(field('css', h('input', {}), { style: { margin: '0' } }));
 const blank = spacer();
+phase('dashboard call settled');
 
 process.stdout.write(JSON.stringify({
   first, second, preset, styled,
@@ -352,7 +361,10 @@ process.stdout.write(JSON.stringify({
   spacerHidden: blank.attrs['aria-hidden'],
   spacerClass: blank.className,
 }));
-"""
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=1, module=True, arguments=(
+    ROOT / 'dashboard' / 'sections' / '_util.js',))
 
 
 def test_field_associates_every_label_with_its_control(tmp):
@@ -364,14 +376,7 @@ def test_field_associates_every_label_with_its_control(tmp):
     stopped emitting `for` would leave the scan perfectly green.
     """
     del tmp
-    node = shutil.which('node')
-    assert node, 'node is required to execute the dashboard field helper'
-    result = subprocess.run(
-        [node, '--input-type=module', '--eval', _FIELD_HARNESS,
-         str(ROOT / 'dashboard' / 'sections' / '_util.js')],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
+    result = _dashnode.run_dashboard_node(_FIELD_HARNESS)
     seen = json.loads(result.stdout)
 
     for key in ('first', 'second', 'preset', 'styled'):

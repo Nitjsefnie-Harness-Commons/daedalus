@@ -4,16 +4,20 @@
 Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
+import inspect
 import os
 import re
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
+import test_dashboard_accessibility as accessibility  # noqa: E402
 import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
@@ -86,12 +90,26 @@ def _harness_failure(harness, *arguments, **options):
         bounded_steps = options.pop('bounded_steps', 0)
         module = options.pop('module', False)
         harness = _harness(harness, bounded_steps, module)
+    if arguments:
+        harness = replace(harness, arguments=arguments)
+    step_timeout = options.pop(
+        'step_timeout', _dashnode._DASHBOARD_STEP_TIMEOUT_S)
+    process_grace = options.pop(
+        'process_grace', _dashnode._DASHBOARD_PROCESS_GRACE_S)
+    assert not options, options
+    real_step_timeout = _dashnode._DASHBOARD_STEP_TIMEOUT_S
+    real_process_grace = _dashnode._DASHBOARD_PROCESS_GRACE_S
     try:
-        _dashnode.run_dashboard_node(harness, *arguments, **options)
+        _dashnode._DASHBOARD_STEP_TIMEOUT_S = step_timeout
+        _dashnode._DASHBOARD_PROCESS_GRACE_S = process_grace
+        _dashnode.run_dashboard_node(harness)
     except AssertionError as failure:
         return str(failure)
     except subprocess.TimeoutExpired as failure:
         return f'bare TimeoutExpired after {failure.timeout}s'
+    finally:
+        _dashnode._DASHBOARD_STEP_TIMEOUT_S = real_step_timeout
+        _dashnode._DASHBOARD_PROCESS_GRACE_S = real_process_grace
     raise AssertionError('the failing dashboard harness unexpectedly passed')
 
 
@@ -118,6 +136,32 @@ def test_phase_records_a_harness_checkpoint(tmp):
     result = _dashnode.run_dashboard_node(
         _harness("phase('dashboard harness started');"))
     assert result.stderr == '[phase] dashboard harness started\n', result
+
+
+def test_runner_keeps_its_one_harness_public_signature(tmp):
+    """The public boundary takes one typed harness and returns text output."""
+    del tmp
+    signature = inspect.signature(_dashnode.run_dashboard_node)
+    assert list(signature.parameters) == ['harness'], signature
+    assert signature.parameters['harness'].annotation is (
+        _dashnode.DashboardNodeHarness), signature
+    assert signature.return_annotation == (
+        subprocess.CompletedProcess[str]), signature
+
+
+def test_one_launch_helper_has_attempt_as_keyword_only(tmp):
+    """One launch is isolated behind the private attempt-numbered helper."""
+    del tmp
+    helper = getattr(_dashnode, '_run_dashboard_node_once', None)
+    assert helper is not None, '_run_dashboard_node_once is missing'
+    signature = inspect.signature(helper)
+    assert list(signature.parameters) == ['harness', 'attempt'], signature
+    assert signature.parameters['harness'].annotation is (
+        _dashnode.DashboardNodeHarness), signature
+    assert signature.parameters['attempt'].kind is (
+        inspect.Parameter.KEYWORD_ONLY), signature
+    assert signature.return_annotation == (
+        subprocess.CompletedProcess[str]), signature
 
 
 def test_bounded_names_a_step_that_never_settles(tmp):
@@ -293,6 +337,7 @@ def test_shipped_harnesses_pin_their_process_metadata(tmp):
         'consume': (behaviour._DASHBOARD_CONSUME_HARNESS, 2, False),
         'world': (behaviour._DASHBOARD_WORLD_HARNESS, 1, False),
         'selector': (behaviour._TAB_SELECTOR_HARNESS, 5, True),
+        'field': (accessibility._FIELD_HARNESS, 1, True),
     }
     for name, (harness, bounded_steps, module) in expected.items():
         assert isinstance(harness, _dashnode.DashboardNodeHarness), name
@@ -407,10 +452,14 @@ def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
         behaviour._DASHBOARD_CONSUME_HARNESS,
         behaviour._DASHBOARD_WORLD_HARNESS,
         behaviour._TAB_SELECTOR_HARNESS,
+        accessibility._FIELD_HARNESS,
     )
+    assert all(isinstance(harness, _dashnode.DashboardNodeHarness)
+               for harness in shipped), shipped
     rebuilt = tuple(
         _dashnode.DashboardNodeHarness(
-            harness.source, harness.bounded_steps, harness.module)
+            harness.source, harness.bounded_steps, harness.module,
+            harness.arguments)
         for harness in shipped)
     assert rebuilt == shipped
 
@@ -465,17 +514,15 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
     del tmp
     runs = {
         'content': _dashnode.run_dashboard_node(
-            behaviour._CONTENT_KEEPALIVE_HARNESS,
-            behaviour.ROOT / 'extension' / 'content.js'),
+            behaviour._CONTENT_KEEPALIVE_HARNESS),
         'consume': _dashnode.run_dashboard_node(
-            behaviour._DASHBOARD_CONSUME_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'api.js'),
+            behaviour._DASHBOARD_CONSUME_HARNESS),
         'world': _dashnode.run_dashboard_node(
-            behaviour._DASHBOARD_WORLD_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js'),
+            behaviour._DASHBOARD_WORLD_HARNESS),
         'selector': _dashnode.run_dashboard_node(
-            behaviour._TAB_SELECTOR_HARNESS,
-            behaviour.ROOT / 'dashboard' / 'sections' / '_util.js'),
+            behaviour._TAB_SELECTOR_HARNESS),
+        'field': _dashnode.run_dashboard_node(
+            accessibility._FIELD_HARNESS),
     }
     expected = [
         'dashboard harness started',
@@ -487,6 +534,28 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
     ]
     actual = {name: _phase_trace(result) for name, result in runs.items()}
     assert actual == {name: expected for name in runs}, actual
+
+
+def test_accessibility_field_case_uses_the_shared_runner(tmp):
+    """The real field case reaches the shared process boundary."""
+    del tmp
+
+    class SharedRunnerReached(Exception):
+        pass
+
+    def stop_at_shared_runner(_harness):
+        raise SharedRunnerReached
+
+    with patch.object(
+            _dashnode, 'run_dashboard_node', stop_at_shared_runner):
+        try:
+            accessibility.test_field_associates_every_label_with_its_control(
+                None)
+        except SharedRunnerReached:
+            pass
+        else:
+            raise AssertionError(
+                'accessibility field case bypassed run_dashboard_node')
 
 
 def test_a_dashboard_module_import_that_never_settles_names_import(tmp):
