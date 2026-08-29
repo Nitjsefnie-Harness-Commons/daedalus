@@ -66,12 +66,19 @@ def _refuse_path_operation(path, operation, failures, clock=None):
             except TypeError:
                 return original(candidate, *args, **kwargs)
         if candidate_key == target_key:
+            if remaining[0]:
+                remaining[0] -= 1
+                calls[0] += 1
+                if clock is not None:
+                    clock.record_read()
+                raise PermissionError(32, 'injected sharing violation')
+            # A call the real API refuses performed no operation, so it is
+            # neither counted nor recorded as one.
+            result = original(candidate, *args, **kwargs)
             calls[0] += 1
             if clock is not None:
                 clock.record_read()
-            if remaining[0]:
-                remaining[0] -= 1
-                raise PermissionError(32, 'injected sharing violation')
+            return result
         return original(candidate, *args, **kwargs)
 
     setattr(Path, operation, refused)
@@ -156,12 +163,18 @@ def _vanish_during_read(path, clock, remove_queue=False):
             handle = _native_read_handle(original, candidate, args, kwargs)
             if handle is not None:
                 return handle
-            armed[0] = False
-            clock.record_read()
             path.unlink()
             if remove_queue:
                 path.parent.rmdir()
-            return original(path, *args, **kwargs)
+            try:
+                reopened = original(path, *args, **kwargs)
+            except OSError:
+                armed[0] = False
+                clock.record_read()
+                raise
+            # A mode that recreates the target cannot observe the vanish, so
+            # the fault was not delivered and stays armed for a real read.
+            return reopened
         return original(candidate, *args, **kwargs)
 
     Path.open = vanished

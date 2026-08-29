@@ -13,7 +13,6 @@ import _cmdqueue  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
     _disappear_on_first_open,
     _queued_file,
-    _path_open_failure,
     _refuse_first_queue_read,
     _refuse_path_operation,
     _vanish_during_read,
