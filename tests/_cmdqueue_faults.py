@@ -40,10 +40,12 @@ def _plain_read(handle, args, kwargs):
 
     The real API has already accepted this call, so its mode is a valid
     spelling and only has to be searched, never parsed. The handle cannot
-    answer instead: a truncating `wb+` reports its mode as `rb+`.
+    answer instead: a truncating `wb+` reports its mode as `rb+`. The search
+    must not go through the mode object's own protocol.
     """
     mode = kwargs.get('mode', args[0] if args else 'r')
-    return handle.readable() and not set(mode) & set('wax')
+    return handle.readable() and not any(
+        str.__contains__(mode, marker) for marker in 'wax')
 
 
 def _native_read_handle(original, candidate, args, kwargs):

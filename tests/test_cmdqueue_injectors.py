@@ -342,6 +342,65 @@ def test_untargeted_readable_and_nonreadable_creates_match_native(tmp):
                     label, mode, actual_opens, expected_opens)
 
 
+def test_untargeted_plain_reads_match_native_and_leave_fault_armed(tmp):
+    queue, queued = _queued_file(tmp)
+    untargeted = Path(tmp) / 'untargeted.json'
+    untargeted.write_text('untargeted content', encoding='utf-8')
+    original = Path.open
+    underlying_opens = [0]
+
+    def counted(candidate, *args, **kwargs):
+        underlying_opens[0] += 1
+        return original(candidate, *args, **kwargs)
+
+    def read_outcome(opener, path, mode):
+        try:
+            with opener(path, mode=mode, encoding='utf-8') as opened:
+                return 'returned', opened.read()
+        except OSError as caught:
+            return 'raised', type(caught)
+
+    def file_content(path):
+        with original(path, mode='r', encoding='utf-8') as opened:
+            return opened.read()
+
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        injectors = (
+            ('generic refusal', _refuse_path_operation,
+             (queued, 'open', 1), 'r', PermissionError),
+            ('first-read', _refuse_first_queue_read,
+             (queue,), 'rt', PermissionError),
+            ('disappearance', _disappear_on_first_open,
+             (queued,), 'r', FileNotFoundError),
+            ('vanish', _vanish_during_read,
+             (queued, clock), 'r', FileNotFoundError))
+        for case in injectors:
+            label, injector, injector_args, mode, injected_type = case
+            underlying_opens[0] = 0
+            expected = read_outcome(counted, untargeted, mode)
+            expected_opens = underlying_opens[0]
+            expected_content = file_content(untargeted)
+            underlying_opens[0] = 0
+            Path.open = counted
+            try:
+                with injector(*injector_args) as state:
+                    actual = read_outcome(Path.open, untargeted, mode)
+                    actual_opens = underlying_opens[0]
+                    actual_content = file_content(untargeted)
+                    target_fault = read_outcome(Path.open, queued, 'r')
+                    if state is not None:
+                        assert state == [1], (label, state)
+            finally:
+                Path.open = original
+            assert actual == expected, (label, actual, expected)
+            assert actual_content == expected_content, (
+                label, actual_content, expected_content)
+            assert actual_opens == expected_opens, (
+                label, actual_opens, expected_opens)
+            assert target_fault == ('raised', injected_type), (
+                label, target_fault, injected_type)
+
+
 def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
     queue, queued = _queued_file(tmp)
     original = Path.open
@@ -408,6 +467,65 @@ def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
                 assert fault[0] == 'raised', (label, mode, fault)
                 assert fault[1][0] is injected_type, (
                     label, mode, fault, injected_type)
+
+
+def test_mode_search_ignores_a_str_subclass_iterator(tmp):
+    queue, queued = _queued_file(tmp)
+    original = Path.open
+
+    class ReadAsWrite(str):
+        def __iter__(self):
+            return iter('w')
+
+    class CreateAsRead(str):
+        def __iter__(self):
+            return iter('r')
+
+    def open_outcome(opener, mode):
+        try:
+            with opener(
+                    queued, mode=mode, encoding='utf-8') as opened:
+                return 'returned', opened.read()
+        except OSError as caught:
+            return 'raised', type(caught)
+
+    def file_content():
+        with original(queued, mode='r', encoding='utf-8') as opened:
+            return opened.read()
+
+    read_mode = ReadAsWrite('r')
+    create_mode = CreateAsRead('w+')
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        injectors = (
+            ('generic refusal', _refuse_path_operation,
+             (queued, 'open', 1), PermissionError),
+            ('first-read', _refuse_first_queue_read,
+             (queue,), PermissionError),
+            ('disappearance', _disappear_on_first_open,
+             (queued,), FileNotFoundError),
+            ('vanish', _vanish_during_read,
+             (queued, clock), FileNotFoundError))
+        for label, injector, injector_args, injected_type in injectors:
+            queued.write_text('seed', encoding='utf-8')
+            with injector(*injector_args):
+                read = open_outcome(Path.open, read_mode)
+            if not queued.exists():
+                queued.write_text('seed', encoding='utf-8')
+            expected_create = open_outcome(original, create_mode)
+            expected_content = file_content()
+            queued.write_text('seed', encoding='utf-8')
+            with injector(*injector_args):
+                actual_create = open_outcome(Path.open, create_mode)
+                actual_content = file_content()
+                target_fault = open_outcome(Path.open, 'r')
+            assert read == ('raised', injected_type), (
+                label, read, injected_type)
+            assert actual_create == expected_create, (
+                label, actual_create, expected_create)
+            assert actual_content == expected_content, (
+                label, actual_content, expected_content)
+            assert target_fault == ('raised', injected_type), (
+                label, target_fault, injected_type)
 
 
 def test_bound_and_unbound_receivers_receive_each_one_shot_fault(tmp):

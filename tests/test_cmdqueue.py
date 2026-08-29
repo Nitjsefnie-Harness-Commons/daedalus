@@ -79,12 +79,17 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
     base_end = clock.monotonic()
     _queue, queue_end, queue_origin = observed_wait(True)
     assert baseline is None, baseline
-    # Sterbenz makes deadline - now exact while its operands are within a
-    # factor of two, so adding it lands on the already-representable deadline.
+    # The wait must reach its deadline and must not sleep an unclamped
+    # polling delay past it. The tolerance is virtual-clock time, not wall
+    # time, so it is deterministic: it sits far above the float drift a wait
+    # that splits its final delay accumulates, and far below the shortfall an
+    # unclamped final sleep leaves.
+    tolerance = _cmdqueue.POLL_DELAY / 100
     endpoints = ((observed_end, origin), (base_end, base),
                  (queue_end, queue_origin))
     for end, start in endpoints:
-        assert end == start + timeout, (end, start, timeout)
+        assert start + timeout <= end <= start + timeout + tolerance, (
+            'wait did not end within its deadline', end, start, timeout)
 
 
 def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
