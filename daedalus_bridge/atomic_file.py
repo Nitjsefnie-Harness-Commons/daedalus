@@ -21,6 +21,10 @@ def _retrying(perform):
     read-only or the disk is full is not going to start working, and waiting
     on it would delay the error that explains what happened instead of
     fixing anything.
+
+    The sleeps run while the caller holds whatever locks it holds, so the
+    wait is bounded at roughly `_RETRY_ATTEMPTS * _RETRY_DELAY` (80 ms) per
+    retrying call.
     """
     for remaining in range(_RETRY_ATTEMPTS - 1, -1, -1):
         try:
