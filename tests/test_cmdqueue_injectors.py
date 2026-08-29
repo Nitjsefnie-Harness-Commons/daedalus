@@ -84,7 +84,7 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     original, underlying_opens = Path.open, [0]
 
     def counted(candidate, *args, **kwargs):
-        underlying_opens[0] += candidate == queued
+        underlying_opens[0] += 1
         return original(candidate, *args, **kwargs)
     Path.open = counted
     try:
@@ -97,6 +97,23 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     # This open count is the transparency contract, not an internal detail.
     assert underlying_opens == [1], (
         'exhausted fault reran native-validation probe', underlying_opens)
+    untargeted = Path(tmp) / 'untargeted-readable'
+    untargeted.write_text('untargeted content', encoding='utf-8')
+    Path.open = counted
+    try:
+        with _refuse_path_operation(queued, 'open', 1):
+            underlying_opens[0] = 0
+            with untargeted.open(
+                    mode='rt', encoding='utf-8') as opened:
+                assert opened.read() == 'untargeted content'
+            untargeted_opens = underlying_opens[0]
+            target_fault = _path_open_failure(
+                queued, encoding='utf-8')
+    finally:
+        Path.open = original
+    assert untargeted_opens == 1, (
+        'untargeted read received native validation', untargeted_opens)
+    assert target_fault[0] is PermissionError, target_fault
     with _refuse_path_operation(queued, 'unlink', 1) as unlink_calls:
         actual_exploding_unlink = path_failure(
             'unlink', exploding_receiver, *excess_unlink)
@@ -256,10 +273,15 @@ def test_exhausted_refusal_accounts_only_for_completed_operations(tmp):
             assert actual == expected, (actual, expected)
             assert calls == [1], calls
             assert len(events) == 1, events
+            with queued.open(mode='w', encoding='utf-8') as opened:
+                opened.write('caller-owned content')
+            assert calls == [1], calls
+            assert len(events) == 1, events
             with queued.open(mode='rt', encoding='utf-8') as opened:
                 assert opened.readable(), opened
     assert calls == [2], calls
     assert len(events) == 2, events
+    assert queued.read_text('utf-8') == 'caller-owned content'
 
 
 def test_untargeted_readable_and_nonreadable_creates_match_native(tmp):
@@ -278,7 +300,7 @@ def test_untargeted_readable_and_nonreadable_creates_match_native(tmp):
                            opened.writable(), opened.write(content))
         except OSError as caught:
             filename = getattr(caught, 'filename', None)
-            return ('raised', type(caught), type(filename), filename)
+            return ('raised', (type(caught), type(filename), filename))
         return 'returned', outcome
 
     def file_effect(path):
@@ -318,6 +340,77 @@ def test_untargeted_readable_and_nonreadable_creates_match_native(tmp):
                     label, mode, actual_effect, expected_effect)
                 assert actual_opens == expected_opens, (
                     label, mode, actual_opens, expected_opens)
+
+
+def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
+    queue, queued = _queued_file(tmp)
+    original = Path.open
+    underlying_opens = [0]
+
+    def counted(candidate, *args, **kwargs):
+        underlying_opens[0] += 1
+        return original(candidate, *args, **kwargs)
+
+    def open_outcome(opener, receiver, mode):
+        try:
+            with opener(
+                    receiver, mode=mode, encoding='utf-8') as opened:
+                state = (opened.tell(), opened.readable(),
+                         opened.writable())
+        except OSError as caught:
+            filename = getattr(caught, 'filename', None)
+            return ('raised', (type(caught), type(filename), filename))
+        return 'returned', state
+
+    def file_content(path):
+        if not path.exists():
+            return None
+        with original(path, mode='r', encoding='utf-8') as opened:
+            return opened.read()
+
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        injectors = (
+            ('generic refusal', _refuse_path_operation,
+             (queued, 'open', 1), PermissionError),
+            ('first-read', _refuse_first_queue_read,
+             (queue,), PermissionError),
+            ('disappearance', _disappear_on_first_open,
+             (queued,), FileNotFoundError),
+            ('vanish', _vanish_during_read,
+             (queued, clock), FileNotFoundError))
+        for label, injector, injector_args, injected_type in injectors:
+            for mode in ('w+', 'a+', 'x+'):
+                native = Path(tmp) / f'native-{label}-{mode}'
+                if mode == 'x+':
+                    queued.unlink(missing_ok=True)
+                else:
+                    native.write_text('seed', encoding='utf-8')
+                    queued.write_text('seed', encoding='utf-8')
+                underlying_opens[0] = 0
+                expected = open_outcome(counted, native, mode)
+                expected_opens = underlying_opens[0]
+                expected_content = file_content(native)
+                underlying_opens[0] = 0
+                Path.open = counted
+                try:
+                    with injector(*injector_args) as state:
+                        actual = open_outcome(Path.open, queued, mode)
+                        actual_opens = underlying_opens[0]
+                        actual_content = file_content(queued)
+                        fault = open_outcome(Path.open, queued, 'r')
+                        if state is not None:
+                            assert state == [1], (label, mode, state)
+                finally:
+                    Path.open = original
+                assert actual == expected, (
+                    label, mode, actual, expected)
+                assert actual_opens == expected_opens, (
+                    label, mode, actual_opens, expected_opens)
+                assert actual_content == expected_content, (
+                    label, mode, actual_content, expected_content)
+                assert fault[0] == 'raised', (label, mode, fault)
+                assert fault[1][0] is injected_type, (
+                    label, mode, fault, injected_type)
 
 
 def test_bound_and_unbound_receivers_receive_each_one_shot_fault(tmp):
@@ -369,6 +462,29 @@ def test_bound_and_unbound_receivers_receive_each_one_shot_fault(tmp):
                     second = read_outcome(spelling)
                     assert second == ('returned', 'readable content'), (
                         label, spelling, second)
+
+
+def test_vanish_reopen_preserves_bytes_receiver_error(tmp):
+    _queue, queued = _queued_file(tmp)
+    receiver = os.fsencode(str(queued))
+
+    def missing_outcome():
+        try:
+            with Path.open(receiver, mode='r', encoding='utf-8'):
+                pass
+        except OSError as caught:
+            filename = getattr(caught, 'filename', None)
+            return (type(caught), str(caught),
+                    type(filename), filename)
+        raise AssertionError('missing path unexpectedly opened')
+
+    queued.unlink()
+    expected = missing_outcome()
+    queued.write_text('seed', encoding='utf-8')
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        with _vanish_during_read(queued, clock):
+            actual = missing_outcome()
+    assert actual == expected, (actual, expected)
 
 
 if __name__ == '__main__':

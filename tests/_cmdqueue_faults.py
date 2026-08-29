@@ -35,10 +35,15 @@ def _target_key(candidate):
         return None
 
 
+def _plain_read(handle):
+    """A call that creates or truncates is not the read an injector faults."""
+    return handle.readable() and handle.mode[0] not in 'wax'
+
+
 def _native_read_handle(original, candidate, args, kwargs):
     """Return a non-readable open for the caller; None for a real read."""
     handle = original(candidate, *args, **kwargs)
-    if handle.readable():
+    if _plain_read(handle):
         handle.close()
         return None
     return handle
@@ -75,6 +80,8 @@ def _refuse_path_operation(path, operation, failures, clock=None):
             # A call the real API refuses performed no operation, so it is
             # neither counted nor recorded as one.
             result = original(candidate, *args, **kwargs)
+            if operation == 'open' and not _plain_read(result):
+                return result
             calls[0] += 1
             if clock is not None:
                 clock.record_read()
@@ -163,18 +170,12 @@ def _vanish_during_read(path, clock, remove_queue=False):
             handle = _native_read_handle(original, candidate, args, kwargs)
             if handle is not None:
                 return handle
+            armed[0] = False
+            clock.record_read()
             path.unlink()
             if remove_queue:
                 path.parent.rmdir()
-            try:
-                reopened = original(path, *args, **kwargs)
-            except OSError:
-                armed[0] = False
-                clock.record_read()
-                raise
-            # A mode that recreates the target cannot observe the vanish, so
-            # the fault was not delivered and stays armed for a real read.
-            return reopened
+            return original(candidate, *args, **kwargs)
         return original(candidate, *args, **kwargs)
 
     Path.open = vanished
