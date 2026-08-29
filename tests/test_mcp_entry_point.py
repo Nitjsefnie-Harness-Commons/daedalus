@@ -85,14 +85,23 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
         env=_util.child_coverage('scrub', env),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     output = _util.drain_lines(proc)
+    drain = getattr(proc, '_daedalus_drain_thread')
+    joins = []
+    original_join = drain.join
+
+    def record_join():
+        joins.append(True)
+        original_join()
+
+    drain.join = record_join
     try:
         port = _await_mcp_listener(
             proc, output, _util.startup_timeout())
         assert port > 0, output
     finally:
         _cleanup_mcp(proc)
+    assert joins == [True]
     assert proc.stdout.closed
-    drain = getattr(proc, '_daedalus_drain_thread')
     assert not drain.is_alive()
 
 
