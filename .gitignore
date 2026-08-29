@@ -242,6 +242,7 @@
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_segments.py
+!/tests/_teardown.py
 !/tests/_util.py
 !/tests/_wfcheckout.py
 !/tests/_wfgraph.py
@@ -331,6 +332,7 @@
 !/tests/test_stream_service.py
 !/tests/test_suite_runner.py
 !/tests/test_tab_routing.py
+!/tests/test_teardown_retry.py
 !/tests/test_version_contract.py
 !/tests/test_vm_file_load_guard.py
 !/tests/test_wfcheckout.py
