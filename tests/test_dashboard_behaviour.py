@@ -473,9 +473,10 @@ def test_no_dashboard_export_is_unreferenced(tmp):
 
 
 class _ControlledProcess:
-    def __init__(self, pid, command, outcomes, events):
+    def __init__(self, pid, command, outcomes, events, wait_succeeds=False):
         self.pid, self.command = pid, command
         self.outcomes, self.events = list(outcomes), events
+        self.wait_succeeds = wait_succeeds
         self.returncode = self.stdout = self.stderr = None
 
     def communicate(self, timeout):
@@ -495,6 +496,8 @@ class _ControlledProcess:
 
     def wait(self, timeout):
         self.events.append(('wait', self.pid, timeout))
+        if self.wait_succeeds:
+            return self.returncode
         raise subprocess.TimeoutExpired(self.command, timeout)
 
 
@@ -502,11 +505,13 @@ def _controlled_run(platform, *specs, before_popen=None):
     pending, events, diagnostic = list(specs), [], StringIO()
 
     def popen(command, **_options):
-        pid, outcomes = pending.pop(0)
+        pid, outcomes, *wait_options = pending.pop(0)
+        wait_succeeds = wait_options[0] if wait_options else False
         if before_popen:
             before_popen(pid, events)
         events.append(('popen', pid, tuple(command)))
-        return _ControlledProcess(pid, command, outcomes, events)
+        return _ControlledProcess(
+            pid, command, outcomes, events, wait_succeeds)
 
     with patch.object(sys, 'platform', platform), \
             patch.object(_dashnode.shutil, 'which', return_value='/node'), \
@@ -609,6 +614,17 @@ def test_windows_does_not_retry_when_child_cleanup_cannot_finish(tmp):
     assert isinstance(failure, str), failure
     assert 'drain outcome: timed out' in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_windows_does_not_retry_after_timed_out_drain_is_reaped(tmp):
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (801, [_timeout(), _timeout('partial', 'error')], True),
+        (802, [_result(0, 'wrong retry')]))
+    assert isinstance(failure, str), failure
+    assert 'drain outcome: timed out' in failure, failure
+    assert [event[0] for event in events].count('popen') == 1, events
+    assert [event[0] for event in events].count('wait') == 1, events
 
 
 def main():
