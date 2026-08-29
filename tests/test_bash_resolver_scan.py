@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """No test launches the workflow shell except through the shared resolver."""
+import ast
 import shutil
 import sys
 from pathlib import Path
@@ -53,6 +54,7 @@ def _mutated_copy(tmp, site):
     target = root / relative
     text = target.read_text(encoding='utf-8')
     assert text.count(needle) == 1, f'the {relative} site shape changed'
+    assert launch_needle in text, f'the {relative} launch shape changed'
     launch_line = text[:text.index(launch_needle)].count('\n') + 1
     target.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
     return root, f'{relative}:{launch_line}:'
@@ -63,7 +65,6 @@ def _synthetic(source):
 
 
 def test_every_launch_names_the_shared_resolver(tmp):
-    """The whole tracked test tree, as the scan reads it."""
     del tmp
     violations = _bash_resolver_scan._tree_violations(ROOT)
     assert not violations, '\n'.join(violations)
@@ -77,6 +78,16 @@ def test_the_scan_reads_exactly_the_tracked_test_tree(tmp):
     scanned = {path.relative_to(ROOT).as_posix()
                for path in _bash_resolver_scan._test_modules(ROOT)}
     assert scanned == tracked, sorted(scanned ^ tracked)
+
+
+def test_a_write_through_a_container_binds_no_name(tmp):
+    """A subscript or attribute target is not a binding of its base name."""
+    del tmp
+    for statement in ("conf['bash'] = 'bash'", 'conf.bash = "bash"',
+                      "conf['bash'] = conf.extra = 'bash'"):
+        names, _value = _bash_resolver_scan._binding_of(
+            ast.parse(statement).body[0])
+        assert names == [], statement
 
 
 def test_a_literal_shell_argv_is_a_violation(tmp):
@@ -115,7 +126,6 @@ subprocess.run([program, '-c', 'true'], cwd=tmp)
 
 
 def test_a_which_of_the_shell_is_a_violation(tmp):
-    """Inline, or bound to a name and then launched through it."""
     del tmp
     inline = _synthetic("""import shutil
 import subprocess
@@ -135,7 +145,6 @@ subprocess.run([bash, '-c', 'true'], cwd=tmp)
 
 
 def test_a_launch_alias_is_followed(tmp):
-    """A launch reached through a `from subprocess import` is still one."""
     del tmp
     violations = _synthetic("""import subprocess
 from subprocess import run
@@ -146,7 +155,6 @@ run(['bash', '-c', 'true'], cwd=tmp)
 
 
 def test_an_argv_spelled_as_a_keyword_is_a_violation(tmp):
-    """Naming the argv parameter launches nothing differently."""
     del tmp
     violations = _synthetic("""import subprocess
 subprocess.run(args=['bash', '-c', 'true'], cwd=tmp)
@@ -155,8 +163,35 @@ subprocess.run(args=['bash', '-c', 'true'], cwd=tmp)
     assert "as 'bash'" in violations[0], violations
 
 
+def test_a_shell_command_string_is_a_violation(tmp):
+    """Under `shell=True` the command string's own program is the element."""
+    del tmp
+    violations = _synthetic("""import subprocess
+subprocess.run('bash -c true', shell=True, cwd=tmp)
+""")
+    assert violations == [
+        "tests/synthetic.py:2: run resolves the workflow shell as "
+        "'bash -c true', not workflow_bash()"], violations
+    bound = _synthetic("""import subprocess
+command = 'bash -c true'
+subprocess.run(command, shell=True, cwd=tmp)
+""")
+    assert len(bound) == 1, bound
+    assert "as 'bash -c true'" in bound[0], bound
+
+
+def test_a_command_string_without_the_flag_is_not_a_program(tmp):
+    """Only `shell=True` makes the string a command rather than an argv."""
+    del tmp
+    assert _synthetic("""import subprocess
+subprocess.run('bash -c true', cwd=tmp)
+""") == []
+    assert _synthetic("""import subprocess
+subprocess.run('python -c true', shell=True, cwd=tmp)
+""") == []
+
+
 def test_a_rebound_name_still_reports_the_bypass(tmp):
-    """A name held by the resolver and the bypass reports the bypass."""
     del tmp
     violations = _synthetic("""import subprocess
 import _util
@@ -186,8 +221,23 @@ subprocess.run([bash, '-c', 'true'], cwd=tmp)
 """) == []
 
 
+def test_a_resolver_call_is_classified_as_the_resolver(tmp):
+    """Recognition itself, not only the cleanliness it buys.
+
+    An unrecognised resolver site is unjudged, which reads as clean in the
+    violation list, so the classification is what has to be watched here.
+    """
+    del tmp
+    for source in ('import _util\n_util.workflow_bash()\n',
+                   'from _util import workflow_bash\nworkflow_bash()\n'):
+        tree = ast.parse(source)
+        facts = _bash_resolver_scan._ModuleFacts(tree)
+        call = next(node for node in ast.walk(tree)
+                    if isinstance(node, ast.Call))
+        assert _bash_resolver_scan._route(call, facts) == 'resolver', source
+
+
 def test_a_closure_bound_resolver_name_is_clean(tmp):
-    """The value a launch reads through an enclosing scope is judged too."""
     del tmp
     assert _synthetic("""import subprocess
 import _util
@@ -196,6 +246,34 @@ def outer(tmp):
     def inner():
         subprocess.run([bash, '-c', 'true'], cwd=tmp)
     return inner
+""") == []
+
+
+def test_a_lambda_parameter_is_not_an_outer_binding(tmp):
+    """A lambda's parameters bind its own scope, the way a def's do."""
+    del tmp
+    assert _synthetic("""import subprocess
+bash = 'bash'
+launch = lambda bash: subprocess.run([bash, '-c', 'true'], cwd=tmp)
+""") == []
+    outer = _synthetic("""import subprocess
+program = 'bash'
+launch = lambda tmp: subprocess.run([program, '-c', 'true'], cwd=tmp)
+""")
+    assert len(outer) == 1, outer
+
+
+def test_a_parameter_shadows_an_outer_binding(tmp):
+    """A launch through a parameter is out of scope, not resolved outward.
+
+    That attribution is `_coverage_scopes._scope_shadows`'s, so this pin also
+    watches the helper this scan's verdicts stand on.
+    """
+    del tmp
+    assert _synthetic("""import subprocess
+bash = 'bash'
+def launch(bash):
+    subprocess.run([bash, '-c', 'true'], cwd=tmp)
 """) == []
 
 
@@ -254,7 +332,6 @@ subprocess.run(['bash', '-c', 'true'], cwd=tmp)
 
 
 def test_each_real_site_is_caught_when_it_bypasses(tmp):
-    """Planting the bypass in each real module names that module's launch."""
     for site in _SITES:
         root, expected = _mutated_copy(tmp, site)
         violations = _bash_resolver_scan._tree_violations(root)
@@ -263,7 +340,6 @@ def test_each_real_site_is_caught_when_it_bypasses(tmp):
 
 
 def test_a_copied_tree_is_clean_before_a_mutation_is_planted(tmp):
-    """The mutation control's baseline: the copy itself names nothing."""
     violations = _bash_resolver_scan._tree_violations(_tree_copy(tmp))
     assert not violations, violations
 
