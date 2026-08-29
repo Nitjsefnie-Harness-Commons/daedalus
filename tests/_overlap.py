@@ -232,7 +232,6 @@ _OVERLAP_INNER_WAIT_S = 15
 # enough time that expiry means a broken drain, not a busy runner; the explicit
 # parameter exists only to force that diagnostic branch deterministically.
 _CLIENT_COMMAND_WAIT_S = 15
-_SUCCESSFUL_CLIENT_GRACE_S = 20
 _FAILED_CLIENT_GRACE_S = 1
 _KILLED_CLIENT_PIPE_RELEASE_S = 20
 
@@ -307,19 +306,27 @@ def client_states(processes, grace,
     before its result arrived is indistinguishable from one where the result
     never came. This is the difference, read at the moment it matters.
 
-    Each client gets `grace` seconds to exit normally. A client still running
-    is killed and gets `killed_pipe_release` seconds for inherited pipes to
-    close; even a second drain timeout is recorded in that client's state
-    instead of escaping and hiding every diagnostic collected.
+    Each client gets `grace` seconds to exit normally, or waits unboundedly
+    when `grace` is `None`, which is what a caller whose client self-bounds
+    passes. A client still running at expiry is killed and gets
+    `killed_pipe_release` seconds for inherited pipes to close; even a second
+    drain timeout is recorded in that client's state instead of escaping and
+    hiding every diagnostic collected.
+
+    A client the helper killed records no `returncode`. The status read after
+    that kill is the kill's own — Windows `Popen.kill()` is
+    `TerminateProcess(handle, 1)`, POSIX's raises SIGKILL and records `-9` —
+    so reporting it as the client's outcome is how one process came to be
+    described as both still running and exited non-zero.
     """
     states = {}
     for owner, proc in processes.items():
-        still_running = False
+        killed = False
         drain_timed_out = False
         try:
             out, err = proc.communicate(timeout=grace)
         except subprocess.TimeoutExpired:
-            still_running = True
+            killed = True
             proc.kill()
             try:
                 out, err = proc.communicate(timeout=killed_pipe_release)
@@ -337,8 +344,8 @@ def client_states(processes, grace,
                     # it with another exception from this diagnostic helper.
                     pass
         states[owner] = {
-            'stillRunning': still_running,
-            'returncode': proc.returncode,
+            'stillRunning': killed,
+            'returncode': None if killed else proc.returncode,
             'stdout': _output_text(out),
             'stderr': _output_text(err),
             'drainTimedOut': drain_timed_out,
@@ -347,12 +354,24 @@ def client_states(processes, grace,
 
 
 def assert_clients_exited(states, posted):
-    """Raise one diagnostic assertion when clients miss their exit grace."""
+    """Raise one diagnostic assertion per kind of client outcome that failed.
+
+    A client that outlived its grace and one that exited non-zero having
+    written nothing are different failures: diagnosing the second as the first
+    sends the reader looking for a stall that is not there.
+    """
     running = [owner for owner, state in states.items()
                if state['stillRunning']]
     if running:
         raise AssertionError(
             f'clients still running after grace: {running}; '
+            f'harness posted: {posted}; client states: {states}')
+    silent = [owner for owner, state in states.items()
+              if state['returncode'] and not state['stdout']
+              and not state['stderr']]
+    if silent:
+        raise AssertionError(
+            f'clients exited non-zero with no output: {silent}; '
             f'harness posted: {posted}; client states: {states}')
 
 
@@ -398,8 +417,10 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
                     f'{failure}; clients: '
                     f'{client_states(processes, grace=_FAILED_CLIENT_GRACE_S)}'
                 ) from failure
-            states = client_states(
-                processes, grace=_SUCCESSFUL_CLIENT_GRACE_S)
+            # The client's own `--timeout` bounds it, so waiting here needs no
+            # wall-clock margin of its own: one that outlived its result would
+            # only be killed while about to finish on its own.
+            states = client_states(processes, grace=None)
             assert_clients_exited(states, posted)
             results = {}
             for owner, state in states.items():
