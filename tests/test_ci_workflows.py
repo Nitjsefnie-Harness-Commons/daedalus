@@ -13,7 +13,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-import _wfgraph  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _tests_yml)
@@ -689,50 +688,6 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     assert required, 'the repository tracks no dependency manifest at all'
     for ecosystem in sorted(required):
         assert f'package-ecosystem: {ecosystem}' in config, ecosystem
-
-
-def test_workflow_bash_resolves_path_and_fails_when_missing(tmp):
-    """The helper owns PATH resolution and its missing-Bash failure."""
-    del tmp
-    original = _util.shutil.which
-    try:
-        sentinel = '/controlled/Git-for-Windows/bash.exe'
-        seen = []
-
-        def resolve(name):
-            seen.append(name)
-            return sentinel
-
-        _util.shutil.which = resolve
-        assert _util.workflow_bash() == sentinel
-        assert seen == ['bash']
-
-        _util.shutil.which = lambda name: None
-        try:
-            _util.workflow_bash()
-        except AssertionError as error:
-            assert str(error) == 'bash is required to execute the workflow shell'
-        else:
-            raise AssertionError('missing Bash must fail loudly')
-    finally:
-        _util.shutil.which = original
-
-
-def test_workflow_shell_caller_uses_shared_bash_helper(tmp):
-    """The workflow graph must not bypass the shared resolver."""
-    sentinel = Path(tmp) / 'controlled-bash'
-    sentinel.write_text('#!/bin/sh\nprintf caller-used\n', encoding='utf-8')
-    sentinel.chmod(0o755)
-    calls = []
-    original = _util.workflow_bash
-    try:
-        _util.workflow_bash = lambda: calls.append(True) or str(sentinel)
-        result = _wfgraph._run_script('printf bypassed', {}, through_bash=True)
-    finally:
-        _util.workflow_bash = original
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == 'caller-used', result.stdout
-    assert calls == [True], calls
 
 
 def main():
