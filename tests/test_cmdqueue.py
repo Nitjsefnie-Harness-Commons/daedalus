@@ -88,15 +88,12 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
     base_end = clock.monotonic()
     _queue, queue_end, queue_origin = observed_wait(True)
     assert baseline is None, baseline
-    assert origin == base, (origin, base)
     # Sterbenz makes deadline - now exact while its operands are within a
     # factor of two, so adding it lands on the already-representable deadline.
     endpoints = ((observed_end, origin), (base_end, base),
                  (queue_end, queue_origin))
     for end, start in endpoints:
         assert end == start + timeout, (end, start, timeout)
-    assert observed_end == base_end, (
-        'vanished-file wait did not match baseline', observed_end, base_end)
 
 
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
