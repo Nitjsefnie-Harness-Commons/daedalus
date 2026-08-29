@@ -471,17 +471,17 @@ def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
                     label, mode, fault, injected_type)
 
 
-def test_mode_search_ignores_a_str_subclass_iterator(tmp):
+def test_mode_search_does_not_trust_the_mode_contains_protocol(tmp):
     queue, queued = _queued_file(tmp)
     original = Path.open
 
-    class ReadAsWrite(str):
-        def __iter__(self):
-            return iter('w')
+    class ReadClaimsCreate(str):
+        def __contains__(self, marker):
+            return marker == 'w'
 
-    class CreateAsRead(str):
-        def __iter__(self):
-            return iter('r')
+    class CreateClaimsRead(str):
+        def __contains__(self, _marker):
+            return False
 
     def open_outcome(opener, mode):
         try:
@@ -495,8 +495,8 @@ def test_mode_search_ignores_a_str_subclass_iterator(tmp):
         with original(queued, mode='r', encoding='utf-8') as opened:
             return opened.read()
 
-    read_mode = ReadAsWrite('r')
-    create_mode = CreateAsRead('w+')
+    read_mode = ReadClaimsCreate('r')
+    create_mode = CreateClaimsRead('w+')
     with _virtual_cmdqueue_clock() as (clock, _events, _origin):
         injectors = (
             ('generic refusal', _refuse_path_operation,
@@ -615,33 +615,55 @@ def test_virtual_clock_allows_no_op_sleeps_before_progress(_tmp):
 
 
 def test_virtual_clock_bounds_a_wait_that_never_ends(_tmp):
-    message = None
+    failure = None
+    tripped_at = None
     # Bounded so that removing the guard fails this control instead of
     # hanging it; the bound is twice the sleeps the guard needs to trip.
     attempts = int(2000 * _RUNAWAY_ELAPSED / _cmdqueue.POLL_DELAY / 1000)
-    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock() as (clock, events, origin):
         try:
-            for _unused in range(attempts):
+            for tripped_at in range(1, attempts + 1):
                 clock.sleep(_cmdqueue.POLL_DELAY)
-        except AssertionError as failure:
-            message = str(failure)
-    assert message == (
-        f'virtual clock ran {_RUNAWAY_ELAPSED:.3f}s past its origin'), message
+        except AssertionError as caught:
+            failure = caught
+    expected_sleeps = int(_RUNAWAY_ELAPSED / _cmdqueue.POLL_DELAY)
+    elapsed = clock.monotonic() - origin
+    assert isinstance(failure, AssertionError), failure
+    assert tripped_at == expected_sleeps, (tripped_at, expected_sleeps)
+    assert events == [
+        ('sleep', _cmdqueue.POLL_DELAY)] * (expected_sleeps - 1), events
+    expected_elapsed = (expected_sleeps - 1) * _cmdqueue.POLL_DELAY
+    assert abs(elapsed - expected_elapsed) < 1e-6, elapsed
+    message = str(failure).lower()
+    assert 'virtual clock' in message, message
+    assert ('elapsed guard' in message
+            or 'past its origin' in message), message
+    assert f'{_RUNAWAY_ELAPSED:.3f}' in message, message
 
 
 def test_virtual_clock_keeps_explicit_sleep_ceilings(_tmp):
-    def refusal(max_sleeps, accepted):
-        with _virtual_cmdqueue_clock(max_sleeps) as (clock, _, _):
-            for _ in range(accepted):
-                clock.sleep(0.0)
+    def refusal(max_sleeps):
+        failure = None
+        tripped_at = None
+        with _virtual_cmdqueue_clock(max_sleeps) as (clock, events, origin):
             try:
-                clock.sleep(0.0)
-            except AssertionError as failure:
-                return str(failure)
-        raise AssertionError('explicit virtual-clock ceiling did not fire')
+                for tripped_at in range(max_sleeps + 1):
+                    clock.sleep(0.0)
+            except AssertionError as caught:
+                failure = caught
+        return failure, tripped_at, events, clock.monotonic() - origin
 
-    assert refusal(0, 0) == 'virtual clock exceeded 0 sleeps'
-    assert refusal(10, 10) == 'virtual clock exceeded 10 sleeps'
+    for max_sleeps in (0, 10):
+        failure, tripped_at, events, elapsed = refusal(max_sleeps)
+        assert isinstance(failure, AssertionError), failure
+        assert tripped_at == max_sleeps, (tripped_at, max_sleeps)
+        assert events == [('sleep', 0.0)] * max_sleeps, events
+        assert elapsed == 0.0, elapsed
+        message = str(failure).lower()
+        assert 'virtual clock' in message, message
+        assert 'sleep' in message, message
+        assert ('ceiling' in message or 'exceeded' in message), message
+        assert str(max_sleeps) in message, message
 
 
 if __name__ == '__main__':
