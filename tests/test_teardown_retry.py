@@ -38,7 +38,8 @@ def test_transient_refusal_is_retried_until_it_clears(tmp):
             raise PermissionError(32, 'in use by another process', tmp)
 
     sleeps = []
-    assert _teardown.settle(cleanup, sleep=_sleep_recorder(sleeps))
+    settled = _teardown.settle(cleanup, sleep=_sleep_recorder(sleeps))
+    assert settled
     assert len(attempts) == 2, attempts
     assert sleeps == [0.05], sleeps
 
@@ -77,8 +78,9 @@ def test_the_warning_names_the_path_it_was_given(tmp):
 
 def test_clear_teardown_reports_success_without_sleeping(tmp):
     calls, sleeps = [], []
-    assert _teardown.settle(lambda: calls.append(True),
-                            sleep=_sleep_recorder(sleeps))
+    settled = _teardown.settle(lambda: calls.append(True),
+                               sleep=_sleep_recorder(sleeps))
+    assert settled
     assert calls == [True]
     assert sleeps == []
 

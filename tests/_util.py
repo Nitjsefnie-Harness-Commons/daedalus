@@ -537,6 +537,8 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
     """
     _report_safely()
     failed, skipped = [], []
+    # The acquisition stays outside the try: if it raises, `td` is unbound and
+    # the finally would report an UnboundLocalError over the original OSError.
     td = tempfile.TemporaryDirectory(prefix=tmp_prefix)
     try:
         tmp = os.path.realpath(td.name)
