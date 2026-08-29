@@ -135,12 +135,26 @@ def _shadowed_names(tree):
     return names
 
 
+def _parameter_names(arguments):
+    """The names a def's or a lambda's parameter list binds in its scope."""
+    return ({argument.arg for argument in
+             (arguments.posonlyargs + arguments.args + arguments.kwonlyargs)}
+            | {extra.arg for extra in (arguments.vararg, arguments.kwarg)
+               if extra is not None})
+
+
 def _scope_shadows(tree):
     """Shadowed names per scope, attributed to the scope that binds them.
 
     A name bound inside one function cannot reach another's expressions, so
     a launch is judged against its own scope chain rather than against every
-    binding in the module.
+    binding in the module. A lambda is a scope too: its parameters bind its
+    own body, and nothing in the scope that writes the lambda.
+
+    Second consumer: `tests/_bash_resolver_scan.py` keys its own binding walk
+    exactly as this function keys scopes, and its verdicts are wrong if this
+    attribution drifts — a parameter this function stops attributing resolves
+    from an outer binding instead of being out of scope.
     """
     shadows = {tree: set()}
 
@@ -151,14 +165,11 @@ def _scope_shadows(tree):
                 shadows[scope].add(child.name)
                 shadows[child] = set()
                 if not isinstance(child, ast.ClassDef):
-                    arguments = (child.args.posonlyargs + child.args.args
-                                 + child.args.kwonlyargs)
-                    shadows[child].update(
-                        argument.arg for argument in arguments)
-                    shadows[child].update(
-                        extra.arg for extra in
-                        (child.args.vararg, child.args.kwarg)
-                        if extra is not None)
+                    shadows[child].update(_parameter_names(child.args))
+                record(child, child)
+                continue
+            if isinstance(child, ast.Lambda):
+                shadows[child] = set(_parameter_names(child.args))
                 record(child, child)
                 continue
             if (isinstance(child, ast.Name)
