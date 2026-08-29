@@ -25,6 +25,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from _teardown import settle
+
 ROOT = Path(__file__).resolve().parents[1]
 # run_tests.py starts the sorted suites in a process wave, so each process's
 # first bridge start pays its cold import costs alongside the other firsts.
@@ -535,8 +537,9 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
     """
     _report_safely()
     failed, skipped = [], []
-    with tempfile.TemporaryDirectory(prefix=tmp_prefix) as tmp:
-        tmp = os.path.realpath(tmp)
+    td = tempfile.TemporaryDirectory(prefix=tmp_prefix)
+    try:
+        tmp = os.path.realpath(td.name)
         for t in tests:
             d = os.path.join(tmp, t.__name__)
             os.makedirs(d, exist_ok=True)
@@ -553,6 +556,9 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
             except Exception as e:  # noqa: BLE001
                 failed.append(t.__name__)
                 print(f'  ERROR {t.__name__}: {type(e).__name__}: {e}')
+    finally:
+        if not settle(td.cleanup):
+            print(f'  WARN  temporary tree left behind: {td.name}')
     passed = len(tests) - len(failed) - len(skipped)
     summary = f'\n{passed}/{len(tests)} passed'
     if skipped:
