@@ -133,8 +133,8 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
         except (OSError, RuntimeError, TypeError, ValueError,
                 PathProtocolExplosion) as caught:
             filename = getattr(caught, 'filename', None)
-            return ('raised', type(caught), str(caught),
-                    type(filename), filename)
+            return ('raised', (type(caught), str(caught),
+                               type(filename), filename))
         return 'returned', outcome
 
     refusing_receiver = RefusingReceiver()
@@ -199,11 +199,15 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     assert queued.exists(), 'unlink control removed the target path'
     with _virtual_cmdqueue_clock() as (clock, _, _):
         injectors = (
-            ('generic refusal', _refuse_path_operation, (queued, 'open', 1)),
-            ('first-read', _refuse_first_queue_read, (queue,)),
-            ('disappearance', _disappear_on_first_open, (queued,)),
-            ('vanish', _vanish_during_read, (queued, clock)))
-        for label, injector, injector_args in injectors:
+            ('generic refusal', _refuse_path_operation,
+             (queued, 'open', 1), PermissionError),
+            ('first-read', _refuse_first_queue_read,
+             (queue,), PermissionError),
+            ('disappearance', _disappear_on_first_open,
+             (queued,), FileNotFoundError),
+            ('vanish', _vanish_during_read,
+             (queued, clock), FileNotFoundError))
+        for label, injector, injector_args, injected_type in injectors:
             with injector(*injector_args):
                 expected_injected = open_outcome(
                     Path.open, queued, encoding='utf-8')
@@ -276,7 +280,11 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
                 injected = open_outcome(
                     Path.open, queued, encoding='utf-8')
             assert injected == expected_injected, (
-                'fault was consumed by a rejected call', label, injected)
+                'injected outcome differed from fresh run', label,
+                injected, expected_injected)
+            assert injected[1][0] is injected_type, (
+                'injected exception type changed', label,
+                injected[1][0], injected_type)
             assert open_failure is None, (label, open_failure)
             assert candidate.read_text('utf-8') == 'caller-owned content'
 
