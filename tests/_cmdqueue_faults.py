@@ -9,9 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cmdqueue  # noqa: E402
 
-# A runaway sleeps without advancing the clock; a valid wait may sleep any
-# number of times, because every positive sleep consumes its deadline.
-_STALLED_SLEEP_LIMIT = 1000
+# A runaway is a wait that never ends, so the bound is on virtual time, not on
+# how a wait spends it: any number of sleeps is fine, of any size, including
+# none at all. Virtual sleeps cost no real time, so a wait that cannot finish
+# reaches this in milliseconds and fails by name instead of hanging.
+_RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
 
 
 def _queued_file(tmp, name='1700000000000_000001.json'):
@@ -112,7 +114,6 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
     now = [origin]
     events = []
     sleep_count = [0]
-    stalled = [0]
     # Read cost exposes stale deadline samples; the fallback avoids underflow.
     read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
@@ -133,10 +134,10 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
                 raise AssertionError(
                     f'virtual clock exceeded {max_sleeps} sleeps')
             advanced = now[0] + seconds
-            stalled[0] = 0 if advanced > now[0] else stalled[0] + 1
-            if stalled[0] >= _STALLED_SLEEP_LIMIT:
+            if advanced - origin > _RUNAWAY_ELAPSED:
                 raise AssertionError(
-                    f'virtual clock made no progress in {stalled[0]} sleeps')
+                    'virtual clock ran '
+                    f'{advanced - origin:.3f}s past its origin')
             sleep_count[0] += 1
             events.append(('sleep', seconds))
             now[0] = advanced
