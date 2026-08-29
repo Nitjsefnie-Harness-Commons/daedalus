@@ -291,7 +291,6 @@ def _format_timeout_attempt(record):
 def _run_dashboard_node_once(
         harness: DashboardNodeHarness, *, attempt: int
 ) -> subprocess.CompletedProcess[str]:
-    """Run one dashboard JavaScript harness child with captured output."""
     node = shutil.which('node')
     if not node:
         raise AssertionError('node is required to execute dashboard harnesses')
