@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
@@ -128,6 +128,64 @@ def _drain_seconds(failure):
     match = re.search(r'drain took ([0-9.]+)s;', failure)
     assert match, failure
     return float(match.group(1))
+
+
+def _metadata_failure(source, bounded_steps):
+    try:
+        _dashnode.DashboardNodeHarness(
+            source, bounded_steps=bounded_steps, module=True)
+    except ValueError as failure:
+        return str(failure)
+    raise AssertionError('invalid dashboard harness was accepted')
+
+
+def test_windows_cancel_adapter_calls_kernel32_contract(tmp):
+    del tmp
+    cases = (('success', 41, True, True, 0, None),
+             ('not found', 41, False, True, 1168, None),
+             ('cancel error', 41, False, True, 5, 'winerror 5'),
+             ('open error', 0, True, True, 5, 'winerror 5'),
+             ('close failure', 41, True, False, 0, None))
+    for name, handle, canceled, closed, error, expected_error in cases:
+        open_thread = Mock(return_value=handle)
+        cancel_io = Mock(return_value=canceled)
+        close_handle = Mock(return_value=closed)
+        kernel32 = type('Kernel32', (), {})()
+        kernel32.OpenThread = open_thread
+        kernel32.CancelSynchronousIo = cancel_io
+        kernel32.CloseHandle = close_handle
+        with (
+                patch.object(
+                    _dashnode.ctypes, 'WinDLL', create=True,
+                    return_value=kernel32) as win_dll,
+                patch.object(_dashnode.ctypes, 'get_last_error', create=True,
+                             return_value=error),
+                patch.object(_dashnode.ctypes, 'WinError', create=True,
+                             side_effect=lambda code: OSError(
+                                 f'winerror {code}')),
+        ):
+            actual_error = None
+            try:
+                _dashnode._cancel_windows_synchronous_io(
+                    type('Reader', (), {'native_id': 7123})())
+            except OSError as failure:
+                actual_error = str(failure)
+        assert actual_error == expected_error, (name, actual_error)
+        win_dll.assert_called_once_with('kernel32', use_last_error=True)
+        assert open_thread.call_args_list == [
+            call(0x0001, False, 7123)], name
+        assert open_thread.argtypes == (
+            _dashnode.wintypes.DWORD, _dashnode.wintypes.BOOL,
+            _dashnode.wintypes.DWORD), name
+        assert open_thread.restype is _dashnode.wintypes.HANDLE, name
+        assert cancel_io.argtypes == (_dashnode.wintypes.HANDLE,), name
+        assert cancel_io.restype is _dashnode.wintypes.BOOL, name
+        assert close_handle.argtypes == (_dashnode.wintypes.HANDLE,), name
+        assert close_handle.restype is _dashnode.wintypes.BOOL, name
+        assert cancel_io.call_args_list == (
+            [call(handle)] if handle else []), name
+        assert close_handle.call_args_list == (
+            [call(handle)] if handle else []), name
 
 
 def test_phase_records_a_harness_checkpoint(tmp):
@@ -348,42 +406,27 @@ def test_shipped_harnesses_pin_their_process_metadata(tmp):
 def test_harness_metadata_rejects_an_under_declared_bound_count(tmp):
     """One real bound cannot be declared as zero bounded steps."""
     del tmp
-    try:
-        _dashnode.DashboardNodeHarness(
-            "await bounded(Promise.resolve(), 'work', 1);",
-            bounded_steps=0, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness declares 0 bounded steps but performs 1')
-    else:
-        raise AssertionError('under-declared dashboard harness was accepted')
+    failure = _metadata_failure(
+        "await bounded(Promise.resolve(), 'work', 1);", 0)
+    assert failure == (
+        'dashboard harness declares 0 bounded steps but performs 1')
 
 
 def test_harness_metadata_rejects_an_over_declared_bound_count(tmp):
     del tmp
-    try:
-        _dashnode.DashboardNodeHarness(
-            "await bounded(Promise.resolve(), 'work', 1);",
-            bounded_steps=2, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness declares 2 bounded steps but performs 1')
-    else:
-        raise AssertionError('over-declared dashboard harness was accepted')
+    failure = _metadata_failure(
+        "await bounded(Promise.resolve(), 'work', 1);", 2)
+    assert failure == (
+        'dashboard harness declares 2 bounded steps but performs 1')
 
 
 def test_harness_metadata_counts_a_bound_split_by_a_comment(tmp):
     """A comment between `await` and `bounded` cannot hide a real bound."""
     del tmp
     source = "await /* diagnostic label */ bounded(work, 'work', 1);"
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=0, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness declares 0 bounded steps but performs 1')
-    else:
-        raise AssertionError('comment-split dashboard bound was not counted')
+    failure = _metadata_failure(source, 0)
+    assert failure == (
+        'dashboard harness declares 0 bounded steps but performs 1')
 
 
 def test_harness_metadata_ignores_a_bound_inside_a_comment(tmp):
@@ -393,28 +436,18 @@ def test_harness_metadata_ignores_a_bound_inside_a_comment(tmp):
 await bounded(first, 'first', 1);
 /* await bounded(disabled, 'disabled', 1); */
 """
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=2, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness declares 2 bounded steps but performs 1')
-    else:
-        raise AssertionError('commented dashboard bound was counted')
+    failure = _metadata_failure(source, 2)
+    assert failure == (
+        'dashboard harness declares 2 bounded steps but performs 1')
 
 
 def test_harness_metadata_refuses_a_template_expression(tmp):
     del tmp
     source = "const value = `${/* await bounded(x, 'y', 1) */ 1}`;"
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=1, module=True)
-    except ValueError as failure:
-        assert str(failure) == (
-            'dashboard harness bound count cannot inspect '
-            'template expression in dashboard harness source')
-    else:
-        raise AssertionError('template-expression harness was accepted')
+    failure = _metadata_failure(source, 1)
+    assert failure == (
+        'dashboard harness bound count cannot inspect '
+        'template expression in dashboard harness source')
 
 
 def test_harness_metadata_refuses_a_regex_literal(tmp):
@@ -423,25 +456,13 @@ def test_harness_metadata_refuses_a_regex_literal(tmp):
 const slashOrStar = /[/*]/;
 await bounded(work, 'work', 1);
 """
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=1, module=True)
-    except ValueError as failure:
-        assert str(failure) == _SLASH_REFUSAL
-    else:
-        raise AssertionError('regex-literal harness was accepted')
+    assert _metadata_failure(source, 1) == _SLASH_REFUSAL
 
 
 def test_harness_metadata_refuses_a_division_slash(tmp):
     del tmp
     source = 'const half = value / 2;'
-    try:
-        _dashnode.DashboardNodeHarness(
-            source, bounded_steps=0, module=True)
-    except ValueError as failure:
-        assert str(failure) == _SLASH_REFUSAL
-    else:
-        raise AssertionError('division slash was accepted')
+    assert _metadata_failure(source, 0) == _SLASH_REFUSAL
 
 
 def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
