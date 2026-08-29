@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Shared fixtures for pull-request body and workflow gate tests."""
+import contextlib
 import html
+import io
+import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -214,21 +219,39 @@ def unsupported():
 
 arguments = sys.argv[1:]
 payload = None
-if '--input' in arguments:
-    index = arguments.index('--input')
-    if index + 2 != len(arguments):
-        unsupported()
-    with open(arguments[index + 1], encoding='utf-8') as handle:
-        payload = json.load(handle)
-with open(os.environ['STUB_CALLS'], 'a', encoding='utf-8') as handle:
-    handle.write(json.dumps({'argv': arguments, 'input': payload}) + '\n')
 if (len(arguments) < 5 or arguments[0] != 'api'
         or arguments[1:3] != ['--include', '-X']):
     unsupported()
 method = arguments[3]
 endpoint = arguments[4]
+fields = {}
+tail = arguments[5:]
+while tail:
+    if len(tail) >= 2 and tail[0] == '-f' and '=' in tail[1]:
+        key, value = tail[1].split('=', 1)
+        fields[key] = value
+        tail = tail[2:]
+    elif len(tail) == 2 and tail[0] == '--input':
+        with open(tail[1], encoding='utf-8') as handle:
+            payload = json.load(handle)
+        tail = []
+    else:
+        unsupported()
+with open(os.environ['STUB_CALLS'], 'a', encoding='utf-8') as handle:
+    handle.write(json.dumps({'argv': arguments, 'input': payload}) + '\n')
 with open(os.environ['STUB_FIXTURES'], encoding='utf-8') as handle:
     fixtures = json.load(handle)
+if fixtures.get('bad_status'):
+    print('status unavailable')
+    print()
+    print('{}')
+    raise SystemExit(0)
+if fixtures.get('non_json'):
+    print('HTTP/2.0 200 OK')
+    print('content-type: application/json')
+    print()
+    print('not JSON')
+    raise SystemExit(0)
 if fixtures.get('unparsable'):
     print('first gh failure line', file=sys.stderr)
     print('second gh failure line', file=sys.stderr)
@@ -243,11 +266,11 @@ if endpoint == 'repos/owner/repo/pulls/99':
 if endpoint == 'markdown' and method == 'POST':
     finish(200, fixtures['rendered'])
 page = re.fullmatch(
-    r'repos/owner/repo/issues/99/(comments|timeline)'
-    r'\?per_page=100&page=([0-9]+)', endpoint)
-if page and method == 'GET':
+    r'repos/owner/repo/issues/99/(comments|timeline)', endpoint)
+if (page and method == 'GET' and fields.get('per_page') == '100'
+        and fields.get('page', '').isdigit() and len(fields) == 2):
     values = fixtures[page.group(1)]
-    offset = (int(page.group(2)) - 1) * 100
+    offset = (int(fields['page']) - 1) * 100
     finish(200, values[offset:offset + 100])
 issue = re.fullmatch(r'repos/owner/repo/issues/([0-9]+)', endpoint)
 if issue and method == 'GET':
@@ -326,9 +349,9 @@ class FakeApi:
         self.calls.append(('GET', endpoint, None))
         if self._failed('GET', endpoint):
             return _Response(500, None)
-        if endpoint == 'repos/owner/repo/issues/99/comments?per_page=100':
+        if endpoint == 'repos/owner/repo/issues/99/comments':
             return _Response(200, self.comments)
-        if endpoint == 'repos/owner/repo/issues/99/timeline?per_page=100':
+        if endpoint == 'repos/owner/repo/issues/99/timeline':
             return _Response(200, self.timeline)
         raise AssertionError(f'unmodelled: GET {endpoint}')
 
@@ -346,6 +369,158 @@ def run_gate(api, body=None):
     api.pull['body'] = body
     code = gate.run(api, 'owner/repo', '99', 'alice', TEMPLATE)
     return code, api.writes
+
+
+def _pull(state='open', merged=False):
+    return {'body': '', 'state': state, 'merged': merged}
+
+
+def _api(*, state='open', merged=False, issues=None, **kwargs):
+    if issues is None:
+        issues = {'101': _issue('alice')}
+    return FakeApi(
+        pull=_pull(state, merged), issues=issues, **kwargs)
+
+
+def _gate_comment(closed=False):
+    lines = ['old gate message', MARKER]
+    if closed:
+        lines.append(CLOSED_MARKER)
+    return {'id': 7, 'user': {'login': BOT}, 'body': '\n'.join(lines)}
+
+
+def _inline_marker_comment():
+    return {
+        'id': 71,
+        'user': {'login': BOT},
+        'body': ('unrelated automation documentation\n'
+                 '`<!-- pr-gate --> <!-- pr-gate: closed -->`'),
+    }
+
+
+def _closed_event(actor=BOT):
+    return {'event': 'closed', 'actor': {'login': actor}}
+
+
+def _execute(api, body):
+    output = io.StringIO()
+    error = io.StringIO()
+    with (contextlib.redirect_stdout(output),
+          contextlib.redirect_stderr(error)):
+        code, writes = run_gate(api, body)
+    return code, writes, output.getvalue(), error.getvalue()
+
+
+def _write_sequence(writes):
+    return [(method, endpoint) for method, endpoint, _payload in writes]
+
+
+def _assert_gate_message(write, first, reasons=(), closed=False):
+    body = _comment_body(write)
+    lines = body.splitlines()
+    assert lines[0] == first, body
+    assert MARKER in lines, body
+    assert (CLOSED_MARKER in lines) is closed, body
+    for reason in reasons:
+        assert f'- {reason}' in lines, (reason, body)
+    return body
+
+
+def _issue_gets(api):
+    return [call for call in api.calls if re.fullmatch(
+        r'repos/owner/repo/issues/[0-9]+', call[1])]
+
+
+def _write_gh_stub(tmp):
+    directory = Path(tmp) / 'bin'
+    directory.mkdir()
+    if os.name == 'nt':
+        script = directory / 'gh.py'
+        script.write_text(GH_STUB, encoding='utf-8')
+        command = directory / 'gh.bat'
+        command.write_text(
+            '@python "%~dp0gh.py" %*\n', encoding='utf-8')
+    else:
+        command = directory / 'gh'
+        command.write_text(GH_STUB, encoding='utf-8')
+        command.chmod(0o755)
+    return directory, command
+
+
+def _run_script(tmp, fixtures):
+    directory, _command = _write_gh_stub(tmp)
+    fixtures_path = Path(tmp) / 'fixtures.json'
+    fixtures_path.write_text(json.dumps(fixtures), encoding='utf-8')
+    calls_path = Path(tmp) / 'calls.jsonl'
+    calls_path.write_text('', encoding='utf-8')
+    environment = {
+        **os.environ,
+        'PATH': f'{directory}{os.pathsep}{os.environ["PATH"]}',
+        'GH_TOKEN': 'stub',
+        'REPO': 'owner/repo',
+        'PR': '99',
+        'ACTOR': 'alice',
+        'STUB_FIXTURES': str(fixtures_path),
+        'STUB_CALLS': str(calls_path),
+    }
+    result = subprocess.run(
+        [sys.executable, 'scripts/ci/pr_gate.py'], cwd=ROOT,
+        env=environment, capture_output=True, text=True, timeout=30)
+    calls = [json.loads(line) for line in calls_path.read_text(
+        encoding='utf-8').splitlines()]
+    return result, calls
+
+
+def _recorded_writes(calls):
+    writes = []
+    for call in calls:
+        argv = call['argv']
+        if '-X' not in argv:
+            continue
+        method = argv[argv.index('-X') + 1]
+        endpoint = argv[argv.index('-X') + 2]
+        if method != 'GET' and endpoint != 'markdown':
+            writes.append((method, endpoint, call['input']))
+    return writes
+
+
+def _capture(call):
+    output = io.StringIO()
+    error = io.StringIO()
+    with (contextlib.redirect_stdout(output),
+          contextlib.redirect_stderr(error)):
+        code = call()
+    return code, output.getvalue(), error.getvalue()
+
+
+def _runtime_error(call):
+    try:
+        call()
+    except RuntimeError as error:
+        return str(error)
+    raise AssertionError('RuntimeError was not raised')
+
+
+class _PaginationApi:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def _request(self, method, endpoint, payload=None, fields=()):
+        response = self.responses[len(self.calls)]
+        self.calls.append((method, endpoint, payload, fields))
+        return response
+
+
+def _script_fixtures(**extra):
+    return {
+        'pull': {'body': _valid_body(), 'state': 'open', 'merged': False},
+        'comments': [],
+        'timeline': [],
+        'rendered': _valid_html(),
+        'issues': {'101': _issue('alice')},
+        **extra,
+    }
 
 
 def _comment_body(write):
