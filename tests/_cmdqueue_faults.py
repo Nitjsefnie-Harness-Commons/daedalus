@@ -17,9 +17,21 @@ def _target_key(candidate):
     """Decode path spellings so str and bytes receivers share one key."""
     try:
         return os.fsdecode(os.fspath(candidate))
-    except Exception:
-        # Let Path.open keep its native receiver/argument validation order.
+    except BaseException:
+        # An exception from this injector probe is not from the caller's call
+        # and must not surface. Cost: this C-level os.fspath call in the test
+        # harness swallows a genuine interrupt on a str, bytes, or Path
+        # receiver.
         return None
+
+
+def _native_read_handle(original, candidate, args, kwargs):
+    """Return a non-readable open for the caller; None for a real read."""
+    handle = original(candidate, *args, **kwargs)
+    if handle.readable():
+        handle.close()
+        return None
+    return handle
 
 
 @contextlib.contextmanager
@@ -35,7 +47,9 @@ def _refuse_path_operation(path, operation, failures, clock=None):
         if (operation == 'open' and candidate_key == target_key
                 and remaining[0]):
             # Native validation adds one open per faulted call.
-            original(candidate, *args, **kwargs).close()
+            handle = _native_read_handle(original, candidate, args, kwargs)
+            if handle is not None:
+                return handle
         elif operation != 'open':
             try:
                 signature.bind(candidate, *args, **kwargs)
@@ -129,7 +143,9 @@ def _vanish_during_read(path, clock, remove_queue=False):
 
     def vanished(candidate, *args, **kwargs):
         if _target_key(candidate) == target_key and armed[0]:
-            original(candidate, *args, **kwargs).close()
+            handle = _native_read_handle(original, candidate, args, kwargs)
+            if handle is not None:
+                return handle
             armed[0] = False
             clock.record_read()
             path.unlink()
@@ -153,7 +169,9 @@ def _disappear_on_first_open(path):
 
     def missing(candidate, *args, **kwargs):
         if _target_key(candidate) == target_key and armed[0]:
-            original(candidate, *args, **kwargs).close()
+            handle = _native_read_handle(original, candidate, args, kwargs)
+            if handle is not None:
+                return handle
             armed[0] = False
             raise FileNotFoundError(2, 'injected disappearance', str(path))
         return original(candidate, *args, **kwargs)
@@ -176,7 +194,9 @@ def _refuse_first_queue_read(queue):
         if (refused_path[0] is None and candidate_key is not None
                 and os.path.dirname(candidate_key) == queue_key
                 and os.path.splitext(candidate_key)[1] == '.json'):
-            original(candidate, *args, **kwargs).close()
+            handle = _native_read_handle(original, candidate, args, kwargs)
+            if handle is not None:
+                return handle
             refused_path[0] = candidate_key
         if candidate_key is not None and candidate_key == refused_path[0]:
             refused_path[0] = False
