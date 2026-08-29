@@ -64,8 +64,8 @@ def test_result_temp_write_retries_transient_refusal(tmp):
             '            and path.name.endswith(".tmp")\n'
             '            and _refused[0]):\n'
             '        _refused[0] = False\n'
-            + _RECORD +
-            f'        raise {_REFUSAL}\n'
+            + _RECORD
+            + f'        raise {_REFUSAL}\n'
             '    return _real_write_bytes(path, data)\n'
             'pathlib.Path.write_bytes = _refuse_one_result_write\n')) as (
             base, docroot):
@@ -89,8 +89,8 @@ def test_an_exhausted_result_write_still_answers_500(tmp):
             'def _refuse_every_result_write(path, data):\n'
             '    if (path.name.startswith(".result-")\n'
             '            and path.name.endswith(".tmp")):\n'
-            + _RECORD +
-            f'        raise {_REFUSAL}\n'
+            + _RECORD
+            + f'        raise {_REFUSAL}\n'
             '    return _real_write_bytes(path, data)\n'
             'pathlib.Path.write_bytes = _refuse_every_result_write\n')) as (
             base, docroot):
@@ -119,8 +119,8 @@ def test_command_temp_write_retries_transient_refusal(tmp):
             '            and path.name.endswith(".tmp")\n'
             '            and _refused[0]):\n'
             '        _refused[0] = False\n'
-            + _RECORD +
-            f'        raise {_REFUSAL}\n'
+            + _RECORD
+            + f'        raise {_REFUSAL}\n'
             '    return _real_write_text(path, data, **kw)\n'
             'pathlib.Path.write_text = _refuse_one_command_write\n')) as (
             base, docroot):
@@ -146,8 +146,8 @@ def test_an_exhausted_command_write_still_answers_500(tmp):
             '    if (path.parent.name == _queue\n'
             '            and path.name.startswith(".")\n'
             '            and path.name.endswith(".tmp")):\n'
-            + _RECORD +
-            f'        raise {_REFUSAL}\n'
+            + _RECORD
+            + f'        raise {_REFUSAL}\n'
             '    return _real_write_text(path, data, **kw)\n'
             'pathlib.Path.write_text = _refuse_every_command_write\n')) as (
             base, docroot):
