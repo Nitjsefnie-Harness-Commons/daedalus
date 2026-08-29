@@ -7,7 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _cmdqueue  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
+    _RUNAWAY_ELAPSED,
     _disappear_on_first_open,
     _path_open_failure,
     _queued_file,
@@ -600,6 +602,46 @@ def test_vanish_reopen_preserves_bytes_receiver_error(tmp):
         with _vanish_during_read(queued, clock):
             actual = missing_outcome()
     assert actual == expected, (actual, expected)
+
+
+def test_virtual_clock_allows_no_op_sleeps_before_progress(_tmp):
+    with _virtual_cmdqueue_clock() as (clock, _events, origin):
+        for _ in range(2000):
+            clock.sleep(0.0)
+        positive = _cmdqueue.POLL_DELAY
+        clock.sleep(positive)
+    assert clock.monotonic() == origin + positive, (
+        clock.monotonic(), origin, positive)
+
+
+def test_virtual_clock_bounds_a_wait_that_never_ends(_tmp):
+    message = None
+    # Bounded so that removing the guard fails this control instead of
+    # hanging it; the bound is twice the sleeps the guard needs to trip.
+    attempts = int(2000 * _RUNAWAY_ELAPSED / _cmdqueue.POLL_DELAY / 1000)
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        try:
+            for _unused in range(attempts):
+                clock.sleep(_cmdqueue.POLL_DELAY)
+        except AssertionError as failure:
+            message = str(failure)
+    assert message == (
+        f'virtual clock ran {_RUNAWAY_ELAPSED:.3f}s past its origin'), message
+
+
+def test_virtual_clock_keeps_explicit_sleep_ceilings(_tmp):
+    def refusal(max_sleeps, accepted):
+        with _virtual_cmdqueue_clock(max_sleeps) as (clock, _, _):
+            for _ in range(accepted):
+                clock.sleep(0.0)
+            try:
+                clock.sleep(0.0)
+            except AssertionError as failure:
+                return str(failure)
+        raise AssertionError('explicit virtual-clock ceiling did not fire')
+
+    assert refusal(0, 0) == 'virtual clock exceeded 0 sleeps'
+    assert refusal(10, 10) == 'virtual clock exceeded 10 sleeps'
 
 
 if __name__ == '__main__':
