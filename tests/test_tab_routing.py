@@ -19,6 +19,12 @@ from _pyroute import (dict_assignments, payload_keys,  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
+def _generator_flow(initial, effect, *steps, iterable='(1,)'):
+    lines = [f'send = b.{initial}',
+             f'gen = ((send := b.{effect}) for _ in {iterable})', *steps]
+    return '\n    '.join(lines)
+
+
 def test_positional_dict_copy_is_opaque_but_later_tab_write_is_tracked(tmp):
     """A positional dict source is opaque; later explicit keys are tracked."""
     del tmp
@@ -99,23 +105,41 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         "send = b.get\n    [(send := b.ext_cmd) for _ in [*{'x': 1}]]",
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*{**{}}]]",
         "send = b.get\n    [(send := b.ext_cmd) for _ in [*{**{'x': 1}}]]",
-        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
-        "    list(gen)",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
-        "    alias = gen\n    tuple(alias)",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
-        "    for _ in gen: pass",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
-        "    [value for value in gen]",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
-        "    flag and list(gen)",
+        _generator_flow('ext_cmd', 'get'),
+        _generator_flow('get', 'ext_cmd', 'list(gen)'),
+        _generator_flow('get', 'ext_cmd', 'alias = gen', 'tuple(alias)'),
+        _generator_flow('get', 'ext_cmd', 'for _ in gen: pass'),
+        _generator_flow('get', 'ext_cmd', '[value for value in gen]'),
+        _generator_flow('get', 'ext_cmd', 'flag and list(gen)'),
+        _generator_flow('ext_cmd', 'get', 'flag and list(gen)'),
+        _generator_flow('get', 'ext_cmd', 'if flag: list(gen)'),
+        _generator_flow('ext_cmd', 'get', 'if flag: list(gen)'),
+        _generator_flow('ext_cmd', 'get', 'for _ in gen: pass',
+                        'send = b.ext_cmd', 'list(gen)'),
+        _generator_flow('ext_cmd', 'get',
+                        'for _ in gen:\n        for _ in (1,): break',
+                        'send = b.ext_cmd', 'list(gen)'),
+        _generator_flow('get', 'ext_cmd', 'for _ in gen: break',
+                        'send = b.get', 'list(gen)', iterable='(1, 2)'),
+        _generator_flow('get', 'ext_cmd',
+                        'for _ in gen:\n        break\n    else:\n'
+                        '        send = b.get', iterable='(1, 2)'),
+        _generator_flow('ext_cmd', 'get', 'for _ in gen: pass',
+                        'send = b.ext_cmd', 'list(gen)', iterable='()'),
+        "list = b.get\n    send = b.ext_cmd\n"
+        "    gen = ((send := b.get) for _ in (1,))\n    list(gen)",
+        _generator_flow('ext_cmd', 'get', 'list = b.get', 'list(gen)'),
+        _generator_flow('ext_cmd', 'get',
+                        'if flag: list = b.get', 'list(gen)'),
         "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
-        "    flag and list(gen)",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
-        "    if flag: list(gen)",
-        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
-        "    if flag: list(gen)",
+        "    async def inner(list):\n        list(gen)\n"
+        "        return await send('x', 'y', tab=tab)\n    send = b.get",
+        "from tools import list\n    send = b.ext_cmd\n"
+        "    gen = ((send := b.get) for _ in (1,))\n    list(gen)",
+        _generator_flow('ext_cmd', 'get',
+                        'def list(value): pass', 'list(gen)'),
+        *(_generator_flow('ext_cmd', 'get', f'b.{method}(gen)')
+          for method in ('extend', 'join', 'update', 'writelines')),
         "send = b.get\n    tuple((send := b.ext_cmd) for _ in (1,))",
         "flag and (send := b.ext_cmd)",
         "((send := b.ext_cmd) if flag else (send := b.get))",
@@ -163,33 +187,55 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*{'x': 1}]]",
         "send = b.get\n    [(send := b.ext_cmd) for _ in [*{**{}}]]",
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*{**{'x': 1}}]]",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))",
-        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
-        "    list(gen)",
-        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
-        "    alias = gen\n    tuple(alias)",
-        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
-        "    for _ in gen: pass",
-        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
-        "    [value for value in gen]",
-        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in ())\n"
-        "    list(gen)",
+        _generator_flow('get', 'ext_cmd'),
+        _generator_flow('ext_cmd', 'get', 'list(gen)'),
+        _generator_flow('ext_cmd', 'get', 'alias = gen', 'tuple(alias)'),
+        _generator_flow('ext_cmd', 'get', 'for _ in gen: pass'),
+        _generator_flow('ext_cmd', 'get', '[value for value in gen]'),
+        _generator_flow('get', 'ext_cmd', 'list(gen)', iterable='()'),
+        _generator_flow('get', 'ext_cmd', 'for _ in gen: pass',
+                        'send = b.get', 'list(gen)'),
+        _generator_flow('get', 'ext_cmd',
+                        'for _ in gen:\n        for _ in (1,): break',
+                        'send = b.get', 'list(gen)'),
+        _generator_flow('ext_cmd', 'get', 'for _ in gen: break',
+                        'send = b.ext_cmd', 'list(gen)', iterable='(1, 2)'),
+        _generator_flow('get', 'ext_cmd', 'for _ in gen: pass',
+                        'else: send = b.get', 'list(gen)'),
+        _generator_flow('get', 'ext_cmd', 'for _ in gen: pass',
+                        'list(gen)', iterable='()'),
+        "send = b.get\n"
+        "    gen = ((send := b.ext_cmd) async for _ in values)\n"
+        "    async for _ in gen: pass\n    send = b.get\n"
+        "    async for _ in gen: pass",
+        "list = b.get\n    send = b.get\n"
+        "    gen = ((send := b.ext_cmd) for _ in (1,))\n    list(gen)",
+        _generator_flow('get', 'ext_cmd', 'list = b.get', 'list(gen)'),
+        _generator_flow('get', 'ext_cmd',
+                        'if flag: list = b.get\n    else: list = print',
+                        'list(gen)'),
+        "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
+        "    async def inner(list):\n        list(gen)\n"
+        "        return await send('x', 'y', tab=tab)",
+        "from tools import list\n    send = b.get\n"
+        "    gen = ((send := b.ext_cmd) for _ in (1,))\n    list(gen)",
+        _generator_flow('get', 'ext_cmd',
+                        'def list(value): pass', 'list(gen)'),
+        *(_generator_flow('get', 'ext_cmd', f'b.{method}(gen)')
+          for method in ('extend', 'join', 'update', 'writelines')),
         "send = b.ext_cmd\n    tuple((send := b.get) for _ in (1,))",
         "def inner():\n        (send := b.ext_cmd)",
         "inner = lambda: (send := b.ext_cmd)",
     ]
     source = Path(tmp) / 'clean_sender_alias.py'
     for body in bodies:
-        text = ("async def f(b, tab):\n    " + body
+        text = ("async def f(b, tab, values, flag):\n    " + body
                 + "\n    return await send('x', 'y', tab=tab)\n")
         source.write_text(text, encoding='utf-8')
         assert not py_tab_routing_violations(source, source.name), body
 
 
 def test_a_name_rebound_away_from_ext_cmd_stops_reading_as_a_sender(tmp):
-    """The false-positive direction: once `send` is reassigned to something
-    else, a later `send(...)` is an ordinary call again, not still judged
-    as ext_cmd just because it once was."""
     source = Path(tmp) / 'rebound_sender.py'
     source.write_text(
         "async def focus_tab(chrome_tab):\n"
@@ -204,10 +250,6 @@ def test_a_name_rebound_away_from_ext_cmd_stops_reading_as_a_sender(tmp):
 
 
 def test_a_for_target_rebinding_away_from_ext_cmd_also_clears_the_alias(tmp):
-    """The rebind check above only covered a plain assignment. Review found
-    a `for` target rebinds the same name too, and it wasn't clearing the
-    alias either — the loop here never even runs, but the name is still
-    rebound by the act of writing the loop."""
     source = Path(tmp) / 'for_rebound_sender.py'
     source.write_text(
         "async def focus_tab(chrome_tab, bridge):\n"
@@ -223,9 +265,6 @@ def test_a_for_target_rebinding_away_from_ext_cmd_also_clears_the_alias(tmp):
 
 
 def test_a_def_shadowing_an_alias_name_also_clears_it(tmp):
-    """Review found the walker skips over a nested def/async def/class
-    without ever visiting it, so a name it shadows never got cleared even
-    though the def itself rebinds that name in the enclosing scope."""
     source = Path(tmp) / 'def_shadowed_sender.py'
     source.write_text(
         "async def focus_tab(chrome_tab):\n"
@@ -241,11 +280,6 @@ def test_a_def_shadowing_an_alias_name_also_clears_it(tmp):
 
 
 def test_a_rebinding_inside_a_loop_with_or_try_body_also_clears_the_alias(tmp):
-    """Review's other direction: a rebinding partway through a for/while/
-    with/try body was never applied before the calls in that body were
-    checked, so a name legitimately rebound away from a sender inside one
-    of these bodies still read as that sender and reported a false
-    violation on ordinary code."""
     bodies = {
         'for': "    for probe in probes:\n"
                "        send = probe.dispatch\n"
@@ -292,11 +326,6 @@ def test_a_rebinding_inside_a_loop_with_or_try_body_also_clears_the_alias(tmp):
 
 
 def test_a_match_case_pattern_rebinding_an_alias_also_clears_it(tmp):
-    """A `case` pattern binds through `MatchAs.name`, `MatchStar.name` and
-    `MatchMapping.rest` -- plain strings, not `Name` nodes in `Store`
-    context -- so a name-context sweep alone never sees them, and a
-    sender alias rebound by a pattern stayed live across the whole
-    `match` body."""
     patterns = {
         'as': "        case object() as send:\n",
         'mapping-value': "        case {'s': send}:\n",
@@ -324,8 +353,6 @@ def test_a_match_case_pattern_rebinding_an_alias_also_clears_it(tmp):
 
 
 def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
-    """The other false-positive direction: declaring a local `send` alias
-    must not reclassify every unrelated `.send()` method call in scope."""
     source = Path(tmp) / 'unrelated_dot_send.py'
     source.write_text(
         "async def focus_tab(chrome_tab, sink):\n"
@@ -339,10 +366,6 @@ def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
 
 
 def _if_else_alias_source(*, alias_in_if):
-    """Two branches, only one of which binds `send` to a real sender --
-    the other binds it to something unrelated. Both spellings hand `tab`
-    to whichever sender actually runs, so both must be caught the same
-    way regardless of which branch happens to come first in the file."""
     sender_branch = "        send = bridge.ext_cmd\n"
     other_branch = "        send = _legacy_sender\n"
     first, second = ((sender_branch, other_branch) if alias_in_if
@@ -357,9 +380,6 @@ def _if_else_alias_source(*, alias_in_if):
 
 
 def test_an_if_branch_alias_is_caught_regardless_of_which_branch_binds_it(tmp):
-    """Two programs that only differ in which branch binds the real sender
-    must both be caught -- the verdict must not depend on whether the
-    sender happens to be assigned in the `if` or the `else` (#224)."""
     if_source = Path(tmp) / 'if_branch_alias.py'
     if_source.write_text(_if_else_alias_source(alias_in_if=True),
                          encoding='utf-8')
@@ -377,39 +397,17 @@ def test_an_if_branch_alias_is_caught_regardless_of_which_branch_binds_it(tmp):
 
 
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
-    r"""`tab` routes to a server queue; `tabId` names a browser tab.
-    This checks senders rather than reconstructing payloads at the wire.
-    Enforced: resolved or possible typed-command senders in daedalus_mcp/,
-    daedalus_cli/ and dashboard/ may carry `tab` only as 'extension'. Eval
-    payloads carry `code` and legitimately route by tab. Python payloads are
-    followed through literals, dict operations, and source-ordered flow;
-    sender aliases through imports, simultaneous destructuring, assignment
-    expressions, definition-time expressions, comprehensions, functions, and
-    compound statements. Possible senders are reported as unprovable.
-    Deferred generators follow direct name aliases and apply in for/async-for,
-    eager-comprehension, starred/unpacking, and recognized consumer contexts.
-    Exhaustive builtins are dict/frozenset/list/max/min/set/sorted/sum/tuple;
-    methods are extend/join/update/writelines. all/any/next merge a partial
-    consumption path. These boundaries are iteration contracts, not call-site
-    examples. JavaScript literal/name/spread/helper senders remain checked in
-    source order; escaped objects become unprovable.
-
-    What is NOT enforced:
-    - Never-assigned names are unknown and silent.
-    - Non-dict call-built /command payloads are skipped; an untracked spread
-      without visible `type` may introduce both `type` and `tab` unseen.
-    - Opaque dict rebindings/mutations drop tracking until a visible write.
-    - Unmatched destructuring invalidates targets; senders are unprovable.
-    - Nonliteral computed keys and unknown-name spreads are skipped.
-    - Named runCommand objects track initializer `type`/`code` and later tab
-      writes, but not later `type`/`code` writes.
-    - Helpers resolve their first declaration through three call levels.
-    - Arbitrary Python calls and lazy adapters do not prove generator
-      consumption; only syntax or APIs whose contracts request iteration do.
-    - JavaScript name state is file-wide and source-ordered, not block-scoped
-      or execution-ordered.
-    - The JavaScript mask does not understand regex literals containing quote
-      characters; current dashboard regex literals contain none.
+    r"""`tab` routes queues; `tabId` identifies browser tabs.
+    Resolved or possible typed-command senders may route only to 'extension';
+    eval payloads legitimately route by tab. Python aliases, payloads, and
+    deferred generators follow source-ordered flow. Structural iteration and
+    unshadowed builtin consumers apply generator effects; normal loops exhaust
+    them while reachable breaks retain partial state. Arbitrary calls,
+    methods, callable aliases, and lazy adapters do not prove consumption.
+    Unknown names,
+    opaque/nonliteral payload construction, and later named-object type writes
+    remain unenforced. JavaScript names are file-wide and source-ordered; its
+    mask does not understand regex literals containing quotes.
     """
     senders_py = [ROOT / 'daedalus_mcp' / 'server.py',
                   *(ROOT / 'daedalus_mcp').glob('tools_*.py'),
