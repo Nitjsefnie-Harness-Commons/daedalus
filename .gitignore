@@ -213,6 +213,7 @@
 
 # ─── tests ───
 !/tests/
+!/tests/_bash_resolver_scan.py
 !/tests/_boundary.py
 !/tests/_boundary_env.py
 !/tests/_bridge.py
@@ -254,6 +255,7 @@
 !/tests/_yamlread.py
 !/tests/_yamlscalar.py
 !/tests/_yamlsteps.py
+!/tests/test_bash_resolver_scan.py
 !/tests/test_bridge_credentials.py
 !/tests/test_bridge_requests.py
 !/tests/test_bridge_results.py
