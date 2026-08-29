@@ -52,12 +52,12 @@ if len(list(marks.iterdir())) < 2:
 """
 
 
-_CONCURRENCY_COUNTER_SUITE = r"""import json, time
+_CONCURRENCY_EVENT_SUITE = r"""import time
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
 lock = root / 'concurrency.lock'
-state_path = root / 'concurrency.json'
+events_path = root / 'events.log'
 
 
 def acquire():
@@ -74,13 +74,8 @@ def acquire():
 
 acquire()
 try:
-    if state_path.exists():
-        state = json.loads(state_path.read_text(encoding='utf-8'))
-    else:
-        state = {'active': 0, 'peak': 0}
-    state['active'] += 1
-    state['peak'] = max(state['peak'], state['active'])
-    state_path.write_text(json.dumps(state), encoding='utf-8')
+    with events_path.open('a', encoding='utf-8') as events:
+        events.write(f'+{Path(__file__).name}\n')
 finally:
     lock.rmdir()
 
@@ -88,11 +83,42 @@ time.sleep(0.5)
 
 acquire()
 try:
-    state = json.loads(state_path.read_text(encoding='utf-8'))
-    state['active'] -= 1
-    state_path.write_text(json.dumps(state), encoding='utf-8')
+    with events_path.open('a', encoding='utf-8') as events:
+        events.write(f'-{Path(__file__).name}\n')
 finally:
     lock.rmdir()
+"""
+
+
+_DYING_CONCURRENCY_SUITE = r"""import os
+import time
+from pathlib import Path
+
+root = Path(__file__).resolve().parent
+lock = root / 'concurrency.lock'
+events_path = root / 'events.log'
+
+
+def acquire():
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            lock.mkdir()
+            return
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise AssertionError('timed out acquiring concurrency lock')
+            time.sleep(0.01)
+
+
+acquire()
+try:
+    with events_path.open('a', encoding='utf-8') as events:
+        events.write(f'+{Path(__file__).name}\n')
+finally:
+    lock.rmdir()
+
+os._exit(1)
 """
 
 
@@ -180,6 +206,50 @@ def _group(stdout, name):
     return stdout[start:end]
 
 
+def _replay_events(lines):
+    lines = list(lines)
+    if lines and not lines[-1].endswith('\n'):
+        lines.pop()
+
+    events = []
+    for line_number, line in enumerate(lines, start=1):
+        if not line.endswith('\n'):
+            raise AssertionError(
+                f'unterminated event log line {line_number}: {line!r}')
+        event = line[:-1]
+        if len(event) < 2 or event[0] not in '+-':
+            raise AssertionError(
+                f'invalid event log line {line_number}: {line!r}')
+        events.append((event[0], event[1:]))
+
+    opened = {}
+    paired_indices = set()
+    orphans = set()
+    for index, (marker, name) in enumerate(events):
+        if marker == '+':
+            if name in opened:
+                raise AssertionError(
+                    f'duplicate open event log line {index + 1}: '
+                    f'{lines[index]!r}')
+            opened[name] = index
+        elif name in opened:
+            paired_indices.update((opened.pop(name), index))
+        else:
+            orphans.add(name)
+
+    active = set()
+    peak = 0
+    for index, (marker, name) in enumerate(events):
+        if index not in paired_indices:
+            continue
+        if marker == '+':
+            active.add(name)
+            peak = max(peak, len(active))
+        else:
+            active.remove(name)
+    return peak, set(opened), orphans
+
+
 def test_every_suite_is_measured_in_its_own_parallel_mode_process(tmp):
     """Dropping a suite, parallel mode, or process isolation must fail."""
     suites = {
@@ -230,14 +300,93 @@ def test_suites_run_concurrently(tmp):
 def test_worker_pool_reaches_but_never_exceeds_cpu_count(tmp):
     """Four suites on two reported CPUs must reach a peak of exactly two."""
     result, _invocations = _coverage_tree(tmp, {
-        f'test_worker_{number}.py': _CONCURRENCY_COUNTER_SUITE
+        f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
         for number in range(4)
     }, cpu_count=2)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    state = json.loads(
-        (Path(tmp) / 'tree' / 'tests' / 'concurrency.json').read_text(
-            encoding='utf-8'))
-    assert state == {'active': 0, 'peak': 2}, state
+    events_path = Path(tmp) / 'tree' / 'tests' / 'events.log'
+    lines = events_path.read_text(encoding='utf-8').splitlines(
+        keepends=True)
+    peak, unpaired, orphans = _replay_events(lines)
+    assert not unpaired, (
+        f'unpaired worker suites {sorted(unpaired)} in log: {lines!r}')
+    assert not orphans, (
+        f'orphan worker suite closes {sorted(orphans)} in log: {lines!r}')
+    assert peak == 2, f'worker pool paired peak was {peak}: {lines!r}'
+
+
+def test_replay_exposes_a_three_suite_peak(_tmp):
+    """Three paired open windows must remain visible as a cap breach."""
+    lines = [
+        '+test_a.py\n',
+        '+test_b.py\n',
+        '+test_c.py\n',
+        '-test_a.py\n',
+        '-test_b.py\n',
+        '-test_c.py\n',
+    ]
+    peak, unpaired, orphans = _replay_events(lines)
+    assert peak == 3, f'peak lost from event log: {lines!r}'
+    assert not unpaired, f'unpaired suite in complete log: {unpaired}'
+    assert not orphans, f'orphan close in complete log: {orphans}'
+
+
+def test_replay_reports_a_close_without_an_open(_tmp):
+    """A close event without a matching open must name its suite."""
+    line = '-test_orphan.py\n'
+    peak, unpaired, orphans = _replay_events([line])
+    assert peak == 0, f'orphan log line changed peak: {line!r}'
+    assert not unpaired, f'orphan log line opened a suite: {line!r}'
+    assert orphans == {'test_orphan.py'}, (
+        f'orphan log line not reported: {line!r}')
+
+
+def test_replay_ignores_a_torn_trailing_line(_tmp):
+    """A final event without its newline must not enter the replay."""
+    lines = ['+test_complete.py\n', '-test_complete.py\n', '+test_torn.py']
+    peak, unpaired, orphans = _replay_events(lines)
+    assert peak == 1, f'torn log tail changed peak: {lines[-1]!r}'
+    assert not unpaired, f'torn log tail opened a suite: {lines[-1]!r}'
+    assert not orphans, f'torn log tail closed a suite: {lines[-1]!r}'
+
+
+def test_replay_finds_two_well_formed_overlapping_windows(_tmp):
+    """Two complete overlapping windows must replay to a peak of two."""
+    lines = [
+        '+test_a.py\n',
+        '+test_b.py\n',
+        '-test_a.py\n',
+        '-test_b.py\n',
+    ]
+    peak, unpaired, orphans = _replay_events(lines)
+    assert peak == 2, f'paired event peak was not two: {lines!r}'
+    assert not unpaired, f'unpaired suite in complete log: {unpaired}'
+    assert not orphans, f'orphan close in complete log: {orphans}'
+
+
+def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
+    """A dead suite stays diagnosed without fabricating a pool breach."""
+    dying_suite = 'test_worker_dies.py'
+    suites = {
+        dying_suite: _DYING_CONCURRENCY_SUITE,
+        **{
+            f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
+            for number in range(3)
+        },
+    }
+    result, _invocations = _coverage_tree(tmp, suites, cpu_count=2)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    events_path = Path(tmp) / 'tree' / 'tests' / 'events.log'
+    lines = events_path.read_text(encoding='utf-8').splitlines(
+        keepends=True)
+    peak, unpaired, orphans = _replay_events(lines)
+    assert unpaired == {dying_suite}, (
+        f'{dying_suite} was not the sole unpaired suite: {lines!r}')
+    assert not orphans, f'orphan close in event log: {lines!r}'
+    failed_group = _group(result.stdout, dying_suite)
+    assert ('  (suite did not pass; its coverage still counts)'
+            in failed_group), f'{dying_suite} group: {failed_group!r}'
+    assert peak == 2, f'paired event log breached cap: {lines!r}'
 
 
 def test_each_suite_output_is_one_contiguous_group(tmp):
