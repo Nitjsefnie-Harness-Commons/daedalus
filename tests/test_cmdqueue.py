@@ -3,6 +3,7 @@
 import contextlib
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -98,6 +99,31 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
 
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     queue, queued = _queued_file(tmp)
+
+    class RefusingReceiver:
+        def __fspath__(self):
+            raise RuntimeError('receiver evaluated before argument validation')
+
+    def path_failure(operation, receiver, *args, **kwargs):
+        try:
+            result = getattr(Path, operation)(receiver, *args, **kwargs)
+        except (OSError, RuntimeError, TypeError, ValueError) as caught:
+            filename = getattr(caught, 'filename', None)
+            return type(caught), str(caught), type(filename), filename
+        if operation == 'open':
+            result.close()
+        raise AssertionError(
+            f'Path.{operation} accepted the control arguments')
+
+    refusing_receiver = RefusingReceiver()
+    invalid_mode = {'mode': None}
+    expected_mode = path_failure(
+        'open', refusing_receiver, **invalid_mode)
+    excess_unlink = (False, 'extra')
+    expected_unlink = path_failure(
+        'unlink', refusing_receiver, *excess_unlink)
+    bytes_receiver = os.fsencode(str(queued))
+    expected_bytes = path_failure('open', bytes_receiver, mode='x')
     excess_args = ('r', 1, -1, None, None, None, False, 'extra')
     expected_excess = _path_open_failure(queued, *excess_args)
     expected_binary = _path_open_failure(queued, mode='rb', encoding='utf-8')
@@ -121,7 +147,24 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     finally:
         Path.open = original
     # This open count is the transparency contract, not an internal detail.
-    assert underlying_opens == [1], underlying_opens
+    assert underlying_opens == [1], (
+        'exhausted fault reran native-validation probe', underlying_opens)
+    with _refuse_path_operation(queued, 'unlink', 1) as unlink_calls:
+        actual_unlink = path_failure(
+            'unlink', refusing_receiver, *excess_unlink)
+        assert actual_unlink == expected_unlink, (
+            'unlink named receiver before signature validation',
+            actual_unlink, expected_unlink)
+        unlink_fault = None
+        try:
+            queued.unlink()
+        except PermissionError:
+            unlink_fault = PermissionError
+    assert unlink_fault is PermissionError, (
+        'unlink fault was consumed by signature refusal', unlink_fault)
+    assert unlink_calls == [1], (
+        'unlink signature refusal changed target call count', unlink_calls)
+    assert queued.exists(), 'unlink control removed the target path'
     with _virtual_cmdqueue_clock() as (clock, _, _):
         injectors = (
             ('generic refusal',
@@ -136,6 +179,16 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
             assert not candidate.exists()
             open_failure = None
             with injector:
+                actual_mode = path_failure(
+                    'open', refusing_receiver, **invalid_mode)
+                assert actual_mode == expected_mode, (
+                    'open named receiver before mode validation',
+                    label, actual_mode, expected_mode)
+                actual_bytes = path_failure(
+                    'open', bytes_receiver, mode='x')
+                assert actual_bytes == expected_bytes, (
+                    'bytes receiver refusal changed',
+                    label, actual_bytes, expected_bytes)
                 try:
                     with candidate.open(mode='x', encoding='utf-8') as opened:
                         opened.write('caller-owned content')
