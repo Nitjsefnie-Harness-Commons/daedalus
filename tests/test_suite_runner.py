@@ -162,6 +162,8 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
     (root / 'tests').mkdir(parents=True)
     shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
     shutil.copy2(ROOT / 'tests' / '_util.py', root / 'tests' / '_util.py')
+    shutil.copy2(ROOT / 'tests' / '_teardown.py',
+                 root / 'tests' / '_teardown.py')
     for name, source in suites.items():
         (root / 'tests' / name).write_text(source, encoding='utf-8')
     if sitecustomize:
