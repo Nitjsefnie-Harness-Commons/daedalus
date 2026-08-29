@@ -172,7 +172,8 @@ def _resolve_sender_name(expr, aliases):
         if expr.id in ('ext_cmd', '_ext_cmd'):
             return expr.id
         return aliases.get(expr.id)
-    if isinstance(expr, ast.Attribute) and expr.attr in ('ext_cmd', '_ext_cmd'):
+    if (isinstance(expr, ast.Attribute)
+            and expr.attr in ('ext_cmd', '_ext_cmd')):
         return expr.attr
     return None
 
@@ -192,7 +193,8 @@ def _rebound_names(node):
     """
     nodes = [node, *_scope_nodes(node)]
     names = {n.id for n in nodes
-             if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+             if isinstance(n, ast.Name)
+             and isinstance(n.ctx, (ast.Store, ast.Del))}
     names |= {(a.asname or a.name).split('.')[0]
               for n in nodes if isinstance(n, (ast.Import, ast.ImportFrom))
               for a in n.names}
