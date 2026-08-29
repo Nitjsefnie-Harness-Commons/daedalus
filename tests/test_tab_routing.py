@@ -330,11 +330,11 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     be followed, so it is not silently believed.
 
     What is NOT enforced:
-    - A name this scanner never saw assigned — a parameter or unrelated import
-      — is unknown rather than unprovable, and unknown stays silent. That is what
-      keeps `extCmd('fetch-timings', opts)` and the `...opts` spread inside
-      `extCmd` itself quiet; the third-argument check covers the override
-      those spreads could carry.
+    - A name this scanner never saw assigned — a parameter or unrelated
+      import — is unknown rather than unprovable, and unknown stays silent.
+      That is what keeps `extCmd('fetch-timings', opts)` and the
+      `...opts` spread inside `extCmd` itself quiet; the third-argument
+      check covers the override those spreads could carry.
     - A Python /command payload built by a non-`dict(...)` call or by
       `dict(...)` with a positional argument is skipped. An untracked
       `**spread` after a visible `type` is rejected, but an untracked spread
