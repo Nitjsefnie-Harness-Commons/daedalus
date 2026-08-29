@@ -93,15 +93,22 @@ def eval_page_server():
     with _FIXTURE_SERVERS_LOCK:
         _FIXTURE_SERVERS[origin] = server
     thread = threading.Thread(target=server.serve_forever)
-    thread.start()
     try:
+        thread.start()
         yield origin
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=10)
-        with _FIXTURE_SERVERS_LOCK:
-            _FIXTURE_SERVERS.pop(origin, None)
+        started = thread.ident is not None
+        try:
+            if started:
+                server.shutdown()
+        finally:
+            try:
+                server.server_close()
+                if started:
+                    thread.join(timeout=10)
+            finally:
+                with _FIXTURE_SERVERS_LOCK:
+                    _FIXTURE_SERVERS.pop(origin, None)
 
 
 def _fixture_request_marker(page_url):
