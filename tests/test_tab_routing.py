@@ -31,7 +31,7 @@ def test_positional_dict_copy_is_opaque_but_later_tab_write_is_tracked(tmp):
     assert keys['tab'][0] == 2
 
 
-def test_a_local_alias_of_ext_cmd_is_judged_the_same_as_calling_it_directly(tmp):
+def test_a_local_alias_of_ext_cmd_is_judged_like_a_direct_call(tmp):
     """A sender that reaches ext_cmd through a same-scope local alias must
     not slip past the guard just because the call site spells a different
     name (#224)."""
@@ -42,7 +42,8 @@ def test_a_local_alias_of_ext_cmd_is_judged_the_same_as_calling_it_directly(tmp)
         "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
         encoding='utf-8')
     violations = py_tab_routing_violations(source, 'aliased_sender.py')
-    assert violations, 'the alias should be caught the same way a direct call is'
+    assert violations, (
+        'the alias should be caught the same way a direct call is')
     assert 'ext_cmd keyword `tab`' in violations[0], violations
 
 
@@ -147,25 +148,31 @@ def test_a_rebinding_inside_a_loop_with_or_try_body_also_clears_the_alias(tmp):
     bodies = {
         'for': "    for probe in probes:\n"
                "        send = probe.dispatch\n"
-               "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+               "        await send('_focus', 'probe-tab', "
+               "tab=int(chrome_tab))\n",
         'while': "    while probes:\n"
                  "        send = probes.pop().dispatch\n"
-                 "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+                 "        await send('_focus', 'probe-tab', "
+                 "tab=int(chrome_tab))\n",
         'with': "    with bridge.session() as send:\n"
-                "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+                "        await send('_focus', 'probe-tab', "
+                "tab=int(chrome_tab))\n",
         'try': "    try:\n"
                "        send = probe.dispatch\n"
-               "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n"
+               "        await send('_focus', 'probe-tab', "
+               "tab=int(chrome_tab))\n"
                "    except OSError:\n"
                "        pass\n",
         'except-as': "    try:\n"
                      "        pass\n"
                      "    except OSError as send:\n"
-                     "        await send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+                     "        await send('_focus', 'probe-tab', "
+                     "tab=int(chrome_tab))\n",
         'nested-def': "    for _ in (1,):\n"
                       "        def send(*a, **k):\n"
                       "            return None\n"
-                      "        send('_focus', 'probe-tab', tab=int(chrome_tab))\n",
+                      "        send('_focus', 'probe-tab', "
+                      "tab=int(chrome_tab))\n",
     }
     for label, body in bodies.items():
         source = Path(tmp) / f'loop_rebound_sender_{label}.py'
@@ -222,7 +229,8 @@ def test_an_unrelated_dot_send_method_is_not_confused_with_a_local_alias(tmp):
     source.write_text(
         "async def focus_tab(chrome_tab, sink):\n"
         "    send = _ext_cmd\n"
-        "    return await sink.send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
+        "    return await sink.send('_focus', 'focus-tab', "
+        "tab=int(chrome_tab))\n",
         encoding='utf-8')
     violations = py_tab_routing_violations(source, 'unrelated_dot_send.py')
     assert not violations, (
@@ -236,8 +244,8 @@ def _if_else_alias_source(*, alias_in_if):
     way regardless of which branch happens to come first in the file."""
     sender_branch = "        send = bridge.ext_cmd\n"
     other_branch = "        send = _legacy_sender\n"
-    first, second = (
-        (sender_branch, other_branch) if alias_in_if else (other_branch, sender_branch))
+    first, second = ((sender_branch, other_branch) if alias_in_if
+                     else (other_branch, sender_branch))
     return (
         "async def focus_tab(chrome_tab, legacy, bridge):\n"
         "    if legacy:\n"
@@ -252,14 +260,19 @@ def test_an_if_branch_alias_is_caught_regardless_of_which_branch_binds_it(tmp):
     must both be caught -- the verdict must not depend on whether the
     sender happens to be assigned in the `if` or the `else` (#224)."""
     if_source = Path(tmp) / 'if_branch_alias.py'
-    if_source.write_text(_if_else_alias_source(alias_in_if=True), encoding='utf-8')
+    if_source.write_text(_if_else_alias_source(alias_in_if=True),
+                         encoding='utf-8')
     else_source = Path(tmp) / 'else_branch_alias.py'
-    else_source.write_text(_if_else_alias_source(alias_in_if=False), encoding='utf-8')
+    else_source.write_text(_if_else_alias_source(alias_in_if=False),
+                           encoding='utf-8')
 
-    if_violations = py_tab_routing_violations(if_source, 'if_branch_alias.py')
-    else_violations = py_tab_routing_violations(else_source, 'else_branch_alias.py')
+    if_violations = py_tab_routing_violations(
+        if_source, 'if_branch_alias.py')
+    else_violations = py_tab_routing_violations(
+        else_source, 'else_branch_alias.py')
     assert if_violations, 'the alias bound in the if branch must be caught'
-    assert else_violations, 'the alias bound in the else branch must be caught too'
+    assert else_violations, (
+        'the alias bound in the else branch must be caught too')
 
 
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
