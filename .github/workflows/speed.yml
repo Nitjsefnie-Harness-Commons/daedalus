@@ -157,21 +157,20 @@ jobs:
         # repository carries that name, and tests/test_speed_gate.py holds
         # the two files to the same string.
         #
-        # Four endings, none of them a silent pass: the aggregate passed and
+        # Three endings, none of them a silent pass: the aggregate passed and
         # the measurement may start; the aggregate concluded anything else and
-        # this job fails, which is what skips the cells; the bound ran out
+        # this job fails, which is what skips the cells; or the bound ran out
         # without a completed aggregate — a missing gate is not a passing one,
-        # so that fails too; or enough consecutive polls saw no check run at
-        # all, which is this run aimed at a commit nothing will ever check
-        # rather than a reason to keep waiting. A failed read is reported as
-        # one and waited out under the same bound, instead of being mistaken
-        # for an empty commit.
+        # so that fails too. A commit whose checks have not appeared yet is
+        # waited out under the same bound as one whose aggregate is still
+        # going: registration is queue-dependent, so the first polls of a
+        # green run can see none. A failed read is reported as one and waited
+        # out under the same bound, instead of being mistaken for an empty
+        # commit.
         run: |
           aggregate='Aggregate workflow checks'
           tries=45
           attempt=0
-          blind=5
-          blind_count=0
           while [ "$attempt" -lt "$tries" ]; do
             attempt=$((attempt + 1))
             if ! states="$(gh api --paginate -H 'Cache-Control: no-cache' \
@@ -188,23 +187,11 @@ jobs:
               | awk -F'\t' -v name="$aggregate" \
                      '$1 == name { print $2 "\t" $3 }')"
             if [ -z "$found" ]; then
-              blind_count=$((blind_count + 1))
-              if [ "$blind_count" -ge "$blind" ]; then
-                echo "No check runs at all on $SHA after $blind" \
-                     "attempts." >&2
-                echo "Check runs appear within moments of the tests" >&2
-                echo "workflow starting, so nothing on this commit will" >&2
-                echo "ever carry them: on a pull request event the checks" >&2
-                echo "attach to the head commit, never the merge commit" >&2
-                echo "github.sha names." >&2
-                exit 1
-              fi
               echo "waiting: no check runs on $SHA yet" \
                    "(attempt $attempt of $tries)"
               sleep 60
               continue
             fi
-            blind_count=0
             # `found` rows are status TAB conclusion: the name was stripped
             # selecting them, so the status is field one and the conclusion
             # field two.
@@ -231,7 +218,8 @@ jobs:
           done
           echo "No completed '$aggregate' check run on $SHA within $tries" >&2
           echo "attempts. A missing aggregate is not a pass: either the tests" >&2
-          echo "workflow never ran on this commit, or it is still going." >&2
+          echo "workflow never ran on this commit, has not registered its" >&2
+          echo "checks yet, or is still going." >&2
           exit 1
 
   timed:

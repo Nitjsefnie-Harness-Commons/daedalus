@@ -2,8 +2,8 @@
 """The correctness wait's runtime behaviour, executed rather than read back.
 
 Shape pins over speed.yml live in test_speed_gate.py. These only mean
-anything as a run: a commit that never gains a check run, a read that
-fails, a near-miss name, an aggregate that is still going.
+anything as a run: a commit whose checks have not registered yet, a read
+that fails, a near-miss name, an aggregate that is still going.
 """
 import re
 import sys
@@ -65,41 +65,52 @@ def test_the_wait_polls_the_commit_the_checks_attach_to(tmp):
     assert '.check_runs[]' in calls[0], calls
 
 
-def test_the_wait_refuses_a_commit_that_never_gains_a_check_run(tmp):
-    """A stretch of empty polls is a misconfiguration signal, not patience.
+def test_an_empty_stretch_is_waited_out_under_the_overall_bound(tmp):
+    """No check runs yet is queueing, not a misconfiguration.
 
-    The bound is consecutive and separate from the overall one, which still
-    governs an aggregate that is present and running.
+    GitHub registers a commit's check runs as runners free up, so the first
+    polls of a perfectly green run can see none, and registration lag is
+    queue-dependent — no honest bound fits it. The wait spends the same
+    overall patience an aggregate that is present and running gets, and the
+    loud ending names that as one reason an aggregate may be absent.
     """
     result, calls = run_wait(tmp, '')
     assert result.returncode == 1, (result.stdout, result.stderr)
-    assert 'No check runs at all' in result.stderr, result.stderr
-    blind = int(re.search(r'\bblind=(\d+)\b', wait_script()).group(1))
-    assert len(calls) == blind, (len(calls), blind)
-    assert len(calls) < int(
-        re.search(r'\btries=(\d+)\b', wait_script()).group(1))
+    assert "No completed 'Aggregate workflow checks' check run" \
+        in result.stderr, result.stderr
+    # The echo lines wrap at the line-length gate, so the message is matched
+    # with its wrapping collapsed.
+    said = ' '.join(result.stderr.split())
+    assert 'has not registered its checks yet' in said, result.stderr
+    tries = int(re.search(r'\btries=(\d+)\b', wait_script()).group(1))
+    assert len(calls) == tries, (len(calls), tries)
 
 
 def test_the_wait_selects_the_aggregate_by_exact_name(tmp):
     """A check run whose name merely contains the aggregate's is not it.
 
     The selection is equality against the whole name, never a pattern: other
-    workflows here carry names that start with the same words.
+    workflows here carry names that start with the same words, and a
+    regex-flavoured match would take one of them for the gate and report an
+    aggregate still running where none ever was.
     """
     rows = ''.join(f'{name}\tin_progress\t\n' for name in (
         f'{_AGGREGATE} (fork)', f'{_AGGREGATE} re-run', 'Aggregate'))
     result, calls = run_wait(tmp, rows)
     assert result.returncode == 1, (result.stdout, result.stderr)
-    assert 'No check runs at all' in result.stderr, result.stderr
-    blind = int(re.search(r'\bblind=(\d+)\b', wait_script()).group(1))
-    assert len(calls) == blind, (len(calls), blind)
+    assert 'still running' not in result.stdout, result.stdout
+    assert "No completed 'Aggregate workflow checks' check run" \
+        in result.stderr, result.stderr
+    tries = int(re.search(r'\btries=(\d+)\b', wait_script()).group(1))
+    assert len(calls) == tries, (len(calls), tries)
 
 
 def test_the_wait_exhausts_its_bound_while_the_aggregate_runs(tmp):
     """An aggregate that is present and still going is waited out, once.
 
-    The overall bound governs that case, a different ending from the
-    misconfiguration one.
+    That is the same patience an absent aggregate gets: the ending is loud
+    either way, and the difference between the two lives in the rows the
+    polls saw, not in a shorter bound.
     """
     result, calls = run_wait(tmp, f'{_AGGREGATE}\tin_progress\t\n')
     assert result.returncode == 1, (result.stdout, result.stderr)
@@ -117,8 +128,7 @@ def test_a_read_that_fails_says_so_instead_of_looking_empty(tmp):
     result, calls = run_wait(tmp, '', fail=True)
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert 'could not be read' in result.stderr, result.stderr
-    assert 'No check runs at all' not in result.stderr, result.stderr
-    assert 'no check runs on' not in result.stderr, result.stderr
+    assert 'no check runs on' not in result.stdout, result.stdout
     tries = int(re.search(r'\btries=(\d+)\b', wait_script()).group(1))
     assert len(calls) == tries, (len(calls), tries)
 
