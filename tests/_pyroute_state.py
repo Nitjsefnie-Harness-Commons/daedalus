@@ -20,13 +20,22 @@ class FlowState:
     aliases: dict
     generators: dict
     evaluated: dict
-    builtin_shadows: set
+    builtin_globals: set
+    builtin_locals: set
 
     def copy(self):
         return FlowState(
             {name: keys.copy() for name, keys in self.dicts.items()},
             dict(self.aliases), dict(self.generators), dict(self.evaluated),
-            set(self.builtin_shadows))
+            set(self.builtin_globals), set(self.builtin_locals))
+
+
+@dataclass(frozen=True)
+class DeferredGenerator:
+    """A generator expression and its known remaining yield count."""
+
+    expression: ast.GeneratorExp
+    remaining: int | None
 
 
 def scope_nodes(scope):
@@ -36,6 +45,75 @@ def scope_nodes(scope):
             continue
         yield child
         yield from scope_nodes(child)
+
+
+def lexical_scope_nodes(scope):
+    """Nodes compiled in `scope`, including nested-definition headers."""
+    roots = [scope.body] if isinstance(scope, ast.Lambda) else scope.body
+
+    def visit(node):
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            values = [*node.decorator_list, *node.args.defaults,
+                      *(value for value in node.args.kw_defaults
+                        if value is not None)]
+        elif isinstance(node, ast.Lambda):
+            values = [*node.args.defaults,
+                      *(value for value in node.args.kw_defaults
+                        if value is not None)]
+        elif isinstance(node, ast.ClassDef):
+            values = [*node.decorator_list, *node.bases,
+                      *(keyword.value for keyword in node.keywords)]
+        else:
+            values = ast.iter_child_nodes(node)
+        for value in values:
+            yield from visit(value)
+
+    for root in roots:
+        yield from visit(root)
+
+
+def callable_builtin_scope(scope):
+    """Return lexical shadows and explicit globals for one callable."""
+    nodes = list(lexical_scope_nodes(scope))
+    comprehension_targets = {
+        target
+        for parent in nodes if isinstance(parent, COMPREHENSIONS)
+        for generator in parent.generators
+        for target in ast.walk(generator.target)
+        if isinstance(target, ast.Name)
+    }
+    bound = {node.id for node in nodes
+             if isinstance(node, ast.Name)
+             and node not in comprehension_targets
+             and isinstance(node.ctx, (ast.Store, ast.Del))}
+    bound |= {(alias.asname or alias.name).split('.')[0]
+              for node in nodes
+              if isinstance(node, (ast.Import, ast.ImportFrom))
+              for alias in node.names}
+    bound |= {node.name for node in nodes
+              if isinstance(node, ast.ExceptHandler) and node.name}
+    bound |= {node.name for node in nodes
+              if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name}
+    bound |= {node.rest for node in nodes
+              if isinstance(node, ast.MatchMapping) and node.rest}
+    bound |= {node.name for node in nodes
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef))}
+    args = scope.args
+    bound |= {arg.arg for arg in [*args.posonlyargs, *args.args,
+                                  *args.kwonlyargs]}
+    if args.vararg is not None:
+        bound.add(args.vararg.arg)
+    if args.kwarg is not None:
+        bound.add(args.kwarg.arg)
+    globals_ = {name for node in nodes if isinstance(node, ast.Global)
+                for name in node.names}
+    nonlocals = {name for node in nodes if isinstance(node, ast.Nonlocal)
+                 for name in node.names}
+    lexical = (bound - globals_ - nonlocals) | nonlocals
+    return (lexical & BUILTIN_CONSUMERS,
+            globals_ & BUILTIN_CONSUMERS)
 
 
 def is_extension_constant(node):
@@ -107,10 +185,57 @@ def evaluated_value(value, state):
     return resolve_sender_name(value, state.aliases)
 
 
+def literal_iterable_cardinality(expr):
+    """Return an exact literal-display length when it is provable."""
+    if isinstance(expr, (ast.Tuple, ast.List)):
+        total = 0
+        for item in expr.elts:
+            if isinstance(item, ast.Starred):
+                count = literal_iterable_cardinality(item.value)
+                if count is None:
+                    return None
+                total += count
+            else:
+                total += 1
+        return total
+    if isinstance(expr, ast.Dict):
+        if not expr.keys:
+            return 0
+        counts = [literal_iterable_cardinality(value) if key is None else 1
+                  for key, value in zip(expr.keys, expr.values)]
+        if any(count is None for count in counts):
+            return None
+        total = sum(counts)
+        return total if total <= 1 else None
+    if isinstance(expr, ast.Set):
+        if not expr.elts:
+            return 0
+        counts = [literal_iterable_cardinality(item.value)
+                  if isinstance(item, ast.Starred) else 1
+                  for item in expr.elts]
+        if any(count is None for count in counts):
+            return None
+        total = sum(counts)
+        return total if total <= 1 else None
+    return None
+
+
+def deferred_generator(expr):
+    remaining = 1
+    for clause in expr.generators:
+        count = literal_iterable_cardinality(clause.iter)
+        if count == 0:
+            return DeferredGenerator(expr, 0)
+        if count is None or clause.ifs:
+            return DeferredGenerator(expr, None)
+        remaining *= count
+    return DeferredGenerator(expr, remaining)
+
+
 def bind_alias_target(target, value, state, bindings):
     if isinstance(target, ast.Name):
         resolved = evaluated_value(value, state)
-        if isinstance(resolved, ast.GeneratorExp):
+        if isinstance(resolved, DeferredGenerator):
             bindings[1][target.id] = resolved
         elif resolved is not None:
             bindings[0][target.id] = resolved
@@ -134,9 +259,19 @@ def bind_alias_target(target, value, state, bindings):
             bind_alias_target(nested_target, nested_value, state, bindings)
         return
     resolved = evaluated_value(value, state)
-    if resolved is not None and not isinstance(resolved, ast.GeneratorExp):
+    if resolved is not None and not isinstance(resolved, DeferredGenerator):
         for name in bound_names(target):
             bindings[0][name] = UNPROVABLE_SENDER
+
+
+def bind_builtin_names(state, names):
+    global_names = (names & BUILTIN_CONSUMERS) - state.builtin_locals
+    state.builtin_globals.update(global_names)
+
+
+def delete_builtin_names(state, names):
+    global_names = (names & BUILTIN_CONSUMERS) - state.builtin_locals
+    state.builtin_globals.difference_update(global_names)
 
 
 def apply_alias_statement(node, state):
@@ -144,7 +279,7 @@ def apply_alias_statement(node, state):
     if isinstance(node, ast.ImportFrom):
         for imported in node.names:
             local = imported.asname or imported.name
-            state.builtin_shadows.update({local} & BUILTIN_CONSUMERS)
+            bind_builtin_names(state, {local})
             aliases.pop(local, None)
             state.generators.pop(local, None)
             if imported.name in ('ext_cmd', '_ext_cmd'):
@@ -153,7 +288,7 @@ def apply_alias_statement(node, state):
     if isinstance(node, ast.Import):
         for imported in node.names:
             local = (imported.asname or imported.name).split('.')[0]
-            state.builtin_shadows.update({local} & BUILTIN_CONSUMERS)
+            bind_builtin_names(state, {local})
             aliases.pop(local, None)
             state.generators.pop(local, None)
         return
@@ -167,7 +302,10 @@ def apply_alias_statement(node, state):
         for target in targets:
             bind_alias_target(target, node.value, state, bindings)
     names = set().union(*(bound_names(target) for target in targets))
-    state.builtin_shadows.update(names & BUILTIN_CONSUMERS)
+    if isinstance(node, ast.Delete):
+        delete_builtin_names(state, names)
+    elif not isinstance(node, ast.AnnAssign) or node.value is not None:
+        bind_builtin_names(state, names)
     for name in names:
         aliases.pop(name, None)
         state.generators.pop(name, None)
@@ -176,8 +314,9 @@ def apply_alias_statement(node, state):
 
 
 def value_signature(value):
-    if isinstance(value, ast.GeneratorExp):
-        return ('generator', value.lineno, value.col_offset)
+    if isinstance(value, DeferredGenerator):
+        expr = value.expression
+        return ('generator', expr.lineno, expr.col_offset, value.remaining)
     return value
 
 
@@ -189,13 +328,15 @@ def state_signature(state):
                if is_extension_constant(keys['tab'][1]) else 'other')
         payloads.append((name, 'type' in keys, tab))
     generators = tuple(sorted(
-        (name, value.lineno, value.col_offset)
+        (name, value.expression.lineno, value.expression.col_offset,
+         value.remaining)
         for name, value in state.generators.items()))
     evaluated = tuple(sorted(
         (key, value_signature(value))
         for key, value in state.evaluated.items()))
     return (tuple(payloads), tuple(sorted(state.aliases.items())),
-            generators, evaluated, tuple(sorted(state.builtin_shadows)))
+            generators, evaluated, tuple(sorted(state.builtin_globals)),
+            tuple(sorted(state.builtin_locals)))
 
 
 def dedupe_states(states):
@@ -233,17 +374,22 @@ def merged_evaluated_value(default, states):
     values = [evaluated_value(default, state) for state in states]
     if all(value is values[0] or value == values[0] for value in values):
         return values[0]
-    if any(value is not None and not isinstance(value, ast.GeneratorExp)
+    if any(value is not None and not isinstance(value, DeferredGenerator)
            for value in values):
         return UNPROVABLE_SENDER
     return None
 
 
-def callable_state(args, states):
+def callable_state(scope, states):
+    args = scope.args
     aliases = inherited_aliases(states)
     generators = inherited_generators(states)
-    builtin_shadows = set().union(
-        *(state.builtin_shadows for state in states))
+    builtin_globals = set().union(
+        *(state.builtin_globals for state in states))
+    inherited_locals = set().union(
+        *(state.builtin_locals for state in states))
+    local_names, global_names = callable_builtin_scope(scope)
+    builtin_locals = (inherited_locals | local_names) - global_names
     positional = [*args.posonlyargs, *args.args]
     parameters = [*positional, *args.kwonlyargs]
     if args.vararg is not None:
@@ -253,7 +399,6 @@ def callable_state(args, states):
     for parameter in parameters:
         aliases.pop(parameter.arg, None)
         generators.pop(parameter.arg, None)
-        builtin_shadows.update({parameter.arg} & BUILTIN_CONSUMERS)
     defaults = zip(positional[-len(args.defaults):], args.defaults)
     if not args.defaults:
         defaults = ()
@@ -262,11 +407,12 @@ def callable_state(args, states):
         if default is None:
             continue
         resolved = merged_evaluated_value(default, states)
-        if isinstance(resolved, ast.GeneratorExp):
+        if isinstance(resolved, DeferredGenerator):
             generators[parameter.arg] = resolved
         elif resolved is not None:
             aliases[parameter.arg] = resolved
-    return FlowState({}, aliases, generators, {}, builtin_shadows)
+    return FlowState({}, aliases, generators, {}, builtin_globals,
+                     builtin_locals)
 
 
 def function_allowed_opaque(node):
@@ -285,7 +431,7 @@ def class_functions(node):
 
 def clear_names(states, names):
     for state in states:
-        state.builtin_shadows.update(names & BUILTIN_CONSUMERS)
+        bind_builtin_names(state, names)
         for name in names:
             state.dicts.pop(name, None)
             state.aliases.pop(name, None)

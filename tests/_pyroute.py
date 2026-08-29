@@ -5,10 +5,12 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
                             UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
-                            FlowState, apply_alias_statement,
-                            argument_defaults, bind_alias_target, bound_names,
+                            DeferredGenerator, FlowState,
+                            apply_alias_statement, argument_defaults,
+                            bind_alias_target, bind_builtin_names, bound_names,
                             callable_state, class_functions, clear_names,
-                            dedupe_states, function_allowed_opaque,
+                            dedupe_states, deferred_generator,
+                            function_allowed_opaque,
                             is_extension_constant, literal_iterable_nonempty,
                             new_exits, rebound_names, record_exit,
                             resolve_sender_name, scope_nodes, state_signature)
@@ -16,12 +18,14 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
 _apply_alias_statement = apply_alias_statement
 _argument_defaults = argument_defaults
 _bind_alias_target = bind_alias_target
+_bind_builtin_names = bind_builtin_names
 _bound_names = bound_names
 _callable_state = callable_state
 _class_functions = class_functions
 _clear_names = clear_names
 _copy_state_pair = FlowState.copy
 _dedupe_state_pairs = dedupe_states
+_deferred_generator = deferred_generator
 _function_allowed_opaque = function_allowed_opaque
 _is_extension_constant = is_extension_constant
 _new_exits = new_exits
@@ -219,7 +223,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def expression_value(node, state):
         if isinstance(node, ast.GeneratorExp):
-            return node
+            return _deferred_generator(node)
         if isinstance(node, ast.Name) and node.id in state.generators:
             return state.generators[node.id]
         if isinstance(node, (ast.NamedExpr, ast.Starred)):
@@ -229,7 +233,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(node, (ast.Tuple, ast.List)):
             values = [state.evaluated.get(id(item)) for item in node.elts]
             if any(value is not None
-                   and not isinstance(value, ast.GeneratorExp)
+                   and not isinstance(value, DeferredGenerator)
                    for value in values):
                 return _UNPROVABLE_SENDER
         return _resolve_sender_name(node, state.aliases)
@@ -241,19 +245,23 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def generator_for(expr, state):
         if isinstance(expr, ast.GeneratorExp):
-            return expr
+            value = state.evaluated.get(id(expr))
+            return value if isinstance(value, DeferredGenerator) else None
         if isinstance(expr, ast.Name):
             return state.generators.get(expr.id)
         value = state.evaluated.get(id(expr))
-        return value if isinstance(value, ast.GeneratorExp) else None
+        return value if isinstance(value, DeferredGenerator) else None
 
     def generator_nonempty(generator):
+        if generator.remaining is not None:
+            return generator.remaining > 0
+        expression = generator.expression
         states = [literal_iterable_nonempty(clause.iter)
-                  for clause in generator.generators]
+                  for clause in expression.generators]
         if False in states:
             return False
         if all(state is True for state in states) and not any(
-                clause.ifs for clause in generator.generators):
+                clause.ifs for clause in expression.generators):
             return True
         return None
 
@@ -267,10 +275,11 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             value is states[0] for value in states) else None
 
     def consume_generator(generator, current_pairs):
+        expression = generator.expression
         entered = copied(current_pairs)
         active = copied(current_pairs)
         may_skip = False
-        for index, clause in enumerate(generator.generators):
+        for index, clause in enumerate(expression.generators):
             if index:
                 active = check_expression(clause.iter, active)
             cardinality = iterable_nonempty(clause.iter, active)
@@ -281,18 +290,38 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for condition in clause.ifs:
                 active = check_expression(condition, active)
             may_skip |= bool(clause.ifs) or cardinality is not True
-        results = [generator.key, generator.value] if isinstance(
-            generator, ast.DictComp) else [generator.elt]
+        results = [expression.key, expression.value] if isinstance(
+            expression, ast.DictComp) else [expression.elt]
         for result in results:
             active = check_expression(result, active)
         skipped = entered if may_skip else []
         return _dedupe_state_pairs([*skipped, *active])
+
+    def advance_generator(state, generator):
+        if generator.remaining is None:
+            return
+        remaining = max(0, generator.remaining - 1)
+        advanced = DeferredGenerator(generator.expression, remaining)
+        for name, value in list(state.generators.items()):
+            if value is not generator:
+                continue
+            if remaining:
+                state.generators[name] = advanced
+            else:
+                del state.generators[name]
+        for key, value in list(state.evaluated.items()):
+            if value is generator:
+                state.evaluated[key] = advanced
 
     def consume_iterable(expr, current_pairs, exhaust):
         outputs = []
         for state in current_pairs:
             generator = generator_for(expr, state)
             if generator is None:
+                outputs.append(state)
+                continue
+            if generator.remaining == 0:
+                advance_generator(state, generator)
                 outputs.append(state)
                 continue
             consumed = consume_generator(generator, [state])
@@ -302,14 +331,17 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         name: value
                         for name, value in output.generators.items()
                         if value is not generator}
+            else:
+                for output in consumed:
+                    advance_generator(output, generator)
             outputs.extend(consumed)
         return _dedupe_state_pairs(outputs)
 
-    def exhaust_generators(generators, current_pairs):
+    def exhaust_generators(expressions, current_pairs):
         for state in current_pairs:
             state.generators = {
                 name: value for name, value in state.generators.items()
-                if value not in generators}
+                if value.expression not in expressions}
         return _dedupe_state_pairs(current_pairs)
 
     def check_expression(node, current_pairs):
@@ -320,7 +352,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for default in defaults:
                 current_pairs = check_expression(default, current_pairs)
             if defaults:
-                nested = [_callable_state(node.args, current_pairs)]
+                nested = [_callable_state(node, current_pairs)]
                 check_expression(node.body, nested)
             return remember(node, current_pairs)
         if isinstance(node, ast.NamedExpr):
@@ -330,8 +362,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 _bind_alias_target(node.target, node.value, state, bindings)
                 state.aliases.pop(node.target.id, None)
                 state.generators.pop(node.target.id, None)
-                state.builtin_shadows.update(
-                    {node.target.id} & _BUILTIN_CONSUMERS)
+                _bind_builtin_names(state, {node.target.id})
                 state.aliases.update(bindings[0])
                 state.generators.update(bindings[1])
             return remember(node, current_pairs)
@@ -368,7 +399,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 call_name = (node.func.id if isinstance(node.func, ast.Name)
                              else None)
                 consumer = (call_name if call_name in _BUILTIN_CONSUMERS
-                            and call_name not in state.builtin_shadows
+                            and call_name not in state.builtin_globals
+                            and call_name not in state.builtin_locals
                             else None)
                 current = [state]
                 for argument in arguments:
@@ -441,10 +473,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for state in pairs:
                 state.aliases.pop(statement.name, None)
                 state.generators.pop(statement.name, None)
-                state.builtin_shadows.update(
-                    {statement.name} & _BUILTIN_CONSUMERS)
+                _bind_builtin_names(state, {statement.name})
             nested, _ = _py_flow_violations(
-                statement.body, [_callable_state(statement.args, pairs)], rel,
+                statement.body, [_callable_state(statement, pairs)], rel,
                 _function_allowed_opaque(statement))
             violations.extend(nested)
             continue
@@ -452,8 +483,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for state in pairs:
                 state.aliases.pop(statement.name, None)
                 state.generators.pop(statement.name, None)
-                state.builtin_shadows.update(
-                    {statement.name} & _BUILTIN_CONSUMERS)
+                _bind_builtin_names(state, {statement.name})
             nested, _ = _py_flow_violations(
                 list(_class_functions(statement)),
                 [_copy_state_pair(pair) for pair in pairs], rel,
@@ -480,15 +510,16 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             header = (statement.iter if isinstance(
                 statement, (ast.For, ast.AsyncFor)) else statement.test)
             pairs = check_expression(header, pairs)
+            header_nonempty = iterable_nonempty(header, pairs)
             loop_generators = {
-                generator_for(header, state) for state in pairs
+                generator_for(header, state).expression for state in pairs
                 if generator_for(header, state) is not None}
             if isinstance(statement, (ast.For, ast.AsyncFor)):
                 pairs = consume_iterable(header, pairs, exhaust=False)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             zero_pairs = incoming
             if (isinstance(statement, (ast.For, ast.AsyncFor))
-                    and iterable_nonempty(statement.iter, pairs) is True):
+                    and header_nonempty is True):
                 zero_pairs = []
             target_names = (_bound_names(statement.target)
                             if isinstance(statement, (ast.For, ast.AsyncFor))
@@ -539,8 +570,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         state.dicts.pop(name, None)
                         state.aliases.pop(name, None)
                         state.generators.pop(name, None)
-                        state.builtin_shadows.update(
-                            {name} & _BUILTIN_CONSUMERS)
+                        _bind_builtin_names(state, {name})
                         if resolved is not None:
                             state.aliases[name] = resolved
             found, pairs = walk(statement.body, entered)
@@ -646,5 +676,6 @@ def py_tab_routing_violations(path, rel):
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
     violations, _ = _py_flow_violations(
-        tree.body, [FlowState({}, {}, {}, {}, set())], rel, frozenset())
+        tree.body, [FlowState({}, {}, {}, {}, set(), set())], rel,
+        frozenset())
     return list(dict.fromkeys(violations))
