@@ -62,6 +62,19 @@ def test_permanent_refusal_is_reported_not_raised(tmp):
     assert 'PermissionError' in message, message
 
 
+def test_the_warning_names_the_path_it_was_given(tmp):
+    """The path is printed raw, not as `repr()` renders it on Windows."""
+    held = r'C:\Temp\held'
+
+    def cleanup():
+        raise PermissionError(32, 'in use by another process', held)
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        _teardown.settle(cleanup, sleep=_sleep_recorder([]))
+    assert held in out.getvalue(), out.getvalue()
+
+
 def test_clear_teardown_reports_success_without_sleeping(tmp):
     calls, sleeps = [], []
     assert _teardown.settle(lambda: calls.append(True),
