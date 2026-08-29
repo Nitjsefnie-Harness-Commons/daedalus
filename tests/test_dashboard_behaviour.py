@@ -109,7 +109,6 @@ phase('dashboard harness finished');
 
 
 def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(_tmp):
-    """A retired port callback cannot clear or replace the current port."""
     result = _dashnode.run_dashboard_node(_CONTENT_KEEPALIVE_HARNESS)
     actual = json.loads(result.stdout)
     assert actual == {
@@ -187,7 +186,6 @@ function response(status, data) {
 
 
 def test_dashboard_failed_consume_is_not_a_success(_tmp):
-    """The dashboard must reject when its matching-result consume fails."""
     _dashnode.run_dashboard_node(_DASHBOARD_CONSUME_HARNESS)
 
 
@@ -218,7 +216,6 @@ const fs = require('fs');
 
 
 def test_dashboard_labels_eval_world_as_a_channel(_tmp):
-    """Dashboard text presents `world` only as execution-channel metadata."""
     result = _dashnode.run_dashboard_node(_DASHBOARD_WORLD_HARNESS)
     assert json.loads(result.stdout) == [
         'channel=cdp',
@@ -263,9 +260,6 @@ _CONSTANT_MARKUP = re.compile(
 
 
 def test_dashboard_never_builds_markup_from_a_value(_tmp):
-    """Reject nonliteral innerHTML, including `+=`.
-    Untrusted values must reach the page through text nodes or the `h` helper.
-    """
     violations = []
     sources = sorted((ROOT / 'dashboard').rglob('*.js'))
     assert sources, 'no dashboard sources found'
@@ -378,27 +372,20 @@ def _run_tab_selector_harness():
 
 
 def test_a_tab_selector_follows_every_lifecycle_event(_tmp):
-    """One selector follows all events and offers only live tabs.
-    A removed selection must not survive until the next full tab sync.
-    """
     seen = _run_tab_selector_harness()
     assert seen['initial'] == ['', '11', '22'], seen
-
     # tab-updated refreshes, and a selection that is still on offer survives.
     assert '11  RETITLED' not in seen['afterUpdate']['labels'], seen
     assert any('RETITLED' in label for label in seen['afterUpdate']['labels']), seen
     assert seen['afterUpdate']['selected'] == '22', seen
-
     # tab-unregistered refreshes, and the selection does NOT survive its tab.
     assert seen['afterUnregister']['offered'] == ['', '11'], seen
     assert seen['afterUnregister']['selected'] != '22', seen
-
     # tabs-synced still refreshes, which is the one that always worked.
     assert seen['afterSync'] == ['', '11', '33'], seen
 
 
 def test_every_tab_selector_uses_the_shared_controller(_tmp):
-    """No section keeps a private copy to drift out of step again."""
     private = []
     for path in sorted((ROOT / 'dashboard' / 'sections').glob('*.js')):
         text = path.read_text(encoding='utf-8')
@@ -408,7 +395,6 @@ def test_every_tab_selector_uses_the_shared_controller(_tmp):
 
 
 def test_no_dashboard_export_is_unreferenced(_tmp):
-    """A public module surface nothing imports is untested code."""
     root = ROOT / 'dashboard'
     sources = {path: path.read_text(encoding='utf-8')
                for path in sorted(root.rglob('*.js'))}
@@ -594,6 +580,12 @@ def test_non_windows_outer_timeout_does_not_retry(_tmp):
     assert [event[0] for event in events].count('popen') == 1, events
 
 
+def test_cumulative_byte_timeout_output_is_decoded_once(_tmp):
+    failure, _, _ = _controlled_run('linux', (402, [
+        _timeout(b'A\xe2'), _timeout(b'A\xe2\x82\xacB')]))
+    assert "stdout: 'A€B'; stderr: ''" in failure and '�' not in failure
+
+
 def test_windows_deterministic_failure_after_retry_does_not_retry(_tmp):
     failure, events, _ = _controlled_run(
         'win32', (501, [_result(
@@ -669,6 +661,14 @@ def test_windows_preserves_only_completed_cpython_reader_buffers(_tmp):
     assert "stdout: 'completed sibling'; stderr: ''" in sibling, sibling
     assert ('buffer-read', 'stderr') not in events, events
     assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_independent_output_sources_keep_repeated_boundary(_tmp):
+    failure, _, _ = _controlled_run('win32', (1003, [
+        _timeout(b'leftX'), _timeout(None, None)], {
+            'wait_succeeds': True,
+            'reader_buffers': {'stdout': b'Xright'}}))
+    assert "stdout: 'leftXXright'; stderr: ''" in failure, failure
 
 
 def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
