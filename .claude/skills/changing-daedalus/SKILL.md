@@ -22,6 +22,14 @@ being read.
 | Piping a runner, a trailing status echo, an `|| true` fallback | `bash-harness-antipatterns` |
 | Contribution conventions and the guard-per-layer rule | `CONTRIBUTING.md` |
 
+For every feature or fix, regardless of size:
+
+- **The lead dispatches the work; it never implements it in its own
+  context.** Implementation goes to an `implementer` subagent and review to
+  independent reviewers, because a lead that implements is biased toward
+  its own code and will not catch its own mistakes. The lead verifies
+  claims and orchestrates; it does not write the change.
+
 For an implementation plan with independent tasks in the current session:
 
 - **REQUIRED SUB-SKILL:** Use `superpowers:subagent-driven-development`.
