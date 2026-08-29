@@ -210,6 +210,167 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
             assert candidate.read_text('utf-8') == 'caller-owned content'
 
 
+def test_vanish_fault_stays_armed_until_open_observes_disappearance(tmp):
+    _queue, queued = _queued_file(tmp)
+    immediate_faults = {'r', 'rt', 'rb', 'r+'}
+
+    def open_error(mode):
+        try:
+            with queued.open(mode=mode):
+                pass
+        except OSError as caught:
+            return type(caught)
+        return None
+
+    modes = ('r', 'rt', 'rb', 'r+', 'w', 'a', 'x', 'x+', 'w+', 'a+')
+    for mode in modes:
+        queued.write_text('seed', encoding='utf-8')
+        with _virtual_cmdqueue_clock() as (clock, events, _origin):
+            with _vanish_during_read(queued, clock):
+                first_error = open_error(mode)
+                if mode in immediate_faults:
+                    assert first_error is FileNotFoundError, (
+                        mode, first_error)
+                else:
+                    native_error = (FileExistsError
+                                    if mode.startswith('x') else None)
+                    assert first_error is native_error, (mode, first_error)
+                    next_error = open_error('r')
+                    assert next_error is FileNotFoundError, (
+                        mode, next_error)
+        assert [kind for kind, _cost in events] == ['read'], (mode, events)
+
+
+def test_exhausted_refusal_accounts_only_for_completed_operations(tmp):
+    _queue, queued = _queued_file(tmp)
+    invalid = {'mode': 'rb', 'encoding': 'utf-8'}
+    expected = _path_open_failure(queued, **invalid)
+    with _virtual_cmdqueue_clock() as (clock, events, _origin):
+        with _refuse_path_operation(
+                queued, 'open', 1, clock=clock) as calls:
+            injected = _path_open_failure(queued, encoding='utf-8')
+            assert injected[0] is PermissionError, injected
+            assert calls == [1], calls
+            assert len(events) == 1, events
+            actual = _path_open_failure(queued, **invalid)
+            assert actual == expected, (actual, expected)
+            assert calls == [1], calls
+            assert len(events) == 1, events
+            with queued.open(mode='rt', encoding='utf-8') as opened:
+                assert opened.readable(), opened
+    assert calls == [2], calls
+    assert len(events) == 2, events
+
+
+def test_untargeted_readable_and_nonreadable_creates_match_native(tmp):
+    queue, queued = _queued_file(tmp)
+    original = Path.open
+    underlying_opens = [0]
+
+    def counted(candidate, *args, **kwargs):
+        underlying_opens[0] += 1
+        return original(candidate, *args, **kwargs)
+
+    def create_outcome(opener, path, mode, content):
+        try:
+            with opener(path, mode=mode, encoding='utf-8') as opened:
+                outcome = (opened.mode, opened.tell(), opened.readable(),
+                           opened.writable(), opened.write(content))
+        except OSError as caught:
+            filename = getattr(caught, 'filename', None)
+            return ('raised', type(caught), type(filename), filename)
+        return 'returned', outcome
+
+    def file_effect(path):
+        if not path.exists():
+            return False, None
+        with original(path, mode='r', encoding='utf-8') as opened:
+            return True, opened.read()
+
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        injectors = (
+            ('generic refusal', _refuse_path_operation,
+             (queued, 'open', 1)),
+            ('first-read', _refuse_first_queue_read, (queue,)),
+            ('disappearance', _disappear_on_first_open, (queued,)),
+            ('vanish', _vanish_during_read, (queued, clock)))
+        for label, injector, injector_args in injectors:
+            for mode in ('x', 'x+'):
+                content = f'{label}-{mode}'
+                native = Path(tmp) / f'native-create-{label}-{mode}'
+                injected = Path(tmp) / f'injected-create-{label}-{mode}'
+                underlying_opens[0] = 0
+                expected = create_outcome(counted, native, mode, content)
+                expected_opens = underlying_opens[0]
+                expected_effect = file_effect(native)
+                underlying_opens[0] = 0
+                Path.open = counted
+                try:
+                    with injector(*injector_args):
+                        actual = create_outcome(
+                            Path.open, injected, mode, content)
+                finally:
+                    Path.open = original
+                actual_opens = underlying_opens[0]
+                actual_effect = file_effect(injected)
+                assert actual == expected, (label, mode, actual, expected)
+                assert actual_effect == expected_effect, (
+                    label, mode, actual_effect, expected_effect)
+                assert actual_opens == expected_opens, (
+                    label, mode, actual_opens, expected_opens)
+
+
+def test_bound_and_unbound_receivers_receive_each_one_shot_fault(tmp):
+    queue, queued = _queued_file(tmp)
+    files = [queued]
+
+    def read_outcome(spelling):
+        try:
+            if spelling == 'bound':
+                opened = files[0].open(mode='rt', encoding='utf-8')
+            elif spelling == 'str':
+                opened = Path.open(  # pylint: disable=bad-open-mode
+                    str(files[0]), mode='r', encoding='utf-8')
+            else:
+                opened = Path.open(
+                    os.fsencode(str(files[0])), mode='r', encoding='utf-8')
+            with opened:
+                return 'returned', opened.read()
+        except OSError as caught:
+            return 'raised', type(caught)
+
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        injectors = (
+            ('generic refusal', _refuse_path_operation,
+             (queued, 'open', 1), PermissionError),
+            ('first-read', _refuse_first_queue_read,
+             (queue,), PermissionError),
+            ('disappearance', _disappear_on_first_open,
+             (queued,), FileNotFoundError),
+            ('vanish', _vanish_during_read,
+             (queued, clock), FileNotFoundError))
+        for label, injector, injector_args, injected_type in injectors:
+            for spelling in ('bound', 'str', 'bytes'):
+                files[0].write_text('readable content', encoding='utf-8')
+                native = read_outcome(spelling)
+                assert native == ('returned', 'readable content'), (
+                    label, spelling, native)
+                with injector(*injector_args) as state:
+                    first = read_outcome(spelling)
+                    assert first == ('raised', injected_type), (
+                        label, spelling, first)
+                    if state is not None:
+                        assert state == [1], (label, spelling, state)
+                    if label == 'vanish':
+                        assert not files[0].exists(), (
+                            label, spelling, files[0])
+                        files[0].write_text(
+                            'readable content', encoding='utf-8')
+                    second = read_outcome(spelling)
+                    assert second == ('returned', 'readable content'), (
+                        label, spelling, second)
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals())),
                           tmp_prefix='cmdqueue_injectors_'))
