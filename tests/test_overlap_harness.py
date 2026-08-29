@@ -355,33 +355,34 @@ def test_real_overlap_bridge_defaults_to_the_durable_token_path(tmp):
     assert recorded == {'TOKEN': '', 'DAEDALUS_TOKEN': token}, recorded
 
 
-def test_real_overlap_success_path_reports_a_lingering_client(tmp):
-    """The real driver diagnoses a client that misses its exit grace."""
-    def client_argv(owner):
-        argv = _cookie_client_argv(owner)
-        if owner != 'owner-b':
-            return argv
-        linger = (
-            'import subprocess, sys, time\n'
-            'result = subprocess.run(sys.argv[1:], check=False)\n'
-            'time.sleep(60)\n'
-            'raise SystemExit(result.returncode)\n'
-        )
-        return [sys.executable, '-c', linger, *argv]
+def test_real_overlap_success_path_waits_for_clients_without_a_bound(tmp):
+    """A client whose result is posted is waited for, not killed at a margin.
 
-    message = None
-    try:
-        _overlap.run_same_id_client_overlap(
-            tmp, ['owner-a', 'owner-b'], client_argv, _client_env(),
+    The client's own `--timeout` already bounds it, so a second wall-clock
+    grace could only kill a client that was about to finish on its own — the
+    kill that once left a self-contradictory record behind.
+    """
+    recorded = {}
+    real_client_states = _overlap.client_states
+
+    def recording_client_states(processes, grace, **kwargs):
+        recorded['grace'] = grace
+        return real_client_states(processes, grace, **kwargs)
+
+    with mock.patch.object(
+            _overlap, 'client_states', recording_client_states):
+        actual = _overlap.run_same_id_client_overlap(
+            tmp, ['owner-a', 'owner-b'], _cookie_client_argv, _client_env(),
             'overlap-client-token',
             _util.ROOT / 'extension' / 'background.js')
-    except AssertionError as failure:
-        message = str(failure)
-    assert message is not None, 'a lingering real client was accepted'
-    assert "clients still running after grace: ['owner-b']" in message, message
-    assert 'harness posted:' in message, message
-    assert 'client states:' in message, message
-    assert "'owner-b': {'stillRunning': True" in message, message
+    assert actual == {
+        owner: {
+            'returncode': 0, 'ownResult': True, 'foreignResult': False,
+            'stderr': '',
+        }
+        for owner in ('owner-a', 'owner-b')
+    }, actual
+    assert recorded == {'grace': None}, recorded
 
 
 def test_real_overlap_failure_keeps_harness_and_live_client_states(tmp):
@@ -437,9 +438,55 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
             process.communicate()
     state = states['slow-owner']
     assert state['stillRunning'] is True, state
-    assert state['returncode'] is not None, state
+    assert state['returncode'] is None, state
     assert state['stdout'] == 'started', state
     assert state['stderr'] == '', state
+
+
+class _KillRecordsOwnStatus:
+    """A client the harness killed, whose kill left its own status behind.
+
+    Windows `Popen.kill()` is `TerminateProcess(handle, 1)` and POSIX's is
+    SIGKILL, so `proc.returncode` after that kill describes the kill rather
+    than the client. The post-kill drain completes with nothing on either
+    stream, which is what the reported Windows record showed.
+    """
+
+    stdout = None
+    stderr = None
+    returncode = None
+
+    def __init__(self, kill_status):
+        self._kill_status = kill_status
+        self._drained = False
+
+    def communicate(self, timeout=None):
+        if self._drained:
+            return '', ''
+        self._drained = True
+        raise subprocess.TimeoutExpired('stub-client', timeout)
+
+    def kill(self):
+        self.returncode = self._kill_status
+
+
+def test_client_states_records_no_exit_status_for_a_client_it_killed(tmp):
+    """A killed client's record cannot carry an exit status at all."""
+    del tmp
+    states = _overlap.client_states({
+        owner: _KillRecordsOwnStatus(status)
+        for owner, status in (('owner-a', 1), ('owner-b', -9))
+    }, grace=0.1)
+    assert states == {
+        'owner-a': {
+            'stillRunning': True, 'returncode': None,
+            'stdout': '', 'stderr': '', 'drainTimedOut': False,
+        },
+        'owner-b': {
+            'stillRunning': True, 'returncode': None,
+            'stdout': '', 'stderr': '', 'drainTimedOut': False,
+        },
+    }, states
 
 
 def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
@@ -503,7 +550,7 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
             process.communicate()
     state = states['pipe-owner']
     assert state['stillRunning'] is True, state
-    assert state['returncode'] is not None, state
+    assert state['returncode'] is None, state
     assert state['stdout'] == '', state
     assert state['stderr'] == '', state
     assert state['drainTimedOut'] is True, state
@@ -550,6 +597,28 @@ def test_client_states_bounds_fallback_wait_after_drain_timeout(tmp):
     }, state
 
 
+def test_a_silent_nonzero_client_is_named_as_its_own_failure(tmp):
+    """A silent non-zero exit is a different failure from outliving grace."""
+    del tmp
+    posted = [{'id': '_cookies', 'owner': 'owner-a'}]
+    states = {
+        'owner-a': {
+            'stillRunning': False, 'returncode': 1,
+            'stdout': '', 'stderr': '', 'drainTimedOut': False,
+        },
+    }
+    message = None
+    try:
+        _overlap.assert_clients_exited(states, posted)
+    except AssertionError as failure:
+        message = str(failure)
+    else:
+        raise AssertionError('a silent non-zero client was accepted')
+    assert 'clients exited non-zero with no output' in message, message
+    assert "['owner-a']" in message, message
+    assert 'still running after grace' not in message, message
+
+
 def test_running_clients_report_the_owner_posted_results_and_states(tmp):
     """Success-path client stalls preserve all diagnostics in one assertion."""
     del tmp
@@ -560,7 +629,7 @@ def test_running_clients_report_the_owner_posted_results_and_states(tmp):
             'stdout': 'owner-a', 'stderr': '', 'drainTimedOut': False,
         },
         'owner-b': {
-            'stillRunning': True, 'returncode': -9,
+            'stillRunning': True, 'returncode': None,
             'stdout': 'partial', 'stderr': 'waiting',
             'drainTimedOut': False,
         },
