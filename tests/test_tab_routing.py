@@ -50,58 +50,62 @@ def test_unfollowable_sender_aliases_are_reported_as_unprovable(tmp):
         assert 'may be ext_cmd' in violations[0], violations
 
 
-def test_a_local_alias_of_ext_cmd_is_judged_like_a_direct_call(tmp):
-    """A sender that reaches ext_cmd through a same-scope local alias must
-    not slip past the guard just because the call site spells a different
-    name (#224)."""
+def test_direct_annotated_attribute_and_transitive_aliases_are_caught(tmp):
+    assignments = ["send = _ext_cmd", "send = bridge.ext_cmd",
+                   "send: object = _ext_cmd", "a = _ext_cmd\n    send = a"]
     source = Path(tmp) / 'aliased_sender.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab):\n"
-        "    send = _ext_cmd\n"
-        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'aliased_sender.py')
-    assert violations, (
-        'the alias should be caught the same way a direct call is')
-    assert 'ext_cmd keyword `tab`' in violations[0], violations
+    for assignment in assignments:
+        source.write_text(
+            "async def focus_tab(chrome_tab, bridge):\n"
+            f"    {assignment}\n"
+            "    return await send('x', 'y', tab=chrome_tab)\n",
+            encoding='utf-8')
+        violations = py_tab_routing_violations(source, 'aliased_sender.py')
+        assert violations, assignment
+        assert 'ext_cmd keyword `tab`' in violations[0], violations
 
 
-def test_an_attribute_alias_of_ext_cmd_is_also_caught(tmp):
-    """`send = bridge.ext_cmd` is the exact shape review found still
-    escaping: the alias source is an attribute access, not a bare name."""
-    source = Path(tmp) / 'attr_aliased_sender.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab):\n"
-        "    send = bridge.ext_cmd\n"
-        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'attr_aliased_sender.py')
-    assert violations, 'an attribute-access alias should be caught too'
+def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
+    bodies = [
+        "send, other = b.ext_cmd, None",
+        "[send, other] = [b.ext_cmd, None]",
+        "([send], other) = ([b.ext_cmd], None)",
+        "send, *other = b.ext_cmd, None",
+        "send, other = wrap(b.ext_cmd)",
+        "return await (send := b.ext_cmd)('x', 'y', tab=tab)",
+        "(send := b.ext_cmd)",
+        "[(send := b.ext_cmd) for _ in values]",
+        "flag and (send := b.ext_cmd)",
+        "((send := b.ext_cmd) if flag else (send := b.get))",
+        "send = b.ext_cmd\n    return await send((send := b.get), tab=tab)",
+        "send = b.ext_cmd\n    def inner():\n        (send := b.get)",
+        "send = b.ext_cmd\n    inner = lambda: (send := b.get)",
+    ]
+    source = Path(tmp) / 'new_sender_alias.py'
+    call = "\n    return await send('x', 'y', tab=tab)"
+    for body in bodies:
+        tail = call if 'return await' not in body else ''
+        text = "async def f(b, tab, values, flag):\n    " + body + tail + "\n"
+        source.write_text(text, encoding='utf-8')
+        assert py_tab_routing_violations(source, source.name), body
 
 
-def test_an_annotated_alias_of_ext_cmd_is_also_caught(tmp):
-    """`send: object = _ext_cmd` is the same alias, just annotated."""
-    source = Path(tmp) / 'annotated_sender.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab):\n"
-        "    send: object = _ext_cmd\n"
-        "    return await send('_focus', 'focus-tab', tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'annotated_sender.py')
-    assert violations, 'an annotated alias should be caught too'
-
-
-def test_an_alias_of_an_alias_of_ext_cmd_is_also_caught(tmp):
-    """`a = _ext_cmd` then `b = a` resolves transitively, in source order."""
-    source = Path(tmp) / 'transitive_sender.py'
-    source.write_text(
-        "async def focus_tab(chrome_tab):\n"
-        "    a = _ext_cmd\n"
-        "    b = a\n"
-        "    return await b('_focus', 'focus-tab', tab=int(chrome_tab))\n",
-        encoding='utf-8')
-    violations = py_tab_routing_violations(source, 'transitive_sender.py')
-    assert violations, 'a transitive alias should be caught too'
+def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
+    bodies = [
+        "send, sender = b.get, b.ext_cmd",
+        "send = b.ext_cmd\n    send, other = make_pair()",
+        "send = b.ext_cmd\n    send, other = (b.get,)",
+        "send = b.ext_cmd\n    (send := b.get)",
+        "send = b.ext_cmd\n    [(send := b.get) for _ in (1,)]",
+        "def inner():\n        (send := b.ext_cmd)",
+        "inner = lambda: (send := b.ext_cmd)",
+    ]
+    source = Path(tmp) / 'clean_sender_alias.py'
+    for body in bodies:
+        text = ("async def f(b, tab):\n    " + body
+                + "\n    return await send('x', 'y', tab=tab)\n")
+        source.write_text(text, encoding='utf-8')
+        assert not py_tab_routing_violations(source, source.name), body
 
 
 def test_a_name_rebound_away_from_ext_cmd_stops_reading_as_a_sender(tmp):
@@ -317,8 +321,9 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     `type`, and eval genuinely routes by tab. Python payloads are followed
     through literals (annotated or not), `dict(...)`, subscript assignments,
     `update({...})`, `|= {...}` and source-ordered control flow. Sender aliases
-    are followed through imports, nested functions and compound statements;
-    expressions containing a possible sender are reported as unprovable.
+    are followed through imports, matching tuple/list destructuring,
+    assignment expressions (including eager comprehensions), nested functions
+    and compound statements; possible senders are reported as unprovable.
     JavaScript inline literals, names initialized by object literals,
     aliases of those names, ternary initializers whose branches resolve,
     `Object.assign` writes, tracked object spreads, literal computed keys,
@@ -344,6 +349,8 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
       (`d = f()`, `d.update(f())`, `d |= g()`) is dropped from tracking from
       that point rather than trusted on stale keys; a later `d['tab'] = ...`
       is tracked again.
+    - Unmatched Python tuple/list destructuring invalidates every target.
+      Visible sender syntax is unprovable; other values become unknown.
     - Computed keys other than string literals are skipped. Inline object
       spreads and spreads of tracked names, plus literal computed keys such
       as `['tab']`, are checked; a spread of an unknown name is skipped.
@@ -420,6 +427,12 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     reversions = [
         ('py', "from daedalus_cli.invoke import ext_cmd as send\n"
                "send('x', 'y', tab=301)\n"),
+        ('py', "async def f(bridge, tab):\n"
+               "    send, other = bridge.ext_cmd, None\n"
+               "    return await send('x', 'y', tab=tab)\n"),
+        ('py', "async def f(bridge, tab):\n"
+               "    return await (send := bridge.ext_cmd)("
+               "'x', 'y', tab=tab)\n"),
         ('py', "import daedalus_cli.invoke as inv\n"
                "inv.ext_cmd('x', 'y', tab=302)\n"),
         ('py', "async def f(bridge):\n"
