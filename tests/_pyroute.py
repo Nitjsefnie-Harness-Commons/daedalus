@@ -3,16 +3,13 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 This reads client source with `ast`, following payload dictionaries and sender
-aliases through assignments, compound control flow, imports and nested
-functions. A sender expression it cannot prove is reported as unprovable
-rather than clean.
+aliases through assignments, control flow, imports and nested functions.
+An unproved sender expression is reported as unprovable rather than clean.
 """
 import ast
 
 
 def _scope_nodes(scope):
-    """Every node in `scope`, not descending into nested functions or lambdas:
-    each function's locals are tracked as a separate scope."""
     for child in ast.iter_child_nodes(scope):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             continue
@@ -22,6 +19,8 @@ def _scope_nodes(scope):
 
 _OPAQUE_TAB_SPREAD = object()
 _UNPROVABLE_SENDER = '?ext_cmd'
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
+                   ast.GeneratorExp)
 
 
 def _merge_payload_keys(keys, spread, spread_node):
@@ -165,7 +164,6 @@ def _is_extension_constant(node):
 
 
 def _resolve_sender_name(expr, aliases):
-    """The sender identity `expr` denotes, or its unprovable marker."""
     if isinstance(expr, ast.Name):
         if expr.id in ('ext_cmd', '_ext_cmd'):
             return expr.id
@@ -191,11 +189,9 @@ def _resolve_sender_name(expr, aliases):
 def _rebound_names(node):
     """Names rebound by `node`, excluding scoped comprehension targets."""
     nodes = [node, *_scope_nodes(node)]
-    comprehensions = (ast.ListComp, ast.SetComp, ast.DictComp,
-                      ast.GeneratorExp)
     comprehension_targets = {
         target
-        for parent in nodes if isinstance(parent, comprehensions)
+        for parent in nodes if isinstance(parent, _COMPREHENSIONS)
         for generator in parent.generators
         for target in ast.walk(generator.target)
         if isinstance(target, ast.Name)
@@ -220,61 +216,76 @@ def _rebound_names(node):
 
 
 def _apply_alias_statement(node, aliases):
-    """Apply one source-ordered sender-alias binding or rebinding."""
-    for name in _rebound_names(node):
-        aliases.pop(name, None)
     if isinstance(node, ast.ImportFrom):
         for imported in node.names:
+            local = imported.asname or imported.name
+            aliases.pop(local, None)
             if imported.name in ('ext_cmd', '_ext_cmd'):
-                aliases[imported.asname or imported.name] = imported.name
+                aliases[local] = imported.name
         return
-    if isinstance(node, ast.Assign):
-        targets = node.targets
-    elif isinstance(node, ast.AnnAssign) and node.value is not None:
-        targets = [node.target]
-    else:
+    if isinstance(node, ast.Import):
+        for imported in node.names:
+            aliases.pop((imported.asname or imported.name).split('.')[0], None)
         return
-    resolved = _resolve_sender_name(node.value, aliases)
-    if resolved is not None:
+    targets = (node.targets if isinstance(node, (ast.Assign, ast.Delete))
+               else [node.target] if isinstance(
+                   node, (ast.AnnAssign, ast.AugAssign)) else None)
+    if targets is None:
+        return
+    for name in set().union(*(_bound_names(target) for target in targets)):
+        aliases.pop(name, None)
+    if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
         for target in targets:
-            if isinstance(target, ast.Name):
-                aliases[target.id] = resolved
+            _bind_alias_target(target, node.value, aliases)
+
+
+def _bind_alias_target(target, value, aliases):
+    if isinstance(target, ast.Name):
+        resolved = _resolve_sender_name(value, aliases)
+        if resolved is not None:
+            aliases[target.id] = resolved
+        return
+    if not isinstance(target, (ast.Tuple, ast.List)):
+        return
+    pairs = None
+    if isinstance(value, (ast.Tuple, ast.List)):
+        stars = [i for i, item in enumerate(target.elts)
+                 if isinstance(item, ast.Starred)]
+        if not stars and len(target.elts) == len(value.elts):
+            pairs = zip(target.elts, value.elts)
+        elif len(stars) == 1 and len(value.elts) >= len(target.elts) - 1:
+            star, suffix = stars[0], len(target.elts) - stars[0] - 1
+            pairs = [*zip(target.elts[:star], value.elts[:star]),
+                     *(zip(target.elts[-suffix:], value.elts[-suffix:])
+                       if suffix else ())]
+    if pairs is not None:
+        for nested_target, nested_value in pairs:
+            _bind_alias_target(nested_target, nested_value, aliases)
+        return
+    if _resolve_sender_name(value, aliases) is not None:
+        for name in _bound_names(target):
+            aliases[name] = _UNPROVABLE_SENDER
 
 
 def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
-                        aliases=None):
-    """Violations from one Call node, given the scope's tracked dicts.
-
-    Only a bare-name callee ever consults `aliases`: `send()` can be judged
-    against whatever `send` currently resolves to, but `sink.send()` names
-    an attribute of `sink`, not the local `send`, and must not be
-    reclassified just because some unrelated local happens to share that
-    name.
-    """
+                        sender_name=None):
     func = node.func
-    if isinstance(func, ast.Name):
-        name = (aliases or {}).get(func.id, func.id)
-    elif isinstance(func, ast.Attribute):
-        name = func.attr
-    else:
-        name = ''
-    if name == _UNPROVABLE_SENDER and isinstance(func, ast.Name):
+    if sender_name == _UNPROVABLE_SENDER:
+        callee = func.id if isinstance(func, ast.Name) else ast.unparse(func)
         found = []
         for kw in node.keywords:
             if kw.arg == 'tab' and not _is_extension_constant(kw.value):
-                found.append(
-                    f'{rel}:{kw.value.lineno}: `tab` passed through '
-                    f'`{func.id}`, which may be ext_cmd')
+                found.append(f'{rel}:{kw.value.lineno}: `tab` passed through '
+                             f'`{callee}`, which may be ext_cmd')
             elif kw.arg is None:
                 keys = payload_keys(kw.value, dicts)
                 if (keys and 'tab' in keys
                         and not _is_extension_constant(keys['tab'][1])):
                     lineno, _ = keys['tab']
-                    found.append(
-                        f'{rel}:{lineno}: `tab` passed through '
-                        f'`{func.id}`, which may be ext_cmd')
+                    found.append(f'{rel}:{lineno}: `tab` passed through '
+                                 f'`{callee}`, which may be ext_cmd')
         return found
-    if name in ('ext_cmd', '_ext_cmd'):
+    if sender_name in ('ext_cmd', '_ext_cmd'):
         found = []
         for kw in node.keywords:
             if kw.arg == 'tab' and not _is_extension_constant(kw.value):
@@ -282,16 +293,15 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
             elif kw.arg is None:
                 keys = payload_keys(kw.value, dicts)
                 if keys is None or _OPAQUE_TAB_SPREAD in keys:
-                    found.append(
-                        f'{rel}:{kw.value.lineno}: opaque **'
-                        f'{ast.unparse(kw.value)} passed to ext_cmd; `tab` '
-                        'cannot be verified')
+                    found.append(f'{rel}:{kw.value.lineno}: opaque **'
+                                 f'{ast.unparse(kw.value)} passed to ext_cmd; '
+                                 '`tab` cannot be verified')
                 elif 'tab' in keys:
                     lineno, value = keys['tab']
                     if not _is_extension_constant(value):
-                        found.append(
-                            f'{rel}:{lineno}: `tab` in '
-                            f'**{ast.unparse(kw.value)} passed to ext_cmd')
+                        found.append(f'{rel}:{lineno}: `tab` in **'
+                                     f'{ast.unparse(kw.value)} passed to '
+                                     'ext_cmd')
         return found
     cmd_at = next((i for i, a in enumerate(node.args)
                    if isinstance(a, ast.Constant) and a.value == '/command'),
@@ -301,8 +311,7 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
     keys = payload_keys(node.args[cmd_at + 1], dicts)
     if keys and 'type' in keys and _OPAQUE_TAB_SPREAD in keys:
         lineno, spread = keys[_OPAQUE_TAB_SPREAD]
-        allowed = (isinstance(spread, ast.Name)
-                   and spread.id in allowed_opaque_names)
+        allowed = getattr(spread, 'id', None) in allowed_opaque_names
         if not allowed:
             return [f'{rel}:{lineno}: opaque spread may replace `tab` on a '
                     'typed /command payload']
@@ -313,47 +322,29 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
     return []
 
 
-def _copy_dict_state(dicts):
-    return {name: keys.copy() for name, keys in dicts.items()}
-
-
 def _copy_state_pair(pair):
-    """Copy one (dict-state, alias-map) flow state."""
-    state, aliases = pair
-    return (_copy_dict_state(state), dict(aliases))
+    return ({n: v.copy() for n, v in pair[0].items()}, dict(pair[1]))
 
 
 def _state_pair_signature(pair):
     state, aliases = pair
     signature = []
     for name, keys in sorted(state.items()):
-        if _OPAQUE_TAB_SPREAD in keys:
-            tab = 'opaque'
-        elif 'tab' not in keys:
-            tab = 'absent'
-        elif _is_extension_constant(keys['tab'][1]):
-            tab = 'extension'
-        else:
-            tab = 'other'
+        tab = ('opaque' if _OPAQUE_TAB_SPREAD in keys else 'absent'
+               if 'tab' not in keys else 'extension'
+               if _is_extension_constant(keys['tab'][1]) else 'other')
         signature.append((name, 'type' in keys, tab))
     return (tuple(signature), tuple(sorted(aliases.items())))
 
 
 def _dedupe_state_pairs(pairs):
-    """Keep one state per routing-relevant payload and alias signature."""
     found = {}
     for pair in pairs:
         found.setdefault(_state_pair_signature(pair), pair)
     return list(found.values())
 
 
-def _py_calls_in(node):
-    nodes = [node, *_scope_nodes(node)]
-    return [child for child in nodes if isinstance(child, ast.Call)]
-
-
 def _inherited_aliases(pairs):
-    """Aliases visible to a nested function at its definition point."""
     inherited = {}
     names = {name for _, aliases in pairs for name in aliases}
     for name in names:
@@ -390,10 +381,9 @@ def _function_aliases(node, pairs):
 
 
 def _function_allowed_opaque(node):
-    if (node.name in ('ext_cmd', '_ext_cmd')
-            and node.args.kwarg is not None):
-        return frozenset({node.args.kwarg.arg})
-    return frozenset()
+    return (frozenset({node.args.kwarg.arg})
+            if node.name in ('ext_cmd', '_ext_cmd')
+            and node.args.kwarg is not None else frozenset())
 
 
 def _class_functions(node):
@@ -427,20 +417,89 @@ def _record_exit(exits, kind, pairs):
 
 
 def _known_nonempty_iterable(expr):
-    return (isinstance(expr, (ast.Tuple, ast.List, ast.Set))
-            and bool(expr.elts))
+    return isinstance(expr, (ast.Tuple, ast.List, ast.Set)) and bool(expr.elts)
 
 
 def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         flow_exits=None):
-    """Walk statements in order while retaining alternate flow states."""
     violations = []
 
-    def check_calls(node, current_pairs):
-        for call in _py_calls_in(node):
-            for state, aliases in current_pairs:
-                violations.extend(_py_call_violations(
-                    call, state, rel, allowed_opaque_names, aliases))
+    def copied(found):
+        return [_copy_state_pair(pair) for pair in found]
+
+    def check_expression(node, current_pairs):
+        if node is None or isinstance(node, ast.Lambda):
+            return current_pairs
+        if isinstance(node, ast.NamedExpr):
+            current_pairs = check_expression(node.value, current_pairs)
+            for _, aliases in current_pairs:
+                aliases.pop(node.target.id, None)
+                _bind_alias_target(node.target, node.value, aliases)
+            return current_pairs
+        if isinstance(node, ast.BoolOp):
+            current_pairs = check_expression(node.values[0], current_pairs)
+            for value in node.values[1:]:
+                current_pairs = _dedupe_state_pairs([
+                    *copied(current_pairs),
+                    *check_expression(value, copied(current_pairs))])
+            return current_pairs
+        if isinstance(node, ast.IfExp):
+            tested = check_expression(node.test, current_pairs)
+            body = check_expression(node.body, copied(tested))
+            other = check_expression(node.orelse, copied(tested))
+            return _dedupe_state_pairs([*body, *other])
+        if isinstance(node, ast.Compare):
+            active = check_expression(node.left, current_pairs)
+            finished = []
+            for comparator in node.comparators:
+                active = check_expression(comparator, active)
+                finished.extend(copied(active))
+            return _dedupe_state_pairs([*finished, *active])
+        if isinstance(node, ast.Call):
+            callees = check_expression(node.func, current_pairs)
+            arguments = sorted([*node.args,
+                                *(kw.value for kw in node.keywords)],
+                               key=lambda n: (n.lineno, n.col_offset))
+            outputs = []
+            for state, aliases in callees:
+                sender = aliases.get(node.func.target.id) if isinstance(
+                    node.func, ast.NamedExpr) else _resolve_sender_name(
+                        node.func, aliases)
+                current = [(state, aliases)]
+                for argument in arguments:
+                    current = check_expression(argument, current)
+                for current_state, _ in current:
+                    found = _py_call_violations(
+                        node, current_state, rel, allowed_opaque_names, sender)
+                    violations.extend(found)
+                outputs.extend(current)
+            return _dedupe_state_pairs(outputs)
+        if isinstance(node, _COMPREHENSIONS):
+            entered = check_expression(node.generators[0].iter, current_pairs)
+            active = copied(entered)
+            for index, generator in enumerate(node.generators):
+                if index:
+                    active = check_expression(generator.iter, active)
+                for condition in generator.ifs:
+                    active = check_expression(condition, active)
+            results = [node.key, node.value] if isinstance(
+                node, ast.DictComp) else [node.elt]
+            for result in results:
+                active = check_expression(result, active)
+            if isinstance(node, ast.GeneratorExp):
+                return entered
+            may_skip = any(g.ifs or not _known_nonempty_iterable(g.iter)
+                           for g in node.generators)
+            skipped = entered if may_skip else []
+            return _dedupe_state_pairs([*skipped, *active])
+        if isinstance(node, ast.Dict):
+            children = [child for item in zip(node.keys, node.values)
+                        for child in item if child is not None]
+        else:
+            children = ast.iter_child_nodes(node)
+        for child in children:
+            current_pairs = check_expression(child, current_pairs)
+        return current_pairs
 
     def walk(parts, current_pairs, exits=flow_exits):
         return _py_flow_violations(
@@ -466,7 +525,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             violations.extend(nested)
             continue
         if isinstance(statement, ast.If):
-            check_calls(statement.test, pairs)
+            pairs = check_expression(statement.test, pairs)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             body, body_pairs = walk(
                 statement.body,
@@ -484,7 +543,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
             header = (statement.iter if isinstance(
                 statement, (ast.For, ast.AsyncFor)) else statement.test)
-            check_calls(header, pairs)
+            pairs = check_expression(header, pairs)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             zero_pairs = incoming
             if (isinstance(statement, (ast.For, ast.AsyncFor))
@@ -525,7 +584,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(statement, (ast.With, ast.AsyncWith)):
             entered = [_copy_state_pair(pair) for pair in pairs]
             for item in statement.items:
-                check_calls(item.context_expr, entered)
+                entered = check_expression(item.context_expr, entered)
                 if item.optional_vars is None:
                     continue
                 names = _bound_names(item.optional_vars)
@@ -566,7 +625,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 entered = [_copy_state_pair(pair)
                            for pair in handler_entry]
                 if handler.type is not None:
-                    check_calls(handler.type, entered)
+                    entered = check_expression(handler.type, entered)
                 if handler.name:
                     _clear_names(entered, {handler.name})
                 found, handled = walk(handler.body, entered, exits)
@@ -594,20 +653,20 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             pairs = normal_pairs
             continue
         if isinstance(statement, ast.Match):
-            check_calls(statement.subject, pairs)
+            pairs = check_expression(statement.subject, pairs)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             case_pairs = []
             for case in statement.cases:
                 entered = [_copy_state_pair(pair) for pair in incoming]
                 _clear_names(entered, _rebound_names(case.pattern))
                 if case.guard is not None:
-                    check_calls(case.guard, entered)
+                    entered = check_expression(case.guard, entered)
                 found, matched = walk(case.body, entered)
                 violations.extend(found)
                 case_pairs.extend(matched)
             pairs = _dedupe_state_pairs([*incoming, *case_pairs])
             continue
-        check_calls(statement, pairs)
+        pairs = check_expression(statement, pairs)
         for state, aliases in pairs:
             _apply_dict_statement(statement, state)
             _apply_alias_statement(statement, aliases)
