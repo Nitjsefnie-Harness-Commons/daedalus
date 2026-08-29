@@ -176,7 +176,7 @@ def _refuse_first_queue_read(queue):
         if (refused_path[0] is None and candidate_key is not None
                 and os.path.dirname(candidate_key) == queue_key
                 and os.path.splitext(candidate_key)[1] == '.json'):
-            original(candidate_key, *args, **kwargs).close()
+            original(candidate, *args, **kwargs).close()
             refused_path[0] = candidate_key
         if candidate_key is not None and candidate_key == refused_path[0]:
             refused_path[0] = False
