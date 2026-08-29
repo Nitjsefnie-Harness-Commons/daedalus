@@ -5,17 +5,23 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
                             UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
-                            DeferredGenerator, FlowState,
-                            apply_alias_statement, argument_defaults,
+                            DeferredCallable, DeferredGenerator, FlowState,
+                            apply_alias_statement, apply_dict_statement,
+                            argument_defaults,
                             bind_alias_target, bind_builtin_names, bound_names,
                             callable_state, class_functions, clear_names,
                             dedupe_states, deferred_generator,
+                            definition_values,
+                            dict_assignments as _dict_assignments,
                             function_allowed_opaque,
                             is_extension_constant, literal_iterable_nonempty,
+                            literal_truth, payload_keys,
                             new_exits, rebound_names, record_exit,
-                            resolve_sender_name, scope_nodes, state_signature)
+                            resolve_sender_name, state_signature,
+                            statement_cannot_raise)
 
 _apply_alias_statement = apply_alias_statement
+_apply_dict_statement = apply_dict_statement
 _argument_defaults = argument_defaults
 _bind_alias_target = bind_alias_target
 _bind_builtin_names = bind_builtin_names
@@ -26,137 +32,21 @@ _clear_names = clear_names
 _copy_state_pair = FlowState.copy
 _dedupe_state_pairs = dedupe_states
 _deferred_generator = deferred_generator
+_definition_values = definition_values
+dict_assignments = _dict_assignments
 _function_allowed_opaque = function_allowed_opaque
 _is_extension_constant = is_extension_constant
+_literal_truth = literal_truth
 _new_exits = new_exits
 _rebound_names = rebound_names
 _record_exit = record_exit
 _resolve_sender_name = resolve_sender_name
-_scope_nodes = scope_nodes
 _state_pair_signature = state_signature
+_statement_cannot_raise = statement_cannot_raise
 _EAGER_ITERABLE_CALLS = frozenset({
     'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
 })
 _PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
-
-
-def _merge_payload_keys(keys, spread, spread_node):
-    """Apply a spread; a later explicit tab clears opaque uncertainty."""
-    if spread is None:
-        keys[_OPAQUE_TAB_SPREAD] = (spread_node.lineno, spread_node)
-        return
-    if _OPAQUE_TAB_SPREAD in spread:
-        keys[_OPAQUE_TAB_SPREAD] = (spread_node.lineno, spread_node)
-    if 'tab' in spread:
-        keys.pop(_OPAQUE_TAB_SPREAD, None)
-    keys.update((key, value) for key, value in spread.items()
-                if key is not _OPAQUE_TAB_SPREAD)
-
-
-def payload_keys(expr, dicts):
-    """Return tracked string keys, or None for a wholly opaque expression."""
-    if isinstance(expr, ast.Name):
-        return dicts.get(expr.id)
-    if isinstance(expr, ast.Dict):
-        keys = {}
-        for k, v in zip(expr.keys, expr.values):
-            if k is None:
-                _merge_payload_keys(keys, payload_keys(v, dicts), v)
-            elif isinstance(k, ast.Constant) and isinstance(k.value, str):
-                if k.value == 'tab':
-                    keys.pop(_OPAQUE_TAB_SPREAD, None)
-                keys[k.value] = (v.lineno, v)
-        return keys
-    if (isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name)
-            and expr.func.id == 'dict'):
-        if expr.args:
-            return None                    # positional source is opaque
-        keys = {}
-        for kw in expr.keywords:
-            if kw.arg is None:
-                spread = payload_keys(kw.value, dicts)
-                _merge_payload_keys(keys, spread, kw.value)
-            else:
-                if kw.arg == 'tab':
-                    keys.pop(_OPAQUE_TAB_SPREAD, None)
-                keys[kw.arg] = (kw.value.lineno, kw.value)
-        return keys
-    return None
-
-
-def _update_keys(call, dicts):
-    """Return keys merged by d.update, or None when any part is opaque."""
-    keys = {}
-    if call.args:
-        merged = payload_keys(call.args[0], dicts)
-        if merged is None:
-            return None
-        keys.update(merged)
-    for kw in call.keywords:
-        if kw.arg is None:
-            return None                    # d.update(**opaque)
-        if kw.arg == 'tab':
-            keys.pop(_OPAQUE_TAB_SPREAD, None)
-        keys[kw.arg] = (kw.value.lineno, kw.value)
-    return keys
-
-
-def _apply_dict_statement(node, dicts):
-    """Apply one assignment or mapping mutation to a tracked Python state."""
-    if isinstance(node, ast.AugAssign):          # d |= {...}
-        if isinstance(node.op, ast.BitOr) and isinstance(node.target, ast.Name):
-            merged = payload_keys(node.value, dicts)
-            if merged is None:
-                dicts.pop(node.target.id, None)
-            else:
-                _merge_payload_keys(
-                    dicts.setdefault(node.target.id, {}), merged, node.value)
-        return
-    if isinstance(node, ast.Expr):               # d.update({...})
-        call = node.value
-        if (isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and call.func.attr == 'update'
-                and isinstance(call.func.value, ast.Name)):
-            merged = _update_keys(call, dicts)
-            if merged is None:
-                dicts.pop(call.func.value.id, None)
-            else:
-                _merge_payload_keys(
-                    dicts.setdefault(call.func.value.id, {}), merged, call)
-        return
-    if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
-        return
-    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-    for target in targets:
-        if isinstance(target, ast.Name):
-            keys = payload_keys(node.value, dicts)
-            if keys is None:
-                dicts.pop(target.id, None)
-            else:
-                dicts[target.id] = keys
-        elif (isinstance(target, ast.Subscript)
-              and isinstance(target.value, ast.Name)
-              and isinstance(target.slice, ast.Constant)
-              and isinstance(target.slice.value, str)):
-            if target.slice.value == 'tab':
-                dicts.setdefault(target.value.id, {}).pop(
-                    _OPAQUE_TAB_SPREAD, None)
-            dicts.setdefault(target.value.id, {})[target.slice.value] = (
-                node.value.lineno, node.value)
-
-
-def dict_assignments(scope):
-    """Map local names to string keys, retaining only provable mutations.
-
-    Opaque rebinding drops a name; unresolved spreads retain an opaque marker.
-    """
-    dicts = {}
-    nodes = [n for n in _scope_nodes(scope)
-             if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr))]
-    for node in sorted(nodes, key=lambda n: (n.lineno, n.col_offset)):
-        _apply_dict_statement(node, dicts)
-    return dicts
 
 
 def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
@@ -215,11 +105,36 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
 
 
 def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
-                        flow_exits=None):
+                        flow_exits=None, scope_callables=None,
+                        scope_executed=None, active_callables=frozenset(),
+                        module_scope=False):
     violations = []
+    owns_scope = scope_callables is None
+    scope_callables = [] if scope_callables is None else scope_callables
+    scope_executed = set() if scope_executed is None else scope_executed
+    fallback = _copy_state_pair(pairs[0]) if pairs else None
 
     def copied(found):
         return [_copy_state_pair(pair) for pair in found]
+
+    def analyze_callable(deferred, callers, executed=False):
+        key = id(deferred)
+        if key in active_callables:
+            return
+        if executed:
+            scope_executed.add(key)
+        entries = []
+        for caller in callers:
+            entry = _copy_state_pair(deferred.state)
+            entry.builtin_globals = set(caller.builtin_globals)
+            entry.callables.update(caller.callables)
+            entry.bound.update(caller.bound)
+            entries.append(entry)
+        nested, _ = _py_flow_violations(
+            deferred.scope.body, entries, rel,
+            _function_allowed_opaque(deferred.scope),
+            active_callables=active_callables | {key})
+        violations.extend(nested)
 
     def expression_value(node, state):
         if isinstance(node, ast.GeneratorExp):
@@ -289,7 +204,11 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 return _dedupe_state_pairs([*skipped, *active])
             for condition in clause.ifs:
                 active = check_expression(condition, active)
-            may_skip |= bool(clause.ifs) or cardinality is not True
+            truths = [_literal_truth(condition) for condition in clause.ifs]
+            if False in truths:
+                skipped = entered if may_skip else []
+                return _dedupe_state_pairs([*skipped, *active])
+            may_skip |= None in truths or cardinality is not True
         results = [expression.key, expression.value] if isinstance(
             expression, ast.DictComp) else [expression.elt]
         for result in results:
@@ -320,7 +239,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             if generator is None:
                 outputs.append(state)
                 continue
-            if generator.remaining == 0:
+            if generator.remaining == 0 and not generator.evaluate_zero:
                 advance_generator(state, generator)
                 outputs.append(state)
                 continue
@@ -362,6 +281,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 _bind_alias_target(node.target, node.value, state, bindings)
                 state.aliases.pop(node.target.id, None)
                 state.generators.pop(node.target.id, None)
+                state.callables.pop(node.target.id, None)
+                state.bound.add(node.target.id)
                 _bind_builtin_names(state, {node.target.id})
                 state.aliases.update(bindings[0])
                 state.generators.update(bindings[1])
@@ -375,6 +296,11 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             return remember(node, current_pairs)
         if isinstance(node, ast.IfExp):
             tested = check_expression(node.test, current_pairs)
+            truth = _literal_truth(node.test)
+            if truth is True:
+                return remember(node, check_expression(node.body, tested))
+            if truth is False:
+                return remember(node, check_expression(node.orelse, tested))
             body = check_expression(node.body, copied(tested))
             other = check_expression(node.orelse, copied(tested))
             return remember(node, _dedupe_state_pairs([*body, *other]))
@@ -398,6 +324,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         node.func, state.aliases)
                 call_name = (node.func.id if isinstance(node.func, ast.Name)
                              else None)
+                deferred = state.callables.get(call_name)
                 consumer = (call_name if call_name in _BUILTIN_CONSUMERS
                             and call_name not in state.builtin_globals
                             and call_name not in state.builtin_locals
@@ -417,6 +344,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         node, current_state.dicts, rel,
                         allowed_opaque_names, sender)
                     violations.extend(found)
+                if deferred is not None:
+                    analyze_callable(deferred, current, executed=True)
                 outputs.extend(current)
             return remember(node, _dedupe_state_pairs(outputs))
         if isinstance(node, ast.GeneratorExp):
@@ -438,7 +367,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         [*skipped, *active]))
                 for condition in generator.ifs:
                     active = check_expression(condition, active)
-                may_skip |= bool(generator.ifs) or cardinality is not True
+                truths = [_literal_truth(condition)
+                          for condition in generator.ifs]
+                if False in truths:
+                    skipped = entered if may_skip else []
+                    return remember(node, _dedupe_state_pairs(
+                        [*skipped, *active]))
+                may_skip |= None in truths or cardinality is not True
             results = [node.key, node.value] if isinstance(
                 node, ast.DictComp) else [node.elt]
             for result in results:
@@ -462,37 +397,56 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def walk(parts, current_pairs, exits=flow_exits):
         return _py_flow_violations(
-            parts, current_pairs, rel, allowed_opaque_names, exits)
+            parts, current_pairs, rel, allowed_opaque_names, exits,
+            scope_callables, scope_executed, active_callables, module_scope)
 
     for statement in statements:  # pylint: disable=too-many-nested-blocks
+        if pairs:
+            fallback = _copy_state_pair(pairs[0])
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            values = [*statement.decorator_list,
-                      *_argument_defaults(statement.args)]
-            for value in values:
+            for value in _definition_values(statement):
                 pairs = check_expression(value, pairs)
-            for state in pairs:
+            defining = pairs or ([fallback] if fallback is not None else [])
+            for state in defining:
                 state.aliases.pop(statement.name, None)
                 state.generators.pop(statement.name, None)
+                state.callables.pop(statement.name, None)
+                state.bound.add(statement.name)
                 _bind_builtin_names(state, {statement.name})
-            nested, _ = _py_flow_violations(
-                statement.body, [_callable_state(statement, pairs)], rel,
-                _function_allowed_opaque(statement))
-            violations.extend(nested)
+                deferred = DeferredCallable(
+                    statement, _callable_state(statement, [state]))
+                scope_callables.append(deferred)
+                if pairs:
+                    state.callables[statement.name] = deferred
             continue
         if isinstance(statement, ast.ClassDef):
             for state in pairs:
                 state.aliases.pop(statement.name, None)
                 state.generators.pop(statement.name, None)
+                state.callables.pop(statement.name, None)
+                state.bound.add(statement.name)
                 _bind_builtin_names(state, {statement.name})
             nested, _ = _py_flow_violations(
                 list(_class_functions(statement)),
                 [_copy_state_pair(pair) for pair in pairs], rel,
-                allowed_opaque_names)
+                allowed_opaque_names, scope_callables=scope_callables,
+                scope_executed=scope_executed,
+                active_callables=active_callables,
+                module_scope=module_scope)
             violations.extend(nested)
             continue
         if isinstance(statement, ast.If):
             pairs = check_expression(statement.test, pairs)
             incoming = [_copy_state_pair(pair) for pair in pairs]
+            truth = _literal_truth(statement.test)
+            if truth is True:
+                found, pairs = walk(statement.body, incoming)
+                violations.extend(found)
+                continue
+            if truth is False:
+                found, pairs = walk(statement.orelse, incoming)
+                violations.extend(found)
+                continue
             body, body_pairs = walk(
                 statement.body,
                 [_copy_state_pair(pair) for pair in incoming])
@@ -570,6 +524,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         state.dicts.pop(name, None)
                         state.aliases.pop(name, None)
                         state.generators.pop(name, None)
+                        state.callables.pop(name, None)
+                        state.bound.add(name)
                         _bind_builtin_names(state, {name})
                         if resolved is not None:
                             state.aliases[name] = resolved
@@ -579,14 +535,18 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(statement, (ast.Try, ast.TryStar)):
             incoming = [_copy_state_pair(pair) for pair in pairs]
             body_pairs = [_copy_state_pair(pair) for pair in incoming]
-            intermediate = []
+            handler_entry = []
             exits = _new_exits()
             for body_statement in statement.body:
+                before = [_copy_state_pair(pair) for pair in body_pairs]
+                safe = module_scope and body_pairs and all(
+                    _statement_cannot_raise(body_statement, state.bound)
+                    for state in body_pairs)
                 found, body_pairs = walk(
                     [body_statement], body_pairs, exits)
                 violations.extend(found)
-                intermediate.extend(
-                    _copy_state_pair(pair) for pair in body_pairs)
+                if not safe:
+                    handler_entry.extend([*before, *copied(body_pairs)])
                 if not body_pairs:
                     break
             if statement.orelse:
@@ -596,8 +556,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             else:
                 normal_pairs = body_pairs
             handler_pairs = []
-            handler_entry = _dedupe_state_pairs(
-                [*incoming, *intermediate])
+            handler_entry = _dedupe_state_pairs(handler_entry)
             for handler in statement.handlers:
                 entered = [_copy_state_pair(pair)
                            for pair in handler_entry]
@@ -665,6 +624,21 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             _record_exit(flow_exits, 'continue', pairs)
             pairs = []
             continue
+    if owns_scope:
+        seen = set()
+        for deferred in scope_callables:
+            key = id(deferred)
+            if key in seen:
+                continue
+            seen.add(key)
+            callers = [state for state in pairs
+                       if any(value is deferred
+                              for value in state.callables.values())]
+            if not callers and key in scope_executed:
+                continue
+            if not callers:
+                callers = pairs or [fallback or deferred.state]
+            analyze_callable(deferred, callers)
     return violations, pairs
 
 
@@ -676,6 +650,6 @@ def py_tab_routing_violations(path, rel):
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
     violations, _ = _py_flow_violations(
-        tree.body, [FlowState({}, {}, {}, {}, set(), set())], rel,
-        frozenset())
+        tree.body, [FlowState({}, {}, {}, {}, set(), set(), {}, set())], rel,
+        frozenset(), module_scope=True)
     return list(dict.fromkeys(violations))
