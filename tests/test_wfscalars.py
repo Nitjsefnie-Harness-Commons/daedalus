@@ -523,8 +523,8 @@ def test_checkout_reader_decodes_an_escaped_top_level_jobs_key(tmp):
     mutated = workflow.replace('jobs:\n', '"jo\\x62s":\n', 1)
     assert mutated != workflow
     assert _wfcheckout.checkout_refs(mutated) == [
-        ('speed', '${{ github.event.pull_request.head.sha || github.sha }}'),
-        ('speed', '${{ steps.baseline.outputs.point }}'),
+        ('timed', '${{ github.event.pull_request.head.sha || github.sha }}'),
+        ('timed', '${{ steps.baseline.outputs.point }}'),
     ]
 
 

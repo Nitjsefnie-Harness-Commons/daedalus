@@ -2,11 +2,13 @@ name: speed
 
 # Did the test suite get slower since the last release?
 #
-# THE MEASUREMENT ONLY MEANS ANYTHING BECAUSE BOTH BUILDS RUN HERE. A GitHub
-# runner's speed varies by roughly a factor of two between jobs, so a duration
-# recorded in one job compared against a duration recorded in another measures
-# the runners, not the code. This job checks out the last release AND this
-# commit, runs both on the same machine, and reports the ratio.
+# THE MEASUREMENT ONLY MEANS ANYTHING BECAUSE BOTH BUILDS RUN IN ONE CELL. A
+# GitHub runner's speed varies by roughly a factor of two between jobs, so a
+# duration recorded in one job compared against a duration recorded in another
+# measures the runners, not the code. Every cell checks out the last release
+# AND this commit, runs both on the same machine, and reports the ratio; the
+# paired comparison never crosses a cell, and the final job combines verdicts,
+# never seconds.
 #
 # ONE ROUND IS DISCARDED BEFORE ANY MEASUREMENT, and it is not ceremony. The
 # first suite a job runs pays for a cold page cache, and interleaving does not
@@ -52,6 +54,23 @@ name: speed
 # question. scripts/ci/time_tests.py asks nothing of the tree it measures: it
 # runs each suite with -u and reads the wall clock as each result line arrives,
 # so any release, however old, is measurable.
+#
+# THE WORK IS SPLIT THREE WAYS, because a benchmark of a broken tree is a
+# number nobody can act on and a whole-tree benchmark is one long queue.
+#
+# `correctness` measures nothing. It waits for the tests workflow's aggregate
+# check on THIS commit — the same SHA this run is attached to — and fails
+# unless that check passed, which is what keeps the cells below from spending
+# six whole-suite executions on a tree whose tests are red.
+#
+# `timed` is the matrix. Each cell owns one disjoint slice of `tests/` and
+# carries the whole measurement inside it: two checkouts, one virtualenv per
+# side, a discarded warm-up, interleaved measured rounds, and the comparison.
+# A cell fails when ITS comparison fails, so a slowdown is attributable to a
+# slice of the suite rather than buried in a 55-minute total.
+#
+# `speed` is the single verdict and the only cell-independent check name. It
+# requires the matrix and fails when any cell failed.
 
 on:
   push:
@@ -65,9 +84,9 @@ on:
       - '**/*.md'
       - 'LICENSE'
       - '.gitignore'
-  # `pull_request`, never `pull_request_target`: this job checks out and RUNS
-  # the proposed code, and pull_request_target would run it with a writable
-  # token and the base repository's secrets in reach.
+  # `pull_request`, never `pull_request_target`: the timed cells check out and
+  # RUN the proposed code, and pull_request_target would run it with a
+  # writable token and the base repository's secrets in reach.
   pull_request:
     paths-ignore:
       - '**/*.md'
@@ -106,7 +125,82 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  speed:
+  correctness:
+    runs-on: ubuntu-latest
+
+    # The wait is bounded, and the bound has to be shorter than this ceiling:
+    # a job killed for being patient is the one failure a wait must not have.
+    timeout-minutes: 60
+
+    steps:
+      - name: Wait for the correctness aggregate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # github.sha is the merge commit on a pull request and the pushed
+          # commit otherwise, which is exactly the commit the tests workflow's
+          # aggregate check run attaches to. It travels by environment rather
+          # than being expanded inside the script: a SHA from a payload is
+          # caller-controlled text.
+          SHA: ${{ github.sha }}
+        # The name below is the tests workflow's aggregate job, spelled
+        # exactly as that job's `name:` prints it. Nothing else in this
+        # repository carries that name, and tests/test_ci_workflows.py holds
+        # the two files to the same string.
+        #
+        # Three endings, none of them a silent pass: the aggregate passed and
+        # the measurement may start; the aggregate concluded anything else and
+        # this job fails, which is what skips the cells; or the bound ran out
+        # without a completed aggregate — a missing gate is not a passing one,
+        # so that fails too. A skipped or cancelled aggregate is treated as a
+        # failure rather than as a wait that should continue.
+        run: |
+          aggregate='Aggregate workflow checks'
+          tries=45
+          attempt=0
+          while [ "$attempt" -lt "$tries" ]; do
+            attempt=$((attempt + 1))
+            states="$(gh api --paginate -H 'Cache-Control: no-cache' \
+                      "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+                      --jq '.check_runs[]
+                            | "\(.name)\t\(.status)\t\(.conclusion // "")"')"
+            found="$(printf '%s\n' "$states" \
+              | awk -F'\t' -v name="$aggregate" \
+                     '$1 == name { print $2 "\t" $3 }')"
+            if [ -n "$found" ]; then
+              pending="$(printf '%s\n' "$found" \
+                | awk -F'\t' '$2 != "completed" { n++ } END { print n + 0 }')"
+              failed="$(printf '%s\n' "$found" \
+                | awk -F'\t' \
+                       '$2 == "completed" && $3 != "success" { n++ } END {
+                          print n + 0 }')"
+              if [ "$failed" -gt 0 ]; then
+                echo "The correctness aggregate on $SHA did not pass:" >&2
+                printf '%s\n' "$found" >&2
+                echo "Speed benchmarks a tree only once its tests pass, so" >&2
+                echo "there is nothing here worth measuring." >&2
+                exit 1
+              fi
+              if [ "$pending" -eq 0 ]; then
+                echo "Correctness aggregate on $SHA passed."
+                exit 0
+              fi
+              echo "waiting: the aggregate is still running" \
+                   "(attempt $attempt of $tries)"
+            else
+              echo "waiting: no aggregate check run on $SHA yet" \
+                   "(attempt $attempt of $tries)"
+            fi
+            sleep 60
+          done
+          echo "No completed '$aggregate' check run on $SHA within $tries" >&2
+          echo "attempts. A missing aggregate is not a pass: either the tests" >&2
+          echo "workflow never ran on this commit, or it is still going." >&2
+          exit 1
+
+  timed:
+    name: timed (${{ matrix.group }})
+    needs: [correctness]
     runs-on: ubuntu-latest
 
     # This job checks out a pull request's OWN head and runs it, and an
@@ -117,22 +211,108 @@ jobs:
     # as environments: `benchmark` carries no protection rules,
     # `fork-benchmark` requires a review before the job starts.
     #
-    # This gates the benchmark job and nothing else. tests.yml still runs a
-    # fork's code on its `suites`, `wheel` and `coverage` jobs; the lever
-    # that would gate every workflow at once is the repository's
-    # `fork-pr-contributor-approval` setting, moving from
-    # `first_time_contributors` to `all_external_contributors`.
+    # This gates the measuring cells and nothing else. The wait job reads a
+    # check run, the verdict job reads check runs and writes a summary, and
+    # neither touches the tree. tests.yml still runs a fork's code on its
+    # `suites`, `wheel` and `coverage` jobs; the lever that would gate every
+    # workflow at once is the repository's `fork-pr-contributor-approval`
+    # setting, moving from `first_time_contributors` to
+    # `all_external_contributors`.
     #
     # The cost of naming an environment here: every same-repo push and pull
-    # request writes a deployment record, and `benchmark` is a real
+    # request writes a deployment record per cell, and `benchmark` is a real
     # environment, so a secret attached to it later is in reach of every
     # branch pushed to this repository.
     environment: >-
       ${{ github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name != github.repository
       && 'fork-benchmark' || 'benchmark' }}
-    # Two discarded warm-up runs, four measured ones, and two installs.
+    # Two discarded warm-up runs, four measured ones, and two installs —
+    # the whole budget a single cell needs, however many cells run beside it.
     timeout-minutes: 90
+
+    strategy:
+      # A slow or failing slice must not cancel its siblings: each cell owns
+      # a verdict, and losing the others to one of them is a smaller
+      # measurement, not a faster one.
+      fail-fast: false
+      matrix:
+        # One cell per slice of `tests/`. The named groups are disjoint, and
+        # the last cell is the catch-all: it takes every suite file the named
+        # globs do not match, so a suite added later and matched by nothing is
+        # still measured rather than silently dropping out of the gate.
+        include:
+          - group: bridge
+            suites: >-
+              test_bridge_credentials.py test_bridge_requests.py
+              test_bridge_uploads.py test_bridge_startup.py
+              test_bridge_tabs.py test_path_safety.py
+          - group: bridge-delivery
+            suites: >-
+              test_bridge_results.py test_bridge_streams.py
+              test_delivery_*.py test_result_*.py test_control_*.py
+          - group: queue
+            suites: >-
+              test_cmdqueue*.py test_command_queue*.py test_stream_*.py
+          - group: segment
+            suites: >-
+              test_segment_*.py
+          - group: mcp
+            suites: >-
+              test_mcp_*.py
+          - group: cli
+            suites: >-
+              test_cli*.py test_pr_*.py
+          - group: repo-ci
+            suites: >-
+              test_ci_*.py test_workflow_*.py test_yamlread*.py
+              test_wf*.py test_ghexpr.py test_speed_gate.py
+              test_speed_measurement.py
+              test_suite_runner.py test_child_coverage.py
+              test_worker_runtime.py test_worker_module_boundary.py
+              test_change_classifier.py test_version_contract.py
+              test_release_scan.py test_repo_layout.py test_file_sizes.py
+              test_gitignore_*.py test_checkout_pin.py
+          - group: coverage
+            suites: >-
+              test_coverage_*.py test_diff_coverage.py
+              test_diff_coverage_*.py test_js_coverage*.py
+          - group: browser
+            suites: >-
+              test_real_browser_*.py test_eval_relay.py test_gm_*.py
+              test_vm_file_load_guard.py test_extension_*.py
+              test_worker_route_guard.py
+          - group: dashboard
+            suites: >-
+              test_dashboard_*.py test_tab_routing.py
+              test_overlap_harness.py test_js_lines.py
+          - group: catchall
+            suites: '*'
+            except: >-
+              test_bridge_credentials.py test_bridge_requests.py
+              test_bridge_uploads.py test_bridge_startup.py
+              test_bridge_tabs.py test_path_safety.py
+              test_bridge_results.py test_bridge_streams.py
+              test_delivery_*.py test_result_*.py test_control_*.py
+              test_cmdqueue*.py test_command_queue*.py test_stream_*.py
+              test_segment_*.py
+              test_mcp_*.py
+              test_cli*.py test_pr_*.py
+              test_ci_*.py test_workflow_*.py test_yamlread*.py
+              test_wf*.py test_ghexpr.py test_speed_gate.py
+              test_speed_measurement.py
+              test_suite_runner.py test_child_coverage.py
+              test_worker_runtime.py test_worker_module_boundary.py
+              test_change_classifier.py test_version_contract.py
+              test_release_scan.py test_repo_layout.py test_file_sizes.py
+              test_gitignore_*.py test_checkout_pin.py
+              test_coverage_*.py test_diff_coverage.py
+              test_diff_coverage_*.py test_js_coverage*.py
+              test_real_browser_*.py test_eval_relay.py test_gm_*.py
+              test_vm_file_load_guard.py test_extension_*.py
+              test_worker_route_guard.py
+              test_dashboard_*.py test_tab_routing.py
+              test_overlap_harness.py test_js_lines.py
 
     env:
       # Fractional slowdown that fails the job.
@@ -256,12 +436,33 @@ jobs:
 
       - name: Run both suites, interleaved
         if: steps.baseline.outputs.point != ''
+        env:
+          # The cell's slice of the tree, as space-separated globs over the
+          # suite file names. Both are empty when the matrix cell names
+          # neither, and the instrument then times every suite.
+          SUITES_ONLY: ${{ matrix.suites }}
+          SUITES_EXCEPT: ${{ matrix.except }}
         # A failing test does NOT fail this job: tests.yml owns that verdict,
         # and a non-passing test is simply absent from the side's durations and
         # drops out of the intersection. What this step must guarantee is that
         # every round produced usable reports on BOTH sides, so it checks for
         # them explicitly rather than trusting an exit code it ignores.
         run: |
+          # set -f keeps the glob metacharacters away from the shell's own
+          # pathname expansion — they have to reach the instrument as
+          # patterns — and the unquoted expansion below is what turns the
+          # matrix's space-separated list into one argument per glob.
+          set -f
+          selection=()
+          if [ -n "$SUITES_ONLY" ]; then
+            # shellcheck disable=SC2086,SC2206
+            selection+=(--only $SUITES_ONLY)
+          fi
+          if [ -n "$SUITES_EXCEPT" ]; then
+            # shellcheck disable=SC2086,SC2206
+            selection+=(--except $SUITES_EXCEPT)
+          fi
+
           mkdir -p reports
           # Round 0 is thrown away. It is written outside the reports/base-*
           # and reports/head-* globs the comparison reads, so nothing has to
@@ -273,6 +474,7 @@ jobs:
               --tree "$side" \
               --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
               --out "$GITHUB_WORKSPACE/reports/warmup/$side" \
+              "${selection[@]}" \
               || echo "$side warm-up: timing reported a problem"
             echo "::endgroup::"
           done
@@ -284,6 +486,7 @@ jobs:
                 --tree "$side" \
                 --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
                 --out "$GITHUB_WORKSPACE/reports/$side-$round" \
+                "${selection[@]}" \
                 || echo "$side round $round: timing reported a problem"
               echo "::endgroup::"
             done
@@ -311,7 +514,9 @@ jobs:
           BASE_LABEL: ${{ steps.baseline.outputs.point }}
         # The comparator comes from the HEAD checkout, so an improvement to the
         # comparison itself takes effect on the commit that makes it rather
-        # than one release later.
+        # than one release later. The round directories hold this cell's
+        # reports alone, and the comparison intersects on test name, so a
+        # slice of the tree compares correctly on its own.
         run: |
           # shellcheck disable=SC2046
           python3 head/scripts/ci/compare_durations.py \
@@ -326,6 +531,99 @@ jobs:
         if: ${{ !cancelled() && steps.baseline.outputs.point != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: speed-durations
+          # One artifact per cell: a name the whole matrix shares would
+          # collide, and a reader looking for one slice's numbers should not
+          # have to download every other slice's.
+          name: speed-durations-${{ matrix.group }}
           path: reports/
           if-no-files-found: warn
+
+  speed:
+    # The one verdict, and the job that keeps this workflow's check name.
+    needs: [correctness, timed]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Aggregate the cell verdicts
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          # The needs results are the verdict; they reach the script by
+          # environment because a needs result is workflow state, and no
+          # expression is interpolated into the script itself. `cancelled()`
+          # has no env form, and it is not needed: a cancelled run shows up
+          # here as a cancelled or skipped need.
+          CORRECTNESS: ${{ needs.correctness.result }}
+          TIMED: ${{ needs.timed.result }}
+        # A cancelled run produced no measurement and gets no verdict. A red
+        # aggregate is the signal that the tree is broken, and this job says
+        # so instead of failing again on cells that never ran. Any other time,
+        # the cells ran, and one failed cell fails this job.
+        run: |
+          if [ "$CORRECTNESS" = "cancelled" ] || [ "$TIMED" = "cancelled" ]; then
+            {
+              echo "### Test speed"
+              echo
+              echo "The run was cancelled, so no speed verdict was produced."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$CORRECTNESS" != "success" ]; then
+            {
+              echo "### Test speed"
+              echo
+              echo "Not run: the correctness aggregate on this commit is" \
+                   "\`$CORRECTNESS\`, and speed benchmarks a tree only once" \
+                   "its tests pass. That red is the signal; the skipped" \
+                   "cells add nothing to it."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Each cell's check run is named after its group, so the rows below
+          # come from the cells' own conclusions rather than from a list
+          # restated here. A read that fails is reported and leaves the table
+          # empty rather than inventing verdicts; the job's own verdict still
+          # comes from the matrix result alone.
+          if ! cells="$(gh api --paginate -H 'Cache-Control: no-cache' \
+                          "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+                          --jq '.check_runs[]
+                                | select(.name | startswith("timed ("))
+                                | "\(.name)\t\(.conclusion // .status)"')"; then
+            echo "The cells' check runs could not be read:" >&2
+            printf '%s\n' "$cells" >&2
+            cells=""
+          fi
+
+          {
+            echo "### Test speed"
+            echo
+            echo "Each cell benchmarks its own slice of the suite: baseline" \
+                 "and head on one runner, warm-up discarded, rounds" \
+                 "interleaved. No number crosses runners, and the verdict is" \
+                 "per cell."
+            echo
+            echo "| cell | verdict | durations artifact |"
+            echo "|---|---|---|"
+            printf '%s\n' "$cells" | sort -u | awk -F'\t' '$1 != "" {
+              group = substr($1, 8, length($1) - 8)
+              printf "| %s | %s | `speed-durations-%s` |\n", group, $2, group
+            }'
+            if [ -z "$cells" ]; then
+              echo
+              echo "The cells' check runs could not be read, so the table is" \
+                   "empty; the verdict came from the matrix job."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$TIMED" != "success" ]; then
+            echo "At least one speed cell failed; its own summary carries" >&2
+            echo "the paired ratios that decided it." >&2
+            exit 1
+          fi
+          echo "Every speed cell passed."
