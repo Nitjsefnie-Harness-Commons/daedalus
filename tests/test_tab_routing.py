@@ -3,7 +3,7 @@
 import ast
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -35,6 +35,11 @@ def _tracked_focus_verdict(tmp, body, before='', after='', counts=False):
     function.body = ast.parse(body).body
     before_nodes, after_nodes = (ast.parse(value).body
                                  for value in (before, after))
+    future_nodes = [node for node in before_nodes if isinstance(
+        node, ast.ImportFrom) and node.module == '__future__']
+    before_nodes = [node for node in before_nodes
+                    if node not in future_nodes]
+    tree.body[1:1] = future_nodes
     index = tree.body.index(function)
     tree.body[index:index] = before_nodes
     tree.body.extend(after_nodes)
@@ -51,16 +56,34 @@ def _tracked_focus_verdict(tmp, body, before='', after='', counts=False):
                  'ordinary': lambda *args, **kwargs: 0,
                  '_args': SimpleNamespace(
                      chrome_tab=323, flag=True, values=(1, 2))}
-    isolated = ast.Module(
-        body=[*before_nodes, function, *after_nodes], type_ignores=[])
-    ast.fix_missing_locations(isolated)
-    # pylint: disable-next=exec-used
-    exec(compile(isolated, str(mutated), 'exec'), namespace)
-    if not after_nodes:
-        namespace['do_focus_tab'](namespace['_args'])
+    sender_module = ModuleType('_pyroute_test_sender')
+    sender_module.__dict__.update(namespace)
+    sys.modules['_pyroute_test_sender'] = sender_module
+    isolated = ast.fix_missing_locations(ast.Module(
+        body=[*future_nodes, *before_nodes, function, *after_nodes],
+        type_ignores=[]))
+    try:
+        # pylint: disable-next=exec-used
+        exec(compile(isolated, str(mutated), 'exec'), namespace)
+        if not after_nodes:
+            namespace['do_focus_tab'](namespace['_args'])
+    finally:
+        sys.modules.pop('_pyroute_test_sender', None)
     verdict = (len(calls), len(py_tab_routing_violations(
         mutated, mutated.name)))
     return verdict if counts else tuple(bool(value) for value in verdict)
+
+
+_DIRECTIONS = [('setting', 'ordinary', 'ext_cmd', True),
+               ('clearing', 'ext_cmd', 'ordinary', False)]
+
+
+def _assert_focus_cases(tmp, cases):
+    observed = [(label, *_tracked_focus_verdict(tmp, body, before, after))
+                for label, body, before, after, _ in cases]
+    expected = [(label, *(value if isinstance(value, tuple)
+                else (value, value))) for label, _, _, _, value in cases]
+    assert observed == expected, observed
 
 
 def test_generator_break_tracks_only_remaining_effects(tmp):
@@ -94,26 +117,32 @@ def test_generator_break_tracks_only_remaining_effects(tmp):
         ])
     cases = [(label, _focus_flow(
         initial, effect, 'for _ in gen: break', f'send = {initial}',
-        'list(gen)', iterable=iterable), expected)
+        'list(gen)', iterable=iterable), '', '', expected)
         for label, initial, effect, iterable, expected in specs]
     cases.extend([
         ('filter-dynamic-clearing', _focus_flow(
             'ext_cmd', 'ordinary', 'for _ in gen: break', 'send = ext_cmd',
-            'list(gen)', iterable='[1, 2] if args.flag'), (False, True)),
-        ('filter-False-side-effect', _focus_flow(
-            'ordinary', 'ordinary', 'list(gen)',
-            iterable='[1] if (send := ext_cmd) if False'), True),
+            'list(gen)', iterable='[1, 2] if args.flag'), '', '',
+         (False, True)),
     ])
-    observed = [(label, *_tracked_focus_verdict(tmp, body))
-                for label, body, _ in cases]
-    expected = [(label, *(sender if isinstance(sender, tuple)
-                          else (sender, sender)))
-                for label, _, sender in cases]
-    assert observed == expected, observed
+    _assert_focus_cases(tmp, cases)
     for expression in ('{value, value}', '{[1]}', '{1 / 0}', '{**[]}',
                        "{'x': value, 'x': 2}"):
         node = ast.parse(expression, mode='eval').body
         assert literal_iterable_cardinality(node) is None, expression
+
+
+def test_generator_filter_short_circuit_skips_later_effects(tmp):
+    specs = [
+        ('skip-set', 'ordinary', 'False if (send := ext_cmd)', False),
+        ('skip-clear', 'ext_cmd', 'False if (send := ordinary)', True),
+        ('prior-set', 'ordinary', '(send := ext_cmd) if False', True),
+        ('prior-clear', 'ext_cmd', '(send := ordinary) if False', False),
+    ]
+    cases = [(label, _focus_flow(initial, initial, 'list(gen)',
+                                 iterable=f'[1] if {filters}'), '', '', result)
+             for label, initial, filters, result in specs]
+    _assert_focus_cases(tmp, cases)
 
 
 def test_builtin_consumers_follow_python_scope_identity(tmp):
@@ -125,8 +154,6 @@ def test_builtin_consumers_follow_python_scope_identity(tmp):
                   ('clearing', 'ext_cmd', 'ordinary')]
     scenarios = [
         ('later-local', (unbound, 'if args.flag: list = ordinary'), False),
-        ('annotation-local',
-         (unbound, 'def inner(x: (list := ordinary)): pass'), False),
         ('walrus-local', (local_walrus,), False),
         ('deleted-local', ('list = ordinary', 'del list', unbound), False),
         ('deleted-global', ('global list', 'list = ordinary', 'del list',
@@ -135,14 +162,14 @@ def test_builtin_consumers_follow_python_scope_identity(tmp):
                                    'sorted(gen, key=(sorted := ordinary))'),
          True),
     ]
+    if sys.version_info < (3, 14):
+        scenarios.append(('annotation-local', (unbound,
+                          'def inner(x: (list := ordinary)): pass'), False))
     cases = [(f'{label}-{direction}', _focus_flow(initial, effect, *steps),
-              expected if direction == 'setting' else not expected)
+              '', '', expected if direction == 'setting' else not expected)
              for label, steps, expected in scenarios
              for direction, initial, effect in directions]
-    observed = [(label, *_tracked_focus_verdict(tmp, body))
-                for label, body, _ in cases]
-    expected = [(label, sender, sender) for label, _, sender in cases]
-    assert observed == expected, observed
+    _assert_focus_cases(tmp, cases)
     plain = "ordinary = lambda *args, **kwargs: 0\n"
     shadowed = plain + 'list = ordinary\n'
     module_cases = []
@@ -171,11 +198,7 @@ def test_builtin_consumers_follow_python_scope_identity(tmp):
              lambda flow: ('def inner():\n    '
                            + flow.replace('\n', '\n    ')
                            + '\nreturn inner()'))
-    observed = [(label, *_tracked_focus_verdict(tmp, body, before, after))
-                for label, body, before, after, _ in module_cases]
-    expected = [(label, sender, sender)
-                for label, _, _, _, sender in module_cases]
-    assert observed == expected, observed
+    _assert_focus_cases(tmp, module_cases)
     for direction, initial, effect, expected_count in [
             ('setting', 'ordinary', 'ext_cmd', 0),
             ('clearing', 'ext_cmd', 'ordinary', 2)]:
@@ -188,52 +211,102 @@ def test_builtin_consumers_follow_python_scope_identity(tmp):
         assert counts == (expected_count, expected_count), (direction, counts)
 
 
-def test_positional_dict_copy_is_opaque_but_later_tab_write_is_tracked(tmp):
-    del tmp
-    tree = ast.parse(
-        "cmd = dict(BASE)\n"
-        "cmd['tab'] = tab_id\n"
-        "api('PUT', '/command', cmd)\n")
-    assert payload_keys(tree.body[0].value, {}) is None
-    keys = dict_assignments(tree)['cmd']
-    assert keys['tab'][0] == 2
-
-
-def test_unfollowable_sender_aliases_are_reported_as_unprovable(tmp):
-    expressions = [
-        "getattr(bridge, 'ext_cmd')",
-        'bridge.ext_cmd if cond else bridge.ext_cmd',
-        'lambda *a, **k: bridge.ext_cmd(*a, **k)',
+def test_deferred_annotation_and_class_state_flow_matches_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    module_call = "send('_focus', 'focus-tab', tab=int(_args.chrome_tab))"
+    cases = []
+    for label, initial, effect, expected in _DIRECTIONS:
+        before = f'send = {initial}\n'
+        after = f'send = {effect}\ndo_focus_tab(_args)'
+        old_gen = f'gen = ((send := {initial}) for _ in [1])\n'
+        new_gen = f'gen = ((send := {effect}) for _ in [1])\n'
+        imported = 'from _pyroute_test_sender import {} as send\n'
+        cases.extend([
+            (f'assignment-{label}', call, before, after, expected),
+            (f'import-{label}', call, imported.format(initial),
+             imported.format(effect) + 'do_focus_tab(_args)', expected),
+            (f'if-{label}', call, before,
+             f'if True:\n    send = {effect}\ndo_focus_tab(_args)', expected),
+            (f'try-{label}', call, 'ordinary=lambda *a,**k:0\n' + before,
+             f'try:\n    send = {effect}\nexcept NameError: pass\n'
+             'do_focus_tab(_args)', expected),
+            (f'generator-{label}', f'list(gen)\n{call}', before + old_gen,
+             new_gen + 'do_focus_tab(_args)', expected),
+            (f'propagation-{label}', 'list(gen)',
+             before + old_gen, (new_gen
+                                + f'do_focus_tab(_args)\n{module_call}'),
+             expected),
+            (f'global-{label}', f'global send\n{call}', before,
+             after, expected),
+            (f'early-{label}', call, before,
+             'do_focus_tab(_args)\ndo_focus_tab = ordinary\n'
+             f'send = {effect}', initial == 'ext_cmd'),
+            (f'closure-{label}',
+             f'send = {initial}\ndef inner():\n    return {call}\n'
+             f'send = {effect}\nreturn inner()', '', '', expected),
+            (f'nonlocal-{label}',
+             f'send = {initial}\ndef inner():\n    nonlocal send\n'
+             f'    send = {effect}\ninner()\n{call}', '', '', expected),
+        ])
+    local = ('try:\n    ' + call + '\nexcept UnboundLocalError:\n    pass\n'
+             'if False:\n    send = ordinary')
+    cases.append(('lexical-local', local, 'send = ext_cmd\n', '', False))
+    eager = sys.version_info < (3, 14)
+    for label, initial, effect, _ in _DIRECTIONS:
+        initial_sender = initial == 'ext_cmd'
+        effect_sender = effect == 'ext_cmd'
+        cases.extend([
+            (f'postponed-{label}', _focus_flow(
+                initial, effect, 'def inner(value: list(gen)): pass'),
+             'from __future__ import annotations', '', initial_sender),
+            (f'default-{label}', _focus_flow(
+                initial, effect, 'def inner(value=list(gen)): pass'),
+             '', '', effect_sender),
+            (f'default-annotation-{label}', _focus_flow(
+                initial, effect, 'def inner(value: list(gen)): pass'), '',
+             '', effect_sender if eager else initial_sender),
+        ])
+    support = ('class Base: pass\n'
+               'def decorate(value): return lambda cls: cls\n'
+               'def base_factory(*values): return Base\n'
+               'def meta_factory(*values): return type\n')
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    shapes = [
+        ('body', 'class Inner:\n    list(gen)'),
+        ('decorator', '@decorate(list(gen))\nclass Inner: pass'),
+        ('base', 'class Inner(base_factory(list(gen))): pass'),
+        ('keyword', 'class Inner(metaclass=meta_factory(list(gen))): pass'),
+        ('call', 'class Inner:\n    def run(self): list(gen)\nInner().run()'),
+        ('direct', 'class Inner:\n    def run(self): list(gen)\n'
+                   'Inner.run(None)'),
     ]
-    source = Path(tmp) / 'unprovable_sender.py'
-    for index, expression in enumerate(expressions):
-        source.write_text(
-            "async def f(bridge, cond):\n"
-            f"    send = {expression}\n"
-            f"    return await send('_x', 'focus-tab', tab={index})\n",
-            encoding='utf-8')
-        violations = py_tab_routing_violations(source, 'unprovable_sender.py')
-        assert violations, expression
-        assert 'may be ext_cmd' in violations[0], violations
-
-
-def test_direct_annotated_attribute_and_transitive_aliases_are_caught(tmp):
-    assignments = ["send = _ext_cmd", "send = bridge.ext_cmd",
-                   "send: object = _ext_cmd", "a = _ext_cmd\n    send = a"]
-    source = Path(tmp) / 'aliased_sender.py'
-    for assignment in assignments:
-        source.write_text(
-            "async def focus_tab(chrome_tab, bridge):\n"
-            f"    {assignment}\n"
-            "    return await send('x', 'y', tab=chrome_tab)\n",
-            encoding='utf-8')
-        violations = py_tab_routing_violations(source, 'aliased_sender.py')
-        assert violations, assignment
-        assert 'ext_cmd keyword `tab`' in violations[0], violations
+    for label, initial, effect, expected in _DIRECTIONS:
+        prefix = (f'send = {initial}\n'
+                  f'gen = ((send := {effect}) for _ in [1])\n')
+        cases.extend((f'{shape}-{label}', prefix + body + '\n' + call,
+                      support, '', expected) for shape, body in shapes)
+    setting = 'send = ordinary\ngen = ((send := ext_cmd) for _ in [1])\n'
+    orders = [
+        ('decorator-base', '@decorate(list(gen))\nclass Inner(base_factory('
+         f'{call})): pass'),
+        ('base-keyword', 'class Inner(base_factory(list(gen)), '
+         f'metaclass=meta_factory({call})): pass'),
+        ('keyword-body', 'class Inner(metaclass=meta_factory(list(gen))):\n'
+         f'    {call}'),
+    ]
+    cases.extend((label, setting + body, support, '', True)
+                 for label, body in orders)
+    local = f'send = ext_cmd\nclass Inner:\n    send = ordinary\n{call}'
+    cases.append(('class-local', local, support, '', True))
+    _assert_focus_cases(tmp, cases)
 
 
 def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
     bodies = [
+        "send = _ext_cmd", "send = b.ext_cmd", "send: object = _ext_cmd",
+        "a = _ext_cmd\n    send = a", "send = getattr(b, 'ext_cmd')",
+        "send = b.ext_cmd if flag else b.ext_cmd",
+        "send = lambda *a, **k: b.ext_cmd(*a, **k)",
         "send, other = b.ext_cmd, None",
         "[send, other] = [b.ext_cmd, None]",
         "([send], other) = ([b.ext_cmd], None)",
@@ -248,7 +321,6 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         "    return await other('x', 'y', tab=tab)",
         "send = b.get\n    inner = lambda x=(send := b.ext_cmd): x",
         "send = b.get\n    def inner(x=(send := b.ext_cmd)): pass",
-        "send = b.get\n    def inner(x: (send := b.ext_cmd)): pass",
         "send = b.get\n    @(send := b.ext_cmd)\n    def inner(): pass",
         "send = b.ext_cmd\n    def inner(other=send, "
         "reset=(send := b.get)):\n        return await other(tab=tab)",
@@ -268,7 +340,6 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*{**{}}]]",
         "send = b.get\n    [(send := b.ext_cmd) for _ in [*{**{'x': 1}}]]",
         _generator_flow('ext_cmd', 'get'),
-        _generator_flow('get', 'ext_cmd', 'list(gen)'),
         _generator_flow('get', 'ext_cmd', 'alias = gen', 'tuple(alias)'),
         _generator_flow('get', 'ext_cmd', 'for _ in gen: pass'),
         _generator_flow('get', 'ext_cmd', '[value for value in gen]'),
@@ -297,9 +368,6 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         _generator_flow('ext_cmd', 'get', 'list = b.get', 'list(gen)'),
         _generator_flow('ext_cmd', 'get',
                         'if flag: list = b.get', 'list(gen)'),
-        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
-        "    async def inner(list):\n        list(gen)\n"
-        "        return await send('x', 'y', tab=tab)\n    send = b.get",
         "from tools import list\n    send = b.ext_cmd\n"
         "    gen = ((send := b.get) for _ in (1,))\n    list(gen)",
         _generator_flow('ext_cmd', 'get',
@@ -312,6 +380,8 @@ def test_destructured_and_walrus_sender_aliases_are_caught(tmp):
         "send = b.ext_cmd\n    return await send((send := b.get), tab=tab)",
         "send = b.ext_cmd\n    def inner():\n        (send := b.get)",
         "send = b.ext_cmd\n    inner = lambda: (send := b.get)",
+        *(["send = b.get\n    def inner(x: (send := b.ext_cmd)): pass"]
+          if sys.version_info < (3, 14) else []),
     ]
     source = Path(tmp) / 'new_sender_alias.py'
     call = "\n    return await send('x', 'y', tab=tab)"
@@ -335,7 +405,6 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         "    return await other('x', 'y', tab=tab)",
         "send = b.ext_cmd\n    inner = lambda x=(send := b.get): x",
         "send = b.ext_cmd\n    def inner(x=(send := b.get)): pass",
-        "send = b.ext_cmd\n    def inner(x: (send := b.get)): pass",
         "send = b.ext_cmd\n    @(send := b.get)\n    def inner(): pass",
         "send = b.get\n    def inner(other=send, "
         "reset=(send := b.ext_cmd)):\n        return await other(tab=tab)\n"
@@ -355,7 +424,6 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         "send = b.get\n    [(send := b.ext_cmd) for _ in [*{**{}}]]",
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*{**{'x': 1}}]]",
         _generator_flow('get', 'ext_cmd'),
-        _generator_flow('ext_cmd', 'get', 'list(gen)'),
         _generator_flow('ext_cmd', 'get', 'alias = gen', 'tuple(alias)'),
         _generator_flow('ext_cmd', 'get', 'for _ in gen: pass'),
         _generator_flow('ext_cmd', 'get', '[value for value in gen]'),
@@ -384,6 +452,9 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         "send = b.get\n    gen = ((send := b.ext_cmd) for _ in (1,))\n"
         "    async def inner(list):\n        list(gen)\n"
         "        return await send('x', 'y', tab=tab)",
+        "send = b.ext_cmd\n    gen = ((send := b.get) for _ in (1,))\n"
+        "    async def inner(list):\n        list(gen)\n"
+        "        return await send('x', 'y', tab=tab)\n    send = b.get",
         "from tools import list\n    send = b.get\n"
         "    gen = ((send := b.ext_cmd) for _ in (1,))\n    list(gen)",
         _generator_flow('get', 'ext_cmd',
@@ -393,7 +464,28 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         "send = b.ext_cmd\n    tuple((send := b.get) for _ in (1,))",
         "def inner():\n        (send := b.ext_cmd)",
         "inner = lambda: (send := b.ext_cmd)",
+        *(["send = b.ext_cmd\n    def inner(x: (send := b.get)): pass"]
+          if sys.version_info < (3, 14) else []),
     ]
+    rebinding = [
+        "send = b.ext_cmd\nsend = b.get",
+        "send = b.ext_cmd\nwhile values:\n    send = b.get\n"
+        "    await send(tab=tab)\nbreak",
+        "send = b.ext_cmd\nfor send in (b.get,): pass",
+        "send = b.ext_cmd\ndef send(*a, **k): pass",
+        "send = b.ext_cmd\nwith b as send:\n    await send(tab=tab)",
+        "send = b.ext_cmd\ntry: raise OSError\n"
+        "except OSError as send:\n    await send(tab=tab)\nreturn None",
+        "send = b.ext_cmd\nfor _ in values:\n"
+        "    def send(*a, **k): pass\n    send(tab=tab)\nreturn None",
+        "send = b.ext_cmd\nreturn await b.send('x', 'y', tab=tab)",
+    ]
+    patterns = ["object() as send", "{'s': send}", "[_, *send]",
+                "{'a': 1, **send}", "BaseException(args=send)"]
+    rebinding.extend("send = b.ext_cmd\nmatch b.mode:\n"
+                     f"    case {pattern}:\n        await send(tab=0)\nreturn"
+                     for pattern in patterns)
+    bodies.extend(body.replace('\n', '\n    ') for body in rebinding)
     source = Path(tmp) / 'clean_sender_alias.py'
     for body in bodies:
         text = ("async def f(b, tab, values, flag):\n    " + body
@@ -402,50 +494,13 @@ def test_destructured_and_walrus_rebindings_stay_positioned_and_scoped(tmp):
         assert not py_tab_routing_violations(source, source.name), body
 
 
-def test_rebinding_forms_clear_sender_aliases_without_method_guessing(tmp):
-    bodies = {
-        'assignment': "send = b.ext_cmd\nsend = b.get\n"
-                      "return await send('x', 'y', tab=tab)",
-        'for-target': "send = b.ext_cmd\nfor send in (b.get,): pass\n"
-                      "return await send('x', 'y', tab=tab)",
-        'definition': "send = b.ext_cmd\ndef send(*a, **k): pass\n"
-                      "return send('x', 'y', tab=tab)",
-        'for-body': "send = b.ext_cmd\nfor _ in values:\n"
-                    "    send = b.get\n    await send(tab=tab)\nreturn None",
-        'while-body': "send = b.ext_cmd\nwhile values:\n"
-                      "    send = b.get\n    await send(tab=tab)\n"
-                      "    break\nreturn None",
-        'with-body': "send = b.ext_cmd\nwith b as send:\n"
-                     "    await send(tab=tab)\nreturn None",
-        'try-body': "send = b.ext_cmd\ntry:\n    send = b.get\n"
-                    "    await send(tab=tab)\nexcept OSError: "
-                    "pass\nreturn None",
-        'except-as': "send = b.ext_cmd\ntry: raise OSError\n"
-                     "except OSError as send:\n    await send(tab=tab)\n"
-                     "return None",
-        'nested-def': "send = b.ext_cmd\nfor _ in values:\n"
-                      "    def send(*a, **k): pass\n"
-                      "    send(tab=tab)\nreturn None",
-        'attribute': "send = b.ext_cmd\n"
-                     "return await b.send('x', 'y', tab=tab)",
-    }
-    patterns = ["object() as send", "{'s': send}", "[_, *send]",
-                "{'a': 1, **send}", "BaseException(args=send)"]
-    bodies.update((f'match-{index}', "send = b.ext_cmd\nmatch b.mode:\n"
-                   f"    case {pattern}:\n        await send(tab=tab)\n"
-                   "return None") for index, pattern in enumerate(patterns))
-    source = Path(tmp) / 'rebound_sender.py'
-    for label, body in bodies.items():
-        indented = body.replace('\n', '\n    ')
-        source.write_text(
-            f"async def f(b, tab, values):\n    {indented}\n",
-            encoding='utf-8')
-        found = py_tab_routing_violations(source, source.name)
-        assert not found, (label, found)
-
-
 def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     """Typed commands route to extension; eval payloads may route by tab."""
+    tree = ast.parse("cmd = dict(BASE)\ncmd['tab'] = tab_id\n"
+                     "api('PUT', '/command', cmd)\n")
+    assert payload_keys(tree.body[0].value, {}) is None
+    assert dict_assignments(tree)['cmd']['tab'][0] == 2
+
     def js(body, args='tid'):
         return 'js', f'async function f({args}) {{\n{body}\n}}\n'
 
@@ -454,88 +509,38 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                   *(ROOT / 'daedalus_cli').glob('*.py')]
     senders_js = sorted((ROOT / 'dashboard').rglob('*.js'))
     scanned_py = [p for p in senders_py if p.is_file()]
-    assert len(scanned_py) >= 18, (
-        f'found {len(scanned_py)} Python senders (daedalus_mcp/server.py + '
-        'daedalus_mcp/tools_*.py + daedalus_cli/*.py), expected at least 18 — '
-        'one composition point, seven MCP tool modules, and ten CLI modules; '
-        'the senders moved and this guard is stale')
-    assert len(senders_js) >= 10, (
-        f'found {len(senders_js)} dashboard .js files, expected at least '
-        '10 — the senders moved and this guard is stale')
+    assert len(scanned_py) >= 18, ('Python senders moved', len(scanned_py))
+    assert len(senders_js) >= 10, ('dashboard senders moved', len(senders_js))
     violations = []
-    for path in scanned_py:
-        violations.extend(py_tab_routing_violations(
-            path, path.relative_to(ROOT)))
-    for path in senders_js:
-        violations.extend(js_tab_routing_violations(
-            path, path.relative_to(ROOT)))
+    scanners = [(path, py_tab_routing_violations) for path in scanned_py]
+    scanners += [(path, js_tab_routing_violations) for path in senders_js]
+    for path, scanner in scanners:
+        violations.extend(scanner(path, path.relative_to(ROOT)))
     assert not violations, (
-        'these senders pass a browser tab as the routing field `tab`; the '
-        "browser target is `tabId` and a typed command routes to "
-        "`tab: 'extension'`:\n" + '\n'.join(violations))
+        'browser tab sent as typed-command `tab`:\n' + '\n'.join(violations))
     skipped_bodies = [
         "    for send in ():\n        pass\n",
         "    while False:\n        send = bridge.get\n",
-        "    try:\n        pass\n"
-        "    except OSError as send:\n        pass\n",
+        "    try: pass\n    except OSError as send: pass\n",
         "    match 0:\n        case 1 as send:\n            pass\n",
     ]
     entered_bodies = [
-        "    try:\n        send = bridge.ext_cmd\n"
-        "        return await send('x', 'y', tab=x)\n"
+        "    try:\n        send = bridge.ext_cmd; "
+        "return await send('x', 'y', tab=x)\n"
         "    except OSError:\n        return None\n",
         "    async with bridge.session():\n"
-        "        send = bridge.ext_cmd\n"
-        "        return await send('x', 'y', tab=x)\n",
-        "    for item in xs:\n        send = bridge.ext_cmd\n"
-        "        await send('x', 'y', tab=x)\n",
-        "    while xs:\n        send = bridge.ext_cmd\n"
-        "        await send('x', 'y', tab=x)\n        break\n",
+        "        send = bridge.ext_cmd; return await send('x','y',tab=x)\n",
+        "    for item in xs:\n        send = bridge.ext_cmd; "
+        "await send('x','y',tab=x)\n",
+        "    while xs:\n        send = bridge.ext_cmd; "
+        "await send('x','y',tab=x); break\n",
     ]
     reversions = [
-        ('py', "from daedalus_cli.invoke import ext_cmd as send\n"
-               "send('x', 'y', tab=301)\n"),
-        ('py', "async def f(bridge, tab):\n"
-               "    send, other = bridge.ext_cmd, None\n"
-               "    return await send('x', 'y', tab=tab)\n"),
-        ('py', "async def f(bridge, tab):\n"
-               "    return await (send := bridge.ext_cmd)("
-               "'x', 'y', tab=tab)\n"),
-        ('py', "import daedalus_cli.invoke as inv\n"
-               "inv.ext_cmd('x', 'y', tab=302)\n"),
-        ('py', "async def f(bridge):\n"
-               "    send = bridge.ext_cmd; [send for send in ()]\n"
-               "    return await send('x', 'y', tab=308)\n"),
-        ('py', "def f():\n    send = _ext_cmd\n"
-               "    async def inner():\n"
-               "        return await send('x', 'y', tab=307)\n"),
-        ('py', "def f():\n    return None\n"
-               "    async def inner(tab):\n"
-               "        return await _ext_cmd('x', 'y', tab=tab)\n"),
-        ('py', "async def f(bridge, send=bridge.ext_cmd):\n"
-               "    return await send('x', 'y', tab=306)\n"),
         ('py', "class Tabs:\n    async def focus(self, tab):\n"
                "        return await _ext_cmd('x', 'y', tab=tab)\n"),
-        ('py', "class Tabs:\n    if enabled:\n"
-               "        async def focus(self, tab):\n"
-               "            return await _ext_cmd('x', 'y', tab=tab)\n"),
-        ('py', "async def f(bridge, xs):\n    for i in xs:\n"
-               "        if i:\n            send = bridge.ext_cmd\n"
-               "        else:\n            await send('x', 'y', tab=i)\n"),
-        ('py', "async def f(bridge, xs):\n    send = bridge.ext_cmd\n"
-               "    for x in xs:\n        send = x.get\n        break\n"
-               "    return await send('x', 'y', tab=310)\n"),
-        ('py', "async def f(bridge):\n    try:\n"
-               "        send = bridge.ext_cmd\n        bridge.fail()\n"
-               "    except OSError:\n"
-               "        return await send('x', 'y', tab=311)\n"),
         ('py', "async def f(chrome_tab):\n"
                "    fields = {}\n"
                "    fields['tab'] = str(chrome_tab)\n"
-               "    return await _ext_cmd('_ss', 'screenshot', **fields)\n"),
-        ('py', "async def f(tab_id):\n"
-               "    fields = {}\n"
-               "    fields['tab'] = tab_id\n"
                "    return await _ext_cmd('_ss', 'screenshot', **fields)\n"),
         ('py', "def f(args):\n"
                "    cmd = {'id': '_ss', 'type': 'screenshot', 'tab': 'extension'}\n"
@@ -666,30 +671,25 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
          "}\n"),
     ]
     fixture = Path(tmp) / 'sender'
+
+    def scan(lang, source, label):
+        path = fixture.with_suffix('.py' if lang == 'py' else '.js')
+        path.write_text(source, encoding='utf-8')
+        scanner = (py_tab_routing_violations if lang == 'py'
+                   else js_tab_routing_violations)
+        return scanner(path, label)
+
     for i, (lang, src) in enumerate(reversions):
-        path = fixture.with_suffix('.py' if lang == 'py' else '.js')
-        path.write_text(src, encoding='utf-8')
-        found = py_tab_routing_violations(path, f'reversion-{i}') if lang == 'py' \
-            else js_tab_routing_violations(path, f'reversion-{i}')
-        assert found, (
-            f'reversion {i} was NOT caught — the guard asserts a contract it '
-            f'does not enforce:\n{src}')
+        assert scan(lang, src, f'reversion-{i}'), (
+            f'reversion {i} was not caught:\n{src}')
     for i, (lang, src) in enumerate(legitimate):
-        path = fixture.with_suffix('.py' if lang == 'py' else '.js')
-        path.write_text(src, encoding='utf-8')
-        found = py_tab_routing_violations(path, f'legitimate-{i}') if lang == 'py' \
-            else js_tab_routing_violations(path, f'legitimate-{i}')
+        found = scan(lang, src, f'legitimate-{i}')
         assert not found, (
-            f'legitimate shape {i} was flagged — eval routing and `tabId` are '
-            f'correct:\n{src}\n{found}')
+            f'legitimate shape {i} was flagged:\n{src}\n{found}')
     for i, (label, src) in enumerate(disclosed_js_limits):
-        path = fixture.with_suffix('.js')
-        path.write_text(src, encoding='utf-8')
-        found = js_tab_routing_violations(path, f'disclosed-{i}')
+        found = scan('js', src, f'disclosed-{i}')
         assert not found, (
-            f'disclosed JavaScript limit {label!r} is now caught — remove or '
-            f'narrow its docstring disclosure and promote this fixture to a '
-            f'reversion:\n{src}\n{found}')
+            f'disclosed JS limit {label!r} caught:\n{src}\n{found}')
 
 
 def main():

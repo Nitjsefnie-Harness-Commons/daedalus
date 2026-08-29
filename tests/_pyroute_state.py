@@ -49,6 +49,14 @@ class DeferredCallable:
 
     scope: ast.AST
     state: FlowState
+    locals: frozenset
+
+
+@dataclass(frozen=True)
+class DeferredClass:
+    """Methods belonging to one statically known class object."""
+
+    methods: dict
 
 
 def scope_nodes(scope):
@@ -60,14 +68,14 @@ def scope_nodes(scope):
         yield from scope_nodes(child)
 
 
-def lexical_scope_nodes(scope):
+def lexical_scope_nodes(scope, annotations_eager=True):
     """Nodes compiled in `scope`, including nested-definition headers."""
     roots = [scope.body] if isinstance(scope, ast.Lambda) else scope.body
 
     def visit(node):
         yield node
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            values = definition_values(node)
+            values = definition_values(node, annotations_eager)
         elif isinstance(node, ast.Lambda):
             values = [*node.args.defaults,
                       *(value for value in node.args.kw_defaults
@@ -84,9 +92,9 @@ def lexical_scope_nodes(scope):
         yield from visit(root)
 
 
-def callable_builtin_scope(scope):
-    """Return lexical shadows and explicit globals for one callable."""
-    nodes = list(lexical_scope_nodes(scope))
+def lexical_scope_names(scope, annotations_eager=True):
+    """Return local, global, and nonlocal names compiled in one scope."""
+    nodes = list(lexical_scope_nodes(scope, annotations_eager))
     comprehension_targets = {
         target
         for parent in nodes if isinstance(parent, COMPREHENSIONS)
@@ -111,20 +119,19 @@ def callable_builtin_scope(scope):
     bound |= {node.name for node in nodes
               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                                    ast.ClassDef))}
-    args = scope.args
-    bound |= {arg.arg for arg in [*args.posonlyargs, *args.args,
-                                  *args.kwonlyargs]}
-    if args.vararg is not None:
-        bound.add(args.vararg.arg)
-    if args.kwarg is not None:
-        bound.add(args.kwarg.arg)
+    args = getattr(scope, 'args', None)
+    if args is not None:
+        bound |= {arg.arg for arg in [*args.posonlyargs, *args.args,
+                                      *args.kwonlyargs]}
+        if args.vararg is not None:
+            bound.add(args.vararg.arg)
+        if args.kwarg is not None:
+            bound.add(args.kwarg.arg)
     globals_ = {name for node in nodes if isinstance(node, ast.Global)
                 for name in node.names}
     nonlocals = {name for node in nodes if isinstance(node, ast.Nonlocal)
                  for name in node.names}
-    lexical = (bound - globals_ - nonlocals) | nonlocals
-    return (lexical & BUILTIN_CONSUMERS,
-            globals_ & BUILTIN_CONSUMERS)
+    return bound - globals_ - nonlocals, globals_, nonlocals
 
 
 def is_extension_constant(node):
@@ -570,7 +577,7 @@ def merged_evaluated_value(default, states):
     return None
 
 
-def callable_state(scope, states):
+def callable_state(scope, states, annotations_eager=True):
     args = scope.args
     aliases = inherited_aliases(states)
     generators = inherited_generators(states)
@@ -579,8 +586,11 @@ def callable_state(scope, states):
         *(state.builtin_globals for state in states))
     inherited_locals = set().union(
         *(state.builtin_locals for state in states))
-    local_names, global_names = callable_builtin_scope(scope)
-    builtin_locals = (inherited_locals | local_names) - global_names
+    local_names, global_names, nonlocals = lexical_scope_names(
+        scope, annotations_eager)
+    builtin_locals = (inherited_locals
+                      | ((local_names | nonlocals) & BUILTIN_CONSUMERS)) \
+        - global_names
     positional = [*args.posonlyargs, *args.args]
     parameters = [*positional, *args.kwonlyargs]
     if args.vararg is not None:
@@ -589,10 +599,12 @@ def callable_state(scope, states):
         parameters.append(args.kwarg)
     bound = (set.intersection(*(state.bound for state in states))
              if states else set())
+    bound.difference_update(local_names)
     bound.update(parameter.arg for parameter in parameters)
-    for parameter in parameters:
-        aliases.pop(parameter.arg, None)
-        generators.pop(parameter.arg, None)
+    for name in local_names:
+        aliases.pop(name, None)
+        generators.pop(name, None)
+        callables.pop(name, None)
     defaults = zip(positional[-len(args.defaults):], args.defaults)
     if not args.defaults:
         defaults = ()
@@ -613,14 +625,6 @@ def function_allowed_opaque(node):
     return (frozenset({node.args.kwarg.arg})
             if node.name in ('ext_cmd', '_ext_cmd')
             and node.args.kwarg is not None else frozenset())
-
-
-def class_functions(node):
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            yield child
-        else:
-            yield from class_functions(child)
 
 
 def clear_names(states, names):
@@ -648,7 +652,7 @@ def argument_defaults(args):
             *(default for default in args.kw_defaults if default is not None)]
 
 
-def definition_values(node):
+def definition_values(node, annotations_eager=True):
     """Expressions evaluated while a function object is defined."""
     args = node.args
     parameters = [*args.posonlyargs, *args.args]
@@ -657,9 +661,11 @@ def definition_values(node):
     parameters.extend(args.kwonlyargs)
     if args.kwarg is not None:
         parameters.append(args.kwarg)
-    annotations = [parameter.annotation for parameter in parameters
-                   if parameter.annotation is not None]
-    returns = [node.returns] if node.returns is not None else []
+    annotations = ([parameter.annotation for parameter in parameters
+                    if parameter.annotation is not None]
+                   if annotations_eager else [])
+    returns = ([node.returns] if node.returns is not None
+               and annotations_eager else [])
     return [*node.decorator_list, *argument_defaults(args),
             *annotations, *returns]
 
