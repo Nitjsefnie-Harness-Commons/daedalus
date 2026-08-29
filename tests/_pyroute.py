@@ -1,7 +1,8 @@
 """Follow Python payloads and report unproved sender aliases."""
 import ast
 
-from _pyroute_state import (COMPREHENSIONS as _COMPREHENSIONS,
+from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
+                            COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
                             UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
                             FlowState, apply_alias_statement,
@@ -32,7 +33,6 @@ _state_pair_signature = state_signature
 _EAGER_ITERABLE_CALLS = frozenset({
     'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
 })
-_EAGER_ITERABLE_METHODS = frozenset({'extend', 'join', 'update', 'writelines'})
 _PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
 
 
@@ -305,6 +305,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             outputs.extend(consumed)
         return _dedupe_state_pairs(outputs)
 
+    def exhaust_generators(generators, current_pairs):
+        for state in current_pairs:
+            state.generators = {
+                name: value for name, value in state.generators.items()
+                if value not in generators}
+        return _dedupe_state_pairs(current_pairs)
+
     def check_expression(node, current_pairs):
         if node is None:
             return current_pairs
@@ -323,6 +330,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 _bind_alias_target(node.target, node.value, state, bindings)
                 state.aliases.pop(node.target.id, None)
                 state.generators.pop(node.target.id, None)
+                state.builtin_shadows.update(
+                    {node.target.id} & _BUILTIN_CONSUMERS)
                 state.aliases.update(bindings[0])
                 state.generators.update(bindings[1])
             return remember(node, current_pairs)
@@ -356,19 +365,19 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 sender = state.aliases.get(node.func.target.id) if isinstance(
                     node.func, ast.NamedExpr) else _resolve_sender_name(
                         node.func, state.aliases)
+                call_name = (node.func.id if isinstance(node.func, ast.Name)
+                             else None)
+                consumer = (call_name if call_name in _BUILTIN_CONSUMERS
+                            and call_name not in state.builtin_shadows
+                            else None)
                 current = [state]
                 for argument in arguments:
                     current = check_expression(argument, current)
-                call_name = (node.func.id if isinstance(node.func, ast.Name)
-                             else None)
-                method = (node.func.attr if isinstance(
-                    node.func, ast.Attribute) else None)
-                if call_name in _EAGER_ITERABLE_CALLS or method in (
-                        _EAGER_ITERABLE_METHODS):
+                if consumer in _EAGER_ITERABLE_CALLS:
                     for argument in node.args:
                         current = consume_iterable(
                             argument, current, exhaust=True)
-                elif call_name in _PARTIAL_ITERABLE_CALLS and node.args:
+                elif consumer in _PARTIAL_ITERABLE_CALLS and node.args:
                     current = consume_iterable(
                         node.args[0], current, exhaust=False)
                 for current_state in current:
@@ -432,6 +441,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for state in pairs:
                 state.aliases.pop(statement.name, None)
                 state.generators.pop(statement.name, None)
+                state.builtin_shadows.update(
+                    {statement.name} & _BUILTIN_CONSUMERS)
             nested, _ = _py_flow_violations(
                 statement.body, [_callable_state(statement.args, pairs)], rel,
                 _function_allowed_opaque(statement))
@@ -441,6 +452,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for state in pairs:
                 state.aliases.pop(statement.name, None)
                 state.generators.pop(statement.name, None)
+                state.builtin_shadows.update(
+                    {statement.name} & _BUILTIN_CONSUMERS)
             nested, _ = _py_flow_violations(
                 list(_class_functions(statement)),
                 [_copy_state_pair(pair) for pair in pairs], rel,
@@ -467,6 +480,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             header = (statement.iter if isinstance(
                 statement, (ast.For, ast.AsyncFor)) else statement.test)
             pairs = check_expression(header, pairs)
+            loop_generators = {
+                generator_for(header, state) for state in pairs
+                if generator_for(header, state) is not None}
             if isinstance(statement, (ast.For, ast.AsyncFor)):
                 pairs = consume_iterable(header, pairs, exhaust=False)
             incoming = [_copy_state_pair(pair) for pair in pairs]
@@ -500,11 +516,14 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 if signatures == previous:
                     break
                 previous = signatures
-            pairs = _dedupe_state_pairs(
-                [*zero_pairs, *post_body, *break_pairs])
+            normal_pairs = _dedupe_state_pairs([*zero_pairs, *post_body])
+            if isinstance(statement, (ast.For, ast.AsyncFor)):
+                normal_pairs = exhaust_generators(
+                    loop_generators, normal_pairs)
             if statement.orelse:
-                found, pairs = walk(statement.orelse, pairs)
+                found, normal_pairs = walk(statement.orelse, normal_pairs)
                 violations.extend(found)
+            pairs = _dedupe_state_pairs([*normal_pairs, *break_pairs])
             continue
         if isinstance(statement, (ast.With, ast.AsyncWith)):
             entered = [_copy_state_pair(pair) for pair in pairs]
@@ -520,6 +539,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         state.dicts.pop(name, None)
                         state.aliases.pop(name, None)
                         state.generators.pop(name, None)
+                        state.builtin_shadows.update(
+                            {name} & _BUILTIN_CONSUMERS)
                         if resolved is not None:
                             state.aliases[name] = resolved
             found, pairs = walk(statement.body, entered)
@@ -625,5 +646,5 @@ def py_tab_routing_violations(path, rel):
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
     violations, _ = _py_flow_violations(
-        tree.body, [FlowState({}, {}, {}, {})], rel, frozenset())
+        tree.body, [FlowState({}, {}, {}, {}, set())], rel, frozenset())
     return list(dict.fromkeys(violations))
