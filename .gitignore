@@ -235,7 +235,9 @@
 !/tests/_prgate_race.py
 !/tests/_pyroute.py
 !/tests/_realbrowser.py
+!/tests/_realbrowser_controls.py
 !/tests/_realbrowser_errors.py
+!/tests/_realbrowser_pages.py
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_segments.py
@@ -308,6 +310,7 @@
 !/tests/test_path_safety.py
 !/tests/test_pr_body.py
 !/tests/test_pr_gate.py
+!/tests/test_real_browser_boundary.py
 !/tests/test_real_browser_classification.py
 !/tests/test_real_browser_environment.py
 !/tests/test_real_browser_eval.py
