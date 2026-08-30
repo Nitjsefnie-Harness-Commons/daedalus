@@ -6,6 +6,7 @@ added by the issue 280 review round live here: what `client_states` does with
 `grace=None`, which diagnosis kind answers first, what the silent diagnosis
 refuses to name, and the real caller that routes its states through them.
 """
+import re
 import subprocess
 import sys
 from unittest import mock
@@ -139,6 +140,17 @@ def test_a_nonzero_client_with_output_is_not_named_silent(tmp):
 
 def test_run_same_id_client_overlap_diagnoses_its_client_states(tmp):
     """The caller hands its client states to the diagnosis before returning."""
+    message = _overlap_client_failure_message(tmp)
+    assert 'clients still running after grace' in message, message
+
+
+def _overlap_client_failure_message(tmp):
+    """A real overlap run whose clients are reported as still running.
+
+    The clients and the bridge are real, so the failure the caller raises
+    carries evidence a stubbed bridge could not produce: the bridge's own log
+    and the deliveries its results created.
+    """
     stalled = {
         'stillRunning': True, 'returncode': None,
         'stdout': '', 'stderr': '', 'drainTimedOut': False,
@@ -147,7 +159,6 @@ def test_run_same_id_client_overlap_diagnoses_its_client_states(tmp):
     def failing_states(processes, grace, **kwargs):
         return {owner: dict(stalled) for owner in processes}
 
-    message = None
     with mock.patch.object(_overlap, 'client_states', failing_states):
         try:
             _overlap.run_same_id_client_overlap(
@@ -156,10 +167,23 @@ def test_run_same_id_client_overlap_diagnoses_its_client_states(tmp):
                 'overlap-client-token',
                 _util.ROOT / 'extension' / 'background.js')
         except AssertionError as failure:
-            message = str(failure)
-        else:
-            raise AssertionError('the caller never diagnosed its clients')
-    assert 'clients still running after grace' in message, message
+            return str(failure)
+    raise AssertionError('the caller never diagnosed its clients')
+
+
+def test_a_client_failure_names_the_bridge_log_and_delivery_state(tmp):
+    """A client failure carries the bridge log tail and the delivery record.
+
+    The question a same-id timeout leaves open is whether the POST reached the
+    bridge, and the only surfaces that answer it are the bridge's own log and
+    what it retained per delivery.
+    """
+    message = _overlap_client_failure_message(tmp)
+    assert 'bridge log tail' in message, message
+    assert '[Daedalus] Listening on 127.0.0.1:' in message, message
+    assert 'delivery state' in message, message
+    assert re.search(
+        r'_extension/\d+_\d+\.json: deliveryId \d+_\d+', message), message
 
 
 if __name__ == '__main__':

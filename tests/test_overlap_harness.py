@@ -90,6 +90,26 @@ async function dispatchCommand(command) {
 }
 """
 
+# Two POSTs for one owner, the first issued and only the second awaited. With
+# a fabricated response both attempts are recorded during the dispatch, so the
+# recorded count jumps past one inside a single completion-wait poll window.
+_DOUBLE_POST_WORKER = """
+async function loadConfig() {}
+
+async function dispatchCommand(command) {
+  const result = await chrome.cookies.getAll({ domain: command.domain });
+  const first = fetch('test-bridge/result', {
+    method: 'POST',
+    body: JSON.stringify({ id: command.id, result }),
+  });
+  await fetch('test-bridge/result', {
+    method: 'POST',
+    body: JSON.stringify({ id: command.id, result }),
+  });
+  await first;
+}
+"""
+
 
 def _worker(tmp, source):
     path = Path(tmp) / 'background.js'
@@ -105,17 +125,18 @@ def _wait_for_path(path):
 
 
 @contextlib.contextmanager
-def _slow_result_server(post_delay=0):
+def _slow_result_server(post_delay=0, post_status=200):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             self.rfile.read(int(self.headers['Content-Length']))
             if post_delay:
                 time.sleep(post_delay)
+            body = b'{}' if post_status == 200 else b'{"error":"no"}'
             try:
-                self.send_response(200)
-                self.send_header('Content-Length', '2')
+                self.send_response(post_status)
+                self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(b'{}')
+                self.wfile.write(body)
             except OSError:
                 # A delayed POST can outlive the child the backstop
                 # killed, so writing to its closed socket is expected.
@@ -310,6 +331,32 @@ def test_a_slow_result_post_cannot_preempt_the_consume_wait(tmp):
         'result POST for owner-a',
         'the first result to be consumed',
     ])
+
+
+def test_a_rejected_result_post_is_reported_not_posted(tmp):
+    """A non-2xx result POST is a named failure, never a posted result."""
+    with _slow_result_server(post_status=400) as base:
+        failure = _harness_failure(
+            _worker(tmp, _SETTLING_WORKER),
+            commands=[{'id': '_cookies', 'domain': 'owner-a'}],
+            order=['owner-a'], result_base=base, inner_wait=2)
+    assert 'the result POST for owner-a failed' in failure, failure
+    assert 'status 400' in failure, failure
+    assert '{"error":"no"}' in failure, failure
+
+
+def test_two_posts_for_one_owner_cannot_deadlock_the_wait(tmp):
+    """Two resolving fetches for one owner are attempts, not a missing post.
+
+    The completion wait keys on the owner's recorded 2xx, so a second POST
+    landing beside the first leaves the wait answerable instead of pinned at a
+    count that no longer matches the pushes.
+    """
+    posted = _overlap.run_background_overlap(
+        _worker(tmp, _DOUBLE_POST_WORKER),
+        [{'id': '_cookies', 'domain': 'owner-a'}],
+        ['owner-a'], inner_wait=2)
+    assert [item['owner'] for item in posted] == ['owner-a', 'owner-a'], posted
 
 
 def test_real_overlap_bridge_defaults_to_the_durable_token_path(tmp):

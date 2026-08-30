@@ -32,7 +32,8 @@ const waitBetween = waitBetweenText === '1';
 const innerWaitMs = Number(innerWaitText);
 const bridgeUrl = resultBase || 'test-bridge';
 const pendingCookies = new Map();
-const postedResults = [];
+const postAttempts = [];
+const settledDispatches = new Set();
 const nativeFetch = globalThis.fetch;
 
 function response(status, data) {
@@ -45,16 +46,33 @@ function response(status, data) {
   };
 }
 
+function attemptRecord(payload, result, body) {
+  return {
+    id: payload.id,
+    owner: payload.result[0].value,
+    deliveryId: payload._did || null,
+    ok: result.ok,
+    status: result.status,
+    body,
+  };
+}
+
 async function bridgeFetch(target, init = {}) {
   const url = String(target);
   if (url.endsWith('/result') && init.method === 'POST') {
     const payload = JSON.parse(init.body);
     if (resultBase) {
       const result = await nativeFetch(target, init);
-      postedResults.push(payload);
+      const body = await result.text();
+      const record = attemptRecord(payload, result, body);
+      postAttempts.push(record);
+      if (!record.ok) {
+        process.stderr.write('[post-failure] owner=' + record.owner
+          + ' status ' + record.status + ' body ' + body + '\n');
+      }
       return result;
     }
-    postedResults.push(payload);
+    postAttempts.push(attemptRecord(payload, response(200, { ok: true }), ''));
     return response(200, { ok: true });
   }
   if (url.includes('/stream?')) return response(503, { error: 'disabled' });
@@ -179,6 +197,18 @@ async function waitForResultConsume() {
   }, 'the first result to be consumed');
 }
 
+// An owner's dispatch settles when the worker stops trying to post, so only
+// then is a run with no recorded 2xx a failure rather than a retry in flight.
+function ownerPosted(owner) {
+  const mine = postAttempts.filter((item) => item.owner === owner);
+  if (mine.some((item) => item.ok)) return true;
+  if (!settledDispatches.has(owner)) return false;
+  throw new Error('the result POST for ' + owner + ' failed: '
+    + (mine.filter((item) => !item.ok).map((item) =>
+        'status ' + item.status + ' body ' + item.body).join('; ')
+      || 'no POST was recorded'));
+}
+
 (async () => {
   step('the worker script to initialize');
   vm.runInContext(
@@ -193,6 +223,11 @@ async function waitForResultConsume() {
   const executions = commands.map((_command, index) =>
     // vm-load-exempt: dispatches a queued command by index, not a file
     vm.runInContext('dispatchCommand(commands[' + index + '])', context));
+  // A settled dispatch is the only signal that an owner's post sequence is
+  // over; the harness records it beside the attempts it can then judge.
+  commands.forEach((command, index) => executions[index].then(
+    () => settledDispatches.add(command.domain),
+    () => settledDispatches.add(command.domain)));
   await waitFor(
     () => pendingCookies.size === commands.length,
     'all cookie handlers to start');
@@ -201,12 +236,10 @@ async function waitForResultConsume() {
     const owner = completionOrder[index];
     const complete = pendingCookies.get(owner);
     if (!complete) throw new Error('missing cookie completion for ' + owner);
-    const postedBefore = postedResults.length;
     complete();
     // The POST round-trip is incidental; only the outer backstop bounds it.
     await waitFor(
-      () => postedResults.length === postedBefore + 1,
-      'result POST for ' + owner, null);
+      () => ownerPosted(owner), 'result POST for ' + owner, null);
     if (waitBetween && index + 1 < completionOrder.length) {
       await waitForResultConsume();
     }
@@ -214,10 +247,11 @@ async function waitForResultConsume() {
   const settleLabel = 'all dispatchCommand calls to settle';
   step(settleLabel);
   await bounded(Promise.all(executions), settleLabel, innerWaitMs);
-  process.stdout.write(JSON.stringify(postedResults.map((item) => ({
+  process.stdout.write(JSON.stringify(postAttempts.filter(
+    (item) => item.ok).map((item) => ({
     id: item.id,
-    owner: item.result[0].value,
-    deliveryId: item._did || null,
+    owner: item.owner,
+    deliveryId: item.deliveryId,
   }))));
   step('the overlap harness finished');
 })().catch((error) => {
@@ -403,12 +437,27 @@ def cookie_client_argv(owner):
     ]
 
 
+def _client_failure_diagnostics(bridge_log, docroot):
+    """The bridge log tail and the retained deliveries, for one diagnosis."""
+    tail = ''.join(bridge_log[-40:]).strip() or 'no bridge log captured'
+    root = Path(docroot) / 'results' / 'deliveries'
+    lines = []
+    for path in sorted(root.rglob('*.json')):
+        record = json.loads(path.read_text(encoding='utf-8'))
+        lines.append(
+            f"{path.relative_to(root)}: deliveryId {record['deliveryId']}")
+    delivery = '\n'.join(lines) or 'no delivery retained'
+    return f'bridge log tail:\n{tail}\ndelivery state:\n{delivery}'
+
+
 def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
                                token, background):
     """Drive real same-id CLI clients and preserve both failure surfaces."""
     owners = ('owner-a', 'owner-b')
     bridge_env = {'TOKEN': '', 'DAEDALUS_TOKEN': token}
-    with _util.bridge(tmp, env=bridge_env) as (base, docroot):
+    bridge_log = []
+    with _util.bridge(
+            tmp, env=bridge_env, output=bridge_log) as (base, docroot):
         client_env = dict(env)
         client_env.update({
             'DAEDALUS_URL': base,
@@ -440,7 +489,13 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
             # wall-clock margin of its own: one that outlived its result would
             # only be killed while about to finish on its own.
             states = client_states(processes, grace=None)
-            assert_clients_exited(states, posted)
+            try:
+                assert_clients_exited(states, posted)
+            except AssertionError as failure:
+                raise AssertionError(
+                    f'{failure}\n'
+                    f'{_client_failure_diagnostics(bridge_log, docroot)}'
+                ) from failure
             results = {}
             for owner, state in states.items():
                 foreign = owners[1] if owner == owners[0] else owners[0]
