@@ -212,8 +212,11 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
         res = api('GET', _query_path('/result', params), timeout=remaining)
         if res.get('pending'):
             continue
+        result_delivery_id = res.get('deliveryId')
         if (res.get('id') != cmd_id
-                or res.get('deliveryId') != delivery_id):
+                or not delivery_id
+                or not result_delivery_id
+                or result_delivery_id != delivery_id):
             continue  # another caller's result — leave it in place for them
         generation = res.get('resultGeneration')
         if not generation:
