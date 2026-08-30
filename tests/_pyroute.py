@@ -85,10 +85,12 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
     return []
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         flow_exits=None, scope_callables=None,
                         scope_executed=None, active_callables=frozenset(),
-                        module_scope=False, annotation_mode=(True, True)):
+                        module_scope=False, annotation_mode=(True, True),
+                        chain=frozenset()):
     annotations_eager, evaluate_annotations = annotation_mode
     violations = []
     owns_scope = scope_callables is None
@@ -99,20 +101,19 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
     def copied(found):
         return [_copy_state_pair(pair) for pair in found]
 
-    def overlay(destination, source, local_names):
+    def overlay(destination, source, keep, blocked):
         for attr in ('dicts', 'aliases', 'generators', 'callables'):
-            retained = {
-                name: value for name, value in getattr(
-                    destination, attr).items() if name in local_names}
+            retained = {name: value for name, value in getattr(
+                destination, attr).items() if name in keep}
             retained.update({
                 name: value for name, value in getattr(source, attr).items()
-                if name not in local_names})
+                if name not in keep and name not in blocked})
             setattr(destination, attr, retained)
-        destination.builtin_globals = (
-            destination.builtin_globals & local_names
-            | (source.builtin_globals - local_names))
-        destination.bound = (destination.bound & local_names
-                             | source.bound - local_names)
+        destination.builtin_globals = (destination.builtin_globals & keep
+                                       | (source.builtin_globals - keep
+                                          - blocked))
+        destination.bound = (destination.bound & keep
+                             | source.bound - keep - blocked)
         return destination
 
     def analyze_callable(deferred, callers, executed=False):
@@ -121,21 +122,23 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             return copied(callers)
         if executed:
             scope_executed.add(key)
+        blocked = chain - deferred.captured
+        keep = deferred.locals | blocked
         outputs = []
         for caller in callers:
             entry = overlay(_copy_state_pair(deferred.state), caller,
-                            deferred.locals)
+                            deferred.locals, blocked)
             exits = new_exits()
             nested, fallthrough = _py_flow_violations(
                 deferred.scope.body, [entry], rel,
                 function_allowed_opaque(deferred.scope), exits,
                 active_callables=active_callables | {key},
-                annotation_mode=(annotations_eager, False))
+                annotation_mode=(annotations_eager, False),
+                chain=deferred.captured | deferred.locals)
             violations.extend(nested)
-            for result in dedupe_states(
-                    [*fallthrough, *exits['terminal']]):
-                outputs.append(overlay(
-                    _copy_state_pair(caller), result, deferred.locals))
+            for result in dedupe_states([*fallthrough, *exits['terminal']]):
+                outputs.append(overlay(_copy_state_pair(caller), result,
+                                       keep, blocked))
         return dedupe_states(outputs)
 
     def expression_value(node, state):
@@ -375,8 +378,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 active = consume_iterable(
                     generator.iter, active, exhaust=True)
                 if cardinality is False:
-                    return remember(node, dedupe_states(
-                        [*skipped, *active]))
+                    return remember(node, dedupe_states([*skipped, *active]))
                 if cardinality is not True:
                     skipped.extend(copied(active))
                 for condition in generator.ifs:
@@ -435,7 +437,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 deferred = DeferredCallable(
                     statement, callable_state(
                         statement, [state], annotations_eager),
-                    frozenset(local_names))
+                    frozenset(local_names), frozenset(chain))
                 scope_callables.append(deferred)
                 if pairs:
                     state.callables[statement.name] = deferred
@@ -455,7 +457,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     scope_callables=class_callables,
                     scope_executed=scope_executed,
                     active_callables=active_callables,
-                    annotation_mode=(annotations_eager, annotations_eager))
+                    annotation_mode=(annotations_eager, annotations_eager),
+                    chain=chain)
                 violations.extend(nested)
                 scope_callables.extend(class_callables)
                 for state in results:
@@ -464,7 +467,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                                if isinstance(state.callables.get(name),
                                              DeferredCallable)}
                     state = overlay(_copy_state_pair(incoming), state,
-                                    local_names)
+                                    local_names, frozenset())
                     state.aliases.pop(statement.name, None)
                     state.generators.pop(statement.name, None)
                     state.callables[statement.name] = DeferredClass(methods)
@@ -528,8 +531,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 violations.extend(found)
                 record_exit(flow_exits, 'terminal', exits['terminal'])
                 break_pairs.extend(exits['break'])
-                next_pairs = dedupe_states(
-                    [*fallthrough, *exits['continue']])
+                next_pairs = dedupe_states([*fallthrough, *exits['continue']])
                 post_body = dedupe_states(
                     [*post_body, *next_pairs])
                 iteration_pairs = dedupe_states(
@@ -618,9 +620,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     violations.extend(found)
                     record_exit(flow_exits, kind, fallthrough)
                     for final_kind in ('break', 'continue', 'terminal'):
-                        record_exit(
-                            flow_exits, final_kind,
-                            final_exits[final_kind])
+                        record_exit(flow_exits, final_kind,
+                                    final_exits[final_kind])
             else:
                 for kind in ('break', 'continue', 'terminal'):
                     record_exit(flow_exits, kind, exits[kind])
@@ -694,6 +695,5 @@ def py_tab_routing_violations(path, rel):
     eager = sys.version_info < (3, 14) and not future_annotations
     violations, _ = _py_flow_violations(
         tree.body, [FlowState({}, {}, {}, {}, set(), set(), {}, set())], rel,
-        frozenset(), module_scope=True,
-        annotation_mode=(eager, eager))
+        frozenset(), module_scope=True, annotation_mode=(eager, eager))
     return list(dict.fromkeys(violations))
