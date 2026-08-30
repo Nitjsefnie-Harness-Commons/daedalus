@@ -1,4 +1,4 @@
-"""Doubles for service-worker diagnosis classification controls."""
+"""Diagnosis controls."""
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -17,19 +17,6 @@ def _control_target():
 
 
 def control_diagnosis(tmp, answers, clock, poll=None):
-    """Run the real verdict against doubles for browser and DevTools.
-
-    `answers` may be flat per-evaluation values or nested per-launch values;
-    the last value in each launch repeats. The port file is written the way
-    Chromium writes it, since reading that file is part of what the verdict
-    does.
-    """
-    profiles = [Path(tmp) / name for name in (
-        'control-profile', 'control-profile-retry')]
-    for profile in profiles:
-        profile.mkdir()
-        (profile / 'DevToolsActivePort').write_text(
-            '9222\n', encoding='utf-8')
     processes = []
     launches = []
     if answers and isinstance(answers[0], (list, tuple)):
@@ -46,6 +33,12 @@ def control_diagnosis(tmp, answers, clock, poll=None):
         assert stderr is subprocess.DEVNULL, stderr
         active_launch = len(launches)
         launches.append(list(args))
+        profile = Path(next(
+            item.split('=', 1)[1] for item in args
+            if item.startswith('--user-data-dir=')))
+        profile.mkdir()
+        (profile / 'DevToolsActivePort').write_text(
+            '9222\n', encoding='utf-8')
         process = mock.Mock()
         process.poll.return_value = poll
         processes.append(process)
@@ -82,12 +75,10 @@ def control_diagnosis(tmp, answers, clock, poll=None):
                 'background.js', tmp)
         except AssertionError as why:
             outcome = why
-    return outcome, launches, processes[0]
+    return outcome, launches, processes
 
 
 def answered_diagnosis(tmp):
-    # Finite like its siblings: a constant zero spins the verdict's deadline
-    # loop forever on any mutation that blocks the answered path.
     return control_diagnosis(
         tmp, [[True], [True]],
         mock.Mock(side_effect=(0, 0, 31, 31, 31, 62)))
