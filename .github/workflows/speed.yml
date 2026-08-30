@@ -314,8 +314,9 @@ jobs:
               test_worker_route_guard.py
           - group: dashboard
             suites: >-
-              test_dashboard_*.py test_tab_routing.py
-              test_overlap_harness.py test_js_lines.py
+              test_dashboard_*.py test_overlap_harness.py test_js_lines.py
+          - group: tab-routing
+            suites: test_tab_routing.py
           - group: catchall
             suites: '*'
             except: >-
@@ -341,8 +342,8 @@ jobs:
               test_real_browser_*.py test_eval_relay.py test_gm_*.py
               test_vm_file_load_guard.py test_extension_*.py
               test_worker_route_guard.py
-              test_dashboard_*.py test_tab_routing.py
-              test_overlap_harness.py test_js_lines.py
+              test_dashboard_*.py test_overlap_harness.py test_js_lines.py
+              test_tab_routing.py
 
     env:
       # Fractional slowdown that fails the job.
