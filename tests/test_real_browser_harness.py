@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _evalpages  # noqa: E402
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
+import _realbrowser_workers  # noqa: E402
 import _util  # noqa: E402
 import test_real_browser_eval as _real_browser_eval  # noqa: E402
 
@@ -106,7 +107,7 @@ def test_cdp_eval_preserves_typed_evaluation_failure(tmp):
     }
     failure = None
     with mock.patch.object(
-            _realbrowser, 'cdp_call', return_value=response):
+            _realbrowser_workers, 'cdp_call', return_value=response):
         try:
             _realbrowser.cdp_eval(
                 'node-for-control', 'ws://worker', 'controlled probe')
@@ -134,14 +135,14 @@ def test_repository_worker_probe_exception_counts_as_reached(tmp):
         return {'result': {'value': False}}
 
     workers = [{'webSocketDebuggerUrl': 'ws://worker'}]
-    with mock.patch.object(_realbrowser, 'cdp_call', evaluate):
+    with mock.patch.object(_realbrowser_workers, 'cdp_call', evaluate):
         target, reached, reason = _realbrowser.ready_worker(node, workers)
         assert checks[-1].returncode == 0, checks[-1]
         assert target is None, target
         assert reached is True, reason
 
         with mock.patch.object(
-                _realbrowser, '_WORKER_READY_PROBE', 'function {'):
+                _realbrowser_workers, '_WORKER_READY_PROBE', 'function {'):
             target, reached, reason = _realbrowser.ready_worker(node, workers)
         assert checks[-1].returncode != 0, checks[-1]
         assert target is None, target
@@ -156,7 +157,7 @@ def test_worker_transport_failure_stays_unreached(tmp):
         raise AssertionError('controlled transport failure')
 
     workers = [{'webSocketDebuggerUrl': 'ws://worker'}]
-    with mock.patch.object(_realbrowser, 'cdp_call', unanswered):
+    with mock.patch.object(_realbrowser_workers, 'cdp_call', unanswered):
         target, reached, reason = _realbrowser.ready_worker(
             'node-for-control', workers)
     assert target is None, target
@@ -248,10 +249,10 @@ def test_cdp_call_derives_both_deadline_carriers_from_constant(tmp):
     recorded = []
     run = _successful_run_recorder(recorded)
     original_deadline = getattr(
-        _realbrowser, 'CDP_RESPONSE_DEADLINE_MS', None)
+        _realbrowser_workers, 'CDP_RESPONSE_DEADLINE_MS', None)
     assert original_deadline == 10000, original_deadline
     with mock.patch.object(
-            _realbrowser, 'CDP_RESPONSE_DEADLINE_MS', 4321), \
+            _realbrowser_workers, 'CDP_RESPONSE_DEADLINE_MS', 4321), \
             mock.patch.object(_realbrowser.subprocess, 'run', run):
         assert _realbrowser.cdp_call(
             'node-for-control', 'ws://target', 'Runtime.evaluate',
@@ -389,7 +390,8 @@ def test_real_cdp_harness_timeout_is_classified_by_exit_code(tmp):
     assert timeout_type is not None, 'cdp_call has no timeout type'
 
     failure = None
-    with mock.patch.object(_realbrowser, 'CDP_RESPONSE_DEADLINE_MS', 50), \
+    with mock.patch.object(
+            _realbrowser_workers, 'CDP_RESPONSE_DEADLINE_MS', 50), \
             _silent_websocket_peer() as target:
         try:
             _realbrowser.cdp_call(node, target, 'Runtime.evaluate', {})
@@ -448,7 +450,8 @@ def test_fixture_converts_only_post_configuration_environment_skips(tmp):
     before = environment_type('controlled pre-configuration failure')
     popen, _process, launches, _profile = _popen_double(tmp)
     survived = None
-    verdict = mock.Mock(return_value=None)
+    verdict = mock.Mock(return_value=(
+        False, 'controlled observation'))
     with mock.patch.object(
             _realbrowser, 'browser_requirements', _browser_requirements), \
             mock.patch.object(_realbrowser.subprocess, 'Popen', popen), \
