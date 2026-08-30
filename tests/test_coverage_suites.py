@@ -358,8 +358,7 @@ def test_worker_pool_reaches_but_never_exceeds_cpu_count(tmp):
     }
     result, _invocations = _coverage_tree(tmp, suites, cpu_count=2)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    events_path = Path(tmp) / 'tree' / 'tests' / 'events.log'
-    lines = _read_events(events_path)
+    lines = _read_events(Path(tmp) / 'tree' / 'tests' / 'events.log')
     peak, paired_names, unpaired, orphans = _replay_events(lines)
     expected_names = set(suites)
     assert paired_names == expected_names, (
@@ -379,19 +378,12 @@ def test_worker_pool_reaches_but_never_exceeds_cpu_count(tmp):
 
 def test_replay_exposes_a_three_suite_peak(_tmp):
     """Three paired open windows must remain visible as a cap breach."""
-    lines = [
-        '+test_a.py\n',
-        '+test_b.py\n',
-        '+test_c.py\n',
-        '-test_a.py\n',
-        '-test_b.py\n',
-        '-test_c.py\n',
-    ]
+    lines = ['+test_a.py\n', '+test_b.py\n', '+test_c.py\n',
+             '-test_a.py\n', '-test_b.py\n', '-test_c.py\n']
     peak, paired_names, unpaired, orphans = _replay_events(lines)
     assert peak == 3, f'peak lost from event log: {lines!r}'
-    assert paired_names == {
-        'test_a.py', 'test_b.py', 'test_c.py'
-    }, f'paired suites lost from complete log: {lines!r}'
+    expected = {'test_a.py', 'test_b.py', 'test_c.py'}
+    assert paired_names == expected, f'paired suites lost: {lines!r}'
     assert not unpaired, f'unpaired suite in complete log: {unpaired}'
     assert not orphans, f'orphan close in complete log: {orphans}'
 
@@ -403,8 +395,7 @@ def test_replay_reports_a_close_without_an_open(_tmp):
     assert peak == 0, f'orphan log line changed peak: {line!r}'
     assert not paired_names, f'orphan log line paired a suite: {line!r}'
     assert not unpaired, f'orphan log line opened a suite: {line!r}'
-    assert orphans == {'test_orphan.py'}, (
-        f'orphan log line not reported: {line!r}')
+    assert orphans == {'test_orphan.py'}, f'orphan not reported: {line!r}'
 
 
 def test_replay_ignores_a_torn_trailing_line(_tmp):
@@ -420,12 +411,8 @@ def test_replay_ignores_a_torn_trailing_line(_tmp):
 
 def test_replay_finds_two_well_formed_overlapping_windows(_tmp):
     """Two complete overlapping windows must replay to a peak of two."""
-    lines = [
-        '+test_a.py\n',
-        '+test_b.py\n',
-        '-test_a.py\n',
-        '-test_b.py\n',
-    ]
+    lines = ['+test_a.py\n', '+test_b.py\n',
+             '-test_a.py\n', '-test_b.py\n']
     peak, paired_names, unpaired, orphans = _replay_events(lines)
     assert peak == 2, f'paired event peak was not two: {lines!r}'
     assert paired_names == {'test_a.py', 'test_b.py'}, (
@@ -436,13 +423,8 @@ def test_replay_finds_two_well_formed_overlapping_windows(_tmp):
 
 def test_replay_excludes_an_unpaired_open_from_the_peak(_tmp):
     """A dead suite's open event must not inflate paired concurrency."""
-    lines = [
-        '+test_dead.py\n',
-        '+test_a.py\n',
-        '+test_b.py\n',
-        '-test_a.py\n',
-        '-test_b.py\n',
-    ]
+    lines = ['+test_dead.py\n', '+test_a.py\n', '+test_b.py\n',
+             '-test_a.py\n', '-test_b.py\n']
     peak, paired_names, unpaired, orphans = _replay_events(lines)
     assert peak == 2, f'unpaired open changed paired peak: {lines!r}'
     assert paired_names == {'test_a.py', 'test_b.py'}, (
@@ -539,27 +521,21 @@ def test_read_events_retry_contract(_tmp):
     _assert_retry_contract('read_events')
 
 
-def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
-    """A dead suite stays diagnosed without fabricating a pool breach."""
+def _assert_dying_worker_outcome(tmp, unlaunchable=()):
     dying_suite = 'test_worker_dies.py'
-    suites = {
-        dying_suite: _DYING_CONCURRENCY_SUITE,
-        **{
-            f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
-            for number in range(3)
-        },
-    }
-    result, _invocations = _coverage_tree(tmp, suites, cpu_count=2)
+    healthy_sources = {f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
+                       for number in range(3)}
+    healthy_suites = set(healthy_sources)
+    suites = {dying_suite: _DYING_CONCURRENCY_SUITE, **healthy_sources}
+    result, _invocations = _coverage_tree(
+        tmp, suites, unlaunchable=unlaunchable, cpu_count=2)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    events_path = Path(tmp) / 'tree' / 'tests' / 'events.log'
-    lines = _read_events(events_path)
+    lines = _read_events(Path(tmp) / 'tree' / 'tests' / 'events.log')
     peak, paired_names, unpaired, orphans = _replay_events(lines)
-    healthy_suites = set(suites) - {dying_suite}
     assert paired_names == healthy_suites, (
-        f'healthy paired suites differ: expected {sorted(healthy_suites)}, '
-        f'observed {sorted(paired_names)}; log: {lines!r}')
-    assert unpaired == {dying_suite}, (
-        f'{dying_suite} was not the sole unpaired suite: {lines!r}')
+        f'healthy pairing mismatch: {paired_names!r}; log: {lines!r}')
+    assert unpaired <= {dying_suite}, (
+        f'unexpected unpaired suite beside {dying_suite}: {lines!r}')
     assert not orphans, f'orphan close in event log: {lines!r}'
     failure_marker = '(suite did not pass; its coverage still counts)'
     for name in healthy_suites:
@@ -567,10 +543,34 @@ def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
         assert failure_marker not in group, (
             f'healthy suite {name} was reported failed: {group!r}')
     failed_group = _group(result.stdout, dying_suite)
-    assert ('  (suite did not pass; its coverage still counts)'
-            in failed_group), f'{dying_suite} group: {failed_group!r}'
+    if dying_suite in unpaired:
+        death_case = 'mid-window'
+        assert unpaired == {dying_suite}, f'mid-window unpaired: {unpaired!r}'
+    else:
+        death_case = 'never-entered'
+        assert not unpaired, f'never-entered unpaired: {unpaired!r}'
+    assert failure_marker in failed_group, (
+        f'{dying_suite} {death_case} group: {failed_group!r}')
     assert peak == 2, (
         f'paired event peak was {peak}, expected 2: {lines!r}')
+    return result, lines, (peak, paired_names, unpaired, orphans)
+
+
+def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
+    """A dead suite stays diagnosed without fabricating a pool breach."""
+    _assert_dying_worker_outcome(tmp)
+
+
+def test_a_never_entered_dying_suite_is_reported_not_counted(tmp):
+    result, lines, replay = _assert_dying_worker_outcome(
+        tmp, unlaunchable=('test_worker_dies.py',))
+    peak, paired_names, unpaired, _orphans = replay
+    assert not unpaired, f'never-entered suite logged an open: {lines!r}'
+    healthy = {f'test_worker_{number}.py' for number in range(3)}
+    assert paired_names == healthy, lines
+    assert peak == 2, f'never-entered paired peak was {peak}: {lines!r}'
+    failed_group = _group(result.stdout, 'test_worker_dies.py')
+    assert 'LAUNCH FAILED:' in failed_group, failed_group
 
 
 def test_each_suite_output_is_one_contiguous_group(tmp):
