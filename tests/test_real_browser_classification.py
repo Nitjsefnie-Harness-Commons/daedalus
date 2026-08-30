@@ -16,8 +16,18 @@ import _util  # noqa: E402
 from _deliveries import (  # noqa: E402
     real_eval, real_ext_command)
 from _repo import EXTENSION_ROOT  # noqa: E402
+from _realbrowser_classification_support import (  # noqa: E402
+    answered_diagnosis, control_diagnosis)
 from test_real_browser_harness import (  # noqa: E402
     _browser_version, _enter_fixture, _fixture_runtime)
+
+
+def _control_diagnosis(tmp, answers, clock, poll=None):
+    return control_diagnosis(tmp, answers, clock, poll)
+
+
+def _answered_diagnosis(tmp):
+    return answered_diagnosis(tmp)
 
 
 def _call_failure(call):
@@ -231,75 +241,7 @@ def test_machine_skip_carries_what_the_diagnosis_observed(tmp):
     assert len(attempts) == 1, attempts
 
 
-def _control_target():
-    return {
-        'type': 'service_worker',
-        'url': 'chrome-extension://controlled/control-worker.js',
-        'webSocketDebuggerUrl': 'ws://control',
-    }
-
-
-def _control_diagnosis(tmp, answers, clock, poll=None):
-    """Run the real verdict against doubles for the browser and DevTools.
-
-    `answers` are what the control's probe returns per evaluation, the last
-    one repeating; the two-element form is how a poll that could not be read
-    is followed by one that was. The port file is written the way Chromium
-    writes it, since reading that file is part of what the verdict does.
-    """
-    profile = Path(tmp) / 'control-profile'
-    profile.mkdir()
-    (profile / 'DevToolsActivePort').write_text('9222\n', encoding='utf-8')
-    process = mock.Mock()
-    process.poll.return_value = poll
-    launches = []
-    remaining = list(answers)
-
-    def popen(args, *, cwd, stdin, stdout, stderr):
-        del cwd, stdin, stdout, stderr
-        assert not launches, 'the diagnosis launched more than one browser'
-        launches.append(list(args))
-        return process
-
-    def listed(port):
-        del port
-        return [_control_target()]
-
-    def evaluate(node, target, expression):
-        del node, target
-        assert expression == _realbrowser.CONTROL_WORKER_PROBE, expression
-        return remaining.pop(0) if len(remaining) > 1 else remaining[0]
-
-    def describe(browser):
-        del browser
-        return 'Chromium 151.0.7922.169 (controlled)'
-
-    def sleeper(seconds):
-        del seconds
-
-    target = _realbrowser_workers
-    with mock.patch.object(target.subprocess, 'Popen', popen), \
-            mock.patch.object(target, '_devtools_targets', listed), \
-            mock.patch.object(target, 'cdp_eval', evaluate), \
-            mock.patch.object(target, '_browser_version', describe), \
-            mock.patch.object(target.time, 'time', clock), \
-            mock.patch.object(target.time, 'sleep', sleeper):
-        try:
-            outcome = target._worker_absence_verdict(
-                'node-for-control', '/controlled/chromium', EXTENSION_ROOT,
-                'background.js', tmp)
-        except AssertionError as why:
-            outcome = why
-    return outcome, launches, process
-
-
-def _answered_diagnosis(tmp):
-    # Finite like its siblings: a constant zero spins the verdict's deadline
-    # loop forever on any mutation that blocks the answered path.
-    return _control_diagnosis(tmp, [True], mock.Mock(side_effect=(0, 0, 31)))
-
-
-def test_answering_control_worker_marks_worker_absence_our_failure(tmp):
+def test_answering_control_worker_twice_marks_worker_absence_our_failure(tmp):
     """A control worker that answers is a browser that proved the skill.
 
     The absence of our worker is also what a machine without MV3 support
@@ -314,19 +256,23 @@ def test_answering_control_worker_marks_worker_absence_our_failure(tmp):
     assert 'background.js' in reported, reported
     assert 'Chromium 151.0.7922.169 (controlled)' in reported, reported
     assert 'not the machine' in reported, reported
+    assert 'two consecutive diagnosis launches' in reported, reported
 
 
-def test_control_diagnosis_launches_both_extensions_once(tmp):
+def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
     outcome, launches, process = _answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
     process.terminate.assert_called_once()
-    assert len(launches) == 1, launches
-    loaded = [item for item in launches[0]
-              if item.startswith('--load-extension=')]
-    assert len(loaded) == 1, launches
-    assert str(EXTENSION_ROOT.resolve()) in loaded[0], loaded
-    control = str((Path(tmp) / 'control-extension').resolve())
-    assert control in loaded[0], (control, loaded)
+    assert len(launches) == 2, launches
+    loaded = [[item for item in launch
+               if item.startswith('--load-extension=')]
+              for launch in launches]
+    assert all(len(item) == 1 for item in loaded), loaded
+    assert all(str(EXTENSION_ROOT.resolve()) in item[0]
+               for item in loaded), loaded
+    assert str((Path(tmp) / 'control-extension').resolve()) in loaded[0][0]
+    retry = str((Path(tmp) / 'control-extension-retry').resolve())
+    assert retry in loaded[1][0], (retry, loaded)
 
 
 def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
@@ -353,7 +299,7 @@ def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
     """A transport failure is not an answer, and the next poll knows it."""
     outcome, _launches, process = _control_diagnosis(
         tmp, [AssertionError('controlled transport failure'), True],
-        mock.Mock(side_effect=(0, 0, 0, 31)))
+        mock.Mock(side_effect=(0, 0, 0, 31, 31, 31, 62)))
     assert outcome.__class__ is AssertionError, outcome
     process.terminate.assert_called_once()
 

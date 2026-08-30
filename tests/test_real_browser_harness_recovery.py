@@ -242,16 +242,24 @@ class _PollClock:
 
 
 def _diagnosis(tmp, ours, control, poll=None):
-    profile = Path(tmp) / 'control-profile'
-    profile.mkdir()
-    (profile / 'DevToolsActivePort').write_text(
-        '9222\n', encoding='utf-8')
-    process = _ProcessDouble()
-    process.poll = mock.Mock(return_value=poll)
+    profiles = [Path(tmp) / name for name in (
+        'control-profile', 'control-profile-retry')]
+    for profile in profiles:
+        profile.mkdir()
+        (profile / 'DevToolsActivePort').write_text(
+            '9222\n', encoding='utf-8')
+    processes = []
     launches = []
     evaluations = []
-    ours = list(ours)
-    control = list(control)
+
+    def per_launch(answers):
+        if answers and isinstance(answers[0], (list, tuple)):
+            return [list(item) for item in answers]
+        return [list(answers)]
+
+    ours = per_launch(ours)
+    control = per_launch(control)
+    active_launch = 0
 
     def popen(args, *, cwd, stdin, stdout, stderr):
         assert cwd == _realbrowser.ROOT, cwd
@@ -259,6 +267,13 @@ def _diagnosis(tmp, ours, control, poll=None):
         assert stdout is subprocess.DEVNULL, stdout
         assert stderr is subprocess.DEVNULL, stderr
         launches.append(list(args))
+        process = _ProcessDouble()
+        if isinstance(poll, (list, tuple)):
+            process_poll = poll[min(len(processes), len(poll) - 1)]
+        else:
+            process_poll = poll
+        process.poll = mock.Mock(return_value=process_poll)
+        processes.append(process)
         return process
 
     def listed(port):
@@ -268,7 +283,9 @@ def _diagnosis(tmp, ours, control, poll=None):
     def evaluate(node, target, expression):
         assert node == 'node-for-control', node
         evaluations.append((target, expression))
-        answers = ours if target == 'ws://ours' else control
+        answers = (ours if target == 'ws://ours' else control)[
+            min(active_launch, len(ours if target == 'ws://ours' else control)
+                - 1)]
         return answers.pop(0) if len(answers) > 1 else answers[0]
 
     def version(browser):
@@ -276,8 +293,15 @@ def _diagnosis(tmp, ours, control, poll=None):
         return 'Chromium controlled version'
 
     target = _realbrowser_workers
+
+    def launch(args, *, cwd, stdin, stdout, stderr):
+        nonlocal active_launch
+        active_launch = len(launches)
+        return popen(args, cwd=cwd, stdin=stdin, stdout=stdout,
+                     stderr=stderr)
+
     patches = (
-        mock.patch.object(target.subprocess, 'Popen', popen),
+        mock.patch.object(target.subprocess, 'Popen', launch),
         mock.patch.object(target, '_devtools_targets', listed),
         mock.patch.object(target, 'cdp_eval', evaluate),
         mock.patch.object(target, '_browser_version', version),
@@ -294,7 +318,7 @@ def _diagnosis(tmp, ours, control, poll=None):
                 'background.js', tmp)
         except AssertionError as why:
             outcome = why
-    return outcome, launches, process, evaluations
+    return outcome, launches, processes[0], evaluations
 
 
 def test_control_answer_without_ours_preserves_source_guilt(tmp):
@@ -305,6 +329,50 @@ def test_control_answer_without_ours_preserves_source_guilt(tmp):
     assert str(EXTENSION_ROOT.resolve()) in message, message
     assert 'background.js' in message, message
     assert 'control extension' in message, message
+
+
+def test_control_answer_then_retry_ours_answer_returns_contention(tmp):
+    outcome, launches, _process, _evaluations = _diagnosis(
+        tmp, [[False], [True]], [[True], [True]])
+    assert outcome.__class__ is tuple, outcome
+    assert outcome[0] is True, outcome
+    assert 'contention' in outcome[1], outcome
+    assert 'retry diagnosis launch' in outcome[1], outcome
+    assert len(launches) == 2, launches
+    profiles = [next(item.split('=', 1)[1] for item in launch
+                     if item.startswith('--user-data-dir='))
+                for launch in launches]
+    assert profiles == [
+        str(Path(tmp) / 'control-profile'),
+        str(Path(tmp) / 'control-profile-retry'),
+    ], profiles
+
+
+def test_control_answer_in_both_windows_preserves_source_guilt(tmp):
+    outcome, launches, _process, _evaluations = _diagnosis(
+        tmp, [[False], [False]], [[True], [True]])
+    assert outcome.__class__ is AssertionError, outcome
+    assert 'two consecutive diagnosis launches' in str(outcome), outcome
+    assert len(launches) == 2, launches
+
+
+def test_control_answer_then_unanswered_retry_leaves_machine_skip(tmp):
+    outcome, launches, _process, _evaluations = _diagnosis(
+        tmp, [[False], [False]], [[True], [False]])
+    assert outcome.__class__ is tuple, outcome
+    assert outcome[0] is False, outcome
+    assert 'two diagnosis launches' in outcome[1], outcome
+    assert len(launches) == 2, launches
+
+
+def test_control_answer_then_retry_browser_exit_leaves_machine_skip(tmp):
+    outcome, launches, _process, _evaluations = _diagnosis(
+        tmp, [[False], [False]], [[True], [False]], poll=(None, 1))
+    assert outcome.__class__ is tuple, outcome
+    assert outcome[0] is False, outcome
+    assert 'two diagnosis launches' in outcome[1], outcome
+    assert 'retry control did not answer' in outcome[1], outcome
+    assert len(launches) == 2, launches
 
 
 def test_ours_answer_without_control_returns_contention(tmp):
