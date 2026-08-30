@@ -58,7 +58,7 @@ def bash_candidates(path, windows, exists=os.path.isfile,
     launchers come last, so a machine with only those still resolves rather
     than failing in the resolver.
     """
-    separator = ';' if windows else os.pathsep
+    separator = ';' if windows else ':'
     name = 'bash.exe' if windows else 'bash'
     found = []
     for directory in (path or '').split(separator):
