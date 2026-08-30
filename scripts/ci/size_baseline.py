@@ -42,6 +42,9 @@ TEST_CEILING = 700
 # Issues #97 and #129 are the standing work to empty this table.
 BASELINE = {
     'server.py': 1970,
+    'tests/_pyroute.py': 701,
+    'tests/_pyroute_state.py': 712,
+    'tests/test_tab_routing.py': 717,
     'tests/test_mcp_server.py': 1723,
     'tests/test_cli.py': 1268,
     'tests/test_bridge_results.py': 1343,

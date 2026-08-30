@@ -548,6 +548,17 @@ def inherited_aliases(states):
     return inherited
 
 
+def inherited_dicts(states):
+    inherited = {}
+    names = {name for state in states for name in state.dicts}
+    for name in names:
+        values = [state.dicts.get(name) for state in states]
+        if values[0] is not None and all(value == values[0]
+                                         for value in values):
+            inherited[name] = values[0].copy()
+    return inherited
+
+
 def inherited_generators(states):
     inherited = {}
     names = {name for state in states for name in state.generators}
@@ -582,6 +593,7 @@ def merged_evaluated_value(default, states):
 
 def callable_state(scope, states, annotations_eager=True):
     args = scope.args
+    dicts = inherited_dicts(states)
     aliases = inherited_aliases(states)
     generators = inherited_generators(states)
     callables = inherited_callables(states)
@@ -605,6 +617,7 @@ def callable_state(scope, states, annotations_eager=True):
     bound.difference_update(local_names)
     bound.update(parameter.arg for parameter in parameters)
     for name in local_names:
+        dicts.pop(name, None)
         aliases.pop(name, None)
         generators.pop(name, None)
         callables.pop(name, None)
@@ -620,7 +633,7 @@ def callable_state(scope, states, annotations_eager=True):
             generators[parameter.arg] = resolved
         elif resolved is not None:
             aliases[parameter.arg] = resolved
-    return FlowState({}, aliases, generators, {}, builtin_globals,
+    return FlowState(dicts, aliases, generators, {}, builtin_globals,
                      builtin_locals, callables, bound)
 
 
