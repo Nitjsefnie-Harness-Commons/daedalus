@@ -227,6 +227,7 @@
 !/tests/_coverage_guard.py
 !/tests/_coverage_scopes.py
 !/tests/_dashnode.py
+!/tests/_deliveries.py
 !/tests/_evalpages.py
 !/tests/_ghexpr.py
 !/tests/_jsread.py

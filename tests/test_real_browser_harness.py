@@ -448,11 +448,14 @@ def test_fixture_converts_only_post_configuration_environment_skips(tmp):
     before = environment_type('controlled pre-configuration failure')
     popen, _process, launches, _profile = _popen_double(tmp)
     survived = None
+    verdict = mock.Mock(return_value=None)
     with mock.patch.object(
             _realbrowser, 'browser_requirements', _browser_requirements), \
             mock.patch.object(_realbrowser.subprocess, 'Popen', popen), \
             mock.patch.object(
-                _realbrowser, '_wait_for_devtools', side_effect=before):
+                _realbrowser, '_wait_for_devtools', side_effect=before), \
+            mock.patch.object(
+                _realbrowser, '_worker_absence_verdict', verdict):
         try:
             with _enter_fixture(tmp):
                 raise AssertionError('fixture yielded before configuration')
@@ -460,6 +463,7 @@ def test_fixture_converts_only_post_configuration_environment_skips(tmp):
             survived = why
     assert len(launches) == 1, launches
     assert survived is before, survived
+    assert verdict.call_count == 1, verdict.call_count
 
     def navigate(node, target, method, params):
         del node, target, method, params

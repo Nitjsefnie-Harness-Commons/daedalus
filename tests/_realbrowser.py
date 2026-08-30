@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _deliveries import real_eval  # noqa: E402
 from _evalpages import (CDP_CALL_HARNESS,  # noqa: E402
                         CDP_RESPONSE_DEADLINE_MS, CDP_TIMEOUT_EXIT_CODE)
 from _realbrowser_errors import (CDPEvaluationError, CDPTimeout,  # noqa: E402
@@ -124,6 +125,33 @@ def _raise_start_failure(label, executable, why):
             f'{label} command was too large to start: {executable}') from why
     raise BrowserEnvironmentSkipped(
         f'{label} could not be launched: {executable} — {why}') from why
+
+
+def _browser_args(browser, loaded, profile):
+    """The launch for a headless session carrying `loaded` extensions.
+
+    Shared by the fixture launch and the worker-absence diagnosis so the two
+    cannot drift: whatever the fixture needed to start on a leg, the
+    diagnosis needs to start under the same conditions.
+    """
+    return [
+        browser,
+        '--headless=new',
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--no-default-browser-check',
+        # Avoid a D-Bus secret-service probe whose reply timeout holds
+        # every network transaction. This temporary profile is discarded.
+        '--password-store=basic',
+        '--remote-allow-origins=*',
+        '--remote-debugging-port=0',
+        '--disable-extensions-except=' + loaded,
+        '--load-extension=' + loaded,
+        '--user-data-dir=' + str(profile),
+        'about:blank',
+    ]
 
 
 def browser_requirements():
@@ -314,6 +342,122 @@ def declared_worker(extension):
     return worker_path.relative_to(extension).as_posix()
 
 
+CONTROL_WORKER_SCRIPT = 'control-worker.js'
+CONTROL_WORKER_PROBE = 'globalThis.__controlWorkerLoaded === true'
+WORKER_ABSENCE_DEADLINE = 30
+
+
+def _control_extension(tmp):
+    """Write a known-good MV3 extension whose worker answers its probe.
+
+    Its script name is unique on purpose: the diagnosis launch carries our
+    extension too, so two service workers are listed over DevTools at once
+    and `_worker_targets` tells them apart by that name alone. It must never
+    be our own script name, or the worker whose absence is being diagnosed
+    could answer for the control.
+    """
+    root = Path(tmp) / 'control-extension'
+    root.mkdir()
+    (root / 'manifest.json').write_text(json.dumps({
+        'manifest_version': 3,
+        'name': 'daedalus-fixture-control',
+        'version': '1.0',
+        'background': {'service_worker': CONTROL_WORKER_SCRIPT},
+    }), encoding='utf-8')
+    (root / CONTROL_WORKER_SCRIPT).write_text(
+        'globalThis.__controlWorkerLoaded = true;\n', encoding='utf-8')
+    return root
+
+
+def _devtools_port(profile):
+    """The port Chromium wrote for this profile, or '' before it does."""
+    try:
+        lines = (Path(profile) / 'DevToolsActivePort').read_text(
+            encoding='utf-8').splitlines()
+    except OSError:
+        return ''
+    return lines[0] if lines else ''
+
+
+def _control_worker_targets(profile):
+    """The control extension's workers, or [] while none is listed."""
+    port = _devtools_port(profile)
+    if not port:
+        return []
+    try:
+        return _worker_targets(_devtools_targets(port), CONTROL_WORKER_SCRIPT)
+    except (OSError, ValueError):
+        return []
+
+
+def _control_worker_answered(node, items):
+    """Whether a listed control worker ran its script to the flag.
+
+    An unreadable answer is not an answer: a transport failure or an
+    exception inside the probe leaves the control undemonstrated, and the
+    next poll asks again instead of settling a verdict it did not observe.
+    """
+    for item in items:
+        try:
+            if cdp_eval(
+                    node, item['webSocketDebuggerUrl'],
+                    CONTROL_WORKER_PROBE) is True:
+                return True
+        except AssertionError:
+            continue
+    return False
+
+
+def _absence_guilt(browser, extension, worker_script):
+    """The failure raised when the control proves the browser can do this."""
+    return (
+        'the extension source kept its own service worker from loading: '
+        f'{extension} declares {worker_script}, and a control extension '
+        'loaded beside it in a second launch answered its probe while ours '
+        f'never appeared — {_browser_version(browser)} '
+        'demonstrably runs an unpacked MV3 worker, so the absence of ours '
+        "is this repository's, not the machine's")
+
+
+def _worker_absence_verdict(node, browser, extension, worker_script, tmp):
+    """Decide whose fault it is that our extension produced no worker.
+
+    A second launch carries the control extension beside ours, and the
+    control's worker is the witness: a browser that lists it and sees it
+    answer its probe has demonstrated the exact capability the fixture's
+    skip would excuse, so ours is the failure and this raises naming our
+    source. A browser that fails the control too returns what it observed,
+    and the skip standing in the caller names the machine.
+    """
+    control = _control_extension(tmp)
+    profile = Path(tmp) / 'control-profile'
+    loaded = ','.join(
+        str(Path(item).resolve()) for item in (extension, control))
+    process = subprocess.Popen(
+        _browser_args(browser, loaded, profile), cwd=ROOT,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + WORKER_ABSENCE_DEADLINE
+        while time.time() < deadline:
+            if _control_worker_answered(
+                    node, _control_worker_targets(profile)):
+                guilt = _absence_guilt(browser, extension, worker_script)
+                raise AssertionError(guilt)
+            if process.poll() is not None:
+                return ('the diagnosis browser exited before any control '
+                        'worker was listed')
+            time.sleep(0.5)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+    return 'the control extension produced no answering worker either'
+
+
 @contextlib.contextmanager
 def _environment_verdicts_closed():
     """Turn an environment skip after configuration into a hard failure."""
@@ -336,7 +480,9 @@ def real_extension_page(tmp, bridge_url, token, page_url,
     DevTools and run the unpacked extension's service worker. None of that
     is a claim about this repository, so where it does not happen the test
     skips with the reason — a browser that cannot be launched, cannot run an
-    MV3 service worker, or is refused a profile is a property of the machine.
+    MV3 service worker (decided by loading a control extension beside ours,
+    never assumed from the absence), or is refused a profile is a property of
+    the machine.
 
     From the configuration step on, the browser has demonstrably worked and
     everything asserted is the extension's own behaviour, so those stay hard
@@ -356,24 +502,7 @@ def real_extension_page(tmp, bridge_url, token, page_url,
     # one first, which is the order the CI legs see.
     loaded = ','.join(str(Path(item).resolve())
                       for item in (*extra_extensions, extension))
-    browser_args = [
-        browser,
-        '--headless=new',
-        '--no-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--no-first-run',
-        '--no-default-browser-check',
-        # Avoid a D-Bus secret-service probe whose reply timeout holds
-        # every network transaction. This temporary profile is discarded.
-        '--password-store=basic',
-        '--remote-allow-origins=*',
-        '--remote-debugging-port=0',
-        '--disable-extensions-except=' + loaded,
-        '--load-extension=' + loaded,
-        '--user-data-dir=' + str(profile),
-        'about:blank',
-    ]
+    browser_args = _browser_args(browser, loaded, profile)
     try:
         process = subprocess.Popen(
             browser_args, cwd=ROOT, stdin=subprocess.DEVNULL,
@@ -409,6 +538,15 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             yield from _configured_fixture(
                 node, bridge_url, token, worker_target, devtools_port,
                 worker_script, page_target, page_url)
+    except BrowserEnvironmentSkipped:
+        # Reached only after the launch, so this is the one state a skip
+        # cannot be trusted on: our extension produced no worker, which is
+        # either the machine failing MV3 outright or our source failing to
+        # load. The control extension tells those apart, and raises instead
+        # of returning when the machine has proven itself.
+        _worker_absence_verdict(
+            node, browser, extension, worker_script, tmp)
+        raise
     finally:
         process.terminate()
         try:
@@ -511,65 +649,6 @@ def _configured_fixture(node, bridge_url, token, worker_target,
         time.sleep(0.05)
     raise AssertionError(
         f'extension did not register the eval fixture tab: {last_tabs!r}')
-
-
-def real_ext_command(bridge_url, token, cmd_id, payload):
-    """Send a typed extension command and return its delivered result."""
-    body = {'token': token, 'tab': 'extension', 'id': cmd_id, **payload}
-    status, raw = _util.request(bridge_url + '/command', 'PUT', body=body)
-    if status != 200:
-        raise AssertionError(
-            f'extension command {cmd_id!r} was rejected by the bridge: '
-            f'status={status}, response={raw!r}')
-    sent = json.loads(raw)
-    deadline = time.time() + 20
-    query = urllib.parse.urlencode({'token': token, 'tab': 'extension'})
-    while time.time() < deadline:
-        result_status, result = _util.get_json(bridge_url + '/result?' + query)
-        if (result_status == 200 and isinstance(result, dict)
-                and result.get('deliveryId') == sent.get('did')):
-            return result
-        time.sleep(0.05)
-    raise AssertionError(f'{cmd_id!r} did not return its delivery result')
-
-
-def real_eval(bridge_url, token, tab_id, cmd_id, code):
-    status, raw = _util.request(
-        bridge_url + '/command', 'PUT', body={
-            'token': token,
-            'tab': tab_id,
-            'id': cmd_id,
-            'code': code,
-        })
-    if status != 200:
-        raise AssertionError(
-            f'eval command {cmd_id!r} was rejected by the bridge: '
-            f'status={status}, response={raw!r}')
-    sent = json.loads(raw)
-    deadline = time.time() + 20
-    query = urllib.parse.urlencode({'token': token, 'tab': tab_id})
-    while time.time() < deadline:
-        result_status, body = _util.get_json(
-            bridge_url + '/result?' + query)
-        if (result_status == 200 and isinstance(body, dict)
-                and body.get('deliveryId') == sent.get('did')):
-            generation = body.get('resultGeneration')
-            if generation:
-                consume = urllib.parse.urlencode({
-                    'token': token,
-                    'tab': tab_id,
-                    'consume': '1',
-                    'expected': generation,
-                })
-                consumed_status, consumed = _util.get_json(
-                    bridge_url + '/result?' + consume)
-                if consumed_status != 200:
-                    raise AssertionError(
-                        f'eval {cmd_id!r} conditional consume failed: '
-                        f'status={consumed_status}, response={consumed!r}')
-            return body
-        time.sleep(0.05)
-    raise AssertionError(f'eval {cmd_id!r} did not return its delivery result')
 
 
 def hostile_eval_matrix(tmp):
