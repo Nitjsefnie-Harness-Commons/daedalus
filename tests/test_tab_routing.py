@@ -316,6 +316,24 @@ def test_deferred_annotation_and_class_state_flow_matches_runtime(tmp):
     _assert_focus_cases(tmp, cases)
 
 
+def test_callee_dict_state_ignores_callers_local_shadow(tmp):
+    source = Path(tmp) / 'callee_dict.py'
+    template = ("cmd = {'type': '/focus', 'tab': 5}\n\n"
+                "def callee():\n"
+                "    return ext_cmd(**cmd)\n\n"
+                "async def caller(chrome_tab, bridge):\n"
+                "<shadow>"
+                "    return callee()\n")
+
+    def scan(shadow):
+        source.write_text(template.replace('<shadow>', shadow),
+                          encoding='utf-8')
+        return py_tab_routing_violations(source, source.name)
+
+    expected = [f'{source.name}:1: `tab` in **cmd passed to ext_cmd']
+    assert scan('') == scan("    cmd = {'type': '/other'}\n") == expected
+
+
 def test_destructured_and_walrus_alias_boundaries(tmp):
     bodies = [
         "send = _ext_cmd", "send = b.ext_cmd", "send: object = _ext_cmd",
