@@ -331,7 +331,8 @@ def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
-    for source in (['--staged'], ['--rev', 'HEAD'], ['--rev', '']):
+    for source in (['--staged'], ['--rev', 'HEAD'], ['--rev', ''],
+                   ['--rev=']):
         r = _run_checker(copy_root, '--set', '9.9.9', *source)
         assert r.returncode != 0, (source, r.returncode, r.stdout, r.stderr)
         assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
