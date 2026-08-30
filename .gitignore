@@ -333,6 +333,7 @@
 !/tests/test_segment_storage.py
 !/tests/test_segment_store.py
 !/tests/test_segment_write_retry.py
+!/tests/test_speed_acceptance.py
 !/tests/test_speed_gate.py
 !/tests/test_speed_measurement.py
 !/tests/test_speed_wait.py
