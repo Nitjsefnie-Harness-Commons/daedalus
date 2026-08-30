@@ -262,7 +262,10 @@ def test_the_accepted_speed_manifest_matches_test_names_in_the_tree(tmp):
                 and not isinstance(bound, bool) and bound > 0), acceptance
         assert isinstance(acceptance['reason'], str), acceptance
         baseline = acceptance['through_baseline']
-        assert isinstance(baseline, str) and baseline.strip(), acceptance
+        assert isinstance(baseline, list) and baseline, acceptance
+        assert all(isinstance(label, str) and label.strip()
+                   for label in baseline), acceptance
+        assert len(baseline) == len(set(baseline)), acceptance
         needle = re.compile(r'^\s*def\s+' + re.escape(name) + r'\s*\(',
                             re.MULTILINE)
         assert any(needle.search(source) for source in sources), name
