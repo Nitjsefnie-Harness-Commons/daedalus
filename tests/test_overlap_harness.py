@@ -5,11 +5,8 @@ Each stall is driven through a temporary JavaScript worker so the suite checks
 the real Node subprocess boundary and the exact evidence returned to Python.
 """
 import contextlib
-import http.server
-import re
 import subprocess
 import sys
-import threading
 import time
 from unittest import mock
 from pathlib import Path
@@ -17,6 +14,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
+from _overlap import (  # noqa: E402
+    _assert_step_trace, _harness_failure, _slow_result_server)
 
 
 _SETTLING_WORKER = """
@@ -110,6 +109,8 @@ async function dispatchCommand(command) {
 }
 """
 
+_SHIPPED_BACKGROUND = _util.ROOT / 'extension' / 'background.js'
+
 
 def _worker(tmp, source):
     path = Path(tmp) / 'background.js'
@@ -122,86 +123,6 @@ def _wait_for_path(path):
     while not path.exists() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert path.exists(), f'{path.name} was not published'
-
-
-@contextlib.contextmanager
-def _slow_result_server(post_delay=0, post_status=200):
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):
-            self.rfile.read(int(self.headers['Content-Length']))
-            if post_delay:
-                time.sleep(post_delay)
-            body = b'{}' if post_status == 200 else b'{"error":"no"}'
-            try:
-                self.send_response(post_status)
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except OSError:
-                # A delayed POST can outlive the child the backstop
-                # killed, so writing to its closed socket is expected.
-                pass
-
-        def do_GET(self):
-            time.sleep(60)
-            body = b'{"pending":false}'
-            try:
-                self.send_response(200)
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except OSError:
-                # The test deliberately ends the peer while this is pending,
-                # so its closed socket is expected to reset here.
-                pass
-
-        # pylint: disable-next=redefined-builtin
-        def log_message(self, format, *args):
-            del format, args
-
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f'http://127.0.0.1:{server.server_port}'
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
-
-
-def _harness_failure(background, inner_wait=1, commands=None, order=None,
-                     result_base='', wait_between=False):
-    commands = commands or [{'id': '_cookies', 'domain': 'owner-a'}]
-    order = order or ['owner-a']
-    try:
-        _overlap.run_background_overlap(
-            background, commands, order, result_base=result_base,
-            wait_between=wait_between, inner_wait=inner_wait)
-    except AssertionError as failure:
-        return str(failure)
-    except subprocess.TimeoutExpired as failure:
-        raise AssertionError(
-            f'bare TimeoutExpired after {failure.timeout}s') from failure
-    raise AssertionError('the stalled overlap harness unexpectedly succeeded')
-
-
-def _assert_step_trace(failure, labels):
-    marker = '[step] '
-    trace_start = failure.find(marker)
-    trace_text = failure[trace_start:] if trace_start >= 0 else ''
-    trace_text = trace_text.replace('\\n', '\n')
-    actual = re.findall(r'^\[step\] (.+)$', trace_text, re.MULTILINE)
-    position = 0
-    for expected in labels:
-        try:
-            position = actual.index(expected, position) + 1
-        except ValueError as mismatch:
-            reason = 'out of order' if expected in actual else 'missing'
-            raise AssertionError(
-                f'expected step {expected!r} was {reason}; '
-                f'actual step labels: {actual}'
-            ) from mismatch
 
 
 def test_run_background_overlap_accepts_a_short_inner_bound(tmp):
@@ -357,6 +278,42 @@ def test_two_posts_for_one_owner_cannot_deadlock_the_wait(tmp):
         [{'id': '_cookies', 'domain': 'owner-a'}],
         ['owner-a'], inner_wait=2)
     assert [item['owner'] for item in posted] == ['owner-a', 'owner-a'], posted
+
+
+def test_shipped_worker_retries_a_transient_result_post(tmp):
+    """A shipped worker retries a 5xx and completes on the later 2xx."""
+    commands = [{
+        'id': '_cookies', 'type': 'cookies', 'domain': 'owner-a',
+        '_did': 'did-retry',
+    }]
+    with _slow_result_server(post_statuses=[500, 200]) as base:
+        actual = _overlap.run_background_overlap(
+            _SHIPPED_BACKGROUND, commands, ['owner-a'], result_base=base,
+            inner_wait=2)
+    assert actual == [{
+        'id': '_cookies', 'owner': 'owner-a', 'deliveryId': 'did-retry',
+    }], actual
+
+
+def test_shipped_worker_terminal_5xx_fails_fast_with_clipped_diagnostics(tmp):
+    """A terminal shipped-worker refusal names its clipped failure."""
+    long_body = 'x' * 250
+    commands = [{
+        'id': '_cookies', 'type': 'cookies', 'domain': 'owner-a',
+        '_did': 'did-terminal',
+    }]
+    with _slow_result_server(post_statuses=[500], post_body=long_body) as base:
+        failure = _harness_failure(
+            _SHIPPED_BACKGROUND, inner_wait=2, commands=commands,
+            order=['owner-a'], result_base=base)
+    clipped = 'x' * 200 + '...'
+    assert 'outer backstop' not in failure, failure
+    assert 'the result POST for owner-a failed' in failure, failure
+    assert 'status 500' in failure, failure
+    assert clipped in failure, failure
+    assert 'x' * 201 not in failure, failure
+    assert ('[post-failure] owner=owner-a status 500 body ' + clipped
+            in failure), failure
 
 
 def test_real_overlap_bridge_defaults_to_the_durable_token_path(tmp):
