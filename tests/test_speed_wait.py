@@ -5,8 +5,11 @@ Shape pins over speed.yml live in test_speed_gate.py. These only mean
 anything as a run: a commit whose checks have not registered yet, a read
 that fails, a near-miss name, an aggregate that is still going.
 """
+import os
 import re
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -17,16 +20,6 @@ from _speedharness import (  # noqa: E402
 
 
 _AGGREGATE = 'Aggregate workflow checks'
-
-# Quarantined, not fixed: the hang is Windows-only and this box is Linux, so
-# it cannot be reproduced here. See issue 352 for the evidence and the state
-# of the work.
-_WINDOWS_QUARANTINE = (
-    'windows quarantine: hangs silently at or before its first test on'
-    ' every windows-latest leg since it landed — no banner and no summary'
-    ' among the 102 suites that reported both in job 99191192573 — while'
-    ' the same pins pass in about a second on Linux and macOS. Tracked in'
-    ' issue 352.')
 
 
 def test_the_harness_runs_the_wait_with_a_small_bound(tmp):
@@ -159,39 +152,38 @@ def test_a_read_that_fails_says_so_instead_of_looking_empty(tmp):
     assert len(calls) == tries, (len(calls), tries)
 
 
-def test_the_suite_reports_itself_quarantined_on_windows(tmp):
-    """On Windows the suite says why it is not running, rather than hanging.
-
-    Every windows-latest leg since this suite landed has ended at the
-    job's ceiling with no banner and no summary from it, while the same
-    pins pass in about a second on Linux and macOS; the aggregate has to
-    record the suite as NOT RUN with the reason and the tracking issue,
-    never as verified, and the pins stay live everywhere else.
-    """
-    del tmp
-    original_platform, original_runner = sys.platform, _util.runner
-    seen = {}
-
-    def recording_runner(tests, tmp_prefix='speedwait_', requires=None):
-        seen['tests'] = list(tests)
-        seen['requires'] = requires
-        print(f'  SKIP  test_speed_wait: {requires}')
-        return 0
+def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
+    """A timed-out workflow leaves evidence and no live process tree."""
+    pid_file = Path(tmp) / 'grandchild.pid'
+    script = (
+        "printf 'started\\n'; "
+        'sleep 15 & echo $! > "$PWD/grandchild.pid"; '
+        'wait')
 
     try:
-        sys.platform = 'win32'
-        _util.runner = recording_runner
-        assert main() == 0
-    finally:
-        sys.platform, _util.runner = original_platform, original_runner
-    assert seen['tests'] == [], seen
-    assert 'issue 352' in (seen['requires'] or ''), seen
+        run_workflow_script(tmp, script, {}, timeout=2)
+    except subprocess.TimeoutExpired as failure:
+        output_files = getattr(failure, 'output_files', {})
+        assert isinstance(output_files, dict) and output_files, failure
+        stdout_path = Path(output_files['stdout'])
+        assert 'started' in stdout_path.read_text(encoding='utf-8'), (
+            stdout_path, failure)
+    else:
+        raise AssertionError('the workflow unexpectedly completed')
+
+    assert pid_file.exists(), pid_file
+    pid = int(pid_file.read_text(encoding='utf-8'))
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(f'grandchild {pid} is still alive')
 
 
 def main():
-    if sys.platform == 'win32':
-        return _util.runner([], tmp_prefix='speedwait_',
-                            requires=_WINDOWS_QUARANTINE)
     return _util.runner(_util.collect(globals()), tmp_prefix='speedwait_')
 
 
