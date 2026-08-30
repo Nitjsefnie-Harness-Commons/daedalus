@@ -7,6 +7,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -53,61 +55,51 @@ if len(list(marks.iterdir())) < 2:
 """
 
 
-_CONCURRENCY_EVENT_SUITE = r"""import time
-from pathlib import Path
-
-root = Path(__file__).resolve().parent
-lock = root / 'concurrency.lock'
-events_path = root / 'events.log'
-
-
-def acquire():
-    deadline = time.monotonic() + 30
-    while True:
-        try:
-            lock.mkdir()
-            return
-        except FileExistsError:
-            if time.monotonic() >= deadline:
-                raise AssertionError('timed out acquiring concurrency lock')
-            time.sleep(0.01)
-
-
-def append_event(marker):
+_RETRY_SOURCE = r"""def append_event(marker):
     deadline = time.monotonic() + 30
     while True:
         try:
             with events_path.open('a', encoding='utf-8') as events:
                 events.write(f'{marker}{Path(__file__).name}\n')
             return
-        except PermissionError:
+        except PermissionError as exc:
             if time.monotonic() >= deadline:
                 raise AssertionError(
-                    f'timed out appending event to {events_path}')
+                    f'timed out appending event to {events_path}') from exc
             time.sleep(0.01)
-
-
 def release():
     deadline = time.monotonic() + 30
     while True:
         try:
             lock.rmdir()
             return
-        except PermissionError:
+        except PermissionError as exc:
             if time.monotonic() >= deadline:
                 raise AssertionError(
-                    f'timed out removing lock directory {lock}')
+                    f'timed out removing lock directory {lock}') from exc
             time.sleep(0.01)
+"""
 
 
+_CONCURRENCY_EVENT_SUITE = r"""import time; from pathlib import Path
+root = Path(__file__).resolve().parent
+lock = root / 'concurrency.lock'; events_path = root / 'events.log'
+def acquire():
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            lock.mkdir(); return
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise AssertionError('timed out acquiring concurrency lock')
+            time.sleep(0.01)
+""" + _RETRY_SOURCE + r"""
 acquire()
 try:
     append_event('+')
 finally:
     release()
-
 time.sleep(0.5)
-
 acquire()
 try:
     append_event('-')
@@ -116,60 +108,24 @@ finally:
 """
 
 
-_DYING_CONCURRENCY_SUITE = r"""import os
-import time
-from pathlib import Path
-
+_DYING_CONCURRENCY_SUITE = r"""import os, time; from pathlib import Path
 root = Path(__file__).resolve().parent
-lock = root / 'concurrency.lock'
-events_path = root / 'events.log'
-
-
+lock = root / 'concurrency.lock'; events_path = root / 'events.log'
 def acquire():
     deadline = time.monotonic() + 30
     while True:
         try:
-            lock.mkdir()
-            return
+            lock.mkdir(); return
         except FileExistsError:
             if time.monotonic() >= deadline:
                 raise AssertionError('timed out acquiring concurrency lock')
             time.sleep(0.01)
-
-
-def append_event(marker):
-    deadline = time.monotonic() + 30
-    while True:
-        try:
-            with events_path.open('a', encoding='utf-8') as events:
-                events.write(f'{marker}{Path(__file__).name}\n')
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    f'timed out appending event to {events_path}')
-            time.sleep(0.01)
-
-
-def release():
-    deadline = time.monotonic() + 30
-    while True:
-        try:
-            lock.rmdir()
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    f'timed out removing lock directory {lock}')
-            time.sleep(0.01)
-
-
+""" + _RETRY_SOURCE + r"""
 acquire()
 try:
     append_event('+')
 finally:
     release()
-
 os._exit(1)
 """
 
@@ -258,17 +214,51 @@ def _group(stdout, name):
     return stdout[start:end]
 
 
-def _read_events(path):
-    deadline = time.monotonic() + 30
+def _fake_time(moments):
+    moments = iter(moments)
+    sleeps = []
+    return SimpleNamespace(
+        monotonic=lambda: next(moments), sleep=sleeps.append), sleeps
+
+
+def _retry_target(path, outcomes, operation):
+    target = MagicMock()
+    target.__str__.return_value = path
+    if operation == 'open':
+        writer = MagicMock()
+        writer.__enter__.return_value = writer
+        outcomes = [writer if item is None else item for item in outcomes]
+    getattr(target, operation).side_effect = outcomes
+    return target
+
+
+def _retry_call(kind, fake_time, target):
+    if kind == 'read_events':
+        return lambda: _read_events(
+            target, monotonic=fake_time.monotonic,
+            sleep=fake_time.sleep)
+    namespace = {
+        'time': fake_time, 'Path': Path,
+        'events_path': target if kind == 'append_event' else MagicMock(),
+        'lock': target if kind == 'release' else MagicMock()}
+    namespace['__file__'] = '/fake/test_retry.py'
+    exec(_RETRY_SOURCE, namespace)  # pylint: disable=exec-used
+    if kind == 'append_event':
+        return lambda: namespace[kind]('+')
+    return namespace[kind]
+
+
+def _read_events(path, *, monotonic=time.monotonic, sleep=time.sleep):
+    deadline = monotonic() + 30
     while True:
         try:
             return path.read_text(encoding='utf-8').splitlines(
                 keepends=True)
         except PermissionError as exc:
-            if time.monotonic() >= deadline:
+            if monotonic() >= deadline:
                 raise AssertionError(
                     f'timed out reading event log {path}') from exc
-            time.sleep(0.01)
+            sleep(0.01)
 
 
 def _replay_events(lines):
@@ -491,6 +481,64 @@ def test_replay_rejects_a_duplicate_open(_tmp):
         raise AssertionError(f'duplicate event log line accepted: {lines!r}')
 
 
+def _assert_retry_contract(kind):
+    operation, path, success, expected_operation = {
+        'append_event': ('open', '/fake/events.log', None, 'appending event'),
+        'release': (
+            'rmdir', '/fake/concurrency.lock', None,
+            'removing lock directory'),
+        'read_events': ('read_text', '/fake/events.log', '+test_a.py\n',
+                        'reading event log'),
+    }[kind]
+    expected_result = ['+test_a.py\n'] if success else None
+    fake_time, sleeps = _fake_time([0, 1, 2])
+    transient = _retry_target(
+        path, [PermissionError('first'), PermissionError('second'), success],
+        operation)
+    result = _retry_call(kind, fake_time, transient)()
+    assert sleeps == [0.01, 0.01], sleeps
+    assert result == expected_result, result
+    fake_time, _sleeps = _fake_time([0, 30])
+    denied = PermissionError('denied')
+    exhausted = _retry_target(path, [denied], operation)
+    try:
+        _retry_call(kind, fake_time, exhausted)()
+    except AssertionError as exc:
+        assert expected_operation in str(exc), exc
+        assert path in str(exc), exc
+        if kind == 'read_events':
+            assert exc.__cause__ is denied, exc.__cause__
+    else:
+        raise AssertionError(f'exhausted {kind} retry returned silently')
+    fake_time, sleeps = _fake_time([0])
+    error = OSError('not a permission denial')
+    other_error = _retry_target(path, [error], operation)
+    try:
+        _retry_call(kind, fake_time, other_error)()
+    except OSError as exc:
+        assert exc is error, (exc, error)
+    else:
+        raise AssertionError(f'non-permission {kind} error was swallowed')
+    assert not sleeps, sleeps
+    fake_time, sleeps = _fake_time([0])
+    immediate = _retry_target(path, [success], operation)
+    result = _retry_call(kind, fake_time, immediate)()
+    assert not sleeps, sleeps
+    assert result == expected_result, result
+
+
+def test_append_event_retry_contract(_tmp):
+    _assert_retry_contract('append_event')
+
+
+def test_release_retry_contract(_tmp):
+    _assert_retry_contract('release')
+
+
+def test_read_events_retry_contract(_tmp):
+    _assert_retry_contract('read_events')
+
+
 def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
     """A dead suite stays diagnosed without fabricating a pool breach."""
     dying_suite = 'test_worker_dies.py'
@@ -505,10 +553,19 @@ def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
     assert result.returncode == 0, (result.stdout, result.stderr)
     events_path = Path(tmp) / 'tree' / 'tests' / 'events.log'
     lines = _read_events(events_path)
-    peak, _paired_names, unpaired, orphans = _replay_events(lines)
+    peak, paired_names, unpaired, orphans = _replay_events(lines)
+    healthy_suites = set(suites) - {dying_suite}
+    assert paired_names == healthy_suites, (
+        f'healthy paired suites differ: expected {sorted(healthy_suites)}, '
+        f'observed {sorted(paired_names)}; log: {lines!r}')
     assert unpaired == {dying_suite}, (
         f'{dying_suite} was not the sole unpaired suite: {lines!r}')
     assert not orphans, f'orphan close in event log: {lines!r}'
+    failure_marker = '(suite did not pass; its coverage still counts)'
+    for name in healthy_suites:
+        group = _group(result.stdout, name)
+        assert failure_marker not in group, (
+            f'healthy suite {name} was reported failed: {group!r}')
     failed_group = _group(result.stdout, dying_suite)
     assert ('  (suite did not pass; its coverage still counts)'
             in failed_group), f'{dying_suite} group: {failed_group!r}'
