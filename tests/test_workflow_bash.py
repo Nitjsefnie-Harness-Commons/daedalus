@@ -1,11 +1,38 @@
 #!/usr/bin/env python3
 """Contracts for resolving and using Bash in workflow-shell tests."""
+import os
+import shlex
+import shutil
+import stat
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _wfgraph  # noqa: E402
+
+_COVERAGE_ENV = _util.child_coverage('scrub')
+
+
+class _MonkeyPatch:
+    def __init__(self):
+        self._environment = os.environ.copy()
+        self._cwd = os.getcwd()
+
+    def setenv(self, name, value):
+        os.environ[name] = value
+
+    def chdir(self, path):
+        os.chdir(path)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        os.environ.clear()
+        os.environ.update(self._environment)
+        os.chdir(self._cwd)
 
 
 def test_workflow_bash_takes_the_first_existing_candidate(tmp):
@@ -31,6 +58,38 @@ def test_workflow_bash_takes_the_first_existing_candidate(tmp):
             raise AssertionError('missing Bash must fail loudly')
     finally:
         _util.bash_candidates = original
+
+
+def test_workflow_bash_resolves_relative_candidate_for_other_cwd(tmp):
+    """A relative PATH candidate remains launchable after its cwd changes."""
+    real_bash = _util.workflow_bash()
+    root = Path(tmp)
+    pathbin = root / 'pathbin'
+    pathbin.mkdir()
+    if sys.platform.startswith('win'):
+        bash = pathbin / 'bash.exe'
+        shutil.copy2(real_bash, bash)
+    else:
+        bash = pathbin / 'bash'
+        bash.write_text(
+            '#!/bin/sh\nexec ' + shlex.quote(real_bash) + ' "$@"\n',
+            encoding='utf-8')
+        bash.chmod(stat.S_IRWXU)
+    other = root / 'other'
+    other.mkdir()
+
+    with _MonkeyPatch() as monkeypatch:
+        monkeypatch.setenv(
+            'PATH', 'pathbin' + os.pathsep + os.environ.get('PATH', ''))
+        monkeypatch.chdir(root)
+        resolved = _util.workflow_bash()
+        assert os.path.isabs(resolved), resolved
+        result = subprocess.run(
+            [resolved, '-c', 'printf relative-path-ok'],
+            cwd=other, env=_COVERAGE_ENV, capture_output=True, text=True)
+
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'relative-path-ok', result.stdout
 
 
 def test_windows_candidates_prefer_git_bash_over_the_wsl_launcher(tmp):
