@@ -213,6 +213,26 @@ def test_control_extension_turns_worker_absence_into_failure(tmp):
     assert len(attempts) == 1, attempts
 
 
+def test_machine_skip_carries_what_the_diagnosis_observed(tmp):
+    """The machine verdict carries what the diagnosis observed with it.
+
+    A skip byte-identical to one where no diagnosis ran leaves the
+    machine-blame claim unevidenced.
+    """
+    def observed(*args):
+        del args
+        return 'controlled: the control worker never answered either'
+
+    failure, attempts = _worker_timeout_failure(tmp, False, verdict=observed)
+    assert failure.__class__ is (
+        _realbrowser.BrowserEnvironmentSkipped), failure
+    assert 'this browser never let the extension worker be reached' in str(
+        failure), failure
+    assert 'controlled: the control worker never answered either' in str(
+        failure), failure
+    assert len(attempts) == 1, attempts
+
+
 def _control_target():
     return {
         'type': 'service_worker',
@@ -275,7 +295,9 @@ def _control_diagnosis(tmp, answers, clock, poll=None):
 
 
 def _answered_diagnosis(tmp):
-    return _control_diagnosis(tmp, [True], mock.Mock(return_value=0))
+    # Finite like its siblings: a constant zero spins the verdict's deadline
+    # loop forever on any mutation that blocks the answered path.
+    return _control_diagnosis(tmp, [True], mock.Mock(side_effect=(0, 0, 31)))
 
 
 def test_answering_control_worker_marks_worker_absence_our_failure(tmp):
@@ -312,6 +334,8 @@ def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
     """No control answer is a browser that never demonstrated anything."""
     outcome, launches, process = _control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0, 31)))
+    # The contract: a no-answer route returns a description, it does not raise.
+    assert outcome.__class__ is str, outcome
     assert 'no answering worker either' in outcome, outcome
     process.terminate.assert_called_once()
     assert len(launches) == 1, launches
@@ -321,6 +345,7 @@ def test_control_browser_exit_ends_the_diagnosis_without_a_verdict(tmp):
     """A diagnosis browser that is gone cannot demonstrate anything."""
     outcome, launches, process = _control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0)), poll=1)
+    assert outcome.__class__ is str, outcome
     assert 'exited before any control worker' in outcome, outcome
     assert len(launches) == 1, launches
     process.terminate.assert_called_once()
@@ -338,7 +363,9 @@ def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
 def test_the_control_extension_satisfies_its_own_probe(tmp):
     """The verdict rests on the control's script reaching its flag."""
     node = shutil.which('node')
-    assert node, 'Node is required to execute the control worker probe'
+    if not node:
+        _realbrowser_controls.control_requirement_missing(
+            'Node is absent, so the control worker probe cannot be checked')
     control = _realbrowser._control_extension(tmp)
     source = (control / _realbrowser.CONTROL_WORKER_SCRIPT).read_text(
         encoding='utf-8')
@@ -353,6 +380,15 @@ def test_the_control_extension_satisfies_its_own_probe(tmp):
         capture_output=True, text=True, timeout=10)
     assert answer.returncode == 0, (answer.returncode, answer.stderr)
     assert answer.stdout == 'true', (answer.stdout, answer.stderr)
+
+
+def test_the_control_probe_requirement_is_a_skip_not_a_failure(tmp):
+    """A Node-less leg skips the probe control instead of failing it."""
+    with mock.patch.object(shutil, 'which', return_value=None):
+        failure = _call_failure(
+            lambda: test_the_control_extension_satisfies_its_own_probe(tmp))
+    assert failure.__class__ is (
+        _realbrowser_controls.ControlRequirementSkipped), failure
 
 
 def test_the_control_extension_is_loadable_and_cannot_collide_with_ours(tmp):

@@ -427,7 +427,8 @@ def _worker_absence_verdict(node, browser, extension, worker_script, tmp):
     answer its probe has demonstrated the exact capability the fixture's
     skip would excuse, so ours is the failure and this raises naming our
     source. A browser that fails the control too returns what it observed,
-    and the skip standing in the caller names the machine.
+    and the skip standing in the caller names the machine and carries that
+    observation with it.
     """
     control = _control_extension(tmp)
     profile = Path(tmp) / 'control-profile'
@@ -538,14 +539,17 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             yield from _configured_fixture(
                 node, bridge_url, token, worker_target, devtools_port,
                 worker_script, page_target, page_url)
-    except BrowserEnvironmentSkipped:
+    except BrowserEnvironmentSkipped as why:
         # Reached only after the launch, so this is the one state a skip
         # cannot be trusted on: our extension produced no worker, which is
         # either the machine failing MV3 outright or our source failing to
         # load. The control extension tells those apart, and raises instead
-        # of returning when the machine has proven itself.
-        _worker_absence_verdict(
+        # of returning when the machine has proven itself; otherwise what it
+        # observed rides along on the re-raised skip as that verdict's
+        # evidence, so a machine skip is never one where no diagnosis ran.
+        observed = _worker_absence_verdict(
             node, browser, extension, worker_script, tmp)
+        why.args = (f'{why} — {observed}',)
         raise
     finally:
         process.terminate()
