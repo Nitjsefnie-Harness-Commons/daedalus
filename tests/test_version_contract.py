@@ -145,17 +145,19 @@ def _break_one_site(copy_root, replacement='0.0.0-drift', quote='"'):
     init_copy.write_text(new_text, encoding='utf-8')
 
 
-def _duplicate_the_package_version(copy_root, second_value='0.22.0.2'):
+def _duplicate_the_package_version(copy_root, second_value='0.22.0.2',
+                                   quote="'"):
     """Add a second, later `__version__` assignment in the COPY's CLI package.
 
     A plain, valid assignment in a shape the file does not otherwise use —
     the exact reproduction from #228: nothing about it looks malformed, so a
     checker that reports the first regex match cannot tell the file now binds
-    a different value at runtime.
+    a different value at runtime, and `quote` writes the #319 mirror spelling.
     """
     init_copy = copy_root / 'daedalus_cli' / '__init__.py'
     text = init_copy.read_text(encoding='utf-8')
-    init_copy.write_text(text + f"\n__version__ = '{second_value}'\n", encoding='utf-8')
+    assignment = f'\n__version__ = {quote}{second_value}{quote}\n'
+    init_copy.write_text(text + assignment, encoding='utf-8')
 
 
 def _duplicate_the_page_js_version(copy_root, second_value='9.9.9', quote='"'):
@@ -477,46 +479,45 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
 
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
-    """A second `__version__` assignment whose value carries the quote the
-    site is not delimited with: the old value class refused both quotes, so
-    the duplicate matched nothing and the tree read consistent (#319)."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, _pattern = checker.SITES[-1]
-    assert path == 'daedalus_cli/__init__.py', path
-    _duplicate_the_package_version(copy_root, second_value='9.9.9"')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    assert desc in r.stderr, (desc, r.stderr)
-    assert '0.22.0.1' in r.stderr, r.stderr
-    assert '9.9.9"' in r.stderr, r.stderr
+    """A duplicate `__version__` whose value carries the quote character its
+    own delimiter is not must be refused, in either spelling (#319)."""
+    for second_value, quote in (('9.9.9"', "'"), ("9.9.9'", '"')):
+        copy_root = Path(tmp) / 'tree'
+        _copy_versioned_tree(copy_root)
+        _duplicate_the_package_version(copy_root, second_value, quote)
+        r = _run_checker(copy_root)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert 'matches 2 times' in r.stderr, r.stderr
+        assert 'package __version__' in r.stderr, r.stderr
+        assert '0.22.0.1' in r.stderr, r.stderr
+        assert second_value in r.stderr, r.stderr
 
 
 def test_check_versions_print_refuses_the_other_quote_package_duplicate(tmp):
-    """--print feeds another program, so it must not hand out the first of
-    two competing values just because one is spelled invisibly (#319)."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    _duplicate_the_package_version(copy_root, second_value='9.9.9"')
-    r = _run_checker(copy_root, '--print')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert r.stdout.strip() == '', r.stdout
-    assert 'matches 2 times' in r.stderr, r.stderr
+    """--print must not hand out the first of two competing values (#319)."""
+    for second_value, quote in (('9.9.9"', "'"), ("9.9.9'", '"')):
+        copy_root = Path(tmp) / 'tree'
+        _copy_versioned_tree(copy_root)
+        _duplicate_the_package_version(copy_root, second_value, quote)
+        r = _run_checker(copy_root, '--print')
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert r.stdout.strip() == '', r.stdout
+        assert 'matches 2 times' in r.stderr, r.stderr
 
 
 def test_check_versions_set_refuses_the_other_quote_package_duplicate(tmp):
     """--set must not rewrite every site to an invisible duplicate (#319)."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    _duplicate_the_package_version(copy_root, second_value='9.9.9"')
-    init_copy = copy_root / 'daedalus_cli' / '__init__.py'
-    before = init_copy.read_text(encoding='utf-8')
-    r = _run_checker(copy_root, '--set', '9.9.9')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    after = init_copy.read_text(encoding='utf-8')
-    assert after == before, 'refused sites must not be partially rewritten'
+    for second_value, quote in (('9.9.9"', "'"), ("9.9.9'", '"')):
+        copy_root = Path(tmp) / 'tree'
+        _copy_versioned_tree(copy_root)
+        _duplicate_the_package_version(copy_root, second_value, quote)
+        init_copy = copy_root / 'daedalus_cli' / '__init__.py'
+        before = init_copy.read_text(encoding='utf-8')
+        r = _run_checker(copy_root, '--set', '9.9.9')
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert 'matches 2 times' in r.stderr, r.stderr
+        after = init_copy.read_text(encoding='utf-8')
+        assert after == before, 'refused sites must not be partially rewritten'
 
 
 def test_check_versions_package_value_may_contain_a_different_quote(tmp):
