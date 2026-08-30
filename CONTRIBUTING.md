@@ -24,6 +24,18 @@ Two conditions, and they are about honesty rather than provenance:
    model name — a context-window suffix like `(1M context)` is not part of it.
    One primary-author trailer per commit.
 
+   Before pushing, inspect every outgoing commit rather than checking only the
+   tip:
+
+   ```bash
+   git log --format='%h %(trailers:key=Co-Authored-By,valueonly)' origin/main..HEAD
+   ```
+
+   A present trailer is not enough: its value must exactly match the model's
+   standardized identity. For GPT-5.6 Sol that identity is
+   `GPT-5.6 Sol <noreply@openai.com>`; slug, case, and hyphen variants such as
+   `gpt-5.6-sol` and `GPT-5.6-Sol` are not equivalent.
+
 2. **Do not submit claims you have not verified.** Paste the command and its
    real output. "Tests pass" without the run is not evidence, and this
    repository is unusually easy to be confidently wrong about: much of it is
