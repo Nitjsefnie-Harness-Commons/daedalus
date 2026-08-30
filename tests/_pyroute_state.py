@@ -1,7 +1,7 @@
 """Alias-flow state primitives for Python tab-routing analysis."""
 import ast
 import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 OPAQUE_TAB_SPREAD = object()
@@ -25,13 +25,19 @@ class FlowState:
     builtin_locals: set
     callables: dict
     bound: set
+    dict_origins: dict = field(default_factory=dict)
+    dict_namespaces: dict = field(default_factory=dict)
+    namespace: int = 0
 
     def copy(self):
         return FlowState(
             {name: keys.copy() for name, keys in self.dicts.items()},
             dict(self.aliases), dict(self.generators), dict(self.evaluated),
             set(self.builtin_globals), set(self.builtin_locals),
-            dict(self.callables), set(self.bound))
+            dict(self.callables), set(self.bound), dict(self.dict_origins),
+            {scope: {name: keys.copy() for name, keys in values.items()}
+             for scope, values in self.dict_namespaces.items()},
+            self.namespace)
 
 
 @dataclass(frozen=True)
@@ -241,6 +247,29 @@ def apply_dict_statement(node, dicts):
                     OPAQUE_TAB_SPREAD, None)
             dicts.setdefault(target.value.id, {})[target.slice.value] = (
                 node.value.lineno, node.value)
+
+
+def apply_state_dict_statement(node, state):
+    before = {name: keys.copy() for name, keys in state.dicts.items()}
+    apply_dict_statement(node, state.dicts)
+    changed = {name for name in before.keys() | state.dicts.keys()
+               if before.get(name) != state.dicts.get(name)}
+    for name in changed:
+        origin = state.dict_origins.get(name, state.namespace)
+        namespace = state.dict_namespaces.setdefault(origin, {})
+        if name in state.dicts:
+            state.dict_origins[name] = origin
+            namespace[name] = state.dicts[name].copy()
+        else:
+            state.dict_origins.pop(name, None)
+            namespace.pop(name, None)
+
+
+def discard_state_dict(state, name):
+    state.dicts.pop(name, None)
+    origin = state.dict_origins.pop(name, None)
+    if origin is not None:
+        state.dict_namespaces.setdefault(origin, {}).pop(name, None)
 
 
 def dict_assignments(scope):
@@ -502,13 +531,20 @@ def value_signature(value):
     return value
 
 
+def payload_state_signature(keys):
+    tab = ('opaque' if OPAQUE_TAB_SPREAD in keys else 'absent'
+           if 'tab' not in keys else 'extension'
+           if is_extension_constant(keys['tab'][1]) else 'other')
+    return 'type' in keys, tab
+
+
 def state_signature(state):
-    payloads = []
-    for name, keys in sorted(state.dicts.items()):
-        tab = ('opaque' if OPAQUE_TAB_SPREAD in keys else 'absent'
-               if 'tab' not in keys else 'extension'
-               if is_extension_constant(keys['tab'][1]) else 'other')
-        payloads.append((name, 'type' in keys, tab))
+    payloads = [(name, *payload_state_signature(keys))
+                for name, keys in sorted(state.dicts.items())]
+    namespaces = tuple(sorted(
+        (scope, name, *payload_state_signature(keys))
+        for scope, values in state.dict_namespaces.items()
+        for name, keys in values.items()))
     generators = tuple(sorted(
         (name, value.expression.lineno, value.expression.col_offset,
          value.remaining, value.evaluate_zero)
@@ -525,7 +561,9 @@ def state_signature(state):
             tuple(sorted(state.builtin_locals)),
             tuple(sorted((name, id(value))
                          for name, value in state.callables.items())),
-            tuple(sorted(state.bound)))
+            tuple(sorted(state.bound)),
+            tuple(sorted(state.dict_origins.items())),
+            namespaces, state.namespace)
 
 
 def dedupe_states(states):
@@ -556,6 +594,32 @@ def inherited_dicts(states):
         if values[0] is not None and all(value == values[0]
                                          for value in values):
             inherited[name] = values[0].copy()
+    return inherited
+
+
+def inherited_dict_origins(states, dicts):
+    origins = {}
+    for name in list(dicts):
+        values = [state.dict_origins.get(name) for state in states]
+        if values[0] is not None and all(value == values[0]
+                                         for value in values):
+            origins[name] = values[0]
+        else:
+            dicts.pop(name)
+    return origins
+
+
+def inherited_dict_namespaces(states):
+    inherited = {}
+    entries = {(scope, name) for state in states
+               for scope, values in state.dict_namespaces.items()
+               for name in values}
+    for scope, name in entries:
+        values = [state.dict_namespaces.get(scope, {}).get(name)
+                  for state in states]
+        if values[0] is not None and all(value == values[0]
+                                         for value in values):
+            inherited.setdefault(scope, {})[name] = values[0].copy()
     return inherited
 
 
@@ -594,6 +658,8 @@ def merged_evaluated_value(default, states):
 def callable_state(scope, states, annotations_eager=True):
     args = scope.args
     dicts = inherited_dicts(states)
+    dict_origins = inherited_dict_origins(states, dicts)
+    dict_namespaces = inherited_dict_namespaces(states)
     aliases = inherited_aliases(states)
     generators = inherited_generators(states)
     callables = inherited_callables(states)
@@ -618,6 +684,7 @@ def callable_state(scope, states, annotations_eager=True):
     bound.update(parameter.arg for parameter in parameters)
     for name in local_names:
         dicts.pop(name, None)
+        dict_origins.pop(name, None)
         aliases.pop(name, None)
         generators.pop(name, None)
         callables.pop(name, None)
@@ -633,8 +700,9 @@ def callable_state(scope, states, annotations_eager=True):
             generators[parameter.arg] = resolved
         elif resolved is not None:
             aliases[parameter.arg] = resolved
-    return FlowState(dicts, aliases, generators, {}, builtin_globals,
-                     builtin_locals, callables, bound)
+    return FlowState(
+        dicts, aliases, generators, {}, builtin_globals, builtin_locals,
+        callables, bound, dict_origins, dict_namespaces, id(scope))
 
 
 def function_allowed_opaque(node):
@@ -648,7 +716,7 @@ def clear_names(states, names):
         bind_builtin_names(state, names)
         state.bound.update(names)
         for name in names:
-            state.dicts.pop(name, None)
+            discard_state_dict(state, name)
             state.aliases.pop(name, None)
             state.generators.pop(name, None)
             state.callables.pop(name, None)
