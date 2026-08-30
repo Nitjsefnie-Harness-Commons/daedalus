@@ -98,7 +98,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         flow_exits=None, scope_callables=None,
                         scope_executed=None, active_callables=frozenset(),
                         module_scope=False, annotation_mode=(True, True),
-                        chain=frozenset()):
+                        chain=frozenset(), callable_dict_origins=None):
     annotations_eager, evaluate_annotations = annotation_mode
     violations = []
     owns_scope = scope_callables is None
@@ -108,6 +108,23 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def copied(found):
         return [_copy_state_pair(pair) for pair in found]
+
+    def callable_pairs(found):
+        if callable_dict_origins is None:
+            return found
+        projected = []
+        for state in found:
+            entry = _copy_state_pair(state)
+            entry.dicts = {}
+            entry.dict_origins = {}
+            for name, origin in callable_dict_origins.items():
+                keys = entry.dict_namespaces.get(origin, {}).get(name)
+                if keys is None:
+                    continue
+                entry.dicts[name] = keys.copy()
+                entry.dict_origins[name] = origin
+            projected.append(entry)
+        return projected
 
     def overlay(destination, source, keep, blocked):
         for attr in ('dicts', 'dict_origins', 'aliases', 'generators',
@@ -295,7 +312,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 current_pairs = check_expression(default, current_pairs)
             if defaults:
                 nested = [callable_state(
-                    node, current_pairs, annotations_eager)]
+                    node, callable_pairs(current_pairs), annotations_eager)]
                 check_expression(node.body, nested)
             return remember(node, current_pairs)
         if isinstance(node, ast.NamedExpr):
@@ -437,7 +454,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         return _py_flow_violations(
             parts, current_pairs, rel, allowed_opaque_names, exits,
             scope_callables, scope_executed, active_callables, module_scope,
-            (annotations_eager, evaluate_annotations))
+            (annotations_eager, evaluate_annotations),
+            callable_dict_origins=callable_dict_origins)
 
     for statement in statements:  # pylint: disable=too-many-nested-blocks
         if pairs: fallback = _copy_state_pair(pairs[0])
@@ -455,7 +473,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 bind_builtin_names(state, {statement.name})
                 deferred = DeferredCallable(
                     statement, callable_state(
-                        statement, [state], annotations_eager),
+                        statement, callable_pairs([state]),
+                        annotations_eager),
                     frozenset(local_names), frozenset(chain))
                 scope_callables.append(deferred)
                 if pairs: state.callables[statement.name] = deferred
@@ -469,14 +488,22 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             completed = []
             for incoming in pairs:
                 class_callables = []
+                class_state = _copy_state_pair(incoming)
+                origins = (callable_dict_origins
+                           if callable_dict_origins is not None
+                           else incoming.dict_origins)
+                origins = dict(origins)
+                class_state.namespace = id(statement)
+                for name in local_names:
+                    class_state.dict_origins.pop(name, None)
                 nested, results = _py_flow_violations(
-                    statement.body, [_copy_state_pair(incoming)], rel,
+                    statement.body, [class_state], rel,
                     allowed_opaque_names,
                     scope_callables=class_callables,
                     scope_executed=scope_executed,
                     active_callables=active_callables,
                     annotation_mode=(annotations_eager, annotations_eager),
-                    chain=chain)
+                    chain=chain, callable_dict_origins=origins)
                 violations.extend(nested)
                 scope_callables.extend(class_callables)
                 for state in results:

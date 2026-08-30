@@ -391,6 +391,25 @@ def test_callable_dict_state_requires_consensus(tmp):
         '`tab` cannot be verified']
 
 
+def test_class_dicts_do_not_replace_method_global_state(tmp):
+    source = Path(tmp) / 'class_dict.py'
+
+    def scan(module_tab, class_tab):
+        source.write_text(
+            f"cmd = {{'type': '/focus', 'tab': {module_tab!r}}}\n"
+            "class Sender:\n"
+            f"    cmd = {{'type': '/focus', 'tab': {class_tab!r}}}\n"
+            "    def run():\n"
+            "        return ext_cmd(**cmd)\n"
+            "Sender.run()\n",
+            encoding='utf-8')
+        return py_tab_routing_violations(source, source.name)
+
+    actual = (scan(5, 'extension'), scan('extension', 5))
+    expected = ([f'{source.name}:1: `tab` in **cmd passed to ext_cmd'], [])
+    assert actual == expected, actual
+
+
 def test_destructured_and_walrus_alias_boundaries(tmp):
     bodies = [
         "send = _ext_cmd", "send = b.ext_cmd", "send: object = _ext_cmd",
