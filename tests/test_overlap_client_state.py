@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Pins on the overlap client diagnostics the harness suite does not hold.
 
-`tests/test_overlap_harness.py` sits at its module-size ceiling, so the pins
-added by the issue 280 review round live here: what `client_states` does with
-`grace=None`, which diagnosis kind answers first, what the silent diagnosis
-refuses to name, and the real caller that routes its states through them.
+The client-process pins live here beside the harness controls: what
+`client_states` does with `grace=None`, which diagnosis kind answers first,
+what a nonzero diagnosis must name, and the real caller that routes its states
+through them.
 """
 import re
 import subprocess
@@ -118,24 +118,25 @@ def test_a_still_running_client_is_diagnosed_before_a_silent_one(tmp):
     assert 'exited non-zero with no output' not in message, message
 
 
-def test_a_nonzero_client_with_output_is_not_named_silent(tmp):
-    """Output on either stream keeps a non-zero client off the silent list."""
+def test_a_nonzero_client_with_timeout_output_is_named_as_a_failure(tmp):
+    """The filed timeout state is still a failed client outcome."""
     del tmp
     states = {
         'owner-a': {
             'stillRunning': False, 'returncode': 1,
-            'stdout': 'a traceback', 'stderr': '', 'drainTimedOut': False,
-        },
-        'owner-b': {
-            'stillRunning': False, 'returncode': 1,
-            'stdout': '', 'stderr': 'a warning', 'drainTimedOut': False,
+            'stdout': '', 'stderr': 'Timeout (120s)', 'drainTimedOut': False,
         },
     }
+    message = None
     try:
         _overlap.assert_clients_exited(states, [{'owner': 'owner-a'}])
     except AssertionError as failure:
-        raise AssertionError(
-            f'a client with output was named silent: {failure}') from failure
+        message = str(failure)
+    else:
+        raise AssertionError('the filed nonzero client was accepted')
+    assert 'clients exited non-zero' in message, message
+    assert "['owner-a']" in message, message
+    assert 'Timeout (120s)' in message, message
 
 
 def test_run_same_id_client_overlap_diagnoses_its_client_states(tmp):
@@ -144,8 +145,8 @@ def test_run_same_id_client_overlap_diagnoses_its_client_states(tmp):
     assert 'clients still running after grace' in message, message
 
 
-def _overlap_client_failure_message(tmp):
-    """A real overlap run whose clients are reported as still running.
+def _overlap_client_failure_message(tmp, states=None):
+    """A real overlap run whose clients are reported in supplied states.
 
     The clients and the bridge are real, so the failure the caller raises
     carries evidence a stubbed bridge could not produce: the bridge's own log
@@ -155,9 +156,12 @@ def _overlap_client_failure_message(tmp):
         'stillRunning': True, 'returncode': None,
         'stdout': '', 'stderr': '', 'drainTimedOut': False,
     }
+    expected = states or {owner: stalled for owner in ('owner-a', 'owner-b')}
 
     def failing_states(processes, grace, **kwargs):
-        return {owner: dict(stalled) for owner in processes}
+        assert grace is None, grace
+        del kwargs
+        return {owner: dict(expected[owner]) for owner in processes}
 
     with mock.patch.object(_overlap, 'client_states', failing_states):
         try:
@@ -184,6 +188,29 @@ def test_a_client_failure_names_the_bridge_log_and_delivery_state(tmp):
     assert 'delivery state' in message, message
     assert re.search(
         r'_extension/\d+_\d+\.json: deliveryId \d+_\d+', message), message
+
+
+def test_a_timeout_client_failure_keeps_both_diagnostics(tmp):
+    """The filed timeout state fails at the caller with both evidence."""
+    states = {
+        'owner-a': {
+            'stillRunning': False, 'returncode': 1,
+            'stdout': '', 'stderr': 'Timeout (120s)', 'drainTimedOut': False,
+        },
+        'owner-b': {
+            'stillRunning': False, 'returncode': 0,
+            'stdout': 'owner-b', 'stderr': '', 'drainTimedOut': False,
+        },
+    }
+    message = _overlap_client_failure_message(tmp, states)
+    assert 'clients exited non-zero' in message, message
+    assert ("'owner-a': {'stillRunning': False, 'returncode': 1, "
+            "'stdout': '', "
+            "'stderr': 'Timeout (120s)'" in message), message
+    assert "'owner-a'" in message, message
+    assert 'Timeout (120s)' in message, message
+    assert 'bridge log tail' in message, message
+    assert 'delivery state' in message, message
 
 
 if __name__ == '__main__':
