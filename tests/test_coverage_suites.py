@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """coverage_suites.py: concurrent measurement without mixed suite output."""
-import ast
 import json
 import os
 import shutil
@@ -197,9 +196,11 @@ def _group(stdout, name):
     return stdout[start:end]
 
 
-def _fake_time():
+def _fake_time(moments=()):
+    moments = iter(moments)
     sleeps = []
-    return SimpleNamespace(sleep=sleeps.append), sleeps
+    return SimpleNamespace(monotonic=lambda: next(moments, 0),
+                           sleep=sleeps.append), sleeps
 
 
 def _retry_target(path, outcomes, operation):
@@ -215,23 +216,30 @@ def _retry_target(path, outcomes, operation):
 
 def _retry_call(kind, fake_time, target):
     if kind == 'read_events':
-        return lambda: _read_events(target, sleep=fake_time.sleep)
+        return lambda: _read_events(target, monotonic=fake_time.monotonic,
+                                    sleep=fake_time.sleep)
+    fallback = MagicMock()
     namespace = {'time': fake_time, 'Path': Path,
-                 'events_path': (
-                     target if kind == 'append_event' else MagicMock()),
-                 'lock': target if kind == 'release' else MagicMock()}
-    namespace['__file__'] = '/fake/test_retry.py'
-    exec(_RETRY_SOURCE, namespace)  # pylint: disable=exec-used
+                 'events_path': target if kind == 'append_event' else fallback,
+                 'lock': (target if kind in ('acquire', 'release')
+                          else fallback),
+                 '__file__': '/fake/test_retry.py'}
+    exec(  # pylint: disable=exec-used
+        _ACQUIRE_SOURCE if kind == 'acquire' else _RETRY_SOURCE, namespace)
     if kind == 'append_event':
         return lambda: namespace[kind]('+')
     return namespace[kind]
 
 
-def _read_events(path, *, sleep=time.sleep):
+def _read_events(path, *, monotonic=time.monotonic, sleep=time.sleep):
+    deadline = monotonic() + 30
     while True:
         try:
             return path.read_text(encoding='utf-8').splitlines(keepends=True)
-        except PermissionError:
+        except PermissionError as exc:
+            if monotonic() >= deadline:
+                raise AssertionError(
+                    f'timed out reading event log {path}') from exc
             sleep(0.01)
 
 
@@ -459,6 +467,7 @@ def test_replay_rejects_a_duplicate_open(_tmp):
 
 def _assert_retry_contract(kind):
     operation, path, success = {
+        'acquire': ('mkdir', '/fake/concurrency.lock', None),
         'append_event': ('open', '/fake/events.log', None),
         'release': ('rmdir', '/fake/concurrency.lock', None),
         'read_events': ('read_text', '/fake/events.log', '+test_a.py\n'),
@@ -471,13 +480,28 @@ def _assert_retry_contract(kind):
     result = _retry_call(kind, fake_time, transient)()
     assert sleeps == [0.01, 0.01], sleeps
     assert result == expected_result, result
-    fake_time, sleeps = _fake_time()
-    tolerant = _retry_target(
-        path, [PermissionError(f'failure {i}') for i in range(50)]
-        + [success], operation)
-    result = _retry_call(kind, fake_time, tolerant)()
-    assert sleeps == [0.01] * 50, sleeps
-    assert result == expected_result, result
+    errors = ((PermissionError, FileExistsError) if kind == 'acquire'
+              else (PermissionError,))
+    for error in errors:
+        fake_time, sleeps = _fake_time()
+        tolerant = _retry_target(
+            path, [error(f'failure {i}') for i in range(50)]
+            + [success], operation)
+        result = _retry_call(kind, fake_time, tolerant)()
+        assert sleeps == [0.01] * 50, sleeps
+        assert result == expected_result, result
+    if kind == 'read_events':
+        fake_time, _sleeps = _fake_time([0, 30])
+        denied = PermissionError('denied')
+        exhausted = _retry_target(path, [denied], operation)
+        try:
+            _retry_call(kind, fake_time, exhausted)()
+        except AssertionError as exc:
+            assert ('reading event log' in str(exc)
+                    and path in str(exc)), exc
+            assert exc.__cause__ is denied, exc.__cause__
+        else:
+            raise AssertionError(f'exhausted {kind} retry returned silently')
     fake_time, sleeps = _fake_time()
     error = OSError('not a permission denial')
     other_error = _retry_target(path, [error], operation)
@@ -490,26 +514,8 @@ def _assert_retry_contract(kind):
     assert not sleeps, sleeps
     fake_time, sleeps = _fake_time()
     immediate = _retry_target(path, [success], operation)
-    result = _retry_call(kind, fake_time, immediate)()
+    assert _retry_call(kind, fake_time, immediate)() == expected_result
     assert not sleeps, sleeps
-    assert result == expected_result, result
-
-
-def test_acquire_retries_permission_error(_tmp):
-    target = MagicMock()
-    target.mkdir.side_effect = [PermissionError('transient'), None]
-    sleeps = []
-    namespace = {'time': SimpleNamespace(sleep=sleeps.append),
-                 'lock': target}
-    function = next(node for node in ast.parse(_CONCURRENCY_EVENT_SUITE).body
-                    if isinstance(node, ast.FunctionDef)
-                    and node.name == 'acquire')
-    module = ast.Module(body=[function], type_ignores=[])
-    # pylint: disable=exec-used
-    exec(compile(module, '<fixture>', 'exec'), namespace)
-    namespace['acquire']()
-    assert target.mkdir.call_count == 2, target.mkdir.call_count
-    assert sleeps == [0.01], sleeps
 
 
 def test_suite_strings_embed_the_retry_source_verbatim(_tmp):
@@ -517,6 +523,10 @@ def test_suite_strings_embed_the_retry_source_verbatim(_tmp):
     assert _DYING_CONCURRENCY_SUITE.count(_ACQUIRE_SOURCE) == 1
     assert _CONCURRENCY_EVENT_SUITE.count(_RETRY_SOURCE) == 1
     assert _DYING_CONCURRENCY_SUITE.count(_RETRY_SOURCE) == 1
+
+
+def test_acquire_retry_contract(_tmp):
+    _assert_retry_contract('acquire')
 
 
 def test_append_event_retry_contract(_tmp):
