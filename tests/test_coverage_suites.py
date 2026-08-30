@@ -466,7 +466,7 @@ def test_replay_rejects_a_duplicate_open(_tmp):
 
 
 def _assert_retry_contract(kind):
-    operation, path, success = {
+    op, path, success = {
         'acquire': ('mkdir', '/fake/concurrency.lock', None),
         'append_event': ('open', '/fake/events.log', None),
         'release': ('rmdir', '/fake/concurrency.lock', None),
@@ -476,44 +476,44 @@ def _assert_retry_contract(kind):
     fake_time, sleeps = _fake_time()
     transient = _retry_target(
         path, [PermissionError('first'), PermissionError('second'), success],
-        operation)
-    result = _retry_call(kind, fake_time, transient)()
+        op)
+    assert _retry_call(kind, fake_time, transient)() == expected_result
     assert sleeps == [0.01, 0.01], sleeps
-    assert result == expected_result, result
     errors = ((PermissionError, FileExistsError) if kind == 'acquire'
               else (PermissionError,))
     for error in errors:
         fake_time, sleeps = _fake_time()
         tolerant = _retry_target(
             path, [error(f'failure {i}') for i in range(50)]
-            + [success], operation)
-        result = _retry_call(kind, fake_time, tolerant)()
+            + [success], op)
+        assert _retry_call(kind, fake_time, tolerant)() == expected_result
         assert sleeps == [0.01] * 50, sleeps
-        assert result == expected_result, result
     if kind == 'read_events':
         fake_time, _sleeps = _fake_time([0, 30])
         denied = PermissionError('denied')
-        exhausted = _retry_target(path, [denied], operation)
+        exhausted = _retry_target(path, [denied], op)
         try:
             _retry_call(kind, fake_time, exhausted)()
         except AssertionError as exc:
-            assert ('reading event log' in str(exc)
-                    and path in str(exc)), exc
+            assert 'reading event log' in str(exc) and path in str(exc), exc
             assert exc.__cause__ is denied, exc.__cause__
         else:
             raise AssertionError(f'exhausted {kind} retry returned silently')
+    rejected = {
+        'acquire': (), 'append_event': (FileExistsError,),
+        'release': (FileExistsError,),
+        'read_events': (FileExistsError,)}[kind]
+    for error_type in rejected + (OSError,):
+        fake_time, sleeps = _fake_time()
+        error = error_type('not tolerated')
+        try:
+            _retry_call(kind, fake_time, _retry_target(path, [error], op))()
+        except OSError as exc:
+            assert exc is error and not sleeps, (exc, error, sleeps)
+        else:
+            raise AssertionError(f'rejected {kind} error was swallowed')
     fake_time, sleeps = _fake_time()
-    error = OSError('not a permission denial')
-    other_error = _retry_target(path, [error], operation)
-    try:
-        _retry_call(kind, fake_time, other_error)()
-    except OSError as exc:
-        assert exc is error, (exc, error)
-    else:
-        raise AssertionError(f'non-permission {kind} error was swallowed')
-    assert not sleeps, sleeps
-    fake_time, sleeps = _fake_time()
-    immediate = _retry_target(path, [success], operation)
+    immediate = _retry_target(path, [success], op)
     assert _retry_call(kind, fake_time, immediate)() == expected_result
     assert not sleeps, sleeps
 
