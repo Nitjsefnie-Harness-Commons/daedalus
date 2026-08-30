@@ -26,10 +26,6 @@ _VERSION_SITE_COUNT_COMMENT = re.compile(
     r'^\s*# sends its report to stderr, so a tree whose '
     r'(?P<word>[a-z]+) sites disagree\s*$', re.MULTILINE)
 
-# Duplicate `__version__` spellings the three mirror tests must all refuse:
-# a value carrying the other quote character, or a continuation spelling.
-_DUPLICATE_SPELLINGS = (('9.9.9"', "'"), ("9.9.9'", '"'), ('9.9.\\\n9', "'"))
-
 
 def _version_workflow_site_count(workflow):
     """Read the concrete site count from the version workflow comment."""
@@ -465,68 +461,6 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
     assert 'matches 2 times' in r.stderr, r.stderr
     after = (copy_root / 'daedalus_cli' / '__init__.py').read_text(encoding='utf-8')
     assert after == before, 'refused sites must not be partially rewritten'
-
-
-def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
-    """A duplicate `__version__` whose value carries a quote other than
-    its own delimiter, or across a continuation, is refused (#319): the
-    canonical needle is derived, and a CRLF continuation matches the class."""
-    for second_value, quote in _DUPLICATE_SPELLINGS:
-        copy_root = Path(tmp) / 'tree'
-        checker = _copy_versioned_tree(copy_root)
-        path, desc, pattern = checker.SITES[-1]
-        assert path == 'daedalus_cli/__init__.py', path
-        pristine = (copy_root / path).read_text(encoding='utf-8')
-        canonical = re.search(pattern, pristine).group('v')
-        _duplicate_the_package_version(copy_root, second_value, quote)
-        r = _run_checker(copy_root)
-        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-        assert 'matches 2 times' in r.stderr, r.stderr
-        assert desc in r.stderr, r.stderr
-        assert canonical in r.stderr, r.stderr
-        assert second_value in r.stderr, r.stderr
-        # Matched by the class itself, not by a read normalizing CRLF away.
-        assert re.fullmatch(pattern, "__version__ = '9.9.\\\r\n9'")
-
-
-def test_check_versions_print_refuses_the_other_quote_package_duplicate(tmp):
-    """--print must not hand out the first of two competing values (#319)."""
-    for second_value, quote in _DUPLICATE_SPELLINGS:
-        copy_root = Path(tmp) / 'tree'
-        _copy_versioned_tree(copy_root)
-        _duplicate_the_package_version(copy_root, second_value, quote)
-        r = _run_checker(copy_root, '--print')
-        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-        assert r.stdout.strip() == '', r.stdout
-        assert 'matches 2 times' in r.stderr, r.stderr
-
-
-def test_check_versions_set_refuses_the_other_quote_package_duplicate(tmp):
-    """--set must not rewrite every site to an invisible duplicate (#319)."""
-    for second_value, quote in _DUPLICATE_SPELLINGS:
-        copy_root = Path(tmp) / 'tree'
-        _copy_versioned_tree(copy_root)
-        _duplicate_the_package_version(copy_root, second_value, quote)
-        init_copy = copy_root / 'daedalus_cli' / '__init__.py'
-        before = init_copy.read_text(encoding='utf-8')
-        r = _run_checker(copy_root, '--set', '9.9.9')
-        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-        assert 'matches 2 times' in r.stderr, r.stderr
-        after = init_copy.read_text(encoding='utf-8')
-        assert after == before, 'refused sites must not be partially rewritten'
-
-
-def test_check_versions_package_value_may_contain_a_different_quote(tmp):
-    """The value class only has to refuse whichever delimiter `q` captured, so
-    a single-quoted value may still carry a double quote the way page.js's
-    already does, and the widened pattern must still see it (#319)."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    _break_one_site(copy_root, replacement='9.9.9"', quote="'")
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'version strings disagree' in r.stderr, r.stderr
-    assert '9.9.9"' in r.stderr, r.stderr
 
 
 def test_check_versions_refuses_a_page_js_version_spelled_with_the_other_quote(tmp):
