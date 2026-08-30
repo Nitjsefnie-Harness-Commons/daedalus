@@ -16,7 +16,7 @@ neutral, cancelled) is held past the debounce window as well, because a filling
 matrix goes quiet between cells and every partial tally is superseded by the
 next. Such a batch is released when something worth reading arrives — which
 makes it no longer quiet, so the ordinary debounce applies — or when every
-check except `speed` on that head has concluded. An unanswerable completion
+check on that head has concluded, `speed` included. An unanswerable completion
 query keeps it holding: a failed query must never look like a settled matrix.
 
 This is a true debounce: the window restarts on every arrival, so nothing
@@ -165,13 +165,13 @@ def _repo_slug():
     return match.group(1) if match else None
 
 
-def _non_speed_all_concluded(sha):
-    """Whether every check on `sha` except `speed` has finished.
+def _all_concluded(sha):
+    """Whether every check on `sha` has finished.
 
     Returns None when the answer cannot be established, and the caller keeps
     holding on None: a failed query must never look like a settled matrix.
-    `speed` is excluded because it outlasts every other check, so a wait that
-    counts it never fires.
+    `speed` counts like any other check; the max-hold cap, not this function,
+    bounds how long the slowest check may hold a batch.
     """
     slug = _repo_slug()
     if not (slug and sha):
@@ -191,7 +191,7 @@ def _non_speed_all_concluded(sha):
             runs.extend(json.loads(chunk).get('check_runs', []))
         except (ValueError, AttributeError):
             return None
-    named = [run for run in runs if 'speed' not in (run.get('name') or '')]
+    named = runs
     if not named:
         return None
     return all(run.get('status') == 'completed' for run in named)
@@ -291,11 +291,11 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
             # matrix still filling in. Emitting it now spends a notification
             # on a tally the next arrival supersedes, so hold it until either
             # something worth reading lands — which makes the batch no longer
-            # quiet, and the debounce above takes over — or every check but
-            # `speed` has concluded and the tally is final.
+            # quiet, and the debounce above takes over — or every check on
+            # that head has concluded and the tally is final.
             held_for = time.monotonic() - (held_since or time.monotonic())
             if _batch_is_only_quiet_ci(batch) and held_for < max_hold:
-                settled = _non_speed_all_concluded(_latest_sha(batch))
+                settled = _all_concluded(_latest_sha(batch))
                 if settled is not True:
                     if held_since is None:
                         held_since = time.monotonic()
