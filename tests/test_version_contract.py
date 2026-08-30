@@ -402,20 +402,39 @@ def test_check_versions_refuses_an_empty_revision_name(tmp):
     """--rev '' is a present --rev with no name in it, and the spec it builds
     (`:<path>`) is what git reads as the index, so an empty --rev silently
     describes something other than the revision the run asked for. Every
-    mode has to refuse it rather than answer about some other source."""
-    copy_root, _checker = _versioned_git_tree(tmp)
-    for argv in (['--rev', ''], ['--print', '--rev', ''],
-                 ['--staged', '--rev', '']):
+    mode has to refuse it rather than answer about some other source,
+    whatever spelling delivers the empty name and whatever state the tree
+    the run is asked about is in."""
+    copy_root, checker = _versioned_git_tree(tmp)
+    for argv in (['--rev', ''], ['--rev='], ['--rev', 'HEAD', '--rev', ''],
+                 ['--print', '--rev', ''], ['--staged', '--rev', '']):
         r = _run_checker(copy_root, *argv)
         assert r.returncode != 0, (argv, r.returncode, r.stdout, r.stderr)
         if argv[0] == '--staged':
             # argparse rejects the combination before main() runs, so this
             # one is refused as a conflict rather than by the empty-rev
-            # refusal the other two reach.
+            # refusal the other spellings reach.
             assert '--staged' in r.stderr and '--rev' in r.stderr, r.stderr
             continue
         assert 'cannot read an empty revision name' in r.stderr, (
             argv, r.stdout, r.stderr)
+
+    # Nor may the refusal depend on the tree being clean. A dirty working
+    # tree over a consistent index is the shape where the old behavior was
+    # worst — the spec it builds reads the index while the report named the
+    # working tree — so it has to fire here too, and write nothing.
+    manifest = copy_root / 'extension' / 'manifest.json'
+    text = manifest.read_text(encoding='utf-8')
+    dirty_text, n = re.subn(r'"version"\s*:\s*"[^"]+"',
+                            '"version": "9.9.9.9"', text)
+    assert n == 1, text
+    manifest.write_text(dirty_text, encoding='utf-8')
+    before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
+    dirty = _run_checker(copy_root, '--rev', '')
+    assert dirty.returncode != 0, (dirty.returncode, dirty.stdout)
+    assert 'cannot read an empty revision name' in dirty.stderr, dirty.stderr
+    for path, body in before.items():
+        assert (copy_root / path).read_bytes() == body, path
 
 
 def test_check_versions_reports_a_revision_it_cannot_read(tmp):
