@@ -177,8 +177,8 @@ class BridgeSession:
             if data.get('pending'):
                 continue
             if (expect_id is not None and data.get('id') != expect_id
-                    or expect_delivery is not None
-                    and data.get('deliveryId') != expect_delivery):
+                    or not expect_delivery
+                    or data.get('deliveryId') != expect_delivery):
                 continue
             generation = data.get('resultGeneration')
             if not generation:
