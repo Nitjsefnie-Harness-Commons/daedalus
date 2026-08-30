@@ -241,6 +241,7 @@
 !/tests/_realbrowser_controls.py
 !/tests/_realbrowser_errors.py
 !/tests/_realbrowser_pages.py
+!/tests/_realbrowser_workers.py
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_segments.py
@@ -323,6 +324,7 @@
 !/tests/test_real_browser_environment.py
 !/tests/test_real_browser_eval.py
 !/tests/test_real_browser_harness.py
+!/tests/test_real_browser_harness_recovery.py
 !/tests/test_release_scan.py
 !/tests/test_repo_layout.py
 !/tests/test_result_command_write_retry.py

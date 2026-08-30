@@ -11,6 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
+import _realbrowser_workers  # noqa: E402
 import _util  # noqa: E402
 from _deliveries import (  # noqa: E402
     real_eval, real_ext_command)
@@ -154,11 +155,8 @@ def _worker_timeout_failure(tmp, reached, verdict=None):
         del node, workers
         return None, reached, 'controlled worker timeout'
 
-    def quiet(*args):
-        del args
-
     if verdict is None:
-        verdict = quiet
+        verdict = mock.Mock(return_value=(False, 'controlled observation'))
     attempts = []
 
     def recording(*args):
@@ -221,7 +219,7 @@ def test_machine_skip_carries_what_the_diagnosis_observed(tmp):
     """
     def observed(*args):
         del args
-        return 'controlled: the control worker never answered either'
+        return False, 'controlled: the control worker never answered either'
 
     failure, attempts = _worker_timeout_failure(tmp, False, verdict=observed)
     assert failure.__class__ is (
@@ -279,14 +277,15 @@ def _control_diagnosis(tmp, answers, clock, poll=None):
     def sleeper(seconds):
         del seconds
 
-    with mock.patch.object(_realbrowser.subprocess, 'Popen', popen), \
-            mock.patch.object(_realbrowser, '_devtools_targets', listed), \
-            mock.patch.object(_realbrowser, 'cdp_eval', evaluate), \
-            mock.patch.object(_realbrowser, '_browser_version', describe), \
-            mock.patch.object(_realbrowser.time, 'time', clock), \
-            mock.patch.object(_realbrowser.time, 'sleep', sleeper):
+    target = _realbrowser_workers
+    with mock.patch.object(target.subprocess, 'Popen', popen), \
+            mock.patch.object(target, '_devtools_targets', listed), \
+            mock.patch.object(target, 'cdp_eval', evaluate), \
+            mock.patch.object(target, '_browser_version', describe), \
+            mock.patch.object(target.time, 'time', clock), \
+            mock.patch.object(target.time, 'sleep', sleeper):
         try:
-            outcome = _realbrowser._worker_absence_verdict(
+            outcome = target._worker_absence_verdict(
                 'node-for-control', '/controlled/chromium', EXTENSION_ROOT,
                 'background.js', tmp)
         except AssertionError as why:
@@ -334,9 +333,8 @@ def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
     """No control answer is a browser that never demonstrated anything."""
     outcome, launches, process = _control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0, 31)))
-    # The contract: a no-answer route returns a description, it does not raise.
-    assert outcome.__class__ is str, outcome
-    assert 'no answering worker either' in outcome, outcome
+    assert outcome[0] is False, outcome
+    assert 'no answering worker either' in outcome[1], outcome
     process.terminate.assert_called_once()
     assert len(launches) == 1, launches
 
@@ -345,8 +343,8 @@ def test_control_browser_exit_ends_the_diagnosis_without_a_verdict(tmp):
     """A diagnosis browser that is gone cannot demonstrate anything."""
     outcome, launches, process = _control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0)), poll=1)
-    assert outcome.__class__ is str, outcome
-    assert 'exited before any control worker' in outcome, outcome
+    assert outcome[0] is False, outcome
+    assert 'exited before any control worker' in outcome[1], outcome
     assert len(launches) == 1, launches
     process.terminate.assert_called_once()
 
@@ -480,6 +478,8 @@ def test_worker_configuration_failure_is_repository_failure(tmp):
 
     with _fixture_runtime(tmp, _navigate), \
             mock.patch.object(_realbrowser, 'cdp_eval', not_configured), \
+            mock.patch.object(
+                _realbrowser_workers, 'cdp_eval', not_configured), \
             mock.patch.object(
                 _realbrowser.time, 'time', side_effect=(0, 0, 0, 31)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
