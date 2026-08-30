@@ -131,7 +131,8 @@ def _break_one_site(copy_root, replacement='0.0.0-drift', quote='"'):
     init_copy.write_text(new_text, encoding='utf-8')
 
 
-def _duplicate_the_package_version(copy_root, duplicate='0.22.0.2', quote="'"):
+def _duplicate_the_package_version(copy_root, second_value='0.22.0.2',
+                                   quote="'"):
     """Add a second, later `__version__` assignment in the COPY's CLI package.
 
     A plain, valid assignment in a shape the file does not otherwise use —
@@ -141,7 +142,7 @@ def _duplicate_the_package_version(copy_root, duplicate='0.22.0.2', quote="'"):
     """
     init_copy = copy_root / 'daedalus_cli' / '__init__.py'
     text = init_copy.read_text(encoding='utf-8')
-    assignment = f'\n__version__ = {quote}{duplicate}{quote}\n'
+    assignment = f'\n__version__ = {quote}{second_value}{quote}\n'
     init_copy.write_text(text + assignment, encoding='utf-8')
 
 
