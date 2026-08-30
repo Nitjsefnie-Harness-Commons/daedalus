@@ -45,7 +45,7 @@ def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
         assert 'matches 2 times' in r.stderr, r.stderr
         assert desc in r.stderr, r.stderr
         assert canonical in r.stderr, r.stderr
-        assert second_value in r.stderr, r.stderr
+        assert repr(second_value) in r.stderr, r.stderr
         # Matched by the class itself, not by a read normalizing CRLF away.
         assert re.fullmatch(pattern, "__version__ = '9.9.\\\r\n9'")
 
