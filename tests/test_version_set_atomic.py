@@ -12,8 +12,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from test_version_contract import (  # noqa: E402
+    _copy_versioned_tree,
+    _duplicate_the_page_js_version,
     _run_checker,
-    _versioned_git_tree,
 )
 
 
@@ -25,20 +26,21 @@ def test_check_versions_set_writes_every_site_or_none(tmp):
     planned before it were already on disk when the run aborted."""
     spellings = (['--set', '1.2.3'], ['--set=1.2.3'])
     for i, argv in enumerate(spellings):
-        dirty_root, checker = _versioned_git_tree(Path(tmp) / f'dirty{i}')
-        page = dirty_root / 'extension' / 'page.js'
-        page.write_text(
-            page.read_text(encoding='utf-8')
-            + "\nconst _dup = { info: { script: { version: '9.9.9' } } };\n",
-            encoding='utf-8')
+        dirty_root = Path(tmp) / f'dirty{i}' / 'tree'
+        checker = _copy_versioned_tree(dirty_root)
+        _duplicate_the_page_js_version(dirty_root, quote="'")
         before = {p: (dirty_root / p).read_bytes()
                   for p, _, _ in checker.SITES}
         aborted = _run_checker(dirty_root, *argv)
         assert aborted.returncode != 0, (
             argv, aborted.returncode, aborted.stdout, aborted.stderr)
         assert 'FAIL' in aborted.stderr, (argv, aborted.stderr)
-        # The report is written after planning, so an abort lands before
-        # any `set <path> ->` line exists to print.
+        # The refusal is for the reason the repro sets up: the duplicate,
+        # not some unrelated refusal a wrong-reason abort would hide.
+        assert 'matches 2 times' in aborted.stderr, (argv, aborted.stderr)
+        # _find_site writes the FAIL during planning; the `set <path> ->`
+        # progress output is what waits for planning, so an abort leaves
+        # it unprinted.
         assert not any(line.startswith('set ')
                        for line in aborted.stdout.splitlines()), (
             argv, aborted.stdout)
@@ -48,7 +50,8 @@ def test_check_versions_set_writes_every_site_or_none(tmp):
     # The positive control: the same tree without the duplicate still gets
     # every site written, so the atomic path did not stop writing at all.
     for i, argv in enumerate(spellings):
-        clean_root, checker = _versioned_git_tree(Path(tmp) / f'clean{i}')
+        clean_root = Path(tmp) / f'clean{i}' / 'tree'
+        checker = _copy_versioned_tree(clean_root)
         clean = _run_checker(clean_root, *argv)
         assert clean.returncode == 0, (argv, clean.returncode, clean.stderr)
         for path, desc, pattern in checker.SITES:
