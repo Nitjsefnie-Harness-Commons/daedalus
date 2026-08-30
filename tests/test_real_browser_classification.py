@@ -2,6 +2,7 @@
 """Browser-free mutation controls for fixture fault classification."""
 import contextlib
 import errno
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
+from _deliveries import (  # noqa: E402
+    real_eval, real_ext_command)
+from _repo import EXTENSION_ROOT  # noqa: E402
 from test_real_browser_harness import (  # noqa: E402
     _browser_version, _enter_fixture, _fixture_runtime)
 
@@ -141,7 +145,7 @@ def test_devtools_start_deadline_is_environment_skip(tmp):
     assert failure.__class__ is _realbrowser.BrowserEnvironmentSkipped, failure
 
 
-def _worker_timeout_failure(tmp, reached):
+def _worker_timeout_failure(tmp, reached, verdict=None):
     def navigate(node, target, method, params):
         del node, target, method, params
         return {}
@@ -150,25 +154,244 @@ def _worker_timeout_failure(tmp, reached):
         del node, workers
         return None, reached, 'controlled worker timeout'
 
+    def quiet(*args):
+        del args
+
+    if verdict is None:
+        verdict = quiet
+    attempts = []
+
+    def recording(*args):
+        attempts.append(args)
+        return verdict(*args)
+
     with _fixture_runtime(
             tmp, navigate, subprocess_run=_browser_version), \
             mock.patch.object(_realbrowser, 'ready_worker', unready), \
             mock.patch.object(
                 _realbrowser, '_devtools_targets', return_value=[]), \
             mock.patch.object(
+                _realbrowser, '_worker_absence_verdict', recording), \
+            mock.patch.object(
                 _realbrowser.time, 'time', side_effect=(0, 0, 31)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
-        return _fixture_failure(tmp)
+        return _fixture_failure(tmp), attempts
 
 
 def test_answering_unready_worker_is_repository_failure(tmp):
-    failure = _worker_timeout_failure(tmp, True)
+    failure, attempts = _worker_timeout_failure(tmp, True)
     assert failure.__class__ is AssertionError, failure
+    assert attempts == [], attempts
 
 
 def test_unreachable_worker_is_environment_skip(tmp):
-    failure = _worker_timeout_failure(tmp, False)
-    assert failure.__class__ is _realbrowser.BrowserEnvironmentSkipped, failure
+    failure, attempts = _worker_timeout_failure(tmp, False)
+    environment = _realbrowser.BrowserEnvironmentSkipped
+    assert failure.__class__ is environment, failure
+    assert 'controlled worker timeout' in str(failure), failure
+    assert 'this browser never let the extension worker be reached' in str(
+        failure), failure
+    # One diagnosis, carrying what it needs to name our source on a verdict.
+    assert len(attempts) == 1, attempts
+    node, browser, extension, worker_script, tmp_dir = attempts[0]
+    assert node == 'node-for-control', node
+    assert browser == '/controlled/chromium', browser
+    assert extension == EXTENSION_ROOT.resolve(), extension
+    assert worker_script == 'background.js', worker_script
+    assert tmp_dir is tmp or Path(tmp_dir) == Path(tmp), tmp_dir
+
+
+def test_control_extension_turns_worker_absence_into_failure(tmp):
+    def guilty(*args):
+        del args
+        raise AssertionError(
+            'controlled: our source, not the machine')
+
+    failure, attempts = _worker_timeout_failure(tmp, False, verdict=guilty)
+    assert failure.__class__ is AssertionError, failure
+    assert 'controlled: our source, not the machine' in str(failure), failure
+    assert len(attempts) == 1, attempts
+
+
+def _control_target():
+    return {
+        'type': 'service_worker',
+        'url': 'chrome-extension://controlled/control-worker.js',
+        'webSocketDebuggerUrl': 'ws://control',
+    }
+
+
+def _control_diagnosis(tmp, answers, clock, poll=None):
+    """Run the real verdict against doubles for the browser and DevTools.
+
+    `answers` are what the control's probe returns per evaluation, the last
+    one repeating; the two-element form is how a poll that could not be read
+    is followed by one that was. The port file is written the way Chromium
+    writes it, since reading that file is part of what the verdict does.
+    """
+    profile = Path(tmp) / 'control-profile'
+    profile.mkdir()
+    (profile / 'DevToolsActivePort').write_text('9222\n', encoding='utf-8')
+    process = mock.Mock()
+    process.poll.return_value = poll
+    launches = []
+    remaining = list(answers)
+
+    def popen(args, *, cwd, stdin, stdout, stderr):
+        del cwd, stdin, stdout, stderr
+        assert not launches, 'the diagnosis launched more than one browser'
+        launches.append(list(args))
+        return process
+
+    def listed(port):
+        del port
+        return [_control_target()]
+
+    def evaluate(node, target, expression):
+        del node, target
+        assert expression == _realbrowser.CONTROL_WORKER_PROBE, expression
+        return remaining.pop(0) if len(remaining) > 1 else remaining[0]
+
+    def describe(browser):
+        del browser
+        return 'Chromium 151.0.7922.169 (controlled)'
+
+    def sleeper(seconds):
+        del seconds
+
+    with mock.patch.object(_realbrowser.subprocess, 'Popen', popen), \
+            mock.patch.object(_realbrowser, '_devtools_targets', listed), \
+            mock.patch.object(_realbrowser, 'cdp_eval', evaluate), \
+            mock.patch.object(_realbrowser, '_browser_version', describe), \
+            mock.patch.object(_realbrowser.time, 'time', clock), \
+            mock.patch.object(_realbrowser.time, 'sleep', sleeper):
+        try:
+            outcome = _realbrowser._worker_absence_verdict(
+                'node-for-control', '/controlled/chromium', EXTENSION_ROOT,
+                'background.js', tmp)
+        except AssertionError as why:
+            outcome = why
+    return outcome, launches, process
+
+
+def _answered_diagnosis(tmp):
+    return _control_diagnosis(tmp, [True], mock.Mock(return_value=0))
+
+
+def test_answering_control_worker_marks_worker_absence_our_failure(tmp):
+    """A control worker that answers is a browser that proved the skill.
+
+    The absence of our worker is also what a machine without MV3 support
+    produces, so the verdict is only trustworthy once something else has
+    demonstrated the capability. What is pinned here is that contract: the
+    failure names our source and our declared script, never the machine.
+    """
+    outcome, _launches, _process = _answered_diagnosis(tmp)
+    assert outcome.__class__ is AssertionError, outcome
+    reported = str(outcome)
+    assert str(EXTENSION_ROOT.resolve()) in reported, reported
+    assert 'background.js' in reported, reported
+    assert 'Chromium 151.0.7922.169 (controlled)' in reported, reported
+    assert 'not the machine' in reported, reported
+
+
+def test_control_diagnosis_launches_both_extensions_once(tmp):
+    outcome, launches, process = _answered_diagnosis(tmp)
+    assert outcome.__class__ is AssertionError, outcome
+    process.terminate.assert_called_once()
+    assert len(launches) == 1, launches
+    loaded = [item for item in launches[0]
+              if item.startswith('--load-extension=')]
+    assert len(loaded) == 1, launches
+    assert str(EXTENSION_ROOT.resolve()) in loaded[0], loaded
+    control = str((Path(tmp) / 'control-extension').resolve())
+    assert control in loaded[0], (control, loaded)
+
+
+def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
+    """No control answer is a browser that never demonstrated anything."""
+    outcome, launches, process = _control_diagnosis(
+        tmp, [False], mock.Mock(side_effect=(0, 0, 31)))
+    assert 'no answering worker either' in outcome, outcome
+    process.terminate.assert_called_once()
+    assert len(launches) == 1, launches
+
+
+def test_control_browser_exit_ends_the_diagnosis_without_a_verdict(tmp):
+    """A diagnosis browser that is gone cannot demonstrate anything."""
+    outcome, launches, process = _control_diagnosis(
+        tmp, [False], mock.Mock(side_effect=(0, 0)), poll=1)
+    assert 'exited before any control worker' in outcome, outcome
+    assert len(launches) == 1, launches
+    process.terminate.assert_called_once()
+
+
+def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
+    """A transport failure is not an answer, and the next poll knows it."""
+    outcome, _launches, process = _control_diagnosis(
+        tmp, [AssertionError('controlled transport failure'), True],
+        mock.Mock(side_effect=(0, 0, 0, 31)))
+    assert outcome.__class__ is AssertionError, outcome
+    process.terminate.assert_called_once()
+
+
+def test_the_control_extension_satisfies_its_own_probe(tmp):
+    """The verdict rests on the control's script reaching its flag."""
+    node = shutil.which('node')
+    assert node, 'Node is required to execute the control worker probe'
+    control = _realbrowser._control_extension(tmp)
+    source = (control / _realbrowser.CONTROL_WORKER_SCRIPT).read_text(
+        encoding='utf-8')
+    checked = subprocess.run(
+        [node, '--check'], input=source, capture_output=True, text=True,
+        timeout=10)
+    assert checked.returncode == 0, (checked.returncode, checked.stderr)
+    answer = subprocess.run(
+        [node, '-e',
+         source + '\nprocess.stdout.write(String('
+                  + _realbrowser.CONTROL_WORKER_PROBE + '))'],
+        capture_output=True, text=True, timeout=10)
+    assert answer.returncode == 0, (answer.returncode, answer.stderr)
+    assert answer.stdout == 'true', (answer.stdout, answer.stderr)
+
+
+def test_the_control_extension_is_loadable_and_cannot_collide_with_ours(tmp):
+    control = _realbrowser._control_extension(tmp)
+    ours = _realbrowser.declared_worker(EXTENSION_ROOT)
+    assert _realbrowser.declared_worker(control) == (
+        _realbrowser.CONTROL_WORKER_SCRIPT)
+    assert _realbrowser.CONTROL_WORKER_SCRIPT != ours, ours
+    listed = [
+        {'type': 'service_worker',
+         'url': f'chrome-extension://ours/{ours}',
+         'webSocketDebuggerUrl': 'ws://ours'},
+        {'type': 'service_worker', 'url': 'chrome-extension://theirs/x',
+         'webSocketDebuggerUrl': 'ws://theirs'},
+    ]
+    assert _realbrowser._worker_targets(
+        listed, _realbrowser.CONTROL_WORKER_SCRIPT) == [], listed
+
+
+def test_no_browser_never_launches_a_diagnosis(tmp):
+    """The diagnosis is reached only after the launch that already happened."""
+    launches = []
+
+    def popen(*args, **kwargs):
+        launches.append(args)
+        raise AssertionError('no browser was required here')
+
+    missing = _realbrowser.BrowserEnvironmentSkipped('no browser on this box')
+
+    def enter_fixture():
+        with _enter_fixture(tmp):
+            raise AssertionError('fixture yielded with no browser at all')
+
+    with mock.patch.object(
+            _realbrowser, 'browser_requirements', side_effect=missing), \
+            mock.patch.object(_realbrowser.subprocess, 'Popen', popen):
+        failure = _call_failure(enter_fixture)
+    assert failure is missing, failure
+    assert launches == [], launches
 
 
 def _navigate(node, target, method, params):
@@ -287,7 +510,7 @@ def _delivery_timeout(call):
 
 def test_extension_command_delivery_timeout_is_repository_failure(tmp):
     del tmp
-    failure = _delivery_timeout(lambda: _realbrowser.real_ext_command(
+    failure = _delivery_timeout(lambda: real_ext_command(
         'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}))
     assert failure.__class__ is AssertionError, failure
 
@@ -297,7 +520,7 @@ def test_extension_command_submission_failure_is_repository_failure(tmp):
     with mock.patch.object(
             _realbrowser._util, 'request',
             return_value=(503, 'controlled extension rejection')):
-        failure = _call_failure(lambda: _realbrowser.real_ext_command(
+        failure = _call_failure(lambda: real_ext_command(
             'http://127.0.0.1:1', 'controltoken',
             'controlled-command', {}))
     assert failure.__class__ is AssertionError, failure
@@ -320,7 +543,7 @@ def test_extension_matching_delivery_returns_result(tmp):
             mock.patch.object(
                 _realbrowser.time, 'time', side_effect=(0, 0, 21)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
-        actual = _realbrowser.real_ext_command(
+        actual = real_ext_command(
             'http://127.0.0.1:1', 'controltoken',
             'controlled-command', {})
     assert actual is result, actual
@@ -328,7 +551,7 @@ def test_extension_matching_delivery_returns_result(tmp):
 
 def test_eval_delivery_timeout_is_repository_failure(tmp):
     del tmp
-    failure = _delivery_timeout(lambda: _realbrowser.real_eval(
+    failure = _delivery_timeout(lambda: real_eval(
         'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
         'controlled-eval', '2 + 2'))
     assert failure.__class__ is AssertionError, failure
@@ -339,7 +562,7 @@ def test_eval_submission_failure_is_repository_failure(tmp):
     with mock.patch.object(
             _realbrowser._util, 'request',
             return_value=(503, 'controlled eval rejection')):
-        failure = _call_failure(lambda: _realbrowser.real_eval(
+        failure = _call_failure(lambda: real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'))
     assert failure.__class__ is AssertionError, failure
@@ -365,7 +588,7 @@ def test_eval_consume_failure_is_repository_failure(tmp):
             return_value=(200, '{"did":"controlled-delivery"}')), \
             mock.patch.object(_realbrowser._util, 'get_json', get_json), \
             mock.patch.object(_realbrowser.time, 'time', side_effect=(0, 0)):
-        failure = _call_failure(lambda: _realbrowser.real_eval(
+        failure = _call_failure(lambda: real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'))
     assert failure.__class__ is AssertionError, failure
@@ -395,7 +618,7 @@ def test_eval_matching_delivery_returns_and_consumes_result(tmp):
             mock.patch.object(
                 _realbrowser.time, 'time', side_effect=(0, 0, 21)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
-        actual = _realbrowser.real_eval(
+        actual = real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2')
     assert actual is result, actual

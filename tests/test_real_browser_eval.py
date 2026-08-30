@@ -16,10 +16,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
+from _deliveries import real_eval, real_ext_command  # noqa: E402
 from _realbrowser import (BrowserEnvironmentSkipped,  # noqa: E402
                           browser_requirements, cdp_call, cdp_eval,
-                          eval_page_server, hostile_eval_matrix, real_eval,
-                          real_ext_command, real_extension_page)
+                          eval_page_server, hostile_eval_matrix,
+                          real_extension_page)
 from _repo import EXTENSION_ROOT  # noqa: E402
 sys.path.insert(0, str(_util.ROOT))
 import daedalus_cli.output as CLI_OUTPUT  # noqa: E402
@@ -91,7 +92,8 @@ def test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp):
 
     A worker that answers is one the browser has reached, so what it says
     about itself is the extension's own behaviour and fails. A worker that
-    cannot be reached at all is still the machine's business and skips.
+    cannot be reached at all is decided by the control extension: the
+    machine skips only when the control fails to load too.
     """
     browser_requirements()  # skips honestly where no browser exists
     broken = Path(tmp) / 'broken-extension'
@@ -100,8 +102,8 @@ def test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp):
     # Appended, and conditioned on being a real MV3 worker: the script still
     # installs and answers, and what breaks is the extension's own state.
     # A top-level throw instead makes Chrome retire the registration, which
-    # is indistinguishable from a machine that cannot reach the worker at
-    # all — the fault has to be one the extension survives loading.
+    # is what the control extension now tells apart from a machine that
+    # cannot reach a worker at all.
     worker.write_text(
         worker.read_text(encoding='utf-8')
         + "\nif (chrome.runtime.id) { startStream = undefined; }\n",
