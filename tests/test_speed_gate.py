@@ -9,6 +9,7 @@ runtime behaviour is executed in test_speed_wait.py; other invariants over
 speed.yml stay in `test_ci_workflows.py`.
 """
 import fnmatch
+import json
 import re
 import shutil
 import sys
@@ -221,6 +222,47 @@ def test_the_speed_gate_waits_for_the_exact_aggregate_check(tmp):
     assert script.count('exit 1') >= 2, script
     assert 'exit 0' in script, script
     assert '|| true' not in script and '|| echo' not in script
+
+
+def test_the_compare_step_uses_the_head_acceptance_manifest(tmp):
+    """The comparator reads the reviewed acceptance file from HEAD."""
+    del tmp
+    workflow = speed_yml()
+    section = '\n'.join(_job_section(workflow, 'timed'))
+    _, marker, after = section.partition('- name: Compare\n')
+    assert marker, section
+    compare_block, _, _ = after.partition('- name:')
+    paths = re.findall(r'--accept\s+(\S+)', compare_block)
+    assert paths == ['head/scripts/ci/accepted_speed_changes.json'], (
+        paths, compare_block)
+    assert compare_block.count(
+        'head/scripts/ci/accepted_speed_changes.json') == 1, compare_block
+
+
+def test_the_accepted_speed_manifest_matches_test_names_in_the_tree(tmp):
+    """The tracked manifest is strict and cannot silently drift from tests."""
+    del tmp
+    path = ROOT / 'scripts' / 'ci' / 'accepted_speed_changes.json'
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    assert isinstance(payload, dict), payload
+    assert set(payload) == {'acceptances'}, payload
+    acceptances = payload['acceptances']
+    assert isinstance(acceptances, list) and acceptances, payload
+    sources = [
+        suite.read_text(encoding='utf-8')
+        for suite in sorted((ROOT / 'tests').glob('*.py'))]
+    for acceptance in acceptances:
+        assert isinstance(acceptance, dict), acceptance
+        assert set(acceptance) == {'test', 'max_ratio', 'reason'}, acceptance
+        name = acceptance['test']
+        assert isinstance(name, str) and name.strip(), acceptance
+        bound = acceptance['max_ratio']
+        assert (isinstance(bound, (int, float))
+                and not isinstance(bound, bool) and bound > 0), acceptance
+        assert isinstance(acceptance['reason'], str), acceptance
+        needle = re.compile(r'^\s*def\s+' + re.escape(name) + r'\s*\(',
+                            re.MULTILINE)
+        assert any(needle.search(source) for source in sources), name
 
 
 def test_the_speed_cells_partition_the_suites(tmp):
