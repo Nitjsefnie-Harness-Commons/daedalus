@@ -21,6 +21,7 @@ being read.
 | Architecture, endpoints, exact field names | `AGENTS.md` |
 | Piping a runner, a trailing status echo, an `|| true` fallback | `bash-harness-antipatterns` |
 | Contribution conventions and the guard-per-layer rule | `CONTRIBUTING.md` |
+| Auditing outgoing co-author trailers | `git-coauthorship` and `CONTRIBUTING.md` |
 
 For every feature or fix, regardless of size:
 
@@ -152,6 +153,14 @@ same commit - that is the older policy and reading it will teach you the wrong
 one.
 
 ## Git and CI
+
+**Audit co-author trailer values before every push.** Run
+`python3 ~/.agent-bundle/scripts/author_stats.py --list origin/main..HEAD` so
+the complete outgoing range is visible. The tool checks trailer presence, not
+whether the value is standardized, so compare every listed value literally
+with `CONTRIBUTING.md`; for GPT-5.6 Sol only
+`GPT-5.6 Sol <noreply@openai.com>` is valid, not `gpt-5.6-sol` or
+`GPT-5.6-Sol`.
 
 **Count a branch's commits before asserting the count anywhere.** Run
 `git rev-list --count <base>..HEAD`; never state a range from reading the tail
