@@ -346,6 +346,86 @@ def test_poll_rejects_a_delivery_id_when_none_is_expected(tmp):
     assert result == expected, (result, expected)
 
 
+def test_poll_rejects_a_matching_delivery_with_a_foreign_command_id(tmp):
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    body = {
+        'id': 'other',
+        'deliveryId': 'wanted',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        body,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command',
+        expect_delivery='wanted'))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert peeks, 'the loop never polled, so this test proved nothing'
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
+
+
+def test_poll_rejects_a_matching_command_id_with_a_foreign_delivery_id(tmp):
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    body = {
+        'id': 'command',
+        'deliveryId': 'stale',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        body,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command',
+        expect_delivery='wanted'))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert peeks, 'the loop never polled, so this test proved nothing'
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
+
+
+def test_poll_rejects_an_empty_delivery_expectation(tmp):
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    # The empty string is the one value where a truthiness check and an
+    # `is None` check disagree, so the body has to report the same empty
+    # string the caller sent to catch the weaker spelling.
+    body = {
+        'id': 'command',
+        'deliveryId': '',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        body,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command', expect_delivery=''))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert peeks, 'the loop never polled, so this test proved nothing'
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
+
+
 def test_extension_command_surfaces_result_error(tmp):
     del tmp
     transport = _transport()

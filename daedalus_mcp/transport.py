@@ -154,6 +154,8 @@ class BridgeSession:
         The delivery id rejects stale results from an earlier invocation even when
         its command id is reused. The result generation makes peek then consume
         safe when another caller replaces the shared slot between those requests.
+        An absent or empty delivery id on either side never matches, so a poll
+        sent without an expectation admits nothing and always times out.
 
         The wait ramps 20ms -> `interval` instead of sleeping a flat `interval` up
         front: most commands finish in tens of milliseconds, and the fixed first
