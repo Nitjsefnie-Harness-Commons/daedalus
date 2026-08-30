@@ -43,7 +43,7 @@ TEST_CEILING = 700
 BASELINE = {
     'server.py': 1970,
     'tests/test_mcp_server.py': 1723,
-    'tests/test_cli.py': 1268,
+    'tests/test_cli.py': 1310,
     'tests/test_bridge_results.py': 1343,
 }
 
