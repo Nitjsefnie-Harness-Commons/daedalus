@@ -50,6 +50,7 @@ class DeferredCallable:
     scope: ast.AST
     state: FlowState
     locals: frozenset
+    captured: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
