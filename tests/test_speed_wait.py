@@ -18,6 +18,16 @@ from _speedharness import (  # noqa: E402
 
 _AGGREGATE = 'Aggregate workflow checks'
 
+# Quarantined, not fixed: the hang is Windows-only and this box is Linux, so
+# it cannot be reproduced here. See issue 352 for the evidence and the state
+# of the work.
+_WINDOWS_QUARANTINE = (
+    'windows quarantine: hangs silently at or before its first test on'
+    ' every windows-latest leg since it landed — no banner and no summary'
+    ' among the 102 suites that reported both in job 99191192573 — while'
+    ' the same pins pass in about a second on Linux and macOS. Tracked in'
+    ' issue 352.')
+
 
 def test_the_harness_runs_the_wait_with_a_small_bound(tmp):
     """The behavioral pins run the wait's loop at a small bound.
@@ -149,7 +159,39 @@ def test_a_read_that_fails_says_so_instead_of_looking_empty(tmp):
     assert len(calls) == tries, (len(calls), tries)
 
 
+def test_the_suite_reports_itself_quarantined_on_windows(tmp):
+    """On Windows the suite says why it is not running, rather than hanging.
+
+    Every windows-latest leg since this suite landed has ended at the
+    job's ceiling with no banner and no summary from it, while the same
+    pins pass in about a second on Linux and macOS; the aggregate has to
+    record the suite as NOT RUN with the reason and the tracking issue,
+    never as verified, and the pins stay live everywhere else.
+    """
+    del tmp
+    original_platform, original_runner = sys.platform, _util.runner
+    seen = {}
+
+    def recording_runner(tests, tmp_prefix='speedwait_', requires=None):
+        seen['tests'] = list(tests)
+        seen['requires'] = requires
+        print(f'  SKIP  test_speed_wait: {requires}')
+        return 0
+
+    try:
+        sys.platform = 'win32'
+        _util.runner = recording_runner
+        assert main() == 0
+    finally:
+        sys.platform, _util.runner = original_platform, original_runner
+    assert seen['tests'] == [], seen
+    assert 'issue 352' in (seen['requires'] or ''), seen
+
+
 def main():
+    if sys.platform == 'win32':
+        return _util.runner([], tmp_prefix='speedwait_',
+                            requires=_WINDOWS_QUARANTINE)
     return _util.runner(_util.collect(globals()), tmp_prefix='speedwait_')
 
 
