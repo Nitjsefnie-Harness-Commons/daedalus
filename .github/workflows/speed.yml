@@ -217,9 +217,10 @@ jobs:
             sleep 60
           done
           echo "No completed '$aggregate' check run on $SHA within $tries" >&2
-          echo "attempts. A missing aggregate is not a pass: either the tests" >&2
-          echo "workflow never ran on this commit, has not registered its" >&2
-          echo "checks yet, or is still going." >&2
+          echo "attempts. A missing aggregate is not a pass: either the" >&2
+          echo "tests workflow never ran on this commit, has not" >&2
+          echo "registered its checks yet, is still going, or its checks" >&2
+          echo "could not be read." >&2
           exit 1
 
   timed:
@@ -696,4 +697,8 @@ jobs:
             echo "the paired ratios that decided it." >&2
             exit 1
           fi
-          echo "Every speed cell passed."
+          if [ -n "$table" ]; then
+            echo "Every speed cell passed."
+          else
+            echo "No cell uploaded a verdict, so no speed comparison ran."
+          fi

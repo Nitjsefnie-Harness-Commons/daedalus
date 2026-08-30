@@ -219,7 +219,10 @@ the names back before building anything that waits on or reads those names;
 the expensive teacher is a wait that burns its whole bound on a commit
 nothing ever checked.
 
-
+**The `speed` suite may be ignored**, and issue 148 against it stays
+deferred - do not fix it. It also outlasts every other check on a
+head, so any "all checks concluded" condition must exclude it or it never
+fires.
 
 ## Before and during a branch
 
