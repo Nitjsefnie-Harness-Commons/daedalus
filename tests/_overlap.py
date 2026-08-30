@@ -6,12 +6,16 @@ The Node VM drives concurrent cookie commands through the shipped background
 worker, while the Python helpers keep its subprocesses observable when an
 overlap stalls.
 """
+import contextlib
+import http.server
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -84,6 +88,17 @@ function eventTarget() {
   return { addListener() {} };
 }
 
+function vmSetTimeout(callback, delay) {
+  const timer = globalThis.setTimeout(
+    callback, Math.min(Number(delay) || 0, 10));
+  timer.unref();
+  return timer;
+}
+
+function vmClearTimeout(timer) {
+  globalThis.clearTimeout(timer);
+}
+
 const chrome = {
   storage: {
     local: {
@@ -144,8 +159,8 @@ const context = vm.createContext({
   URL,
   performance,
   btoa,
-  setTimeout: () => 1,
-  clearTimeout() {},
+  setTimeout: vmSetTimeout,
+  clearTimeout: vmClearTimeout,
   setInterval: () => 1,
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
@@ -390,11 +405,10 @@ def client_states(processes, grace,
 
 
 def assert_clients_exited(states, posted):
-    """Raise at most one diagnostic assertion: the first failing kind.
+    """Raise at most one diagnostic assertion for any failed client.
 
     A client that outlived its grace and one that exited non-zero having
-    written nothing are different failures: diagnosing the second as the first
-    sends the reader looking for a stall that is not there.
+    written output are different failures, but both are not clean exits.
     """
     running = [owner for owner, state in states.items()
                if state['stillRunning']]
@@ -402,12 +416,20 @@ def assert_clients_exited(states, posted):
         raise AssertionError(
             f'clients still running after grace: {running}; '
             f'harness posted: {posted}; client states: {states}')
-    silent = [owner for owner, state in states.items()
-              if state['returncode'] and not state['stdout']
-              and not state['stderr']]
-    if silent:
+    nonzero = [owner for owner, state in states.items()
+               if state['returncode'] not in (None, 0)]
+    if nonzero:
+        silent = [owner for owner in nonzero
+                  if not states[owner]['stdout']
+                  and not states[owner]['stderr']]
+        if silent and len(silent) == len(nonzero):
+            label = 'clients exited non-zero with no output'
+            owners = silent
+        else:
+            label = 'clients exited non-zero'
+            owners = nonzero
         raise AssertionError(
-            f'clients exited non-zero with no output: {silent}; '
+            f'{label}: {owners}; '
             f'harness posted: {posted}; client states: {states}')
 
 
@@ -418,6 +440,100 @@ def _wait_for_client_commands(queue, count):
         raise AssertionError(
             'timed out waiting for both same-id client commands')
     return commands
+
+
+@contextlib.contextmanager
+def _slow_result_server(post_delay=0, post_status=200, post_statuses=None,
+                        post_body=None):
+    statuses = list(post_statuses or [post_status])
+    status_lock = threading.Lock()
+    status_index = 0
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            if post_delay:
+                time.sleep(post_delay)
+            nonlocal status_index
+            with status_lock:
+                index = min(status_index, len(statuses) - 1)
+                status_index += 1
+            status = statuses[index]
+            body = post_body
+            if body is None:
+                body = b'{}' if status == 200 else b'{"error":"no"}'
+            if isinstance(body, str):
+                body = body.encode('utf-8')
+            try:
+                self.send_response(status)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                # A delayed POST can outlive the child the backstop killed,
+                # so writing to its closed socket is expected.
+                pass
+
+        def do_GET(self):
+            time.sleep(60)
+            body = b'{"pending":false}'
+            try:
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                # The test deliberately ends the peer while this is pending,
+                # so its closed socket is expected to reset here.
+                pass
+
+        # pylint: disable-next=redefined-builtin
+        def log_message(self, format, *args):
+            del format, args
+
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f'http://127.0.0.1:{server.server_port}'
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def _harness_failure(background, inner_wait=1, commands=None, order=None,
+                     result_base='', wait_between=False):
+    commands = commands or [{'id': '_cookies', 'domain': 'owner-a'}]
+    order = order or ['owner-a']
+    try:
+        run_background_overlap(
+            background, commands, order, result_base=result_base,
+            wait_between=wait_between, inner_wait=inner_wait)
+    except AssertionError as failure:
+        return str(failure)
+    except subprocess.TimeoutExpired as failure:
+        raise AssertionError(
+            f'bare TimeoutExpired after {failure.timeout}s') from failure
+    raise AssertionError('the stalled overlap harness unexpectedly succeeded')
+
+
+def _assert_step_trace(failure, labels):
+    marker = '[step] '
+    trace_start = failure.find(marker)
+    trace_text = failure[trace_start:] if trace_start >= 0 else ''
+    trace_text = trace_text.replace('\\n', '\n')
+    actual = re.findall(r'^\[step\] (.+)$', trace_text, re.MULTILINE)
+    position = 0
+    for expected in labels:
+        try:
+            position = actual.index(expected, position) + 1
+        except ValueError as mismatch:
+            reason = 'out of order' if expected in actual else 'missing'
+            raise AssertionError(
+                f'expected step {expected!r} was {reason}; '
+                f'actual step labels: {actual}'
+            ) from mismatch
 
 
 def client_env():
@@ -445,8 +561,9 @@ def _client_failure_diagnostics(bridge_log, docroot):
     lines = []
     for path in sorted(root.rglob('*.json')):
         record = json.loads(path.read_text(encoding='utf-8'))
+        relative = path.relative_to(root).as_posix()
         lines.append(
-            f"{path.relative_to(root)}: deliveryId {record['deliveryId']}")
+            f"{relative}: deliveryId {record['deliveryId']}")
     delivery = '\n'.join(lines) or 'no delivery retained'
     return f'bridge log tail:\n{tail}\ndelivery state:\n{delivery}'
 
@@ -482,9 +599,12 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
                     background, commands, completion_order,
                     result_base=base, token=token, wait_between=False)
             except AssertionError as failure:
+                states = client_states(
+                    processes, grace=_FAILED_CLIENT_GRACE_S)
                 raise AssertionError(
                     f'{failure}; clients: '
-                    f'{client_states(processes, grace=_FAILED_CLIENT_GRACE_S)}'
+                    f'{states}\n'
+                    f'{_client_failure_diagnostics(bridge_log, docroot)}'
                 ) from failure
             # The client's own `--timeout` bounds it, so waiting here needs no
             # wall-clock margin of its own: one that outlived its result would
