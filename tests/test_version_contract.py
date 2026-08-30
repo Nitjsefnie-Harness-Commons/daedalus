@@ -20,10 +20,8 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-_VERSION_SITE_COUNT_WORDS = {
-    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
-    'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10, 'eleven': 11, 'twelve': 12,
-}
+_SITE_WORDS = 'one two three four five six seven eight nine ten eleven twelve'
+_SITE_WORD_COUNTS = {w: n for n, w in enumerate(_SITE_WORDS.split(), 1)}
 _VERSION_SITE_COUNT_COMMENT = re.compile(
     r'^\s*# sends its report to stderr, so a tree whose '
     r'(?P<word>[a-z]+) sites disagree\s*$', re.MULTILINE)
@@ -40,10 +38,9 @@ def _version_workflow_site_count(workflow):
         raise AssertionError('version workflow site-count comment not found')
     word = match.group('word')
     try:
-        return _VERSION_SITE_COUNT_WORDS[word]
+        return _SITE_WORD_COUNTS[word]
     except KeyError as exc:
-        raise AssertionError(
-            f'unrecognised version-site count word {word!r} in workflow comment') from exc
+        raise AssertionError(f'unknown site-count word {word!r}') from exc
 
 
 def _copy_versioned_tree(dest):
@@ -124,8 +121,7 @@ def _versioned_git_tree(tmp):
                  ['git', 'commit', '-qm', 'versioned tree']):
         subprocess.run(
             argv, cwd=str(copy_root), env=_util.child_coverage('scrub'),
-            capture_output=True,
-            text=True, timeout=60, check=True)
+            capture_output=True, text=True, timeout=60, check=True)
     return copy_root, checker
 
 
@@ -139,8 +135,7 @@ def _break_one_site(copy_root, replacement='0.0.0-drift', quote='"'):
     init_copy.write_text(new_text, encoding='utf-8')
 
 
-def _duplicate_the_package_version(copy_root, second_value='0.22.0.2',
-                                   quote="'"):
+def _duplicate_the_package_version(copy_root, duplicate='0.22.0.2', quote="'"):
     """Add a second, later `__version__` assignment in the COPY's CLI package.
 
     A plain, valid assignment in a shape the file does not otherwise use —
@@ -150,7 +145,7 @@ def _duplicate_the_package_version(copy_root, second_value='0.22.0.2',
     """
     init_copy = copy_root / 'daedalus_cli' / '__init__.py'
     text = init_copy.read_text(encoding='utf-8')
-    assignment = f'\n__version__ = {quote}{second_value}{quote}\n'
+    assignment = f'\n__version__ = {quote}{duplicate}{quote}\n'
     init_copy.write_text(text + assignment, encoding='utf-8')
 
 
@@ -474,17 +469,24 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
     """A duplicate `__version__` whose value carries a quote other than
-    its own delimiter, or spelled across a continuation, is refused (#319)."""
+    its own delimiter, or across a continuation, is refused (#319): the
+    canonical needle is derived, and a CRLF continuation matches the class."""
     for second_value, quote in _DUPLICATE_SPELLINGS:
         copy_root = Path(tmp) / 'tree'
-        _copy_versioned_tree(copy_root)
+        checker = _copy_versioned_tree(copy_root)
+        path, desc, pattern = checker.SITES[-1]
+        assert path == 'daedalus_cli/__init__.py', path
+        pristine = (copy_root / path).read_text(encoding='utf-8')
+        canonical = re.search(pattern, pristine).group('v')
         _duplicate_the_package_version(copy_root, second_value, quote)
         r = _run_checker(copy_root)
         assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
         assert 'matches 2 times' in r.stderr, r.stderr
-        assert 'package __version__' in r.stderr, r.stderr
-        assert '0.22.0.1' in r.stderr, r.stderr
+        assert desc in r.stderr, r.stderr
+        assert canonical in r.stderr, r.stderr
         assert second_value in r.stderr, r.stderr
+        # Matched by the class itself, not by a read normalizing CRLF away.
+        assert re.fullmatch(pattern, "__version__ = '9.9.\\\r\n9'")
 
 
 def test_check_versions_print_refuses_the_other_quote_package_duplicate(tmp):
@@ -657,8 +659,7 @@ def test_version_workflow_comment_counts_checker_sites(tmp):
     count = _version_workflow_site_count(workflow)
     expected = len(checker.SITES)
     assert count == expected, (
-        f'version workflow says {count} sites, but '
-        f'scripts/check_versions.py lists {expected}')
+        f'version.yml says {count} sites, check_versions.py lists {expected}')
 
 
 def test_the_version_gate_refuses_an_already_published_version(tmp):
