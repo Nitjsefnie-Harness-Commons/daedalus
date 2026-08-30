@@ -135,12 +135,12 @@ def _versioned_git_tree(tmp):
     return copy_root, checker
 
 
-def _break_one_site(copy_root, replacement='0.0.0-drift'):
+def _break_one_site(copy_root, replacement='0.0.0-drift', quote='"'):
     """Rewrite the package version in the COPY, never the real file."""
     init_copy = copy_root / 'daedalus_cli' / '__init__.py'
     text = init_copy.read_text(encoding='utf-8')
     new_text, n = re.subn(r'__version__\s*=\s*"[^"]+"',
-                          f'__version__ = "{replacement}"', text)
+                          f'__version__ = {quote}{replacement}{quote}', text)
     assert n == 1, text
     init_copy.write_text(new_text, encoding='utf-8')
 
@@ -474,6 +474,62 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
     assert 'matches 2 times' in r.stderr, r.stderr
     after = (copy_root / 'daedalus_cli' / '__init__.py').read_text(encoding='utf-8')
     assert after == before, 'refused sites must not be partially rewritten'
+
+
+def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
+    """A second `__version__` assignment whose value carries the quote the
+    site is not delimited with: the old value class refused both quotes, so
+    the duplicate matched nothing and the tree read consistent (#319)."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, _pattern = checker.SITES[-1]
+    assert path == 'daedalus_cli/__init__.py', path
+    _duplicate_the_package_version(copy_root, second_value='9.9.9"')
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    assert desc in r.stderr, (desc, r.stderr)
+    assert '0.22.0.1' in r.stderr, r.stderr
+    assert '9.9.9"' in r.stderr, r.stderr
+
+
+def test_check_versions_print_refuses_the_other_quote_package_duplicate(tmp):
+    """--print feeds another program, so it must not hand out the first of
+    two competing values just because one is spelled invisibly (#319)."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    _duplicate_the_package_version(copy_root, second_value='9.9.9"')
+    r = _run_checker(copy_root, '--print')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert r.stdout.strip() == '', r.stdout
+    assert 'matches 2 times' in r.stderr, r.stderr
+
+
+def test_check_versions_set_refuses_the_other_quote_package_duplicate(tmp):
+    """--set must not rewrite every site to an invisible duplicate (#319)."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    _duplicate_the_package_version(copy_root, second_value='9.9.9"')
+    init_copy = copy_root / 'daedalus_cli' / '__init__.py'
+    before = init_copy.read_text(encoding='utf-8')
+    r = _run_checker(copy_root, '--set', '9.9.9')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    after = init_copy.read_text(encoding='utf-8')
+    assert after == before, 'refused sites must not be partially rewritten'
+
+
+def test_check_versions_package_value_may_contain_a_different_quote(tmp):
+    """The value class only has to refuse whichever delimiter `q` captured, so
+    a single-quoted value may still carry a double quote the way page.js's
+    already does, and the widened pattern must still see it (#319)."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    _break_one_site(copy_root, replacement='9.9.9"', quote="'")
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'version strings disagree' in r.stderr, r.stderr
+    assert '9.9.9"' in r.stderr, r.stderr
 
 
 def test_check_versions_refuses_a_page_js_version_spelled_with_the_other_quote(tmp):
