@@ -175,6 +175,7 @@ class _OuterTimeoutAttempt:
     pid: int
     argv: tuple[str, ...]
     timeout_s: float
+    child_cpu_at_timeout: str
     kill_issued: bool
     drain_outcome: str
     returncode: int | None
@@ -190,6 +191,50 @@ class _DashboardOuterTimeout(Exception):
         super().__init__()
         self.record = record
         self.retryable = retryable
+
+
+def _windows_process_cpu_seconds(process):
+    win_dll = getattr(ctypes, 'WinDLL')
+    get_last_error = getattr(ctypes, 'get_last_error')
+    win_error = getattr(ctypes, 'WinError')
+    kernel32 = win_dll('kernel32', use_last_error=True)
+    get_process_times = kernel32.GetProcessTimes
+    get_process_times.argtypes = (
+        wintypes.HANDLE,
+        wintypes.LPFILETIME,
+        wintypes.LPFILETIME,
+        wintypes.LPFILETIME,
+        wintypes.LPFILETIME,
+    )
+    get_process_times.restype = wintypes.BOOL
+    created = wintypes.FILETIME()
+    exited = wintypes.FILETIME()
+    kernel = wintypes.FILETIME()
+    user = wintypes.FILETIME()
+    queried = get_process_times(
+        process._handle,
+        ctypes.byref(created),
+        ctypes.byref(exited),
+        ctypes.byref(kernel),
+        ctypes.byref(user),
+    )
+    if not queried:
+        raise win_error(get_last_error())
+
+    def ticks(value):
+        return value.dwHighDateTime << 32 | value.dwLowDateTime
+
+    return (ticks(kernel) + ticks(user)) / 10_000_000
+
+
+def _child_cpu_at_timeout(process):
+    if sys.platform != 'win32':
+        return 'n/a'
+    try:
+        seconds = _windows_process_cpu_seconds(process)
+    except Exception as failure:  # pylint: disable=W0718
+        return f'unavailable ({type(failure).__name__}: {failure})'
+    return f'{seconds:.6f}s'
 
 
 def _cancel_windows_synchronous_io(thread):
@@ -275,6 +320,7 @@ def _format_timeout_attempt(record):
         f'  executable: {record.argv[0]!r}\n'
         f'  argv: {record.argv!r}\n'
         f'  outer timeout: {record.timeout_s}s\n'
+        f'  child CPU at timeout: {record.child_cpu_at_timeout}\n'
         f'  kill issued: {"yes" if record.kill_issued else "no"}\n'
         f'  drain outcome: {record.drain_outcome}\n'
         f'  return code: {record.returncode!r}\n'
@@ -315,6 +361,7 @@ def _run_dashboard_node_once(
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
+        child_cpu_at_timeout = _child_cpu_at_timeout(process)
         process.kill()
         cleanup_failure = None
         drain_started = time.monotonic()
@@ -366,6 +413,7 @@ def _run_dashboard_node_once(
             pid=process.pid,
             argv=tuple(command),
             timeout_s=timeout,
+            child_cpu_at_timeout=child_cpu_at_timeout,
             kill_issued=True,
             drain_outcome=drain_outcome,
             returncode=process.returncode,
