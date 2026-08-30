@@ -28,6 +28,7 @@ _EAGER_ITERABLE_CALLS = frozenset({
     'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
 })
 _PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
+_CALL_CACHE = {}
 
 
 def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
@@ -69,8 +70,7 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
     cmd_at = next((i for i, a in enumerate(node.args)
                    if isinstance(a, ast.Constant) and a.value == '/command'),
                   None)
-    if cmd_at is None or cmd_at + 1 >= len(node.args):
-        return []
+    if cmd_at is None or cmd_at + 1 >= len(node.args): return []
     keys = payload_keys(node.args[cmd_at + 1], dicts)
     if keys and 'type' in keys and _OPAQUE_TAB_SPREAD in keys:
         lineno, spread = keys[_OPAQUE_TAB_SPREAD]
@@ -83,6 +83,13 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
         if not is_extension_constant(value):
             return [f'{rel}:{lineno}: `tab` on a typed /command payload']
     return []
+
+
+def _payload_key(dicts):
+    return tuple(sorted(
+        (name, frozenset((key, value[0], id(value[1]))
+                         for key, value in keys.items()))
+        for name, keys in dicts.items()))
 
 
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
@@ -124,26 +131,41 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             scope_executed.add(key)
         blocked = chain - deferred.captured
         keep = deferred.locals | blocked
+        # A deferred body's walk is pure in its entry state, so callers that
+        # project onto the same state reuse the first walk's findings. The
+        # payload key exists because state_signature collapses dict contents;
+        # the stored caller keeps the deferred objects the key's ids name
+        # alive, and ids die with the file, hence the per-scan clear.
+        cached = _CALL_CACHE.setdefault((key, active_callables),
+                                        (deferred, {}))[1]
         outputs = []
         for caller in callers:
             entry = overlay(_copy_state_pair(deferred.state), caller,
                             deferred.locals, blocked)
-            exits = new_exits()
-            nested, fallthrough = _py_flow_violations(
-                deferred.scope.body, [entry], rel,
-                function_allowed_opaque(deferred.scope), exits,
-                active_callables=active_callables | {key},
-                annotation_mode=(annotations_eager, False),
-                chain=deferred.captured | deferred.locals)
-            violations.extend(nested)
-            for result in dedupe_states([*fallthrough, *exits['terminal']]):
+            signature = state_signature(entry), _payload_key(entry.dicts)
+            hit = cached.get(signature)
+            if hit is None:
+                exits = new_exits()
+                nested, fallthrough = _py_flow_violations(
+                    deferred.scope.body, [entry], rel,
+                    function_allowed_opaque(deferred.scope), exits,
+                    active_callables=active_callables | {key},
+                    annotation_mode=(annotations_eager, False),
+                    chain=deferred.captured | deferred.locals)
+                violations.extend(nested)
+                hit = (caller, (tuple(nested),
+                                dedupe_states([*fallthrough,
+                                               *exits['terminal']])))
+                cached[signature] = hit
+            stored = hit[1]
+            violations.extend(stored[0])
+            for result in stored[1]:
                 outputs.append(overlay(_copy_state_pair(caller), result,
                                        keep, blocked))
         return dedupe_states(outputs)
 
     def expression_value(node, state):
-        if isinstance(node, ast.GeneratorExp):
-            return deferred_generator(node)
+        if isinstance(node, ast.GeneratorExp): return deferred_generator(node)
         if isinstance(node, ast.Name) and node.id in state.generators:
             return state.generators[node.id]
         if isinstance(node, (ast.NamedExpr, ast.Starred)):
@@ -164,19 +186,16 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         return current_pairs
 
     def generator_for(expr, state):
-        if isinstance(expr, ast.Name):
-            return state.generators.get(expr.id)
+        if isinstance(expr, ast.Name): return state.generators.get(expr.id)
         value = state.evaluated.get(id(expr))
         return value if isinstance(value, DeferredGenerator) else None
 
     def generator_nonempty(generator):
-        if generator.remaining is not None:
-            return generator.remaining > 0
+        if generator.remaining is not None: return generator.remaining > 0
         expression = generator.expression
         states = [literal_iterable_nonempty(clause.iter)
                   for clause in expression.generators]
-        if False in states:
-            return False
+        if False in states: return False
         if all(state is True for state in states) and not any(
                 clause.ifs for clause in expression.generators):
             return True
@@ -196,42 +215,34 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         active = copied(current_pairs)
         skipped = []
         for index, clause in enumerate(expression.generators):
-            if index:
-                active = check_expression(clause.iter, active)
+            if index: active = check_expression(clause.iter, active)
             cardinality = iterable_nonempty(clause.iter, active)
             active = consume_iterable(clause.iter, active, exhaust=True)
-            if cardinality is False:
-                return dedupe_states([*skipped, *active])
-            if cardinality is not True:
-                skipped.extend(copied(active))
+            if cardinality is False: return dedupe_states([*skipped, *active])
+            if cardinality is not True: skipped.extend(copied(active))
             for condition in clause.ifs:
                 active = check_expression(condition, active)
                 truth = literal_truth(condition)
-                if truth is False:
-                    return dedupe_states([*skipped, *active])
+                if truth is False: return dedupe_states([*skipped, *active])
                 if truth is None:
                     skipped.extend(copied(active))
         results = [expression.key, expression.value] if isinstance(
             expression, ast.DictComp) else [expression.elt]
-        for result in results:
-            active = check_expression(result, active)
+        for result in results: active = check_expression(result, active)
         return dedupe_states([*skipped, *active])
 
     def advance_generator(state, generator):
-        if generator.remaining is None:
-            return
+        if generator.remaining is None: return
         remaining = max(0, generator.remaining - 1)
         advanced = DeferredGenerator(generator.expression, remaining)
         for name, value in list(state.generators.items()):
-            if value is not generator:
-                continue
+            if value is not generator: continue
             if remaining:
                 state.generators[name] = advanced
             else:
                 del state.generators[name]
         for key, value in list(state.evaluated.items()):
-            if value is generator:
-                state.evaluated[key] = advanced
+            if value is generator: state.evaluated[key] = advanced
 
     def consume_iterable(expr, current_pairs, exhaust):
         outputs = []
@@ -252,8 +263,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         for name, value in output.generators.items()
                         if value is not generator}
             else:
-                for output in consumed:
-                    advance_generator(output, generator)
+                for output in consumed: advance_generator(output, generator)
             outputs.extend(consumed)
         return dedupe_states(outputs)
 
@@ -265,8 +275,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         return dedupe_states(current_pairs)
 
     def check_expression(node, current_pairs):
-        if node is None:
-            return current_pairs
+        if node is None: return current_pairs
         if isinstance(node, ast.Lambda):
             defaults = argument_defaults(node.args)
             for default in defaults:
@@ -327,8 +336,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 call_name = (node.func.id if isinstance(node.func, ast.Name)
                              else None)
                 deferred = state.callables.get(call_name)
-                if not isinstance(deferred, DeferredCallable):
-                    deferred = None
+                if not isinstance(deferred, DeferredCallable): deferred = None
                 if isinstance(node.func, ast.Attribute):
                     owner = node.func.value
                     class_name = (owner.func.id
@@ -402,8 +410,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             return remember(node, current_pairs)
         if isinstance(node, ast.AnnAssign):
             children = ([node.value] if node.value is not None else [])
-            if evaluate_annotations:
-                children.append(node.annotation)
+            if evaluate_annotations: children.append(node.annotation)
         elif isinstance(node, ast.Dict):
             children = [child for item in zip(node.keys, node.values)
                         for child in item if child is not None]
@@ -420,8 +427,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             (annotations_eager, evaluate_annotations))
 
     for statement in statements:  # pylint: disable=too-many-nested-blocks
-        if pairs:
-            fallback = _copy_state_pair(pairs[0])
+        if pairs: fallback = _copy_state_pair(pairs[0])
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for value in definition_values(statement, annotations_eager):
                 pairs = check_expression(value, pairs)
@@ -439,8 +445,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         statement, [state], annotations_eager),
                     frozenset(local_names), frozenset(chain))
                 scope_callables.append(deferred)
-                if pairs:
-                    state.callables[statement.name] = deferred
+                if pairs: state.callables[statement.name] = deferred
             continue
         if isinstance(statement, ast.ClassDef):
             for value in [*statement.decorator_list, *statement.bases,
@@ -497,8 +502,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     statement.orelse,
                     [_copy_state_pair(pair) for pair in incoming])
                 violations.extend(other)
-            else:
-                other_pairs = incoming
+            else: other_pairs = incoming
             pairs = dedupe_states([*body_pairs, *other_pairs])
             continue
         if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
@@ -538,8 +542,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     [*incoming, *post_body])
                 signatures = frozenset(
                     state_signature(pair) for pair in iteration_pairs)
-                if signatures == previous:
-                    break
+                if signatures == previous: break
                 previous = signatures
             normal_pairs = dedupe_states([*zero_pairs, *post_body])
             if isinstance(statement, (ast.For, ast.AsyncFor)):
@@ -554,8 +557,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             entered = [_copy_state_pair(pair) for pair in pairs]
             for item in statement.items:
                 entered = check_expression(item.context_expr, entered)
-                if item.optional_vars is None:
-                    continue
+                if item.optional_vars is None: continue
                 names = bound_names(item.optional_vars)
                 for state in entered:
                     resolved = resolve_sender_name(
@@ -587,8 +589,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 violations.extend(found)
                 if not safe:
                     handler_entry.extend([*before, *copied(body_pairs)])
-                if not body_pairs:
-                    break
+                if not body_pairs: break
             if statement.orelse:
                 found, normal_pairs = walk(
                     statement.orelse, body_pairs, exits)
@@ -667,16 +668,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         seen = set()
         for deferred in scope_callables:
             key = id(deferred)
-            if key in seen:
-                continue
+            if key in seen: continue
             seen.add(key)
             callers = [state for state in pairs
                        if any(value is deferred
                               for value in state.callables.values())]
-            if not callers and key in scope_executed:
-                continue
-            if not callers:
-                callers = pairs or [fallback or deferred.state]
+            if not callers and key in scope_executed: continue
+            if not callers: callers = pairs or [fallback or deferred.state]
             analyze_callable(deferred, callers)
     return violations, pairs
 
@@ -688,6 +686,7 @@ def py_tab_routing_violations(path, rel):
     `type` key. Eval payloads carry `code` and legitimately route by tab;
     `_send_eval` is exempt by structure, not by naming convention.
     """
+    _CALL_CACHE.clear()
     tree = ast.parse(path.read_text(encoding='utf-8'))
     future_annotations = any(
         isinstance(node, ast.ImportFrom) and node.module == '__future__'
