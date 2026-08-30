@@ -130,6 +130,56 @@ def test_eval_unrelated_delivery_times_out(tmp):
     assert 'did not return its delivery result' in str(failure), failure
 
 
+def test_extension_command_non_200_result_times_out(tmp):
+    del tmp
+    failure = _unmatched_delivery_failure(
+        lambda: real_ext_command(
+            'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
+        '{"did":"controlled-delivery"}',
+        (503, {'deliveryId': 'controlled-delivery'}))
+    assert failure.__class__ is AssertionError, failure
+    assert 'controlled-command' in str(failure), failure
+    assert 'did not return its delivery result' in str(failure), failure
+
+
+def test_eval_non_200_result_times_out(tmp):
+    del tmp
+    failure = _unmatched_delivery_failure(
+        lambda: real_eval(
+            'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
+            'controlled-eval', '2 + 2'),
+        '{"did":"controlled-delivery"}',
+        (503, {'deliveryId': 'controlled-delivery'}))
+    assert failure.__class__ is AssertionError, failure
+    assert 'controlled-eval' in str(failure), failure
+    assert 'did not return its delivery result' in str(failure), failure
+
+
+def test_extension_command_non_dict_result_times_out(tmp):
+    del tmp
+    failure = _unmatched_delivery_failure(
+        lambda: real_ext_command(
+            'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
+        '{"did":"controlled-delivery"}',
+        (200, ['unexpected non-dict body']))
+    assert failure.__class__ is AssertionError, failure
+    assert 'controlled-command' in str(failure), failure
+    assert 'did not return its delivery result' in str(failure), failure
+
+
+def test_eval_non_dict_result_times_out(tmp):
+    del tmp
+    failure = _unmatched_delivery_failure(
+        lambda: real_eval(
+            'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
+            'controlled-eval', '2 + 2'),
+        '{"did":"controlled-delivery"}',
+        (200, ['unexpected non-dict body']))
+    assert failure.__class__ is AssertionError, failure
+    assert 'controlled-eval' in str(failure), failure
+    assert 'did not return its delivery result' in str(failure), failure
+
+
 def main():
     return _realbrowser_controls.run_controls(
         globals(), tmp_prefix='deliverymatching_')
