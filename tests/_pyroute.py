@@ -140,8 +140,10 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                                         (deferred, {}))[1]
         outputs = []
         for caller in callers:
+            entry_keep = (deferred.locals
+                          | (blocked & deferred.state.dicts.keys()))
             entry = overlay(_copy_state_pair(deferred.state), caller,
-                            deferred.locals, blocked)
+                            entry_keep, blocked)
             signature = state_signature(entry), _payload_key(entry.dicts)
             hit = cached.get(signature)
             if hit is None:
