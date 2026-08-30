@@ -210,6 +210,12 @@ def test_speed_comparison_rejects_malformed_acceptance_files(tmp):
         ('non-string-baseline-entry', json.dumps({'acceptances': [
             {**_acceptance('steady'), 'through_baseline': [1]}]}),
          'string'),
+        ('empty-baseline-entry', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'through_baseline': ['']}]}),
+         'through_baseline entries must be non-empty strings'),
+        ('whitespace-baseline-entry', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'through_baseline': ['   ']}]}),
+         'through_baseline entries must be non-empty strings'),
         ('duplicate-baseline-entry', json.dumps({'acceptances': [
             {**_acceptance('steady'),
              'through_baseline': [ACTIVE_BASELINE, ACTIVE_BASELINE]}]}),
@@ -590,6 +596,36 @@ def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
     assert compare.main(['--base', str(old), '--head', *head,
                          '--summary-file', str(summary)]) == 0
     assert 'produced no per-test durations' in summary.read_text(encoding='utf-8')
+
+
+def test_speed_comparison_active_unmeasured_acceptance_not_expired(tmp):
+    """An active acceptance stays active when no comparison is measurable."""
+    compare = _compare_durations()
+    base = Path(tmp) / 'base'
+    head = Path(tmp) / 'head'
+    base.mkdir()
+    head.mkdir()
+    accepted = _acceptance_file(
+        tmp, [_acceptance('accepted', through_baseline=['old', 'baseline'])])
+    active_summary = Path(tmp) / 'active-summary.md'
+    code, _output = _run_comparator(compare, [
+        '--base', str(base), '--head', str(head), '--accept', str(accepted),
+        '--base-label', 'baseline', '--summary-file', str(active_summary)])
+    assert code == 0
+    active_text = active_summary.read_text(encoding='utf-8')
+    assert ('| `accepted` | — | — | — | 40.000 | not measured this run |'
+            in active_text), active_text
+    assert 'expired' not in active_text, active_text
+
+    expired = _acceptance_file(
+        tmp, [_acceptance('accepted', through_baseline=['old', 'new'])])
+    expired_summary = Path(tmp) / 'expired-summary.md'
+    _run_comparator(compare, [
+        '--base', str(base), '--head', str(head), '--accept', str(expired),
+        '--base-label', 'baseline', '--summary-file', str(expired_summary)])
+    expired_text = expired_summary.read_text(encoding='utf-8')
+    assert ('expired at baseline baseline; not measured this run'
+            in expired_text), expired_text
 
 
 def _selection_tree(tmp):
