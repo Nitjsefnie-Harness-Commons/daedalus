@@ -120,7 +120,6 @@ def test_generator_break_tracks_only_remaining_effects(tmp):
         ('set', '{1, 1}'), ('dict', "{'x': 1, 'x': 2}"),
         ('set-star', '{*{1}, *{1}}'),
         ('dict-star', "{**{'x': 1}, **{'x': 2}}"), ('equality', '{1, True}'),
-        ('equality', '{1, True}'),
         ('nested', "{('x', (1, True)): [1], ('x', (True, 1)): {2}}"),
     ]:
         specs.extend([(f'{label}-setting', 'ordinary', 'ext_cmd', iterable,
