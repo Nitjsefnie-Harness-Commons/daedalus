@@ -21,22 +21,17 @@ from _repo import ROOT  # noqa: E402
 
 
 _VERSION_SITE_COUNT_WORDS = {
-    'one': 1,
-    'two': 2,
-    'three': 3,
-    'four': 4,
-    'five': 5,
-    'six': 6,
-    'seven': 7,
-    'eight': 8,
-    'nine': 9,
-    'ten': 10,
-    'eleven': 11,
-    'twelve': 12,
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12,
 }
 _VERSION_SITE_COUNT_COMMENT = re.compile(
     r'^\s*# sends its report to stderr, so a tree whose '
     r'(?P<word>[a-z]+) sites disagree\s*$', re.MULTILINE)
+
+# Duplicate `__version__` spellings the three mirror tests must all refuse:
+# a value carrying the other quote character, or a continuation spelling.
+_DUPLICATE_SPELLINGS = (('9.9.9"', "'"), ("9.9.9'", '"'), ('9.9.\\\n9', "'"))
 
 
 def _version_workflow_site_count(workflow):
@@ -479,9 +474,10 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
 
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
-    """A duplicate `__version__` whose value carries the quote character its
-    own delimiter is not must be refused, in either spelling (#319)."""
-    for second_value, quote in (('9.9.9"', "'"), ("9.9.9'", '"')):
+    """A duplicate `__version__` whose value carries a quote character other
+    than its own delimiter must be refused, in either spelling, and so must
+    one spelled across a backslash-newline continuation (#319)."""
+    for second_value, quote in _DUPLICATE_SPELLINGS:
         copy_root = Path(tmp) / 'tree'
         _copy_versioned_tree(copy_root)
         _duplicate_the_package_version(copy_root, second_value, quote)
@@ -495,7 +491,7 @@ def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
 
 def test_check_versions_print_refuses_the_other_quote_package_duplicate(tmp):
     """--print must not hand out the first of two competing values (#319)."""
-    for second_value, quote in (('9.9.9"', "'"), ("9.9.9'", '"')):
+    for second_value, quote in _DUPLICATE_SPELLINGS:
         copy_root = Path(tmp) / 'tree'
         _copy_versioned_tree(copy_root)
         _duplicate_the_package_version(copy_root, second_value, quote)
@@ -507,7 +503,7 @@ def test_check_versions_print_refuses_the_other_quote_package_duplicate(tmp):
 
 def test_check_versions_set_refuses_the_other_quote_package_duplicate(tmp):
     """--set must not rewrite every site to an invisible duplicate (#319)."""
-    for second_value, quote in (('9.9.9"', "'"), ("9.9.9'", '"')):
+    for second_value, quote in _DUPLICATE_SPELLINGS:
         copy_root = Path(tmp) / 'tree'
         _copy_versioned_tree(copy_root)
         _duplicate_the_package_version(copy_root, second_value, quote)

@@ -102,10 +102,12 @@ SITES = [
     # the other way (#228) -- it has to see every assignment to be able to
     # refuse more than one. The value excludes only whichever delimiter `q`
     # captured (#319): a class refusing both quotes left a value carrying
-    # the other one with no match at all, and the value stays on one line
-    # because a plain Python string literal cannot span lines.
+    # the other one with no match at all. One line is the norm for a
+    # plain-quoted Python literal; the exception, a backslash-newline
+    # continuation, is admitted explicitly.
     ('daedalus_cli/__init__.py', 'package __version__',
-     r'''__version__\s*=\s*(?P<q>['"])(?P<v>(?:(?!(?P=q))[^\n])*)(?P=q)'''),
+     r'''__version__\s*=\s*(?P<q>['"])(?P<v>(?:(?!(?P=q))[^\n]'''
+     r'''|\\\n)*)(?P=q)'''),
 ]
 
 # The site every other site is compared against.
