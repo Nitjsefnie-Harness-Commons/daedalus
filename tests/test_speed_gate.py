@@ -427,7 +427,10 @@ def test_the_speed_verdict_fails_unless_the_matrix_succeeded(tmp):
 
     result, text = run('success')
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert 'Every speed cell passed' in result.stdout, result.stdout
+    # No cell uploaded a record here, so nothing measured: a verdict that
+    # claimed cells passed would be reporting a run that never happened.
+    assert 'Every speed cell passed' not in result.stdout, result.stdout
+    assert 'no speed comparison ran' in result.stdout, result.stdout
     # No verdict is scraped from anywhere: the matrix result and the cells'
     # own records are the whole story.
     assert not calls.exists(), calls.read_text(encoding='utf-8')

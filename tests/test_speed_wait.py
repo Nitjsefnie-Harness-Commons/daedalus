@@ -123,12 +123,18 @@ def test_the_wait_exhausts_its_bound_while_the_aggregate_runs(tmp):
 def test_a_read_that_fails_says_so_instead_of_looking_empty(tmp):
     """A request that failed is not an answer of zero check runs.
 
-    Both end the wait eventually; only one is a fact about the commit.
+    Both end the wait eventually; only one is a fact about the commit, and
+    the loud ending has to name the read failure as a reason the aggregate
+    was never seen, or a dead API looks like a red tree.
     """
     result, calls = run_wait(tmp, '', fail=True)
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert 'could not be read' in result.stderr, result.stderr
     assert 'no check runs on' not in result.stdout, result.stdout
+    said = ' '.join(result.stderr.split())
+    # The loud ending names the read failure as one reason the aggregate was
+    # never seen, so a dead API is not left looking like a red tree.
+    assert 'or its checks could not be read' in said, result.stderr
     tries = int(re.search(r'\btries=(\d+)\b', wait_script()).group(1))
     assert len(calls) == tries, (len(calls), tries)
 
