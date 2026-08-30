@@ -60,7 +60,9 @@ def _run_comparator(compare, argv):
     return code, stdout.getvalue() + stderr.getvalue()
 
 
-def _acceptance(test, max_ratio=40.0, through_baseline=ACTIVE_BASELINE):
+def _acceptance(test, max_ratio=40.0, through_baseline=None):
+    if through_baseline is None:
+        through_baseline = [ACTIVE_BASELINE]
     return {
         'test': test,
         'max_ratio': max_ratio,
@@ -202,12 +204,20 @@ def test_speed_comparison_rejects_malformed_acceptance_files(tmp):
         ('non-string-reason', json.dumps({'acceptances': [
             {**_acceptance('steady'), 'reason': 1}]}),
          'reason must be a string'),
-        ('empty-baseline', json.dumps({'acceptances': [
-            {**_acceptance('steady'), 'through_baseline': ''}]}),
-         'through_baseline'),
-        ('non-string-baseline', json.dumps({'acceptances': [
-            {**_acceptance('steady'), 'through_baseline': 1}]}),
-         'through_baseline'),
+        ('empty-baseline-list', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'through_baseline': []}]}),
+         'non-empty list'),
+        ('non-string-baseline-entry', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'through_baseline': [1]}]}),
+         'string'),
+        ('duplicate-baseline-entry', json.dumps({'acceptances': [
+            {**_acceptance('steady'),
+             'through_baseline': [ACTIVE_BASELINE, ACTIVE_BASELINE]}]}),
+         'unique'),
+        ('bare-string-baseline', json.dumps({'acceptances': [
+            {**_acceptance('steady'),
+             'through_baseline': ACTIVE_BASELINE}]}),
+         'list'),
         ('duplicate-root',
          '{"acceptances": [], "acceptances": []}', 'duplicate'),
         ('duplicate-entry-key',
@@ -284,7 +294,7 @@ def test_speed_comparison_acceptance_expires_after_baseline_advance(tmp):
     """An acceptance authorizes only its recorded baseline transition."""
     compare = _compare_durations()
     accepted = _acceptance_file(
-        tmp, [_acceptance('accepted', 40.0, ACTIVE_BASELINE)])
+        tmp, [_acceptance('accepted', 40.0, [ACTIVE_BASELINE])])
 
     old_base = _durations_tree(
         tmp, 'old-base', [{'accepted': 0.28, 'steady': 1.0}])
@@ -317,6 +327,54 @@ def test_speed_comparison_acceptance_expires_after_baseline_advance(tmp):
     regressed_text = regressed_summary.read_text(encoding='utf-8')
     assert 'expired at baseline v0.23.0' in regressed_text, regressed_text
     assert 'covered-set median paired ratio' in regressed_text, regressed_text
+
+
+def test_speed_comparison_acceptance_survives_pr_main_and_expires(tmp):
+    """One accepted slowdown survives both workflow baseline labels."""
+    compare = _compare_durations()
+    pr_base = 'BASE_SHA'
+    release = ACTIVE_BASELINE
+    next_release = 'v0.23.0'
+    accepted = _acceptance_file(
+        tmp, [_acceptance('accepted', 40.0, [pr_base, release])])
+
+    old_base = _durations_tree(
+        tmp, 'old-base', [{'accepted': 0.28, 'steady': 1.0}])
+    merged_head = _durations_tree(
+        tmp, 'merged-head', [{'accepted': 8.20, 'steady': 1.0}])
+
+    def run(base, head, label, name):
+        return _run_comparator(compare, [
+            '--base', *base, '--head', *head, '--accept', str(accepted),
+            '--base-label', label, '--summary-file', str(Path(tmp) / name)])
+
+    # Pull request: the base SHA authorizes the accepted transition.
+    assert run(old_base, merged_head, pr_base, 'pr-summary.md')[0] == 0
+    # Main push after merge: the release tag authorizes that same transition.
+    assert run(old_base, merged_head, release, 'main-summary.md')[0] == 0
+
+    new_base = _durations_tree(
+        tmp, 'new-base', [{'accepted': 8.20, 'steady': 1.0}])
+    steady_head = _durations_tree(
+        tmp, 'steady-head', [{'accepted': 8.20, 'steady': 1.0}])
+    next_code, _ = run(new_base, steady_head, next_release,
+                       'next-summary.md')
+    assert next_code == 0
+    next_text = (Path(tmp) / 'next-summary.md').read_text(encoding='utf-8')
+    assert f'expired at baseline {next_release}' in next_text, next_text
+    assert '| 1 | 9.20s | 9.20s | 1.000 |' in next_text, next_text
+
+    regressed_head = _durations_tree(
+        tmp, 'regressed-head', [{'accepted': 300.0, 'steady': 1.0}])
+    regression_code, _ = run(new_base, regressed_head, next_release,
+                             'regression-summary.md')
+    assert regression_code == 1
+    regression_text = (Path(tmp) / 'regression-summary.md').read_text(
+        encoding='utf-8')
+    assert f'expired at baseline {next_release}' in regression_text, (
+        regression_text)
+    assert 'covered-set median paired ratio' in regression_text, (
+        regression_text)
 
 
 def test_speed_comparison_all_accepted_cell_has_no_fictitious_measurement(tmp):
@@ -355,6 +413,46 @@ def test_speed_comparison_handles_zero_base_acceptance_medians(tmp):
             '--base-label', ACTIVE_BASELINE]
     assert _run_comparator(compare, args + ['--head', *both_zero])[0] == 0
     assert _run_comparator(compare, args + ['--head', *positive])[0] == 1
+
+    mixed_base = _durations_tree(
+        tmp, 'mixed-base', [{'zero': 0.0, 'steady': 1.0},
+                            {'zero': 1.0, 'steady': 1.0}])
+    mixed_head = _durations_tree(
+        tmp, 'mixed-head', [{'zero': 0.0, 'steady': 1.0},
+                            {'zero': 1.0, 'steady': 1.0}])
+    mixed_args = ['--base', *mixed_base, '--accept', str(accepted),
+                  '--base-label', ACTIVE_BASELINE]
+    mixed_summary = Path(tmp) / 'mixed-summary.md'
+    mixed_code, _ = _run_comparator(
+        compare, mixed_args + ['--head', *mixed_head, '--summary-file',
+                               str(mixed_summary)])
+    assert mixed_code == 0
+    mixed_text = mixed_summary.read_text(encoding='utf-8')
+    assert '| `zero` | 0.50s | 0.50s | 1.000 | 1.000 | PASS |' in mixed_text
+
+    mixed_positive_head = _durations_tree(
+        tmp, 'mixed-positive-head', [{'zero': 0.5, 'steady': 1.0},
+                                     {'zero': 1.0, 'steady': 1.0}])
+    positive_summary = Path(tmp) / 'mixed-positive-summary.md'
+    positive_code, _ = _run_comparator(
+        compare, mixed_args + ['--head', *mixed_positive_head,
+                               '--summary-file', str(positive_summary)])
+    assert positive_code == 1
+    positive_text = positive_summary.read_text(encoding='utf-8')
+    assert '| `zero` | 0.50s | 0.75s | inf | 1.000 | FAIL |' in positive_text
+
+    positive_base = _durations_tree(
+        tmp, 'positive-base', [{'zero': 1.0, 'steady': 1.0}])
+    zero_head = _durations_tree(
+        tmp, 'zero-head', [{'zero': 0.0, 'steady': 1.0}])
+    zero_summary = Path(tmp) / 'zero-summary.md'
+    zero_code, _ = _run_comparator(
+        compare, ['--base', *positive_base, '--head', *zero_head,
+                  '--accept', str(accepted), '--base-label', ACTIVE_BASELINE,
+                  '--summary-file', str(zero_summary)])
+    assert zero_code == 0
+    zero_text = zero_summary.read_text(encoding='utf-8')
+    assert '| `zero` | 1.00s | 0.00s | 0.000 | 1.000 | PASS |' in zero_text
 
 
 def test_speed_comparison_pairs_whole_rounds_rather_than_per_test_minima(tmp):

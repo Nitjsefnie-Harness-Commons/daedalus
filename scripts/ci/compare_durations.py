@@ -33,13 +33,13 @@ time it took to give up. That instrument belongs to the comparison, not to
 either tree, which is what lets a release predating it be measured at all.
 
 An accepted speed change is an explicit in-tree record for one bare test
-function name. It authorizes ONE transition — from the recorded
-`through_baseline` to the next baseline. While the comparison's base label is
-that recorded baseline, the named test is removed from the shared-set budget
-and its own MEDIAN of paired-round ratios is checked against the positive
-`max_ratio`. The permission is relative (runner-proof, like the paired budget)
-while active, and inert (fail-closed) everywhere else; it never allows
-another test to regress or a later baseline to hide a new regression.
+function name. It authorizes ONE transition — from any of the recorded
+`through_baseline` labels to the next baseline. While the comparison's base
+label is one of those recorded baselines, the named test is removed from the
+shared-set budget and its own MEDIAN of paired-round ratios is checked against
+the positive `max_ratio`. The permission is relative (runner-proof, like the
+paired budget) while active, and inert (fail-closed) everywhere else; it never
+allows another test to regress or a later baseline to hide a new regression.
 """
 import argparse
 import json
@@ -180,12 +180,21 @@ def _load_acceptances(path):
         if not isinstance(reason, str):
             raise ValueError(f'{where}: reason must be a string')
         through_baseline = acceptance['through_baseline']
-        if (not isinstance(through_baseline, str)
-                or not through_baseline.strip()):
+        if (not isinstance(through_baseline, list)
+                or not through_baseline):
             raise ValueError(
-                f'{where}: through_baseline must be a non-empty string')
+                f'{where}: through_baseline must be a non-empty list')
+        if any(not isinstance(label, str) or not label.strip()
+               for label in through_baseline):
+            raise ValueError(
+                f'{where}: through_baseline entries must be non-empty '
+                'strings')
+        if len(through_baseline) != len(set(through_baseline)):
+            raise ValueError(
+                f'{where}: through_baseline entries must be unique')
         parsed.append({'test': name, 'max_ratio': bound,
-                       'reason': reason, 'through_baseline': through_baseline})
+                       'reason': reason,
+                       'through_baseline': through_baseline})
     return parsed
 
 
@@ -197,7 +206,7 @@ def _acceptance_checks(acceptances, shared, base_rounds, head_rounds,
     for acceptance in acceptances:
         name = acceptance['test']
         bound = acceptance['max_ratio']
-        active = acceptance['through_baseline'] == base_label
+        active = base_label in acceptance['through_baseline']
         expired = f'expired at baseline {base_label}'
         if name not in shared:
             status = ('not measured this run' if active else
@@ -228,7 +237,7 @@ def _unmeasured_acceptance_rows(acceptances, base_label):
     """Rows for a comparison that produced no shared measurements."""
     rows = []
     for item in acceptances:
-        active = item['through_baseline'] == base_label
+        active = base_label in item['through_baseline']
         status = ('not measured this run' if active else
                   f'expired at baseline {base_label}; not measured this run')
         rows.append((item['test'], None, None, None, item['max_ratio'],
@@ -367,7 +376,7 @@ def main(argv=None):
         return 1 if args.require_measurements else 0
 
     accepted_names = [item['test'] for item in acceptances
-                      if item['through_baseline'] == args.base_label]
+                      if args.base_label in item['through_baseline']]
     shared, pairs, movements = compare(
         base_rounds, head_rounds, excluded=accepted_names)
     acceptance_rows, acceptances_ok = _acceptance_checks(
