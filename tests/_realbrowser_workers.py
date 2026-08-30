@@ -8,9 +8,7 @@ from pathlib import Path
 from _evalpages import CDP_CALL_HARNESS, CDP_RESPONSE_DEADLINE_MS
 from _evalpages import CDP_TIMEOUT_EXIT_CODE
 from _realbrowser_errors import CDPEvaluationError, CDPTimeout
-
-
-ROOT = Path(__file__).resolve().parent.parent
+from _repo import ROOT
 
 
 def cdp_call(node, target, method, params):
