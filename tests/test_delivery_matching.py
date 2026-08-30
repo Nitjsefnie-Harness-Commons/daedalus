@@ -13,8 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _deliveries  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
-from _deliveries import (  # noqa: E402
-    real_eval, real_ext_command)
 
 
 def _call_failure(call):
@@ -39,7 +37,7 @@ def _unmatched_delivery_failure(call, raw, polled):
 def test_extension_command_without_did_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_ext_command(
+        lambda: _deliveries.real_ext_command(
             'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
         '{"ok": true}', (200, {'pending': True}))
     assert failure.__class__ is AssertionError, failure
@@ -50,7 +48,7 @@ def test_extension_command_without_did_times_out(tmp):
 def test_eval_without_did_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_eval(
+        lambda: _deliveries.real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'),
         '{"ok": true}', (200, {'pending': True}))
@@ -62,7 +60,7 @@ def test_eval_without_did_times_out(tmp):
 def test_extension_command_pending_body_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_ext_command(
+        lambda: _deliveries.real_ext_command(
             'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
         '{"did":"controlled-delivery"}', (200, {'pending': True}))
     assert failure.__class__ is AssertionError, failure
@@ -73,7 +71,7 @@ def test_extension_command_pending_body_times_out(tmp):
 def test_eval_pending_body_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_eval(
+        lambda: _deliveries.real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'),
         '{"did":"controlled-delivery"}', (200, {'pending': True}))
@@ -85,7 +83,7 @@ def test_eval_pending_body_times_out(tmp):
 def test_extension_command_empty_did_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_ext_command(
+        lambda: _deliveries.real_ext_command(
             'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
         '{"did":""}', (200, {'deliveryId': ''}))
     assert failure.__class__ is AssertionError, failure
@@ -96,7 +94,7 @@ def test_extension_command_empty_did_times_out(tmp):
 def test_eval_empty_did_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_eval(
+        lambda: _deliveries.real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'),
         '{"did":""}', (200, {'deliveryId': ''}))
@@ -108,7 +106,7 @@ def test_eval_empty_did_times_out(tmp):
 def test_extension_command_unrelated_delivery_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_ext_command(
+        lambda: _deliveries.real_ext_command(
             'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
         '{"did":"controlled-delivery"}',
         (200, {'deliveryId': 'unrelated-delivery'}))
@@ -120,7 +118,7 @@ def test_extension_command_unrelated_delivery_times_out(tmp):
 def test_eval_unrelated_delivery_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_eval(
+        lambda: _deliveries.real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'),
         '{"did":"controlled-delivery"}',
@@ -133,7 +131,7 @@ def test_eval_unrelated_delivery_times_out(tmp):
 def test_extension_command_non_200_result_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_ext_command(
+        lambda: _deliveries.real_ext_command(
             'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
         '{"did":"controlled-delivery"}',
         (503, {'deliveryId': 'controlled-delivery'}))
@@ -145,7 +143,7 @@ def test_extension_command_non_200_result_times_out(tmp):
 def test_eval_non_200_result_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_eval(
+        lambda: _deliveries.real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'),
         '{"did":"controlled-delivery"}',
@@ -158,7 +156,7 @@ def test_eval_non_200_result_times_out(tmp):
 def test_extension_command_non_dict_result_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_ext_command(
+        lambda: _deliveries.real_ext_command(
             'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
         '{"did":"controlled-delivery"}',
         (200, ['unexpected non-dict body']))
@@ -170,7 +168,7 @@ def test_extension_command_non_dict_result_times_out(tmp):
 def test_eval_non_dict_result_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
-        lambda: real_eval(
+        lambda: _deliveries.real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'),
         '{"did":"controlled-delivery"}',
