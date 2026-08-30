@@ -201,10 +201,8 @@ def _coverage_tree(tmp, suites, unlaunchable=(), cpu_count=None):
         input='runner-only input\n', capture_output=True, text=True,
         timeout=120)
     records = root / 'coverage-invocations'
-    invocations = [
-        json.loads(record.read_text(encoding='utf-8'))
-        for record in sorted(records.glob('*.json'))
-    ]
+    invocations = [json.loads(record.read_text(encoding='utf-8'))
+                   for record in sorted(records.glob('*.json'))]
     return result, invocations
 
 
@@ -234,13 +232,12 @@ def _retry_target(path, outcomes, operation):
 
 def _retry_call(kind, fake_time, target):
     if kind == 'read_events':
-        return lambda: _read_events(
-            target, monotonic=fake_time.monotonic,
-            sleep=fake_time.sleep)
-    namespace = {
-        'time': fake_time, 'Path': Path,
-        'events_path': target if kind == 'append_event' else MagicMock(),
-        'lock': target if kind == 'release' else MagicMock()}
+        return lambda: _read_events(target, monotonic=fake_time.monotonic,
+                                    sleep=fake_time.sleep)
+    namespace = {'time': fake_time, 'Path': Path,
+                 'events_path': (
+                     target if kind == 'append_event' else MagicMock()),
+                 'lock': target if kind == 'release' else MagicMock()}
     namespace['__file__'] = '/fake/test_retry.py'
     exec(_RETRY_SOURCE, namespace)  # pylint: disable=exec-used
     if kind == 'append_event':
@@ -252,8 +249,7 @@ def _read_events(path, *, monotonic=time.monotonic, sleep=time.sleep):
     deadline = monotonic() + 30
     while True:
         try:
-            return path.read_text(encoding='utf-8').splitlines(
-                keepends=True)
+            return path.read_text(encoding='utf-8').splitlines(keepends=True)
         except PermissionError as exc:
             if monotonic() >= deadline:
                 raise AssertionError(
@@ -484,9 +480,8 @@ def test_replay_rejects_a_duplicate_open(_tmp):
 def _assert_retry_contract(kind):
     operation, path, success, expected_operation = {
         'append_event': ('open', '/fake/events.log', None, 'appending event'),
-        'release': (
-            'rmdir', '/fake/concurrency.lock', None,
-            'removing lock directory'),
+        'release': ('rmdir', '/fake/concurrency.lock', None,
+                    'removing lock directory'),
         'read_events': ('read_text', '/fake/events.log', '+test_a.py\n',
                         'reading event log'),
     }[kind]
@@ -525,6 +520,11 @@ def _assert_retry_contract(kind):
     result = _retry_call(kind, fake_time, immediate)()
     assert not sleeps, sleeps
     assert result == expected_result, result
+
+
+def test_suite_strings_embed_the_retry_source_verbatim(_tmp):
+    assert _CONCURRENCY_EVENT_SUITE.count(_RETRY_SOURCE) == 1
+    assert _DYING_CONCURRENCY_SUITE.count(_RETRY_SOURCE) == 1
 
 
 def test_append_event_retry_contract(_tmp):
