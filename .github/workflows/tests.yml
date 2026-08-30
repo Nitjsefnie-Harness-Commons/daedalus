@@ -589,9 +589,9 @@ jobs:
         # Namespace-package discovery exposed previously invisible unexecuted
         # statements, moving the total from 88.8 to 88.0; the denominator grew,
         # no code lost coverage, and the 1.5-point buffer stays unchanged.
-        # Python measured: 89.4
-        # Python floor: 87.9
-        run: python -m coverage report --fail-under=87.9 --precision=1
+        # Python measured: 89.5
+        # Python floor: 88.0
+        run: python -m coverage report --fail-under=88.0 --precision=1
 
       # Keep this exact name: ratchet.py scopes the three anchors to this step.
       - name: JavaScript coverage gate
