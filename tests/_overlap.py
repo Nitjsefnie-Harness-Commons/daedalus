@@ -53,7 +53,8 @@ function attemptRecord(payload, result, body) {
     deliveryId: payload._did || null,
     ok: result.ok,
     status: result.status,
-    body,
+    // Clipped so a refusal of any size stays one readable diagnostic line.
+    body: body.length > 200 ? body.slice(0, 200) + '...' : body,
   };
 }
 
@@ -68,7 +69,7 @@ async function bridgeFetch(target, init = {}) {
       postAttempts.push(record);
       if (!record.ok) {
         process.stderr.write('[post-failure] owner=' + record.owner
-          + ' status ' + record.status + ' body ' + body + '\n');
+          + ' status ' + record.status + ' body ' + record.body + '\n');
       }
       return result;
     }
