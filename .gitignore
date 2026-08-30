@@ -196,6 +196,7 @@
 # ─── scripts/ci ───
 !/scripts/
 !/scripts/ci/
+!/scripts/ci/accepted_speed_changes.json
 !/scripts/ci/classify_changes.py
 !/scripts/ci/compare_durations.py
 !/scripts/ci/coverage_combine.py

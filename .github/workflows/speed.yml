@@ -554,11 +554,15 @@ jobs:
         # than one release later. The round directories hold this cell's
         # reports alone, and the comparison intersects on test name, so a
         # slice of the tree compares correctly on its own.
+        # accepted_speed_changes.json is reviewed in-tree and bounded per
+        # test; any other regression, or an accepted test past its bound,
+        # still fails this cell.
         run: |
           # shellcheck disable=SC2046
           python3 head/scripts/ci/compare_durations.py \
             --base $(ls -d reports/base-*) \
             --head $(ls -d reports/head-*) \
+            --accept head/scripts/ci/accepted_speed_changes.json \
             --max-regression "$MAX_REGRESSION" \
             --base-label "$BASE_LABEL" \
             --require-measurements \

@@ -31,9 +31,16 @@ the outside and records only passing tests -- so a test that failed on one side
 is simply absent and drops out of the intersection rather than contributing the
 time it took to give up. That instrument belongs to the comparison, not to
 either tree, which is what lets a release predating it be measured at all.
+
+An accepted speed change is an explicit in-tree record for one bare test
+function name. It is bounded by that record's positive `max_ratio`: the named
+test is removed from the shared-set budget, then its own median head/base
+ratio is checked against the bound. This is per-test permission only; it never
+allows another test to regress or the accepted test to exceed its bound.
 """
 import argparse
 import json
+import math
 import statistics
 import sys
 from pathlib import Path
@@ -78,9 +85,11 @@ def shared_tests(rounds):
     return sorted(everywhere or ())
 
 
-def compare(base_rounds, head_rounds):
-    """Paired round totals over one fixed shared set, and the movements."""
-    shared = shared_tests([*base_rounds, *head_rounds])
+def compare(base_rounds, head_rounds, excluded=()):
+    """Paired totals and movements, optionally excluding named tests."""
+    excluded = set(excluded)
+    shared = [name for name in shared_tests([*base_rounds, *head_rounds])
+              if name not in excluded]
     pairs = []
     for base, head in zip(base_rounds, head_rounds):
         base_total = sum(base[name] for name in shared)
@@ -94,6 +103,111 @@ def compare(base_rounds, head_rounds):
         movements.append((name, was, now, now - was))
     movements.sort(key=lambda row: row[3], reverse=True)
     return shared, pairs, movements
+
+
+def _load_acceptances(path):
+    """Read and validate an optional accepted-speed manifest."""
+    if path is None:
+        return []
+    manifest = Path(path)
+    if not manifest.exists():
+        return []
+    try:
+        document = manifest.read_text(encoding='utf-8')
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f'{manifest}: unreadable ({exc})') from exc
+    try:
+        data = json.loads(document)
+    except (json.JSONDecodeError, ValueError, UnicodeError,
+            RecursionError) as exc:
+        raise ValueError(f'{manifest}: invalid JSON ({exc})') from exc
+    if not isinstance(data, dict):
+        raise ValueError(f'{manifest}: root must be an object')
+    unknown = set(data) - {'acceptances'}
+    if unknown:
+        raise ValueError(
+            f'{manifest}: unknown key(s): {", ".join(sorted(unknown))}')
+    acceptances = data.get('acceptances')
+    if not isinstance(acceptances, list):
+        raise ValueError(f'{manifest}: acceptances must be a list')
+
+    parsed = []
+    seen = set()
+    for index, acceptance in enumerate(acceptances, start=1):
+        where = f'{manifest}: acceptance {index}'
+        if not isinstance(acceptance, dict):
+            raise ValueError(f'{where} must be an object')
+        unknown = set(acceptance) - {'test', 'max_ratio', 'reason'}
+        if unknown:
+            raise ValueError(
+                f'{where}: unknown key(s): {", ".join(sorted(unknown))}')
+        missing = {'test', 'max_ratio', 'reason'} - set(acceptance)
+        if missing:
+            raise ValueError(
+                f'{where}: missing key(s): {", ".join(sorted(missing))}')
+        name = acceptance['test']
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f'{where}: test name must be non-empty')
+        if name in seen:
+            raise ValueError(f'{where}: duplicate test name {name!r}')
+        seen.add(name)
+        bound = acceptance['max_ratio']
+        numeric = (isinstance(bound, (int, float))
+                   and not isinstance(bound, bool))
+        if isinstance(bound, float) and not math.isfinite(bound):
+            numeric = False
+        if not numeric or bound <= 0:
+            raise ValueError(
+                f'{where}: max_ratio must be a positive number')
+        reason = acceptance['reason']
+        if not isinstance(reason, str):
+            raise ValueError(f'{where}: reason must be a string')
+        parsed.append({'test': name, 'max_ratio': bound,
+                       'reason': reason})
+    return parsed
+
+
+def _acceptance_checks(acceptances, shared, base_rounds, head_rounds):
+    """Return per-acceptance rows and whether every bound is respected."""
+    rows = []
+    all_ok = True
+    for acceptance in acceptances:
+        name = acceptance['test']
+        bound = acceptance['max_ratio']
+        if name not in shared:
+            rows.append((name, None, None, None, bound,
+                         'not measured this run'))
+            continue
+        was = statistics.median([round_[name] for round_ in base_rounds])
+        now = statistics.median([round_[name] for round_ in head_rounds])
+        if was == 0.0:
+            ratio = 1.0 if now == 0.0 else math.inf
+        else:
+            ratio = now / was
+        status = 'PASS' if ratio <= bound else 'FAIL'
+        all_ok = all_ok and status == 'PASS'
+        rows.append((name, was, now, ratio, bound, status))
+    return rows, all_ok
+
+
+def _render_acceptances(lines, rows):
+    """Append the accepted-speed table, including stale entries."""
+    if not rows:
+        return
+    lines.append('')
+    lines.append('### Accepted speed changes')
+    lines.append('')
+    lines.append('| test | base median | head median | ratio | '
+                 'bound | status |')
+    lines.append('|---|---:|---:|---:|---:|---|')
+    for name, was, now, ratio, bound, status in rows:
+        if status == 'not measured this run':
+            lines.append(f'| `{name}` | — | — | — | {bound:.3f} | '
+                         'not measured this run |')
+            continue
+        shown_ratio = 'inf' if math.isinf(ratio) else f'{ratio:.3f}'
+        lines.append(f'| `{name}` | {was:.2f}s | {now:.2f}s | '
+                     f'{shown_ratio} | {bound:.3f} | {status} |')
 
 
 def render(lines, base_label, shared, pairs, movements, limit=10):
@@ -143,12 +257,20 @@ def main(argv=None):
                         help='fractional slowdown that fails the comparison')
     parser.add_argument('--base-label', default='baseline')
     parser.add_argument('--summary-file')
+    parser.add_argument('--accept',
+                        help='optional accepted speed-change manifest')
     parser.add_argument(
         '--require-measurements', action='store_true',
         help='treat an unmeasurable comparison as a failure rather than a '
              'skip; CI passes this, because there the absence of data means '
              'a step broke rather than that there is nothing to compare')
     args = parser.parse_args(argv)
+
+    try:
+        acceptances = _load_acceptances(args.accept)
+    except ValueError as exc:
+        print(f'Invalid accepted speed changes file: {exc}', file=sys.stderr)
+        return 1
 
     base_rounds = side_rounds(args.base)
     head_rounds = side_rounds(args.head)
@@ -164,6 +286,9 @@ def main(argv=None):
         lines.append(f'Skipped: the baseline `{args.base_label}` produced no '
                      'per-test durations, so nothing was measured to compare '
                      'against.')
+        _render_acceptances(
+            lines, [(item['test'], None, None, None, item['max_ratio'],
+                     'not measured this run') for item in acceptances])
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
@@ -176,21 +301,48 @@ def main(argv=None):
         lines.append(f'Skipped: the baseline ran {len(base_rounds)} rounds and '
                      f'this commit ran {len(head_rounds)}, so the rounds '
                      'cannot be paired.')
+        _render_acceptances(
+            lines, [(item['test'], None, None, None, item['max_ratio'],
+                     'not measured this run') for item in acceptances])
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
-    shared, pairs, movements = compare(base_rounds, head_rounds)
-    if not shared:
+    all_shared = shared_tests([*base_rounds, *head_rounds])
+    if not all_shared:
         lines.append('### Test speed')
         lines.append('')
         lines.append('Skipped: no test passed in every round on both sides, '
                      'so the comparison has no shared set to sum.')
+        _render_acceptances(
+            lines, [(item['test'], None, None, None, item['max_ratio'],
+                     'not measured this run') for item in acceptances])
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
+    accepted_names = [item['test'] for item in acceptances]
+    shared, pairs, movements = compare(
+        base_rounds, head_rounds, excluded=accepted_names)
+    acceptance_rows, acceptances_ok = _acceptance_checks(
+        acceptances, all_shared, base_rounds, head_rounds)
     ratio = render(lines, args.base_label, shared, pairs, movements)
+    _render_acceptances(lines, acceptance_rows)
     budget = 1.0 + args.max_regression
-    if ratio > budget:
+    budget_ok = ratio <= budget
+    if acceptances:
+        lines.append('')
+        budget_text = (f'covered-set median paired ratio {ratio:.3f} is '
+                       f'within the {budget:.2f} budget'
+                       if budget_ok else
+                       f'covered-set median paired ratio {ratio:.3f} '
+                       f'exceeds the {budget:.2f} budget')
+        acceptance_text = ('every acceptance bound holds'
+                           if acceptances_ok else
+                           'one or more acceptance bounds were breached')
+        verdict = 'OK' if budget_ok and acceptances_ok else 'FAIL'
+        lines.append(f'**{verdict}**: {budget_text}; {acceptance_text}.')
+        _emit(lines, args.summary_file)
+        return 0 if verdict == 'OK' else 1
+    if not budget_ok:
         lines.append('')
         lines.append(f'**FAIL**: {ratio:.3f} exceeds the {budget:.2f} budget.')
         _emit(lines, args.summary_file)
