@@ -11,16 +11,14 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             apply_alias_statement, apply_dict_statement,
                             argument_defaults,
                             bind_alias_target, bind_builtin_names, bound_names,
-                            callable_state, clear_names,
-                            dedupe_states, deferred_generator,
-                            definition_values,
+                            callable_state, clear_names, dedupe_states,
+                            deferred_generator, definition_values,
                             dict_assignments as _dict_assignments,
-                            function_allowed_opaque,
-                            is_extension_constant, literal_iterable_nonempty,
-                            lexical_scope_names, literal_truth, payload_keys,
-                            new_exits, rebound_names, record_exit,
-                            resolve_sender_name, state_signature,
-                            statement_cannot_raise)
+                            function_allowed_opaque, is_extension_constant,
+                            literal_iterable_nonempty, lexical_scope_names,
+                            literal_truth, payload_keys, new_exits,
+                            rebound_names, record_exit, resolve_sender_name,
+                            state_signature, statement_cannot_raise)
 
 _copy_state_pair = FlowState.copy
 dict_assignments = _dict_assignments
@@ -43,11 +41,13 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
                              f'`{callee}`, which may be ext_cmd')
             elif kw.arg is None:
                 keys = payload_keys(kw.value, dicts)
-                if (keys and 'tab' in keys
+                if keys is None or _OPAQUE_TAB_SPREAD in keys:
+                    found.append(f'{rel}:{kw.value.lineno}: opaque spread '
+                                 f'through `{callee}`, which may be ext_cmd')
+                elif ('tab' in keys
                         and not is_extension_constant(keys['tab'][1])):
-                    lineno, _ = keys['tab']
-                    found.append(f'{rel}:{lineno}: `tab` passed through '
-                                 f'`{callee}`, which may be ext_cmd')
+                    found.append(f'{rel}:{keys["tab"][0]}: `tab` passed '
+                                 f'through `{callee}`, which may be ext_cmd')
         return found
     if sender_name in ('ext_cmd', '_ext_cmd'):
         found = []
