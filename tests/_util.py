@@ -36,16 +36,71 @@ DRAIN_JOIN_TIMEOUT = 1
 _bridge_started = False
 
 
+def _is_wsl_launcher(candidate):
+    """True for the WSL launchers a Windows PATH puts ahead of Git's Bash."""
+    lowered = candidate.lower().replace('/', '\\')
+    return (
+        '\\windows\\system32\\bash.exe' in lowered
+        or '\\windows\\syswow64\\bash.exe' in lowered
+        or '\\microsoft\\windowsapps\\bash.exe' in lowered
+    )
+
+
+def bash_candidates(path, windows, exists=os.path.isfile,
+                    program_files=None, program_files_x86=None,
+                    local_app_data=None):
+    """Bash executables to try, most preferred first.
+
+    On Windows a bare program name resolves the system WSL launcher ahead of
+    the Git-for-Windows Bash executable: System32 sits near the front of PATH
+    and its `bash.exe` starts a Linux VM before it says anything. Candidates
+    are therefore ordered Git-for-Windows first — the PATH directories that
+    are not WSL launchers, then the standard install locations — and the WSL
+    launchers come last, so a machine with only those still resolves rather
+    than failing in the resolver.
+    """
+    separator = ';' if windows else os.pathsep
+    name = 'bash.exe' if windows else 'bash'
+    found = []
+    for directory in (path or '').split(separator):
+        if not directory:
+            continue
+        candidate = directory.rstrip('/\\') + ('\\' if windows else '/') + name
+        if exists(candidate):
+            found.append(candidate)
+    if not windows:
+        return found
+    on_path = [item for item in found if not _is_wsl_launcher(item)]
+    launchers = [item for item in found if _is_wsl_launcher(item)]
+    installs = []
+    for base in (program_files, program_files_x86):
+        for sub in ('Git\\bin', 'Git\\usr\\bin'):
+            if base:
+                installs.append(base.rstrip('/\\') + '\\' + sub + '\\' + name)
+    if local_app_data:
+        for sub in ('Programs\\Git\\bin', 'Programs\\Git\\usr\\bin'):
+            installs.append(
+                local_app_data.rstrip('/\\') + '\\' + sub + '\\' + name)
+    return on_path + [item for item in installs if exists(item)] + launchers
+
+
 def workflow_bash():
     """Resolve Git-for-Windows Bash through PATH, not a bare WSL launcher.
 
-    On Windows, a bare program name can select the system WSL launcher ahead of
-    the Git-for-Windows Bash executable on PATH.
+    On Windows, a bare program name can select the system WSL launcher ahead
+    of the Git-for-Windows Bash executable on PATH; `bash_candidates` owns the
+    ordering that prevents it, and the WSL launcher is still returned when it
+    is the only Bash there is, so the suite that needed it fails with its own
+    signal rather than a resolver error.
     """
-    bash = shutil.which('bash')
-    if not bash:
-        raise AssertionError('bash is required to execute the workflow shell')
-    return bash
+    for candidate in bash_candidates(
+            os.environ.get('PATH', ''), sys.platform.startswith('win'),
+            program_files=os.environ.get('ProgramFiles'),
+            program_files_x86=os.environ.get('ProgramFiles(x86)'),
+            local_app_data=os.environ.get('LOCALAPPDATA')):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    raise AssertionError('bash is required to execute the workflow shell')
 
 
 def coverage_free_environment(environment):
