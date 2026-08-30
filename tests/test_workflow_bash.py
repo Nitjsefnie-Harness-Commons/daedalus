@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Contracts for resolving and using Bash in workflow-shell tests."""
 import os
-import shlex
-import shutil
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -62,31 +59,21 @@ def test_workflow_bash_takes_the_first_existing_candidate(tmp):
 
 def test_workflow_bash_resolves_relative_candidate_for_other_cwd(tmp):
     """A relative PATH candidate remains launchable after its cwd changes."""
-    real_bash = _util.workflow_bash()
-    root = Path(tmp)
-    pathbin = root / 'pathbin'
-    pathbin.mkdir()
-    if sys.platform.startswith('win'):
-        bash = pathbin / 'bash.exe'
-        shutil.copy2(real_bash, bash)
-    else:
-        bash = pathbin / 'bash'
-        bash.write_text(
-            '#!/bin/sh\nexec ' + shlex.quote(real_bash) + ' "$@"\n',
-            encoding='utf-8')
-        bash.chmod(stat.S_IRWXU)
-    other = root / 'other'
+    real = Path(_util.workflow_bash())
+    original_path = os.environ.get('PATH', '')
+    other = Path(tmp) / 'other'
     other.mkdir()
 
     with _MonkeyPatch() as monkeypatch:
+        monkeypatch.chdir(real.parent.parent)
         monkeypatch.setenv(
-            'PATH', 'pathbin' + os.pathsep + os.environ.get('PATH', ''))
-        monkeypatch.chdir(root)
+            'PATH', real.parent.name + os.pathsep + original_path)
         resolved = _util.workflow_bash()
         assert os.path.isabs(resolved), resolved
         result = subprocess.run(
             [resolved, '-c', 'printf relative-path-ok'],
-            cwd=other, env=_COVERAGE_ENV, capture_output=True, text=True)
+            cwd=other, env=_COVERAGE_ENV, capture_output=True, text=True,
+            timeout=60)
 
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == 'relative-path-ok', result.stdout
