@@ -219,10 +219,10 @@ the names back before building anything that waits on or reads those names;
 the expensive teacher is a wait that burns its whole bound on a commit
 nothing ever checked.
 
-**The `speed` suite may be ignored**, and issue 148 against it stays
-deferred - do not fix it. It also outlasts every other check on a
-head, so any "all checks concluded" condition must exclude it or it never
-fires.
+**The `speed` suite gates like any other check.** Its conclusion is waited
+on and read. It outlasts every other check on a head, and that wait is the
+cost of reading it: any "all checks concluded" condition must include it,
+since one that excludes it fires while the gate is still running.
 
 ## Before and during a branch
 
@@ -267,7 +267,8 @@ What the aggregator does, and why each part is load-bearing:
 - **A success-only batch is held longer**, because a filling matrix goes quiet
   between cells and every partial tally is superseded by the next. A batch
   holding nothing but settled, actionless conclusions waits until something
-  worth reading lands or until every check except `speed` has concluded. An
+  worth reading lands or until every check on that head has concluded,
+  `speed` included. An
   unanswerable check-runs query keeps it holding rather than flushing: a failed
   query must never look like a settled matrix.
 - **The hold is bounded** by `--max-hold` (default 600s). A push supersedes the
@@ -295,8 +296,6 @@ poll since a push moves it.
 `pulls/<N>/reviews`, `pulls/<N>/comments` (inline) and `issues/<N>/comments`
 (the conversation). Read or unread is delivery bookkeeping, not evidence that a
 thread has been dealt with.
-
-**Never wait on `speed` to conclude** - see below.
 
 This is not redundant with the local suites, which cover one platform: a
 `.gitattributes` regression here passed every local suite and all eight Linux
