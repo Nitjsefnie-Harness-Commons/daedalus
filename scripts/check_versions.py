@@ -57,13 +57,19 @@ def spelling_error(version):
 
 # (path, description, regex). Each regex needs a 'v' group holding the version;
 # --set rewrites exactly that group and leaves the rest of the line untouched.
+#
+# Every value class is star-quantified: with one-or-more, a zero-length
+# value produced no match at all, so a second assignment carrying '' was
+# invisible and the tree was reported consistent (#324). The anchors around
+# each class keep `*` from matching zero-width on its own, so one
+# assignment is still exactly one match.
 SITES = [
     ('extension/manifest.json', 'manifest version',
-     r'"version"\s*:\s*"(?P<v>[^"]+)"'),
+     r'"version"\s*:\s*"(?P<v>[^"]*)"'),
     ('extension/background.js', '@version header',
-     r'@version\s+(?P<v>\S+)'),
+     r'@version\s+(?P<v>\S*)'),
     ('extension/background.js', 'VERSION constant',
-     r"const VERSION\s*=\s*'(?P<v>[^']+)'"),
+     r"const VERSION\s*=\s*'(?P<v>[^']*)'"),
     # Same reasoning as the __version__ site below: a second assignment
     # written with a different quote character is still valid JavaScript
     # and still wins, so the pattern has to see any of the three ways a
@@ -80,11 +86,11 @@ SITES = [
     # them would need its own pattern, and none of page.js's own sites do
     # that today.
     ('extension/page.js', 'GM bridge info.script.version',
-     r'''script:\s*\{\s*version:\s*(?P<q>['"`])(?P<v>(?:(?!(?P=q))[\s\S])+)(?P=q)'''),
+     r'''script:\s*\{\s*version:\s*(?P<q>['"`])(?P<v>(?:(?!(?P=q))[\s\S])*)(?P=q)'''),
     ('dashboard/index.html', 'dashboard rail footer',
-     r'class="rail-foot">v(?P<v>[^ <]+)'),
+     r'class="rail-foot">v(?P<v>[^ <]*)'),
     ('dashboard/index.html', 'dashboard status line',
-     r'<span class="sl-v">(?P<v>[^<]+)</span>'),
+     r'<span class="sl-v">(?P<v>[^<]*)</span>'),
     # The published wheel is a version claim about the wire format, so it is
     # checked like any other site. pyproject reads this same attribute, so
     # there is nothing separate to keep in step.
@@ -96,7 +102,7 @@ SITES = [
     # the other way (#228) -- it has to see every assignment to be able to
     # refuse more than one.
     ('daedalus_cli/__init__.py', 'package __version__',
-     r'''__version__\s*=\s*(?P<q>['"])(?P<v>[^'"]+)(?P=q)'''),
+     r'''__version__\s*=\s*(?P<q>['"])(?P<v>[^'"]*)(?P=q)'''),
 ]
 
 # The site every other site is compared against.
@@ -131,7 +137,10 @@ def _find_site(path, desc, pattern, text):
             f'FAIL: no version found for {desc} in {path} — the file changed '
             f'shape and SITES in {__file__} needs updating')
     if len(matches) > 1:
-        values = ', '.join(sorted({m.group('v') for m in matches}))
+        # repr'd, so an empty value is still named: a bare join rendered it
+        # as an empty slot the reader could not tell from a formatting bug.
+        values = ', '.join(
+            repr(v) for v in sorted({m.group('v') for m in matches}))
         raise SystemExit(
             f'FAIL: {desc} in {path} matches {len(matches)} times ({values}) '
             f'— a checker that reports the first match cannot report the '
