@@ -175,7 +175,7 @@ CONTROL_WORKER_PROBE = 'globalThis.__controlWorkerLoaded === true'
 WORKER_ABSENCE_DEADLINE = 30
 
 
-def _control_extension(tmp):
+def _control_extension(tmp, directory='control-extension'):
     """Write a known-good MV3 extension whose worker answers its probe.
 
     Its script name is unique on purpose: the diagnosis launch carries our
@@ -184,7 +184,7 @@ def _control_extension(tmp):
     be our own script name, or the worker whose absence is being diagnosed
     could answer for the control.
     """
-    root = Path(tmp) / 'control-extension'
+    root = Path(tmp) / directory
     root.mkdir()
     (root / 'manifest.json').write_text(json.dumps({
         'manifest_version': 3,
@@ -240,24 +240,26 @@ def _absence_guilt(browser, extension, worker_script):
     return (
         'the extension source kept its own service worker from loading: '
         f'{extension} declares {worker_script}, and a control extension '
-        'loaded beside it in a second launch answered its probe while ours '
-        f'never answered in the same launch — {_browser_version(browser)} '
+        'loaded beside it in two consecutive diagnosis launches answered its '
+        'probe while ours never answered in either launch — '
+        f'{_browser_version(browser)} '
         'demonstrably runs an unpacked MV3 worker, so the absence of ours '
         "is this repository's, not the machine's")
 
 
-def _contention_observation(browser, extension, worker_script):
+def _contention_observation(browser, extension, worker_script,
+                            launch_name='diagnosis'):
     return (
         f'{extension} declares {worker_script}, and that worker answered in '
-        'the diagnosis launch; '
+        f'the {launch_name} launch; '
         f'{_browser_version(browser)} loaded this source, so its absence '
         'from the fixture launch was browser-launch contention')
 
 
-def _worker_absence_verdict(node, browser, extension, worker_script, tmp):
-    """Return the owner of a fixture launch that produced no worker."""
-    control = _control_extension(tmp)
-    profile = Path(tmp) / 'control-profile'
+def _diagnosis_launch(node, browser, extension, worker_script, tmp,
+                      control_directory, profile_directory):
+    control = _control_extension(tmp, control_directory)
+    profile = Path(tmp) / profile_directory
     loaded = ','.join(
         str(Path(item).resolve()) for item in (extension, control))
     process = subprocess.Popen(
@@ -271,23 +273,57 @@ def _worker_absence_verdict(node, browser, extension, worker_script, tmp):
             ours, _reached, _error = ready_worker(
                 node, _listed_workers(profile, worker_script))
             if ours:
-                return True, _contention_observation(
-                    browser, extension, worker_script)
+                return 'ours', control_answered
             if _control_worker_answered(
                     node, _listed_workers(profile, CONTROL_WORKER_SCRIPT)):
                 control_answered = True
             if process.poll() is not None:
-                if control_answered:
-                    return False, (
-                        'the diagnosis browser exited after the control '
-                        'answered but before ours answered')
-                return False, (
-                    'the diagnosis browser exited before any control '
-                    'worker was listed')
+                return 'exited', control_answered
             time.sleep(0.5)
     finally:
         _retire_browser(process)
-    if control_answered:
+    return 'expired', control_answered
+
+
+def _worker_absence_verdict(node, browser, extension, worker_script, tmp):
+    """Return the owner of a fixture launch that produced no worker."""
+    first_status, first_control = _diagnosis_launch(
+        node, browser, extension, worker_script, tmp,
+        'control-extension', 'control-profile')
+    if first_status == 'ours':
+        return True, _contention_observation(
+            browser, extension, worker_script)
+    if first_status == 'exited':
+        if first_control:
+            return False, (
+                'the diagnosis browser exited after the control answered '
+                'but before ours answered')
+        return False, (
+            'the diagnosis browser exited before any control worker was '
+            'listed')
+    if not first_control:
+        return False, (
+            'the control extension produced no answering worker either')
+
+    retry_status, retry_control = _diagnosis_launch(
+        node, browser, extension, worker_script, tmp,
+        'control-extension-retry', 'control-profile-retry')
+    if retry_status == 'ours':
+        return True, _contention_observation(
+            browser, extension, worker_script, 'retry diagnosis')
+    if retry_status == 'exited':
+        if retry_control:
+            return False, (
+                'the diagnosis browser exited during two diagnosis launches '
+                'after the control answered in both launches but before ours '
+                'answered')
+        return False, (
+            'the diagnosis browser exited during two diagnosis launches: the '
+            'control answered in the first diagnosis launch, the retry '
+            'control did not answer, and ours never answered')
+    if retry_control:
         raise AssertionError(
             _absence_guilt(browser, extension, worker_script))
-    return False, 'the control extension produced no answering worker either'
+    return False, (
+        'the two diagnosis launches had a control answer in the first but not '
+        'in the retry; neither launch saw ours answer')
