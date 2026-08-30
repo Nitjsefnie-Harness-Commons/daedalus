@@ -21,9 +21,8 @@ from _repo import ROOT  # noqa: E402
 
 
 _VERSION_SITE_COUNT_WORDS = {
-    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
-    'eleven': 11, 'twelve': 12,
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
+    'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10, 'eleven': 11, 'twelve': 12,
 }
 _VERSION_SITE_COUNT_COMMENT = re.compile(
     r'^\s*# sends its report to stderr, so a tree whose '
@@ -474,9 +473,8 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
 
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
-    """A duplicate `__version__` whose value carries a quote character other
-    than its own delimiter must be refused, in either spelling, and so must
-    one spelled across a backslash-newline continuation (#319)."""
+    """A duplicate `__version__` whose value carries a quote other than
+    its own delimiter, or spelled across a continuation, is refused (#319)."""
     for second_value, quote in _DUPLICATE_SPELLINGS:
         copy_root = Path(tmp) / 'tree'
         _copy_versioned_tree(copy_root)
