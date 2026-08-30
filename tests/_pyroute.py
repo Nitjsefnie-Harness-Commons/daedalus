@@ -8,11 +8,12 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
                             DeferredCallable, DeferredClass,
                             DeferredGenerator, FlowState,
-                            apply_alias_statement, apply_dict_statement,
-                            argument_defaults,
+                            apply_alias_statement,
+                            apply_state_dict_statement, argument_defaults,
                             bind_alias_target, bind_builtin_names, bound_names,
                             callable_state, clear_names, dedupe_states,
                             deferred_generator, definition_values,
+                            discard_state_dict,
                             dict_assignments as _dict_assignments,
                             function_allowed_opaque, is_extension_constant,
                             literal_iterable_nonempty, lexical_scope_names,
@@ -109,7 +110,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         return [_copy_state_pair(pair) for pair in found]
 
     def overlay(destination, source, keep, blocked):
-        for attr in ('dicts', 'aliases', 'generators', 'callables'):
+        for attr in ('dicts', 'dict_origins', 'aliases', 'generators',
+                     'callables'):
             retained = {name: value for name, value in getattr(
                 destination, attr).items() if name in keep}
             retained.update({
@@ -121,6 +123,15 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                                           - blocked))
         destination.bound = (destination.bound & keep
                              | source.bound - keep - blocked)
+        destination.dict_namespaces.update({
+            scope: {name: keys.copy() for name, keys in values.items()}
+            for scope, values in source.dict_namespaces.items()})
+        for name, origin in destination.dict_origins.items():
+            keys = destination.dict_namespaces.get(origin, {}).get(name)
+            if keys is None:
+                destination.dicts.pop(name, None)
+            else:
+                destination.dicts[name] = keys.copy()
         return destination
 
     def analyze_callable(deferred, callers, executed=False):
@@ -141,7 +152,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         outputs = []
         for caller in callers:
             entry_keep = (deferred.locals
-                          | (blocked & deferred.state.dicts.keys()))
+                          | deferred.state.dict_origins.keys())
             entry = overlay(_copy_state_pair(deferred.state), caller,
                             entry_keep, blocked)
             signature = state_signature(entry), _payload_key(entry.dicts)
@@ -565,7 +576,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     resolved = resolve_sender_name(
                         item.context_expr, state.aliases)
                     for name in names:
-                        state.dicts.pop(name, None)
+                        discard_state_dict(state, name)
                         state.aliases.pop(name, None)
                         state.generators.pop(name, None)
                         state.callables.pop(name, None)
@@ -652,7 +663,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                for target in targets):
             pairs = consume_iterable(statement.value, pairs, exhaust=True)
         for state in pairs:
-            apply_dict_statement(statement, state.dicts)
+            apply_state_dict_statement(statement, state)
             apply_alias_statement(statement, state)
         if isinstance(statement, (ast.Return, ast.Raise)):
             record_exit(flow_exits, 'terminal', pairs)
