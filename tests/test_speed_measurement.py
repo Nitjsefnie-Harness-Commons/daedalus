@@ -17,6 +17,9 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
+ACTIVE_BASELINE = 'v0.22.0'
+
+
 def _durations_tree(tmp, side, rounds):
     """Write one summary directory per round, as run_tests.py would."""
     dirs = []
@@ -57,11 +60,12 @@ def _run_comparator(compare, argv):
     return code, stdout.getvalue() + stderr.getvalue()
 
 
-def _acceptance(test, max_ratio=40.0):
+def _acceptance(test, max_ratio=40.0, through_baseline=ACTIVE_BASELINE):
     return {
         'test': test,
         'max_ratio': max_ratio,
         'reason': 'accepted for this test',
+        'through_baseline': through_baseline,
     }
 
 
@@ -78,6 +82,7 @@ def test_speed_comparison_excludes_accepted_test_from_totals(tmp):
     summary = Path(tmp) / 'summary.md'
     code, _output = _run_comparator(compare, [
         '--base', *base, '--head', *head, '--accept', str(accepted),
+        '--base-label', ACTIVE_BASELINE,
         '--summary-file', str(summary)])
     assert code == 0, code
     text = summary.read_text(encoding='utf-8')
@@ -98,7 +103,7 @@ def test_speed_comparison_respects_each_acceptance_bound(tmp):
     past = _durations_tree(
         tmp, 'past', [{'accepted': 1.4, 'steady': 1.0}])
     args = ['--base', *base, '--accept', str(accepted),
-            '--max-regression', '0.30']
+            '--base-label', ACTIVE_BASELINE, '--max-regression', '0.30']
     assert _run_comparator(compare, args + ['--head', *within])[0] == 0
     assert _run_comparator(compare, args + ['--head', *past])[0] == 1
 
@@ -114,7 +119,8 @@ def test_speed_comparison_different_regression_still_fails(tmp):
     summary = Path(tmp) / 'summary.md'
     assert _run_comparator(compare, [
         '--base', *base, '--head', *head, '--accept', str(accepted),
-        '--max-regression', '0.30', '--summary-file',
+        '--base-label', ACTIVE_BASELINE, '--max-regression', '0.30',
+        '--summary-file',
         str(summary)])[0] == 1
     text = summary.read_text(encoding='utf-8')
     assert 'covered-set median paired ratio 1.400 exceeds' in text, text
@@ -130,6 +136,7 @@ def test_speed_comparison_stale_acceptance_is_visible_but_inert(tmp):
     summary = Path(tmp) / 'summary.md'
     code, _output = _run_comparator(compare, [
         '--base', *base, '--head', *head, '--accept', str(accepted),
+        '--base-label', ACTIVE_BASELINE,
         '--summary-file', str(summary)])
     assert code == 0, code
     text = summary.read_text(encoding='utf-8')
@@ -168,13 +175,45 @@ def test_speed_comparison_rejects_malformed_acceptance_files(tmp):
          'unknown key'),
         ('item-key', json.dumps({'acceptances': [
             {**_acceptance('steady'), 'extra': 1}]}), 'unknown key'),
+        ('missing-key', json.dumps({'acceptances': [{
+            'test': 'steady', 'max_ratio': 1.0, 'reason': 'x'}]}),
+         'missing key'),
+        ('non-object', json.dumps({'acceptances': [1]}), 'must be an object'),
+        ('not-a-list', json.dumps({'acceptances': {}}),
+         'must be a list'),
         ('non-numeric', json.dumps({'acceptances': [
             {**_acceptance('steady'), 'max_ratio': 'slow'}]}),
+         'max_ratio'),
+        ('infinity', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'max_ratio': float('inf')}]}),
+         'max_ratio'),
+        ('nan', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'max_ratio': float('nan')}]}),
          'max_ratio'),
         ('non-positive', json.dumps({'acceptances': [
             _acceptance('steady', 0.0)]}), 'positive'),
         ('empty-test', json.dumps({'acceptances': [
             {**_acceptance(''), 'test': ''}]}), 'test name'),
+        ('padded-test', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'test': ' steady '}]}), 'test name'),
+        ('duplicate-name', json.dumps({'acceptances': [
+            _acceptance('steady'), _acceptance('steady')]}),
+         'duplicate test name'),
+        ('non-string-reason', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'reason': 1}]}),
+         'reason must be a string'),
+        ('empty-baseline', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'through_baseline': ''}]}),
+         'through_baseline'),
+        ('non-string-baseline', json.dumps({'acceptances': [
+            {**_acceptance('steady'), 'through_baseline': 1}]}),
+         'through_baseline'),
+        ('duplicate-root',
+         '{"acceptances": [], "acceptances": []}', 'duplicate'),
+        ('duplicate-entry-key',
+         '{"acceptances": [{"test": "steady", "test": "steady", '
+         '"max_ratio": 1.0, "reason": "x", '
+         '"through_baseline": "v0.22.0"}]}', 'duplicate'),
     ]
     for name, content, reason in cases:
         path = Path(tmp) / f'{name}.json'
@@ -185,6 +224,118 @@ def test_speed_comparison_rejects_malformed_acceptance_files(tmp):
                 *extra])
             assert code == 1, (name, extra, code, output)
             assert reason in output, (name, extra, output)
+
+    unreadable = Path(tmp) / 'unreadable'
+    unreadable.mkdir()
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--accept', str(unreadable)])
+    assert code == 1, output
+    assert 'unreadable' in output, output
+
+
+def test_speed_comparison_rejects_manifest_before_reading_durations(tmp):
+    """Malformed manifests fail before either duration tree is read."""
+    compare = _compare_durations()
+    malformed = Path(tmp) / 'malformed.json'
+    malformed.write_text('{"acceptances": [], "acceptances": []}',
+                         encoding='utf-8')
+    calls = []
+    original = compare.side_rounds
+
+    def spy(directories):
+        calls.append(directories)
+        return original(directories)
+
+    compare.side_rounds = spy
+    try:
+        code, output = _run_comparator(compare, [
+            '--base', str(Path(tmp) / 'missing-base'), '--head',
+            str(Path(tmp) / 'missing-head'), '--accept', str(malformed)])
+    finally:
+        compare.side_rounds = original
+    assert code == 1, output
+    assert 'duplicate' in output, output
+    assert calls == [], calls
+
+
+def test_speed_comparison_acceptance_uses_median_of_paired_ratios(tmp):
+    """Accepted bounds use the workflow's per-pair ratio median."""
+    compare = _compare_durations()
+    base = _durations_tree(
+        tmp, 'base', [{'accepted': 1.0, 'steady': 1.0},
+                      {'accepted': 100.0, 'steady': 1.0},
+                      {'accepted': 100.0, 'steady': 1.0}])
+    head = _durations_tree(
+        tmp, 'head', [{'accepted': 2.0, 'steady': 1.0},
+                      {'accepted': 101.0, 'steady': 1.0},
+                      {'accepted': 10000.0, 'steady': 1.0}])
+    accepted = _acceptance_file(tmp, [_acceptance('accepted', 1.30)])
+    summary = Path(tmp) / 'summary.md'
+    code, _output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--accept', str(accepted),
+        '--base-label', ACTIVE_BASELINE, '--summary-file', str(summary)])
+    assert code == 1, code
+    text = summary.read_text(encoding='utf-8')
+    assert '| `accepted` | 100.00s | 101.00s | 2.000 | 1.300 | FAIL |' \
+        in text, text
+
+
+def test_speed_comparison_acceptance_expires_after_baseline_advance(tmp):
+    """An acceptance authorizes only its recorded baseline transition."""
+    compare = _compare_durations()
+    accepted = _acceptance_file(
+        tmp, [_acceptance('accepted', 40.0, ACTIVE_BASELINE)])
+
+    old_base = _durations_tree(
+        tmp, 'old-base', [{'accepted': 0.28, 'steady': 1.0}])
+    accepted_head = _durations_tree(
+        tmp, 'accepted-head', [{'accepted': 8.20, 'steady': 1.0}])
+    assert _run_comparator(compare, [
+        '--base', *old_base, '--head', *accepted_head,
+        '--accept', str(accepted), '--base-label', ACTIVE_BASELINE])[0] == 0
+
+    advanced_base = _durations_tree(
+        tmp, 'advanced-base', [{'accepted': 8.20, 'steady': 1.0}])
+    steady_head = _durations_tree(
+        tmp, 'steady-head', [{'accepted': 8.20, 'steady': 1.0}])
+    steady_summary = Path(tmp) / 'steady-summary.md'
+    assert _run_comparator(compare, [
+        '--base', *advanced_base, '--head', *steady_head,
+        '--accept', str(accepted), '--base-label', 'v0.23.0',
+        '--summary-file', str(steady_summary)])[0] == 0
+    steady_text = steady_summary.read_text(encoding='utf-8')
+    assert 'expired at baseline v0.23.0' in steady_text, steady_text
+    assert '| 1 | 9.20s | 9.20s | 1.000 |' in steady_text, steady_text
+
+    regressed_head = _durations_tree(
+        tmp, 'regressed-head', [{'accepted': 300.0, 'steady': 1.0}])
+    regressed_summary = Path(tmp) / 'regressed-summary.md'
+    assert _run_comparator(compare, [
+        '--base', *advanced_base, '--head', *regressed_head,
+        '--accept', str(accepted), '--base-label', 'v0.23.0',
+        '--summary-file', str(regressed_summary)])[0] == 1
+    regressed_text = regressed_summary.read_text(encoding='utf-8')
+    assert 'expired at baseline v0.23.0' in regressed_text, regressed_text
+    assert 'covered-set median paired ratio' in regressed_text, regressed_text
+
+
+def test_speed_comparison_all_accepted_cell_has_no_fictitious_measurement(tmp):
+    """An empty covered set reports bounds without synthetic zero totals."""
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'accepted': 1.0}])
+    head = _durations_tree(tmp, 'head', [{'accepted': 2.0}])
+    accepted = _acceptance_file(tmp, [_acceptance('accepted', 2.0)])
+    summary = Path(tmp) / 'summary.md'
+    code, _output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--accept', str(accepted),
+        '--base-label', ACTIVE_BASELINE, '--summary-file', str(summary)])
+    assert code == 0, code
+    text = summary.read_text(encoding='utf-8')
+    assert 'no non-accepted shared tests; only acceptance bounds apply' in text
+    assert '| round | baseline | this commit | ratio |' not in text
+    assert 'median paired ratio' not in text
+    assert text.count('### Accepted speed changes') == 1, text
+    assert text.count('**OK**') + text.count('**FAIL**') == 1, text
 
 
 def test_speed_comparison_handles_zero_base_acceptance_medians(tmp):
@@ -200,7 +351,8 @@ def test_speed_comparison_handles_zero_base_acceptance_medians(tmp):
     positive = _durations_tree(
         tmp, 'positive', [{'zero': 0.5, 'steady': 1.0},
                           {'zero': 0.5, 'steady': 1.0}])
-    args = ['--base', *base, '--accept', str(accepted)]
+    args = ['--base', *base, '--accept', str(accepted),
+            '--base-label', ACTIVE_BASELINE]
     assert _run_comparator(compare, args + ['--head', *both_zero])[0] == 0
     assert _run_comparator(compare, args + ['--head', *positive])[0] == 1
 
