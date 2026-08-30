@@ -91,6 +91,23 @@ def test_check_versions_refuses_an_empty_status_line_duplicate(tmp):
     _assert_duplicate_refused(_run_checker(copy_root), desc)
 
 
+def test_check_versions_refuses_an_empty_header_version_duplicate(tmp):
+    """A second `@version` header carrying an empty value is still a second
+    assignment (#324), the one site the other duplicate tests here do not
+    reach. It is appended last so the site's `\\s+` runs to the end of the
+    file and the value it names is really '' rather than the first word of
+    whatever line followed it."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _path, desc, _pattern = checker.SITES[1]
+    assert _path == 'extension/background.js', _path
+    assert desc == '@version header', desc
+    header = copy_root / 'extension' / 'background.js'
+    header.write_text(header.read_text(encoding='utf-8') + '// @version \n',
+                      encoding='utf-8')
+    _assert_duplicate_refused(_run_checker(copy_root), desc)
+
+
 def test_check_versions_print_refuses_an_empty_value_duplicate(tmp):
     """--print must not hand out a value while a second, empty assignment
     competes with the first, so stdout stays empty (#324)."""
@@ -108,7 +125,8 @@ def test_check_versions_print_refuses_an_empty_value_duplicate(tmp):
 
 def test_check_versions_set_refuses_an_empty_value_duplicate(tmp):
     """--set must refuse a tree an empty duplicate has made ambiguous, and
-    must not rewrite the file holding it (#324)."""
+    must not rewrite the file holding it (#324). Both argparse spellings of
+    the flag take the same refusal: the separated token and `--set=<value>`."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     _path, _desc, _pattern = checker.SITES[3]
@@ -116,12 +134,13 @@ def test_check_versions_set_refuses_an_empty_value_duplicate(tmp):
     page = copy_root / 'extension' / 'page.js'
     _duplicate_the_page_js_version(copy_root, second_value='')
     before = page.read_text(encoding='utf-8')
-    result = _run_checker(copy_root, '--set', '9.9.9')
-    assert result.returncode != 0, (result.returncode, result.stdout,
-                                    result.stderr)
-    assert 'matches 2 times' in result.stderr, result.stderr
-    assert page.read_text(encoding='utf-8') == before, (
-        'refused sites must not be partially rewritten')
+    for argv in (['--set', '9.9.9'], ['--set=9.9.9']):
+        result = _run_checker(copy_root, *argv)
+        assert result.returncode != 0, (argv, result.returncode,
+                                        result.stdout, result.stderr)
+        assert 'matches 2 times' in result.stderr, (argv, result.stderr)
+        assert page.read_text(encoding='utf-8') == before, (
+            argv, 'refused sites must not be partially rewritten')
 
 
 def test_check_versions_refuses_an_empty_canonical_version(tmp):
