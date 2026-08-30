@@ -146,16 +146,14 @@ def _merge_payload_keys(keys, spread, spread_node):
         return
     if OPAQUE_TAB_SPREAD in spread:
         keys[OPAQUE_TAB_SPREAD] = (spread_node.lineno, spread_node)
-    if 'tab' in spread:
-        keys.pop(OPAQUE_TAB_SPREAD, None)
+    if 'tab' in spread: keys.pop(OPAQUE_TAB_SPREAD, None)
     keys.update((key, value) for key, value in spread.items()
                 if key is not OPAQUE_TAB_SPREAD)
 
 
 def payload_keys(expr, dicts):
     """Return tracked string keys, or None for a wholly opaque expression."""
-    if isinstance(expr, ast.Name):
-        return dicts.get(expr.id)
+    if isinstance(expr, ast.Name): return dicts.get(expr.id)
     if isinstance(expr, ast.Dict):
         keys = {}
         for key, value in zip(expr.keys, expr.values):
@@ -515,14 +513,18 @@ def state_signature(state):
         (name, value.expression.lineno, value.expression.col_offset,
          value.remaining, value.evaluate_zero)
         for name, value in state.generators.items()))
-    evaluated = tuple(sorted(
-        (key, value_signature(value))
-        for key, value in state.evaluated.items()))
-    callables = tuple(sorted((name, id(value))
-                             for name, value in state.callables.items()))
+    found = state.evaluated
+    evaluated = []
+    for key in sorted(found):
+        value = found[key]
+        evaluated.append((key, value if value.__class__ is
+                          not DeferredGenerator else value_signature(value)))
     return (tuple(payloads), tuple(sorted(state.aliases.items())),
-            generators, evaluated, tuple(sorted(state.builtin_globals)),
-            tuple(sorted(state.builtin_locals)), callables,
+            generators, tuple(evaluated),
+            tuple(sorted(state.builtin_globals)),
+            tuple(sorted(state.builtin_locals)),
+            tuple(sorted((name, id(value))
+                         for name, value in state.callables.items())),
             tuple(sorted(state.bound)))
 
 
