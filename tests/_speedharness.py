@@ -21,6 +21,7 @@ from _wfgraph import _job_section  # noqa: E402
 # is seconds on Linux and minutes on windows-latest. The real bound stays
 # pinned to the workflow file by test_speed_gate.py.
 WAIT_TRIES_UNDER_TEST = 5
+_CLEANUP_TIMEOUT = 5
 
 
 def wait_script(tries=WAIT_TRIES_UNDER_TEST):
@@ -80,7 +81,19 @@ cat "${STUB_ROWS:?}"
 
 # The wait's cadence is pinned textually; the behavioral tests run it fast.
 SLEEP_STUB = """#!/usr/bin/env bash
+if [ -n "${STUB_CALLS:-}" ]; then
+  printf 'sleep %s\\n' "$*" >> "$STUB_CALLS"
+fi
 exit 0
+"""
+
+# Bash imports this function before resolving the ordinary `sleep` command.
+SLEEP_FUNCTION = """() {
+if [ -n "${STUB_CALLS:-}" ]; then
+  printf 'sleep %s\\n' "$*" >> "$STUB_CALLS"
+fi
+return 0
+}
 """
 
 # Stands in for the timing instrument: it records the invocation and writes
@@ -128,29 +141,26 @@ def run_workflow_script(workdir, script, environment, timeout=120):
         'stderr': output_dir / 'stderr.log',
     }
     command = [_util.workflow_bash(), '-e', '-c', script]
+    child_environment = {
+        **os.environ,
+        'PATH': (f'{workdir}/bin{os.pathsep}'
+                 f'{os.environ["PATH"]}'),
+        **environment,
+    }
+    child_environment.setdefault('BASH_FUNC_sleep%%', SLEEP_FUNCTION)
     with (output_files['stdout'].open('wb') as stdout,
           output_files['stderr'].open('wb') as stderr):
         process = subprocess.Popen(
             command, cwd=workdir,
-            env=_util.child_coverage('scrub', {
-                **os.environ,
-                'PATH': (f'{workdir}/bin{os.pathsep}'
-                         f'{os.environ["PATH"]}'),
-                **environment,
-            }),
+            env=_util.child_coverage('scrub', child_environment),
             stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
             start_new_session=sys.platform != 'win32')
     try:
         returncode = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
-        _kill_process_tree(process)
-        process.wait()
-        timed_out = failure
-    else:
-        timed_out = None
-    if timed_out is not None:
-        _attach_timeout_output(timed_out, output_files)
-        raise timed_out
+        cleanup = _cleanup_process(process)
+        _attach_timeout_output(failure, output_files, cleanup)
+        raise
     return subprocess.CompletedProcess(
         command, returncode, _read_output(output_files['stdout']),
         _read_output(output_files['stderr']))
@@ -159,25 +169,79 @@ def run_workflow_script(workdir, script, environment, timeout=120):
 def _kill_process_tree(process):
     """Terminate a timed-out workflow shell and every child it started."""
     if sys.platform == 'win32':
-        subprocess.run(
-            ['taskkill', '/F', '/T', '/PID', str(process.pid)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, check=False)
-        return
+        try:
+            result = subprocess.run(
+                ['taskkill', '/F', '/T', '/PID', str(process.pid)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, check=False,
+                timeout=_CLEANUP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return f'taskkill timed out after {_CLEANUP_TIMEOUT}s'
+        except OSError as error:
+            return f'taskkill failed to run: {error}'
+        if result.returncode == 0:
+            return 'taskkill completed successfully'
+        return f'taskkill failed with exit code {result.returncode}'
     try:
         process_group = os.getpgid(process.pid)
     except ProcessLookupError:
-        return
+        return 'process group was already gone before cleanup'
+    except OSError as error:
+        return f'process-group lookup failed: {error}'
     try:
         if process_group == os.getpgrp():
             process.kill()
+            return 'direct process kill requested for the current group'
         else:
             os.killpg(process_group, signal.SIGKILL)
+            return f'process group {process_group} killed'
     except ProcessLookupError:
-        pass
+        # The group can disappear between getpgid() and the signal.
+        return f'process group {process_group} was already gone'
+    except OSError as error:
+        return f'process-group kill failed: {error}'
 
 
-def _attach_timeout_output(failure, output_files):
+def _cleanup_process(process):
+    """Keep cleanup failures from masking the original timeout."""
+    try:
+        cleanup = _kill_process_tree(process)
+    except Exception as error:  # pylint: disable=broad-except
+        cleanup = f'process-tree kill raised {error!r}'
+    try:
+        return _reap_process(process, cleanup)
+    except Exception as error:  # pylint: disable=broad-except
+        return f'{cleanup}; cleanup reap raised {error!r}'
+
+
+def _reap_process(process, cleanup):
+    """Reap a timed-out shell without restoring an unbounded wait."""
+    try:
+        process.wait(timeout=_CLEANUP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        cleanup += '; bounded reap timed out'
+    except OSError as error:
+        cleanup += f'; bounded reap failed: {error}'
+    else:
+        return cleanup + '; process reaped'
+    try:
+        process.kill()
+    except ProcessLookupError:
+        cleanup += '; fallback process was already gone'
+    except OSError as error:
+        cleanup += f'; fallback process kill failed: {error}'
+    else:
+        cleanup += '; fallback process kill requested'
+    try:
+        process.wait(timeout=_CLEANUP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return cleanup + '; process reap still timed out'
+    except OSError as error:
+        return cleanup + f'; process reap failed: {error}'
+    return cleanup + '; process reaped after fallback'
+
+
+def _attach_timeout_output(failure, output_files, cleanup):
     """Add partial text and its durable files to a timeout failure."""
     failure.stdout = _read_output(output_files['stdout'])
     failure.output = failure.stdout
@@ -185,6 +249,7 @@ def _attach_timeout_output(failure, output_files):
     failure.output_files = {
         name: str(path) for name, path in output_files.items()
     }
+    failure.cleanup_diagnostic = cleanup
 
 
 def _read_output(path):
