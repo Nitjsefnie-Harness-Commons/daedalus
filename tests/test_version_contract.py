@@ -325,13 +325,18 @@ def test_a_version_no_site_can_carry_is_reported(tmp):
 
 def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
     """--set writes the working tree, so naming another source is a mistake
-    the script must refuse rather than half-honour."""
+    the script must refuse rather than half-honour. An empty string still
+    names one: the refusal has to test whether --rev was given, not whether
+    its value is true, so `--rev ''` is refused before anything is written."""
     copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    for source in (['--staged'], ['--rev', 'HEAD']):
+    checker = _copy_versioned_tree(copy_root)
+    before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
+    for source in (['--staged'], ['--rev', 'HEAD'], ['--rev', '']):
         r = _run_checker(copy_root, '--set', '9.9.9', *source)
         assert r.returncode != 0, (source, r.returncode, r.stdout, r.stderr)
         assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
+        for path, body in before.items():
+            assert (copy_root / path).read_bytes() == body, (source, path)
 
 
 def test_check_versions_reads_the_index_and_a_revision(tmp):
