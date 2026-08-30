@@ -33,10 +33,13 @@ time it took to give up. That instrument belongs to the comparison, not to
 either tree, which is what lets a release predating it be measured at all.
 
 An accepted speed change is an explicit in-tree record for one bare test
-function name. It is bounded by that record's positive `max_ratio`: the named
-test is removed from the shared-set budget, then its own median head/base
-ratio is checked against the bound. This is per-test permission only; it never
-allows another test to regress or the accepted test to exceed its bound.
+function name. It authorizes ONE transition — from the recorded
+`through_baseline` to the next baseline. While the comparison's base label is
+that recorded baseline, the named test is removed from the shared-set budget
+and its own MEDIAN of paired-round ratios is checked against the positive
+`max_ratio`. The permission is relative (runner-proof, like the paired budget)
+while active, and inert (fail-closed) everywhere else; it never allows
+another test to regress or a later baseline to hide a new regression.
 """
 import argparse
 import json
@@ -105,6 +108,16 @@ def compare(base_rounds, head_rounds, excluded=()):
     return shared, pairs, movements
 
 
+def _unique_object(pairs):
+    """Build a JSON object while rejecting ambiguous duplicate keys."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f'duplicate key in JSON object: {key!r}')
+        result[key] = value
+    return result
+
+
 def _load_acceptances(path):
     """Read and validate an optional accepted-speed manifest."""
     if path is None:
@@ -117,7 +130,7 @@ def _load_acceptances(path):
     except (OSError, UnicodeError) as exc:
         raise ValueError(f'{manifest}: unreadable ({exc})') from exc
     try:
-        data = json.loads(document)
+        data = json.loads(document, object_pairs_hook=_unique_object)
     except (json.JSONDecodeError, ValueError, UnicodeError,
             RecursionError) as exc:
         raise ValueError(f'{manifest}: invalid JSON ({exc})') from exc
@@ -137,17 +150,21 @@ def _load_acceptances(path):
         where = f'{manifest}: acceptance {index}'
         if not isinstance(acceptance, dict):
             raise ValueError(f'{where} must be an object')
-        unknown = set(acceptance) - {'test', 'max_ratio', 'reason'}
+        unknown = (set(acceptance)
+                   - {'test', 'max_ratio', 'reason', 'through_baseline'})
         if unknown:
             raise ValueError(
                 f'{where}: unknown key(s): {", ".join(sorted(unknown))}')
-        missing = {'test', 'max_ratio', 'reason'} - set(acceptance)
+        missing = ({'test', 'max_ratio', 'reason', 'through_baseline'}
+                   - set(acceptance))
         if missing:
             raise ValueError(
                 f'{where}: missing key(s): {", ".join(sorted(missing))}')
         name = acceptance['test']
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(f'{where}: test name must be non-empty')
+        if (not isinstance(name, str) or not name.strip()
+                or name != name.strip()):
+            raise ValueError(
+                f'{where}: test name must be a bare non-empty string')
         if name in seen:
             raise ValueError(f'{where}: duplicate test name {name!r}')
         seen.add(name)
@@ -162,32 +179,61 @@ def _load_acceptances(path):
         reason = acceptance['reason']
         if not isinstance(reason, str):
             raise ValueError(f'{where}: reason must be a string')
+        through_baseline = acceptance['through_baseline']
+        if (not isinstance(through_baseline, str)
+                or not through_baseline.strip()):
+            raise ValueError(
+                f'{where}: through_baseline must be a non-empty string')
         parsed.append({'test': name, 'max_ratio': bound,
-                       'reason': reason})
+                       'reason': reason, 'through_baseline': through_baseline})
     return parsed
 
 
-def _acceptance_checks(acceptances, shared, base_rounds, head_rounds):
-    """Return per-acceptance rows and whether every bound is respected."""
+def _acceptance_checks(acceptances, shared, base_rounds, head_rounds,
+                       base_label):
+    """Return acceptance rows and whether active bounds are respected."""
     rows = []
     all_ok = True
     for acceptance in acceptances:
         name = acceptance['test']
         bound = acceptance['max_ratio']
+        active = acceptance['through_baseline'] == base_label
+        expired = f'expired at baseline {base_label}'
         if name not in shared:
+            status = ('not measured this run' if active else
+                      f'{expired}; not measured this run')
             rows.append((name, None, None, None, bound,
-                         'not measured this run'))
+                         status))
             continue
         was = statistics.median([round_[name] for round_ in base_rounds])
         now = statistics.median([round_[name] for round_ in head_rounds])
-        if was == 0.0:
-            ratio = 1.0 if now == 0.0 else math.inf
-        else:
-            ratio = now / was
+        paired_ratios = []
+        for base, head in zip(base_rounds, head_rounds):
+            if base[name] == 0.0:
+                pair_ratio = 1.0 if head[name] == 0.0 else math.inf
+            else:
+                pair_ratio = head[name] / base[name]
+            paired_ratios.append(pair_ratio)
+        ratio = statistics.median(paired_ratios)
+        if not active:
+            rows.append((name, was, now, ratio, bound, expired))
+            continue
         status = 'PASS' if ratio <= bound else 'FAIL'
         all_ok = all_ok and status == 'PASS'
         rows.append((name, was, now, ratio, bound, status))
     return rows, all_ok
+
+
+def _unmeasured_acceptance_rows(acceptances, base_label):
+    """Rows for a comparison that produced no shared measurements."""
+    rows = []
+    for item in acceptances:
+        active = item['through_baseline'] == base_label
+        status = ('not measured this run' if active else
+                  f'expired at baseline {base_label}; not measured this run')
+        rows.append((item['test'], None, None, None, item['max_ratio'],
+                     status))
+    return rows
 
 
 def _render_acceptances(lines, rows):
@@ -201,9 +247,9 @@ def _render_acceptances(lines, rows):
                  'bound | status |')
     lines.append('|---|---:|---:|---:|---:|---|')
     for name, was, now, ratio, bound, status in rows:
-        if status == 'not measured this run':
+        if was is None:
             lines.append(f'| `{name}` | — | — | — | {bound:.3f} | '
-                         'not measured this run |')
+                         f'{status} |')
             continue
         shown_ratio = 'inf' if math.isinf(ratio) else f'{ratio:.3f}'
         lines.append(f'| `{name}` | {was:.2f}s | {now:.2f}s | '
@@ -212,12 +258,16 @@ def _render_acceptances(lines, rows):
 
 def render(lines, base_label, shared, pairs, movements, limit=10):
     """The step summary: the verdict first, then what moved most."""
-    ratio = statistics.median([pair[2] for pair in pairs])
     lines.append('### Test speed')
     lines.append('')
     lines.append(f'Baseline `{base_label}`, over {len(shared)} tests present '
                  'and passing in every round on both sides.')
     lines.append('')
+    if not shared:
+        lines.append('No non-accepted shared tests; only acceptance bounds '
+                     'apply.')
+        return None
+    ratio = statistics.median([pair[2] for pair in pairs])
     lines.append('Each row is one interleaved pair of rounds, so every total '
                  'below is a run that happened:')
     lines.append('')
@@ -287,8 +337,7 @@ def main(argv=None):
                      'per-test durations, so nothing was measured to compare '
                      'against.')
         _render_acceptances(
-            lines, [(item['test'], None, None, None, item['max_ratio'],
-                     'not measured this run') for item in acceptances])
+            lines, _unmeasured_acceptance_rows(acceptances, args.base_label))
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
@@ -302,8 +351,7 @@ def main(argv=None):
                      f'this commit ran {len(head_rounds)}, so the rounds '
                      'cannot be paired.')
         _render_acceptances(
-            lines, [(item['test'], None, None, None, item['max_ratio'],
-                     'not measured this run') for item in acceptances])
+            lines, _unmeasured_acceptance_rows(acceptances, args.base_label))
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
@@ -314,28 +362,34 @@ def main(argv=None):
         lines.append('Skipped: no test passed in every round on both sides, '
                      'so the comparison has no shared set to sum.')
         _render_acceptances(
-            lines, [(item['test'], None, None, None, item['max_ratio'],
-                     'not measured this run') for item in acceptances])
+            lines, _unmeasured_acceptance_rows(acceptances, args.base_label))
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
-    accepted_names = [item['test'] for item in acceptances]
+    accepted_names = [item['test'] for item in acceptances
+                      if item['through_baseline'] == args.base_label]
     shared, pairs, movements = compare(
         base_rounds, head_rounds, excluded=accepted_names)
     acceptance_rows, acceptances_ok = _acceptance_checks(
-        acceptances, all_shared, base_rounds, head_rounds)
+        acceptances, all_shared, base_rounds, head_rounds, args.base_label)
     ratio = render(lines, args.base_label, shared, pairs, movements)
     _render_acceptances(lines, acceptance_rows)
     budget = 1.0 + args.max_regression
-    budget_ok = ratio <= budget
+    budget_ok = ratio is None or ratio <= budget
     if acceptances:
         lines.append('')
-        budget_text = (f'covered-set median paired ratio {ratio:.3f} is '
+        budget_text = ('no non-accepted shared tests; only acceptance bounds '
+                       'apply'
+                       if ratio is None else
+                       f'covered-set median paired ratio {ratio:.3f} is '
                        f'within the {budget:.2f} budget'
                        if budget_ok else
                        f'covered-set median paired ratio {ratio:.3f} '
                        f'exceeds the {budget:.2f} budget')
+        active_count = len(accepted_names)
         acceptance_text = ('every acceptance bound holds'
+                           if acceptances_ok and active_count else
+                           'no active acceptance bounds apply'
                            if acceptances_ok else
                            'one or more acceptance bounds were breached')
         verdict = 'OK' if budget_ok and acceptances_ok else 'FAIL'

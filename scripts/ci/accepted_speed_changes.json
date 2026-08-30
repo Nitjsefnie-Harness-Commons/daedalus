@@ -3,7 +3,8 @@
     {
       "test": "test_no_client_sends_the_browser_target_as_the_routing_field",
       "max_ratio": 40.0,
-      "reason": "Accepted in PR #342 (tab-routing guard alias tracking). Measured paired ratio 29.225 once PR #370 gave tests/test_tab_routing.py its own speed cell; 40.0 leaves headroom over the measured value."
+      "reason": "Accepted in PR #342; measured ratio 29.225; bound 40.0.",
+      "through_baseline": "v0.22.0"
     }
   ]
 }
