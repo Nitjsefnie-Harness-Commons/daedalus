@@ -39,6 +39,7 @@ _FAKE_COVERAGE_INIT = """def process_startup(**_kwargs):
 
 
 _SYNTHETIC_PROCESS_START = 'fabricated coverage startup'
+_FAILURE_MARKER = '(suite did not pass; its coverage still counts)'
 
 
 _RENDEZVOUS_SUITE = r"""import os, time
@@ -193,8 +194,7 @@ def _coverage_tree(tmp, suites, unlaunchable=(), cpu_count=None):
     if cpu_count is not None:
         sitecustomize += _cpu_count_site(cpu_count)
     if sitecustomize:
-        (root / 'sitecustomize.py').write_text(
-            sitecustomize, encoding='utf-8')
+        (root / 'sitecustomize.py').write_text(sitecustomize, encoding='utf-8')
     result = subprocess.run(
         [sys.executable, 'scripts/ci/coverage_suites.py'], cwd=str(root),
         env=_util.child_coverage('keep', env, cwd=root),
@@ -305,11 +305,9 @@ def _replay_events(lines):
 
 def test_every_suite_is_measured_in_its_own_parallel_mode_process(tmp):
     """Dropping a suite, parallel mode, or process isolation must fail."""
-    suites = {
-        'test_alpha.py': "print('alpha')\n",
-        'test_beta.py': "print('beta')\n",
-        'test_gamma.py': "print('gamma')\n",
-    }
+    suites = {'test_alpha.py': "print('alpha')\n",
+              'test_beta.py': "print('beta')\n",
+              'test_gamma.py': "print('gamma')\n"}
     result, invocations = _coverage_tree(tmp, suites)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert len(invocations) == len(suites), invocations
@@ -317,21 +315,16 @@ def test_every_suite_is_measured_in_its_own_parallel_mode_process(tmp):
     assert len(process_ids) == len(suites), invocations
     tree = Path(tmp) / 'tree'
     expected = {(tree / 'tests' / name).resolve() for name in suites}
-    assert {
-        tuple(invocation['argv'][:2]) for invocation in invocations
-    } == {('run', '--parallel-mode')}, invocations
-    measured = {
-        (tree / invocation['argv'][2]).resolve()
-        for invocation in invocations
-    }
+    assert {tuple(item['argv'][:2]) for item in invocations} == {
+        ('run', '--parallel-mode')}, invocations
+    measured = {(tree / item['argv'][2]).resolve() for item in invocations}
     assert measured == expected, invocations
 
 
 def test_measured_children_keep_coverage_start_but_not_runner_stdin(tmp):
     """Child setup must preserve tracing without inheriting readable stdin."""
-    result, invocations = _coverage_tree(tmp, {
-        'test_subprocess_contract.py': "print('contract observed')\n",
-    })
+    suites = {'test_subprocess_contract.py': "print('contract observed')\n"}
+    result, invocations = _coverage_tree(tmp, suites)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert len(invocations) == 1, invocations
     assert (invocations[0]['coverage_process_start']
@@ -343,37 +336,64 @@ def test_suites_run_concurrently(tmp):
     """Each suite must observe its sibling while both are still running."""
     if (os.cpu_count() or 1) < 2:
         _util.skip('parallel coverage test requires at least two CPUs')
-    result, _invocations = _coverage_tree(tmp, {
-        'test_rendezvous_a.py': _RENDEZVOUS_SUITE,
-        'test_rendezvous_b.py': _RENDEZVOUS_SUITE,
-    })
+    suites = {'test_rendezvous_a.py': _RENDEZVOUS_SUITE,
+              'test_rendezvous_b.py': _RENDEZVOUS_SUITE}
+    result, _invocations = _coverage_tree(tmp, suites)
     assert result.returncode == 0, (result.stdout, result.stderr)
+
+
+def _assert_worker_pool_record(stdout, expected_names, lines):
+    peak, paired_names, unpaired, orphans = _replay_events(lines)
+    assert paired_names <= expected_names, (
+        f'unknown paired workers {paired_names - expected_names}: {lines!r}')
+    assert not orphans, f'orphan worker closes {orphans}: {lines!r}'
+    absent_names = expected_names - paired_names
+    assert unpaired <= absent_names, f'unpaired outside absent: {unpaired}'
+    for name in expected_names:
+        group = _group(stdout, name)
+        case = ('absent-and-reported' if name in absent_names
+                else 'paired-and-healthy')
+        has_marker = _FAILURE_MARKER in group
+        assert has_marker == (name in absent_names), (
+            f'{case} worker {name}: {group!r}')
+    assert peak == 2, (
+        f'paired peak {peak}; reaching worker cap 2 is mandatory: {lines!r}')
+    return peak, paired_names, unpaired, orphans
+
+
+def _worker_pool_outcome(tmp, unlaunchable=()):
+    suites = {f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
+              for number in range(4)}
+    result, _invocations = _coverage_tree(tmp, suites, unlaunchable, 2)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    lines = _read_events(Path(tmp) / 'tree' / 'tests' / 'events.log')
+    replay = _assert_worker_pool_record(result.stdout, set(suites), lines)
+    return result, lines, replay
 
 
 def test_worker_pool_reaches_but_never_exceeds_cpu_count(tmp):
     """Four suites on two reported CPUs must reach a peak of exactly two."""
-    suites = {
-        f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
-        for number in range(4)
-    }
-    result, _invocations = _coverage_tree(tmp, suites, cpu_count=2)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    lines = _read_events(Path(tmp) / 'tree' / 'tests' / 'events.log')
-    peak, paired_names, unpaired, orphans = _replay_events(lines)
-    expected_names = set(suites)
-    assert paired_names == expected_names, (
-        f'paired worker suites differ: expected {sorted(expected_names)}, '
-        f'observed {sorted(paired_names)}; log: {lines!r}')
-    assert not unpaired, (
-        f'unpaired worker suites {sorted(unpaired)} in log: {lines!r}')
-    assert not orphans, (
-        f'orphan worker suite closes {sorted(orphans)} in log: {lines!r}')
-    failure_marker = '(suite did not pass; its coverage still counts)'
-    for name in suites:
-        group = _group(result.stdout, name)
-        assert failure_marker not in group, (
-            f'{name} was reported failed: {group!r}')
-    assert peak == 2, f'worker pool paired peak was {peak}: {lines!r}'
+    _worker_pool_outcome(tmp)
+
+
+def test_a_worker_that_never_runs_is_reported_not_counted(tmp):
+    result, lines, replay = _worker_pool_outcome(
+        tmp, unlaunchable=('test_worker_2.py',))
+    peak, paired_names, unpaired, orphans = replay
+    launchable = {f'test_worker_{number}.py' for number in (0, 1, 3)}
+    assert paired_names == launchable, lines
+    assert not (unpaired or orphans), (unpaired, orphans, lines)
+    assert peak == 2, f'launchable peak {peak}, expected 2: {lines!r}'
+    failed_group = _group(result.stdout, 'test_worker_2.py')
+    assert 'LAUNCH FAILED:' in failed_group, failed_group
+    without_marker = result.stdout.replace(_FAILURE_MARKER, '', 1)
+    expected = launchable | {'test_worker_2.py'}
+    try:
+        _assert_worker_pool_record(without_marker, expected, lines)
+    except AssertionError as exc:
+        assert 'absent-and-reported' in str(exc), exc
+    else:
+        raise AssertionError(f'absent marker not required: {failed_group!r}')
 
 
 def test_replay_exposes_a_three_suite_peak(_tmp):
@@ -537,10 +557,9 @@ def _assert_dying_worker_outcome(tmp, unlaunchable=()):
     assert unpaired <= {dying_suite}, (
         f'unexpected unpaired suite beside {dying_suite}: {lines!r}')
     assert not orphans, f'orphan close in event log: {lines!r}'
-    failure_marker = '(suite did not pass; its coverage still counts)'
     for name in healthy_suites:
         group = _group(result.stdout, name)
-        assert failure_marker not in group, (
+        assert _FAILURE_MARKER not in group, (
             f'healthy suite {name} was reported failed: {group!r}')
     failed_group = _group(result.stdout, dying_suite)
     if dying_suite in unpaired:
@@ -549,7 +568,7 @@ def _assert_dying_worker_outcome(tmp, unlaunchable=()):
     else:
         death_case = 'never-entered'
         assert not unpaired, f'never-entered unpaired: {unpaired!r}'
-    assert failure_marker in failed_group, (
+    assert _FAILURE_MARKER in failed_group, (
         f'{dying_suite} {death_case} group: {failed_group!r}')
     assert peak == 2, (
         f'paired event peak was {peak}, expected 2: {lines!r}')
@@ -575,46 +594,39 @@ def test_a_never_entered_dying_suite_is_reported_not_counted(tmp):
 
 def test_each_suite_output_is_one_contiguous_group(tmp):
     """Concurrent child writes must never interleave in workflow logs."""
-    result, _invocations = _coverage_tree(tmp, {
-        'test_alpha.py': _interleaving_suite('alpha'),
-        'test_beta.py': _interleaving_suite('beta'),
-    })
+    suites = {'test_alpha.py': _interleaving_suite('alpha'),
+              'test_beta.py': _interleaving_suite('beta')}
+    result, _invocations = _coverage_tree(tmp, suites)
     assert result.returncode == 0, (result.stdout, result.stderr)
     for name, label in (('test_alpha.py', 'alpha'),
                         ('test_beta.py', 'beta')):
-        block = (
-            f'::group::tests/{name}\n'
-            f'{label} first\n'
-            f'{label} second\n'
-            '::endgroup::\n'
-        )
+        block = (f'::group::tests/{name}\n'
+                 f'{label} first\n{label} second\n'
+                 '::endgroup::\n')
         assert block in result.stdout, result.stdout
         assert result.stdout.count(f'::group::tests/{name}') == 1
 
 
 def test_one_launch_failure_is_grouped_without_failing_the_run(tmp):
     """One unlaunchable child is reported while its sibling still counts."""
-    result, _invocations = _coverage_tree(tmp, {
-        'test_unlaunchable.py': "print('must not execute')\n",
-        'test_passing.py': "print('passed')\n",
-    }, unlaunchable=('test_unlaunchable.py',))
+    suites = {'test_unlaunchable.py': "print('must not execute')\n",
+              'test_passing.py': "print('passed')\n"}
+    result, _invocations = _coverage_tree(
+        tmp, suites, unlaunchable=('test_unlaunchable.py',))
     assert result.returncode == 0, (result.stdout, result.stderr)
     failed_group = _group(result.stdout, 'test_unlaunchable.py')
-    assert failed_group.startswith(
-        '::group::tests/test_unlaunchable.py\n'
-        'LAUNCH FAILED: FileNotFoundError:'), failed_group
-    assert ('  (suite did not pass; its coverage still counts)'
-            in failed_group), failed_group
+    prefix = ('::group::tests/test_unlaunchable.py\n'
+              'LAUNCH FAILED: FileNotFoundError:')
+    assert failed_group.startswith(prefix), failed_group
+    assert _FAILURE_MARKER in failed_group, failed_group
     assert ('::group::tests/test_passing.py\npassed\n::endgroup::\n'
             in result.stdout), result.stdout
 
 
 def test_every_launch_failure_fails_with_the_all_failed_guard(tmp):
     """All unlaunchable children reach groups and the terminal diagnostic."""
-    suites = {
-        'test_unlaunchable_a.py': "print('must not execute')\n",
-        'test_unlaunchable_b.py': "print('must not execute')\n",
-    }
+    suites = {'test_unlaunchable_a.py': "print('must not execute')\n",
+              'test_unlaunchable_b.py': "print('must not execute')\n"}
     result, _invocations = _coverage_tree(
         tmp, suites, unlaunchable=tuple(suites))
     assert result.returncode != 0, (result.stdout, result.stderr)
@@ -623,44 +635,37 @@ def test_every_launch_failure_fails_with_the_all_failed_guard(tmp):
     for name in suites:
         failed_group = _group(result.stdout, name)
         assert 'LAUNCH FAILED: FileNotFoundError:' in failed_group
-        assert ('  (suite did not pass; its coverage still counts)'
-                in failed_group), failed_group
-    assert ('every one of the 2 suites failed — refusing to\n'
-            in result.stderr), result.stderr
-    assert ('report a coverage number for a program that did not run.'
-            in result.stderr), result.stderr
+        assert _FAILURE_MARKER in failed_group, failed_group
+    message = ('every one of the 2 suites failed — refusing to\n'
+               'report a coverage number for a program that did not run.')
+    assert message in result.stderr, result.stderr
 
 
 def test_one_failing_suite_does_not_fail_the_run(tmp):
     """Partial coverage survives while the matrix owns suite verdicts."""
-    result, _invocations = _coverage_tree(tmp, {
-        'test_failing.py': (
-            "print('before failure', flush=True)\n"
-            "raise RuntimeError('coverage child boom')\n"
-        ),
-        'test_passing.py': "print('passed')\n",
-    })
+    suites = {
+        'test_failing.py': ("print('before failure', flush=True)\n"
+                            "raise RuntimeError('coverage child boom')\n"),
+        'test_passing.py': "print('passed')\n"}
+    result, _invocations = _coverage_tree(tmp, suites)
     assert result.returncode == 0, (result.stdout, result.stderr)
     failed_group = _group(result.stdout, 'test_failing.py')
     assert result.stderr == '', (failed_group, result.stderr)
     assert 'before failure\nTraceback (most recent call last):\n' in (
         failed_group), failed_group
     assert 'RuntimeError: coverage child boom\n' in failed_group, failed_group
-    assert ('  (suite did not pass; its coverage still counts)\n'
-            in failed_group), failed_group
+    assert _FAILURE_MARKER + '\n' in failed_group, failed_group
 
 
 def test_every_suite_failing_fails_the_run(tmp):
     """A coverage number is refused when no suite completed successfully."""
-    result, _invocations = _coverage_tree(tmp, {
-        'test_failing_a.py': 'raise SystemExit(1)\n',
-        'test_failing_b.py': 'raise SystemExit(2)\n',
-    })
+    suites = {'test_failing_a.py': 'raise SystemExit(1)\n',
+              'test_failing_b.py': 'raise SystemExit(2)\n'}
+    result, _invocations = _coverage_tree(tmp, suites)
     assert result.returncode != 0, (result.stdout, result.stderr)
-    assert ('every one of the 2 suites failed — refusing to\n'
-            in result.stderr), result.stderr
-    assert ('report a coverage number for a program that did not run.'
-            in result.stderr), result.stderr
+    message = ('every one of the 2 suites failed — refusing to\n'
+               'report a coverage number for a program that did not run.')
+    assert message in result.stderr, result.stderr
 
 
 def test_no_suites_fails_the_run(tmp):
@@ -674,10 +679,8 @@ def test_no_suites_fails_the_run(tmp):
 
 def test_every_repository_suite_name_is_discovered(tmp):
     """No matching repository suite may disappear from measurement."""
-    names = sorted(
-        suite.name for suite in (ROOT / 'tests').glob('test_*.py'))
-    result, invocations = _coverage_tree(
-        tmp, {name: '' for name in names})
+    names = sorted(suite.name for suite in (ROOT / 'tests').glob('test_*.py'))
+    result, invocations = _coverage_tree(tmp, {name: '' for name in names})
     assert result.returncode == 0, (result.stdout, result.stderr)
     measured = {Path(item['argv'][2]).name for item in invocations}
     assert measured == set(names), (set(names) - measured,
@@ -686,15 +689,12 @@ def test_every_repository_suite_name_is_discovered(tmp):
 
 def test_unterminated_suite_output_gets_a_group_separator(tmp):
     """A child without a final newline cannot swallow the group terminator."""
-    result, _invocations = _coverage_tree(tmp, {
-        'test_unterminated.py': "import sys\nsys.stdout.write('no newline')\n",
-    })
+    source = "import sys\nsys.stdout.write('no newline')\n"
+    result, _calls = _coverage_tree(tmp, {'test_unterminated.py': source})
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == (
-        '::group::tests/test_unterminated.py\n'
-        'no newline\n'
-        '::endgroup::\n'
-    ), result.stdout
+    expected = ('::group::tests/test_unterminated.py\nno newline\n'
+                '::endgroup::\n')
+    assert result.stdout == expected, result.stdout
 
 
 raise SystemExit(_util.runner(_util.collect(dict(globals()))))
