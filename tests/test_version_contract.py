@@ -326,16 +326,20 @@ def test_a_version_no_site_can_carry_is_reported(tmp):
 def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
     """--set writes the working tree, so naming another source is a mistake
     the script must refuse rather than half-honour. An empty string still
-    names one: the refusal has to test whether --rev was given, not whether
-    its value is true, so `--rev ''` is refused before anything is written."""
+    names one, and the empty-rev refusal every mode shares fires before the
+    conflict guard, so `--rev ''` and `--rev=` answer with that message;
+    --staged and a real revision answer with the conflict one."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
-    for source in (['--staged'], ['--rev', 'HEAD'], ['--rev', ''],
-                   ['--rev=']):
+    for source, message in (
+            (['--staged'], 'drop --staged/--rev'),
+            (['--rev', 'HEAD'], 'drop --staged/--rev'),
+            (['--rev', ''], 'cannot read an empty revision name'),
+            (['--rev='], 'cannot read an empty revision name')):
         r = _run_checker(copy_root, '--set', '9.9.9', *source)
         assert r.returncode != 0, (source, r.returncode, r.stdout, r.stderr)
-        assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
+        assert message in r.stderr, (source, r.stderr)
         for path, body in before.items():
             assert (copy_root / path).read_bytes() == body, (source, path)
 
@@ -392,6 +396,26 @@ def test_check_versions_reads_the_index_and_a_revision(tmp):
     # The working tree is the one that disagrees.
     worktree = _run_checker(copy_root)
     assert worktree.returncode == 1, (worktree.stdout, worktree.stderr)
+
+
+def test_check_versions_refuses_an_empty_revision_name(tmp):
+    """--rev '' is a present --rev with no name in it, and the spec it builds
+    (`:<path>`) is what git reads as the index, so an empty --rev silently
+    describes something other than the revision the run asked for. Every
+    mode has to refuse it rather than answer about some other source."""
+    copy_root, _checker = _versioned_git_tree(tmp)
+    for argv in (['--rev', ''], ['--print', '--rev', ''],
+                 ['--staged', '--rev', '']):
+        r = _run_checker(copy_root, *argv)
+        assert r.returncode != 0, (argv, r.returncode, r.stdout, r.stderr)
+        if argv[0] == '--staged':
+            # argparse rejects the combination before main() runs, so this
+            # one is refused as a conflict rather than by the empty-rev
+            # refusal the other two reach.
+            assert '--staged' in r.stderr and '--rev' in r.stderr, r.stderr
+            continue
+        assert 'cannot read an empty revision name' in r.stderr, (
+            argv, r.stdout, r.stderr)
 
 
 def test_check_versions_reports_a_revision_it_cannot_read(tmp):
