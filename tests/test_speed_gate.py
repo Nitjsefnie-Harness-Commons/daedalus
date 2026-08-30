@@ -9,7 +9,6 @@ runtime behaviour is executed in test_speed_wait.py; other invariants over
 speed.yml stay in `test_ci_workflows.py`.
 """
 import fnmatch
-import json
 import re
 import shutil
 import sys
@@ -26,6 +25,10 @@ from _wfgraph import _job_section, _tests_yml  # noqa: E402
 from _yamlread import job_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
+
+
+def _compare_durations():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'compare_durations.py')
 
 
 def test_only_the_benchmark_cells_benchmark_without_a_reviewer(tmp):
@@ -243,26 +246,36 @@ def test_the_accepted_speed_manifest_matches_test_names_in_the_tree(tmp):
     """The tracked manifest is strict and cannot silently drift from tests."""
     del tmp
     path = ROOT / 'scripts' / 'ci' / 'accepted_speed_changes.json'
-    payload = json.loads(path.read_text(encoding='utf-8'))
-    assert isinstance(payload, dict), payload
-    assert set(payload) == {'acceptances'}, payload
-    acceptances = payload['acceptances']
-    assert isinstance(acceptances, list) and acceptances, payload
+    acceptances = _compare_durations()._load_acceptances(path)
+    assert isinstance(acceptances, list), acceptances
     sources = [
         suite.read_text(encoding='utf-8')
         for suite in sorted((ROOT / 'tests').glob('*.py'))]
     for acceptance in acceptances:
         assert isinstance(acceptance, dict), acceptance
-        assert set(acceptance) == {'test', 'max_ratio', 'reason'}, acceptance
+        assert set(acceptance) == {
+            'test', 'max_ratio', 'reason', 'through_baseline'}, acceptance
         name = acceptance['test']
         assert isinstance(name, str) and name.strip(), acceptance
         bound = acceptance['max_ratio']
         assert (isinstance(bound, (int, float))
                 and not isinstance(bound, bool) and bound > 0), acceptance
         assert isinstance(acceptance['reason'], str), acceptance
+        baseline = acceptance['through_baseline']
+        assert isinstance(baseline, str) and baseline.strip(), acceptance
         needle = re.compile(r'^\s*def\s+' + re.escape(name) + r'\s*\(',
                             re.MULTILINE)
         assert any(needle.search(source) for source in sources), name
+
+
+def test_the_accepted_speed_manifest_can_be_empty_or_missing(tmp):
+    """Removing every acceptance, or the file, is ordinary cleanup."""
+    compare = _compare_durations()
+    empty = Path(tmp) / 'empty.json'
+    empty.write_text('{"acceptances": []}', encoding='utf-8')
+    missing = Path(tmp) / 'missing.json'
+    assert compare._load_acceptances(empty) == []
+    assert compare._load_acceptances(missing) == []
 
 
 def test_the_speed_cells_partition_the_suites(tmp):
