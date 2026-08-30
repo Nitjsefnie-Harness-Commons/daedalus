@@ -91,6 +91,9 @@ def workflow_bash():
     ordering that prevents it, and the WSL launcher is still returned when it
     is the only Bash there is, so the suite that needed it fails with its own
     signal rather than a resolver error.
+
+    Relative executable candidates are made absolute without resolving
+    symlinks.
     """
     for candidate in bash_candidates(
             os.environ.get('PATH', ''), sys.platform.startswith('win'),
@@ -98,7 +101,8 @@ def workflow_bash():
             program_files_x86=os.environ.get('ProgramFiles(x86)'),
             local_app_data=os.environ.get('LOCALAPPDATA')):
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+            return (candidate if os.path.isabs(candidate)
+                    else os.path.abspath(candidate))
     raise AssertionError('bash is required to execute the workflow shell')
 
 
