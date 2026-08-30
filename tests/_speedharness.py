@@ -4,6 +4,7 @@ The readers lift one job's step out of the workflow; the runner executes it
 under `bash -e` with stubbed neighbours on PATH.
 """
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
+
+# The behavioral tests run the wait's loop at a small bound: every attempt
+# spawns the stubs, so a leg costs attempts x per-spawn cost, and per-spawn
+# cost varies by two orders of magnitude across platforms — a 45-attempt loop
+# is seconds on Linux and minutes on windows-latest. The real bound stays
+# pinned to the workflow file by test_speed_gate.py.
+WAIT_TRIES_UNDER_TEST = 5
+
+
+def wait_script(tries=WAIT_TRIES_UNDER_TEST):
+    """The wait's script as the behavioral tests run it: bound substituted.
+
+    The workflow file keeps the production bound; the extraction rewrites
+    that one assignment so a leg's spawn count does not follow it. `None`
+    returns the workflow's own text unrewritten.
+    """
+    script = speed_script(speed_yml(), 'correctness',
+                          'Wait for the correctness aggregate')
+    if tries is None:
+        return script
+    bounds = re.findall(r'(?m)^\s*tries=(\d+)\s*$', script)
+    assert len(bounds) == 1, bounds
+    return script.replace(f'tries={bounds[0]}', f'tries={tries}', 1)
 
 
 def speed_yml():

@@ -209,6 +209,9 @@ def test_the_speed_gate_waits_for_the_exact_aggregate_check(tmp):
     # Bounded, with a ceiling that outlasts the bound: minutes against
     # seconds, so widening either the attempts or the pause trips it.
     tries = int(re.search(r'\btries=(\d+)\b', script).group(1))
+    # The production bound lives here, not in the behavioral harness, which
+    # substitutes its own: the value 45 is pinned on this side alone.
+    assert 'tries=45' in script, script
     pauses = {int(found) for found in re.findall(r'\bsleep (\d+)\b', script)}
     assert len(pauses) == 1, pauses
     pause = pauses.pop()

@@ -12,16 +12,26 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _speedharness import (  # noqa: E402
-    run_workflow_script, speed_script, speed_yml, stub_path,
+    WAIT_TRIES_UNDER_TEST, run_workflow_script, stub_path, wait_script,
 )
 
 
 _AGGREGATE = 'Aggregate workflow checks'
 
 
-def wait_script():
-    return speed_script(speed_yml(), 'correctness',
-                        'Wait for the correctness aggregate')
+def test_the_harness_runs_the_wait_with_a_small_bound(tmp):
+    """The behavioral pins run the wait's loop at a small bound.
+
+    Every attempt spawns the stubs, so a leg's cost is attempts x per-spawn
+    cost, and per-spawn cost varies by two orders of magnitude across
+    platforms — a 45-attempt loop is seconds on Linux and minutes on
+    windows-latest. The value is pinned where it is production, in the
+    workflow file; here it is whatever the harness substitutes.
+    """
+    del tmp
+    script = wait_script()
+    assert 'tries=45' not in script, script
+    assert f'tries={WAIT_TRIES_UNDER_TEST}' in script, script
 
 
 def run_wait(workdir, rows, sha='a' * 40, fail=False):
