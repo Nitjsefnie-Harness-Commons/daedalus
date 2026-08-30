@@ -229,6 +229,10 @@ def main():
                       help='print the canonical version alone, for a script to read')
     args = ap.parse_args()
 
+    if args.rev is not None and not args.rev:
+        raise SystemExit('cannot read an empty revision name: the spec '
+                         ':<path> it builds names the index, not a revision')
+
     if args.set_to is not None:
         if args.staged or args.rev is not None:
             raise SystemExit('--set rewrites the working tree; drop --staged/--rev')
