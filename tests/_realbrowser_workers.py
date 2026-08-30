@@ -83,6 +83,15 @@ def _browser_args(browser, loaded, profile):
     ]
 
 
+def _retire_browser(process):
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
 _WORKER_READY_PROBE = (
     '(() => { try { return typeof loadConfig === "function" '
     '&& typeof ensureKeepAlive === "function" '
@@ -199,7 +208,6 @@ def _devtools_port(profile):
 
 
 def _listed_workers(profile, declared):
-    """Workers for `declared`, or [] while none is listed."""
     port = _devtools_port(profile)
     if not port:
         return []
@@ -269,17 +277,16 @@ def _worker_absence_verdict(node, browser, extension, worker_script, tmp):
                     node, _listed_workers(profile, CONTROL_WORKER_SCRIPT)):
                 control_answered = True
             if process.poll() is not None:
+                if control_answered:
+                    return False, (
+                        'the diagnosis browser exited after the control '
+                        'answered but before ours answered')
                 return False, (
                     'the diagnosis browser exited before any control '
                     'worker was listed')
             time.sleep(0.5)
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=10)
+        _retire_browser(process)
     if control_answered:
         raise AssertionError(
             _absence_guilt(browser, extension, worker_script))

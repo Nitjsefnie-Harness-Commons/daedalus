@@ -31,8 +31,8 @@ from _realbrowser_workers import (  # noqa: E402
     WORKER_ABSENCE_DEADLINE, _WORKER_READY_PROBE, _WORKER_STATE_PROBE,
     _absence_guilt, _browser_args, _browser_version, _control_extension,
     _control_worker_answered, _devtools_port, _devtools_targets,
-    _listed_workers, _worker_absence_verdict, _worker_targets, cdp_call,
-    cdp_eval, ready_worker, worker_state)
+    _listed_workers, _retire_browser, _worker_absence_verdict,
+    _worker_targets, cdp_call, cdp_eval, ready_worker, worker_state)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
@@ -220,15 +220,6 @@ def _environment_verdicts_closed():
             + str(why)) from why
 
 
-def _retire_browser(process):
-    process.terminate()
-    try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=10)
-
-
 def _launch_and_reach(node, browser, loaded, profile, worker_script,
                       page_url, started):
     browser_args = _browser_args(browser, loaded, profile)
@@ -313,16 +304,23 @@ def real_extension_page(tmp, bridge_url, token, page_url,
             if not contention:
                 first_absence.args = (f'{first_absence} — {observed}',)
                 raise
+            started_before_recovery = len(started)
             try:
                 launch = _launch_and_reach(
                     node, browser, loaded,
                     Path(tmp) / 'chromium-profile-recovery', worker_script,
                     page_url, started)
             except BrowserEnvironmentSkipped as recovery_absence:
+                if len(started) == started_before_recovery:
+                    recovery_observation = (
+                        'the recovery browser could not be launched')
+                else:
+                    recovery_observation = (
+                        'the recovery relaunch saw the extension worker '
+                        'absent again')
                 recovery_absence.args = (
                     f'{recovery_absence} — diagnosis launch demonstrated '
-                    f'{observed}; the recovery relaunch saw the extension '
-                    'worker absent again',)
+                    f'{observed}; {recovery_observation}',)
                 raise
             _retire_browser(started.pop(0))
         _process, worker_target, devtools_port, page_target = launch

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Browser-free controls for worker-absence recovery and diagnosis."""
 import contextlib
+import errno
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +16,7 @@ from test_real_browser_harness import (  # noqa: E402
     _ProcessDouble, _browser_requirements, _enter_fixture)
 
 
-def _process_launches():
+def _process_launches(recovery_failure=None):
     processes = [_ProcessDouble(), _ProcessDouble()]
     launches = []
 
@@ -27,6 +28,8 @@ def _process_launches():
         if launches:
             assert processes[0].terminated is False
         launches.append(list(args))
+        if len(launches) == 2 and recovery_failure is not None:
+            raise recovery_failure
         return processes[len(launches) - 1]
 
     return popen, processes, launches
@@ -73,8 +76,8 @@ def _configured(node, bridge_url, token, worker_target, devtools_port,
 
 
 @contextlib.contextmanager
-def _recovery_runtime(tmp, waits, verdict):
-    popen, processes, launches = _process_launches()
+def _recovery_runtime(tmp, waits, verdict, recovery_failure=None):
+    popen, processes, launches = _process_launches(recovery_failure)
     wait_calls = []
 
     def wait_for_devtools(profile, process, declared_worker):
@@ -90,11 +93,13 @@ def _recovery_runtime(tmp, waits, verdict):
         mock.patch.object(_realbrowser.subprocess, 'Popen', popen),
         mock.patch.object(
             _realbrowser, '_wait_for_devtools', wait_for_devtools),
-        mock.patch.object(_realbrowser, '_worker_absence_verdict', verdict),
         mock.patch.object(_realbrowser, 'cdp_call', _navigate),
         mock.patch.object(_realbrowser, '_reached_worker', _reached),
         mock.patch.object(_realbrowser, '_configured_fixture', _configured),
     )
+    if verdict is not None:
+        patches += (mock.patch.object(
+            _realbrowser, '_worker_absence_verdict', verdict),)
     with contextlib.ExitStack() as stack:
         for patcher in patches:
             stack.enter_context(patcher)
@@ -161,6 +166,56 @@ def test_contention_relaunch_absence_remains_a_skip(tmp):
     assert [item.wait_timeouts for item in processes] == [[10], [10]]
 
 
+def test_contention_recovery_launch_failure_is_not_worker_absence(tmp):
+    first_absence = _realbrowser.BrowserEnvironmentSkipped(
+        'controlled first-launch worker absence')
+    recovery_failure = OSError(
+        errno.ENOENT, 'controlled recovery launch failure')
+    verdict = mock.Mock(return_value=(
+        True, 'controlled contention evidence'))
+    survived = None
+    with _recovery_runtime(
+            tmp, [first_absence], verdict,
+            recovery_failure=recovery_failure) as runtime:
+        processes, launches, _wait_calls = runtime
+        try:
+            with _enter_fixture(tmp):
+                raise AssertionError('fixture yielded after launch failure')
+        except _realbrowser.BrowserEnvironmentSkipped as why:
+            survived = why
+
+    assert survived is not None, survived
+    assert 'controlled contention evidence' in str(survived), survived
+    assert 'worker absent' not in str(survived), survived
+    assert 'recovery browser could not be launched' in str(survived), survived
+    assert len(launches) == 2, launches
+    verdict.assert_called_once()
+    assert [item.wait_timeouts for item in processes] == [[10], []]
+
+
+def test_diagnosis_poll_exception_retires_both_browser_owners(tmp):
+    first_absence = _realbrowser.BrowserEnvironmentSkipped(
+        'controlled first-launch worker absence')
+    poll_failure = RuntimeError('controlled diagnosis poll failure')
+    survived = None
+    with _recovery_runtime(tmp, [first_absence], None) as runtime:
+        processes, launches, _wait_calls = runtime
+        with mock.patch.object(
+                _realbrowser_workers, '_listed_workers',
+                side_effect=poll_failure):
+            try:
+                with _enter_fixture(tmp):
+                    raise AssertionError(
+                        'fixture yielded after diagnosis failure')
+            except RuntimeError as why:
+                survived = why
+
+    assert survived is poll_failure, survived
+    assert len(launches) == 2, launches
+    assert [item.terminated for item in processes] == [True, True]
+    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+
+
 def _repository_target():
     return {
         'type': 'service_worker',
@@ -186,13 +241,13 @@ class _PollClock:
         return self.now
 
 
-def _diagnosis(tmp, ours, control):
+def _diagnosis(tmp, ours, control, poll=None):
     profile = Path(tmp) / 'control-profile'
     profile.mkdir()
     (profile / 'DevToolsActivePort').write_text(
         '9222\n', encoding='utf-8')
     process = _ProcessDouble()
-    process.poll = mock.Mock(return_value=None)
+    process.poll = mock.Mock(return_value=poll)
     launches = []
     evaluations = []
     ours = list(ours)
@@ -266,6 +321,18 @@ def test_control_answer_then_ours_answer_returns_contention(tmp):
         tmp, [False, False, True], [True])
     assert outcome[0] is True, outcome
     assert 'contention' in outcome[1], outcome
+
+
+def test_control_answer_is_preserved_when_diagnosis_browser_exits(tmp):
+    outcome, launches, process, _evaluations = _diagnosis(
+        tmp, [False], [True], poll=1)
+    assert outcome == (
+        False,
+        'the diagnosis browser exited after the control answered but before '
+        'ours answered',
+    ), outcome
+    assert len(launches) == 1, launches
+    assert process.wait_timeouts == [10], process.wait_timeouts
 
 
 def test_neither_worker_answers_and_both_extensions_are_loaded(tmp):
