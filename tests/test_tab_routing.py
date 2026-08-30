@@ -334,6 +334,63 @@ def test_callee_dict_state_ignores_callers_local_shadow(tmp):
     assert scan('') == scan("    cmd = {'type': '/other'}\n") == expected
 
 
+def test_callee_dict_reads_current_module_value_through_shadow(tmp):
+    source = Path(tmp) / 'callee_rebind.py'
+    source.write_text(
+        "cmd = {'type': '/focus', 'tab': 'extension'}\n"
+        "def callee():\n"
+        "    return ext_cmd(**cmd)\n"
+        "def caller():\n"
+        "    cmd = {'type': '/other'}\n"
+        "    return callee()\n"
+        "cmd = {'type': '/focus', 'tab': 5}\n"
+        "caller()\n"
+        "cmd = {'type': '/focus', 'tab': 'extension'}\n",
+        encoding='utf-8')
+    assert py_tab_routing_violations(source, source.name) == [
+        f'{source.name}:7: `tab` in **cmd passed to ext_cmd']
+    source.write_text(
+        "cmd = {'type': '/focus', 'tab': 5}\n"
+        "def callee():\n"
+        "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
+        "    return ext_cmd(**cmd)\n"
+        "def caller():\n"
+        "    cmd = {'type': '/other'}\n"
+        "    return callee()\n"
+        "caller()\n",
+        encoding='utf-8')
+    assert not py_tab_routing_violations(source, source.name)
+    source.write_text(
+        "def outer():\n"
+        "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
+        "    def callee():\n"
+        "        return ext_cmd(**cmd)\n"
+        "    def caller():\n"
+        "        cmd = {'type': '/other'}\n"
+        "        return callee()\n"
+        "    cmd = {'type': '/focus', 'tab': 5}\n"
+        "    caller()\n"
+        "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
+        "outer()\n",
+        encoding='utf-8')
+    assert py_tab_routing_violations(source, source.name) == [
+        f'{source.name}:8: `tab` in **cmd passed to ext_cmd']
+
+
+def test_callable_dict_state_requires_consensus(tmp):
+    source = Path(tmp) / 'callable_consensus.py'
+    source.write_text(
+        "def outer(flag):\n"
+        "    cmd = {'type': '/focus', 'tab': 5}\n"
+        "    if flag:\n"
+        "        cmd = {'type': '/focus', 'tab': 'extension'}\n"
+        "    return lambda unused=None: ext_cmd(**cmd)\n",
+        encoding='utf-8')
+    assert py_tab_routing_violations(source, source.name) == [
+        f'{source.name}:5: opaque **cmd passed to ext_cmd; '
+        '`tab` cannot be verified']
+
+
 def test_destructured_and_walrus_alias_boundaries(tmp):
     bodies = [
         "send = _ext_cmd", "send = b.ext_cmd", "send: object = _ext_cmd",
