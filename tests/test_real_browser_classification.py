@@ -249,7 +249,7 @@ def test_answering_control_worker_twice_marks_worker_absence_our_failure(tmp):
     demonstrated the capability. What is pinned here is that contract: the
     failure names our source and our declared script, never the machine.
     """
-    outcome, _launches, _process = _answered_diagnosis(tmp)
+    outcome, _launches, processes = _answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
     reported = str(outcome)
     assert str(EXTENSION_ROOT.resolve()) in reported, reported
@@ -257,12 +257,19 @@ def test_answering_control_worker_twice_marks_worker_absence_our_failure(tmp):
     assert 'Chromium 151.0.7922.169 (controlled)' in reported, reported
     assert 'not the machine' in reported, reported
     assert 'two consecutive diagnosis launches' in reported, reported
+    assert len(processes) == 2, processes
+    for process in processes:
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=10)
 
 
 def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
-    outcome, launches, process = _answered_diagnosis(tmp)
+    outcome, launches, processes = _answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
-    process.terminate.assert_called_once()
+    assert len(processes) == 2, processes
+    for process in processes:
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=10)
     assert len(launches) == 2, launches
     loaded = [[item for item in launch
                if item.startswith('--load-extension=')]
@@ -270,38 +277,47 @@ def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
     assert all(len(item) == 1 for item in loaded), loaded
     assert all(str(EXTENSION_ROOT.resolve()) in item[0]
                for item in loaded), loaded
-    assert str((Path(tmp) / 'control-extension').resolve()) in loaded[0][0]
-    retry = str((Path(tmp) / 'control-extension-retry').resolve())
-    assert retry in loaded[1][0], (retry, loaded)
+    controls = [
+        [Path(item.split(',', 1)[1]) for item in launch]
+        for launch in loaded]
+    assert controls[0][0] != controls[1][0], controls
+    assert all(item.exists() for pair in controls for item in pair), controls
 
 
 def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
     """No control answer is a browser that never demonstrated anything."""
-    outcome, launches, process = _control_diagnosis(
+    outcome, launches, processes = _control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0, 31)))
     assert outcome[0] is False, outcome
     assert 'no answering worker either' in outcome[1], outcome
-    process.terminate.assert_called_once()
+    assert len(processes) == 1, processes
+    processes[0].terminate.assert_called_once()
+    processes[0].wait.assert_called_once_with(timeout=10)
     assert len(launches) == 1, launches
 
 
 def test_control_browser_exit_ends_the_diagnosis_without_a_verdict(tmp):
     """A diagnosis browser that is gone cannot demonstrate anything."""
-    outcome, launches, process = _control_diagnosis(
+    outcome, launches, processes = _control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0)), poll=1)
     assert outcome[0] is False, outcome
     assert 'exited before any control worker' in outcome[1], outcome
     assert len(launches) == 1, launches
-    process.terminate.assert_called_once()
+    assert len(processes) == 1, processes
+    processes[0].terminate.assert_called_once()
+    processes[0].wait.assert_called_once_with(timeout=10)
 
 
 def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
     """A transport failure is not an answer, and the next poll knows it."""
-    outcome, _launches, process = _control_diagnosis(
+    outcome, _launches, processes = _control_diagnosis(
         tmp, [AssertionError('controlled transport failure'), True],
         mock.Mock(side_effect=(0, 0, 0, 31, 31, 31, 62)))
     assert outcome.__class__ is AssertionError, outcome
-    process.terminate.assert_called_once()
+    assert len(processes) == 2, processes
+    for process in processes:
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=10)
 
 
 def test_the_control_extension_satisfies_its_own_probe(tmp):

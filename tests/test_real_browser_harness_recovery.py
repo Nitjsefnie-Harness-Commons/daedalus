@@ -112,6 +112,20 @@ def _profile_args(launches):
             for launch in launches]
 
 
+def _extension_args(launches):
+    return [
+        [Path(item) for item in next(
+            arg.split('=', 1)[1] for arg in launch
+            if arg.startswith('--load-extension=')).split(',')]
+        for launch in launches]
+
+
+def _assert_diagnosis_processes_settled(processes):
+    assert len(processes) == 2, processes
+    assert [item.terminated for item in processes] == [True, True]
+    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+
+
 def test_contention_relaunch_recovers_the_fixture(tmp):
     first_absence = _realbrowser.BrowserEnvironmentSkipped(
         'controlled first-launch worker absence')
@@ -242,12 +256,6 @@ class _PollClock:
 
 
 def _diagnosis(tmp, ours, control, poll=None):
-    profiles = [Path(tmp) / name for name in (
-        'control-profile', 'control-profile-retry')]
-    for profile in profiles:
-        profile.mkdir()
-        (profile / 'DevToolsActivePort').write_text(
-            '9222\n', encoding='utf-8')
     processes = []
     launches = []
     evaluations = []
@@ -267,6 +275,12 @@ def _diagnosis(tmp, ours, control, poll=None):
         assert stdout is subprocess.DEVNULL, stdout
         assert stderr is subprocess.DEVNULL, stderr
         launches.append(list(args))
+        profile = Path(next(
+            item.split('=', 1)[1] for item in args
+            if item.startswith('--user-data-dir=')))
+        profile.mkdir()
+        (profile / 'DevToolsActivePort').write_text(
+            '9222\n', encoding='utf-8')
         process = _ProcessDouble()
         if isinstance(poll, (list, tuple)):
             process_poll = poll[min(len(processes), len(poll) - 1)]
@@ -318,21 +332,22 @@ def _diagnosis(tmp, ours, control, poll=None):
                 'background.js', tmp)
         except AssertionError as why:
             outcome = why
-    return outcome, launches, processes[0], evaluations
+    return outcome, launches, processes, evaluations
 
 
 def test_control_answer_without_ours_preserves_source_guilt(tmp):
-    outcome, _launches, _process, _evaluations = _diagnosis(
+    outcome, _launches, processes, _evaluations = _diagnosis(
         tmp, [False], [True])
     assert outcome.__class__ is AssertionError, outcome
     message = str(outcome)
     assert str(EXTENSION_ROOT.resolve()) in message, message
     assert 'background.js' in message, message
     assert 'control extension' in message, message
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_control_answer_then_retry_ours_answer_returns_contention(tmp):
-    outcome, launches, _process, _evaluations = _diagnosis(
+    outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [[False], [True]], [[True], [True]])
     assert outcome.__class__ is tuple, outcome
     assert outcome[0] is True, outcome
@@ -342,41 +357,73 @@ def test_control_answer_then_retry_ours_answer_returns_contention(tmp):
     profiles = [next(item.split('=', 1)[1] for item in launch
                      if item.startswith('--user-data-dir='))
                 for launch in launches]
-    assert profiles == [
-        str(Path(tmp) / 'control-profile'),
-        str(Path(tmp) / 'control-profile-retry'),
-    ], profiles
+    assert all(Path(item).parent == Path(tmp) for item in profiles), profiles
+    assert profiles[0] != profiles[1], profiles
+    loaded = _extension_args(launches)
+    assert all(EXTENSION_ROOT.resolve() in item for item in loaded), loaded
+    controls = [item[1] for item in loaded]
+    assert controls[0] != controls[1], controls
+    assert all(item.exists() for item in controls), controls
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_control_answer_in_both_windows_preserves_source_guilt(tmp):
-    outcome, launches, _process, _evaluations = _diagnosis(
+    outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [[False], [False]], [[True], [True]])
     assert outcome.__class__ is AssertionError, outcome
     assert 'two consecutive diagnosis launches' in str(outcome), outcome
     assert len(launches) == 2, launches
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_control_answer_then_unanswered_retry_leaves_machine_skip(tmp):
-    outcome, launches, _process, _evaluations = _diagnosis(
+    outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [[False], [False]], [[True], [False]])
     assert outcome.__class__ is tuple, outcome
     assert outcome[0] is False, outcome
     assert 'two diagnosis launches' in outcome[1], outcome
     assert len(launches) == 2, launches
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_control_answer_then_retry_browser_exit_leaves_machine_skip(tmp):
-    outcome, launches, _process, _evaluations = _diagnosis(
+    outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [[False], [False]], [[True], [False]], poll=(None, 1))
     assert outcome.__class__ is tuple, outcome
     assert outcome[0] is False, outcome
     assert 'two diagnosis launches' in outcome[1], outcome
     assert 'retry control did not answer' in outcome[1], outcome
     assert len(launches) == 2, launches
+    _assert_diagnosis_processes_settled(processes)
+
+
+def test_control_answer_then_answered_retry_exit_leaves_machine_skip(tmp):
+    outcome, launches, processes, _evaluations = _diagnosis(
+        tmp, [[False], [False]], [[True], [True]], poll=(None, 1))
+    assert outcome.__class__ is tuple, outcome
+    assert outcome[0] is False, outcome
+    assert outcome[1] == (
+        'the diagnosis browser exited during two diagnosis launches '
+        'after the control answered in both launches but before ours '
+        'answered'), outcome
+    assert len(launches) == 2, launches
+    _assert_diagnosis_processes_settled(processes)
+
+
+def test_late_retry_control_answer_before_deadline_preserves_source_guilt(tmp):
+    outcome, launches, processes, evaluations = _diagnosis(
+        tmp, [[False], [False]], [[True], [False, False, True]])
+    assert outcome.__class__ is AssertionError, outcome
+    assert 'two consecutive diagnosis launches' in str(outcome), outcome
+    assert len(launches) == 2, launches
+    control_polls = [target for target, _expression in evaluations
+                     if target == 'ws://control']
+    assert len(control_polls) >= 4, control_polls
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_ours_answer_without_control_returns_contention(tmp):
-    outcome, _launches, _process, evaluations = _diagnosis(
+    outcome, _launches, _processes, evaluations = _diagnosis(
         tmp, [True], [False])
     assert outcome[0] is True, outcome
     assert 'contention' in outcome[1], outcome
@@ -385,14 +432,14 @@ def test_ours_answer_without_control_returns_contention(tmp):
 
 
 def test_control_answer_then_ours_answer_returns_contention(tmp):
-    outcome, _launches, _process, _evaluations = _diagnosis(
+    outcome, _launches, _processes, _evaluations = _diagnosis(
         tmp, [False, False, True], [True])
     assert outcome[0] is True, outcome
     assert 'contention' in outcome[1], outcome
 
 
 def test_control_answer_is_preserved_when_diagnosis_browser_exits(tmp):
-    outcome, launches, process, _evaluations = _diagnosis(
+    outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [False], [True], poll=1)
     assert outcome == (
         False,
@@ -400,22 +447,22 @@ def test_control_answer_is_preserved_when_diagnosis_browser_exits(tmp):
         'ours answered',
     ), outcome
     assert len(launches) == 1, launches
-    assert process.wait_timeouts == [10], process.wait_timeouts
+    assert processes[0].wait_timeouts == [10], processes[0].wait_timeouts
 
 
 def test_neither_worker_answers_and_both_extensions_are_loaded(tmp):
-    outcome, launches, process, _evaluations = _diagnosis(
+    outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [False], [False])
     assert outcome == (
         False, 'the control extension produced no answering worker either'
     ), outcome
     assert len(launches) == 1, launches
-    loaded = [arg for arg in launches[0]
-              if arg.startswith('--load-extension=')]
+    loaded = _extension_args(launches)
     assert len(loaded) == 1, loaded
-    assert str(EXTENSION_ROOT.resolve()) in loaded[0], loaded
-    assert str((Path(tmp) / 'control-extension').resolve()) in loaded[0]
-    assert process.wait_timeouts == [10], process.wait_timeouts
+    assert len(loaded[0]) == 2, loaded
+    assert EXTENSION_ROOT.resolve() in loaded[0], loaded
+    assert loaded[0][1].exists(), loaded
+    assert processes[0].wait_timeouts == [10], processes[0].wait_timeouts
 
 
 def main():
