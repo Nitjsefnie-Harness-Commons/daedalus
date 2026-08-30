@@ -354,7 +354,7 @@ def test_check_versions_set_refuses_an_empty_version(tmp):
     r = _run_checker(copy_root, '--set', '')
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
     assert "''" in r.stderr, r.stderr
-    assert 'ASCII digits' in r.stderr, r.stderr
+    assert 'dot-separated integers' in r.stderr, r.stderr
     assert 'ok:' not in r.stdout, r.stdout
     for path, body in before.items():
         assert (copy_root / path).read_bytes() == body, path
@@ -370,13 +370,14 @@ def test_check_versions_set_refuses_an_empty_version_with_a_source(tmp):
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
-    for source in (['--staged'], ['--rev', 'HEAD']):
-        r = _run_checker(copy_root, '--set', '', *source)
-        assert r.returncode != 0, (source, r.returncode, r.stdout, r.stderr)
-        assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
-        assert 'ok:' not in r.stdout, (source, r.stdout)
-        for path, body in before.items():
-            assert (copy_root / path).read_bytes() == body, (source, path)
+    for argv in (['--set', ''], ['--set=']):
+        for source in (['--staged'], ['--rev', 'HEAD']):
+            r = _run_checker(copy_root, *argv, *source)
+            assert r.returncode != 0, (argv, source, r.stdout, r.stderr)
+            assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
+            assert 'ok:' not in r.stdout, (source, r.stdout)
+            for path, body in before.items():
+                assert (copy_root / path).read_bytes() == body, (source, path)
 
 
 def test_check_versions_reads_the_index_and_a_revision(tmp):
