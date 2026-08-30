@@ -545,39 +545,38 @@ def _assert_dying_worker_outcome(tmp, unlaunchable=()):
     dying_suite = 'test_worker_dies.py'
     healthy_sources = {f'test_worker_{number}.py': _CONCURRENCY_EVENT_SUITE
                        for number in range(3)}
-    healthy_suites = set(healthy_sources)
     suites = {dying_suite: _DYING_CONCURRENCY_SUITE, **healthy_sources}
     result, _invocations = _coverage_tree(
         tmp, suites, unlaunchable=unlaunchable, cpu_count=2)
     assert result.returncode == 0, (result.stdout, result.stderr)
     lines = _read_events(Path(tmp) / 'tree' / 'tests' / 'events.log')
-    peak, paired_names, unpaired, orphans = _replay_events(lines)
-    assert paired_names == healthy_suites, (
-        f'healthy pairing mismatch: {paired_names!r}; log: {lines!r}')
-    assert unpaired <= {dying_suite}, (
-        f'unexpected unpaired suite beside {dying_suite}: {lines!r}')
-    assert not orphans, f'orphan close in event log: {lines!r}'
-    for name in healthy_suites:
-        group = _group(result.stdout, name)
-        assert _FAILURE_MARKER not in group, (
-            f'healthy suite {name} was reported failed: {group!r}')
+    replay = _assert_worker_pool_record(result.stdout, set(suites), lines)
+    _peak, paired_names, unpaired, _orphans = replay
+    assert dying_suite not in paired_names, (
+        f'dying suite paired unexpectedly: {lines!r}')
     failed_group = _group(result.stdout, dying_suite)
-    if dying_suite in unpaired:
-        death_case = 'mid-window'
-        assert unpaired == {dying_suite}, f'mid-window unpaired: {unpaired!r}'
-    else:
-        death_case = 'never-entered'
-        assert not unpaired, f'never-entered unpaired: {unpaired!r}'
+    death_case = ('mid-window' if dying_suite in unpaired
+                  else 'never-entered')
     assert _FAILURE_MARKER in failed_group, (
         f'{dying_suite} {death_case} group: {failed_group!r}')
-    assert peak == 2, (
-        f'paired event peak was {peak}, expected 2: {lines!r}')
-    return result, lines, (peak, paired_names, unpaired, orphans)
+    return result, lines, replay
 
 
 def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
     """A dead suite stays diagnosed without fabricating a pool breach."""
     _assert_dying_worker_outcome(tmp)
+
+
+def test_an_absent_healthy_worker_is_reported_not_counted(tmp):
+    result, lines, replay = _assert_dying_worker_outcome(
+        tmp, unlaunchable=('test_worker_1.py',))
+    peak, paired_names, unpaired, orphans = replay
+    assert paired_names == {'test_worker_0.py', 'test_worker_2.py'}, lines
+    assert unpaired == {'test_worker_dies.py'}, (unpaired, lines)
+    assert not orphans, (orphans, lines)
+    assert peak == 2, f'paired peak {peak}, expected 2: {lines!r}'
+    failed_group = _group(result.stdout, 'test_worker_1.py')
+    assert 'LAUNCH FAILED:' in failed_group, failed_group
 
 
 def test_a_never_entered_dying_suite_is_reported_not_counted(tmp):
