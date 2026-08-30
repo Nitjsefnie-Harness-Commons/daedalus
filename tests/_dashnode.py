@@ -295,7 +295,10 @@ def _run_dashboard_node_once(
     if not node:
         raise AssertionError('node is required to execute dashboard harnesses')
     options = ['--input-type=module'] if harness.module else []
-    step_timeout_ms = round(_DASHBOARD_STEP_TIMEOUT_S * 1000)
+    timeout_scale = attempt
+    step_timeout = _DASHBOARD_STEP_TIMEOUT_S * timeout_scale
+    process_grace = _DASHBOARD_PROCESS_GRACE_S * timeout_scale
+    step_timeout_ms = round(step_timeout * 1000)
     timeout_source = (
         f'const _dashnodeStepTimeoutMs = {step_timeout_ms};\n')
     command = [
@@ -307,9 +310,8 @@ def _run_dashboard_node_once(
     process = subprocess.Popen(
         command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding='utf-8', errors='replace')
-    timeout = (
-        harness.bounded_steps * _DASHBOARD_STEP_TIMEOUT_S
-        + _DASHBOARD_PROCESS_GRACE_S)
+    timeout = dashboard_child_timeout(
+        harness.bounded_steps, step_timeout, process_grace)
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
