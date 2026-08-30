@@ -100,9 +100,12 @@ SITES = [
     # the first and wins the binding just the same, so a pattern that only
     # recognizes the convention already in use cannot see a duplicate spelled
     # the other way (#228) -- it has to see every assignment to be able to
-    # refuse more than one.
+    # refuse more than one. The value excludes only whichever delimiter `q`
+    # captured (#319): a class refusing both quotes left a value carrying
+    # the other one with no match at all, and the value stays on one line
+    # because a plain Python string literal cannot span lines.
     ('daedalus_cli/__init__.py', 'package __version__',
-     r'''__version__\s*=\s*(?P<q>['"])(?P<v>[^'"]*)(?P=q)'''),
+     r'''__version__\s*=\s*(?P<q>['"])(?P<v>(?:(?!(?P=q))[^\n])*)(?P=q)'''),
 ]
 
 # The site every other site is compared against.
