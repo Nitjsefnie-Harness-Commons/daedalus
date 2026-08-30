@@ -173,22 +173,35 @@ passed the gates, and it is one command instead of re-reading every conflict
 resolution - 23 resolutions did not have to be re-reviewed here, only the tree
 compared.
 
-**When the base moves, rebase and re-verify against the rebased SHA.** All
-pre-rebase test and CI evidence is stale. Re-fetch immediately before pushing
-rather than once at the start: `main` has advanced 26 commits and then 4 more
-inside a single session here. A rebase has two outcomes and you must establish
-which one you are in - if `git rev-list --count HEAD..<saved-old-head>` is 0,
-history was preserved and that containment is the proof; if it is not, commits
-were replayed, so compare the old and new series with `git range-diff` and
-account for every changed or unmatched commit.
+**Base movement is checked once, at the final gate; it is not a mid-work
+event.** During implementation, draft pushes, CI and review rounds, do not
+rebase merely because `main` advanced and do not make `behind == 0` a push
+precondition. Otherwise concurrent branches repeatedly rebase for one
+another's merges, invalidating evidence without changing the outcome.
+
+At the final gate before taking the pull request out of draft, fetch `main` and
+inspect the commits added since the branch diverged. Rebase only when those
+commits are relevant: they change behavior the branch also changes or depends
+on, a shared helper or import surface it uses, or a build, test, scanner or CI
+path that verifies it. A new commit or an overlapping filename is a reason to
+inspect, not by itself a reason to rebase. Record the comparison. If no added
+commit can affect the branch or its verification, finish the gate without a
+rebase.
+
+If a relevant change exists, create the recovery anchor, rebase, and re-verify
+against the rebased SHA; all pre-rebase test, review and CI evidence is stale.
+Establish which rebase outcome occurred: if `git rev-list --count
+HEAD..<saved-old-head>` is 0, history was preserved and that containment is the
+proof; otherwise compare the old and new series with `git range-diff` and
+account for every changed or unmatched commit. If `main` advances again while
+the final gate runs, inspect only the newly added commits by the same relevance
+test; do not restart the gate for an irrelevant change.
 
 **A check that gates an action goes in its own invocation, and you read it
 before acting.** Printing a precondition beside the command it guards gates
-nothing: a push whose "behind == 0" precondition printed `behind: 4` in the
-same compound command went out anyway. Watch the shape of compound checks
-generally - `git status --short && echo "(clean)"` prints `(clean)` next to a
-list of modified files, because `&&` fires on exit status and `git status`
-succeeds either way.
+nothing. Watch the shape of compound checks generally - `git status --short &&
+echo "(clean)"` prints `(clean)` next to a list of modified files, because `&&`
+fires on exit status and `git status` succeeds either way.
 
 **Re-run a failing CI leg on the unchanged commit before calling it a flake.**
 "The branch touches none of those files", "the suite calls the changed helper
