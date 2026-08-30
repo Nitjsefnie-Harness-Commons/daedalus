@@ -342,6 +342,7 @@
 !/tests/test_teardown_retry.py
 !/tests/test_version_contract.py
 !/tests/test_version_contract_empty_rev.py
+!/tests/test_version_set_atomic.py
 !/tests/test_vm_file_load_guard.py
 !/tests/test_wfcheckout.py
 !/tests/test_wfscalars.py

@@ -177,7 +177,12 @@ def check(staged=False, rev=None):
 
 
 def apply(version):
-    """Rewrite every site in the working tree to `version`."""
+    """Rewrite every site in the working tree to `version`, or none of them.
+
+    Every file is planned before any is written, so a tree that fails
+    somewhere is refused with no file rewritten (#315): a partial bump is
+    the disagreement this checker exists to catch, half-applied.
+    """
     problem = spelling_error(version)
     if problem:
         raise SystemExit(f'FAIL: {problem}')
@@ -186,6 +191,7 @@ def apply(version):
     for path, desc, pattern in SITES:
         by_file.setdefault(path, []).append((desc, pattern))
 
+    planned = {}
     for path, entries in by_file.items():
         target = REPO / path
         text = target.read_text(encoding='utf-8')
@@ -194,7 +200,10 @@ def apply(version):
             # Replace only the 'v' group so surrounding markup stays byte-identical.
             start, end = m.span('v')
             text = text[:start] + version + text[end:]
-        target.write_text(text, encoding='utf-8')
+        planned[path] = text
+
+    for path, text in planned.items():
+        (REPO / path).write_text(text, encoding='utf-8')
         print(f'set {path} -> {version}')
     return check()
 
