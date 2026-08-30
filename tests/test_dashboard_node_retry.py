@@ -28,12 +28,13 @@ def test_windows_process_cpu_adapter_calls_kernel32_contract(tmp):
     cases = (('success', True, 0, None),
              ('query error', False, 5, 'winerror 5'))
     for name, queried, error, expected_error in cases:
-        def get_times(_handle, created, exited, kernel, user):
+        def get_times(
+                _handle, created, exited, kernel, user, result=queried):
             _set_filetime(created, 3)
             _set_filetime(exited, 4)
             _set_filetime(kernel, 0x100000000)
             _set_filetime(user, 10_000_000)
-            return queried
+            return result
 
         query = Mock(side_effect=get_times)
         kernel32 = type('Kernel32', (), {})()
@@ -73,6 +74,41 @@ def test_windows_process_cpu_adapter_calls_kernel32_contract(tmp):
         assert query.restype is _dashnode.wintypes.BOOL, name
 
 
+def test_windows_child_cpu_wrapper_preserves_query_error(tmp):
+    del tmp
+
+    def process_cpu(_process):
+        raise OSError('query denied')
+
+    with (
+            patch.object(_dashnode.sys, 'platform', 'win32'),
+            patch.object(
+                _dashnode, '_windows_process_cpu_seconds', process_cpu),
+    ):
+        actual = _dashnode._child_cpu_at_timeout(object())
+
+    assert actual == 'unavailable (OSError: query denied)', actual
+
+
+def test_non_windows_child_cpu_wrapper_is_na_without_adapter(tmp):
+    del tmp
+    calls = []
+
+    def process_cpu(process):
+        calls.append(process)
+        return 0.25
+
+    with (
+            patch.object(_dashnode.sys, 'platform', 'linux'),
+            patch.object(
+                _dashnode, '_windows_process_cpu_seconds', process_cpu),
+    ):
+        actual = _dashnode._child_cpu_at_timeout(object())
+
+    assert actual == 'n/a', actual
+    assert calls == [], calls
+
+
 def test_windows_outer_timeout_records_cpu_before_kill(tmp):
     del tmp
     events = []
@@ -93,6 +129,7 @@ def test_windows_outer_timeout_records_cpu_before_kill(tmp):
                 _dashnode, '_windows_process_cpu_seconds', process_cpu,
                 create=True),
     ):
+        record = None
         try:
             _dashnode._run_dashboard_node_once(_harness(''), attempt=1)
         except _dashnode._DashboardOuterTimeout as failure:
@@ -100,6 +137,7 @@ def test_windows_outer_timeout_records_cpu_before_kill(tmp):
         else:
             raise AssertionError('timed-out Windows harness unexpectedly ran')
 
+    assert record is not None, 'outer timeout record was not captured'
     assert events == ['cpu', 'kill'], events
     assert record.child_cpu_at_timeout == '0.375000s', record
     formatted = _dashnode._format_timeout_attempt(record)
