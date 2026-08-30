@@ -65,9 +65,8 @@ def test_workflow_bash_resolves_relative_candidate_for_other_cwd(tmp):
     other.mkdir()
 
     with _MonkeyPatch() as monkeypatch:
-        monkeypatch.chdir(real.parent.parent)
-        monkeypatch.setenv(
-            'PATH', real.parent.name + os.pathsep + original_path)
+        monkeypatch.chdir(real.parent)
+        monkeypatch.setenv('PATH', '.' + os.pathsep + original_path)
         resolved = _util.workflow_bash()
         assert os.path.isabs(resolved), resolved
         result = subprocess.run(
