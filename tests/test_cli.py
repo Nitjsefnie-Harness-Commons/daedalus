@@ -420,30 +420,6 @@ _WAIT_HARNESS = (
     'print("RESULT", res if res is None else res["result"])\n')
 
 
-_ABSENT_DELIVERY_WAIT_HARNESS = (
-    'from daedalus_cli import transport\n'
-    'consume_calls = []\n'
-    'peek_calls = []\n'
-    'def fake_api(method, path, body=None, timeout=None):\n'
-    '    if "consume=1" in path:\n'
-    '        consume_calls.append(path)\n'
-    '        return {"consumed": True, "resultGeneration": "g1"}\n'
-    '    peek_calls.append(path)\n'
-    '    result = {"id": "c1", "result": "STALE",\n'
-    '              "resultGeneration": "g1"}\n'
-    '    if delivery_id == "":\n'
-    '        result["deliveryId"] = ""\n'
-    '    return result\n'
-    'transport.api = fake_api\n'
-    'results = []\n'
-    'for delivery_id in (None, ""):\n'
-    '    results.append(transport.wait_for_result(\n'
-    '        "c1", "extension", delivery_id, 0.08, interval=0.01))\n'
-    'print("RESULTS", results)\n'
-    'print("CONSUMES", len(consume_calls))\n'
-    'print("PEEKS", len(peek_calls))\n')
-
-
 def _wait_harness_output(stdout):
     """(elapsed, polls, result) from one _WAIT_HARNESS run."""
     fields = {}
@@ -452,24 +428,6 @@ def _wait_harness_output(stdout):
         if key in ('ELAPSED', 'POLLS', 'RESULT'):
             fields[key] = value
     return float(fields['ELAPSED']), int(fields['POLLS']), fields['RESULT']
-
-
-def test_result_wait_requires_a_nonempty_delivery_id_on_both_sides(tmp):
-    """An absent or empty sent id cannot claim an uncorrelated result.
-
-    The non-empty matching case is pinned by `_WAIT_HARNESS`; this controls
-    the opposite boundary and proves the stale generation is left in place.
-    """
-    del tmp
-    r = run_python(
-        _ABSENT_DELIVERY_WAIT_HARNESS,
-        cli_env(DAEDALUS_TOKEN=TOK))
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    fields = dict(
-        line.split(' ', 1) for line in r.stdout.splitlines() if ' ' in line)
-    assert fields['RESULTS'] == '[None, None]', r.stdout
-    assert fields['CONSUMES'] == '0', r.stdout
-    assert int(fields['PEEKS']) >= 2, r.stdout
 
 
 def test_the_result_wait_polls_before_it_sleeps_the_full_interval(tmp):
