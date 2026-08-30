@@ -268,6 +268,84 @@ def test_poll_reports_timeout_when_no_attempt_is_admitted(tmp):
     assert result == expected, (result, expected)
 
 
+def test_poll_rejects_a_body_without_a_delivery_id(tmp):
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    body = {
+        'id': 'command',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    # The receipt after the body proves the only thing that stopped the
+    # hand-over is the matching rule: the consume itself would have succeeded.
+    # timeout is under the loop's first 20ms ramp sleep, so exactly one peek
+    # happens before the deadline expires.
+    client = ClientProbe((
+        body,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command'))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert peeks, 'the loop never polled, so this test proved nothing'
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
+
+
+def test_poll_rejects_an_empty_delivery_id(tmp):
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    body = {
+        'id': 'command',
+        'deliveryId': '',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        body,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command'))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert peeks, 'the loop never polled, so this test proved nothing'
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
+
+
+def test_poll_rejects_a_delivery_id_when_none_is_expected(tmp):
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    body = {
+        'id': 'command',
+        'deliveryId': 'someone-elses',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        body,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command'))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert peeks, 'the loop never polled, so this test proved nothing'
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
+
+
 def test_extension_command_surfaces_result_error(tmp):
     del tmp
     transport = _transport()
