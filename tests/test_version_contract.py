@@ -340,6 +340,45 @@ def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
             assert (copy_root / path).read_bytes() == body, (source, path)
 
 
+def test_check_versions_set_refuses_an_empty_version(tmp):
+    """An empty version is refused like any other version no site can carry.
+
+    The dispatcher read `--set` as a truthiness test, so the one argument an
+    empty string is took the plain-check path instead: the run printed `ok:`
+    and exited 0 without writing anything, reporting a tree it never
+    touched. Dispatching on presence reaches apply(), which refuses the
+    value before a single site is rewritten."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
+    r = _run_checker(copy_root, '--set', '')
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert "''" in r.stderr, r.stderr
+    assert 'ASCII digits' in r.stderr, r.stderr
+    assert 'ok:' not in r.stdout, r.stdout
+    for path, body in before.items():
+        assert (copy_root / path).read_bytes() == body, path
+
+
+def test_check_versions_set_refuses_an_empty_version_with_a_source(tmp):
+    """`--set ''` paired with a source is still a write, so the pair takes
+    the working-tree refusal.
+
+    That only works once the dispatch tests presence: under a truthiness
+    test the pair never reached the `--set` branch, and the plain check it
+    fell through to answers a question the caller did not ask."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
+    for source in (['--staged'], ['--rev', 'HEAD']):
+        r = _run_checker(copy_root, '--set', '', *source)
+        assert r.returncode != 0, (source, r.returncode, r.stdout, r.stderr)
+        assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
+        assert 'ok:' not in r.stdout, (source, r.stdout)
+        for path, body in before.items():
+            assert (copy_root / path).read_bytes() == body, (source, path)
+
+
 def test_check_versions_reads_the_index_and_a_revision(tmp):
     """--staged and --rev read through git show, not the working tree, so a
     dirty file must not change what either one reports."""
