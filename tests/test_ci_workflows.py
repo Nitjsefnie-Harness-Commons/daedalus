@@ -15,10 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
-                      _tests_yml)
+                      _job_names, _tests_yml)
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
 from _yamlread import job_mapping  # noqa: E402
+from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
 
@@ -265,11 +266,21 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
     def before(source, job, consumer):
         section = source.partition(f'\n  {job}:\n')[2].partition(consumer)
         return section[0] if section[1] else ''
+    measurement_jobs = []
+    for name in _job_names(tests):
+        steps = complete_job_mapping(tests, name).get('steps', [])
+        consumers = [index for index, step in enumerate(steps)
+                     if 'coverage_suites.py' in step.get('run', '')]
+        if consumers:
+            assert len(consumers) == 1, (name, consumers)
+            prefix = '\n'.join(
+                step.get('run', '') for step in steps[:consumers[0]])
+            measurement_jobs.append((name, prefix))
+    assert len(measurement_jobs) == 1, measurement_jobs
     jobs = (
         ('diff-coverage', before(tests, 'diff-coverage',
                                  '- name: Measure the coverage')),
-        ('coverage-matrix', before(tests, 'coverage-matrix',
-                                   '- name: Measure')),
+        measurement_jobs[0],
         ('suites', before(tests, 'suites', '- name: Run every suite')),
         ('pylint', before(tests, 'pylint', '- name: pylint')),
         ('release', before(release, 'publish',

@@ -37,7 +37,10 @@ _CHDIR = frozenset({'chdir', 'fchdir'})
 # [tool.coverage.paths] maps back onto the repository (pyproject.toml).
 _KEEP_ALLOWLIST = frozenset({
     # A synthetic COVERAGE_PROCESS_START is the variable under test.
-    'tests/test_coverage_suites.py::_coverage_tree',
+    'tests/_coverage_suite_fixture.py::coverage_tree',
+    # The workflow's .pth program is the subject of the child probe.
+    'tests/test_js_coverage_workflow.py::'
+    'test_subprocess_startup_program_starts_coverage',
     # run_tests.py is measured where it stands in the copied tree.
     'tests/test_suite_runner.py::_runner_tree',
     # The copied checker runs from the mapped copy so its lines count.
