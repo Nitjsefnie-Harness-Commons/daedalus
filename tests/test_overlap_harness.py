@@ -261,7 +261,8 @@ def test_a_rejected_result_post_is_reported_not_posted(tmp):
             _worker(tmp, _SETTLING_WORKER),
             commands=[{'id': '_cookies', 'domain': 'owner-a'}],
             order=['owner-a'], result_base=base, inner_wait=2)
-    assert 'the result POST for owner-a failed' in failure, failure
+    assert ('the result POST for owner-a failed: '
+            'id=_cookies _did=null' in failure), failure
     assert 'status 400' in failure, failure
     assert '{"error":"no"}' in failure, failure
 
@@ -308,11 +309,13 @@ def test_shipped_worker_terminal_5xx_fails_fast_with_clipped_diagnostics(tmp):
             order=['owner-a'], result_base=base)
     clipped = 'x' * 200 + '...'
     assert 'outer backstop' not in failure, failure
-    assert 'the result POST for owner-a failed' in failure, failure
+    assert ('the result POST for owner-a failed: '
+            'id=_cookies _did=did-terminal' in failure), failure
     assert 'status 500' in failure, failure
     assert clipped in failure, failure
     assert 'x' * 201 not in failure, failure
-    assert ('[post-failure] owner=owner-a status 500 body ' + clipped
+    assert ('[post-failure] owner=owner-a id=_cookies '
+            '_did=did-terminal status 500 body ' + clipped
             in failure), failure
 
 

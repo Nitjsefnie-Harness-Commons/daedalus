@@ -20,6 +20,8 @@ from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
+sys.path.insert(0, str(_util.ROOT))
+from daedalus_bridge import path_safety  # noqa: E402
 
 TOKEN = 'toksafety'
 os.environ['TOKEN'] = ''
@@ -541,6 +543,80 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
     # And the backstop still refuses a real escape under the same spelling,
     # which is the half a looser comparison would have given away.
     assert answer['escape'] == 'refused', answer
+
+
+def test_containment_rechecks_a_degraded_resolution_before_refusing(tmp):
+    """One transient spelling mismatch is not proof of an escape."""
+    root = str(Path(tmp) / 'root')
+    resolved_root = os.path.join(root, 'canonical')
+    inside = os.path.join(resolved_root, 'inside.json')
+    degraded = os.path.join(root, 'CANONI~1', 'inside.json')
+    outside = os.path.join(root, 'outside', 'inside.json')
+    candidate_call = os.path.join(resolved_root, 'inside.json')
+    expected_calls = [
+        root, candidate_call, root, candidate_call,
+        root, candidate_call, root, candidate_call,
+    ]
+    answers = iter([
+        resolved_root, degraded, resolved_root, inside,
+        resolved_root, outside, resolved_root, outside,
+    ])
+    calls = []
+    realpath = path_safety.os.path.realpath
+
+    def resolving_stub(path):
+        calls.append(os.fspath(path))
+        return next(answers)
+
+    path_safety.os.path.realpath = resolving_stub
+    try:
+        try:
+            contained = path_safety.under(root, 'inside.json')
+        except ValueError as failure:
+            contained = f'REFUSED: {failure}'
+        try:
+            path_safety.under(root, 'inside.json')
+        except ValueError:
+            escape = 'refused'
+        else:
+            escape = 'ALLOWED'
+    finally:
+        path_safety.os.path.realpath = realpath
+    assert contained == Path(inside), contained
+    assert escape == 'refused', escape
+    assert calls == expected_calls, calls
+
+
+def test_path_equality_rechecks_a_degraded_resolution_before_refusing(tmp):
+    """A transient spelling mismatch is not a stable alias verdict."""
+    left = str(Path(tmp) / 'left')
+    right = str(Path(tmp) / 'right')
+    resolved = str(Path(tmp) / 'canonical')
+    degraded = str(Path(tmp) / 'CANONI~1')
+    alias = str(Path(tmp) / 'other-target')
+    expected_calls = [left, right, left, right] * 2
+    answers = iter([
+        resolved, degraded, resolved, resolved,
+        resolved, alias, resolved, alias,
+    ])
+    calls = []
+    realpath = path_safety.os.path.realpath
+
+    def resolving_stub(path):
+        calls.append(os.fspath(path))
+        return next(answers)
+
+    comparer = getattr(path_safety, 'same_path', None)
+    assert comparer is not None, 'missing same_path comparer'
+    path_safety.os.path.realpath = resolving_stub
+    try:
+        same = comparer(left, right)
+        different = comparer(left, right)
+    finally:
+        path_safety.os.path.realpath = realpath
+    assert same is True, same
+    assert different is False, different
+    assert calls == expected_calls, calls
 
 
 def test_delivery_stripe_is_keyed_on_the_logical_target(tmp):

@@ -73,6 +73,7 @@ async function bridgeFetch(target, init = {}) {
       postAttempts.push(record);
       if (!record.ok) {
         process.stderr.write('[post-failure] owner=' + record.owner
+          + ' id=' + record.id + ' _did=' + record.deliveryId
           + ' status ' + record.status + ' body ' + record.body + '\n');
       }
       return result;
@@ -221,7 +222,8 @@ function ownerPosted(owner) {
   if (!settledDispatches.has(owner)) return false;
   throw new Error('the result POST for ' + owner + ' failed: '
     + (mine.filter((item) => !item.ok).map((item) =>
-        'status ' + item.status + ' body ' + item.body).join('; ')
+        'id=' + item.id + ' _did=' + item.deliveryId
+        + ' status ' + item.status + ' body ' + item.body).join('; ')
       || 'no POST was recorded'));
 }
 
