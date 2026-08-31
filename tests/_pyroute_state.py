@@ -3,8 +3,7 @@ import ast
 import operator
 from dataclasses import dataclass, field
 
-from _pyroute_values import (DeferredCallable, DeferredClass,
-                             DeferredGenerator)
+from _pyroute_values import DeferredGenerator, is_deferred_value
 
 
 OPAQUE_TAB_SPREAD = object()
@@ -322,8 +321,6 @@ def rebound_names(node):
 def evaluated_value(value, state):
     if id(value) in state.evaluated:
         return state.evaluated[id(value)]
-    if isinstance(value, ast.Name) and value.id in state.callables:
-        return state.callables[value.id]
     return resolve_sender_name(value, state.aliases)
 
 
@@ -419,7 +416,7 @@ def bind_alias_target(target, value, state, bindings):
         resolved = evaluated_value(value, state)
         if isinstance(resolved, DeferredGenerator):
             bindings[1][target.id] = resolved
-        elif isinstance(resolved, (DeferredCallable, DeferredClass)):
+        elif is_deferred_value(resolved):
             bindings[2][target.id] = resolved
             sender = resolve_sender_name(value, state.aliases)
             if sender is not None:
@@ -513,7 +510,7 @@ def value_signature(value):
         expr = value.expression
         return ('generator', expr.lineno, expr.col_offset, value.remaining,
                 value.evaluate_zero)
-    if isinstance(value, (DeferredCallable, DeferredClass)):
+    if is_deferred_value(value):
         return ('callable', id(value))
     return value
 
@@ -684,6 +681,8 @@ def callable_state(scope, states, annotations_eager=True):
         resolved = merged_evaluated_value(default, states)
         if isinstance(resolved, DeferredGenerator):
             generators[parameter.arg] = resolved
+        elif is_deferred_value(resolved):
+            callables[parameter.arg] = resolved
         elif resolved is not None:
             aliases[parameter.arg] = resolved
     return FlowState(
@@ -709,12 +708,18 @@ def clear_names(states, names):
 
 
 def new_exits():
-    return {'break': [], 'continue': [], 'terminal': []}
+    return {'break': [], 'continue': [], 'terminal': [], 'returns': []}
 
 
 def record_exit(exits, kind, states):
     if exits is not None:
         exits[kind].extend(state.copy() for state in states)
+
+
+def record_returns(exits, states, value):
+    if exits is not None and value is not None:
+        exits['returns'].extend(evaluated_value(value, state)
+                                for state in states)
 
 
 def argument_defaults(args):

@@ -88,6 +88,121 @@ def test_lambda_call_reachability_matches_runtime(tmp):
     _assert_focus_cases(tmp, cases)
 
 
+def test_compound_lambda_callees_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('conditional',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         '(call if True else ordinary)()', '', '', True),
+        ('boolean',
+         f'send = ext_cmd\ncall = lambda: {call}\n(True and call)()',
+         '', '', True),
+        ('conditional-stored',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'chosen = call if args.flag else ordinary\nchosen()\n'
+         'send = ordinary', '', '', True),
+        ('boolean-stored',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'chosen = True and call\nchosen()\nsend = ordinary',
+         '', '', True),
+        ('starred-list',
+         f'send = ext_cmd\ncall = lambda: {call}\n[*[call]][0]()',
+         '', '', True),
+        ('list-comprehension',
+         f'send = ext_cmd\nbox = [lambda: {call} for _ in [1]]\n'
+         'box[0]()', '', '', True),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
+def test_indirect_lambda_invocation_states_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('argument-invoked',
+         f'def run(fn): return fn()\nsend = ext_cmd\n'
+         f'call = lambda: {call}\nrun(call)\nsend = ordinary',
+         '', '', True),
+        ('argument-discarded',
+         f'def discard(fn): return 0\nsend = ext_cmd\n'
+         f'call = lambda: {call}\ndiscard(call)', '', '', False),
+        ('list-invoked',
+         f'send = ext_cmd\ncall = lambda: {call}\nbox = [call]\n'
+         'box[0]()\nsend = ordinary', '', '', True),
+        ('list-discarded',
+         f'send = ext_cmd\ncall = lambda: {call}\nbox = [call]\n'
+         'return 0', '', '', False),
+        ('dict-invoked',
+         f'send = ext_cmd\ncall = lambda: {call}\nbox = {{"fn": call}}\n'
+         'box["fn"]()\nsend = ordinary', '', '', True),
+        ('attribute-invoked',
+         f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+         f'holder.fn = lambda: {call}\nholder.fn()\nsend = ordinary',
+         '', '', True),
+        ('attribute-discarded',
+         f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+         f'holder.fn = lambda: {call}\nreturn 0', '', '', False),
+        ('subscript-store-invoked',
+         f'send = ext_cmd\nbox = [ordinary]\nbox[0] = lambda: {call}\n'
+         'box[0]()\nsend = ordinary', '', '', True),
+        ('subscript-store-discarded',
+         f'send = ext_cmd\nbox = [ordinary]\nbox[0] = lambda: {call}\n'
+         'return 0', '', '', False),
+        ('return-invoked',
+         f'send = ordinary\ndef make(): return lambda: {call}\n'
+         'call = make()\nsend = ext_cmd\ncall()\nsend = ordinary',
+         '', '', True),
+        ('return-discarded',
+         f'send = ext_cmd\ndef make(): return lambda: {call}\n'
+         'make()\nreturn 0', '', '', False),
+        ('class-member-invoked',
+         f'send = ext_cmd\nclass Holder:\n    fn = lambda self: {call}\n'
+         'Holder().fn()\nsend = ordinary', '', '', True),
+        ('class-member-discarded',
+         f'send = ext_cmd\nclass Holder:\n    fn = lambda self: {call}\n'
+         'return 0', '', '', False),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
+def test_module_lambda_invocation_states_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(_args.chrome_tab))"
+    cases = [
+        ('module-invoked', 'return 0',
+         f'send = ext_cmd\ncall = lambda: {call}\n',
+         'call()\nsend = ordinary', True),
+        ('module-discarded', 'return 0',
+         f'send = ext_cmd\ncall = lambda: {call}\n',
+         'del call', False),
+        ('module-class-invoked', 'return 0',
+         f'send = ext_cmd\nclass Holder:\n    fn = lambda self: {call}\n',
+         'Holder().fn()\nsend = ordinary', True),
+        ('module-class-discarded', 'return 0',
+         f'send = ext_cmd\nclass Holder:\n    fn = lambda self: {call}\n',
+         'del Holder', False),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
+def test_module_lambda_external_exposure(tmp):
+    source = Path(tmp) / 'module_lambda.py'
+    call = "send('_focus', 'focus-tab', tab=dynamic)"
+    source.write_text(
+        f'send = ext_cmd\ncall = lambda: {call}\n', encoding='utf-8')
+    assert py_tab_routing_violations(source, source.name)
+    source.write_text(
+        f'send = ext_cmd\ncall = lambda: {call}\ndel call\n',
+        encoding='utf-8')
+    assert not py_tab_routing_violations(source, source.name)
+    source.write_text(
+        f'send = ext_cmd\nclass Holder:\n    fn = lambda self: {call}\n',
+        encoding='utf-8')
+    assert py_tab_routing_violations(source, source.name)
+    source.write_text(
+        f'send = ext_cmd\nclass Holder:\n    fn = lambda self: {call}\n'
+        'del Holder\n', encoding='utf-8')
+    assert not py_tab_routing_violations(source, source.name)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='unprovable_')
 
