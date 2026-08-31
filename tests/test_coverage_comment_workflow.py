@@ -324,9 +324,17 @@ def test_workflow_scalar_reader_distinguishes_missing_and_unsafe_shapes(tmp):
                 'no scalar value')
     _job_raises('jobs:\n  sample:\n    if:\n', 'no scalar value')
     _job_raises('jobs:\n  sample:\n    if: [true]\n', 'not a scalar')
-    _job_raises(
+    assert job_scalar(
         'jobs:\n  sample:\n    if: true\n'
         '      continuation\n',
+        'sample', 'if') == 'true continuation'
+    _job_raises(
+        'jobs:\n  sample:\n    if: "true"\n'
+        '      continuation\n',
+        'multiline scalar')
+    _job_raises(
+        'jobs:\n  sample:\n    if: true\n'
+        '\n      continuation\n',
         'multiline scalar')
     _job_raises(
         'jobs:\n  sample:\n    if: >1-2\n'

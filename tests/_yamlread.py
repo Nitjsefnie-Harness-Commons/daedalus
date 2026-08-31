@@ -539,6 +539,10 @@ def _sequence_item_scalar(lines, item, start, end, name):
 def _scalar_entry(lines, start, end, parent_indent, name):
     """Read one mapping scalar, returning None when its key is absent."""
     entry = _mapping_entry(lines, start, end, parent_indent, name)
+    if entry is not None:
+        # A field's value ends where the field does, so a later sibling's
+        # nested block is not this scalar's continuation.
+        _value_start, end = _section(lines, entry.index, entry.indent)
     return _scalar_value(lines, entry, end, name)
 
 
@@ -555,21 +559,20 @@ def _scalar_value(lines, entry, end, name):
     if value[:1] not in ('>', '|'):
         if value[:1] in ('[', '{'):
             raise YAMLReadError(f'{name} is not a scalar')
-        quoted = value[:1] in ('"', "'")
-        if not quoted:
-            value = _strip_inline_comment(value)
-            if not value:
-                raise YAMLReadError(f'{name} has no scalar value')
-        for following in range(index + 1, end):
-            if (_meaningful(lines[following])
-                    and _indent(lines[following]) > key_indent):
-                raise YAMLReadError(
-                    f'{name} has an unsupported multiline scalar')
-        # A quoting style is spelling: the decoded value is what the
-        # workflow means, so it decodes rather than being refused.
-        if quoted:
+        if value[:1] in ('"', "'"):
+            for following in range(index + 1, end):
+                if (_meaningful(lines[following])
+                        and _indent(lines[following]) > key_indent):
+                    raise YAMLReadError(
+                        f'{name} has an unsupported multiline scalar')
+            # A quoting style is spelling: the decoded value is what the
+            # workflow means, so it decodes rather than being refused.
             return _decode_inline_scalar(value, name)
-        return _check_plain_scalar(value, name)
+        value = _strip_inline_comment(value)
+        if not value:
+            raise YAMLReadError(f'{name} has no scalar value')
+        return _check_plain_scalar(
+            _folded_plain(lines, index, end, key_indent, value, name), name)
     style, chomp, explicit = _parse_header(value, name)
     block_start = index + 1
     block_end = end
@@ -583,6 +586,30 @@ def _scalar_value(lines, entry, end, name):
             break
     return _decode_block(lines[block_start:block_end], key_indent,
                          style, chomp, explicit, name)
+
+
+def _folded_plain(lines, index, end, key_indent, value, name):
+    """Fold a plain scalar's continuation lines into the one value.
+
+    A plain scalar carries its continuation more indented than its key; each
+    line contributes its own comment strip and they join with the single
+    space YAML would.  A blank line between them would fold to a newline
+    instead, which is outside the subset.
+    """
+    parts = [value]
+    blank = False
+    for following in range(index + 1, end):
+        line = lines[following]
+        if not _meaningful(line):
+            blank = blank or not _comment(line)
+            continue
+        if _indent(line) <= key_indent:
+            continue
+        if blank:
+            raise YAMLReadError(f'{name} has an unsupported multiline scalar')
+        text, _ended = line
+        parts.append(_strip_inline_comment(text.strip(' ')))
+    return ' '.join(part for part in parts if part)
 
 
 def _parse_header(value, name):

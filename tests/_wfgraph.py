@@ -260,17 +260,6 @@ def _job_if_expression(workflow, job):
     source = _field_source(workflow, job, 'if')
     if source is None:
         return None
-    field_lines = _job_field_lines(workflow, job, 'if')
-    assert field_lines is not None
-    first = field_lines[0]
-    _raw_key, raw_value = split_mapping_field(first[4:], f'job {job!r}')
-    if (raw_value.strip(' ')[:1] not in ('>', '|', "'", '"')
-            and any(_line_meaningful(line) for line in field_lines[1:])):
-        parts = [raw_value.strip()]
-        parts.extend(line.strip() for line in field_lines[1:]
-                     if _line_meaningful(line))
-        source = '\n'.join((
-            'jobs:', f'  {job}:', f'    if: {" ".join(parts)}')) + '\n'
     return job_scalar(source, job, 'if')
 
 

@@ -3,11 +3,14 @@
 The workflow readers built on this admit one subset and refuse the rest, and
 a refusal is one of exactly two things.
 
-Admitted: plain, single-quoted and double-quoted one-line scalars, folded and
-literal block scalars, block mappings and block sequences, and flow
-collections of any of those -- spanning lines where the collection itself
-does. Equivalent spellings decode to the same value, so quoting a scalar or
-rewriting a block collection in flow style changes nothing a reader sees.
+Admitted: plain, single-quoted and double-quoted scalars, folded and literal
+block scalars, block mappings and block sequences, and flow collections of
+any of those. A value spans lines where YAML says it does: a flow collection
+for as long as its own brackets stay open, at any indentation, and a plain
+scalar over its more-indented continuation lines. Folding joins with one
+space and every line contributes its own comment strip. Equivalent spellings
+decode to the same value, so quoting a scalar or rewriting a block collection
+in flow style changes nothing a reader sees.
 
 Refused as invalid YAML: an unterminated quote or bracket, an unquoted flow
 scalar carrying any of `,[]{}`, an interior empty flow item, an empty mapping
@@ -16,10 +19,11 @@ malformed block-scalar header or escape, and a control or surrogate
 character.
 
 Refused as a boundary of this subset, which every such message names with
-the word `unsupported`: a tab inside a value, a multiline plain scalar,
-nested content under a scalar, an anchor, an alias or a tag, and a plain
-scalar outside the character set the reader admits. A shape refusal
-("... is not a mapping") names the shape the reader requires instead.
+the word `unsupported`: a tab inside a value, a multiline quoted scalar, a
+blank line inside a plain one, nested content beside a value that already
+closed, an anchor, an alias or a tag, and a plain scalar outside the
+character set the reader admits. A shape refusal ("... is not a mapping")
+names the shape the reader requires instead.
 
 Deciding full YAML validity is not this module's job. `actionlint` is the
 CI-side oracle for that and gates every workflow change.
