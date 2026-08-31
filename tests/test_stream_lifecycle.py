@@ -94,11 +94,12 @@ def _noise_path(tmp, name, body):
 def test_a_line_printed_before_the_announcement_does_not_hide_it(tmp):
     """Startup output the reader does not recognise is skipped, not taken.
 
-    The bridge prints whatever its platform gives it cause to before it
-    binds — on a non-glibc host `mallopt` is missing and the malloc-tuning
-    diagnostic goes out first, and a checkout without the MCP dependencies
-    reports that bootstrap failure too. Those lines are worth keeping, so
-    readiness has to be found by searching the output for the announcement.
+    The bridge prints whatever its platform gives it cause to — on a
+    non-glibc host `mallopt` is missing and the malloc-tuning diagnostic goes
+    out before the bind, and a checkout without the MCP dependencies reports
+    that bootstrap failure from its own thread whenever it gets there. Those
+    lines are worth keeping, so readiness has to be found by searching the
+    output for the announcement.
     """
     noise = ('print("[Daedalus] malloc tuning unavailable: '
              'dlsym(0x0, mallopt): symbol not found", flush=True)\n')
@@ -123,6 +124,10 @@ def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
     MCP section sees a working bridge and a client that cannot connect. The
     line that reports the failure is the one place that can name the install
     that fixes it.
+
+    The bootstrap runs on a thread of its own, so this report is not ordered
+    against readiness and may land after it: it is waited for rather than
+    read out of whatever the child had printed by the time it answered.
     """
     blocked = 'import sys\nsys.modules["daedalus_mcp.server"] = None\n'
     output = []
@@ -131,9 +136,107 @@ def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
                       output=output) as (base, _docroot):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
-    reported = [line for line in output if 'MCP bootstrap failed' in line]
-    assert reported, output
+        while True:
+            reported = [line for line in output
+                        if 'MCP bootstrap failed' in line]
+            if reported:
+                break
+            time.sleep(0.01)
     assert any('.[mcp]' in line for line in reported), reported
+
+
+def _held_mcp_import(tmp, entered, release):
+    """A PYTHONPATH whose sitecustomize holds the daedalus_mcp import open.
+
+    The finder sits ahead of the real ones on sys.meta_path, so it blocks
+    where the bridge asks for the module rather than wherever that module's
+    own dependencies resolve, and it stays blocked until this test says
+    otherwise.
+    """
+    body = (
+        'import os, sys, time\n'
+        'class _Held:\n'
+        '    @staticmethod\n'
+        '    def find_spec(name, path=None, target=None):\n'
+        '        if name.split(".")[0] != "daedalus_mcp":\n'
+        '            return None\n'
+        f'        open({str(entered)!r}, "w").close()\n'
+        f'        while not os.path.exists({str(release)!r}):\n'
+        '            time.sleep(0.01)\n'
+        'sys.meta_path.insert(0, _Held)\n'
+    )
+    return _noise_path(tmp, 'held-mcp-import', body)
+
+
+def _listening_port(drained):
+    """The port off the announcement, or None while it has not arrived."""
+    for line in list(drained):
+        _, marker, rest = line.partition('[Daedalus] Listening on 127.0.0.1:')
+        if marker:
+            return int(rest.split(' ', 1)[0])
+    return None
+
+
+def _await_alive(proc, drained, probe, what):
+    """Poll `probe` with no deadline, giving up only when the child dies.
+
+    What is being waited for here is an ordering, so a deadline would turn a
+    loaded machine into a failure while proving nothing extra on a fast one.
+    A regression surfaces as a hung job instead, which is the trade this
+    repository takes deliberately.
+    """
+    while True:
+        value = probe()
+        if value:
+            return value
+        assert proc.poll() is None, f'{what}:\n' + ''.join(drained)
+        time.sleep(0.01)
+
+
+def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
+    """The announcement must not be gated on the optional front end.
+
+    Importing daedalus_mcp pulls in mcp, pydantic, httpx and opentelemetry,
+    about a second of it, and every caller waiting on readiness paid that —
+    the bridge fixture a couple of hundred times per test run. The MCP
+    listener binds on a thread of its own and announces itself on its own
+    [MCP] line, so the Listening line never meant the front end was up.
+
+    The import is held open rather than timed: the announcement arriving
+    while the finder is still blocked is what says the bootstrap is off the
+    main thread, and no wall-clock margin could say it.
+    """
+    entered = Path(tmp) / 'mcp-import-entered'
+    release = Path(tmp) / 'mcp-import-released'
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
+        'DAEDALUS_PORT': '0',
+        'DAEDALUS_MCP_PORT': '0',
+        'DAEDALUS_TOKEN': 'lifecycle-test',
+        'TOKEN': '',
+        'PYTHONDONTWRITEBYTECODE': '1',
+        'PYTHONUNBUFFERED': '1',
+        'PYTHONPATH': _held_mcp_import(tmp, entered, release),
+    })
+    proc = subprocess.Popen(
+        [sys.executable, str(_util.ROOT / 'server.py')],
+        cwd=_util.ROOT, env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True)
+    drained = _util.drain_lines(proc)
+    try:
+        _await_alive(proc, drained, entered.exists,
+                     'the bridge never asked for daedalus_mcp')
+        port = _await_alive(
+            proc, drained, lambda: _listening_port(drained),
+            'the bridge announced no port while the import was held')
+        assert not release.exists(), 'the import was let go before the wait'
+        status, health = _util.get_json(f'http://127.0.0.1:{port}/health')
+        assert status == 200 and health['ok'] is True, (status, health)
+    finally:
+        release.write_text('go', encoding='utf-8')
+        proc.terminate()
+        proc.wait(timeout=10)
 
 
 def test_the_announcement_does_not_wait_on_a_reverse_dns_lookup(tmp):
