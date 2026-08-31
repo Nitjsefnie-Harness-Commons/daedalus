@@ -150,8 +150,8 @@ def _line_meaningful(line):
 def _job_field_end(section, index, raw_value):
     """Where one job field's lines stop, past any collection it opens.
 
-    A flow collection holds its own lines open, so a continuation sitting
-    at the field's own indentation still belongs to the field.
+    A flow collection holds its own lines open, so a continuation at the
+    field's own indentation still belongs to the field.
     """
     value = _strip_inline_comment(raw_value.strip(' '))
     depth = flow_depth(value) if value[:1] in ('[', '{') else 0
