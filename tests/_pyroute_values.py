@@ -39,6 +39,7 @@ class DeferredGenerator:
     expression: ast.GeneratorExp
     remaining: int | None
     evaluate_zero: bool = False
+    yielded: object = None
 
 
 @dataclass(frozen=True)
@@ -91,12 +92,19 @@ class DeferredInstance:
     attributes: dict
 
 
-DEFERRED_VALUES = (DeferredCallable, DeferredClass, DeferredAlternatives,
-                   DeferredContainer, DeferredInstance)
+DEFERRED_VALUES = (DeferredGenerator, DeferredCallable, DeferredClass,
+                   DeferredAlternatives, DeferredContainer,
+                   DeferredInstance)
 
 
 def is_deferred_value(value):
     return isinstance(value, DEFERRED_VALUES)
+
+
+def new_deferred_callable(node, state, definition, local_names, captured):
+    return DeferredCallable(
+        node, definition, frozenset(local_names), frozenset(captured),
+        state.namespace, state.cells)
 
 
 def _binding_from_state(state, name):
@@ -192,7 +200,9 @@ def advance_generator(state, generator):
     if generator.remaining is None:
         return
     remaining = max(0, generator.remaining - 1)
-    advanced = DeferredGenerator(generator.expression, remaining)
+    advanced = DeferredGenerator(
+        generator.expression, remaining, generator.evaluate_zero,
+        generator.yielded)
     for name, value in list(state.generators.items()):
         if value is not generator:
             continue
@@ -203,6 +213,45 @@ def advance_generator(state, generator):
     for key, value in list(state.evaluated.items()):
         if value is generator:
             state.evaluated[key] = advanced
+
+
+def generator_for(expr, state):
+    if isinstance(expr, ast.Name):
+        return state.generators.get(expr.id)
+    value = state.evaluated.get(id(expr))
+    return value if isinstance(value, DeferredGenerator) else None
+
+
+def generator_nonempty(generator, literal_nonempty):
+    if generator.remaining is not None:
+        return generator.remaining > 0
+    expression = generator.expression
+    states = [literal_nonempty(clause.iter)
+              for clause in expression.generators]
+    if False in states:
+        return False
+    if all(state is True for state in states) and not any(
+            clause.ifs for clause in expression.generators):
+        return True
+    return None
+
+
+def iterable_nonempty(expr, states, literal_nonempty):
+    values = []
+    for state in states:
+        generator = generator_for(expr, state)
+        values.append(generator_nonempty(generator, literal_nonempty)
+                      if generator else literal_nonempty(expr))
+    return (values[0] if values
+            and all(value is values[0] for value in values) else None)
+
+
+def exhaust_generators(expressions, states, dedupe):
+    for state in states:
+        state.generators = {
+            name: value for name, value in state.generators.items()
+            if value.expression not in expressions}
+    return dedupe(states)
 
 
 def merge_deferred_values(values):
@@ -240,8 +289,11 @@ def reachable_callables(value):
         values = value.attributes.values()
     if isinstance(value, DeferredClass):
         values = value.methods.values()
+    if isinstance(value, DeferredGenerator):
+        values = (value.yielded,)
     if not isinstance(value, (DeferredAlternatives, DeferredContainer,
-                              DeferredInstance, DeferredClass)):
+                              DeferredInstance, DeferredClass,
+                              DeferredGenerator)):
         return ()
     return tuple(candidate for item in values
                  for candidate in reachable_callables(item))
@@ -266,6 +318,96 @@ def _known_value(node, state):
     if value is None and isinstance(node, ast.Name):
         value = state.callables.get(node.id)
     return value if is_deferred_value(value) else None
+
+
+def deferred_expression_value(node, state, lambda_factory):
+    if node is None:
+        return None
+    if isinstance(node, ast.Lambda):
+        return lambda_factory(node, state)
+    value = _known_value(node, state)
+    if value is not None:
+        return value
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        values = [deferred_expression_value(item, state, lambda_factory)
+                  for item in node.elts]
+        if any(is_deferred_value(value) for value in values):
+            return DeferredContainer(dict(enumerate(values)), len(values))
+    if isinstance(node, ast.Dict):
+        items = {}
+        for key, item in zip(node.keys, node.values):
+            known_key = deferred_expression_value(key, state, lambda_factory)
+            value = deferred_expression_value(item, state, lambda_factory)
+            if known_key is not None and is_deferred_value(value):
+                items[known_key] = value
+        if items:
+            return DeferredContainer(items, len(node.values))
+    return None
+
+
+def new_deferred_generator(node, state, lambda_factory, generator_factory):
+    yielded = deferred_expression_value(node.elt, state, lambda_factory)
+    return generator_factory(node, yielded)
+
+
+def bind_deferred_target(target, value, state):
+    names = {node.id for node in ast.walk(target)
+             if isinstance(node, ast.Name)}
+    for name in names:
+        state.aliases.pop(name, None)
+        state.generators.pop(name, None)
+        state.callables.pop(name, None)
+        state.bound.add(name)
+    if isinstance(target, ast.Name):
+        if isinstance(value, DeferredGenerator):
+            state.generators[target.id] = value
+        elif is_deferred_value(value):
+            state.callables[target.id] = value
+    elif isinstance(target, (ast.Tuple, ast.List)) \
+            and isinstance(value, DeferredContainer):
+        for index, nested in enumerate(target.elts):
+            bind_deferred_target(nested, value.items.get(index), state)
+    sync_cells(state, names)
+
+
+def bind_deferred_states(target, value, states):
+    for state in states:
+        bind_deferred_target(target, value, state)
+
+
+def append_deferred(values, value):
+    if value is not None:
+        values.append(value)
+
+
+def materialize_deferred(consumer, value):
+    if value is None:
+        return None
+    if isinstance(value, DeferredAlternatives):
+        return merge_deferred_values(
+            materialize_deferred(consumer, item) for item in value.values)
+    if consumer == 'dict' and isinstance(value, DeferredContainer):
+        key = value.items.get(0)
+        item = value.items.get(1)
+        if not is_deferred_value(item):
+            return None
+        try:
+            hash(key)
+        except TypeError:
+            return None
+        return DeferredContainer({key: item}, 1)
+    return DeferredContainer({0: value}, 1)
+
+
+def iterable_deferred(value):
+    if isinstance(value, DeferredAlternatives):
+        return merge_deferred_values(
+            iterable_deferred(item) for item in value.values)
+    if isinstance(value, DeferredContainer):
+        return merge_deferred_values(value.items.values())
+    return None
 
 
 def _selected_values(value, key, attribute=False):
@@ -336,7 +478,7 @@ def expression_value(node, state, generator_factory, sender_resolver,
             for child in ast.iter_child_nodes(node))
         if value is not None:
             return value
-    if isinstance(node, (ast.Tuple, ast.List)):
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
         value = _display_value(node, state)
         if value is not None:
             return value

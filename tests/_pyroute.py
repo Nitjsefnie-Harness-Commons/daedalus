@@ -3,19 +3,23 @@ import ast
 import sys
 
 from _pyroute_values import (DeferredCallable, DeferredClass,
-                             advance_generator, bind_call_arguments,
+                             advance_generator, append_deferred,
+                             bind_call_arguments, bind_deferred_states,
                              callable_candidates,
-                             exposed_callables, expression_callables,
-                             expression_value, follow_callable_call,
-                             is_deferred_value, load_callable_cells,
-                             merge_deferred_values, payload_key,
+                             exposed_callables, exhaust_generators,
+                             expression_callables, expression_value,
+                             follow_callable_call,
+                             generator_for, is_deferred_value,
+                             iterable_deferred, iterable_nonempty,
+                             load_callable_cells, materialize_deferred,
+                             merge_deferred_values, new_deferred_callable,
+                             new_deferred_generator, payload_key,
                              store_deferred_value, sync_cells)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
                             UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
-                            DeferredGenerator, FlowState,
-                            apply_alias_statement,
+                            FlowState, apply_alias_statement,
                             apply_state_dict_statement, argument_defaults,
                             bind_alias_target, bind_builtin_names, bound_names,
                             callable_state, clear_names, dedupe_states,
@@ -209,38 +213,14 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 _UNPROVABLE_SENDER)
         return current_pairs
 
-    def generator_for(expr, state):
-        if isinstance(expr, ast.Name): return state.generators.get(expr.id)
-        value = state.evaluated.get(id(expr))
-        return value if isinstance(value, DeferredGenerator) else None
-
-    def generator_nonempty(generator):
-        if generator.remaining is not None: return generator.remaining > 0
-        expression = generator.expression
-        states = [literal_iterable_nonempty(clause.iter)
-                  for clause in expression.generators]
-        if False in states: return False
-        if all(state is True for state in states) and not any(
-                clause.ifs for clause in expression.generators):
-            return True
-        return None
-
-    def iterable_nonempty(expr, current_pairs):
-        states = []
-        for state in current_pairs:
-            generator = generator_for(expr, state)
-            states.append(generator_nonempty(generator) if generator
-                          else literal_iterable_nonempty(expr))
-        return states[0] if states and all(
-            value is states[0] for value in states) else None
-
     def consume_generator(generator, current_pairs):
         expression = generator.expression
         active = copied(current_pairs)
         skipped = []
         for index, clause in enumerate(expression.generators):
             if index: active = check_expression(clause.iter, active)
-            cardinality = iterable_nonempty(clause.iter, active)
+            cardinality = iterable_nonempty(
+                clause.iter, active, literal_iterable_nonempty)
             active, _ = consume_iterable(clause.iter, active, exhaust=True)
             if cardinality is False:
                 return dedupe_states([*skipped, *active]), None
@@ -252,12 +232,15 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     return dedupe_states([*skipped, *active]), None
                 if truth is None:
                     skipped.extend(copied(active))
-        results = [expression.key, expression.value] if isinstance(
-            expression, ast.DictComp) else [expression.elt]
-        for result in results: active = check_expression(result, active)
-        yielded = merge_deferred_values(
-            state.evaluated.get(id(result))
-            for state in active for result in results)
+        yielded = generator.yielded
+        if yielded is None:
+            results = [expression.key, expression.value] if isinstance(
+                expression, ast.DictComp) else [expression.elt]
+            for result in results:
+                active = check_expression(result, active)
+            yielded = merge_deferred_values(
+                state.evaluated.get(id(result))
+                for state in active for result in results)
         return dedupe_states([*skipped, *active]), yielded
 
     def consume_iterable(expr, current_pairs, exhaust):
@@ -266,6 +249,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         for state in current_pairs:
             generator = generator_for(expr, state)
             if generator is None:
+                value = iterable_deferred(evaluated_value(expr, state))
+                append_deferred(yielded, value)
                 outputs.append(state)
                 continue
             if generator.remaining == 0 and not generator.evaluate_zero:
@@ -285,12 +270,14 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             outputs.extend(consumed)
         return dedupe_states(outputs), merge_deferred_values(yielded)
 
-    def exhaust_generators(expressions, current_pairs):
-        for state in current_pairs:
-            state.generators = {
-                name: value for name, value in state.generators.items()
-                if value.expression not in expressions}
-        return dedupe_states(current_pairs)
+    def deferred_lambda(node, state, capture_chain):
+        local_names, global_names, _ = lexical_scope_names(
+            node, annotations_eager)
+        definition = callable_state(
+            node, callable_pairs([state]), annotations_eager)
+        return new_deferred_callable(
+            node, state, definition, local_names,
+            capture_chain - local_names - global_names)
 
     def check_expression(node, current_pairs):
         if node is None: return current_pairs
@@ -300,15 +287,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 current_pairs = check_expression(default, current_pairs)
             if defaults: check_expression(node.body, [callable_state(
                 node, callable_pairs(current_pairs), annotations_eager)])
-            local_names, global_names, _ = lexical_scope_names(
-                node, annotations_eager)
             for state in current_pairs:
-                state.evaluated[id(node)] = DeferredCallable(
-                    node, callable_state(
-                        node, callable_pairs([state]), annotations_eager),
-                    frozenset(local_names),
-                    frozenset(chain - local_names - global_names),
-                    state.namespace, state.cells)
+                state.evaluated[id(node)] = deferred_lambda(
+                    node, state, chain)
             return current_pairs
         if isinstance(node, ast.NamedExpr):
             current_pairs = check_expression(node.value, current_pairs)
@@ -377,12 +358,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     for argument in node.args:
                         current, yielded = consume_iterable(
                             argument, current, exhaust=True)
-                        if yielded is not None: consumed_values.append(yielded)
+                        yielded = materialize_deferred(consumer, yielded)
+                        append_deferred(consumed_values, yielded)
                 elif consumer in _PARTIAL_ITERABLE_CALLS and node.args:
                     current, yielded = consume_iterable(
                         node.args[0], current, exhaust=False)
-                    if consumer == 'next' and yielded is not None:
-                        consumed_values.append(yielded)
+                    if consumer == 'next':
+                        append_deferred(consumed_values, yielded)
                 for current_state in current:
                     found = _py_call_violations(
                         node, current_state.dicts, rel,
@@ -401,7 +383,11 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             return remember(node, dedupe_states(outputs))
         if isinstance(node, ast.GeneratorExp):
             entered = check_expression(node.generators[0].iter, current_pairs)
-            return remember(node, entered)
+            for state in entered:
+                state.evaluated[id(node)] = new_deferred_generator(
+                    node, state, lambda item, current: deferred_lambda(
+                        item, current, chain), deferred_generator)
+            return entered
         if isinstance(node, _COMPREHENSIONS):
             entered = check_expression(node.generators[0].iter, current_pairs)
             active = copied(entered)
@@ -409,9 +395,11 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for index, generator in enumerate(node.generators):
                 if index:
                     active = check_expression(generator.iter, active)
-                cardinality = iterable_nonempty(generator.iter, active)
-                active, _ = consume_iterable(
+                cardinality = iterable_nonempty(
+                    generator.iter, active, literal_iterable_nonempty)
+                active, yielded = consume_iterable(
                     generator.iter, active, exhaust=True)
+                bind_deferred_states(generator.target, yielded, active)
                 if cardinality is False:
                     return remember(node, dedupe_states([*skipped, *active]))
                 if cardinality is not True:
@@ -552,12 +540,15 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             header = (statement.iter if isinstance(
                 statement, (ast.For, ast.AsyncFor)) else statement.test)
             pairs = check_expression(header, pairs)
-            header_nonempty = iterable_nonempty(header, pairs)
+            header_nonempty = iterable_nonempty(
+                header, pairs, literal_iterable_nonempty)
             loop_generators = {
                 generator_for(header, state).expression for state in pairs
                 if generator_for(header, state) is not None}
+            yielded = None
             if isinstance(statement, (ast.For, ast.AsyncFor)):
-                pairs, _ = consume_iterable(header, pairs, exhaust=False)
+                pairs, yielded = consume_iterable(
+                    header, pairs, exhaust=False)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             zero_pairs = incoming
             if (isinstance(statement, (ast.For, ast.AsyncFor))
@@ -573,6 +564,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for _ in range(4):
                 entry = [_copy_state_pair(pair) for pair in iteration_pairs]
                 clear_names(entry, target_names)
+                if isinstance(statement, (ast.For, ast.AsyncFor)):
+                    bind_deferred_states(statement.target, yielded, entry)
                 exits = new_exits()
                 found, fallthrough = walk(statement.body, entry, exits)
                 violations.extend(found)
@@ -590,7 +583,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             normal_pairs = dedupe_states([*zero_pairs, *post_body])
             if isinstance(statement, (ast.For, ast.AsyncFor)):
                 normal_pairs = exhaust_generators(
-                    loop_generators, normal_pairs)
+                    loop_generators, normal_pairs, dedupe_states)
             if statement.orelse:
                 found, normal_pairs = walk(statement.orelse, normal_pairs)
                 violations.extend(found)

@@ -326,6 +326,73 @@ def test_generator_yielded_callables_match_runtime(tmp):
     _assert_focus_cases(tmp, cases)
 
 
+def test_generator_iteration_forms_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    local_cases = [
+        ('for-invoked',
+         f'send = ext_cmd\ngen = (lambda: {call} for _ in [1])\n'
+         'for callback in gen:\n    callback()', '', '', True),
+        ('for-not-invoked',
+         f'send = ext_cmd\ngen = (lambda: {call} for _ in [1])\n'
+         'for callback in gen:\n    pass', '', '', False),
+        ('comprehension-invoked',
+         f'send = ext_cmd\ngen = (lambda: {call} for _ in [1])\n'
+         '[callback() for callback in gen]', '', '', True),
+        ('comprehension-not-invoked',
+         f'send = ext_cmd\ngen = (lambda: {call} for _ in [1])\n'
+         '[callback for callback in gen]', '', '', False),
+        ('dict-invoked',
+         f'send = ext_cmd\ncallback = lambda: {call}\n'
+         "gen = (('x', callback) for _ in [1])\n"
+         "dict(gen)['x']()", '', '', True),
+        ('dict-not-invoked',
+         f'send = ext_cmd\ncallback = lambda: {call}\n'
+         "gen = (('x', callback) for _ in [1])\n"
+         'dict(gen)', '', '', False),
+    ]
+    _assert_focus_cases(tmp, local_cases)
+
+
+def test_returned_generator_values_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('returned-invoked',
+         f'send = ext_cmd\nreturn (lambda: {call} for _ in [1])', '',
+         'gen = do_focus_tab(_args)', 'next(gen)()', True),
+        ('returned-discarded',
+         f'send = ext_cmd\nreturn (lambda: {call} for _ in [1])', '',
+         'gen = do_focus_tab(_args)\ndel gen', '', False),
+    ]
+    _assert_export_cases(tmp, cases)
+
+
+def test_factory_returned_sets_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('set-invoked',
+         f'send = ext_cmd\nreturn {{lambda: {call}}}', '',
+         'box = do_focus_tab(_args)', 'next(iter(box))()', True),
+        ('set-deleted',
+         f'send = ext_cmd\nreturn {{lambda: {call}}}', '',
+         'box = do_focus_tab(_args)\ndel box', '', False),
+    ]
+    _assert_export_cases(tmp, cases)
+
+
+def test_generator_materializer_shape_matches_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    prefix = (f'send = ext_cmd\ncallback = lambda: {call}\n'
+              'gen = ([callback] for _ in [1])\n')
+    cases = [
+        ('outer-item-not-callable',
+         prefix + 'try:\n    list(gen)[0]()\nexcept TypeError:\n    pass',
+         '', '', False),
+        ('nested-item-invoked',
+         prefix + 'list(gen)[0][0]()', '', '', True),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
 def test_nested_function_reachability_matches_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     cases = [
