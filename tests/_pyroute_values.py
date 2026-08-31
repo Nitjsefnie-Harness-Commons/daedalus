@@ -6,6 +6,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from _pyroute_state import FlowState
 
+EAGER_ITERABLE_CALLS = frozenset({
+    'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
+})
+PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
+
 
 @dataclass(frozen=True)
 class CellBinding:
@@ -428,6 +433,14 @@ def bind_deferred_states(target, value, states):
 def append_deferred(values, value):
     if value is not None:
         values.append(value)
+
+
+def consumer_results(consumer, arguments, states):
+    if consumer != 'iter' or not arguments:
+        return []
+    value = merge_deferred_values(
+        _known_value(arguments[0], state) for state in states)
+    return [value] if value is not None else []
 
 
 def materialize_deferred(consumer, value):

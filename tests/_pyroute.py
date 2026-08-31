@@ -2,10 +2,13 @@
 import ast
 import sys
 
-from _pyroute_values import (DeferredCallable, DeferredClass,
+from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
+                             PARTIAL_ITERABLE_CALLS as _PARTIAL_ITERABLE_CALLS,
+                             DeferredCallable, DeferredClass,
                              advance_generator, append_deferred,
                              bind_call_arguments, bind_deferred_states,
-                             callable_candidates, live_expression_value,
+                             callable_candidates, consumer_results,
+                             live_expression_value,
                              exposed_callables, exhaust_generators,
                              expression_callables, expression_value,
                              follow_callable_call,
@@ -37,10 +40,6 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
 
 _copy_state_pair = FlowState.copy
 dict_assignments = _dict_assignments
-_EAGER_ITERABLE_CALLS = frozenset({
-    'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
-})
-_PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
 _CALL_CACHE = {}
 
 
@@ -359,7 +358,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 current = [state]
                 for argument in arguments:
                     current = check_expression(argument, current)
-                consumed_values = []
+                consumed_values = consumer_results(
+                    consumer, node.args, current)
                 if consumer in _EAGER_ITERABLE_CALLS:
                     for argument in node.args:
                         current, yielded = consume_iterable(

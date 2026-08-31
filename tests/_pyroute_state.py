@@ -11,8 +11,8 @@ OPAQUE_TAB_SPREAD = object()
 UNPROVABLE_SENDER = '?ext_cmd'
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 BUILTIN_CONSUMERS = frozenset({
-    'all', 'any', 'dict', 'frozenset', 'list', 'max', 'min', 'next', 'set',
-    'sorted', 'sum', 'tuple',
+    'all', 'any', 'dict', 'frozenset', 'iter', 'list', 'max', 'min', 'next',
+    'set', 'sorted', 'sum', 'tuple',
 })
 
 
