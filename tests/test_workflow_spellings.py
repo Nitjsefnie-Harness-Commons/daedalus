@@ -176,6 +176,25 @@ def test_parenthesised_output_reference_names_the_same_step(tmp):
         assert _job_output_step_ids(workflow, 'changes') == plain, spelling
 
 
+def test_an_output_reference_must_be_exactly_one_step_lookup(tmp):
+    """Each limb of the `steps.<id>.outputs.<name>` shape is pinned alone.
+
+    Every spelling here differs from the accepted reference in exactly one
+    field, so dropping any single limb of the check leaves one accepted.
+    """
+    original = '      matrix: ${{ steps.classify.outputs.matrix }}\n'
+    spellings = (
+        '      matrix: ${{ steps.classify.env.matrix }}\n',
+        '      matrix: ${{ steps.classify.outputs }}\n',
+        '      matrix: ${{ steps.classify.outputs.matrix.value }}\n',
+        '      matrix: ${{ needs.changes.outputs.matrix }}\n',
+    )
+    for spelling in spellings:
+        workflow = _real(tmp, _replaced(original, spelling))
+        assert 'unsupported expression' in _refuses(
+            _job_output_step_ids, workflow, 'changes'), spelling
+
+
 def test_both_readers_decode_one_scalar_spelling_set(tmp):
     """_yamlread and _yamlsteps must agree on every equivalent spelling."""
     spellings = (
