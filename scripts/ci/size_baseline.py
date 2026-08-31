@@ -45,7 +45,7 @@ BASELINE = {
     'tests/_pyroute.py': 738,
     'tests/_pyroute_state.py': 780,
     'tests/test_tab_routing.py': 793,
-    'tests/test_mcp_server.py': 1723,
+    'tests/test_mcp_server.py': 1721,
     'tests/test_cli.py': 1254,
     'tests/test_bridge_results.py': 1343,
 }

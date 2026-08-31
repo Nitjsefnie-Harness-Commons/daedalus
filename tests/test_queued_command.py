@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Controls for the queue-entry read the suite driving a CLI shares.
+"""Controls for one-or-exact-set queue reads shared by CLI-driving suites.
 
-`_queueread.queued_command` is what stands between a suite and a bridge's
-command queue: a refusal that clears while the bridge publishes is
-absorbed, one that survives the bounded wait is raised as itself, a queue
-that never fills fails as a timeout, the oldest entry is the one parsed,
-and an entry that is gone is not retried.
+`_queueread` stands between suites and bridge command queues: transient
+refusals are absorbed, surviving refusals are raised as themselves, an
+unfilled queue times out, one read selects the oldest eligible entry, an exact
+set requires its full count, and a vanished entry is not retried.
 """
 import ast
 import json
@@ -16,6 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _queueread  # noqa: E402
 import _util  # noqa: E402
+from _cmdqueue_faults import _virtual_cmdqueue_clock  # noqa: E402
 
 
 def _denying_read(entry, times):
@@ -85,12 +85,13 @@ def test_a_queue_read_denied_for_good_fails_as_the_denial_it_is(tmp):
     entry.write_text(json.dumps({'id': '_ss'}), encoding='utf-8')
     wrapper, refusals = _denying_read(entry, times=100)
     failure = None
-    with mock.patch.object(Path, 'read_text', wrapper):
-        try:
-            _queueread.queued_command(qdir, 'the pinned queue read',
-                                      timeout=0.2)
-        except PermissionError as denied:
-            failure = denied
+    with _virtual_cmdqueue_clock():
+        with mock.patch.object(Path, 'read_text', wrapper):
+            try:
+                _queueread.queued_command(
+                    qdir, 'the pinned queue read', timeout=0.2)
+            except PermissionError as denied:
+                failure = denied
     if failure is None:
         raise AssertionError('the persistent-denial control needs a denial')
     assert len(refusals) > 1, refusals
@@ -141,13 +142,55 @@ def test_a_multi_queue_read_retries_a_refusal_and_reads_all(tmp):
     entries = [qdir / f'170000000000{i}_00000{i}.json' for i in (1, 2)]
     for entry, identifier in zip(entries, ('first', 'second')):
         entry.write_text(json.dumps({'id': identifier}), encoding='utf-8')
-    wrapper, refusals = _denying_read(entries[0], times=1)
-    with mock.patch.object(Path, 'read_text', wrapper):
-        commands = _queueread.queued_commands(
-            qdir, 'the pinned queue reads', len(entries))
-    assert [command['id'] for command in commands] == ['first', 'second'], (
-        commands)
-    assert len(refusals) == 1, refusals
+    for refused_entry in entries:
+        wrapper, refusals = _denying_read(refused_entry, times=1)
+        with mock.patch.object(Path, 'read_text', wrapper):
+            commands = _queueread.queued_commands(
+                qdir, 'the pinned queue reads', len(entries))
+        assert [command['id'] for command in commands] == [
+            'first', 'second'], commands
+        assert len(refusals) == 1, (refused_entry, refusals)
+
+
+def test_a_multi_queue_read_requires_exact_count(tmp):
+    """Under-filled and over-filled queues return no partial command set."""
+    timeout = 2.5 * _queueread.POLL_DELAY
+    for available in (1, 3):
+        qdir = Path(tmp) / f'commands-{available}'
+        qdir.mkdir()
+        for index in range(available):
+            entry = qdir / f'170000000000{index}_00000{index}.json'
+            entry.write_text(json.dumps({'id': str(index)}), encoding='utf-8')
+        failure = None
+        with _virtual_cmdqueue_clock():
+            try:
+                _queueread.queued_commands(
+                    qdir, 'exactly two commands', 2, timeout=timeout)
+            except AssertionError as timeout_error:
+                failure = timeout_error
+        assert str(failure) == 'timed out waiting for exactly two commands', (
+            available, failure)
+
+
+def test_a_multi_queue_read_does_not_retry_a_vanished_entry(tmp):
+    """A vanished plural entry reaches the caller after its first read."""
+    qdir = Path(tmp) / 'commands' / 'tok_extension'
+    qdir.mkdir(parents=True)
+    entries = [qdir / f'170000000000{i}_00000{i}.json' for i in (1, 2)]
+    for entry, identifier in zip(entries, ('first', 'second')):
+        entry.write_text(json.dumps({'id': identifier}), encoding='utf-8')
+    attempts = []
+    wrapper = _vanishing_read(entries[1], attempts)
+    failure = None
+    with _virtual_cmdqueue_clock():
+        with mock.patch.object(Path, 'read_text', wrapper):
+            try:
+                _queueread.queued_commands(
+                    qdir, 'the pinned queue reads', len(entries))
+            except FileNotFoundError as vanished:
+                failure = vanished
+    assert attempts == [entries[1]], attempts
+    assert failure is not None and failure.filename == str(entries[1]), failure
 
 
 def test_a_multi_queue_read_denied_for_good_fails_as_the_denial_it_is(tmp):
@@ -158,28 +201,61 @@ def test_a_multi_queue_read_denied_for_good_fails_as_the_denial_it_is(tmp):
     entry.write_text(json.dumps({'id': 'only'}), encoding='utf-8')
     wrapper, refusals = _denying_read(entry, times=100)
     failure = None
-    with mock.patch.object(Path, 'read_text', wrapper):
-        try:
-            _queueread.queued_commands(
-                qdir, 'the pinned queue reads', 1, timeout=0.2)
-        except PermissionError as denied:
-            failure = denied
+    with _virtual_cmdqueue_clock():
+        with mock.patch.object(Path, 'read_text', wrapper):
+            try:
+                _queueread.queued_commands(
+                    qdir, 'the pinned queue reads', 1, timeout=0.2)
+            except PermissionError as denied:
+                failure = denied
     if failure is None:
         raise AssertionError('the persistent plural denial needs a denial')
     assert len(refusals) > 1, refusals
     assert failure.filename == str(entry), failure
 
 
-def test_mcp_suite_routes_queue_reads_through_the_bounded_reader(tmp):
-    """The MCP suite has no direct JSON parse of a queue `read_text` call.
+def test_mcp_suite_has_no_json_loads_of_read_text_results(tmp):
+    """Reject nested or assigned `read_text` results passed to `json.loads`.
 
-    This catches the unprotected `json.loads(...)` applied to a
-    `.read_text(...)` queue entry. It deliberately does not reject a future
-    non-queue `read_text` use, which would be a different defect.
+    This is a module-wide syntactic rule, not queue-path analysis. Assigned
+    names are matched within their lexical scope;
+    `json.load(path.open())` remains outside its scope.
     """
     del tmp
     source_path = Path(__file__).with_name('test_mcp_server.py')
     tree = ast.parse(source_path.read_text(encoding='utf-8'))
+    scope_by_node = {}
+
+    class ScopeMap(ast.NodeVisitor):
+        def __init__(self):
+            self.scope = None
+
+        def visit_scope(self, node):
+            previous, self.scope = self.scope, node
+            self.generic_visit(node)
+            self.scope = previous
+
+        visit_Module = visit_scope
+        visit_ClassDef = visit_scope
+        visit_FunctionDef = visit_scope
+        visit_AsyncFunctionDef = visit_scope
+        visit_Lambda = visit_scope
+
+        def generic_visit(self, node):
+            scope_by_node[node] = self.scope
+            super().generic_visit(node)
+
+    ScopeMap().visit(tree)
+    assigned_reads = {
+        (scope_by_node[assignment], target.id)
+        for assignment in ast.walk(tree)
+        if (isinstance(assignment, ast.Assign)
+            and isinstance(assignment.value, ast.Call)
+            and isinstance(assignment.value.func, ast.Attribute)
+            and assignment.value.func.attr == 'read_text')
+        for target in assignment.targets
+        if isinstance(target, ast.Name)
+    }
     violations = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call)
@@ -188,13 +264,20 @@ def test_mcp_suite_routes_queue_reads_through_the_bounded_reader(tmp):
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id == 'json'):
             continue
-        if any(isinstance(child, ast.Call)
-               and isinstance(child.func, ast.Attribute)
-               and child.func.attr == 'read_text'
-               for argument in node.args for child in ast.walk(argument)):
+        nested_read = any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Attribute)
+            and child.func.attr == 'read_text'
+            for argument in node.args for child in ast.walk(argument))
+        assigned_read = any(
+            isinstance(argument, ast.Name)
+            and (scope_by_node[node], argument.id) in assigned_reads
+            for argument in node.args)
+        if nested_read or assigned_read:
             violations.append(node.lineno)
     assert not violations, (
-        'MCP queue entries must use queued_command(s), not direct reads: '
+        'MCP suite json.loads calls must not consume read_text results; '
+        'json.load(path.open()) is outside this syntactic rule: '
         f'{violations}')
 
 
