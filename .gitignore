@@ -240,9 +240,9 @@
 !/tests/_prgate_race.py
 !/tests/_pyroute.py
 !/tests/_pyroute_state.py
-!/tests/_queueread.py
-!/tests/_pyroute_values.py
 !/tests/_pyroute_storage.py
+!/tests/_pyroute_values.py
+!/tests/_queueread.py
 !/tests/_realbrowser.py
 !/tests/_realbrowser_classification_support.py
 !/tests/_realbrowser_controls.py
