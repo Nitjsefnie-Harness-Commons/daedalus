@@ -164,6 +164,8 @@ def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
             with _util.bridge(tmp):
                 pass
         except RuntimeError:
+            # The stand-in is still installed, so entering the fixture can
+            # only fail; the warm allowance it recorded is the assertion.
             pass
         assert spent[-1] == _util.WARM_START_TIMEOUT, spent
         _util.await_listening_line = real_await
