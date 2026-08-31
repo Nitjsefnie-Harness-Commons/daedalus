@@ -7,17 +7,18 @@ A Python child inheriting COVERAGE_* into a working directory that
 paths that vanish with the temporary tree, and `coverage combine` later
 fails with `No source for code`. The guard fails closed: a recognised
 launcher proves its working directory safe or declares on every call;
-any other callee does so when it spells one readably (`cwd=` or a `**`
-spread of a mapping literal naming `cwd`); a launcher bound where the
-alias walk cannot follow is refused there; a root owner reached any
-way but a plain attribute read stops proving ROOT; and `chdir` or
-`fchdir` on any base or through a from-import alias moves the cwd
-launches inherit.
+any other callee does so when it spells one readably (`cwd=`, a `**`
+spread of a mapping literal naming `cwd`, or `dict(cwd=...)`); a
+launcher bound where the alias walk cannot follow is refused there; a
+root owner reached any way but a plain attribute read stops proving
+ROOT; and `chdir` or `fchdir` on any base or through a from-import
+alias moves the cwd launches inherit.
 
-Outside it: a launcher, owner or chdir reached only by a string
-(`getattr(os, 'chdir')`) or a call result, an unreadable `**` spread
-on an unrecognised callee, and a launcher alias bound by a call
-result, default argument or match capture.
+Outside it: a `child_coverage(...)` call itself, a launcher, owner or
+chdir reached only by a string (`getattr(os, 'chdir')`) or a call
+result, an unreadable `**` spread on an unrecognised callee, and a
+launcher alias bound by a call result, default argument or match
+capture.
 """
 import ast
 
@@ -225,7 +226,7 @@ def _launch_method(node, facts):
     return None
 
 
-def _unresolved_cwd(node, facts, shadowed):
+def _unresolved_cwd(node, facts, shadowed, launcher):
     """Why the launch's working directory is not provably safe, or None."""
     spread = False
     for keyword in node.keywords:
@@ -236,6 +237,11 @@ def _unresolved_cwd(node, facts, shadowed):
             return f'cwd={ast.unparse(keyword.value)}'
         if keyword.arg is None:
             spread = True
+    if (launcher and len(node.args) > 9
+            and not any(isinstance(arg, ast.Starred)
+                        for arg in node.args[:9])):
+        if not _is_root_spelling(node.args[9], shadowed, facts.root_owners):
+            return f'cwd={ast.unparse(node.args[9])} at position 10'
     if spread:
         return 'cwd may arrive through a ** spread'
     # Not `line < node.lineno`: a helper defined above a chdir still runs
@@ -385,7 +391,8 @@ def _declaration(node, facts, tree):
 
 def _check_launch(node, method, relative, function, facts, tree, keeps,
                   violations, shadowed):
-    why = _unresolved_cwd(node, facts, shadowed)
+    why = _unresolved_cwd(node, facts, shadowed,
+                          method.startswith('subprocess.'))
     if why is None:
         return
     problem, mode, call = _declaration(node, facts, tree)
@@ -589,23 +596,24 @@ def _helper_rebind_violations(tree, facts, relative):
 
 
 def _bound_values(node):
-    """The values a statement binds through a form aliases cannot follow."""
+    """Every (statement line, value) the statement binds unreadably."""
     if isinstance(node, ast.Assign):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             return []
-        return [node.value]
+        return [(node.lineno, node.value)]
     if isinstance(node, ast.AnnAssign):
         if node.value is None or isinstance(node.target, ast.Name):
             return []
-        return [node.value]
+        return [(node.lineno, node.value)]
     if isinstance(node, ast.AugAssign):
-        return [node.value]
+        return [(node.lineno, node.value)]
     if isinstance(node, (ast.For, ast.AsyncFor)):
-        return [node.iter]
-    if isinstance(node, ast.withitem) and node.optional_vars is not None:
-        return [node.context_expr]
+        return [(node.lineno, node.iter)]
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return [(node.lineno, item.context_expr) for item in node.items
+                if item.optional_vars is not None]
     if isinstance(node, ast.NamedExpr):
-        return [node.value]
+        return [(node.lineno, node.value)]
     return []
 
 
@@ -628,12 +636,12 @@ def _unfollowable_launcher_bindings(tree, facts, relative):
     """A launcher bound where the alias walk cannot see is refused there."""
     violations = []
     for node in ast.walk(tree):
-        for value in _bound_values(node):
+        for line, value in _bound_values(node):
             if any(_names_one_of(part, facts.subprocess_modules)
                    or _is_launch_value(part, facts)
                    for part in _carried_parts(value)):
                 violations.append(
-                    f'{relative}:{value.lineno}: a launcher is bound '
+                    f'{relative}:{line}: a launcher is bound '
                     'through a form the guard cannot follow')
     return violations
 

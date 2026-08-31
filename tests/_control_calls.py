@@ -2,9 +2,6 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-Split out of tests/_control_writes.py, which owns the path analysis:
-these answer "may this call happen at all, and where is its target",
-which is a different question from "is that target control-owned".
 A call outside these tables is refused rather than ignored, so a new
 primitive a control needs is a reviewed line here, not a silent gap.
 """
@@ -44,7 +41,7 @@ _WRITER_IMPORTS = {('_owned_writes', 'copy_test_tree'): ('root', 0)}
 def argument(call, name, position):
     """A call's argument by keyword, else by position, else None."""
     for keyword in call.keywords:
-        if keyword.arg == name:
+        if keyword.arg is not None and keyword.arg == name:
             return keyword.value
     if position is not None and len(call.args) > position:
         return call.args[position]
@@ -90,9 +87,8 @@ class ModuleNames:
     """How every name in a module is bound, counted across all scopes.
 
     A name proves something only when it is bound exactly once and the
-    binding is one the checker can read: a def, an import, or nothing at
-    all for a builtin. A module namespace written through a computed key
-    or handled as a whole retires every name at once.
+    checker can read the binding. A namespace written through a computed
+    key or handled as a whole retires every name at once.
     """
 
     def __init__(self, tree):
@@ -250,12 +246,7 @@ def _name_judgement(node, label, names):
 
 
 def call_judgement(node, label, names):
-    """(problem, kind, target): refused outright, or a write to prove.
-
-    A call the tables do not name is a problem in itself; a writer comes
-    back with the expression it writes to, for the path analysis to
-    prove, and a pure call comes back as (None, None, None).
-    """
+    """(problem, kind, target): refused outright, or a write to prove."""
     if isinstance(node.func, ast.Attribute):
         return _attribute_judgement(node, label, names)
     if isinstance(node.func, ast.Name):

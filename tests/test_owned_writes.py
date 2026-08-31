@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""The copy primitive proves at runtime what no control text can.
-
-tests/_control_writes.py judges spelling, and the refusal this suite
-pins has to be spelled to be exercised, so this suite is deliberately
-not one the writer checker scans.
-"""
+"""The copy primitive proves at runtime what no control text can."""
 import sys
 from pathlib import Path
 
@@ -15,7 +10,6 @@ from _repo import ROOT  # noqa: E402
 
 
 def test_copy_test_tree_copies_every_test_module_below_the_root(tmp):
-    """Every tests/*.py lands under root/tests, byte for byte."""
     root = Path(tmp) / 'repository'
     copy_test_tree(root)
     sources = sorted((ROOT / 'tests').glob('*.py'))
@@ -29,9 +23,11 @@ def test_copy_test_tree_copies_every_test_module_below_the_root(tmp):
 
 
 def test_copy_test_tree_refuses_a_root_inside_the_checkout(tmp):
-    """The checkout, a directory below it, and a link to it are refused."""
     link = Path(tmp) / 'checkout-link'
-    link.symlink_to(ROOT, target_is_directory=True)
+    try:
+        link.symlink_to(ROOT, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        _util.skip('this platform cannot create directory symlinks')
     for root in (ROOT, ROOT / '.probe', link):
         try:
             copy_test_tree(root)

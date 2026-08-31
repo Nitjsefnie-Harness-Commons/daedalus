@@ -474,6 +474,18 @@ def test_a_launcher_bound_through_an_unfollowable_form_is_refused(tmp):
             violations)
     finally:
         target.write_bytes(original)
+    original = _with_planted_launch(
+        target,
+        "launcher, other = \\\n"
+        "    subprocess, None\n")
+    try:
+        violations = _coverage_environment_violations(
+            root)
+        assert (f'tests/test_diff_coverage.py:{first}: a launcher is bound '
+                'through a form the guard cannot follow') in violations, (
+            violations)
+    finally:
+        target.write_bytes(original)
     for binding in ('for launcher in (subprocess,):\n    pass',
                     'launcher, other = subprocess, None',
                     'with hold(subprocess) as launcher:\n    pass',
@@ -577,6 +589,36 @@ subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
     assert violations == [
         'tests/synthetic.py:4: subprocess.run cwd=_util.ROOT declares no '
         'env='], violations
+
+
+def test_a_positional_cwd_on_a_recognised_launcher_is_judged(tmp):
+    """A launcher's working directory arrives by position too."""
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
+    first = _declaration_line(_module_text(target))
+    plant = ("subprocess.Popen(['python3', 'child.py'], 0, None, None,\n"
+             "                  None, None, None, False, False, tmp)\n")
+    original = _with_planted_launch(target, plant)
+    try:
+        violations = _coverage_environment_violations(root)
+        assert (f'tests/test_diff_coverage.py:{first}: subprocess.Popen '
+                'cwd=tmp at position 10 declares no env='
+                ) in violations, violations
+    finally:
+        target.write_bytes(original)
+    restored = _coverage_environment_violations(root)
+    assert not any(v.startswith(f'tests/test_diff_coverage.py:{first}:')
+                   for v in restored), restored
+    assert _synthetic_violations(
+        "import subprocess\n"
+        "from _util import child_coverage\n"
+        "subprocess.Popen(['python3'], 0, None, None, None, None, None,\n"
+        "                 False, False, tmp, env=child_coverage('scrub'))\n"
+    ) == []
+    assert _synthetic_violations(
+        "import subprocess\n"
+        "subprocess.Popen(['python3'], 0, None, None, None, None, None,\n"
+        "                 False, False, ROOT)\n") == []
 
 
 def test_an_alias_of_the_os_module_still_moves_the_cwd(tmp):
