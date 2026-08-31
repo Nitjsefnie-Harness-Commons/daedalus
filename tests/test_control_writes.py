@@ -261,5 +261,81 @@ def test_resolves_only_control_owned_paths(tmp):
     ]
 
 
+def test_a_module_level_call_site_seeds_the_helper(tmp):
+    """A helper called from module scope is met like one called from a test."""
+    source = Path(tmp) / 'module-caller.py'
+    source.write_text(
+        "from _owned_writes import copy_test_tree\n"
+        "def _copy(tmp):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    copy_test_tree(root)\n"
+        "    return root\n"
+        "def test_control(tmp):\n"
+        "    _copy(tmp)\n"
+        "_copy(ROOT)\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'module-caller.py:4: copy_test_tree target path is not control-owned'
+    ]
+
+
+def test_a_computed_namespace_key_retires_every_name(tmp):
+    """A namespace written through a computed key proves nothing after."""
+    source = Path(tmp) / 'namespace-key.py'
+    source.write_text(
+        "def _copy(tmp):\n"
+        "    return Path(tmp)\n"
+        "def test_control(tmp):\n"
+        "    globals()[tmp] = 1\n"
+        "    _copy(tmp).write_text('planted')\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'namespace-key.py:2: Path callable is unresolved',
+        'namespace-key.py:4: globals callable is unresolved',
+        'namespace-key.py:5: _copy callable is unresolved',
+        'namespace-key.py:5: write_text target path is not control-owned',
+    ]
+
+
+def test_a_starred_signature_or_extra_argument_seeds_nothing(tmp):
+    """A helper the call shape cannot map onto its parameters is unseeded."""
+    source = Path(tmp) / 'call-shape.py'
+    source.write_text(
+        "def _star(root, *rest):\n"
+        "    Path(root).write_text('planted')\n"
+        "def _options(root, **options):\n"
+        "    Path(root).write_text('planted')\n"
+        "def _plain(root):\n"
+        "    Path(root).write_text('planted')\n"
+        "def test_control(tmp):\n"
+        "    _star(tmp, ROOT)\n"
+        "    _options(tmp)\n"
+        "    _plain(tmp, ROOT)\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'call-shape.py:2: write_text target path is not control-owned',
+        'call-shape.py:4: write_text target path is not control-owned',
+        'call-shape.py:6: write_text target path is not control-owned',
+    ]
+
+
+def test_a_helper_in_a_call_cycle_is_judged_unseeded(tmp):
+    """A partial seeding is not a seeding: a cycle owns nothing."""
+    source = Path(tmp) / 'cycle.py'
+    source.write_text(
+        "def _a(root):\n"
+        "    _b(root)\n"
+        "    Path(root).write_text('planted')\n"
+        "def _b(root):\n"
+        "    _a(root)\n"
+        "def test_control(tmp):\n"
+        "    _a(tmp)\n"
+        "_b(ROOT)\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'cycle.py:3: write_text target path is not control-owned'
+    ]
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
