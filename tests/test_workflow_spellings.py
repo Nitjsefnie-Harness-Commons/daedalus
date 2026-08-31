@@ -339,6 +339,22 @@ def test_a_bracket_in_ordinary_content_ends_no_job_field(tmp):
         assert _job_output_step_ids(workflow, 'changes') == {'classify'}
 
 
+def test_a_continuation_left_of_its_key_is_the_slice_boundary(tmp):
+    """Both oracles read these; the readers refuse them, and that is stated.
+
+    A field is sliced out by indentation before its brackets are read, so a
+    continuation indented no further than its key lands outside the slice.
+    The policy docstring in scripts/ci/yamlscalar.py records this as the one
+    boundary whose message does not carry the word `unsupported`.
+    """
+    for spelling in ('    needs: [changes,\n  pylint]\n',
+                     '    needs: [changes,\npylint]\n'):
+        workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
+        assert _refuses(_job_needs, workflow, 'suites'), spelling
+        assert 'unsupported mapping field' in _refuses(
+            complete_job_mapping, workflow, 'suites'), spelling
+
+
 def test_flow_outputs_mapping_reads_like_the_block_mapping(tmp):
     """A flow mapping carries the same outputs as the block mapping."""
     block = _job_output_mapping(_tests_yml(), 'changes')
