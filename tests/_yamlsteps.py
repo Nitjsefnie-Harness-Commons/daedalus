@@ -6,6 +6,7 @@ import _yamlread as _reader
 from _yamlscalar import (
     YAMLReadError,
     _strip_inline_comment,
+    check_plain_scalar,
     decode_inline_scalar,
     flow_depth,
     split_flow_collection,
@@ -391,10 +392,6 @@ def _decode_complete_inline(raw_value, owner):
         return _decode_flow_collection(*flow, owner)
     if value.startswith(("'", '"')):
         return decode_inline_scalar(value, owner)
-    if not value or value.startswith(('&', '*', '!', '@', '`')):
+    if not value:
         raise YAMLReadError(f'{owner} has an unsupported plain scalar')
-    if ': ' in value or '\t' in value or any(
-            ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
-            for char in value):
-        raise YAMLReadError(f'{owner} has an unsupported plain scalar')
-    return value
+    return check_plain_scalar(value, owner)
