@@ -271,6 +271,7 @@
 !/tests/test_bridge_tabs.py
 !/tests/test_bridge_uploads.py
 !/tests/test_change_classifier.py
+!/tests/test_change_classifier_callers.py
 !/tests/test_checkout_pin.py
 !/tests/test_child_coverage.py
 !/tests/test_ci_ratchets.py
