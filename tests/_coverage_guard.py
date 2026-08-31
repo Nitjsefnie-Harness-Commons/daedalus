@@ -14,10 +14,10 @@ way but a plain attribute read stops proving ROOT; and `chdir` or
 `fchdir` on any base or through a from-import alias moves the cwd
 launches inherit.
 
-Outside it: a launcher or owner reached only by a string (`importlib`,
-`sys.modules[...]`), an unreadable `**` spread on an unrecognised
-callee, and a launcher alias bound by a call result, default argument
-or match capture.
+Outside it: a launcher, owner or chdir reached only by a string
+(`getattr(os, 'chdir')`), a call result, an unreadable `**` spread on
+an unrecognised callee, or a launcher alias bound by a call result,
+default argument or match capture.
 """
 import ast
 
@@ -85,7 +85,7 @@ class _ModuleFacts:
                     if (node.module == '_util'
                             and alias.name == _DECLARATION):
                         self.declaration_functions.add(bound)
-                    if node.module == 'os' and alias.name in _CHDIR:
+                    if alias.name in _CHDIR:
                         self.chdir_callables.add(bound)
         self._propagate_aliases(tree)
         for node in ast.walk(tree):
@@ -122,7 +122,8 @@ class _ModuleFacts:
             (self.subprocess_modules,
              lambda value: _names_one_of(value, self.subprocess_modules)),
             (self.chdir_callables,
-             lambda value: _names_one_of(value, self.chdir_callables)),
+             lambda value: _names_one_of(value, self.chdir_callables)
+             or isinstance(value, ast.Attribute) and value.attr in _CHDIR),
         )
         changed = True
         while changed:

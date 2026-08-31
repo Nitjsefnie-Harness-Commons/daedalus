@@ -607,7 +607,13 @@ def test_every_spelling_of_a_cwd_change_taints_an_inherited_cwd(tmp):
     del tmp
     for mover in ('import contextlib\nwith contextlib.chdir(tmp):\n    pass',
                   'import os\nos.fchdir(handle)',
-                  'from os import chdir as move\nmover = move\nmover(tmp)'):
+                  'from os import chdir as move\nmover = move\nmover(tmp)',
+                  'from contextlib import chdir\nwith chdir(tmp):\n    pass',
+                  'import os\nmover = os.chdir\nmover(tmp)',
+                  'import os\nmover: object = os.chdir\nmover(tmp)',
+                  'import contextlib\n'
+                  'mover = contextlib.chdir\n'
+                  'with mover(tmp):\n    pass'):
         violations = _synthetic_violations(
             f"""import subprocess
 {mover}
