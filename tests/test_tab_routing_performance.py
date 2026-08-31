@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Bound state growth from state-neutral short-circuit expressions."""
+"""Pin routing state identity semantics and growth."""
 import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _pyroute  # noqa: E402
 import _util  # noqa: E402
-from _pyroute import py_tab_routing_violations  # noqa: E402
 
 
 def _scanner_copies(tmp, width):
@@ -29,10 +29,47 @@ def _scanner_copies(tmp, width):
 
     _pyroute._copy_state_pair = counted_copy
     try:
-        assert not py_tab_routing_violations(source, source.name)
+        assert not _pyroute.py_tab_routing_violations(source, source.name)
     finally:
         _pyroute._copy_state_pair = original
     return copies
+
+
+def test_evaluated_alias_state_matches_runtime(tmp):
+    source = Path(tmp) / 'evaluated_alias.py'
+    source.write_text(
+        'from fake_route import ext_cmd\n\n'
+        'def ordinary(*args, **kwargs):\n'
+        "    return ('ordinary', args, kwargs)\n\n"
+        'def go(args):\n'
+        '    send = ext_cmd\n'
+        '    if not args.flag:\n'
+        '        send = ordinary\n'
+        '    other, send = send, (send := ordinary)\n'
+        "    return other('_focus', 'focus-tab', "
+        'tab=int(args.chrome_tab))\n',
+        encoding='utf-8')
+    calls = []
+
+    def ext_cmd(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    sender = ModuleType('fake_route')
+    sender.ext_cmd = ext_cmd
+    sys.modules['fake_route'] = sender
+    namespace = {}
+    try:
+        # pylint: disable-next=exec-used
+        exec(compile(source.read_text(encoding='utf-8'), source, 'exec'),
+             namespace)
+        namespace['go'](SimpleNamespace(flag=True, chrome_tab=17))
+    finally:
+        sys.modules.pop('fake_route', None)
+    violations = _pyroute.py_tab_routing_violations(source, source.name)
+    assert calls == [(('_focus', 'focus-tab'), {'tab': 17})], calls
+    assert violations == [
+        f'{source.name}:11: ext_cmd keyword `tab`'], violations
+    assert len(violations) == len(calls)
 
 
 def test_state_neutral_short_circuits_scale_linearly(tmp):
