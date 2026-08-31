@@ -303,6 +303,20 @@ def render(lines, base_label, shared, pairs, movements, limit=10):
     lines.append('|---|---:|---:|---:|')
     for name, was, now, delta in movements[:limit]:
         lines.append(f'| `{name}` | {was:.2f}s | {now:.2f}s | {delta:+.2f}s |')
+    head_total = sum(now for _name, _was, now, _delta in movements)
+    lines.append('')
+    lines.append('Longest-running tests (head median, covered-set share):')
+    lines.append('')
+    lines.append(
+        'Shares are of the covered-set head-median total used by the '
+        'paired ratio.')
+    lines.append('')
+    lines.append('| test | head median | share of covered set |')
+    lines.append('|---|---:|---:|')
+    for name, _was, now, _delta in sorted(
+            movements, key=lambda row: row[2], reverse=True)[:limit]:
+        share = now / head_total if head_total else 0.0
+        lines.append(f'| `{name}` | {now:.2f}s | {share:.3f} |')
     return ratio
 
 
