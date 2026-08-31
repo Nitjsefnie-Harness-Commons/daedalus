@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from _pyroute_values import (CellState, DeferredGenerator,
                              cell_state_signature, is_deferred_value,
-                             merge_cell_states, sync_cells)
+                             merge_cell_states, sender_value, sync_cells)
 
 OPAQUE_TAB_SPREAD = object()
 UNPROVABLE_SENDER = '?ext_cmd'
@@ -420,11 +420,11 @@ def bind_alias_target(target, value, state, bindings):
             bindings[1][target.id] = resolved
         elif is_deferred_value(resolved):
             bindings[2][target.id] = resolved
-            sender = resolve_sender_name(value, state.aliases)
-            if sender is not None:
-                bindings[0][target.id] = sender
+            sender = (resolve_sender_name(value, state.aliases)
+                      or sender_value(resolved))
+            if sender is not None: bindings[0][target.id] = sender
         elif resolved is not None:
-            bindings[0][target.id] = resolved
+            bindings[0][target.id] = sender_value(resolved) or resolved
         return
     if not isinstance(target, (ast.Tuple, ast.List)):
         return

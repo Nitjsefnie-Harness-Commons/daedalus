@@ -51,8 +51,7 @@ class DeferredGenerator:
     closure: CellState = field(default=None, compare=False, repr=False)
 
     def __post_init__(self):
-        if self.state is not None:
-            _register_closure(self)
+        if self.state is not None: _register_closure(self)
 
 
 @dataclass(frozen=True)
@@ -165,8 +164,8 @@ def _apply_binding(state, name, key, binding):
 def sync_cells(state, names):
     for name in names:
         key = state.cells.origins.get(name)
-        if key is not None:
-            state.cells.values[key] = _binding_from_state(state, name)
+        if key is not None: state.cells.values[key] = _binding_from_state(
+            state, name)
 
 
 def load_callable_cells(deferred, caller, entry):
@@ -252,8 +251,7 @@ def generator_for(expr, state):
 
 
 def generator_nonempty(generator, literal_nonempty):
-    if generator.remaining is not None:
-        return generator.remaining > 0
+    if generator.remaining is not None: return generator.remaining > 0
     expression = generator.expression
     states = [literal_nonempty(clause.iter)
               for clause in expression.generators]
@@ -292,21 +290,28 @@ def merge_deferred_values(values):
             if is_deferred_value(item) and all(
                     item is not found for found in merged):
                 merged.append(item)
-    if not merged:
-        return None
+    if not merged: return None
     return merged[0] if len(merged) == 1 else DeferredAlternatives(
         tuple(merged))
 
 
 def sender_value(value):
-    return value if value in ('ext_cmd', '_ext_cmd', '?ext_cmd') else None
+    if value in ('ext_cmd', '_ext_cmd', '?ext_cmd'): return value
+    if isinstance(value, DeferredAlternatives):
+        return next(filter(None, map(sender_value, value.values)), None)
+    return None
 
 
 def merge_yielded(values):
     values = list(values)
     deferred = merge_deferred_values(values)
-    return deferred if deferred is not None else next(
-        (value for value in values if sender_value(value) is not None), None)
+    sender = next(filter(None, map(sender_value, values)), None)
+    sender = '?ext_cmd' if sender and values.count(sender) > 1 else sender
+    if deferred is None or sender is None: return sender or deferred
+    alternatives = (deferred.values if isinstance(deferred,
+                    DeferredAlternatives) else (deferred,))
+    return (deferred if sender in alternatives else
+            DeferredAlternatives((*alternatives, sender)))
 
 
 def callable_candidates(value):
@@ -362,13 +367,11 @@ def _known_value(node, state):
 
 
 def deferred_expression_value(node, state, lambda_factory):
-    if node is None:
-        return None
+    if node is None: return None
     if isinstance(node, ast.Lambda):
         return lambda_factory(node, state)
     value = _known_value(node, state)
-    if value is not None:
-        return value
+    if value is not None: return value
     if isinstance(node, ast.Constant):
         return node.value
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
@@ -422,6 +425,8 @@ def bind_deferred_target(target, value, state):
             state.generators[target.id] = value
         elif is_deferred_value(value):
             state.callables[target.id] = value
+        sender = sender_value(value)
+        if sender is not None: state.aliases[target.id] = sender
     elif isinstance(target, (ast.Tuple, ast.List)) \
             and isinstance(value, DeferredContainer):
         for index, nested in enumerate(target.elts):
@@ -435,23 +440,21 @@ def bind_deferred_states(target, value, states):
 
 
 def append_deferred(values, value):
-    if value is not None:
-        values.append(value)
+    if value is not None: values.append(value)
 
 
 def consumer_results(consumer, arguments, states):
     if consumer != 'iter' or not arguments:
         return []
-    value = merge_deferred_values(
+    value = merge_yielded(
         _known_value(arguments[0], state) for state in states)
     return [value] if value is not None else []
 
 
 def materialize_deferred(consumer, value):
-    if value is None:
-        return None
+    if value is None: return None
     if isinstance(value, DeferredAlternatives):
-        return merge_deferred_values(
+        return merge_yielded(
             materialize_deferred(consumer, item) for item in value.values)
     if consumer in ('max', 'min'):
         return value
@@ -462,7 +465,7 @@ def materialize_deferred(consumer, value):
             return None
         key = value.items.get(0)
         item = value.items.get(1)
-        if not is_deferred_value(item):
+        if not (is_deferred_value(item) or sender_value(item) is not None):
             return None
         try:
             hash(key)
@@ -475,12 +478,12 @@ def materialize_deferred(consumer, value):
 
 def iterable_deferred(value):
     if isinstance(value, DeferredAlternatives):
-        return merge_deferred_values(
+        return merge_yielded(
             iterable_deferred(item) for item in value.values)
     if isinstance(value, DeferredContainer):
         if value.kind == 'dict':
-            return merge_deferred_values(value.items.keys())
-        return merge_deferred_values(value.items.values())
+            return merge_yielded(value.items.keys())
+        return merge_yielded(value.items.values())
     return None
 
 
@@ -511,7 +514,7 @@ def _display_value(node, state):
                         items[index + nested_index] = nested
                 index += value.length or 0
             else:
-                return merge_deferred_values(items.values())
+                return merge_yielded(items.values())
         else:
             if value is not None:
                 items[index] = value
@@ -535,8 +538,7 @@ def _dict_value(node, state):
 def expression_value(node, state, generator_factory, sender_resolver,
                      unprovable_sender):
     known = _known_value(node, state)
-    if known is not None:
-        return known
+    if known is not None: return known
     if isinstance(node, ast.GeneratorExp):
         return generator_factory(node)
     if isinstance(node, ast.Name) and node.id in state.generators:
@@ -548,9 +550,9 @@ def expression_value(node, state, generator_factory, sender_resolver,
         if value is not None:
             return value
     if isinstance(node, (ast.IfExp, ast.BoolOp)):
-        value = merge_deferred_values(
-            state.evaluated.get(id(child))
-            for child in ast.iter_child_nodes(node))
+        value = merge_yielded((sender_resolver(node, state.aliases),
+                               *(state.evaluated.get(id(child))
+                                 for child in ast.iter_child_nodes(node))))
         if value is not None:
             return value
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
@@ -573,12 +575,12 @@ def expression_value(node, state, generator_factory, sender_resolver,
         owner = _known_value(node.value, state)
         key = (node.slice.value
                if isinstance(node.slice, ast.Constant) else None)
-        value = merge_deferred_values(_selected_values(owner, key))
+        value = merge_yielded(_selected_values(owner, key))
         if value is not None:
             return value
     if isinstance(node, ast.Attribute):
         owner = _known_value(node.value, state)
-        value = merge_deferred_values(
+        value = merge_yielded(
             _selected_values(owner, node.attr, attribute=True))
         if value is not None:
             return value
@@ -605,7 +607,7 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
             invoked.extend(branch)
             if value is not None:
                 returned.append(value)
-        return dedupe_states(invoked), merge_deferred_values(returned)
+        return dedupe_states(invoked), merge_yielded(returned)
     callbacks = {id(candidate): candidate
                  for argument in arguments for state in states
                  for candidate in expression_callables(argument, state)}
