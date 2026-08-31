@@ -435,6 +435,57 @@ def test_deferred_storage_invalidation_matches_runtime(tmp):
     _assert_export_cases(tmp, cases)
 
 
+def test_deferred_storage_aliases_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    module_call = (
+        "send('_focus', 'focus-tab', tab=int(_args.chrome_tab))")
+    list_body = f'send = ext_cmd\nreturn [lambda: {call}]'
+    holder_body = (
+        f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+        f'holder.fn = lambda: {call}\nreturn holder')
+    cases = [
+        ('list-alias-inserted', 'return [ordinary]', '',
+         'box = do_focus_tab(_args)\nalias = box\nsend = ext_cmd\n'
+         f'alias[0] = lambda: {module_call}\ndel alias', 'box[0]()', True),
+        ('list-alias-overwritten', list_body, '',
+         'box = do_focus_tab(_args)\nalias = box\nalias[0] = ordinary',
+         'box[0]()', False),
+        ('list-alias-deleted', list_body, '',
+         'box = do_focus_tab(_args)\nalias = box\ndel alias[0]', '', False),
+        ('attribute-alias-inserted', 'class Holder: pass\nreturn Holder()',
+         '', 'holder = do_focus_tab(_args)\nalias = holder\nsend = ext_cmd\n'
+         f'alias.fn = lambda: {module_call}\ndel alias', 'holder.fn()', True),
+        ('attribute-alias-overwritten', holder_body, '',
+         'holder = do_focus_tab(_args)\nalias = holder\nalias.fn = ordinary',
+         'holder.fn()', False),
+        ('attribute-alias-deleted', holder_body, '',
+         'holder = do_focus_tab(_args)\nalias = holder\ndel alias.fn',
+         '', False),
+        ('alias-name-rebound', list_body, '',
+         'box = do_focus_tab(_args)\nalias = box\nalias = [ordinary]',
+         'box[0]()', True),
+        ('closure-alias-cleared',
+         f'send = ext_cmd\nbox = [lambda: {call}]\nalias = box\n'
+         'def clear():\n    alias[0] = ordinary\nreturn box, clear', '',
+         'pair = do_focus_tab(_args)', 'pair[1](); pair[0][0]()', False),
+        ('closure-alias-inserted',
+         f'send = ext_cmd\nbox = [ordinary]\nalias = box\n'
+         f'def insert():\n    alias[0] = lambda: {call}\nreturn box, insert',
+         '', 'pair = do_focus_tab(_args)', 'pair[1](); pair[0][0]()', True),
+        ('cell-alias-cleared',
+         f'send = ext_cmd\nbox = [lambda: {call}]\nwriter = box\n'
+         'reader = box\ndef clear():\n    writer[0] = ordinary\n'
+         'def invoke():\n    reader[0]()\nreturn clear, invoke', '',
+         'pair = do_focus_tab(_args)', 'pair[0](); pair[1]()', False),
+        ('cell-alias-inserted',
+         f'send = ext_cmd\nbox = [ordinary]\nwriter = box\nreader = box\n'
+         f'def insert():\n    writer[0] = lambda: {call}\n'
+         'def invoke():\n    reader[0]()\nreturn insert, invoke', '',
+         'pair = do_focus_tab(_args)', 'pair[0](); pair[1]()', True),
+    ]
+    _assert_export_cases(tmp, cases)
+
+
 def test_generator_materializer_shape_matches_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     prefix = (f'send = ext_cmd\ncallback = lambda: {call}\n'
