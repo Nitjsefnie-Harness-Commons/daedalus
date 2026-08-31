@@ -20,6 +20,7 @@ from _cmdqueue_faults import (  # noqa: E402
 
 
 _CAPTURED_READ_TEXT = Path.read_text
+_CAPTURED_OPEN = Path.open
 
 
 def test_captured_read_text_reference_still_hits_a_read_refusal(tmp):
@@ -34,6 +35,39 @@ def test_captured_read_text_reference_still_hits_a_read_refusal(tmp):
                 failure = None
         assert failure is PermissionError, (operation, failure)
         assert calls == [1], (operation, calls)
+
+
+def test_captured_path_open_reference_hits_each_read_injector(tmp):
+    queue, queued = _queued_file(tmp)
+    injectors = (
+        ('generic refusal', _refuse_path_operation,
+         (queued, 'open', 1), PermissionError),
+        ('first-read', _refuse_first_queue_read,
+         (queue,), PermissionError),
+        ('disappearance', _disappear_on_first_open,
+         (queued,), FileNotFoundError),
+        ('vanish', _vanish_during_read, (queued,), FileNotFoundError))
+
+    def captured_read():
+        try:
+            with _CAPTURED_OPEN(
+                    queued, mode='r', encoding='utf-8') as opened:
+                opened.read()
+        except OSError as caught:
+            return type(caught)
+        return None
+
+    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+        for label, injector, injector_args, expected in injectors:
+            if not queued.exists():
+                queued.write_text(
+                    json.dumps({'id': 'queued', 'type': 'reload'}),
+                    encoding='utf-8')
+            if injector is _vanish_during_read:
+                injector_args = (queued, clock)
+            with injector(*injector_args):
+                failure = captured_read()
+            assert failure is expected, (label, failure, expected)
 
 
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
