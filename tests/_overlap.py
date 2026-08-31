@@ -560,7 +560,11 @@ def _client_failure_diagnostics(bridge_log, docroot):
     root = Path(docroot) / 'results' / 'deliveries'
     lines = []
     for path in sorted(root.rglob('*.json')):
-        record = json.loads(path.read_text(encoding='utf-8'))
+        try:
+            record = json.loads(path.read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            # A client's consume deleted it after listing: retained, not lost.
+            continue
         relative = path.relative_to(root).as_posix()
         lines.append(
             f"{relative}: deliveryId {record['deliveryId']}")
@@ -569,8 +573,13 @@ def _client_failure_diagnostics(bridge_log, docroot):
 
 
 def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
-                               token, background):
-    """Drive real same-id CLI clients and preserve both failure surfaces."""
+                               token, background, *,
+                               stop_clients_after_enqueue=False):
+    """Drive real same-id CLI clients and preserve both failure surfaces.
+
+    With `stop_clients_after_enqueue` the clients are stopped once their
+    commands are queued, so a manufactured diagnosis cannot race a consume.
+    """
     owners = ('owner-a', 'owner-b')
     bridge_env = {'TOKEN': '', 'DAEDALUS_TOKEN': token}
     bridge_log = []
@@ -594,6 +603,13 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
             by_owner = {command['domain']: command for command in queued}
             assert set(by_owner) == set(owners), by_owner
             commands = [by_owner[owner] for owner in owners]
+            if stop_clients_after_enqueue:
+                for process in processes.values():
+                    process.kill()
+                    process.communicate()
+                alive = [owner for owner, process in processes.items()
+                         if process.poll() is None]
+                assert not alive, f'clients survived their stop: {alive}'
             try:
                 posted = run_background_overlap(
                     background, commands, completion_order,
