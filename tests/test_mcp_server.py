@@ -189,6 +189,21 @@ def _bridge_with_live_mcp(tmp, env):
         yield base, port
 
 
+@contextlib.contextmanager
+def _surface_responder_errors(thread, errors, timeout, stop=None):
+    """Join a responder and prefer its original failure to the main one."""
+    try:
+        yield
+    finally:
+        if stop is not None:
+            stop.set()
+        thread.join(timeout=timeout)
+        failure = next((item for item in errors
+                        if isinstance(item, Exception)), None)
+        if failure is not None:
+            raise failure from None
+
+
 def _mcp_request(port, body, authorizations=None, session_ids=None,
                  hosts=None, origins=None):
     """Send one MCP request while preserving repeated physical headers."""
@@ -846,7 +861,7 @@ def test_live_mcp_has_no_server_path_authority(tmp):
 
         simulator = threading.Thread(target=extension_simulator)
         simulator.start()
-        try:
+        with _surface_responder_errors(simulator, simulator_errors, 20, stop):
             replies = [
                 _call_mcp_tool(
                     port, session_id, f'path-{index}', 'store_hotfix',
@@ -862,13 +877,6 @@ def test_live_mcp_has_no_server_path_authority(tmp):
                 session_ids=(session_id,))
             assert status == 200, (status, raw)
             schemas = _mcp_payload(raw)['result']['tools']
-        except Exception as caught:
-            simulator.join(timeout=20)
-            raise next((error for error in simulator_errors
-                        if isinstance(error, Exception)), caught) from None
-        finally:
-            stop.set()
-            simulator.join(timeout=5)
 
         path_tools = {'put': 'code', 'inject_css': 'css',
                       'remove_css': 'css', 'store_hotfix': 'code'}
@@ -944,13 +952,8 @@ def test_ping_tool_round_trip(tmp):
         for world in ('cdp', 'page:scripting'):
             t = threading.Thread(target=extension, args=(world,))
             t.start()
-            try:
+            with _surface_responder_errors(t, failure, 20):
                 res = asyncio.run(mod.ping())
-            except Exception as caught:
-                t.join(timeout=20)
-                raise failure[0] if failure else caught
-            finally:
-                t.join(timeout=20)
             assert res['title'] == 'MCP Title', res
             assert res['world'] == world, res
             assert isinstance(res['ms'], int) and res['ms'] >= 0, res
@@ -1093,14 +1096,8 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
 
         responder = threading.Thread(target=extension, daemon=True)
         responder.start()
-        try:
+        with _surface_responder_errors(responder, failure, 30):
             answer = asyncio.run(mod.screenshot(include_image=True, timeout=25))
-        except Exception as caught:
-            responder.join(timeout=30)
-            raise failure[0] if failure else caught
-        finally:
-            responder.join(timeout=30)
-        assert not failure, failure
         meta, image = answer
         assert meta == {'path': f'{TOK}/_ss/mine.png',
                         'size': len(b'this-invocation')}, meta
