@@ -625,6 +625,7 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver):
     expressions.extend((by_name[keyword.arg], keyword.value)
                        for keyword in call.keywords
                        if keyword.arg in by_name)
+    literals = []
     for parameter, expression in expressions:
         name = parameter.arg
         value = _known_value(expression, caller)
@@ -633,6 +634,14 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver):
         sender = sender_resolver(expression, caller.aliases)
         if sender is not None:
             entry.aliases[name] = sender
+        if isinstance(expression, ast.Constant):
+            literals.append((name, bool(expression.value)))
+    if literals:
+        assigned = {node.id for node in ast.walk(deferred.scope)
+                    if isinstance(node, ast.Name) and isinstance(
+                        node.ctx, (ast.Store, ast.Del))}
+        literals = [item for item in literals if item[0] not in assigned]
+    return tuple(literals)
 
 
 def store_deferred_value(statement, state):
