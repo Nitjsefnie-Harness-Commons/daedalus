@@ -19,7 +19,9 @@ const chromeTab = 41;
 
 def _runtime_and_guard(source, path):
     script = (_RUNTIME_PREFIX + source
-              + "\nprocess.stdout.write(calls.length ? '1' : '0');\n")
+              + "\nconst routed = calls.some(args => args.some(\n"
+              + "  value => value && value.tab === chromeTab));\n"
+              + "process.stdout.write(routed ? '1' : '0');\n")
     path.write_text(script, encoding='utf-8')
     node = shutil.which('node')
     assert node, 'node is required to execute JavaScript routing controls'
@@ -90,6 +92,14 @@ def test_sender_alias_scopes_match_runtime(tmp):
         ('uninvoked-demotion', "let send = extCmd;\n"
          "function demote() { send = ordinary; }\n"
          "send('focus-tab', { tab: chromeTab });\n", True),
+        ('same-name-callable-shadow', "let promote = ordinary;\n"
+         "let send = ordinary;\n{ const promote = () => {\n"
+         "  send = extCmd;\n}; }\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('same-name-helper-shadow',
+         "const fields = () => ({ tab: chromeTab });\n"
+         "{ function fields() { return {}; } }\n"
+         "extCmd('focus-tab', fields());\n", True),
         ('conditional', "let send = extCmd;\nconst flag = false;\n"
          "if (flag) send = ordinary;\n"
          "send('focus-tab', { tab: chromeTab });\n", True),
