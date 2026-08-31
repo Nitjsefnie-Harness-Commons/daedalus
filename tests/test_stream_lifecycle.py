@@ -470,6 +470,7 @@ def test_an_invalid_mcp_setting_stops_the_bridge_naming_it(tmp):
                 f'output={output!r}')
     assert not failures, '\n'.join(failures)
 
+
 def test_non_finite_command_ttl_cannot_disable_the_collector(tmp):
     """The real collector must not run with a non-finite expiry bound."""
     failures = []
