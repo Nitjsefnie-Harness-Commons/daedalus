@@ -14,7 +14,7 @@ import coverage
 import coverage.data
 
 
-def main():
+def main(data_paths=()):
     # Reference the real method first: if coverage.py ever renames or
     # removes DataFileClassifier.classify, this line raises AttributeError
     # -- the bare assignment below would otherwise create an unused
@@ -25,10 +25,10 @@ def main():
         lambda f: "combine")
 
     cov = coverage.Coverage()
-    cov.combine(strict=True, keep=False)
+    cov.combine(data_paths=data_paths or None, strict=True, keep=False)
     cov.save()
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

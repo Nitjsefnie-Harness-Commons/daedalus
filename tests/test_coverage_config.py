@@ -130,6 +130,13 @@ def test_wrapped_forbidden_row_cannot_satisfy_negative_control(tmp):
         globals()['_coverage_report'] = original_report
 
 
+def test_github_runner_checkout_roots_are_path_aliases(tmp):
+    """Per-OS artifacts must resolve back to this checkout when combined."""
+    del tmp
+    config = _RCFILE.read_text(encoding='utf-8')
+    assert '"*/daedalus/daedalus"' in config
+
+
 def test_whitespace_only_report_lines_are_ignored(tmp):
     del tmp
     report = (
