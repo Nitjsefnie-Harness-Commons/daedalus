@@ -5,12 +5,19 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 A Python child inheriting COVERAGE_* into a working directory that
 [tool.coverage.paths] does not map back onto the repository records
 paths that vanish with the temporary tree, and `coverage combine` later
-fails with `No source for code`. A launch proves its working directory
-safe or declares. A recognised launcher is judged on every call; any
-other callee only when the call spells a working directory the guard
-can read: a `cwd=` keyword, or a `**` spread of a mapping literal that
-names `cwd`. A spread it cannot read is not judged — that boundary is
-where to look first when this guard passes something it should not.
+fails with `No source for code`. The guard fails closed: a recognised
+launcher proves its working directory safe or declares on every call;
+any other callee does so when it spells one readably (`cwd=` or a `**`
+spread of a mapping literal naming `cwd`); a launcher bound where the
+alias walk cannot follow is refused there; a root owner reached any
+way but a plain attribute read stops proving ROOT; and `chdir` or
+`fchdir` on any base or through a from-import alias moves the cwd
+launches inherit.
+
+Outside it: a launcher or owner reached only by a string (`importlib`,
+`sys.modules[...]`), an unreadable `**` spread on an unrecognised
+callee, and a launcher alias bound by a call result, default argument
+or match capture.
 """
 import ast
 
@@ -23,6 +30,7 @@ _LAUNCHERS = frozenset(
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
+_CHDIR = frozenset({'chdir', 'fchdir'})
 # Keep launches as module::function, so an edit above a site does not
 # churn the list; each tree sits under the `*/tree` anchor that
 # [tool.coverage.paths] maps back onto the repository (pyproject.toml).
@@ -77,17 +85,14 @@ class _ModuleFacts:
                     if (node.module == '_util'
                             and alias.name == _DECLARATION):
                         self.declaration_functions.add(bound)
-                    if node.module == 'os' and alias.name == 'chdir':
+                    if node.module == 'os' and alias.name in _CHDIR:
                         self.chdir_callables.add(bound)
         self._propagate_aliases(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 function = node.func
-                is_chdir = (
-                    isinstance(function, ast.Attribute)
-                    and function.attr == 'chdir'
-                    and isinstance(function.value, ast.Name)
-                    and function.value.id == 'os')
+                is_chdir = (isinstance(function, ast.Attribute)
+                            and function.attr in _CHDIR)
                 is_chdir = (is_chdir
                             or isinstance(function, ast.Name)
                             and function.id in self.chdir_callables)
@@ -100,7 +105,7 @@ class _ModuleFacts:
         self._collect_bindings(tree.body)
 
     def _propagate_aliases(self, tree):
-        """Follow plain-name aliases of a launcher or _util to a fixpoint."""
+        """Follow plain-name aliases of a launcher, _util or chdir."""
         aliases = []
         for node in ast.walk(tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -116,6 +121,8 @@ class _ModuleFacts:
              lambda value: _names_one_of(value, self.declaration_modules)),
             (self.subprocess_modules,
              lambda value: _names_one_of(value, self.subprocess_modules)),
+            (self.chdir_callables,
+             lambda value: _names_one_of(value, self.chdir_callables)),
         )
         changed = True
         while changed:
