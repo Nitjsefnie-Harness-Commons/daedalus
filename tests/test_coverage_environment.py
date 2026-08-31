@@ -6,7 +6,6 @@ these tests pin each rule, the mutation-shaped regressions it exists to
 catch, and the behaviour of the _util.child_coverage declaration it
 reads.
 """
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _coverage_guard  # noqa: E402
 import _util  # noqa: E402
 from _control_writes import control_write_violations  # noqa: E402
+from _owned_writes import copy_test_tree  # noqa: E402
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
 from _repo import ROOT  # noqa: E402
@@ -28,10 +28,7 @@ def _module_text(target):
 def _real_module_copy(tmp, relative):
     """Copy the real test tree under a root this control owns."""
     root = Path(tmp) / 'repository'
-    for source in sorted((ROOT / 'tests').glob('*.py')):
-        destination = root / source.relative_to(ROOT)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+    copy_test_tree(root)
     return root, root / relative
 
 

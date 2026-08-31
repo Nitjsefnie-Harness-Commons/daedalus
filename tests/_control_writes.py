@@ -1,14 +1,14 @@
 """Fail-closed path ownership checks for mutation controls."""
 import ast
+from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
+
+from _control_calls import ModuleNames, argument, call_judgement
 
 _UNKNOWN_PATH = 0
 _RELATIVE_PATH = 1
 _CONTROL_OWNED_PATH = 2
-_UNRESOLVED_MODE = object()
 _MAX_PROOF_DEPTH = 2
-_READ_MODES = frozenset({'r', 'rb', 'rt'})
-_WRITE_MODES = frozenset({'w', 'a', 'x', 'wb', 'ab', 'xb'})
 _SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
            ast.ClassDef, ast.Lambda)
 
@@ -197,10 +197,11 @@ def _scope_local_names(scope):
     return names
 
 
-def _module_functions(tree):
+def _module_functions(tree, names):
     """The module-level functions a call in this file can resolve to."""
     return {node.name: node for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and names.is_unique_def(node.name)}
 
 
 def _returned_values(scope):
@@ -234,20 +235,10 @@ def _proved_call_kind(call, context, owned, trusted_names, mutated, depth):
     function = context.get(call.func.id)
     if function is None or call.func.id not in context:
         return _UNKNOWN_PATH
-    parameters = (function.args.posonlyargs + function.args.args
-                  + function.args.kwonlyargs)
-    if (function.args.vararg is not None or function.args.kwarg is not None
-            or len(call.args) > len(parameters)):
-        return _UNKNOWN_PATH
-    seeded = {}
-    for index, parameter in enumerate(parameters):
-        value = _argument(call, parameter.arg, index)
-        if value is None:
-            return _UNKNOWN_PATH
-        seeded[parameter.arg] = _path_kind(
-            value, owned, trusted_names, mutated, context, depth)
+    seeded = _seeded_parameters(call, function, owned, trusted_names,
+                                mutated, context, depth)
     values = _returned_values(function)
-    if not values:
+    if seeded is None or not values:
         return _UNKNOWN_PATH
     inner_owned, inner_mutated = _owned_path_names(
         function, context, seeded, depth + 1)
@@ -257,6 +248,24 @@ def _proved_call_kind(call, context, owned, trusted_names, mutated, depth):
            for value in values):
         return _CONTROL_OWNED_PATH
     return _UNKNOWN_PATH
+
+
+def _seeded_parameters(call, function, owned, trusted, mutated, context,
+                       depth):
+    """Kinds for the callee's parameters from this call's arguments."""
+    parameters = (function.args.posonlyargs + function.args.args
+                  + function.args.kwonlyargs)
+    if (function.args.vararg is not None or function.args.kwarg is not None
+            or len(call.args) > len(parameters)):
+        return None
+    seeded = {}
+    for index, parameter in enumerate(parameters):
+        value = argument(call, parameter.arg, index)
+        if value is None:
+            return None
+        seeded[parameter.arg] = _path_kind(
+            value, owned, trusted, mutated, context, depth)
+    return seeded
 
 
 def _mutated_container_names(scope):
@@ -343,90 +352,114 @@ def _owned_path_names(scope, functions=None, seeded=None, depth=0):
     return kinds, mutated
 
 
-def _argument(call, name, position):
-    """A call's argument by keyword, else by position, else None."""
-    for keyword in call.keywords:
-        if keyword.arg == name:
-            return keyword.value
-    return call.args[position] if len(call.args) > position else None
+def _call_violation(node, label, names, owned, trusted, mutated, context):
+    """The one message this call earns, or None when it is proved."""
+    problem, kind, target = call_judgement(node, label, names)
+    if problem is not None or kind is None:
+        return problem
+    if target is None:
+        return f'{label}:{node.lineno}: {kind} target is unresolved'
+    if _path_kind(target, owned, trusted, mutated, context) \
+            != _CONTROL_OWNED_PATH:
+        return (f'{label}:{node.lineno}: {kind} target path is not '
+                'control-owned')
+    return None
 
 
-def _write_mode(node, position):
-    mode = _argument(node, 'mode', position)
-    if mode is None:
-        return None
-    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
-        if mode.value in _WRITE_MODES:
-            return mode.value
-        if mode.value in _READ_MODES:
-            return None
-    return _UNRESOLVED_MODE
+def _helper_calls(scope, helpers):
+    for node in _scope_nodes(scope):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in helpers):
+            yield node
+
+
+def _meet_seeding(seedings, name, function, seeded):
+    """Fold one call site's kinds into the helper's seeding, fail-closed."""
+    target = seedings.setdefault(name, {})
+    parameters = (function.args.posonlyargs + function.args.args
+                  + function.args.kwonlyargs)
+    for parameter in parameters:
+        kind = (_UNKNOWN_PATH if seeded is None
+                else seeded[parameter.arg])
+        if target.get(parameter.arg, kind) != kind:
+            kind = _UNKNOWN_PATH
+        target[parameter.arg] = kind
+
+
+class _ModuleJudgement:
+    """One module's scopes, judged in an order that seeds its helpers.
+
+    A helper's body is judged with its parameters seeded from the kinds
+    every caller hands it, once every caller has been judged; a helper
+    nobody calls, or one in a call cycle, is judged unseeded.
+    """
+
+    def __init__(self, tree, label):
+        self.label = label
+        self.names = ModuleNames(tree)
+        self.functions = _module_functions(tree, self.names)
+        self.helpers = {name: function
+                        for name, function in self.functions.items()
+                        if not name.startswith('test_')}
+        self.seedings = {}
+        self.violations = []
+        helper_nodes = set(self.helpers.values())
+        self.scopes = [tree] + [
+            node for node in ast.walk(tree)
+            if isinstance(node, _SCOPES[1:]) and node not in helper_nodes]
+
+    def judge(self, scope, seeded):
+        local_names = _scope_local_names(scope)
+        owned, mutated = _owned_path_names(scope, self.functions, seeded)
+        context = {name: function
+                   for name, function in self.functions.items()
+                   if name not in local_names}
+        trusted = {'Path', 'str', 'os'} - local_names
+        for node in _scope_nodes(scope):
+            if not isinstance(node, ast.Call):
+                continue
+            if (isinstance(node.func, ast.Name)
+                    and node.func.id in self.helpers
+                    and node.func.id in context):
+                function = self.helpers[node.func.id]
+                _meet_seeding(self.seedings, node.func.id, function,
+                              _seeded_parameters(node, function, owned,
+                                                 trusted, mutated,
+                                                 context, 0))
+            message = _call_violation(node, self.label, self.names, owned,
+                                      trusted, mutated, context)
+            if message is not None:
+                self.violations.append((node.lineno, message))
+
+    def run(self):
+        callers = defaultdict(set)
+        for scope in self.scopes + list(self.helpers.values()):
+            for call in _helper_calls(scope, self.helpers):
+                callers[call.func.id].add(scope)
+        judged = set()
+        for scope in self.scopes:
+            self.judge(scope, None)
+            judged.add(scope)
+        pending = dict(self.helpers)
+        while pending:
+            ready = [name for name in pending if callers[name] <= judged]
+            if not ready:
+                for function in pending.values():
+                    self.judge(function, None)
+                break
+            for name in ready:
+                function = pending.pop(name)
+                self.judge(function, self.seedings.get(name))
+                judged.add(function)
+        return [message for _, message in sorted(self.violations)]
 
 
 def control_write_violations(source, repository_root):
-    """Return every write whose target is not provably control-owned."""
+    """Return every call the control cannot prove harmless."""
     source = Path(source)
     tree = ast.parse(source.read_text(encoding='utf-8'))
     try:
         label = source.relative_to(repository_root).as_posix()
     except ValueError:
         label = source.name
-    violations = []
-    functions = _module_functions(tree)
-    scopes = [tree]
-    scopes.extend(node for node in ast.walk(tree)
-                  if isinstance(node, _SCOPES[1:]))
-    for scope in scopes:
-        local_names = _scope_local_names(scope)
-        owned_names, mutated_names = _owned_path_names(scope, functions)
-        context = {name: function for name, function in functions.items()
-                   if name not in local_names}
-        for node in _scope_nodes(scope):
-            if not isinstance(node, ast.Call):
-                continue
-            kind = None
-            target = None
-            if (isinstance(node.func, ast.Attribute)
-                    and node.func.attr in {'write_bytes', 'write_text'}):
-                kind = node.func.attr
-                target = node.func.value
-            elif (isinstance(node.func, ast.Attribute)
-                  and node.func.attr == 'open'):
-                mode = _write_mode(node, 0)
-                if mode is _UNRESOLVED_MODE:
-                    violations.append(
-                        (node.lineno, f'{label}:{node.lineno}: '
-                         'Path.open mode is unresolved'))
-                elif mode is not None:
-                    kind = f'Path.open mode {mode!r}'
-                    target = node.func.value
-            elif (isinstance(node.func, ast.Name)
-                  and node.func.id == 'open'):
-                if 'open' in local_names:
-                    violations.append(
-                        (node.lineno, f'{label}:{node.lineno}: '
-                         'open callable is unresolved'))
-                    continue
-                mode = _write_mode(node, 1)
-                if mode is _UNRESOLVED_MODE:
-                    violations.append(
-                        (node.lineno, f'{label}:{node.lineno}: '
-                         'open mode is unresolved'))
-                elif mode is not None:
-                    kind = f'open mode {mode!r}'
-                    target = _argument(node, 'file', 0)
-                    if target is None:
-                        violations.append(
-                            (node.lineno, f'{label}:{node.lineno}: '
-                             'open target is unresolved'))
-                        continue
-            if (target is not None
-                    and _path_kind(
-                        target, owned_names,
-                        {'Path', 'str', 'os'} - local_names, mutated_names,
-                        context)
-                    != _CONTROL_OWNED_PATH):
-                violations.append(
-                    (node.lineno, f'{label}:{node.lineno}: {kind} target '
-                     'path is not control-owned'))
-    return [message for _, message in sorted(violations)]
+    return _ModuleJudgement(tree, label).run()
