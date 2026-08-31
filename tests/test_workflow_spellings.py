@@ -399,7 +399,7 @@ def test_both_readers_decode_one_scalar_spelling_set(tmp):
         assert scalar == '${{ !cancelled() && !failure() }}', spelling
         assert complete == scalar, (spelling, complete, scalar)
     for spelling in ('a: b', '&anchor x', '!!str x', '*anchor', '@x',
-                     '`x`', 'a\x01b'):
+                     '`x`', 'a\x01b', '%x'):
         source = _real(tmp, 'jobs:\n  sample:\n    if: ' + spelling + '\n')
         assert 'unsupported' in _refuses(
             job_scalar, source, 'sample', 'if'), spelling
@@ -525,10 +525,14 @@ def test_an_indicator_a_plain_scalar_cannot_open_with_is_refused(tmp):
     """`[:]` and `[- x]` are indicators, not names a flow item may carry.
 
     Each was read as the string it looks like, which is a value no YAML
-    parser agrees with.
+    parser agrees with.  The list comes from YAML's indicator set rather
+    than from the spellings a previous round happened to name, so the
+    directive and block-scalar indicators are in it too.
     """
     for spelling in ('    needs: [:]\n', '    needs: [:x]\n',
-                     '    needs: [- changes]\n', '    needs: [-]\n'):
+                     '    needs: [- changes]\n', '    needs: [-]\n',
+                     '    needs: [%x]\n', '    needs: [|x]\n',
+                     '    needs: [>x]\n'):
         workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
         assert _refuses(_job_needs, workflow, 'suites'), spelling
 
