@@ -6,6 +6,15 @@ from _pyroute_values import deferred_expression_value
 _LIVE_UNRESOLVED = object()
 
 
+def clear_expression_cache(node, states):
+    """Clear an expression tree's cache and return its root."""
+    keys = {id(item) for item in ast.walk(node)}
+    for state in states:
+        for key in keys:
+            state.evaluated.pop(key, None)
+    return node
+
+
 def live_expression_value(node, state, lambda_factory, captured):
     evaluated = state.evaluated
     cached = evaluated.get(id(node), _LIVE_UNRESOLVED)
@@ -23,4 +32,4 @@ def live_expression_value(node, state, lambda_factory, captured):
     if resolved: evaluated[id(node)] = value
     elif cached is not _LIVE_UNRESOLVED: evaluated[id(node)] = cached
     else: evaluated.pop(id(node), None)
-    return value if resolved else cached
+    return value if resolved else evaluated.get(id(node), _LIVE_UNRESOLVED)

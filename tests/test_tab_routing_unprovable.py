@@ -387,6 +387,40 @@ def test_generator_second_consumption_re_resolves_yielded_name(tmp):
     assert _tracked_focus_verdict(tmp, unsafe, counts=True) == (1, 1)
 
 
+def test_generator_second_subscript_consumption_safe_to_unsafe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'send = ext_cmd\nbox = [lambda: ordinary()]\n'
+            f'gen = (box[0] for _ in [1, 2])\nfirst = next(gen)\n'
+            f'box[0] = lambda: {call}\nsecond = next(gen)\nsecond()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (1, 1)
+
+
+def test_generator_second_subscript_consumption_unsafe_to_safe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'send = ext_cmd\nbox = [lambda: {call}]\n'
+            f'gen = (box[0] for _ in [1, 2])\nfirst = next(gen)\n'
+            'box[0] = ordinary\nsecond = next(gen)\nsecond()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (0, 0)
+
+
+def test_generator_second_attribute_consumption_safe_to_unsafe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+            f'holder.fn = lambda: ordinary()\n'
+            f'gen = (holder.fn for _ in [1, 2])\nfirst = next(gen)\n'
+            f'holder.fn = lambda: {call}\nsecond = next(gen)\nsecond()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (1, 1)
+
+
+def test_generator_second_attribute_consumption_unsafe_to_safe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+            f'holder.fn = lambda: {call}\n'
+            f'gen = (holder.fn for _ in [1, 2])\nfirst = next(gen)\n'
+            'holder.fn = ordinary\nsecond = next(gen)\nsecond()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (0, 0)
+
+
 def test_generator_ifexp_yield_cache_runtime_unsafe(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     body = (f'send = ext_cmd\ncallback = lambda: {call}\n'
