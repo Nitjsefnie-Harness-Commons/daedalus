@@ -85,6 +85,7 @@ class DeferredContainer:
 
     items: dict
     length: int | None = None
+    kind: str = 'list'
 
 
 @dataclass(frozen=True)
@@ -353,7 +354,9 @@ def deferred_expression_value(node, state, lambda_factory):
         values = [deferred_expression_value(item, state, lambda_factory)
                   for item in node.elts]
         if any(is_deferred_value(value) for value in values):
-            return DeferredContainer(dict(enumerate(values)), len(values))
+            kind = type(node).__name__.lower()
+            return DeferredContainer(
+                dict(enumerate(values)), len(values), kind)
     if isinstance(node, ast.Dict):
         items = {}
         for key, item in zip(node.keys, node.values):
@@ -362,7 +365,7 @@ def deferred_expression_value(node, state, lambda_factory):
             if known_key is not None and is_deferred_value(value):
                 items[known_key] = value
         if items:
-            return DeferredContainer(items, len(node.values))
+            return DeferredContainer(items, len(node.values), 'dict')
     return None
 
 
@@ -433,7 +436,13 @@ def materialize_deferred(consumer, value):
     if isinstance(value, DeferredAlternatives):
         return merge_deferred_values(
             materialize_deferred(consumer, item) for item in value.values)
+    if consumer in ('max', 'min'):
+        return value
+    if consumer == 'sum':
+        return None
     if consumer == 'dict' and isinstance(value, DeferredContainer):
+        if value.kind not in ('list', 'tuple') or value.length != 2:
+            return None
         key = value.items.get(0)
         item = value.items.get(1)
         if not is_deferred_value(item):
@@ -442,8 +451,9 @@ def materialize_deferred(consumer, value):
             hash(key)
         except TypeError:
             return None
-        return DeferredContainer({key: item}, 1)
-    return DeferredContainer({0: value}, 1)
+        return DeferredContainer({key: item}, 1, 'dict')
+    kind = 'list' if consumer == 'sorted' else consumer
+    return DeferredContainer({0: value}, 1, kind)
 
 
 def iterable_deferred(value):
@@ -451,6 +461,8 @@ def iterable_deferred(value):
         return merge_deferred_values(
             iterable_deferred(item) for item in value.values)
     if isinstance(value, DeferredContainer):
+        if value.kind == 'dict':
+            return merge_deferred_values(value.items.keys())
         return merge_deferred_values(value.items.values())
     return None
 
@@ -488,7 +500,7 @@ def _display_value(node, state):
                 items[index] = value
             index += 1
     if items or isinstance(node, ast.List):
-        return DeferredContainer(items, index)
+        return DeferredContainer(items, index, type(node).__name__.lower())
     return None
 
 
@@ -499,7 +511,8 @@ def _dict_value(node, state):
         if key is not None and isinstance(key, ast.Constant) \
                 and value is not None:
             items[key.value] = value
-    return DeferredContainer(items, len(node.values)) if items else None
+    return DeferredContainer(
+        items, len(node.values), 'dict') if items else None
 
 
 def expression_value(node, state, generator_factory, sender_resolver,
@@ -537,7 +550,8 @@ def expression_value(node, state, generator_factory, sender_resolver,
     if isinstance(node, (ast.ListComp, ast.SetComp)):
         value = state.evaluated.get(id(node.elt))
         if is_deferred_value(value):
-            return DeferredContainer({0: value}, 1)
+            return DeferredContainer(
+                {0: value}, 1, type(node).__name__[:-4].lower())
     if isinstance(node, ast.Subscript):
         owner = _known_value(node.value, state)
         key = (node.slice.value
@@ -612,7 +626,8 @@ def store_deferred_value(statement, state):
         owner = state.callables.get(owner_name)
         if getattr(call.func, 'attr', None) == 'clear' \
                 and isinstance(owner, DeferredContainer):
-            state.callables[owner_name] = DeferredContainer({}, 0)
+            state.callables[owner_name] = DeferredContainer(
+                {}, 0, owner.kind)
             sync_cells(state, {owner_name})
         return
     if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Delete)):
@@ -643,7 +658,7 @@ def store_deferred_value(statement, state):
             else:
                 items[target.slice.value] = value
             state.callables[owner_name] = DeferredContainer(
-                items, owner.length)
+                items, owner.length, owner.kind)
             sync_cells(state, {owner_name})
 
 
