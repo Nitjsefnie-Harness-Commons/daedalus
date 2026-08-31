@@ -83,7 +83,7 @@ def coverage_tree(
             _FAKE_COVERAGE, encoding='utf-8')
     for name, source in suites.items():
         (root / 'tests' / name).write_text(source, encoding='utf-8')
-    env = _util.coverage_free_environment(os.environ)
+    env = dict(os.environ)
     if not real_coverage:
         env['COVERAGE_PROCESS_START'] = SYNTHETIC_PROCESS_START
     env['COVERAGE_FILE'] = str(root / '.coverage')
