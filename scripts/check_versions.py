@@ -19,10 +19,12 @@ translates cannot report the disagreement it is translating away.
 """
 import argparse
 import contextlib
+import io
 import pathlib
 import re
 import subprocess
 import sys
+import tokenize
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -83,8 +85,8 @@ SITES = [
     # negative lookahead already stops the match at the real delimiter on
     # its own, so nothing else needs excluding. The keys may be bare or quoted
     # with matching delimiters, and whitespace before either colon is
-    # admitted, so valid JavaScript duplicates in both spellings remain
-    # visible to this site too.
+    # admitted, so executable JavaScript duplicates in both spellings remain
+    # visible while decoys in comments or larger strings are filtered.
     ('extension/page.js', 'GM bridge info.script.version',
      r'''(?P<kq>['"]?)script(?P=kq)\s*:\s*\{\s*'''
      r'''(?P<vq>['"]?)version(?P=vq)\s*:\s*'''
@@ -116,6 +118,120 @@ SITES = [
 # The site every other site is compared against.
 CANONICAL = ('extension/background.js', 'VERSION constant')
 MANIFEST = ('extension/manifest.json', 'manifest version')
+_COMMENT_SITES = {('extension/background.js', '@version header')}
+
+
+def _quoted_end(text, start):
+    quote = text[start]
+    i = start + 1
+    while i < len(text):
+        if text[i] == '\\':
+            i += 2
+        elif text[i] == quote:
+            return i + 1
+        else:
+            i += 1
+    return len(text)
+
+
+def _quoted_regions(text, delimiters):
+    regions = []
+    i = 0
+    while i < len(text):
+        if text[i] not in delimiters:
+            i += 1
+            continue
+        end = _quoted_end(text, i)
+        regions.append((i, end, 'string'))
+        i = end
+    return regions
+
+
+def _javascript_regions(text):
+    regions = []
+    i = 0
+    while i < len(text):
+        if text.startswith('//', i):
+            end = text.find('\n', i + 2)
+            if end == -1:
+                end = len(text)
+            regions.append((i, end, 'comment'))
+            i = end
+            continue
+        if text.startswith('/*', i):
+            end = text.find('*/', i + 2)
+            end = len(text) if end == -1 else end + 2
+            regions.append((i, end, 'comment'))
+            i = end
+            continue
+        if text[i] in "'\"`":
+            end = _quoted_end(text, i)
+            regions.append((i, end, 'string'))
+            i = end
+            continue
+        i += 1
+    return regions
+
+
+def _html_regions(text):
+    regions = []
+    i = 0
+    while i < len(text):
+        if text.startswith('<!--', i):
+            end = text.find('-->', i + 4)
+            end = len(text) if end == -1 else end + 3
+            regions.append((i, end, 'comment'))
+            i = end
+            continue
+        if text[i] in "'\"":
+            end = _quoted_end(text, i)
+            regions.append((i, end, 'string'))
+            i = end
+            continue
+        i += 1
+    return regions
+
+
+def _python_regions(text):
+    starts = [0]
+    for line in text.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    regions = []
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        for tok in tokens:
+            if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            start = starts[min(tok.start[0] - 1, len(starts) - 1)]
+            end = starts[min(tok.end[0] - 1, len(starts) - 1)]
+            regions.append((start + tok.start[1],
+                            end + tok.end[1],
+                            'comment' if tok.type == tokenize.COMMENT
+                            else 'string'))
+    except (IndentationError, SyntaxError, tokenize.TokenError):
+        pass
+    return regions
+
+
+def _regions_for(path, text):
+    if path.endswith('.js'):
+        return _javascript_regions(text)
+    if path.endswith('.py'):
+        return _python_regions(text)
+    if path.endswith('.json'):
+        return _quoted_regions(text, {'"'})
+    if path.endswith('.html'):
+        return _html_regions(text)
+    return []
+
+
+def _is_decoy(match, regions, allow_comments):
+    position = match.start()
+    for start, end, kind in regions:
+        if start < position < end:
+            if kind != 'comment' or not allow_comments:
+                return True
+    return False
 
 
 def read_source(path, staged, rev):
@@ -130,7 +246,7 @@ def read_source(path, staged, rev):
     return out.stdout
 
 
-def _find_site(path, desc, pattern, text):
+def _find_site(path, desc, pattern, text, allow_comments=False):
     """The site's one match in `text`, or a FAIL naming why there wasn't one.
 
     A second assignment further down the file is invisible to `re.search`,
@@ -139,7 +255,9 @@ def _find_site(path, desc, pattern, text):
     and `--set` would rewrite only the first occurrence, leaving the second
     stale. Neither can happen once a site is required to match exactly once.
     """
-    matches = list(re.finditer(pattern, text))
+    regions = _regions_for(path, text)
+    matches = [m for m in re.finditer(pattern, text)
+               if not _is_decoy(m, regions, allow_comments)]
     if not matches:
         raise SystemExit(
             f'FAIL: no version found for {desc} in {path} — the file changed '
@@ -163,7 +281,9 @@ def collect(staged=False, rev=None):
     for path, desc, pattern in SITES:
         if path not in cache:
             cache[path] = read_source(path, staged, rev)
-        m = _find_site(path, desc, pattern, cache[path])
+        m = _find_site(
+            path, desc, pattern, cache[path],
+            allow_comments=(path, desc) in _COMMENT_SITES)
         found.append((path, desc, m.group('v')))
     return found
 
@@ -213,7 +333,9 @@ def apply(version):
         target = REPO / path
         text = target.read_text(encoding='utf-8')
         for desc, pattern in entries:
-            m = _find_site(path, desc, pattern, text)
+            m = _find_site(
+                path, desc, pattern, text,
+                allow_comments=(path, desc) in _COMMENT_SITES)
             # Replace only the 'v' group so surrounding markup stays byte-identical.
             start, end = m.span('v')
             text = text[:start] + version + text[end:]

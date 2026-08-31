@@ -120,6 +120,54 @@ def test_check_versions_refuses_a_page_js_version_with_spaced_colons(tmp):
             assert '9.9.9' in r.stderr, context
 
 
+def test_check_versions_ignores_page_js_comment_and_string_decoys(tmp):
+    """Only executable page.js bindings count as duplicate versions."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, pattern = checker.SITES[3]
+    assert path == 'extension/page.js', path
+    page_copy = copy_root / path
+    text = page_copy.read_text(encoding='utf-8')
+    canonical = re.search(pattern, text).group('v')
+    decoys = (
+        "\n// script: { version: '9.9.9' }\n"
+        '// script: { version: "8.8.8" }\n'
+        "const _single = 'script: { version: \"7.7.7\" }';\n"
+        'const _double = "script: { version: \'6.6.6\' }";\n')
+    page_copy.write_text(text + decoys, encoding='utf-8')
+    r = _run_checker(copy_root)
+    expected = (f'ok: version {canonical} consistent across '
+                f'{len(checker.SITES)} sites in '
+                f'{len({p for p, _, _ in checker.SITES})} files\n')
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    assert r.stdout == expected, r.stdout
+    assert desc not in r.stderr, r.stderr
+
+
+def test_check_versions_ignores_python_comment_and_string_decoys(tmp):
+    """Python comments and string literals are not version bindings."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, pattern = checker.SITES[-1]
+    assert path == 'daedalus_cli/__init__.py', path
+    init_copy = copy_root / path
+    text = init_copy.read_text(encoding='utf-8')
+    canonical = re.search(pattern, text).group('v')
+    decoys = (
+        "\n# __version__ = '9.9.9'\n"
+        '# __version__ = "8.8.8"\n'
+        "_single = '__version__ = \"7.7.7\"'\n"
+        '_double = "__version__ = \'6.6.6\'"\n')
+    init_copy.write_text(text + decoys, encoding='utf-8')
+    r = _run_checker(copy_root)
+    expected = (f'ok: version {canonical} consistent across '
+                f'{len(checker.SITES)} sites in '
+                f'{len({p for p, _, _ in checker.SITES})} files\n')
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    assert r.stdout == expected, r.stdout
+    assert desc not in r.stderr, r.stderr
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='versioncontract_quote_duplicates_')
