@@ -6,11 +6,13 @@ a refusal is one of exactly two things.
 Admitted: plain, single-quoted and double-quoted scalars, folded and literal
 block scalars, block mappings and block sequences, and flow collections of
 any of those. A value spans lines where YAML says it does: a flow collection
-for as long as its own brackets stay open, at any indentation, and a plain
-scalar over its more-indented continuation lines. Folding joins with one
-space and every line contributes its own comment strip. Equivalent spellings
-decode to the same value, so quoting a scalar or rewriting a block collection
-in flow style changes nothing a reader sees.
+for as long as its own brackets stay open, and a plain scalar over its
+more-indented continuation lines. Every reader folds both. Folding joins
+with one space, and each line of a flow collection contributes its own
+comment strip because a comment between entries is content YAML skips; a
+comment ENDS a plain scalar instead, so nothing continues one after it.
+Equivalent spellings decode to the same value, so quoting a scalar or
+rewriting a block collection in flow style changes nothing a reader sees.
 
 Refused as invalid YAML: an unterminated quote or bracket, an unquoted flow
 scalar carrying any of `,[]{}`, an interior empty flow item, an empty mapping
@@ -20,10 +22,17 @@ character.
 
 Refused as a boundary of this subset, which every such message names with
 the word `unsupported`: a tab inside a value, a multiline quoted scalar, a
-blank line inside a plain one, nested content beside a value that already
-closed, an anchor, an alias or a tag, and a plain scalar outside the
-character set the reader admits. A shape refusal ("... is not a mapping")
-names the shape the reader requires instead.
+blank line or a comment inside a plain one, nested content beside a value
+that already closed, an anchor, an alias or a tag, and a plain scalar
+outside the character set the reader admits. A shape refusal ("... is not a
+mapping") names the shape the reader requires instead.
+
+One boundary is spelled as an invalid-YAML refusal and is written down here
+instead. A field is sliced out by indentation before its brackets are read,
+so a flow collection whose continuation is indented no further than its key
+is cut in half and the decoder is handed something genuinely unbalanced.
+Telling that apart from a collection that never closes needs the rest of the
+document, which is the one thing a field slice does not have.
 
 Deciding full YAML validity is not this module's job. `actionlint` is the
 CI-side oracle for that and gates every workflow change.
