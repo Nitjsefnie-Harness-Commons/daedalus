@@ -15,9 +15,9 @@ way but a plain attribute read stops proving ROOT; and `chdir` or
 launches inherit.
 
 Outside it: a launcher, owner or chdir reached only by a string
-(`getattr(os, 'chdir')`), a call result, an unreadable `**` spread on
-an unrecognised callee, or a launcher alias bound by a call result,
-default argument or match capture.
+(`getattr(os, 'chdir')`) or a call result, an unreadable `**` spread
+on an unrecognised callee, and a launcher alias bound by a call
+result, default argument or match capture.
 """
 import ast
 
