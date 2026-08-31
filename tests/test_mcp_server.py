@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
+from _queueread import queued_command, queued_commands  # noqa: E402
 
 # find_spec asks whether the dependency is installed without importing it --
 # an import kept only for its truthiness reads as dead code to every linter,
@@ -810,8 +811,9 @@ def test_live_mcp_has_no_server_path_authority(tmp):
                     for command_path in sorted(qdir.glob('*.json')):
                         if command_path.name in handled:
                             continue
+                        command = queued_command(
+                            qdir, 'the hotfix command', exclude=handled)
                         handled.add(command_path.name)
-                        command = json.loads(command_path.read_text(encoding='utf-8'))
                         if command.get('type') == 'store-hotfix':
                             stored.append({
                                 'id': command['fixId'],
@@ -918,17 +920,12 @@ def test_ping_tool_round_trip(tmp):
         answered = set()
 
         def extension(world):
-            # Answer only after the command has actually been enqueued, the
-            # way the real extension would.
-            deadline = time.time() + 15
-            while time.time() < deadline:
-                if qdir.is_dir() and set(qdir.glob('*.json')) - answered:
-                    break
-                time.sleep(0.05)
-            queued = sorted(set(qdir.glob('*.json')) - answered)
+            command = queued_command(
+                qdir, 'the ping command', exclude=answered)
+            queued = sorted(path for path in qdir.glob('*.json')
+                            if path.name not in answered)
             assert len(queued) == 1, queued
-            answered.add(queued[0])
-            command = json.loads(queued[0].read_text(encoding='utf-8'))
+            answered.add(queued[0].name)
             status, _ = _util.post_json(base + '/result', {
                 'token': TOK, 'id': command['id'], 'result': 'MCP Title',
                 'error': None, 'ts': 1, 'world': world,
@@ -995,8 +992,8 @@ def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
                 time.sleep(0.05)
             files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
             assert len(files) == len(held_ids) == len(owners), (files, box)
-            commands = [json.loads(path.read_text(encoding='utf-8'))
-                        for path in files]
+            commands = queued_commands(
+                qdir, 'the cookie commands', len(owners))
             by_owner = {command['domain']: command for command in commands}
             for owner in owners:
                 command = by_owner[owner]
@@ -1069,12 +1066,7 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
             """Stand in for the extension: store this capture, let a later one
             land on top of it, then answer the command."""
             try:
-                deadline = time.time() + 20
-                while not (qdir.is_dir() and any(qdir.glob('*.json'))):
-                    assert time.time() < deadline, 'no screenshot command'
-                    time.sleep(0.05)
-                command = json.loads(
-                    sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+                command = queued_command(qdir, 'the screenshot command')
                 for name, payload in (('mine.png', b'this-invocation'),
                                       ('later.png', b'the-next-invocation')):
                     status, body = _util.post_json(base + '/upload', {
