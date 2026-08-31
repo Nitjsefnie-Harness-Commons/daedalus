@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Executable contracts for JavaScript coverage capture and publication."""
 import ast
+import itertools
 import os
 import re
 import shlex
@@ -10,7 +11,7 @@ from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _ghexpr import evaluate_if  # noqa: E402
+from _ghexpr import ExpressionError, evaluate_if  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_names, _matrix_job_running  # noqa: E402
 from _yamlread import job_mapping, step_mapping_scalar  # noqa: E402
@@ -28,6 +29,13 @@ _SUPPORTED_MATRIX = {
     'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
     'python': ['3.13'],
 }
+_STATUS_NAMES = ('success', 'failure', 'cancelled')
+_PYTHON_CAPTURE_CONDITION = (
+    "${{ matrix.os == 'ubuntu-latest' "
+    "&& matrix.python == '3.13' }}")
+_FAILURE_CAPTURE_CONDITION = (
+    "${{ (success() && matrix.os == 'ubuntu-latest') "
+    "|| (failure() && matrix.os == 'windows-latest') }}")
 _PTH_CREATION_COMMAND = (
     'python -c "from pathlib import Path; import sysconfig; Path( '
     "sysconfig.get_paths()['purelib'], 'coverage-subprocess.pth').write_text( "
@@ -44,19 +52,64 @@ def _matrix_job(workflow):
         workflow, _SUPPORTED_MATRIX, 'coverage_suites.py')
 
 
+def _capture_step(workflow):
+    _name, matrix_job = _matrix_job(workflow)
+    matches = [step for step in matrix_job['steps']
+               if _CAPTURE_KEY in step.get('run', '')]
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
+def _with_capture_condition(workflow, condition):
+    matches = list(_STEP_START.finditer(workflow))
+    bounds = []
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) \
+            else len(workflow)
+        step = workflow[start:end]
+        if _CAPTURE_KEY in step and 'GITHUB_ENV' in step:
+            bounds.append((start, end))
+    assert len(bounds) == 1, bounds
+    start, end = bounds[0]
+    lines = workflow[start:end].splitlines(keepends=True)
+    fields = [index for index, line in enumerate(lines)
+              if line.startswith('        if:')]
+    assert len(fields) == 1, fields
+    field = fields[0]
+    field_end = next(
+        (index for index in range(field + 1, len(lines))
+         if lines[index].startswith('        ')
+         and not lines[index].startswith('          ')),
+        len(lines))
+    lines[field:field_end] = [f'        if: {condition}\n']
+    return workflow[:start] + ''.join(lines) + workflow[end:]
+
+
+def _matrix_cases(expression):
+    axes = tuple(_SUPPORTED_MATRIX)
+    cases = []
+    for values in itertools.product(
+            *(_SUPPORTED_MATRIX[axis] for axis in axes)):
+        row = dict(zip(axes, values))
+        for status_name in _STATUS_NAMES:
+            context = {
+                'matrix': row,
+                'status': {
+                    name: name == status_name for name in _STATUS_NAMES
+                },
+                'steps': {'measure': {'conclusion': 'success'}},
+            }
+            cases.append((
+                row, status_name, evaluate_if(expression, context)))
+    return cases
+
+
 def _matrix_rows(expression):
-    rows = set()
-    for operating_system in _SUPPORTED_MATRIX['os']:
-        context = {
-            'matrix': {'os': operating_system},
-            'status': {
-                'success': True, 'failure': False, 'cancelled': False,
-            },
-            'steps': {'measure': {'conclusion': 'success'}},
-        }
-        if evaluate_if(expression, context):
-            rows.add(operating_system)
-    return rows
+    return {
+        row['os'] for row, _status, runs in _matrix_cases(expression)
+        if runs
+    }
 
 
 def _capture_updates(step, tmp, workspace):
@@ -79,20 +132,23 @@ def _capture_updates(step, tmp, workspace):
 
 def _assert_capture_step(step, tmp):
     ubuntu = {'ubuntu-latest'}
-    assert _matrix_rows(step['if']) == ubuntu, step
+    cases = _matrix_cases(step['if'])
+    selected = [(row, status) for row, status, runs in cases if runs]
+    assert selected, step
+    assert {row['os'] for row, _status in selected} == ubuntu, selected
     assert step.get('shell') == 'bash', step
-    for operating_system in _SUPPORTED_MATRIX['os']:
-        workspace_dir = Path(tmp) / operating_system
+    for index, (row, status, runs) in enumerate(cases):
+        workspace_dir = Path(tmp) / f'case-{index}'
         workspace_dir.mkdir(parents=True)
         workspace = workspace_dir.as_posix()
         updates = {}
-        if operating_system in ubuntu:
+        if runs:
             updates = _capture_updates(step, workspace_dir, workspace)
         expected = {}
-        if operating_system in ubuntu:
+        if runs:
             expected[_CAPTURE_KEY] = (
                 f'{workspace}/.node-v8-coverage')
-        assert updates == expected, (operating_system, updates)
+        assert updates == expected, (row, status, updates)
 
 
 def _pth_program(command):
@@ -357,6 +413,29 @@ def test_capture_step_uses_a_posix_workspace_shape(tmp):
     assert updates == {
         _CAPTURE_KEY: 'workspace/checkout/.node-v8-coverage',
     }
+
+
+def test_capture_condition_accepts_every_declared_matrix_axis(tmp):
+    """An equivalent condition may name the declared Python row."""
+    workflow = _with_capture_condition(
+        _workflow(), _PYTHON_CAPTURE_CONDITION)
+    try:
+        _assert_capture_step(_capture_step(workflow), tmp)
+    except ExpressionError as error:
+        raise AssertionError(
+            f'declared matrix axis was unavailable: {error}') from error
+
+
+def test_capture_condition_refuses_windows_after_failure(tmp):
+    """No status context may make the capture step run on Windows."""
+    workflow = _with_capture_condition(
+        _workflow(), _FAILURE_CAPTURE_CONDITION)
+    try:
+        _assert_capture_step(_capture_step(workflow), tmp)
+    except AssertionError as error:
+        assert 'windows-latest' in str(error), error
+    else:
+        raise AssertionError('failure() allowed Windows capture')
 
 
 def test_matrix_job_identifier_is_not_a_contract(tmp):
