@@ -151,7 +151,9 @@ def _job_field_end(section, index, raw_value):
     """Where one job field's lines stop, past any collection it opens.
 
     A flow collection holds its own lines open, so a continuation at the
-    field's own indentation still belongs to the field.
+    field's own indentation still belongs to the field.  Only the
+    collection the field opened counts: past its close a bracket is content,
+    so the depth stops accumulating where `_flow_extent` stops it.
     """
     value = _strip_inline_comment(raw_value.strip(' '))
     depth = flow_depth(value) if value[:1] in ('[', '{') else 0
@@ -159,8 +161,10 @@ def _job_field_end(section, index, raw_value):
         candidate = section[following]
         if not _line_meaningful(candidate):
             continue
-        if depth <= 0 and _line_indent(candidate) <= 4:
-            return following
+        if depth <= 0:
+            if _line_indent(candidate) <= 4:
+                return following
+            continue
         depth += flow_depth(_strip_inline_comment(candidate.strip(' ')))
     return len(section)
 

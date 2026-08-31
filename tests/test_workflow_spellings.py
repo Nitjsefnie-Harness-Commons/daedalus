@@ -270,6 +270,39 @@ def test_a_flow_collection_spanning_lines_must_still_close(tmp):
     assert 'flow indicator' in _refuses(_job_needs, workflow, 'suites')
 
 
+def test_a_bracket_in_ordinary_content_ends_no_job_field(tmp):
+    """Depth accumulates only while a collection the field opened is open.
+
+    A `[` in a block scalar, a plain scalar or a script is content, so it
+    cannot hold a job field open over the fields after it; a nested flow
+    collection that really does span lines still holds them.
+    """
+    plain = _job_if_expression(_tests_yml(), 'suites')
+    block = _job_needs(_tests_yml(), 'suites')
+    header = '  suites:\n    needs:\n'
+    plants = (
+        '  suites:\n    env:\n      X: >-\n        [\n    needs:\n',
+        '  suites:\n    env:\n      X: a[b\n    needs:\n',
+        '  suites:\n    env:\n      X: |\n        grep "[" file\n'
+        '    needs:\n',
+    )
+    for plant in plants:
+        workflow = _real(tmp, _replaced(header, plant))
+        assert _job_needs(workflow, 'suites') == block, plant
+        assert _job_if_expression(workflow, 'suites') == plain, plant
+    outputs = _job_output_mapping(_tests_yml(), 'changes')
+    ahead = (
+        '    env:\n      X: |\n        grep "[" file\n',
+        '    strategy:\n      matrix:\n        os: [ubuntu-latest,\n'
+        '             macos-latest]\n',
+    )
+    for plant in ahead:
+        workflow = _real(tmp, _replaced(
+            BLOCK_OUTPUTS, plant + BLOCK_OUTPUTS), 'outputs.yml')
+        assert _job_output_mapping(workflow, 'changes') == outputs, plant
+        assert _job_output_step_ids(workflow, 'changes') == {'classify'}
+
+
 def test_flow_outputs_mapping_reads_like_the_block_mapping(tmp):
     """A flow mapping carries the same outputs as the block mapping."""
     block = _job_output_mapping(_tests_yml(), 'changes')
