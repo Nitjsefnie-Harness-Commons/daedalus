@@ -573,8 +573,7 @@ def _scalar_value(lines, entry, end, name):
             # A quoting style is spelling: the decoded value is what the
             # workflow means, so it decodes rather than being refused.
             return _decode_inline_scalar(value, name)
-        value = _strip_inline_comment(value)
-        if not value:
+        if not _strip_inline_comment(value):
             raise YAMLReadError(f'{name} has no scalar value')
         return _check_plain_scalar(
             _folded_plain(lines, index, end, key_indent, value, name), name)
@@ -596,25 +595,32 @@ def _scalar_value(lines, entry, end, name):
 def _folded_plain(lines, index, end, key_indent, value, name):
     """Fold a plain scalar's continuation lines into the one value.
 
-    A plain scalar carries its continuation more indented than its key; each
-    line contributes its own comment strip and they join with the single
-    space YAML would.  A blank line between them would fold to a newline
-    instead, which is outside the subset.
+    A plain scalar carries its continuation more indented than its key, and
+    they join with the single space YAML would.  A comment ends the scalar,
+    and so does a blank line YAML would fold to a newline; text after either
+    continues nothing, and what it is instead this subset does not decide.
     """
-    parts = [value]
-    blank = False
-    for following in range(index + 1, end):
-        line = lines[following]
-        if not _meaningful(line):
-            blank = blank or not _comment(line)
-            continue
-        if _indent(line) <= key_indent:
-            continue
-        if blank:
+    parts = []
+    ended = False
+    for following in range(index, end):
+        if following == index:
+            text = value
+        else:
+            line = lines[following]
+            if not _meaningful(line):
+                ended = True
+                continue
+            if _indent(line) <= key_indent:
+                continue
+            text, _line_ended = line
+            text = text.strip(' ')
+        if ended:
             raise YAMLReadError(f'{name} has an unsupported multiline scalar')
-        text, _ended = line
-        parts.append(_strip_inline_comment(text.strip(' ')))
-    return ' '.join(part for part in parts if part)
+        stripped = _strip_inline_comment(text)
+        ended = stripped != text.rstrip(' ')
+        if stripped:
+            parts.append(stripped)
+    return ' '.join(parts)
 
 
 def _parse_header(value, name):
