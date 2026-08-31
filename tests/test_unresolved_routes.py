@@ -355,5 +355,26 @@ def test_a_class_body_binding_does_not_shield_its_methods(tmp):
         "    targets[0].write_bytes(b'ok')\n") == []
 
 
+def test_a_class_body_binding_does_not_shield_its_comprehensions(tmp):
+    """A comprehension is a function scope, so it sees past the class."""
+    for spelling in ("[targets.append(ROOT / 'x') for _ in [0]]",
+                     "list(targets.append(ROOT / 'x') for _ in [0])"):
+        route = ("    class _Base:\n"
+                 "        targets = 1\n"
+                 f"        _ = {spelling}\n")
+        line = _CONTAINER_PRELUDE.count('\n') + route.count('\n') + 1
+        assert _container_route_violations(
+            tmp, route + "    targets[-1].write_bytes(b'mutated')\n") == [
+                f'nested.py:{line}: write_bytes target path is not '
+                'control-owned'], spelling
+    assert _container_route_violations(
+        tmp,
+        "    def inner():\n"
+        "        targets = []\n"
+        "        _ = [targets.append(ROOT / 'x') for _ in [0]]\n"
+        "    inner()\n"
+        "    targets[0].write_bytes(b'ok')\n") == []
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
