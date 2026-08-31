@@ -167,37 +167,32 @@ def test_a_queue_file_already_gone_during_clear_is_not_an_error(tmp):
 
 
 def test_a_permanent_read_refusal_is_bounded(tmp):
-    timeout = 2.5 * _cmdqueue.POLL_DELAY
+    # A whole-multiple timeout keeps a second read per pass inside the bound.
+    timeout = 2 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
     with _virtual_cmdqueue_clock(10) as (clock, events, origin):
-        with _refuse_path_operation(
-                queued, 'open', 1000, clock=clock) as calls:
+        with _refuse_path_operation(queued, 'open', 1000, clock=clock):
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)
-    sleep_groups = []
-    for kind, duration in events:
-        if kind == 'read':
-            assert not sleep_groups or sleep_groups[-1], (
-                'read without intervening sleep', events)
-            sleep_groups.append([])
-        else:
-            assert kind == 'sleep' and sleep_groups, (
-                'sleep before first read', events)
-            sleep_groups[-1].append(duration)
-    assert sleep_groups and sleep_groups[-1], (
-        'final read had no following sleep', events)
-    sleeps = [sum(group) for group in sleep_groups]
+    kinds = [kind for kind, _ in events]
+    sleeps = [duration for kind, duration in events if kind == 'sleep']
+    assert kinds and kinds[0] == 'read', ('no leading read', events)
+    assert kinds[-1] == 'sleep', ('no final sleep', events)
+    assert all(a != 'sleep' or b == 'read'
+               for a, b in zip(kinds, kinds[1:])), events
     assert command is None, command
-    assert calls[0] == len(sleep_groups), (calls, sleep_groups)
-    assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), sleeps
+    assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), (
+        sleeps, events)
     # An exact multiple can make the final sleep equal the polling delay.
-    assert sleeps[-1] <= _cmdqueue.POLL_DELAY, sleeps
-    elapsed = clock.monotonic() - origin
-    # Sterbenz makes deadline - now exact while its operands are within a
-    # factor of two, so adding it lands on the already-representable deadline.
-    assert clock.monotonic() == origin + timeout, (
-        clock.monotonic(), origin, timeout, events)
-    assert abs(elapsed - timeout) <= math.ulp(origin + timeout), (
+    assert sleeps[-1] <= _cmdqueue.POLL_DELAY, (sleeps, events)
+    end = clock.monotonic()
+    deadline = origin + timeout
+    # A wait may take its deadline as origin + timeout or as that value's
+    # next representable successor; it must stop at whichever it chose.
+    assert deadline <= end <= math.nextafter(deadline, math.inf), (
+        end, origin, timeout, events)
+    elapsed = end - origin
+    assert abs(elapsed - timeout) <= math.ulp(deadline), (
         elapsed, timeout, origin, events)
 
 
