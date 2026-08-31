@@ -314,7 +314,10 @@ def test_workflow_scalar_reader_distinguishes_missing_and_unsafe_shapes(tmp):
     assert step_scalar(workflow, 'sample', 'missing', 'if') is None
     _job_raises('jobs:\n  sample:\n    if: >- broken\n',
                 'unsupported block scalar header')
-    _job_raises('jobs:\n  sample:\n    if: "true"\n', 'quoted scalar')
+    assert job_scalar('jobs:\n  sample:\n    if: "true"\n',
+                      'sample', 'if') == 'true'
+    _job_raises('jobs:\n  sample:\n    if: "true\n',
+                'incomplete quoted scalar')
     _job_raises('jobs:\n  sample:\n    if: true # guard explanation\n',
                 'inline comment')
     _job_raises('jobs:\n  sample:\n    if:\n', 'no scalar value')
