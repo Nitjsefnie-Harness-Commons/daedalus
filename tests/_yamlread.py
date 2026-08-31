@@ -332,17 +332,14 @@ def _scalar_mapping(lines, start, end, parent_indent, owner):
 
 
 def _mapping_value(lines, index, end, indent, raw_value, name):
-    """Decode one scalar mapping value, folding the lines it wraps over.
-
-    The unwrapped spelling keeps the tighter inline character set this
-    mapping admits, because folding is all the wrap changes.
-    """
+    """Decode one inline scalar mapping value, folding a plain wrap."""
     _value_start, value_end = _section(lines, index, indent)
     if _first_child(lines, index + 1, value_end, indent) is None:
         return _decode_inline_scalar(raw_value, name)
     value = raw_value.strip(' ')
     if value[:1] in ('[', '{', "'", '"', '>', '|', ''):
         raise YAMLReadError(f'{name} has an unsupported nested value')
+    _check_plain_scalar(value, name)
     return _check_plain_scalar(
         _folded_plain(lines, index, value_end, indent, value, name), name)
 
@@ -381,6 +378,11 @@ def _sequence_scalar_values(lines, start, end, parent_indent, key):
             values.append(_scalar_value(
                 lines, entry, value_end, f'step {key}'))
         else:
+            _value_start, value_end = _section(lines, index, field_indent)
+            if _first_child(
+                    lines, index + 1, value_end, field_indent) is not None:
+                raise YAMLReadError(
+                    f'step {key} has an unsupported multiline scalar')
             values.append(_decode_inline_scalar(raw_value, f'step {key}'))
         seen = True
     return values

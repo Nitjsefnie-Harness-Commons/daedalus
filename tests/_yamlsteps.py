@@ -280,8 +280,10 @@ def _value_extent(lines, index, end, text, owner):
     """Return the last line index the value written at `text` spans."""
     try:
         _raw_key, text = split_mapping_field(text, owner)
-    except YAMLReadError:
-        pass
+    except YAMLReadError as error:
+        if str(error) != f'{owner} has an unsupported mapping field':
+            raise
+        # A non-field sequence item uses its whole text as the value.
     _joined, close = _flow_extent(
         lines, index, end, _strip_inline_comment(text.strip(' ')))
     return close

@@ -5,12 +5,14 @@ a refusal is one of exactly two things.
 
 Admitted: plain, single-quoted and double-quoted scalars, folded and literal
 block scalars, block mappings and block sequences, and flow collections of
-any of those. A value spans lines where YAML says it does: a flow collection
-for as long as its own brackets stay open, and a plain scalar over its
-more-indented continuation lines. Every reader folds both. Folding joins
-with one space, and each line of a flow collection contributes its own
-comment strip because a comment between entries is content YAML skips; a
-comment ENDS a plain scalar instead, so nothing continues one after it.
+any of those. A value spans lines only where its entry point admits the
+construct. Wrapped plain scalars fold in `job_scalar`, `job_mapping`,
+`top_level_mapping`, `step_scalar`, `step_mappings`, `workflow_mapping`, and
+`complete_job_mapping`. `step_scalars`, `step_mapping_scalar`, and nested
+scalar mappings under `step_mappings` refuse them. Folding joins with one
+space, and each line of a flow collection contributes its own comment strip
+because a comment between entries is content YAML skips; a comment ENDS a
+plain scalar instead, so nothing continues one after it.
 Equivalent spellings decode to the same value, so quoting a scalar or
 rewriting a block collection in flow style changes nothing a reader sees.
 
