@@ -30,6 +30,14 @@ def _real_module_copy(tmp, relative):
     return root, root / relative
 
 
+def _planted_copy(tmp, relative, plant):
+    """A real module's copy with `plant` appended: (root, target, line)."""
+    root, target = _real_module_copy(tmp, relative)
+    text = _module_text(target)
+    target.write_bytes((text + plant).encode('utf-8'))
+    return root, target, text.count('\n') + 1
+
+
 def _declaration_line(text):
     """The line after test_diff_coverage.py's module-level declaration."""
     assert _DECLARATION_LINE in text, 'the declaration binding shape changed'
@@ -106,6 +114,79 @@ def test_a_helper_write_is_proved_from_what_its_callers_hand_it(tmp):
     source.write_text(helper, encoding='utf-8')
     assert control_write_violations(source, Path(tmp)) == [
         'seeded.py:4: copy_test_tree target path is not control-owned']
+
+
+def test_a_path_replace_is_not_the_pure_string_replace(tmp):
+    """Path.replace moves a file; only the two-argument str form is pure."""
+    relative = Path('tests/test_coverage_environment.py')
+    root, target = _real_module_copy(tmp, relative)
+    needle = "    copy_test_tree(root)\n"
+    text = _module_text(target)
+    assert needle in text, 'the copy helper shape changed'
+    line = text[:text.index(needle)].count('\n') + 2
+    plant = ("    (root / 'tests' / 'test_control_writes.py')"
+             ".replace(ROOT / '.probe.py')\n")
+    target.write_bytes(
+        text.replace(needle, needle + plant, 1).encode('utf-8'))
+    violations = control_write_violations(target, root)
+    assert (f'tests/test_coverage_environment.py:{line}: '
+            "(root / 'tests' / 'test_control_writes.py').replace is not a "
+            'modelled call') in violations, violations
+    target.write_bytes(text.encode('utf-8'))
+    assert control_write_violations(target, root) == []
+
+
+def test_a_lambda_default_is_judged_in_its_enclosing_scope(tmp):
+    """A write hidden in a lambda's default expression is still judged."""
+    root, target, line = _planted_copy(
+        tmp, Path('tests/test_unresolved_routes.py'),
+        "_UNJUDGED = lambda _x=(ROOT / '.probe2.py').write_text(\n"
+        "    'planted', encoding='utf-8'): _x\n")
+    assert control_write_violations(target, root) == [
+        f'tests/test_unresolved_routes.py:{line}: write_text target path '
+        'is not control-owned']
+
+
+def test_a_lambda_default_call_site_seeds_the_helper_it_calls(tmp):
+    """A helper's caller inside a lambda default counts like any other."""
+    root, target, line = _planted_copy(
+        tmp, Path('tests/test_coverage_environment.py'),
+        "def _planted_helper(target):\n"
+        "    (Path(target) / '.probe4.py').write_text('planted')\n"
+        "_BYPASS = lambda _x=_planted_helper(ROOT): _x\n"
+        "def test_planted_owned_site(tmp):\n"
+        "    _planted_helper(tmp)\n")
+    assert control_write_violations(target, root) == [
+        f'tests/test_coverage_environment.py:{line + 1}: write_text target '
+        'path is not control-owned']
+
+
+def test_a_control_called_in_its_module_is_seeded_like_a_helper(tmp):
+    """A test_ name owns tmp from the runner only while nothing calls it."""
+    root, target, line = _planted_copy(
+        tmp, Path('tests/test_coverage_environment.py'),
+        "def test_planted_helper(tmp):\n"
+        "    (Path(tmp) / '.probe3.py').write_text('planted')\n"
+        "def test_planted_caller(tmp):\n"
+        "    del tmp\n"
+        "    test_planted_helper(ROOT)\n")
+    assert control_write_violations(target, root) == [
+        f'tests/test_coverage_environment.py:{line + 1}: write_text target '
+        'path is not control-owned']
+
+
+def test_an_import_bound_twice_resolves_to_neither_binding(tmp):
+    """copy_test_tree defined beside its import is no longer the writer."""
+    root, target, _ = _planted_copy(
+        tmp, Path('tests/test_coverage_environment.py'),
+        "def copy_test_tree(root):\n    return root\n")
+    text = _module_text(target)
+    needle = "    copy_test_tree(root)\n"
+    assert needle in text, 'the copy helper shape changed'
+    call = text[:text.index(needle)].count('\n') + 1
+    assert control_write_violations(target, root) == [
+        f'tests/test_coverage_environment.py:{call}: copy_test_tree '
+        'callable is unresolved']
 
 
 if __name__ == '__main__':

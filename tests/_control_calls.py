@@ -26,8 +26,8 @@ _PURE_IMPORTS = frozenset({
 })
 _PURE_METHODS = frozenset({
     'append', 'count', 'decode', 'encode', 'endswith', 'glob', 'index',
-    'join', 'read_bytes', 'read_text', 'relative_to', 'replace', 'resolve',
-    'rindex', 'startswith'})
+    'join', 'read_bytes', 'read_text', 'relative_to', 'resolve', 'rindex',
+    'startswith'})
 _PURE_MODULE_CALLS = frozenset({
     '_util.child_coverage', '_util.collect', '_util.runner',
     'os.path.join', 'sys.path.insert'})
@@ -155,6 +155,11 @@ def _chain_base(node):
     return node
 
 
+def _is_string_replace(node):
+    """str.replace takes two positional arguments; Path.replace, one."""
+    return node.func.attr == 'replace' and len(node.args) >= 2
+
+
 def _writer_target(node, spec, receiver):
     keyword, position = spec
     if keyword is None and position is None:
@@ -198,7 +203,7 @@ def _attribute_judgement(node, label, names):
         if spelling in _WRITER_MODULE_CALLS:
             return None, spelling, _writer_target(
                 node, _WRITER_MODULE_CALLS[spelling], None)
-    elif function.attr in _PURE_METHODS:
+    elif function.attr in _PURE_METHODS or _is_string_replace(node):
         return None, None, None
     return f'{label}:{line}: {spelling} is not a modelled call', None, None
 
