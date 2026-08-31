@@ -83,6 +83,24 @@ def path_key(path):
     return os.path.normcase(text)
 
 
+def _path_within(root, candidate):
+    """Return whether two resolved spellings describe containment."""
+    root_key = path_key(root)
+    candidate_key = path_key(candidate)
+    return (candidate_key == root_key
+            or candidate_key.startswith(root_key + os.sep))
+
+
+def same_path(left, right):
+    """Compare two paths, confirming a transient mismatch once."""
+    for _attempt in range(2):
+        resolved_left = os.path.realpath(left)
+        resolved_right = os.path.realpath(right)
+        if path_key(resolved_left) == path_key(resolved_right):
+            return True
+    return False
+
+
 def under(root, *parts):
     """Join `parts` under `root` and refuse a result that lands outside it.
 
@@ -105,17 +123,15 @@ def under(root, *parts):
     Raises ValueError, which is what the routes taking these values already
     answer 400 for.
     """
-    resolved_root = os.path.realpath(root)
-    candidate = os.path.realpath(
-        os.path.join(resolved_root, *(str(part) for part in parts)))
-    root_key = path_key(resolved_root)
-    candidate_key = path_key(candidate)
-    if (candidate_key != root_key
-            and not candidate_key.startswith(root_key + os.sep)):
-        raise ValueError(f'path escapes its root: {parts!r}')
-    # The resolved path, not the normalized key: the key exists to compare two
-    # spellings, and the caller needs the one the filesystem answers to.
-    return pathlib.Path(candidate)
+    for _attempt in range(2):
+        resolved_root = os.path.realpath(root)
+        candidate = os.path.realpath(
+            os.path.join(resolved_root, *(str(part) for part in parts)))
+        if _path_within(resolved_root, candidate):
+            # The resolved path, not the normalized key: the key exists to
+            # compare spellings, and the caller needs the filesystem's answer.
+            return pathlib.Path(candidate)
+    raise ValueError(f'path escapes its root: {parts!r}')
 
 
 def bad_token(token):
