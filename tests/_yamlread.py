@@ -529,19 +529,24 @@ def _sequence_item_scalar(lines, item, start, end, name):
         lines, start, end, item.indent, name, item.indent + 2)
     if inline is not None and nested is not None:
         raise YAMLReadError(f'duplicate mapping key: {name}')
-    if inline is not None:
-        _value_start, value_end = _section(
-            lines, inline.index, inline.indent)
-        return _scalar_value(lines, inline, value_end, name)
-    return _scalar_value(lines, nested, end, name)
+    return _entry_scalar(lines, inline if inline is not None else nested,
+                         end, name)
 
 
 def _scalar_entry(lines, start, end, parent_indent, name):
     """Read one mapping scalar, returning None when its key is absent."""
-    entry = _mapping_entry(lines, start, end, parent_indent, name)
+    return _entry_scalar(
+        lines, _mapping_entry(lines, start, end, parent_indent, name),
+        end, name)
+
+
+def _entry_scalar(lines, entry, end, name):
+    """Decode one located entry over the lines its own field spans.
+
+    Every reader bounds an entry here, because a field's value ends where
+    the field does: a later sibling's nested block is not its continuation.
+    """
     if entry is not None:
-        # A field's value ends where the field does, so a later sibling's
-        # nested block is not this scalar's continuation.
         _value_start, end = _section(lines, entry.index, entry.indent)
     return _scalar_value(lines, entry, end, name)
 

@@ -519,5 +519,45 @@ def test_quoted_and_escaped_uses_keys_are_refused(tmp):
         _assert_checkout_mutation_refused(mutated)
 
 
+def test_a_step_scalar_stops_where_its_own_field_stops(tmp):
+    """A later sibling's nested block is not this scalar's continuation.
+
+    The shipped values are the proof: reading `id` as the id plus the whole
+    `run:` script is a value no parser produces, on source the suites read.
+    """
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: s\n'
+        '        shell: bash\n'
+        '        run: |\n'
+        '          echo hi\n')
+    assert step_scalar(source, 'sample', 's', 'shell') == 'bash'
+    tests_yml = (_util.ROOT / '.github/workflows/tests.yml').read_text(
+        encoding='utf-8')
+    speed_yml = (_util.ROOT / '.github/workflows/speed.yml').read_text(
+        encoding='utf-8')
+    measured = "${{ !cancelled() && steps.measure.conclusion == 'success' }}"
+    shipped = (
+        (tests_yml, 'actionlint', 'Install zizmor', 'id', 'install_zizmor'),
+        (tests_yml, 'actionlint', 'actionlint', 'id', 'actionlint'),
+        (tests_yml, 'coverage', 'Work out the raise this run justifies',
+         'id', 'ratchet'),
+        (tests_yml, 'coverage', 'Python coverage summary', 'if', measured),
+        (tests_yml, 'coverage', 'JavaScript coverage summary', 'if',
+         measured),
+        (tests_yml, 'coverage', 'JavaScript coverage gate', 'if', measured),
+        (tests_yml, 'coverage', 'Work out the raise this run justifies', 'if',
+         "${{ !cancelled() && steps.measure.conclusion == 'success'"
+         " && github.event_name == 'push'"
+         " && github.ref == 'refs/heads/main' }}"),
+        (speed_yml, 'timed', 'Build one virtualenv per side', 'if',
+         "steps.baseline.outputs.point != ''"),
+    )
+    for workflow, job, step, key, expected in shipped:
+        assert step_scalar(workflow, job, step, key) == expected, (
+            job, step, key)
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
