@@ -238,14 +238,21 @@ def test_classic_script_html_comment_filters_decoy(tmp_path):
 
 def test_prefixed_class_attributes_are_not_dashboard_sites(tmp_path):
     copy_root = Path(tmp_path) / 'tree'
-    _copy_versioned_tree(copy_root)
-    markup = (
-        "<div x:class='rail-foot'>v9.9.9</div>\n"
-        "<span x:class='sl-v'>8.8.8</span>")
+    checker = _copy_versioned_tree(copy_root)
+    prefixes = ('data-', 'x:', '@', '.', '#')
+    markup = '\n'.join(
+        f"<div {prefix}class='rail-foot'>v9.9.9</div>\n"
+        f"<span {prefix}class='sl-v'>8.8.8</span>"
+        for prefix in prefixes)
     _insert_before_body(copy_root, markup)
     result = _run_checker(copy_root)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
+    dashboard = (copy_root / 'dashboard' / 'index.html').read_text(
+        encoding='utf-8')
+    for _class_name, desc in _SITE_CASES:
+        _path, _site_desc, pattern = _dashboard_site(checker, desc)
+        assert len(list(re.finditer(pattern, dashboard))) == 1, desc
 
 
 def test_uppercase_script_tag_filters_its_decoy(tmp_path):
@@ -315,6 +322,52 @@ def test_status_line_value_stops_at_markup(tmp_path):
     _copy_versioned_tree(copy_root)
     _insert_before_body(
         copy_root, "<span class='sl-v'>9.9.9<em>x</em></span>")
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_html_close_comment_filters_the_rest_of_its_line(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    script = (
+        '<script>\n'
+        '<!--\n'
+        "--> <span class='sl-v'>9.9.9</span>\n"
+        '</script>')
+    _insert_before_body(copy_root, script)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_html_close_comment_reaches_template_substitutions(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    script = (
+        '<script>\n'
+        'const value = `${0\n'
+        "\xa0\t--> <span class='sl-v'>9.9.9</span>\n"
+        '}`;\n'
+        '</script>')
+    _insert_before_body(copy_root, script)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_escaped_dash_transitions_reach_the_first_script_end(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    old = f'<span class="sl-v">{canonical}</span>'
+    _replace_dashboard_once(copy_root, old, '')
+    markup = (
+        '<script>\n'
+        '<!-- a - b --><script></script>\n'
+        f'<span class="sl-v">{canonical}</span>')
+    _insert_before_body(copy_root, markup)
     result = _run_checker(copy_root)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)

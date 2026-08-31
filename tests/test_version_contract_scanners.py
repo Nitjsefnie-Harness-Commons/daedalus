@@ -340,6 +340,47 @@ def test_html_regions_classify_adversarial_cases(tmp):
         assert _region_texts(_DASHBOARD, source) == expected, label
 
 
+def test_midline_html_close_marker_stays_javascript(tmp):
+    """A mid-line `-->` is an operator sequence, not an HTML comment."""
+    del tmp
+    decoy = "<span class='sl-v'>9.9.9</span>"
+    code = '0; const text'
+    source = f'<script>\nconst r = 1-->0; const text = "{decoy}";\n</script>'
+    regions = _checker()
+    spans = regions.regions_for(_DASHBOARD, source)
+    assert _surviving(regions, _DASHBOARD, source, code) == 1
+    assert _surviving(regions, _DASHBOARD, source, decoy) == 0
+    assert _covered_kind(source, spans, decoy) == 'string'
+
+
+def test_html_close_marker_mode_is_off_for_javascript_files(tmp):
+    """A `.js` file keeps the scanner's pre-HTML comment grammar."""
+    del tmp
+    source = '--> const live = ' + _SPACED_DUP + ';\n'
+    assert _surviving(_checker(), _JS, source, _SPACED_DUP) == 1
+
+
+_SCRIPT_END_CASES = (
+    ('escaped entry and dash-dash exit',
+     '<!--><script></script>tail</script>'),
+    ('escaped dash reset and exit',
+     '<!-- a - b --><script></script>tail</script>'),
+    ('double-escaped dash-dash exit',
+     '<!--<script>--></script>tail</script>'),
+    ('form-feed end-tag delimiter',
+     'code</script\f>tail</script>'),
+)
+
+
+def test_script_data_state_limbs_reach_the_first_end_tag(tmp):
+    """Each state-machine limb leaves the first end tag as the closer."""
+    del tmp
+    regions = _checker()
+    for label, source in _SCRIPT_END_CASES:
+        expected = source.index('</script')
+        assert regions._html_script_end(source, 0) == expected, label
+
+
 def _insert_before_rail_foot(copy_root, markup):
     """Insert `markup` ahead of the real rail-footer site in the copy."""
     dashboard = copy_root / _DASHBOARD
