@@ -99,6 +99,15 @@ def _javascript_regions(text, html_comments=False):
     return regions
 
 
+def _js_html_close_comment(text, position):
+    """Whether `-->` at `position` starts an HTML-like line comment."""
+    line_start = max(text.rfind(mark, 0, position)
+                     for mark in ('\n', '\r', '\u2028', '\u2029')) + 1
+    prefix = text[line_start:position]
+    return (text.startswith('-->', position)
+            and (not prefix or prefix.isspace()))
+
+
 def _scan_javascript(text, start, regions, substitution, html_comments):
     """Scan JavaScript code from `start` into `regions`, answering where the
     scan stopped: the end of the text, or — inside a template substitution —
@@ -111,11 +120,14 @@ def _scan_javascript(text, start, regions, substitution, html_comments):
     previous = ''
     while i < end:
         ch = text[i]
+        html_line = html_comments and (
+            text.startswith('<!--', i)
+            or _js_html_close_comment(text, i))
         if ch in ' \t\r\n':
             i += 1
         elif (text.startswith('//', i) or text.startswith('/*', i)
-              or html_comments and text.startswith('<!--', i)):
-            line = text[i + 1] == '/' or text.startswith('<!--', i)
+              or html_line):
+            line = text[i + 1] == '/' or html_line
             closer, skip = ('\n', 0) if line else ('*/', 2)
             close = text.find(closer, i + 2)
             close = end if close == -1 else close + skip
