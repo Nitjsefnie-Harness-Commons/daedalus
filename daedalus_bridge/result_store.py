@@ -82,8 +82,12 @@ def delivery_result_paths(token, tab, did):
     delivery_dir = path_safety.under(DELIVERY_DIR, key)
     # The stripe is keyed on `key`, so the resolved directory must be the
     # one-to-one namespace entry that key names, not an alias to another one.
-    if (not path_safety.same_path(delivery_dir.parent, DELIVERY_DIR)
-            or delivery_dir.name != key):
+    alias_attempts = []
+    parent_matches = path_safety.same_path(
+        delivery_dir.parent, DELIVERY_DIR, alias_attempts)
+    if not parent_matches or delivery_dir.name != key:
+        path_safety.log_path_refusal(
+            'alias', DELIVERY_DIR, (key,), alias_attempts)
         raise ValueError('delivery target is an alias')
     delivery_file = path_safety.under(
         delivery_dir, path_safety.derived_component(f'{did}.json'))
