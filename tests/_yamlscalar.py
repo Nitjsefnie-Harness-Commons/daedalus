@@ -32,7 +32,8 @@ __all__ = (
 )
 
 
-_FORBIDDEN_LEADERS = ('&', '*', '!', '@', '`', ':', '- ', '%', '|', '>')
+_FORBIDDEN_LEADERS = (
+    '&', '*', '!', '@', '`', ':', '- ', '? ', ',', ']', '}', '%', '|', '>')
 
 
 def check_plain_scalar(value, owner):
