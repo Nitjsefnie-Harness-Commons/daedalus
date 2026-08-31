@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Virtual-clock controls for test-side command queue readers."""
+import math
 import re
 import sys
 from pathlib import Path
@@ -47,6 +48,17 @@ def test_virtual_clock_allows_no_op_sleeps_before_progress(_tmp):
         clock.sleep(positive)
     assert clock.monotonic() == origin + positive, (
         clock.monotonic(), origin, positive)
+
+
+def test_virtual_clock_accumulates_sub_ulp_sleep_requests(_tmp):
+    with _virtual_cmdqueue_clock() as (clock, _events, origin):
+        requested = math.ulp(origin)
+        third = requested / 3
+        clock.sleep(third)
+        clock.sleep(third)
+        clock.sleep(requested - 2 * third)
+    assert clock.monotonic() == origin + requested, (
+        clock.monotonic(), origin, requested)
 
 
 def test_virtual_clock_bounds_a_wait_that_never_ends(_tmp):
@@ -100,6 +112,26 @@ def test_virtual_clock_keeps_explicit_sleep_ceilings(_tmp):
         assert any(word in message for word in (
             'ceiling', 'maximum', 'limit', 'exceeded')), message
         assert _has_numeric_token(message, str(max_sleeps)), message
+
+
+def test_virtual_clock_default_sleep_ceiling_stops_zero_time_runaway(_tmp):
+    failure = None
+    tripped_at = None
+    expected_sleeps = 100_000
+    with _virtual_cmdqueue_clock() as (clock, events, origin):
+        try:
+            for tripped_at in range(expected_sleeps + 1):
+                clock.sleep(0.0)
+        except AssertionError as caught:
+            failure = caught
+    assert isinstance(failure, AssertionError), failure
+    assert tripped_at == expected_sleeps, (tripped_at, expected_sleeps)
+    assert len(events) == expected_sleeps, len(events)
+    assert clock.monotonic() == origin, (clock.monotonic(), origin)
+    message = str(failure).lower()
+    assert 'virtual clock' in message, message
+    assert 'sleep' in message, message
+    assert _has_numeric_token(message, str(expected_sleeps)), message
 
 
 if __name__ == '__main__':
