@@ -162,6 +162,43 @@ def test_a_flow_collection_may_span_lines(tmp):
     assert _job_output_step_ids(workflow, 'changes') == {'classify'}
 
 
+def test_a_flow_collection_spans_lines_at_any_indentation(tmp):
+    """A collection's extent is its own brackets, not the block's indent.
+
+    Its continuation may sit at the key's own indentation and its closing
+    bracket may stand alone on a line; both are the same one value, so the
+    field enumerator must not claim a line the collection still holds open.
+    """
+    block = _job_needs(_tests_yml(), 'suites')
+    spellings = (
+        '    needs: [\n'
+        '      changes, pycodestyle, pylint,\n'
+        '      pyright, eslint, actionlint\n'
+        '    ]\n',
+        '    needs: [changes, pycodestyle, pylint,\n'
+        '    pyright, eslint, actionlint]\n',
+    )
+    for spelling in spellings:
+        workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
+        assert _job_needs(workflow, 'suites') == block, spelling
+    outputs = _job_output_mapping(_tests_yml(), 'changes')
+    workflow = _real(tmp, _replaced(
+        BLOCK_OUTPUTS,
+        "    outputs: {matrix: '${{ steps.classify.outputs.matrix }}',\n"
+        "    docs_only: '${{ steps.classify.outputs.docs_only }}',\n"
+        "    workflows: '${{ steps.classify.outputs.workflows }}'}\n"),
+        'outputs.yml')
+    assert _job_output_mapping(workflow, 'changes') == outputs
+
+
+def test_a_closed_flow_collection_claims_no_further_line(tmp):
+    """Closing on its first line ends the collection's extent there."""
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [changes, pylint]\n      pyright\n'))
+    assert 'unsupported nested content' in _refuses(
+        _job_needs, workflow, 'suites')
+
+
 def test_a_block_sequence_item_may_span_lines_too(tmp):
     """A sequence item is a value like any other, so it may span lines."""
     workflow = _real(tmp, _replaced(

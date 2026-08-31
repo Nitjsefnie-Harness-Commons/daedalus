@@ -12,7 +12,10 @@ from _yamlread import (
     _decoded_mapping_entry, _first_child, _indent, _lines, _meaningful,
     _section, job_scalar, step_scalars,
 )
-from _yamlscalar import decode_inline_scalar, split_mapping_field
+from _yamlscalar import (
+    _strip_inline_comment, decode_inline_scalar, flow_depth,
+    split_mapping_field,
+)
 from _yamlsteps import complete_job_mapping
 
 
@@ -146,28 +149,43 @@ def _line_meaningful(line):
     return bool(line.strip(' ')) and not line.lstrip(' ').startswith('#')
 
 
+def _job_field_end(section, index, raw_value):
+    """Where one job field's lines stop, past any collection it opens.
+
+    A flow collection holds its own lines open, so a continuation sitting
+    at the field's own indentation still belongs to the field.
+    """
+    value = _strip_inline_comment(raw_value.strip(' '))
+    depth = flow_depth(value) if value[:1] in ('[', '{') else 0
+    for following in range(index + 1, len(section)):
+        candidate = section[following]
+        if not _line_meaningful(candidate):
+            continue
+        if depth <= 0 and _line_indent(candidate) <= 4:
+            return following
+        depth += flow_depth(_strip_inline_comment(candidate.strip(' ')))
+    return len(section)
+
+
 def _job_field_lines(workflow, job, field):
     """Return one direct job field and its continuation lines."""
     section = _job_section(workflow, job)
     found = None
-    for index, line in enumerate(section[1:], 1):
+    index = 1
+    while index < len(section):
+        line = section[index]
         if not _line_meaningful(line) or _line_indent(line) != 4:
+            index += 1
             continue
-        raw_key, _raw_value = split_mapping_field(
+        raw_key, raw_value = split_mapping_field(
             line[4:], f'job {job!r}')
         key = decode_inline_scalar(raw_key, f'job {job!r} key')
-        if key != field:
-            continue
-        if found is not None:
-            raise ValueError(f'duplicate job field: {field}')
-        end = len(section)
-        for following in range(index + 1, len(section)):
-            candidate = section[following]
-            if (_line_meaningful(candidate)
-                    and _line_indent(candidate) <= 4):
-                end = following
-                break
-        found = section[index:end]
+        end = _job_field_end(section, index, raw_value)
+        if key == field:
+            if found is not None:
+                raise ValueError(f'duplicate job field: {field}')
+            found = section[index:end]
+        index = end
     return found
 
 
