@@ -3,8 +3,12 @@ import ast
 import sys
 
 from _pyroute_values import (DeferredCallable, DeferredClass,
-                             assignment_escapes, expression_value,
-                             mark_callable_escapes, payload_key)
+                             bind_call_arguments, callable_candidates,
+                             contains_callable, expression_callables,
+                             expression_value, follow_callable_call,
+                             is_deferred_value, merge_deferred_values,
+                             payload_key,
+                             store_deferred_value)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
@@ -21,8 +25,9 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             is_extension_constant,
                             literal_iterable_nonempty, lexical_scope_names,
                             literal_truth, payload_keys, new_exits,
-                            rebound_names, record_exit, resolve_sender_name,
-                            state_signature, statement_cannot_raise)
+                            rebound_names, record_exit, record_returns,
+                            resolve_sender_name, state_signature,
+                            statement_cannot_raise)
 
 _copy_state_pair = FlowState.copy
 dict_assignments = _dict_assignments
@@ -147,10 +152,10 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 destination.dicts[name] = keys.copy()
         return destination
 
-    def analyze_callable(deferred, callers, executed=False):
+    def analyze_callable(deferred, callers, executed=False, call=None):
         key = id(deferred)
         if key in active_callables:
-            return copied(callers)
+            return copied(callers), None
         if executed:
             scope_executed.add(key)
         blocked = chain - deferred.captured
@@ -163,6 +168,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         cached = _CALL_CACHE.setdefault((key, active_callables),
                                         (deferred, {}))[1]
         outputs = []
+        returned = []
         body = ([deferred.scope.body]
                 if isinstance(deferred.scope, ast.Lambda)
                 else deferred.scope.body)
@@ -171,7 +177,10 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                           | deferred.state.dict_origins.keys())
             entry = overlay(_copy_state_pair(deferred.state), caller,
                             entry_keep, blocked)
-            signature = state_signature(entry), _payload_key(entry.dicts)
+            if call is not None:
+                bind_call_arguments(deferred, call, caller, entry,
+                                    resolve_sender_name)
+            signature = state_signature(entry), payload_key(entry.dicts)
             hit = cached.get(signature)
             if hit is None:
                 exits = new_exits()
@@ -184,14 +193,17 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 violations.extend(nested)
                 hit = (caller, (tuple(nested),
                                 dedupe_states([*fallthrough,
-                                               *exits['terminal']])))
+                                               *exits['terminal']]),
+                                tuple(value for value in exits['returns']
+                                      if is_deferred_value(value))))
                 cached[signature] = hit
             stored = hit[1]
             violations.extend(stored[0])
+            returned.extend(stored[2])
             for result in stored[1]:
                 outputs.append(overlay(_copy_state_pair(caller), result,
                                        keep, blocked))
-        return dedupe_states(outputs)
+        return dedupe_states(outputs), merge_deferred_values(returned)
 
     def remember(node, current_pairs):
         for state in current_pairs:
@@ -302,7 +314,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 state.evaluated[id(node)] = DeferredCallable(
                     node, callable_state(
                         node, callable_pairs([state]), annotations_eager),
-                    frozenset(local_names), frozenset(chain), module_scope)
+                    frozenset(local_names), frozenset(chain))
                 scope_callables.append(state.evaluated[id(node)])
             return current_pairs
         if isinstance(node, ast.NamedExpr):
@@ -357,18 +369,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 call_name = (node.func.id if isinstance(node.func, ast.Name)
                              else None)
                 deferred = evaluated_value(node.func, state)
-                if not isinstance(deferred, DeferredCallable): deferred = None
-                if isinstance(node.func, ast.Attribute):
-                    owner = node.func.value
-                    class_name = (owner.func.id
-                                  if isinstance(owner, ast.Call)
-                                  and isinstance(owner.func, ast.Name)
-                                  else owner.id if isinstance(owner, ast.Name)
-                                  else None)
-                    class_value = (state.callables.get(class_name)
-                                   if class_name else None)
-                    if isinstance(class_value, DeferredClass):
-                        deferred = class_value.methods.get(node.func.attr)
+                candidates = (callable_candidates(deferred)
+                              or expression_callables(node.func, state))
                 consumer = (call_name if call_name in _BUILTIN_CONSUMERS
                             and call_name not in state.builtin_globals
                             and call_name not in state.builtin_locals
@@ -376,8 +378,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 current = [state]
                 for argument in arguments:
                     current = check_expression(argument, current)
-                    for current_state in current:
-                        mark_callable_escapes(argument, current_state)
                 if consumer in _EAGER_ITERABLE_CALLS:
                     for argument in node.args:
                         current = consume_iterable(
@@ -390,9 +390,12 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         node, current_state.dicts, rel,
                         allowed_opaque_names, sender)
                     violations.extend(found)
-                if deferred is not None:
-                    current = analyze_callable(
-                        deferred, current, executed=True)
+                current, returned_value = follow_callable_call(
+                    candidates, arguments, current, node, analyze_callable,
+                    copied, dedupe_states)
+                if returned_value is not None:
+                    for current_state in current:
+                        current_state.evaluated[id(node)] = returned_value
                 outputs.extend(current)
             return remember(node, dedupe_states(outputs))
         if isinstance(node, ast.GeneratorExp):
@@ -504,8 +507,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                                for name in local_names
                                if isinstance(state.callables.get(name),
                                              DeferredCallable)}
-                    for method in methods.values():
-                        method.escaped = True
                     state = overlay(_copy_state_pair(incoming), state,
                                     local_names, frozenset())
                     state.aliases.pop(statement.name, None)
@@ -685,15 +686,12 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                for target in targets):
             pairs = consume_iterable(statement.value, pairs, exhaust=True)
         value = getattr(statement, 'value', None)
-        if assignment_escapes(statement, targets, value):
-            for state in pairs:
-                mark_callable_escapes(value, state)
         for state in pairs:
             apply_state_dict_statement(statement, state)
             apply_alias_statement(statement, state)
+            store_deferred_value(statement, state)
         if isinstance(statement, ast.Return):
-            for state in pairs:
-                mark_callable_escapes(statement.value, state)
+            record_returns(flow_exits, pairs, statement.value)
         if isinstance(statement, (ast.Return, ast.Raise)):
             record_exit(flow_exits, 'terminal', pairs)
             pairs = []
@@ -712,11 +710,12 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             key = id(deferred)
             if key in seen: continue
             seen.add(key)
-            if isinstance(deferred.scope, ast.Lambda) and not deferred.escaped:
-                continue
             callers = [state for state in pairs
-                       if any(value is deferred
+                       if any(contains_callable(value, deferred)
                               for value in state.callables.values())]
+            if isinstance(deferred.scope, ast.Lambda) \
+                    and (not module_scope or not callers):
+                continue
             if not callers and key in scope_executed: continue
             if not callers: callers = pairs or [fallback or deferred.state]
             analyze_callable(deferred, callers)
