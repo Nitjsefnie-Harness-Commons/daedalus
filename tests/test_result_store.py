@@ -52,6 +52,87 @@ print(json.dumps({
 '''
 
 
+_DELIVERY_PATH_PROBE = r'''
+import contextlib
+import io
+import json
+import os
+from pathlib import Path
+
+from daedalus_bridge import path_safety, result_store
+
+delivery_root = Path(result_store.DELIVERY_DIR)
+key = result_store.result_key('tok', 'extension')
+delivery_dir = delivery_root / key
+delivery_file = delivery_dir / '123_1.json'
+degraded_root = Path(os.environ['DAEDALUS_DIR']) / 'RESULT~1' / 'deliveries'
+wrong_root = Path(os.environ['DAEDALUS_DIR']) / 'wrong' / 'deliveries'
+realpath = path_safety.os.path.realpath
+
+
+def call_with(answers):
+    calls = []
+    answers = iter(str(answer) for answer in answers)
+
+    def resolving_stub(path):
+        calls.append(os.fspath(path))
+        return next(answers)
+
+    path_safety.os.path.realpath = resolving_stub
+    output = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(output):
+            paths = result_store.delivery_result_paths(
+                'tok', 'extension', '123_1')
+    finally:
+        path_safety.os.path.realpath = realpath
+    return paths, calls, output.getvalue()
+
+
+paths, transient_calls, transient_log = call_with([
+    delivery_root, delivery_dir,
+    degraded_root, delivery_root,
+    delivery_root, delivery_root,
+    delivery_dir, delivery_file,
+])
+stable_calls = []
+stable_log = io.StringIO()
+answers = iter(str(answer) for answer in [
+    delivery_root, delivery_dir,
+    wrong_root, delivery_root,
+    wrong_root, delivery_root,
+])
+
+
+def stable_stub(path):
+    stable_calls.append(os.fspath(path))
+    return next(answers)
+
+
+path_safety.os.path.realpath = stable_stub
+try:
+    with contextlib.redirect_stdout(stable_log):
+        try:
+            result_store.delivery_result_paths(
+                'tok', 'extension', '123_1')
+        except ValueError:
+            stable = 'refused'
+        else:
+            stable = 'allowed'
+finally:
+    path_safety.os.path.realpath = realpath
+
+print('DELIVERY_PATH ' + json.dumps({
+    'paths': [str(path) for path in paths],
+    'transient_calls': transient_calls,
+    'transient_log': transient_log,
+    'stable': stable,
+    'stable_calls': stable_calls,
+    'stable_log': stable_log.getvalue(),
+}))
+'''
+
+
 def test_result_store_owns_atomic_slots_and_delivery_dedup(tmp):
     root = Path(tmp) / 'result-store-root'
     slot = root / 'results' / 'unit.json'
@@ -88,6 +169,53 @@ def test_result_store_owns_atomic_slots_and_delivery_dedup(tmp):
         'recorded_before': False,
         'recorded_after': True,
     }, answer
+
+
+def test_delivery_paths_use_the_retrying_parent_comparison(tmp):
+    """The real delivery caller retries a degraded parent spelling."""
+    docroot = Path(tmp) / 'docroot'
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': str(docroot),
+        'DAEDALUS_PORT': '0',
+        'PYTHONDONTWRITEBYTECODE': '1',
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', _DELIVERY_PATH_PROBE],
+        cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith('DELIVERY_PATH ')]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    answer = json.loads(marked[0][len('DELIVERY_PATH '):])
+    delivery_root = docroot / 'results' / 'deliveries'
+    delivery_dir = delivery_root / 'tok_extension'
+    delivery_file = delivery_dir / '123_1.json'
+    wrong_root = docroot / 'wrong' / 'deliveries'
+    assert answer['paths'] == [str(delivery_dir), str(delivery_file)], answer
+    assert answer['transient_calls'] == [
+        str(delivery_root), str(delivery_dir),
+        str(delivery_root), str(delivery_root),
+        str(delivery_root), str(delivery_root),
+        str(delivery_dir), str(delivery_file),
+    ], answer
+    assert answer['transient_log'] == '', answer
+    assert answer['stable'] == 'refused', answer
+    assert answer['stable_calls'] == [
+        str(delivery_root), str(delivery_dir),
+        str(delivery_root), str(delivery_root),
+        str(delivery_root), str(delivery_root),
+    ], answer
+    stable_lines = answer['stable_log'].splitlines()
+    assert len(stable_lines) == 1, answer
+    assert stable_lines[0].startswith('[PATH-REFUSAL] kind=alias '), answer
+    assert f'root={str(delivery_root)!r}' in stable_lines[0], answer
+    assert "parts=('tok_extension',)" in stable_lines[0], answer
+    stable_attempts = (
+        (str(wrong_root), str(delivery_root)),
+        (str(wrong_root), str(delivery_root)),
+    )
+    assert f'attempts={stable_attempts!r}' in stable_lines[0], answer
 
 
 def main():
