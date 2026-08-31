@@ -196,6 +196,12 @@ def _binding_signature(binding):
             payload, binding.bound)
 
 
+def cell_state_signature(cells):
+    return (tuple(sorted(cells.origins.items())),
+            tuple(sorted((key, _binding_signature(binding))
+                         for key, binding in cells.values.items())))
+
+
 def advance_generator(state, generator):
     if generator.remaining is None:
         return

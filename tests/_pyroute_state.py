@@ -3,7 +3,8 @@ import ast
 import operator
 from dataclasses import dataclass, field
 
-from _pyroute_values import (CellState, DeferredGenerator, is_deferred_value,
+from _pyroute_values import (CellState, DeferredGenerator,
+                             cell_state_signature, is_deferred_value,
                              merge_cell_states, sync_cells)
 
 OPAQUE_TAB_SPREAD = object()
@@ -552,7 +553,7 @@ def state_signature(state):
                          for name, value in state.callables.items())),
             tuple(sorted(state.bound)),
             tuple(sorted(state.dict_origins.items())),
-            namespaces, state.namespace)
+            namespaces, state.namespace, cell_state_signature(state.cells))
 
 
 def dedupe_states(states):
