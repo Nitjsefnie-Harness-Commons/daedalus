@@ -13,22 +13,29 @@ from test_version_contract import (  # noqa: E402
 
 
 _SITE_CASES = (
-    ('rail-foot', 4, 'dashboard rail footer'),
-    ('sl-v', 5, 'dashboard status line'),
+    ('rail-foot', 'dashboard rail footer'),
+    ('sl-v', 'dashboard status line'),
 )
+
+
+def _insert_before_body(copy_root, markup):
+    dashboard = copy_root / 'dashboard' / 'index.html'
+    text = dashboard.read_text(encoding='utf-8')
+    anchor = '</body>'
+    assert text.count(anchor) == 1, text
+    dashboard.write_text(text.replace(anchor, markup + '\n' + anchor),
+                         encoding='utf-8')
 
 
 def _duplicate_dashboard_version(copy_root, class_name, second_value='9.9.9',
                                  quote="'"):
-    dashboard = copy_root / 'dashboard' / 'index.html'
-    text = dashboard.read_text(encoding='utf-8')
     if class_name == 'rail-foot':
-        duplicate = (f'\n<div class={quote}rail-foot{quote}>'
-                     f'v{second_value}</div>\n')
+        duplicate = (f'<div class={quote}rail-foot{quote}>'
+                     f'v{second_value}</div>')
     else:
-        duplicate = (f'\n<span class={quote}sl-v{quote}>'
-                     f'{second_value}</span>\n')
-    dashboard.write_text(text + duplicate, encoding='utf-8')
+        duplicate = (f'<span class={quote}sl-v{quote}>'
+                     f'{second_value}</span>')
+    _insert_before_body(copy_root, duplicate)
 
 
 def _use_single_quotes_for_only_site(copy_root, class_name):
@@ -43,8 +50,15 @@ def _use_single_quotes_for_only_site(copy_root, class_name):
     dashboard.write_text(rewritten, encoding='utf-8')
 
 
-def _canonical_dashboard_value(copy_root, checker, site_index):
-    path, _desc, pattern = checker.SITES[site_index]
+def _dashboard_site(checker, desc):
+    entries = [entry for entry in checker.SITES
+               if entry[:2] == ('dashboard/index.html', desc)]
+    assert len(entries) == 1, (desc, entries)
+    return entries[0]
+
+
+def _canonical_dashboard_value(copy_root, checker, desc):
+    path, _site_desc, pattern = _dashboard_site(checker, desc)
     text = (copy_root / path).read_text(encoding='utf-8')
     return re.search(pattern, text).group('v')
 
@@ -61,29 +75,28 @@ def _assert_duplicate_refused(result, desc, canonical, second_value):
 def test_check_versions_refuses_single_quoted_rail_footer_duplicate(tmp_path):
     copy_root = Path(tmp_path) / 'tree'
     checker = _copy_versioned_tree(copy_root)
-    canonical = _canonical_dashboard_value(copy_root, checker, 4)
+    desc = 'dashboard rail footer'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
     _duplicate_dashboard_version(copy_root, 'rail-foot')
     result = _run_checker(copy_root)
-    _assert_duplicate_refused(
-        result, 'dashboard rail footer', canonical, '9.9.9')
+    _assert_duplicate_refused(result, desc, canonical, '9.9.9')
 
 
 def test_check_versions_refuses_single_quoted_status_line_duplicate(tmp_path):
     copy_root = Path(tmp_path) / 'tree'
     checker = _copy_versioned_tree(copy_root)
-    canonical = _canonical_dashboard_value(copy_root, checker, 5)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
     _duplicate_dashboard_version(copy_root, 'sl-v')
     result = _run_checker(copy_root)
-    _assert_duplicate_refused(
-        result, 'dashboard status line', canonical, '9.9.9')
+    _assert_duplicate_refused(result, desc, canonical, '9.9.9')
 
 
 def test_check_versions_refuses_mixed_dashboard_delimiters(tmp_path):
-    for class_name, site_index, desc in _SITE_CASES:
+    for class_name, desc in _SITE_CASES:
         copy_root = Path(tmp_path) / class_name / 'tree'
         checker = _copy_versioned_tree(copy_root)
-        canonical = _canonical_dashboard_value(
-            copy_root, checker, site_index)
+        canonical = _canonical_dashboard_value(copy_root, checker, desc)
         _use_single_quotes_for_only_site(copy_root, class_name)
         _duplicate_dashboard_version(copy_root, class_name, quote='"')
         result = _run_checker(copy_root)
@@ -119,11 +132,10 @@ def test_check_versions_set_refuses_without_partial_dashboard_rewrite(
 
 def test_single_quoted_dashboard_site_passes_and_set_preserves_markup(
         tmp_path):
-    for class_name, site_index, _desc in _SITE_CASES:
+    for class_name, desc in _SITE_CASES:
         copy_root = Path(tmp_path) / class_name / 'tree'
         checker = _copy_versioned_tree(copy_root)
-        canonical = _canonical_dashboard_value(
-            copy_root, checker, site_index)
+        canonical = _canonical_dashboard_value(copy_root, checker, desc)
         _use_single_quotes_for_only_site(copy_root, class_name)
         checked = _run_checker(copy_root)
         assert checked.returncode == 0, (
@@ -137,6 +149,77 @@ def test_single_quoted_dashboard_site_passes_and_set_preserves_markup(
             written.returncode, written.stdout, written.stderr)
         assert dashboard.read_text(encoding='utf-8') == before.replace(
             canonical, '9.9.9')
+
+
+def test_script_raw_text_dashboard_version_decoys_are_ignored(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    script = (
+        '<script>\n'
+        'const s = "<span class=\'sl-v\'>9.9.9</span>";\n'
+        'const t = `<span class=\'sl-v\'>8.8.8</span>`;\n'
+        "const r = /class='rail-foot'>v7[.]7[.]7/;\n"
+        "// <span class='sl-v'>6.6.6</span>\n"
+        "/* <div class='rail-foot'>v5.5.5</div> */\n"
+        '</script>')
+    _insert_before_body(copy_root, script)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_data_class_dashboard_decoys_are_ignored(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    markup = (
+        "<div data-class='rail-foot'>v9.9.9</div>\n"
+        "<span data-class='sl-v'>8.8.8</span>")
+    _insert_before_body(copy_root, markup)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_mismatched_dashboard_delimiters_are_not_sites(tmp_path):
+    rail_root = Path(tmp_path) / 'rail-foot' / 'tree'
+    _copy_versioned_tree(rail_root)
+    _insert_before_body(
+        rail_root, "<div class='rail-foot\">v9.9.9</div>")
+    rail_result = _run_checker(rail_root)
+    assert rail_result.returncode == 0, (
+        rail_result.returncode, rail_result.stdout, rail_result.stderr)
+
+    status_root = Path(tmp_path) / 'sl-v' / 'tree'
+    _copy_versioned_tree(status_root)
+    dashboard = status_root / 'dashboard' / 'index.html'
+    text = dashboard.read_text(encoding='utf-8')
+    old, new = '<span class="sl-v">', '<span class="sl-v\'>'
+    assert text.count(old) == 1, text
+    dashboard.write_text(text.replace(old, new), encoding='utf-8')
+    status_result = _run_checker(status_root)
+    assert status_result.returncode != 0, (
+        status_result.returncode, status_result.stdout, status_result.stderr)
+    assert 'no version found for dashboard status line' in status_result.stderr
+
+
+def test_backticks_are_not_html_attribute_delimiters(tmp_path):
+    for class_name, _desc in _SITE_CASES:
+        copy_root = Path(tmp_path) / class_name / 'tree'
+        _copy_versioned_tree(copy_root)
+        _duplicate_dashboard_version(copy_root, class_name, quote='`')
+        result = _run_checker(copy_root)
+        assert result.returncode == 0, (
+            class_name, result.returncode, result.stdout, result.stderr)
+
+
+def test_status_line_value_stops_at_markup(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    _insert_before_body(
+        copy_root, "<span class='sl-v'>9.9.9<em>x</em></span>")
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
 
 
 def main():
