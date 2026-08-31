@@ -111,13 +111,17 @@ class InvocationReplay:
                     and self.scope_at(start) in owners):
                 values.pop(self.visible_binding(match.group(1), start), None)
 
-    def writes(self, call, inherited, seen=frozenset(),
-               inherited_optional=False, limits=None):
+    def run(self, call, inherited, seen=frozenset(),
+            inherited_optional=False, limits=None, sender_sources=None,
+            execution=None):
         call_start, binding, args = call
         if limits is None:
             limits = lexical_limits(
                 self.scopes, self.scope_at(call_start), call_start)
+        if execution is None:
+            execution = call_start
         writes = []
+        calls = []
         bodies = self.timeline.values_at(binding, inherited, limits)
         for body in bodies:
             if body is None:
@@ -126,9 +130,10 @@ class InvocationReplay:
             if function_scope is None or function_scope in seen:
                 continue
             overrides = dict(inherited)
+            sources = dict(sender_sources or {})
             self._override_parameters(
                 overrides, inherited, function_scope, call_start, args,
-                limits)
+                limits, sources)
             operations = [(start, 'bind', match)
                           for start, kind, match in self.events
                           if kind == 'bind'
@@ -142,28 +147,20 @@ class InvocationReplay:
                     self._apply_assignment(
                         item, start, function_scope, path_optional,
                         overrides, inherited, limits)
+                    sources.pop(self.visible_binding(
+                        item.group(1), start), None)
                     writes.append((start, item, path_optional))
                     continue
                 nested_optional = (path_optional or self.optional_write(
                     start, self.scopes[function_scope]['end']))
                 nested_limits = limits + ((function_scope, start),)
-                writes.extend(self.writes(
+                calls.append((item, execution, dict(sources)))
+                nested_writes, nested_calls = self.run(
                     item, overrides, seen | {function_scope},
-                    nested_optional, nested_limits))
-        return writes
-
-    def concise_calls(self, call, inherited):
-        call_start, binding, _ = call
-        limits = lexical_limits(
-            self.scopes, self.scope_at(call_start), call_start)
-        found = []
-        for body in self.timeline.values_at(binding, inherited, limits):
-            if body is None or body[0] != 'expr':
-                continue
-            function_scope = self._scope_for(body)
-            found.extend(nested for nested in self.invocations
-                         if self.scope_at(nested[0]) == function_scope)
-        return found
+                    nested_optional, nested_limits, sources, execution)
+                writes.extend(nested_writes)
+                calls.extend(nested_calls)
+        return writes, calls
 
     def _scope_for(self, body):
         inset = body[0] == 'block'
@@ -173,7 +170,7 @@ class InvocationReplay:
                     None)
 
     def _override_parameters(self, overrides, inherited, function_scope,
-                             call_start, args, limits):
+                             call_start, args, limits, sender_sources):
         scope = self.scopes[function_scope]
         for name, span in zip(scope['param_order'], args):
             if name is None:
@@ -188,6 +185,7 @@ class InvocationReplay:
             overrides[target] = (
                 self.timeline.values_at(source, inherited, limits)
                 if source is not None else (direct,))
+            sender_sources[target] = sender_sources.get(source, span)
 
     def _apply_assignment(self, match, start, function_scope, path_optional,
                           overrides, inherited, limits):

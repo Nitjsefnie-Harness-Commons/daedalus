@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _jsread import (js_bracket_end, js_mask,  # noqa: E402
-                     js_object_entries, js_split_top_level)
+from _jsread import (js_bracket_end, js_expression_end,  # noqa: E402
+                     js_mask, js_object_entries, js_split_top_level)
 from _jsroute_timeline import (  # noqa: E402
     FunctionTimeline, InvocationReplay, declaration_bindings,
     function_reference, lexical_limits)
@@ -89,8 +89,7 @@ def _js_function_body_at(mask, start):
         return ('block', body, js_bracket_end(mask, body))
     if mask[body:body + 1] == '(':
         return ('expr', body + 1, js_bracket_end(mask, body) - 1)
-    semi = mask.find(';', body)
-    return ('expr', body, len(mask) if semi == -1 else semi)
+    return ('expr', body, js_expression_end(mask, body))
 
 
 def js_tab_routing_violations(path, rel):
@@ -497,19 +496,19 @@ def js_tab_routing_violations(path, rel):
         timeline, scopes, events, invocations, mask, scope_at,
         visible_binding, _js_function_body_at, optional_write)
 
-    concise_runtime = {}
+    reached_calls = {}
     runtime_values = {}
     previous_call = -1
     for call in invocations:
         if scope_at(call[0]) != 0:
             continue
         replay.clear_between(runtime_values, previous_call, call[0], {0})
-        for nested in replay.concise_calls(call, runtime_values):
-            concise_runtime.setdefault(nested[0], []).append(call[0])
-        replay.writes(call, runtime_values)
+        _, reached = replay.run(call, runtime_values)
+        for record in reached:
+            reached_calls.setdefault(record[0][0], []).append(record)
         previous_call = call[0]
 
-    def sender_before(name, limit):
+    def sender_states_before(limit):
         states = {}
         call_scope = scope_at(limit)
         ancestors = set()
@@ -530,11 +529,11 @@ def js_tab_routing_violations(path, rel):
                 continue
             replay.clear_between(
                 runtime_values, previous_call, call_start, ancestors)
+            writes, _ = replay.run(call, runtime_values)
             scheduled.extend((call_start, order, start, call_start,
                               path_optional, match)
                              for order, (start, match, path_optional)
-                             in enumerate(replay.writes(
-                                 call, runtime_values), 1))
+                             in enumerate(writes, 1))
             previous_call = call_start
         for _, _, start, call_start, path_optional, match in sorted(scheduled):
             target = visible_binding(match.group(1), start)
@@ -548,7 +547,18 @@ def js_tab_routing_violations(path, rel):
                 optional = optional or optional_write(call_start, limit)
             states[target] = (merged_sender(states.get(target), value)
                               if optional else value)
-        return alias_value(name, limit, states)
+        return states
+
+    def sender_before(name, limit):
+        return alias_value(name, limit, sender_states_before(limit))
+
+    def reached_sender(record):
+        call, execution, sources = record
+        states = sender_states_before(execution)
+        source = sources.get(call[1])
+        if source is not None:
+            return sender_state(source[0], source[1], states)
+        return states.get(call[1])
 
     def names_before(limit, depth, floor=0):
         """Tracked state of named objects from the assignments before `limit`.
@@ -642,12 +652,12 @@ def js_tab_routing_violations(path, rel):
         tab_entries = []
         unprovable = []
         named = names_before(m.start(), 0)
-        runtime_positions = concise_runtime.get(m.start())
+        runtime_records = reached_calls.get(m.start())
         if call_name in senders:
             sender = call_name
-        elif runtime_positions:
-            runtime_senders = [sender_before(call_name, position)
-                               for position in runtime_positions]
+        elif runtime_records:
+            runtime_senders = [reached_sender(record)
+                               for record in runtime_records]
             sender = runtime_senders[0]
             for value in runtime_senders[1:]:
                 sender = merged_sender(sender, value)
