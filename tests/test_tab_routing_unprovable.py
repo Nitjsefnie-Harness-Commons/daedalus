@@ -373,6 +373,20 @@ def test_generator_yielded_callables_match_runtime(tmp):
     _assert_focus_cases(tmp, cases)
 
 
+def test_generator_second_consumption_re_resolves_yielded_name(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    safe = (f'send = ext_cmd\ncallback = lambda: {call}\n'
+            'gen = (callback for _ in [1, 2])\nfirst = next(gen)\n'
+            'holder = first\ncallback = ordinary\nsecond = next(gen)\n'
+            'del holder\nreturn second()')
+    unsafe = ('send = ext_cmd\ncallback = lambda: ordinary()\n'
+              'gen = (callback for _ in [1, 2])\nfirst = next(gen)\n'
+              'holder = first\ncallback = lambda: ' + call + '\n'
+              'second = next(gen)\ndel holder\nreturn second()')
+    assert _tracked_focus_verdict(tmp, safe, counts=True) == (0, 0)
+    assert _tracked_focus_verdict(tmp, unsafe, counts=True) == (1, 1)
+
+
 def test_generator_iteration_forms_match_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     local_cases = [
