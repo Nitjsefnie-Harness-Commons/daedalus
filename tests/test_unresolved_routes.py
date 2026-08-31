@@ -189,5 +189,25 @@ def test_an_import_bound_twice_resolves_to_neither_binding(tmp):
         'callable is unresolved']
 
 
+def test_a_starred_argument_does_not_make_path_replace_pure(tmp):
+    """`*[]` adds nothing at runtime and nothing to the positional count."""
+    relative = Path('tests/test_coverage_environment.py')
+    root, target = _real_module_copy(tmp, relative)
+    needle = "    copy_test_tree(root)\n"
+    text = _module_text(target)
+    assert needle in text, 'the copy helper shape changed'
+    line = text[:text.index(needle)].count('\n') + 2
+    plant = ("    (root / 'tests' / 'test_control_writes.py')"
+             ".replace(*[], ROOT / '.probe5.py')\n")
+    target.write_bytes(
+        text.replace(needle, needle + plant, 1).encode('utf-8'))
+    violations = control_write_violations(target, root)
+    assert (f'tests/test_coverage_environment.py:{line}: '
+            "(root / 'tests' / 'test_control_writes.py').replace is not a "
+            'modelled call') in violations, violations
+    target.write_bytes(text.encode('utf-8'))
+    assert control_write_violations(target, root) == []
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))

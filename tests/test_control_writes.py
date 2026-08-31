@@ -337,5 +337,35 @@ def test_a_helper_in_a_call_cycle_is_judged_unseeded(tmp):
     ]
 
 
+def test_a_spread_argument_seeds_nothing(tmp):
+    """A `*[]` shifts every later positional at runtime, not in the AST."""
+    source = Path(tmp) / 'seed-shift.py'
+    source.write_text(
+        "def _copy(a, b, c=None):\n"
+        "    Path(b).write_text('planted')\n"
+        "def test_control(tmp):\n"
+        "    _copy(*[], tmp, ROOT)\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'seed-shift.py:2: write_text target path is not control-owned'
+    ]
+
+
+def test_a_spread_argument_leaves_the_open_mode_unresolved(tmp):
+    """A mode hidden in a spread is not an absent mode."""
+    source = Path(tmp) / 'open-spread.py'
+    source.write_text(
+        "def test_control(tmp):\n"
+        "    open(*[ROOT / 'unsafe.py', 'w'])\n"
+        "    open(ROOT / 'unsafe.py', **{'mode': 'w'})\n"
+        "    (ROOT / 'unsafe.py').open(**{'mode': 'w'})\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'open-spread.py:2: open mode is unresolved',
+        'open-spread.py:3: open mode is unresolved',
+        'open-spread.py:4: Path.open mode is unresolved',
+    ]
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
