@@ -36,6 +36,12 @@ _PYTHON_CAPTURE_CONDITION = (
 _FAILURE_CAPTURE_CONDITION = (
     "${{ (success() && matrix.os == 'ubuntu-latest') "
     "|| (failure() && matrix.os == 'windows-latest') }}")
+_FAILURE_ONLY_CAPTURE_CONDITION = (
+    "${{ failure() && matrix.os == 'ubuntu-latest' }}")
+_TWO_PYTHON_MATRIX = {
+    'os': _SUPPORTED_MATRIX['os'],
+    'python': ['3.12', '3.13'],
+}
 _PTH_CREATION_COMMAND = (
     'python -c "from pathlib import Path; import sysconfig; Path( '
     "sysconfig.get_paths()['purelib'], 'coverage-subprocess.pth').write_text( "
@@ -86,11 +92,12 @@ def _with_capture_condition(workflow, condition):
     return workflow[:start] + ''.join(lines) + workflow[end:]
 
 
-def _matrix_cases(expression):
-    axes = tuple(_SUPPORTED_MATRIX)
+def _matrix_cases(expression, matrix=None):
+    matrix = _SUPPORTED_MATRIX if matrix is None else matrix
+    axes = tuple(matrix)
     cases = []
     for values in itertools.product(
-            *(_SUPPORTED_MATRIX[axis] for axis in axes)):
+            *(matrix[axis] for axis in axes)):
         row = dict(zip(axes, values))
         for status_name in _STATUS_NAMES:
             context = {
@@ -130,12 +137,12 @@ def _capture_updates(step, tmp, workspace):
     return updates
 
 
-def _assert_capture_step(step, tmp):
-    ubuntu = {'ubuntu-latest'}
-    cases = _matrix_cases(step['if'])
-    selected = [(row, status) for row, status, runs in cases if runs]
-    assert selected, step
-    assert {row['os'] for row, _status in selected} == ubuntu, selected
+def _assert_capture_step(step, tmp, matrix=None):
+    matrix = _SUPPORTED_MATRIX if matrix is None else matrix
+    cases = _matrix_cases(step['if'], matrix)
+    for row, status, runs in cases:
+        required = row['os'] == 'ubuntu-latest' and status == 'success'
+        assert runs is required, (row, status, runs, required)
     assert step.get('shell') == 'bash', step
     for index, (row, status, runs) in enumerate(cases):
         workspace_dir = Path(tmp) / f'case-{index}'
@@ -149,6 +156,16 @@ def _assert_capture_step(step, tmp):
             expected[_CAPTURE_KEY] = (
                 f'{workspace}/.node-v8-coverage')
         assert updates == expected, (row, status, updates)
+
+
+def _capture_rejection(condition, tmp, matrix=None):
+    matrix = _SUPPORTED_MATRIX if matrix is None else matrix
+    workflow = _with_capture_condition(_workflow(), condition)
+    try:
+        _assert_capture_step(_capture_step(workflow), tmp, matrix)
+    except AssertionError as error:
+        return error
+    raise AssertionError(f'capture condition was accepted: {condition}')
 
 
 def _pth_program(command):
@@ -436,6 +453,19 @@ def test_capture_condition_refuses_windows_after_failure(tmp):
         assert 'windows-latest' in str(error), error
     else:
         raise AssertionError('failure() allowed Windows capture')
+
+
+def test_capture_condition_requires_successful_ubuntu_rows(tmp):
+    """Failure-only capture must not replace successful Ubuntu capture."""
+    error = _capture_rejection(_FAILURE_ONLY_CAPTURE_CONDITION, tmp)
+    assert 'success' in str(error), error
+
+
+def test_capture_condition_requires_every_python_row(tmp):
+    """Every declared Python row must capture on successful Ubuntu."""
+    error = _capture_rejection(
+        _PYTHON_CAPTURE_CONDITION, tmp, _TWO_PYTHON_MATRIX)
+    assert '3.12' in str(error), error
 
 
 def test_matrix_job_identifier_is_not_a_contract(tmp):
