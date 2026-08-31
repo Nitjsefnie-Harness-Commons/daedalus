@@ -652,10 +652,13 @@ jobs:
               echo 'raised=true'
               echo "python_measured=${python_measured}"
               echo "javascript_measured=${javascript_measured}"
+              # --quiet exits 0 for an unchanged path, so each
+              # single-file arm announces one file's subject while
+              # testing the other file's diff.
               if git diff --quiet -- scripts/ci/size_baseline.py; then
-                echo 'subject=tighten the module size baseline'
-              elif git diff --quiet -- .github/workflows/tests.yml; then
                 echo 'subject=raise the coverage ratchets'
+              elif git diff --quiet -- .github/workflows/tests.yml; then
+                echo 'subject=tighten the module size baseline'
               else
                 echo 'subject=raise coverage ratchets and tighten module sizes'
               fi
