@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _yamlread import job_mapping, step_mapping_scalar  # noqa: E402
+from _yamlsteps import complete_job_mapping  # noqa: E402
 
 
 _CAPTURE_KEY = 'NODE_V8_COVERAGE'
@@ -205,6 +206,41 @@ def test_coverage_job_publishes_distinct_python_and_javascript_metrics(tmp):
     assert re.search(r'^\s+coverage\.xml\s*$', upload, re.MULTILINE), upload
     assert re.search(r'^\s+javascript-coverage\.xml\s*$',
                      upload, re.MULTILINE), upload
+
+
+def test_coverage_combines_measurements_from_every_supported_os(tmp):
+    """The final gates must consume one artifact from each OS leg."""
+    del tmp
+    workflow = _workflow()
+    matrix_job = complete_job_mapping(workflow, 'coverage-matrix')
+    assert matrix_job is not None, workflow
+    assert matrix_job['strategy']['matrix'] == {
+        'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
+        'python': ['3.13'],
+    }
+    matrix_steps = workflow.split('\n  coverage-matrix:\n', 1)[1]
+    matrix_steps = matrix_steps.split('\n  coverage:\n', 1)[0]
+    assert 'python scripts/ci/coverage_suites.py' in matrix_steps
+    assert 'name: coverage-data-${{ matrix.os }}' in matrix_steps
+    assert 'include-hidden-files: true' in matrix_steps
+    assert re.search(r'^\s+\.coverage\.\*\s*$', matrix_steps,
+                     re.MULTILINE), matrix_steps
+    assert re.search(r'^\s+\.node-v8-coverage\s*$', matrix_steps,
+                     re.MULTILINE), matrix_steps
+
+    coverage = complete_job_mapping(workflow, 'coverage')
+    assert 'coverage-matrix' in coverage['needs']
+    aggregate = complete_job_mapping(workflow, 'aggregate')
+    assert 'coverage-matrix' in aggregate['needs']
+    body = workflow.split('\n  coverage:\n', 1)[1]
+    body = body.split('\n  diff-coverage:\n', 1)[0]
+    assert 'pattern: coverage-data-*' in body, body
+    assert 'path: coverage-data' in body, body
+    assert 'merge-multiple: false' in body, body
+    assert 'python scripts/ci/coverage_combine.py coverage-data/' in body, body
+    assert ('coverage-data/coverage-data-ubuntu-latest/.node-v8-coverage'
+            in body), body
+    assert 'coverage_suites.py' not in body, body
 
 
 def test_capture_can_be_scoped_to_every_consumer_step(tmp):
