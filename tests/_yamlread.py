@@ -16,6 +16,7 @@ from _yamlscalar import (
     _strip_inline_comment,
     check_plain_scalar as _check_plain_scalar,
     decode_inline_scalar as _decode_inline_scalar,
+    decode_inline_value as _decode_inline_value,
     split_mapping_field as _split_mapping_field,
 )
 
@@ -335,12 +336,11 @@ def _mapping_value(lines, index, end, indent, raw_value, name):
     """Decode one inline scalar mapping value, folding a plain wrap."""
     _value_start, value_end = _section(lines, index, indent)
     if _first_child(lines, index + 1, value_end, indent) is None:
-        return _decode_inline_scalar(raw_value, name)
+        return _decode_inline_value(raw_value, name)
     value = raw_value.strip(' ')
     if value[:1] in ('[', '{', "'", '"', '>', '|', ''):
         raise YAMLReadError(f'{name} has an unsupported nested value')
-    _check_plain_scalar(value, name)
-    return _check_plain_scalar(
+    return _decode_inline_value(
         _folded_plain(lines, index, value_end, indent, value, name), name)
 
 
@@ -412,19 +412,20 @@ def _sequence_entry(
     for offset, index in enumerate(items):
         item_end = items[offset + 1] if offset + 1 < len(items) else end
         text, _ended = lines[index]
-        fields = [text[item_indent + 2:]]
+        field_indent = item_indent + 2
+        fields = [(index, text[field_indent:])]
         for following in range(index + 1, item_end):
             line = lines[following]
             if not _meaningful(line):
                 continue
             indent = _indent(line)
-            if indent != item_indent + 2:
+            if indent != field_indent:
                 continue
             text, _ended = line
-            fields.append(text[indent:])
+            fields.append((following, text[indent:]))
 
         step_name = None
-        for field in fields:
+        for field_index, field in fields:
             _entry((field, False))
             raw_key, rest = _split_mapping_field(field, 'step')
             key = _decode_inline_scalar(raw_key, 'step key')
@@ -444,6 +445,11 @@ def _sequence_entry(
             if value.startswith('!'):
                 raise YAMLReadError(
                     'YAML tags in step names are unsupported')
+            value_body = _section(lines, field_index, field_indent)
+            if _first_child(
+                    lines, *value_body, field_indent) is not None:
+                raise YAMLReadError(
+                    'step name has an unsupported multiline scalar')
             step_name = value
         if step_name == name:
             matches.append(_Entry(index, item_indent))

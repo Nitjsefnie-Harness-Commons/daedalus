@@ -628,6 +628,7 @@ def test_a_closing_brace_cannot_open_a_plain_scalar(tmp):
 def test_a_question_mark_and_space_cannot_open_a_plain_scalar(tmp):
     """A question-mark key indicator cannot lead a plain scalar."""
     _plain_indicator_refusal(tmp, '? x')
+    _plain_indicator_refusal(tmp, '?')
 
 
 def test_a_flow_indicator_inside_a_plain_scalar_is_refused(tmp):

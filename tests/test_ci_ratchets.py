@@ -51,10 +51,9 @@ def test_promoted_modules_import_by_package(tmp):
 
 def _assert_duplicate_refused(language, anchor, name):
     ratchet = _ratchet()
-    step = (_PYTHON_STEP if language == 'python' else _JAVASCRIPT_STEP)
-    assert _RATCHET_WORKFLOW.count(step) == 1, step
+    assert _RATCHET_WORKFLOW.count(anchor) == 1, anchor
     duplicate = _RATCHET_WORKFLOW.replace(
-        step, f'{step}{anchor}\n', 1)
+        anchor, f'{anchor}\n{anchor}', 1)
     try:
         ratchet.update(duplicate, 90.0, language)
     except SystemExit as why:
@@ -396,7 +395,8 @@ def test_the_ratchet_refuses_a_gate_that_already_disagrees(tmp):
     something to bake in under a fresh number."""
     del tmp
     ratchet = _ratchet()
-    disagreeing = _RATCHET_WORKFLOW.replace('--fail-under=72', '--fail-under=70')
+    disagreeing = _RATCHET_WORKFLOW.replace(
+        '--fail-under=72', '--fail-under=70')
     try:
         ratchet.update(disagreeing, 90.0, 'python')
     except SystemExit as why:
