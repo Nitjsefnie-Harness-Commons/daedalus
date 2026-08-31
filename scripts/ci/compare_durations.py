@@ -108,6 +108,8 @@ def compare(base_rounds, head_rounds, excluded=()):
         was = statistics.median([durations[name] for durations in base_rounds])
         now = statistics.median([durations[name] for durations in head_rounds])
         movements.append((name, was, now, now - was))
+    # Ordering by |delta| lets the limit's cut tail hide a large mover of
+    # the minority sign -- a table of speedups can drop the one regression.
     movements.sort(key=lambda row: abs(row[3]), reverse=True)
     return shared, pairs, movements
 
