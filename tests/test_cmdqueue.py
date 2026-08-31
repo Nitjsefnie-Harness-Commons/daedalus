@@ -170,23 +170,43 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     # A whole-multiple timeout keeps a second read per pass inside the bound.
     timeout = 2 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    with _virtual_cmdqueue_clock(10) as (clock, events, origin):
+    with _virtual_cmdqueue_clock() as (clock, events, origin):
         with _refuse_path_operation(queued, 'open', 1000, clock=clock):
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)
     kinds = [kind for kind, _ in events]
-    sleeps = [duration for kind, duration in events if kind == 'sleep']
     assert kinds and kinds[0] == 'read', ('no leading read', events)
-    assert kinds[-1] == 'sleep', ('no final sleep', events)
-    assert all(a != 'sleep' or b == 'read'
+    assert all(a != 'read' or b != 'read'
                for a, b in zip(kinds, kinds[1:])), events
+    sleep_groups = []
+    for kind, duration in events:
+        if kind == 'read':
+            sleep_groups.append([])
+        else:
+            assert kind == 'sleep' and sleep_groups, events
+            assert duration <= _cmdqueue.POLL_DELAY, (duration, events)
+            sleep_groups[-1].append(duration)
+    assert sleep_groups and any(sleep_groups), events
+    sleeps = [sum(group) for group in sleep_groups if group]
     assert command is None, command
     assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), (
         sleeps, events)
     # An exact multiple can make the final sleep equal the polling delay.
     assert sleeps[-1] <= _cmdqueue.POLL_DELAY, (sleeps, events)
-    end = clock.monotonic()
     deadline = origin + timeout
+    actual_end = clock.monotonic()
+    end = actual_end
+    if events and events[-1][0] == 'read':
+        # A final read may straddle the deadline after a decomposed delay;
+        # pin the deadline-side endpoint after bounding its modeled cost.
+        before_last_read = actual_end - events[-1][1]
+        read_cost = events[-1][1]
+        assert before_last_read <= deadline <= actual_end, (
+            'final read did not straddle the deadline', actual_end, deadline,
+            events)
+        assert deadline - before_last_read <= read_cost + math.ulp(deadline), (
+            'final read started too early', actual_end, deadline, events)
+        end = deadline
     # A wait may take its deadline as origin + timeout or as that value's
     # next representable successor; it must stop at whichever it chose.
     assert deadline <= end <= math.nextafter(deadline, math.inf), (
