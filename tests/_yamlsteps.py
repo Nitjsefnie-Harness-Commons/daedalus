@@ -8,6 +8,7 @@ from _yamlscalar import (
     _strip_inline_comment,
     check_plain_scalar,
     decode_inline_scalar,
+    find_mapping_field,
     flow_depth,
     split_flow_collection,
     split_flow_items,
@@ -376,17 +377,36 @@ def _decode_flow_collection(opening, body, owner):
         return [] if opening == '[' else {}
     items = split_flow_items(body, owner)
     if opening == '[':
-        return [_decode_complete_inline(item, f'{owner} item')
-                for item in items]
+        return [_decode_flow_item(item, f'{owner} item') for item in items]
     values = {}
     for item in items:
-        raw_key, raw_value = split_mapping_field(item.strip(' '), owner)
-        key = decode_inline_scalar(raw_key, f'{owner} key')
+        key, value = _decode_flow_pair(item.strip(' '), owner)
         if key in values:
             raise YAMLReadError(f'duplicate mapping key: {key}')
-        values[key] = _decode_complete_inline(
-            raw_value, f'{owner} value for {key!r}')
+        values[key] = value
     return values
+
+
+def _decode_flow_pair(text, owner):
+    """Decode one flow mapping entry, whose value YAML may leave null."""
+    raw_key, raw_value = find_mapping_field(text, owner) or (text, '')
+    key = decode_inline_scalar(raw_key, f'{owner} key')
+    if not raw_value.strip(' '):
+        return key, None
+    return key, _decode_complete_inline(
+        raw_value, f'{owner} value for {key!r}')
+
+
+def _decode_flow_item(item, owner):
+    """Decode one flow sequence entry, which may be a single-pair mapping.
+
+    `[a: b]` and `[a:]` are sequences of one mapping each, not scalars that
+    happen to carry a colon.
+    """
+    text = item.strip(' ')
+    if find_mapping_field(text, owner) is None:
+        return _decode_complete_inline(item, owner)
+    return dict((_decode_flow_pair(text, owner),))
 
 
 def _decode_complete_inline(raw_value, owner):
