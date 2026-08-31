@@ -446,6 +446,35 @@ def test_generator_materializer_shape_matches_runtime(tmp):
     _assert_focus_cases(tmp, cases)
 
 
+def test_consumer_runtime_shapes_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    prefix = f'send = ext_cmd\ncallback = lambda: {call}\n'
+    cases = [
+        ('max-element-invoked',
+         prefix + 'gen = (callback for _ in [1])\nmax(gen)()\nsend = ordinary',
+         '', '', True),
+        ('min-element-invoked',
+         prefix + 'gen = (callback for _ in [1])\nmin(gen)()\nsend = ordinary',
+         '', '', True),
+        ('max-element-not-invoked',
+         prefix + 'gen = (callback for _ in [1])\nmax(gen)\nsend = ordinary',
+         '', '', False),
+        ('dict-invalid-arity',
+         prefix + "gen = (('x', callback, 0) for _ in [1])\n"
+         "try:\n    dict(gen)['x']()\nexcept ValueError:\n    pass\n"
+         'send = ordinary', '', '', False),
+        ('dict-key-iteration',
+         prefix + "box = {'x': callback}\n"
+         'for key in box:\n    try:\n        key()\n'
+         '    except TypeError:\n        pass\ndel box\nsend = ordinary',
+         '', '', False),
+        ('dict-value-invoked',
+         prefix + "box = {'x': callback}\nbox['x']()\nsend = ordinary",
+         '', '', True),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
 def test_nested_function_reachability_matches_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     cases = [
