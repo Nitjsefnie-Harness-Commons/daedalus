@@ -378,16 +378,25 @@ def deferred_expression_value(node, state, lambda_factory):
     return None
 
 
+_LIVE_UNRESOLVED = object()
+
+
 def live_expression_value(node, state, lambda_factory, captured):
     evaluated = state.evaluated
     state.evaluated = {key: value for key, value in evaluated.items()
                        if key != id(node)}
     try:
-        return deferred_expression_value(
+        value = deferred_expression_value(
             node, state, lambda item, current:
             lambda_factory(item, current, captured))
     finally:
         state.evaluated = evaluated
+    resolved = (value is not None or isinstance(node, ast.Constant)
+                or (isinstance(node, ast.Name) and node.id in state.bound
+                    and node.id not in state.aliases))
+    if resolved: evaluated[id(node)] = value
+    else: evaluated.pop(id(node), None)
+    return value if resolved else _LIVE_UNRESOLVED
 
 
 def new_deferred_generator(node, state, captured, lambda_factory,
