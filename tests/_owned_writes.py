@@ -13,3 +13,9 @@ def copy_test_tree(root):
     destination.mkdir(parents=True, exist_ok=True)
     for source in sorted((ROOT / 'tests').glob('*.py')):
         (destination / source.name).write_bytes(source.read_bytes())
+    # tests/_util.py loads the fixture's parent-watch module at import, so a
+    # fabricated tree carrying the test tree cannot import without it.
+    bridge = root / 'daedalus_bridge'
+    bridge.mkdir(parents=True, exist_ok=True)
+    (bridge / 'parent_watch.py').write_bytes(
+        (ROOT / 'daedalus_bridge' / 'parent_watch.py').read_bytes())

@@ -11,7 +11,7 @@ from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.output import configure_stdio
 from daedalus_cli.transport import token as _configured_token
 from daedalus_bridge import atomic_file
-from daedalus_bridge import command_queue
+from daedalus_bridge import command_queue, parent_watch
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import mcp_bootstrap
 from daedalus_bridge import result_store
@@ -1940,10 +1940,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    CMD_DIR.mkdir(parents=True, exist_ok=True)
-    RES_DIR.mkdir(parents=True, exist_ok=True)
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    SEG_DIR.mkdir(parents=True, exist_ok=True)
+    parent_watch.start()
+    for directory in (CMD_DIR, RES_DIR, UPLOAD_DIR, SEG_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
     threading.Thread(
         target=command_queue.gc_loop, args=(CMD_DIR, CMD_TTL),
         name='command-gc', daemon=True).start()
