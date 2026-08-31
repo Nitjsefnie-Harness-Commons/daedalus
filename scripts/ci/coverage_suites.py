@@ -36,7 +36,14 @@ def _run_suite(suite, outputs):
     return result.returncode, output_path
 
 
-def main():
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv not in ([], ["--require-all"]):
+        print("usage: coverage_suites.py [--require-all]", file=sys.stderr)
+        return 2
+    require_all = argv == ["--require-all"]
+
     _report_safely()
     suites = sorted((ROOT / "tests").glob("test_*.py"))
     if not suites:
@@ -74,6 +81,13 @@ def main():
                 block += "::endgroup::\n"
                 print(block, end="", flush=True)
 
+    if require_all and failed:
+        print(
+            f"{failed} of the {len(suites)} suites failed — refusing "
+            "partial coverage",
+            file=sys.stderr,
+        )
+        return 1
     if failed == len(suites):
         print(f"every one of the {len(suites)} suites failed — refusing to",
               file=sys.stderr)

@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from coverage import Coverage, CoverageData
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -132,9 +134,22 @@ def test_wrapped_forbidden_row_cannot_satisfy_negative_control(tmp):
 
 def test_github_runner_checkout_roots_are_path_aliases(tmp):
     """Per-OS artifacts must resolve back to this checkout when combined."""
-    del tmp
-    config = _RCFILE.read_text(encoding='utf-8')
-    assert '"*/daedalus/daedalus"' in config
+    tmp = Path(tmp)
+    artifacts = tmp / 'artifacts'
+    artifacts.mkdir()
+    relative = Path('daedalus_bridge') / 'log_safe.py'
+    foreign = Path('/synthetic/daedalus/daedalus') / relative
+    data = CoverageData(
+        basename=str(artifacts / '.coverage.foreign'))
+    data.add_lines({str(foreign): {1}})
+    data.write()
+
+    combined = Coverage(
+        data_file=str(tmp / '.coverage'), config_file=str(_RCFILE))
+    combined.combine(data_paths=[str(artifacts)], strict=True)
+    measured = combined.get_data().measured_files()
+    assert str((ROOT / relative).resolve()) in measured, measured
+    assert str(foreign) not in measured, measured
 
 
 def test_whitespace_only_report_lines_are_ignored(tmp):

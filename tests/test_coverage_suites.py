@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """coverage_suites.py: concurrent measurement without mixed suite output."""
-import json
 import os
-import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -12,33 +9,11 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _coverage_suite_fixture import (  # noqa: E402
+    SYNTHETIC_PROCESS_START, coverage_tree)
 from _repo import ROOT  # noqa: E402
 
 
-_FAKE_COVERAGE = r"""import json, os, runpy, sys
-from pathlib import Path
-
-root = Path(__file__).resolve().parents[1]
-suite = Path(sys.argv[-1])
-stdin_byte = sys.stdin.buffer.read(1)
-record = (root / 'coverage-invocations'
-          / f'{suite.name}.{os.getpid()}.json')
-record.write_text(json.dumps({
-    'argv': sys.argv[1:],
-    'coverage_process_start': os.environ.get('COVERAGE_PROCESS_START'),
-    'pid': os.getpid(),
-    'stdin_byte': stdin_byte.decode('ascii', errors='replace'),
-}), encoding='utf-8')
-runpy.run_path(sys.argv[-1], run_name='__main__')
-"""
-
-
-_FAKE_COVERAGE_INIT = """def process_startup(**_kwargs):
-    pass
-"""
-
-
-_SYNTHETIC_PROCESS_START = 'fabricated coverage startup'
 _FAILURE_MARKER = '(suite did not pass; its coverage still counts)'
 
 
@@ -123,71 +98,7 @@ print('{label} second', flush=True)
 """
 
 
-def _launch_failure_site(unlaunchable):
-    return f"""import subprocess
-from pathlib import Path
-
-_real_run = subprocess.run
-_unlaunchable = {tuple(unlaunchable)!r}
-
-
-def run(command, *args, **kwargs):
-    if (isinstance(command, (list, tuple)) and command
-            and Path(str(command[-1])).name in _unlaunchable):
-        command = list(command)
-        command[0] = str(Path(__file__).resolve().parent / 'missing-python')
-    return _real_run(command, *args, **kwargs)
-
-
-subprocess.run = run
-"""
-
-
-def _cpu_count_site(cpu_count):
-    return f"""import os
-
-os.cpu_count = lambda: {cpu_count}
-"""
-
-
-def _coverage_tree(tmp, suites, unlaunchable=(), cpu_count=None):
-    """Copy the runner over fabricated suites and execute it in that tree."""
-    root = Path(tmp) / 'tree'
-    (root / 'scripts' / 'ci').mkdir(parents=True)
-    (root / 'tests').mkdir()
-    (root / 'coverage').mkdir()
-    (root / 'coverage-invocations').mkdir()
-    shutil.copy2(ROOT / 'scripts' / 'ci' / 'coverage_suites.py',
-                 root / 'scripts' / 'ci' / 'coverage_suites.py')
-    (root / 'coverage' / '__init__.py').write_text(
-        _FAKE_COVERAGE_INIT, encoding='utf-8')
-    (root / 'coverage' / '__main__.py').write_text(
-        _FAKE_COVERAGE, encoding='utf-8')
-    for name, source in suites.items():
-        (root / 'tests' / name).write_text(source, encoding='utf-8')
-    env = _util.coverage_free_environment(os.environ)
-    env['COVERAGE_PROCESS_START'] = _SYNTHETIC_PROCESS_START
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    inherited_path = env.get('PYTHONPATH')
-    env['PYTHONPATH'] = str(root)
-    if inherited_path:
-        env['PYTHONPATH'] += os.pathsep + inherited_path
-    sitecustomize = ''
-    if unlaunchable:
-        sitecustomize += _launch_failure_site(unlaunchable)
-    if cpu_count is not None:
-        sitecustomize += _cpu_count_site(cpu_count)
-    if sitecustomize:
-        (root / 'sitecustomize.py').write_text(sitecustomize, encoding='utf-8')
-    result = subprocess.run(
-        [sys.executable, 'scripts/ci/coverage_suites.py'], cwd=str(root),
-        env=_util.child_coverage('keep', env, cwd=root),
-        input='runner-only input\n', capture_output=True, text=True,
-        timeout=120)
-    records = root / 'coverage-invocations'
-    invocations = [json.loads(record.read_text(encoding='utf-8'))
-                   for record in sorted(records.glob('*.json'))]
-    return result, invocations
+_coverage_tree = coverage_tree
 
 
 def _group(stdout, name):
@@ -289,8 +200,8 @@ def _replay_events(lines):
     return peak, paired_names, set(opened), orphans
 
 
-def test_every_suite_is_measured_in_its_own_parallel_mode_process(tmp):
-    """Dropping a suite, parallel mode, or process isolation must fail."""
+def test_every_suite_is_measured_in_its_own_process(tmp):
+    """Dropping a suite or process isolation must fail."""
     suites = {'test_alpha.py': "print('alpha')\n",
               'test_beta.py': "print('beta')\n",
               'test_gamma.py': "print('gamma')\n"}
@@ -301,10 +212,21 @@ def test_every_suite_is_measured_in_its_own_parallel_mode_process(tmp):
     assert len(process_ids) == len(suites), invocations
     tree = Path(tmp) / 'tree'
     expected = {(tree / 'tests' / name).resolve() for name in suites}
-    assert {tuple(item['argv'][:2]) for item in invocations} == {
-        ('run', '--parallel-mode')}, invocations
-    measured = {(tree / item['argv'][2]).resolve() for item in invocations}
+    measured = {(tree / item['argv'][-1]).resolve() for item in invocations}
     assert measured == expected, invocations
+
+
+def test_concurrent_measurements_write_distinct_coverage_files(tmp):
+    """Concurrent suites must not overwrite another suite's data."""
+    suites = {'test_alpha.py': "print('alpha')\n",
+              'test_beta.py': "print('beta')\n",
+              'test_gamma.py': "print('gamma')\n"}
+    result, _invocations = _coverage_tree(
+        tmp, suites, real_coverage=True)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    data_files = list((Path(tmp) / 'tree').glob('.coverage.*'))
+    assert len(data_files) == len(suites), data_files
+    assert len({path.name for path in data_files}) == len(suites), data_files
 
 
 def test_measured_children_keep_coverage_start_but_not_runner_stdin(tmp):
@@ -314,7 +236,7 @@ def test_measured_children_keep_coverage_start_but_not_runner_stdin(tmp):
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert len(invocations) == 1, invocations
     assert (invocations[0]['coverage_process_start']
-            == _SYNTHETIC_PROCESS_START), invocations
+            == SYNTHETIC_PROCESS_START), invocations
     assert invocations[0]['stdin_byte'] == '', invocations
 
 
@@ -656,6 +578,17 @@ def test_one_failing_suite_does_not_fail_the_run(tmp):
     assert _FAILURE_MARKER + '\n' in failed_group, failed_group
 
 
+def test_require_all_refuses_one_failing_suite(tmp):
+    """A measurement gate must not publish partial suite coverage."""
+    suites = {'test_failing.py': 'raise SystemExit(1)\n',
+              'test_passing.py': "print('passed')\n"}
+    result, _invocations = _coverage_tree(
+        tmp, suites, args=('--require-all',))
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert '1 of the 2 suites failed — refusing partial coverage' in (
+        result.stderr), result.stderr
+
+
 def test_every_suite_failing_fails_the_run(tmp):
     """A coverage number is refused when no suite completed successfully."""
     suites = {'test_failing_a.py': 'raise SystemExit(1)\n',
@@ -681,7 +614,7 @@ def test_every_repository_suite_name_is_discovered(tmp):
     names = sorted(suite.name for suite in (ROOT / 'tests').glob('test_*.py'))
     result, invocations = _coverage_tree(tmp, {name: '' for name in names})
     assert result.returncode == 0, (result.stdout, result.stderr)
-    measured = {Path(item['argv'][2]).name for item in invocations}
+    measured = {Path(item['argv'][-1]).name for item in invocations}
     assert measured == set(names), (set(names) - measured,
                                     measured - set(names))
 

@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Executable contracts for JavaScript coverage capture and publication."""
+import ast
+import os
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wfgraph import _job_names  # noqa: E402
 from _yamlread import job_mapping, step_mapping_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -18,11 +23,50 @@ _STEP_CAPTURE_LINE = f'          {_CAPTURE_KEY}: "{_CAPTURE_VALUE}"\n'
 _STEP_START = re.compile(r'^      - ', re.MULTILINE)
 _CONSUMER_ID = re.compile(
     r'^        id: (?:measure|ratchet)[ \t]*$', re.MULTILINE)
+_SUPPORTED_MATRIX = {
+    'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
+    'python': ['3.13'],
+}
+_PTH_CREATION_COMMAND = (
+    'python -c "from pathlib import Path; import sysconfig; Path( '
+    "sysconfig.get_paths()['purelib'], 'coverage-subprocess.pth').write_text( "
+    "'import coverage; coverage.process_startup()\\n', encoding='ascii')\"")
 
 
 def _workflow():
     return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
+
+
+def _matrix_job(workflow):
+    matches = []
+    for name in _job_names(workflow):
+        job = complete_job_mapping(workflow, name)
+        matrix = job.get('strategy', {}).get('matrix')
+        measures = [
+            step for step in job.get('steps', [])
+            if 'coverage_suites.py' in step.get('run', '')
+        ]
+        if matrix == _SUPPORTED_MATRIX and measures:
+            matches.append((name, job))
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
+def _pth_program(command):
+    argv = shlex.split(command)
+    assert len(argv) == 3 and argv[:2] == ['python', '-c'], argv
+    writes = [
+        node for node in ast.walk(ast.parse(argv[2]))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == 'write_text'
+    ]
+    assert len(writes) == 1, writes
+    program = writes[0].args[0]
+    assert isinstance(program, ast.Constant)
+    assert isinstance(program.value, str)
+    return program.value
 
 
 def _coverage_bounds(workflow):
@@ -208,30 +252,45 @@ def test_coverage_job_publishes_distinct_python_and_javascript_metrics(tmp):
                      upload, re.MULTILINE), upload
 
 
-def test_coverage_combines_measurements_from_every_supported_os(tmp):
-    """The final gates must consume one artifact from each OS leg."""
-    del tmp
-    workflow = _workflow()
-    matrix_job = complete_job_mapping(workflow, 'coverage-matrix')
-    assert matrix_job is not None, workflow
-    assert matrix_job['strategy']['matrix'] == {
-        'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
-        'python': ['3.13'],
-    }
-    matrix_steps = workflow.split('\n  coverage-matrix:\n', 1)[1]
-    matrix_steps = matrix_steps.split('\n  coverage:\n', 1)[0]
-    assert 'python scripts/ci/coverage_suites.py' in matrix_steps
-    assert 'name: coverage-data-${{ matrix.os }}' in matrix_steps
-    assert 'include-hidden-files: true' in matrix_steps
-    assert re.search(r'^\s+\.coverage\.\*\s*$', matrix_steps,
-                     re.MULTILINE), matrix_steps
-    assert re.search(r'^\s+\.node-v8-coverage\s*$', matrix_steps,
-                     re.MULTILINE), matrix_steps
+def _assert_coverage_artifact_flow(workflow):
+    matrix_name, matrix_job = _matrix_job(workflow)
+    measure = [step for step in matrix_job['steps']
+               if 'coverage_suites.py' in step.get('run', '')]
+    assert len(measure) == 1, measure
+    assert measure[0]['run'] == (
+        'python scripts/ci/coverage_suites.py --require-all')
+
+    uploads = [step for step in matrix_job['steps']
+               if step.get('uses', '').startswith('actions/upload-artifact@')]
+    assert len(uploads) == 2, uploads
+    assert {step['with']['name'] for step in uploads} == {
+        'coverage-data-${{ matrix.os }}'}, uploads
+    javascript = [step for step in uploads
+                  if '.node-v8-coverage' in step['with']['path']]
+    assert len(javascript) == 1, uploads
+    assert "matrix.os == 'ubuntu-latest'" in javascript[0]['if']
+    python_only = [step for step in uploads if step not in javascript]
+    assert len(python_only) == 1, uploads
+    assert python_only[0]['with']['path'].strip() == '.coverage.*'
+    assert "matrix.os != 'ubuntu-latest'" in python_only[0]['if']
+    for step in uploads:
+        assert step['with']['include-hidden-files'] == 'true', step
+        assert step['with']['if-no-files-found'] == 'error', step
+
+    job_env = matrix_job.get('env', {})
+    assert _CAPTURE_KEY not in job_env, job_env
+    capture = [step for step in matrix_job['steps']
+               if _CAPTURE_KEY in step.get('run', '')]
+    assert len(capture) == 1, capture
+    assert capture[0]['if'] == "${{ matrix.os == 'ubuntu-latest' }}"
+    assert capture[0]['run'] == (
+        'echo "NODE_V8_COVERAGE=$GITHUB_WORKSPACE/.node-v8-coverage" '
+        '>> "$GITHUB_ENV"')
 
     coverage = complete_job_mapping(workflow, 'coverage')
-    assert 'coverage-matrix' in coverage['needs']
+    assert matrix_name in coverage['needs']
     aggregate = complete_job_mapping(workflow, 'aggregate')
-    assert 'coverage-matrix' in aggregate['needs']
+    assert matrix_name in aggregate['needs']
     body = workflow.split('\n  coverage:\n', 1)[1]
     body = body.split('\n  diff-coverage:\n', 1)[0]
     assert 'pattern: coverage-data-*' in body, body
@@ -241,6 +300,44 @@ def test_coverage_combines_measurements_from_every_supported_os(tmp):
     assert ('coverage-data/coverage-data-ubuntu-latest/.node-v8-coverage'
             in body), body
     assert 'coverage_suites.py' not in body, body
+
+
+def test_coverage_combines_measurements_from_every_supported_os(tmp):
+    """The final gates must consume one artifact from each OS leg."""
+    del tmp
+    _assert_coverage_artifact_flow(_workflow())
+
+
+def test_matrix_job_identifier_is_not_a_contract(tmp):
+    """A consistent private job rename must preserve the dataflow guard."""
+    del tmp
+    workflow = _workflow()
+    name, _job = _matrix_job(workflow)
+    renamed = workflow.replace(name, 'platform-coverage-measurements')
+    assert renamed != workflow
+    _assert_coverage_artifact_flow(renamed)
+
+
+def test_subprocess_startup_program_starts_coverage(tmp):
+    """The generated .pth program must start coverage in a real child."""
+    _name, matrix_job = _matrix_job(_workflow())
+    creators = [step for step in matrix_job['steps']
+                if 'coverage-subprocess.pth' in step.get('run', '')]
+    assert len(creators) == 1, creators
+    command = creators[0]['run']
+    program = _pth_program(command)
+    workdir = Path(tmp) / 'tree'
+    workdir.mkdir()
+    env = _util.coverage_free_environment(os.environ)
+    env['COVERAGE_PROCESS_START'] = str(ROOT / 'pyproject.toml')
+    env['COVERAGE_FILE'] = str(Path(tmp) / '.coverage')
+    probe = program + 'assert coverage.Coverage.current() is not None\n'
+    result = subprocess.run(
+        [sys.executable, '-c', probe], cwd=workdir,
+        env=_util.child_coverage('keep', env, cwd=workdir),
+        capture_output=True, text=True, check=False)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert command == _PTH_CREATION_COMMAND, command
 
 
 def test_capture_can_be_scoped_to_every_consumer_step(tmp):
