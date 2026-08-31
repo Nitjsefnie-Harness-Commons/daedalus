@@ -81,7 +81,7 @@ def test_unimplemented_metacharacters_fail_closed_at_any_position(tmp):
     cases = [('docs/*', 'docs/a.md'),
              ('do[c]s/README.md', 'do[c]s/README.md')]
     cases += [(p, p.replace('/**', '/a.md'))
-             for p in ('docs*/**', 'docs?/**', 'docs[ab]/**', 'docs]/**')]
+              for p in ('docs*/**', 'docs?/**', 'docs[ab]/**', 'docs]/**')]
     cases += [(p, v) for p in ('docs?', 'docs[ab]') for v in (p, 'docsa')]
     for pattern, path in cases:
         try:
