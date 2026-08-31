@@ -282,9 +282,13 @@ def js_tab_routing_violations(path, rel):
     function_occurrences = []
     method_positions = set()
 
-    def add_scope(open_paren, body_open, params=None, param_start=None):
-        body_end = pair_end.get(body_open, len(mask))
-        key = (body_open + 1, body_end - 1)
+    def add_scope(open_paren, body_open, params=None, param_start=None,
+                  body=None):
+        if body is None:
+            body = ('block', body_open,
+                    pair_end.get(body_open, len(mask)))
+        inset = body[0] == 'block'
+        key = (body[1] + inset, body[2] - inset)
         if key in scope_keys:
             return
         scope_keys.add(key)
@@ -315,12 +319,15 @@ def js_tab_routing_violations(path, rel):
             continue
         arrow = re.match(r'\s*=>\s*', mask[close:])
         if arrow:
-            body_open = close + arrow.end()
-            if mask[body_open:body_open + 1] == '{':
-                add_scope(open_paren, body_open)
-    for match in re.finditer(r'\b([\w$]+)\s*=>\s*\{', mask):
-        body_open = mask.index('{', match.start(), match.end())
-        add_scope(None, body_open, {match.group(1)}, match.start())
+            body = _js_function_body_at(mask, open_paren)
+            if body is not None:
+                body_open = body[1] if body[0] == 'block' else None
+                add_scope(open_paren, body_open, body=body)
+    for match in re.finditer(r'\b([\w$]+)\s*=>', mask):
+        body = _js_function_body_at(mask, match.start())
+        if body is not None:
+            body_open = body[1] if body[0] == 'block' else None
+            add_scope(None, body_open, {match.group(1)}, match.start(), body)
     for match in re.finditer(r'\b([\w$]+)\s*\(', mask):
         if match.group(1) in ('if', 'for', 'while', 'switch', 'catch'):
             continue
@@ -490,6 +497,18 @@ def js_tab_routing_violations(path, rel):
         timeline, scopes, events, invocations, mask, scope_at,
         visible_binding, _js_function_body_at, optional_write)
 
+    concise_runtime = {}
+    runtime_values = {}
+    previous_call = -1
+    for call in invocations:
+        if scope_at(call[0]) != 0:
+            continue
+        replay.clear_between(runtime_values, previous_call, call[0], {0})
+        for nested in replay.concise_calls(call, runtime_values):
+            concise_runtime.setdefault(nested[0], []).append(call[0])
+        replay.writes(call, runtime_values)
+        previous_call = call[0]
+
     def sender_before(name, limit):
         states = {}
         call_scope = scope_at(limit)
@@ -623,8 +642,17 @@ def js_tab_routing_violations(path, rel):
         tab_entries = []
         unprovable = []
         named = names_before(m.start(), 0)
-        sender = (call_name if call_name in senders
-                  else sender_before(call_name, m.start()))
+        runtime_positions = concise_runtime.get(m.start())
+        if call_name in senders:
+            sender = call_name
+        elif runtime_positions:
+            runtime_senders = [sender_before(call_name, position)
+                               for position in runtime_positions]
+            sender = runtime_senders[0]
+            for value in runtime_senders[1:]:
+                sender = merged_sender(sender, value)
+        else:
+            sender = sender_before(call_name, m.start())
         if sender is None:
             continue
         if sender in ('runCommand', _JS_UNPROVABLE) and args:
