@@ -30,11 +30,11 @@ def _target_key(candidate):
     """Decode path spellings so str and bytes receivers share one key."""
     try:
         return os.fsdecode(os.fspath(candidate))
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except BaseException:
-        # An exception from this injector probe is not from the caller's call
-        # and must not surface. Cost: this C-level os.fspath call in the test
-        # harness swallows a genuine interrupt on a str, bytes, or Path
-        # receiver.
+        # A failure of this injector probe is not the caller's and stays
+        # here; an interrupt is the caller's, so it is re-raised above.
         return None
 
 
