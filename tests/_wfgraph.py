@@ -91,9 +91,7 @@ def _job_needs(workflow, job):
     source = _field_source(workflow, job, 'needs')
     if source is None:
         return []
-    decoded = complete_job_mapping(source, job)
-    assert decoded is not None, job
-    needs = decoded.get('needs')
+    needs = complete_job_mapping(source, job).get('needs')
     if isinstance(needs, str):
         return [needs]
     if not isinstance(needs, list) or not all(
@@ -202,9 +200,7 @@ def _job_output_mapping(workflow, job):
     source = _field_source(workflow, job, 'outputs')
     if source is None:
         return None
-    decoded = complete_job_mapping(source, job)
-    assert decoded is not None, job
-    outputs = decoded.get('outputs')
+    outputs = complete_job_mapping(source, job).get('outputs')
     if not isinstance(outputs, dict):
         raise ValueError(f'job {job!r} outputs is not a mapping')
     return outputs

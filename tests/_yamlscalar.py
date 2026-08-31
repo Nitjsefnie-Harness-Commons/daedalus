@@ -14,6 +14,7 @@ from yamlscalar import (  # noqa: E402
     _strip_inline_comment,
     _unquoted,
     decode_inline_scalar,
+    find_mapping_field,
     split_mapping_field,
 )
 
@@ -23,11 +24,16 @@ __all__ = (
     '_strip_inline_comment',
     'check_plain_scalar',
     'decode_inline_scalar',
+    'find_mapping_field',
     'flow_depth',
     'split_flow_collection',
     'split_flow_items',
     'split_mapping_field',
 )
+
+
+# Indicators YAML forbids a plain scalar from opening with.
+_PLAIN_LEADERS = ('&', '*', '!', '@', '`', ':', '- ')
 
 
 def check_plain_scalar(value, owner):
@@ -38,7 +44,7 @@ def check_plain_scalar(value, owner):
     scalar is read -- never a value one reader returns raw while the other
     rejects it.
     """
-    if value.startswith(('&', '*', '!', '@', '`')):
+    if value == '-' or value.startswith(_PLAIN_LEADERS):
         raise YAMLReadError(f'{owner} has an unsupported plain scalar')
     if ': ' in value or '\t' in value or any(
             ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff

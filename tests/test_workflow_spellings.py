@@ -228,10 +228,24 @@ def test_a_multiline_plain_scalar_folds_into_one_value(tmp):
     workflow = _real(tmp, _replaced(
         PLAIN_IF,
         '    if: ${{ !cancelled()  # never when cancelled\n'
-        '            && !failure() }}\n'), 'comment.yml')
+        '            && !failure()  # nor after one\n'
+        '            }}\n'), 'comment.yml')
     assert job_scalar(workflow, 'suites', 'if') == folded
     assert complete_job_mapping(workflow, 'suites')['if'] == folded
     assert _job_if_expression(workflow, 'suites') == folded
+
+
+def test_what_wrapping_a_scalar_may_not_do_stays_refused(tmp):
+    """A quoted scalar keeps its one line, and a blank line breaks a plain.
+
+    YAML folds a blank line to a newline rather than a space, so returning
+    the folded value there would be a value no parser agrees with.
+    """
+    for spelling in ('    if: "${{ !cancelled() }}"\n            && x\n',
+                     '    if: ${{ !cancelled() }}\n\n            && x\n'):
+        workflow = _real(tmp, _replaced(PLAIN_IF, spelling))
+        assert 'unsupported multiline scalar' in _refuses(
+            _job_if_expression, workflow, 'suites'), spelling
 
 
 def test_the_shipped_wrapped_conditions_read_the_same_both_ways(tmp):
@@ -365,10 +379,16 @@ def test_a_duplicate_job_field_is_still_refused(tmp):
 
 
 def test_an_unbalanced_flow_collection_is_refused(tmp):
-    """A flow collection that never closes is not an equivalent spelling."""
+    """A flow collection that never closes is not an equivalent spelling.
+
+    `[changes], [pylint]` isolates the scanner's running depth check: it
+    closes and reopens, so a terminal check alone reads it as one balanced
+    scalar and accepts a name no job has.
+    """
     for spelling in ('    needs: [changes, pylint\n',
                      '    needs: [changes]]\n',
-                     '    needs: [changes, [pylint]\n'):
+                     '    needs: [changes, [pylint]\n',
+                     '    needs: [changes], [pylint]\n'):
         workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
         assert 'unbalanced flow collection' in _refuses(
             _job_needs, workflow, 'suites'), spelling
@@ -384,6 +404,78 @@ def test_a_trailing_comma_ends_a_flow_collection(tmp):
     workflow = _real(tmp, _replaced(
         BLOCK_NEEDS, '    needs: [changes, , pylint]\n'), 'interior.yml')
     assert 'empty flow item' in _refuses(_job_needs, workflow, 'suites')
+
+
+def test_an_open_quote_names_the_collection_rather_than_the_item(tmp):
+    """The scanner's terminal check owns the message for an open quote.
+
+    A planted real workflow cannot isolate this limb: an unterminated quote
+    eats the closing bracket, so the field extent runs to the end of the job
+    and the outer close check answers first. Hence the minimal source. The
+    pin is the message, because over every flow spelling of length three and
+    four in the indicator alphabet the limb changes no verdict -- only which
+    refusal names the input.
+    """
+    del tmp
+    assert "value for 'needs' has an unbalanced flow collection" in _refuses(
+        complete_job_mapping, "jobs:\n  sample:\n    needs: [']\n", 'sample')
+
+
+def test_folding_a_flow_collection_keeps_its_space_and_its_comments(tmp):
+    """The fold's own parameters, not merely that folding happens.
+
+    A join with no separator runs two words together, and an interior line's
+    comment left in place swallows every line after it.
+    """
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS,
+        '    needs: [changes, py\n'
+        '            lint,  # the slow gate\n'
+        '            pyright]\n'))
+    assert _job_needs(workflow, 'suites') == ['changes', 'py lint', 'pyright']
+
+
+def test_a_duplicate_key_in_a_flow_mapping_is_refused(tmp):
+    """A flow mapping is a mapping: one key twice is a duplicate."""
+    for spelling in ("    outputs: {matrix: 'a', matrix: 'b'}\n",
+                     "    outputs: {matrix: 'a', 'matrix': 'b'}\n"):
+        workflow = _real(tmp, _replaced(BLOCK_OUTPUTS, spelling))
+        assert 'duplicate mapping key' in _refuses(
+            _job_output_mapping, workflow, 'changes'), spelling
+
+
+def test_needs_that_is_not_a_list_of_names_is_refused(tmp):
+    """`needs` names jobs; a mapping there is a shape, not a spelling."""
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, "    needs: {changes: 'true'}\n"))
+    assert 'not a list of job names' in _refuses(
+        _job_needs, workflow, 'suites')
+
+
+def test_a_single_pair_flow_mapping_decodes_as_a_mapping(tmp):
+    """`[a:]` holds the mapping {a: null}, and `{a}` is that mapping."""
+    workflow = _real(tmp, _replaced(BLOCK_NEEDS, '    needs: [changes:]\n'))
+    assert complete_job_mapping(workflow, 'suites')['needs'] == [
+        {'changes': None}]
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [changes: pylint]\n'), 'pair.yml')
+    assert complete_job_mapping(workflow, 'suites')['needs'] == [
+        {'changes': 'pylint'}]
+    workflow = _real(tmp, _replaced(
+        BLOCK_OUTPUTS, '    outputs: {matrix}\n'), 'null.yml')
+    assert _job_output_mapping(workflow, 'changes') == {'matrix': None}
+
+
+def test_an_indicator_a_plain_scalar_cannot_open_with_is_refused(tmp):
+    """`[:]` and `[- x]` are indicators, not names a flow item may carry.
+
+    Each was read as the string it looks like, which is a value no YAML
+    parser agrees with.
+    """
+    for spelling in ('    needs: [:]\n', '    needs: [:x]\n',
+                     '    needs: [- changes]\n', '    needs: [-]\n'):
+        workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
+        assert _refuses(_job_needs, workflow, 'suites'), spelling
 
 
 def test_a_flow_indicator_inside_a_plain_scalar_is_refused(tmp):

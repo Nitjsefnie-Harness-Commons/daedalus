@@ -329,14 +329,6 @@ def test_workflow_scalar_reader_distinguishes_missing_and_unsafe_shapes(tmp):
         '      continuation\n',
         'sample', 'if') == 'true continuation'
     _job_raises(
-        'jobs:\n  sample:\n    if: "true"\n'
-        '      continuation\n',
-        'multiline scalar')
-    _job_raises(
-        'jobs:\n  sample:\n    if: true\n'
-        '\n      continuation\n',
-        'multiline scalar')
-    _job_raises(
         'jobs:\n  sample:\n    if: >1-2\n'
         '      true\n',
         'two indentation indicators')
