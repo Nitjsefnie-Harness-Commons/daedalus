@@ -279,6 +279,28 @@ def test_a_module_level_call_site_seeds_the_helper(tmp):
     ]
 
 
+def test_a_helper_write_is_proved_from_what_its_callers_hand_it(tmp):
+    """A helper's tmp is owned only while every caller passes an owned one."""
+    source = Path(tmp) / 'seeded.py'
+    helper = (
+        "from _owned_writes import copy_test_tree\n"
+        "def _copy(tmp):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    copy_test_tree(root)\n"
+        "    return root\n")
+    source.write_text(helper + "def test_a(tmp):\n    _copy(tmp)\n",
+                      encoding='utf-8')
+    assert control_write_violations(source, Path(tmp)) == []
+    source.write_text(
+        helper + "def test_a(tmp):\n    _copy(tmp)\n"
+        "def test_b(tmp):\n    _copy(ROOT)\n", encoding='utf-8')
+    assert control_write_violations(source, Path(tmp)) == [
+        'seeded.py:4: copy_test_tree target path is not control-owned']
+    source.write_text(helper, encoding='utf-8')
+    assert control_write_violations(source, Path(tmp)) == [
+        'seeded.py:4: copy_test_tree target path is not control-owned']
+
+
 def test_a_computed_namespace_key_retires_every_name(tmp):
     """A namespace written through a computed key proves nothing after."""
     source = Path(tmp) / 'namespace-key.py'

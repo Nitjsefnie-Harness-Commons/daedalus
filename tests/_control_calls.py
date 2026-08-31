@@ -115,8 +115,9 @@ class ModuleNames:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                              ast.ClassDef)):
             self.counts[node.name] += 1
-            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and node.decorator_list):
+            if isinstance(node, ast.ClassDef):
+                return
+            if node.decorator_list:
                 # A decorator may replace the value the def binds.
                 return
             self.defs.add(node.name)
