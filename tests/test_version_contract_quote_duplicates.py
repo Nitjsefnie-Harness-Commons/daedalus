@@ -27,7 +27,7 @@ from test_version_contract import (  # noqa: E402
 # Duplicate `__version__` spellings the three mirror tests must all refuse:
 # a value carrying the other quote character, or a continuation spelling.
 _DUPLICATE_SPELLINGS = (('9.9.9"', "'"), ("9.9.9'", '"'), ('9.9.\\\n9', "'"))
-_PAGE_JS_PRE_COLON_WHITESPACE = ('  ', '\t', '\n')
+_PAGE_JS_PRE_COLON_WHITESPACE = (' ', '  ', '\t', '\n')
 
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
