@@ -96,6 +96,10 @@ def test_sender_alias_scopes_match_runtime(tmp):
          "let send = ordinary;\n{ const promote = () => {\n"
          "  send = extCmd;\n}; }\npromote();\n"
          "send('focus-tab', { tab: chromeTab });\n", False),
+        ('same-binding-function-reassignment', "let send = ordinary;\n"
+         "var promote = () => { send = extCmd; };\npromote();\n"
+         "var promote = () => { send = ordinary; };\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
         ('same-name-helper-shadow',
          "const fields = () => ({ tab: chromeTab });\n"
          "{ function fields() { return {}; } }\n"
@@ -122,6 +126,155 @@ def test_sender_alias_scopes_match_runtime(tmp):
          "  send('focus-tab', { tab: chromeTab });\n}\n", False),
     ]
     path = Path(tmp) / 'scope.js'
+    observed = [(label, *_runtime_and_guard(source, path))
+                for label, source, _ in cases]
+    expected = [(label, value, value) for label, _, value in cases]
+    assert observed == expected, observed
+
+
+def test_function_value_timelines_match_runtime(tmp):
+    cases = [
+        ('hoisted-declaration', "let send = ordinary;\npromote();\n"
+         "function promote() { send = extCmd; }\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('later-hoisted-declaration-wins', "let send = ordinary;\n"
+         "promote();\nfunction promote() { send = ordinary; }\n"
+         "function promote() { send = extCmd; }\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('declaration-before-var-initializer', "let send = ordinary;\n"
+         "promote();\nvar promote = () => { send = ordinary; };\n"
+         "function promote() { send = extCmd; }\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('var-initializer-overrides-declaration', "let send = ordinary;\n"
+         "function promote() { send = ordinary; }\n"
+         "var promote = () => { send = extCmd; };\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('function-reassignment-clears', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "promote = ordinary;\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('optional-function-demotion', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\nconst flag = false;\n"
+         "if (flag) promote = ordinary;\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('let-uninitialized-block-shadow', "let send = ordinary;\n"
+         "let promote = () => { send = ordinary; };\n{\n"
+         "  let promote;\n  promote = () => { send = extCmd; };\n}\n"
+         "promote();\nsend('focus-tab', { tab: chromeTab });\n", False),
+        ('comma-let-block-shadow', "let send = ordinary;\n"
+         "let promote = () => { send = ordinary; };\n{\n"
+         "  let unused = ordinary, promote = () => { send = extCmd; };\n"
+         "}\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('bare-comma-let-block-shadow', "let send = ordinary;\n"
+         "let promote = () => { send = ordinary; };\n{\n"
+         "  let unused, promote;\n"
+         "  promote = () => { send = extCmd; };\n}\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('default-parameter-callable', "let send = ordinary;\n"
+         "function invoke(promote = () => { send = extCmd; }) {\n"
+         "  promote();\n}\ninvoke();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('overridden-default-parameter', "let send = ordinary;\n"
+         "function invoke(promote = () => { send = extCmd; }) {\n"
+         "  promote();\n}\ninvoke(ordinary);\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('undefined-default-parameter', "let send = ordinary;\n"
+         "function invoke(promote = () => { send = extCmd; }) {\n"
+         "  promote();\n}\ninvoke(undefined);\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('inline-argument-callable', "let send = ordinary;\n"
+         "function invoke(promote = ordinary) { promote(); }\n"
+         "invoke(() => { send = extCmd; });\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('comma-var-callable', "let send = ordinary;\n"
+         "var unused = ordinary, promote = () => { send = extCmd; };\n"
+         "promote();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('comma-var-function-values', "let send = ordinary;\n"
+         "const promoteSender = () => { send = extCmd; };\n"
+         "const promoteOrdinary = () => { send = ordinary; };\n"
+         "var promote = promoteSender, spare = promoteOrdinary;\n"
+         "promote();\nvoid spare;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('function-alias-captures-value', "let send = ordinary;\n"
+         "const promoteSender = () => { send = extCmd; };\n"
+         "const promoteOrdinary = () => { send = ordinary; };\n"
+         "let active = promoteSender;\nlet promote = active;\n"
+         "active = promoteOrdinary;\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('function-self-assignment', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "promote = promote;\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('hoisted-function-reference', "let send = ordinary;\n"
+         "let promote = declared;\npromote();\n"
+         "function declared() { send = extCmd; }\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('captured-call-after-initializer', "let send = ordinary;\n"
+         "function invoke() { promote(); }\n"
+         "let promote = () => { send = extCmd; };\ninvoke();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('captured-call-after-reassignment', "let send = ordinary;\n"
+         "let promote = () => { send = ordinary; };\n"
+         "function invoke() { promote(); }\n"
+         "promote = () => { send = extCmd; };\ninvoke();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('captured-call-before-reassignment', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "function invoke() { promote(); }\n"
+         "promote = () => { send = ordinary; };\ninvoke();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('uninvoked-callable-demotion', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "function demote() { promote = ordinary; }\n"
+         "promote();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('callable-demotion-after-call', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "function invoke() { promote(); promote = ordinary; }\n"
+         "invoke();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('callable-promotion-after-call', "let send = ordinary;\n"
+         "let promote = ordinary;\n"
+         "function invoke() {\n"
+         "  promote();\n  promote = () => { send = extCmd; };\n}\n"
+         "invoke();\nsend('focus-tab', { tab: chromeTab });\n", False),
+        ('invoked-callable-promotion', "let send = ordinary;\n"
+         "const sender = () => { send = extCmd; };\nlet promote = ordinary;\n"
+         "function configure() { promote = sender; }\n"
+         "function invoke() { promote(); }\nconfigure();\ninvoke();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('invoked-callable-demotion', "let send = ordinary;\n"
+         "const sender = () => { send = extCmd; };\nlet promote = sender;\n"
+         "function configure() { promote = ordinary; }\n"
+         "function invoke() { promote(); }\nconfigure();\ninvoke();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('uninvoked-callable-promotion', "let send = ordinary;\n"
+         "const sender = () => { send = extCmd; };\nlet promote = ordinary;\n"
+         "function configure() { promote = sender; }\n"
+         "function invoke() { promote(); }\ninvoke();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('comma-var-invocation', "let send = ordinary;\n"
+         "var promote = () => { send = extCmd; }, invoked = promote();\n"
+         "void invoked;\nvar promote = () => { send = ordinary; };\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('helper-reassigned-after-call',
+         "var fields = () => ({ tab: chromeTab });\n"
+         "extCmd('focus-tab', fields());\nvar fields = () => ({});\n",
+         True),
+        ('helper-reassigned-before-call',
+         "var fields = () => ({ tab: chromeTab });\n"
+         "fields = () => ({});\nextCmd('focus-tab', fields());\n",
+         False),
+        ('helper-function-reference',
+         "const routedFields = () => ({ tab: chromeTab });\n"
+         "const safeFields = () => ({});\n"
+         "var fields = routedFields, spare = safeFields;\n"
+         "extCmd('focus-tab', fields());\nvoid spare;\n", True),
+        ('optional-helper-reassignment',
+         "let fields = () => ({ tab: chromeTab });\n"
+         "const flag = false;\nif (flag) fields = () => ({});\n"
+         "extCmd('focus-tab', fields());\n", True),
+    ]
+    path = Path(tmp) / 'timeline.js'
     observed = [(label, *_runtime_and_guard(source, path))
                 for label, source, _ in cases]
     expected = [(label, value, value) for label, _, value in cases]

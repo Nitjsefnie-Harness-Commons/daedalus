@@ -235,6 +235,7 @@
 !/tests/_ghexpr.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
+!/tests/_jsroute_timeline.py
 !/tests/_overlap.py
 !/tests/_prgate.py
 !/tests/_prgate_race.py
