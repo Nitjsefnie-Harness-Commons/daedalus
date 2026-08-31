@@ -7,6 +7,8 @@ from _yamlscalar import (
     YAMLReadError,
     _strip_inline_comment,
     decode_inline_scalar,
+    split_flow_collection,
+    split_flow_items,
     split_mapping_field,
 )
 from workflow_yaml import workflow_step_items
@@ -302,27 +304,31 @@ def _decode_complete_sequence_mapping(
     return values
 
 
+def _decode_flow_collection(opening, body, owner):
+    """Decode one flow sequence or mapping into the same value as a block."""
+    if not body.strip(' '):
+        return [] if opening == '[' else {}
+    items = split_flow_items(body, owner)
+    if opening == '[':
+        return [_decode_complete_inline(item, f'{owner} item')
+                for item in items]
+    values = {}
+    for item in items:
+        raw_key, raw_value = split_mapping_field(item.strip(' '), owner)
+        key = decode_inline_scalar(raw_key, f'{owner} key')
+        if key in values:
+            raise YAMLReadError(f'duplicate mapping key: {key}')
+        values[key] = _decode_complete_inline(
+            raw_value, f'{owner} value for {key!r}')
+    return values
+
+
 def _decode_complete_inline(raw_value, owner):
     """Decode one bounded inline value used by complete mappings."""
     value = _strip_inline_comment(raw_value.strip(' '))
-    if value == '{}':
-        return {}
-    if value == '[]':
-        return []
-    if value.startswith('['):
-        if not value.endswith(']') or any(
-                char in value[1:-1] for char in '[]{}'):
-            raise YAMLReadError(f'{owner} has an unsupported sequence')
-        body = value[1:-1]
-        if not body.strip(' '):
-            return []
-        items = body.split(',')
-        if any(not item.strip(' ') for item in items):
-            raise YAMLReadError(f'{owner} has an empty sequence item')
-        return [
-            _decode_complete_inline(item, f'{owner} item')
-            for item in items
-        ]
+    flow = split_flow_collection(value, owner)
+    if flow is not None:
+        return _decode_flow_collection(*flow, owner)
     if value.startswith(("'", '"')):
         return decode_inline_scalar(value, owner)
     if not value or value.startswith(('&', '*', '!', '@', '`')):

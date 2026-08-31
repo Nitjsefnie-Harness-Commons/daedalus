@@ -59,6 +59,30 @@ def evaluate_if(expression, context):
     return _truthy(value)
 
 
+def sole_context_path(expression):
+    """Return the dotted path when the whole expression is one lookup.
+
+    Parenthesising and respacing a reference does not change the value it
+    names, so both spellings resolve to the same path.  Anything the
+    admitted grammar does not reduce to a single lookup returns None.
+    """
+    tokens = _tokenize(_unwrap(expression))
+    start, end = 0, len(tokens) - 1
+    while (end - start >= 2 and tokens[start].kind == '('
+           and tokens[end - 1].kind == ')'):
+        start += 1
+        end -= 1
+    if start >= end or (end - start) % 2 == 0:
+        return None
+    path = []
+    for offset, index in enumerate(range(start, end)):
+        if tokens[index].kind != ('IDENT' if offset % 2 == 0 else '.'):
+            return None
+        if offset % 2 == 0:
+            path.append(tokens[index].value)
+    return tuple(path)
+
+
 def _evaluate(expression, context):
     """Pair the value with whether GitHub suppresses its implicit gate."""
     if not isinstance(expression, str):
