@@ -585,5 +585,112 @@ def test_every_reader_folds_a_wrapped_plain_scalar(tmp):
         'A': 'one two', 'B': 'three'}
 
 
+def test_step_scalars_refuses_a_wrapped_plain_scalar(tmp):
+    """The list reader refuses a field whose whole value it cannot return."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - run: a\n'
+        '          b\n')
+    try:
+        step_scalars(source, 'sample', 'run')
+    except YAMLReadError as error:
+        assert 'unsupported multiline scalar' in str(error), str(error)
+        return
+    raise AssertionError('step_scalars truncated a wrapped plain scalar')
+
+
+def test_a_wrapped_mapping_value_must_start_as_plain(tmp):
+    """Quoted, flow, block, and empty starts are not plain continuations."""
+    del tmp
+    spellings = (
+        "      A: 'one'\n        two\n",
+        '      A: [one]\n        two\n',
+        '      A: |\n        two\n',
+        '      A:\n        two\n',
+    )
+    for spelling in spellings:
+        source = 'jobs:\n  sample:\n    env:\n' + spelling
+        try:
+            job_mapping(source, 'sample', 'env')
+        except YAMLReadError as error:
+            assert 'unsupported nested value' in str(error), str(error)
+            continue
+        raise AssertionError(f'job_mapping folded {spelling!r}')
+
+
+def test_a_wrapped_mapping_plain_must_pass_the_plain_guard(tmp):
+    """An anchor cannot enter through the mapping reader's fold path."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    env:\n'
+        '      A: &x one\n'
+        '        two\n')
+    try:
+        job_mapping(source, 'sample', 'env')
+    except YAMLReadError as error:
+        assert 'unsupported plain scalar' in str(error), str(error)
+        return
+    raise AssertionError('job_mapping folded an anchored plain scalar')
+
+
+def test_a_wrapped_mapping_value_stays_in_its_own_section(tmp):
+    """One mapping value cannot absorb a sibling value's continuation."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    env:\n'
+        '      A: one\n'
+        '      B: three\n'
+        '        four\n')
+    assert job_mapping(source, 'sample', 'env') == {
+        'A': 'one', 'B': 'three four'}
+
+
+def test_a_comment_ends_a_wrapped_mapping_value(tmp):
+    """Text after an inline comment cannot continue a mapping value."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    env:\n'
+        '      A: one # comment\n'
+        '        two\n')
+    try:
+        job_mapping(source, 'sample', 'env')
+    except YAMLReadError as error:
+        assert 'unsupported multiline scalar' in str(error), str(error)
+        return
+    raise AssertionError('job_mapping folded past an inline comment')
+
+
+def test_step_mapping_fold_sees_the_unstripped_first_line(tmp):
+    """A first-line comment ends the step scalar before deeper text."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - run: a # comment\n'
+        '          b\n')
+    try:
+        _yamlsteps.step_mappings(source, 'sample')
+    except YAMLReadError as error:
+        assert 'unsupported multiline scalar' in str(error), str(error)
+        return
+    raise AssertionError('step_mappings folded past an inline comment')
+
+
+def test_value_extent_falls_back_only_for_a_non_mapping_field(tmp):
+    """Extent fallback cannot hide malformed mapping-field refusals."""
+    del tmp
+    lines = _yamlsteps._reader._lines('value\n')
+    assert _yamlsteps._value_extent(
+        lines, 0, len(lines), 'value', 'item') == 0
+    for text, detail in (('\tvalue', 'unsupported tab'),
+                         (': value', 'empty mapping key')):
+        try:
+            _yamlsteps._value_extent(lines, 0, len(lines), text, 'item')
+        except YAMLReadError as error:
+            assert detail in str(error), str(error)
+            continue
+        raise AssertionError(f'_value_extent swallowed {detail}')
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))

@@ -339,6 +339,21 @@ def test_a_bracket_in_ordinary_content_ends_no_job_field(tmp):
         assert _job_output_step_ids(workflow, 'changes') == {'classify'}
 
 
+def test_a_closed_spanning_collection_releases_the_next_fields(tmp):
+    """Closing a flow field makes following job fields visible again."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n'
+        '    needs: [one,\n'
+        '      two]\n'
+        '    if: success()\n'
+        '    outputs:\n'
+        '      result: value\n')
+    assert _job_needs(source, 'sample') == ['one', 'two']
+    assert _job_if_expression(source, 'sample') == 'success()'
+    assert _job_output_mapping(source, 'sample') == {'result': 'value'}
+
+
 def test_a_continuation_left_of_its_key_is_the_slice_boundary(tmp):
     """Both oracles read these; the readers refuse them, and that is stated.
 
