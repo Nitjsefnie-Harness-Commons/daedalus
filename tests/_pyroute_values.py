@@ -560,27 +560,43 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver):
 
 
 def store_deferred_value(statement, state):
-    if type(statement) not in (ast.Assign, ast.AnnAssign):
+    if isinstance(statement, ast.Expr) \
+            and isinstance(statement.value, ast.Call):
+        call = statement.value
+        owner_name = getattr(getattr(call.func, 'value', None), 'id', None)
+        owner = state.callables.get(owner_name)
+        if getattr(call.func, 'attr', None) == 'clear' \
+                and isinstance(owner, DeferredContainer):
+            state.callables[owner_name] = DeferredContainer({}, 0)
+            sync_cells(state, {owner_name})
         return
-    value = _known_value(statement.value, state)
-    if value is None:
+    if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Delete)):
         return
+    value = (_known_value(statement.value, state)
+             if not isinstance(statement, ast.Delete) else None)
     targets = (statement.targets if isinstance(statement, ast.Assign)
-               else [statement.target])
+               else [statement.target] if not isinstance(
+                   statement, ast.Delete) else statement.targets)
     for target in targets:
         owner_name = getattr(getattr(target, 'value', None), 'id', None)
         owner = state.callables.get(owner_name)
         if isinstance(target, ast.Attribute) \
                 and isinstance(owner, DeferredInstance):
             attributes = dict(owner.attributes)
-            attributes[target.attr] = value
+            if value is None:
+                attributes.pop(target.attr, None)
+            else:
+                attributes[target.attr] = value
             state.callables[owner_name] = DeferredInstance(attributes)
             sync_cells(state, {owner_name})
         elif isinstance(target, ast.Subscript) \
                 and isinstance(owner, DeferredContainer) \
                 and isinstance(target.slice, ast.Constant):
             items = dict(owner.items)
-            items[target.slice.value] = value
+            if value is None:
+                items.pop(target.slice.value, None)
+            else:
+                items[target.slice.value] = value
             state.callables[owner_name] = DeferredContainer(
                 items, owner.length)
             sync_cells(state, {owner_name})
