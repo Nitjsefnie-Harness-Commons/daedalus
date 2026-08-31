@@ -539,21 +539,27 @@ def test_check_versions_page_js_value_may_contain_a_different_quote_character(tm
     assert desc in r.stderr, (desc, r.stderr)
 
 
-def test_check_versions_page_js_keys_are_assumed_bare(tmp):
-    """A deliberate limit, not an oversight: the page.js pattern matches the
-    keys `script` and `version` bare, so a duplicate that also quotes those
-    keys is a shape none of page.js's own sites use, and passes through
-    unseen. Documented here so a future change to the pattern's key
-    handling has a test to update rather than a silent behavior change."""
+def test_check_versions_refuses_a_page_js_version_with_quoted_keys(tmp):
+    """A duplicate whose `script` and `version` keys are quoted is valid
+    JavaScript and must be counted as a competing page.js binding (#320)."""
     copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, pattern = checker.SITES[3]
+    assert path == 'extension/page.js', path
     page_copy = copy_root / 'extension' / 'page.js'
     text = page_copy.read_text(encoding='utf-8')
+    canonical = re.search(pattern, text).group('v')
     page_copy.write_text(
-        text + '\nconst _dup = { info: { "script": { "version": "9.9.9" } } };\n',
+        text + '\nconst _dup = { info: { "script": { "version": '
+        '\'9.9.9\' } } };\n',
         encoding='utf-8')
     r = _run_checker(copy_root)
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    assert 'extension/page.js' in r.stderr, r.stderr
+    assert desc in r.stderr, r.stderr
+    assert canonical in r.stderr, r.stderr
+    assert '9.9.9' in r.stderr, r.stderr
 
 
 def test_check_versions_print_refuses_a_tree_that_disagrees(tmp):

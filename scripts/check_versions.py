@@ -81,12 +81,14 @@ SITES = [
     # way `main` does. The class also has to admit a newline: a backtick
     # value is the one of the three that may legally span lines, and the
     # negative lookahead already stops the match at the real delimiter on
-    # its own, so nothing else needs excluding. The two keys are assumed
-    # bare, matching this file's own style; a duplicate that also quotes
-    # them would need its own pattern, and none of page.js's own sites do
-    # that today.
+    # its own, so nothing else needs excluding. The keys may be bare or quoted
+    # with matching delimiters, and whitespace before either colon is
+    # admitted, so valid JavaScript duplicates in both spellings remain
+    # visible to this site too.
     ('extension/page.js', 'GM bridge info.script.version',
-     r'''script:\s*\{\s*version:\s*(?P<q>['"`])(?P<v>(?:(?!(?P=q))[\s\S])*)(?P=q)'''),
+     r'''(?P<kq>['"]?)script(?P=kq)\s*:\s*\{\s*'''
+     r'''(?P<vq>['"]?)version(?P=vq)\s*:\s*'''
+     r'''(?P<q>['"`])(?P<v>(?:(?!(?P=q))[\s\S])*)(?P=q)'''),
     ('dashboard/index.html', 'dashboard rail footer',
      r'class="rail-foot">v(?P<v>[^ <]*)'),
     ('dashboard/index.html', 'dashboard status line',
