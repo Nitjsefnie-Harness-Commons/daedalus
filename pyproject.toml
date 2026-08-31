@@ -95,7 +95,7 @@ omit = [
 # it stands, so its lines are recorded under that path. Combining maps them
 # back onto the source; without this the file every one of those tests drives
 # reports 0%, and the total understates by about two points.
-repo = [".", "*/tree"]
+repo = [".", "*/tree", "*/daedalus/daedalus"]
 
 [tool.coverage.report]
 # Without this, unexecuted files below non-package directories are absent.

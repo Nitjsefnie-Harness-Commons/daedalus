@@ -268,6 +268,8 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
     jobs = (
         ('diff-coverage', before(tests, 'diff-coverage',
                                  '- name: Measure the coverage')),
+        ('coverage-matrix', before(tests, 'coverage-matrix',
+                                   '- name: Measure')),
         ('suites', before(tests, 'suites', '- name: Run every suite')),
         ('pylint', before(tests, 'pylint', '- name: pylint')),
         ('release', before(release, 'publish',
