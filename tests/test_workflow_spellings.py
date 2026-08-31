@@ -272,13 +272,26 @@ def test_what_wrapping_a_scalar_may_not_do_stays_refused(tmp):
 
 
 def test_the_shipped_wrapped_conditions_read_the_same_both_ways(tmp):
-    """The workflow the readers exist for wraps three job conditions."""
+    """The workflow the readers exist for wraps three job conditions.
+
+    Both readers share one folder, so agreement between them is not proof:
+    the expression each must produce is written out beside it.
+    """
     del tmp
     workflow = _tests_yml()
-    for job in ('actionlint', 'coverage', 'diff-coverage'):
+    conditions = {
+        'actionlint': "${{ github.event_name == 'push'"
+                      " || needs.changes.outputs.workflows == 'true' }}",
+        'coverage': '${{ !cancelled() && !failure()'
+                    " && needs.changes.outputs.docs_only != 'true' }}",
+        'diff-coverage': "${{ !cancelled() && needs.coverage.result"
+                         " == 'success'"
+                         " && github.event_name == 'pull_request' }}",
+    }
+    for job, expected in conditions.items():
         folded = _job_if_expression(workflow, job)
-        assert folded is not None and '\n' not in folded, job
-        assert complete_job_mapping(workflow, job)['if'] == folded, job
+        assert folded == expected, (job, folded)
+        assert complete_job_mapping(workflow, job)['if'] == expected, job
 
 
 def test_a_flow_collection_spanning_lines_must_still_close(tmp):
@@ -488,6 +501,26 @@ def test_folding_a_flow_collection_keeps_its_space_and_its_comments(tmp):
         '            lint,  # the slow gate\n'
         '            pyright]\n'))
     assert _job_needs(workflow, 'suites') == ['changes', 'py lint', 'pyright']
+
+
+def test_a_flow_collection_nests_inside_a_flow_collection(tmp):
+    """A flow item may itself be a collection, at the item's own depth.
+
+    Splitting on every comma rather than the top-level ones reads both of
+    these as unbalanced, and no other control nests one collection in
+    another.
+    """
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [[changes, pylint], pyright]\n'))
+    assert complete_job_mapping(workflow, 'suites')['needs'] == [
+        ['changes', 'pylint'], 'pyright']
+    assert 'not a list of job names' in _refuses(
+        _job_needs, workflow, 'suites')
+    workflow = _real(tmp, _replaced(
+        BLOCK_OUTPUTS, '    outputs: {matrix: [changes, pylint]}\n'),
+        'nested.yml')
+    assert _job_output_mapping(workflow, 'changes') == {
+        'matrix': ['changes', 'pylint']}
 
 
 def test_a_duplicate_key_in_a_flow_mapping_is_refused(tmp):
