@@ -367,5 +367,78 @@ def test_a_spread_argument_leaves_the_open_mode_unresolved(tmp):
     ]
 
 
+def test_a_match_capture_rebinding_leaves_no_def_unique(tmp):
+    """A case pattern binds its name like any other store."""
+    source = Path(tmp) / 'match-capture.py'
+    for capture in ('_h', '[*_h]', '{**_h}'):
+        source.write_text(
+            "import shutil\n"
+            "def _h(a, b):\n"
+            "    return a\n"
+            "match shutil.copyfile:\n"
+            f"    case {capture}:\n"
+            "        pass\n"
+            "_h(__file__, str(ROOT / '.probe6.py'))\n",
+            encoding='utf-8')
+        assert _violations(source) == [
+            'match-capture.py:7: _h callable is unresolved'
+        ], capture
+
+
+def test_a_match_capture_clears_the_owned_name_it_rebinds(tmp):
+    """A case pattern capturing tmp binds it to the subject, not to tmp."""
+    source = Path(tmp) / 'match-rebind.py'
+    source.write_text(
+        "def test_control(tmp):\n"
+        "    match ROOT:\n"
+        "        case tmp:\n"
+        "            pass\n"
+        "    Path(tmp).write_text('planted')\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'match-rebind.py:5: write_text target path is not control-owned'
+    ]
+
+
+def test_a_signature_expression_is_judged_in_its_enclosing_scope(tmp):
+    """Annotations, the return annotation and decorators run at def time."""
+    source = Path(tmp) / 'signature.py'
+    source.write_text(
+        "def _decorate(_value):\n"
+        "    return lambda function: function\n"
+        "def test_returns(tmp) -> (ROOT / '.probe7.py').write_text('x'):\n"
+        "    pass\n"
+        "def test_arguments(a: (ROOT / '.a').write_text('x'), /,\n"
+        "                   b: (ROOT / '.b').write_text('x'),\n"
+        "                   *c: (ROOT / '.c').write_text('x'),\n"
+        "                   d: (ROOT / '.d').write_text('x'),\n"
+        "                   **e: (ROOT / '.e').write_text('x')):\n"
+        "    pass\n"
+        "@_decorate((ROOT / '.probe8.py').write_text('x'))\n"
+        "def test_decorated(tmp):\n"
+        "    pass\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        f'signature.py:{line}: write_text target path is not control-owned'
+        for line in (3, 5, 6, 7, 8, 9, 11)
+    ]
+
+
+def test_a_spread_namespace_call_is_not_the_pure_locals(tmp):
+    """`locals(*[])` reaches the namespace past the subscript-key count."""
+    source = Path(tmp) / 'namespace-spread.py'
+    for spread in ('*[]', '**{}'):
+        source.write_text(
+            "def _copy(tmp):\n"
+            "    return Path(tmp) / 'r'\n"
+            f"locals({spread})['_copy'] = lambda tmp: ROOT\n"
+            "def test_c(tmp):\n"
+            "    (_copy(tmp) / 'p').write_text('x')\n",
+            encoding='utf-8')
+        assert _violations(source) == [
+            'namespace-spread.py:3: locals callable is unresolved'
+        ], spread
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
