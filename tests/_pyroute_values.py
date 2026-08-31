@@ -40,6 +40,14 @@ class DeferredGenerator:
     remaining: int | None
     evaluate_zero: bool = False
     yielded: object = None
+    state: 'FlowState' = None
+    captured: frozenset = frozenset()
+    origin: int = 0
+    closure: CellState = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self):
+        if self.state is not None:
+            _register_closure(self)
 
 
 @dataclass(frozen=True)
@@ -54,13 +62,7 @@ class DeferredCallable:
     closure: CellState = field(default=None, compare=False, repr=False)
 
     def __post_init__(self):
-        closure = self.closure or self.state.cells
-        for name in self.captured:
-            key = closure.origins.setdefault(name, (self.origin, name))
-            binding = _binding_from_state(self.state, name)
-            closure.values.setdefault(key, binding)
-            self.state.cells.origins[name] = key
-            self.state.cells.values.setdefault(key, binding)
+        _register_closure(self)
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,16 @@ def _binding_from_state(state, name):
         state.aliases.get(name), state.generators.get(name),
         state.callables.get(name), payload.copy() if payload is not None
         else None, name in state.bound)
+
+
+def _register_closure(deferred):
+    closure = deferred.closure or deferred.state.cells
+    for name in deferred.captured:
+        key = closure.origins.setdefault(name, (deferred.origin, name))
+        binding = _binding_from_state(deferred.state, name)
+        closure.values.setdefault(key, binding)
+        deferred.state.cells.origins[name] = key
+        deferred.state.cells.values.setdefault(key, binding)
 
 
 def _apply_binding(state, name, key, binding):
@@ -208,7 +220,8 @@ def advance_generator(state, generator):
     remaining = max(0, generator.remaining - 1)
     advanced = DeferredGenerator(
         generator.expression, remaining, generator.evaluate_zero,
-        generator.yielded)
+        generator.yielded, generator.state, generator.captured,
+        generator.origin, generator.closure)
     for name, value in list(state.generators.items()):
         if value is not generator:
             continue
@@ -353,9 +366,35 @@ def deferred_expression_value(node, state, lambda_factory):
     return None
 
 
-def new_deferred_generator(node, state, lambda_factory, generator_factory):
+def live_expression_value(node, state, lambda_factory, captured):
+    evaluated = state.evaluated
+    state.evaluated = {key: value for key, value in evaluated.items()
+                       if key != id(node)}
+    try:
+        return deferred_expression_value(
+            node, state, lambda item, current:
+            lambda_factory(item, current, captured))
+    finally:
+        state.evaluated = evaluated
+
+
+def new_deferred_generator(node, state, captured, lambda_factory,
+                           generator_factory):
     yielded = deferred_expression_value(node.elt, state, lambda_factory)
-    return generator_factory(node, yielded)
+    generator = generator_factory(node, yielded)
+    return DeferredGenerator(
+        node, generator.remaining, generator.evaluate_zero, yielded, state,
+        frozenset(captured), state.namespace, state.cells)
+
+
+def generator_context(generator, caller, chain, copy_state, overlay):
+    if generator.state is None or generator.captured <= chain:
+        return copy_state(caller), frozenset(), frozenset(), False
+    blocked = chain - generator.captured
+    keep = blocked | (generator.captured - chain)
+    entry = overlay(copy_state(generator.state), caller, keep, blocked)
+    load_callable_cells(generator, caller, entry)
+    return entry, keep, blocked, True
 
 
 def bind_deferred_target(target, value, state):

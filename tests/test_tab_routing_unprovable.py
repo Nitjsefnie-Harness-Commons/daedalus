@@ -328,6 +328,14 @@ def test_generator_yielded_callables_match_runtime(tmp):
          f'send = ext_cmd\ncall = lambda: {call}\n'
          'gen = (call for _ in [1])\nnext(gen)\nsend = ordinary',
          '', '', False),
+        ('rebound-unsafe',
+         f'send = ext_cmd\ncallback = lambda: ordinary()\n'
+         f'gen = (callback for _ in [1])\ncallback = lambda: {call}\n'
+         'next(gen)()\nsend = ordinary', '', '', True),
+        ('rebound-safe',
+         f'send = ext_cmd\ncallback = lambda: {call}\n'
+         'gen = (callback for _ in [1])\ncallback = ordinary\n'
+         'next(gen)()\nsend = ordinary', '', '', False),
     ]
     _assert_focus_cases(tmp, cases)
 
@@ -368,6 +376,14 @@ def test_returned_generator_values_match_runtime(tmp):
         ('returned-discarded',
          f'send = ext_cmd\nreturn (lambda: {call} for _ in [1])', '',
          'gen = do_focus_tab(_args)\ndel gen', '', False),
+        ('returned-rebound-unsafe',
+         f'send = ext_cmd\ncallback = lambda: ordinary()\n'
+         f'gen = (callback for _ in [1])\ncallback = lambda: {call}\n'
+         'return gen', '', 'gen = do_focus_tab(_args)', 'next(gen)()', True),
+        ('returned-rebound-safe',
+         f'send = ext_cmd\ncallback = lambda: {call}\n'
+         'gen = (callback for _ in [1])\ncallback = lambda: ordinary()\n'
+         'return gen', '', 'gen = do_focus_tab(_args)', 'next(gen)()', False),
     ]
     _assert_export_cases(tmp, cases)
 

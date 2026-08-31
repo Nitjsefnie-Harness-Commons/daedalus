@@ -5,11 +5,12 @@ import sys
 from _pyroute_values import (DeferredCallable, DeferredClass,
                              advance_generator, append_deferred,
                              bind_call_arguments, bind_deferred_states,
-                             callable_candidates,
+                             callable_candidates, live_expression_value,
                              exposed_callables, exhaust_generators,
                              expression_callables, expression_value,
                              follow_callable_call,
-                             generator_for, is_deferred_value,
+                             generator_context, generator_for,
+                             is_deferred_value,
                              iterable_deferred, iterable_nonempty,
                              load_callable_cells, materialize_deferred,
                              merge_deferred_values, new_deferred_callable,
@@ -215,7 +216,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def consume_generator(generator, current_pairs):
         expression = generator.expression
-        active = copied(current_pairs)
+        entry, keep, blocked, contextual = generator_context(
+            generator, current_pairs[0], chain, _copy_state_pair, overlay)
+        active = [entry]
         skipped = []
         for index, clause in enumerate(expression.generators):
             if index: active = check_expression(clause.iter, active)
@@ -232,16 +235,19 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     return dedupe_states([*skipped, *active]), None
                 if truth is None:
                     skipped.extend(copied(active))
-        yielded = generator.yielded
-        if yielded is None:
-            results = [expression.key, expression.value] if isinstance(
-                expression, ast.DictComp) else [expression.elt]
-            for result in results:
-                active = check_expression(result, active)
-            yielded = merge_deferred_values(
-                state.evaluated.get(id(result))
-                for state in active for result in results)
-        return dedupe_states([*skipped, *active]), yielded
+        results = [expression.key, expression.value] if isinstance(
+            expression, ast.DictComp) else [expression.elt]
+        for result in results: active = check_expression(result, active)
+        yielded = merge_deferred_values(
+            live_expression_value(result, state, deferred_lambda,
+                                  generator.captured)
+            or state.evaluated.get(id(result))
+            for state in active for result in results)
+        outputs = dedupe_states([*skipped, *active])
+        if contextual: outputs = [overlay(
+            _copy_state_pair(current_pairs[0]), output, keep, blocked)
+            for output in outputs]
+        return dedupe_states(outputs), yielded
 
     def consume_iterable(expr, current_pairs, exhaust):
         outputs = []
@@ -385,7 +391,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             entered = check_expression(node.generators[0].iter, current_pairs)
             for state in entered:
                 state.evaluated[id(node)] = new_deferred_generator(
-                    node, state, lambda item, current: deferred_lambda(
+                    node, state, chain,
+                    lambda item, current: deferred_lambda(
                         item, current, chain), deferred_generator)
             return entered
         if isinstance(node, _COMPREHENSIONS):
