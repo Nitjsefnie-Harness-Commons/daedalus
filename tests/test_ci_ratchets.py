@@ -544,6 +544,82 @@ def test_languages_ratchet_independently(tmp):
         javascript_raise, 'javascript') == (40.0, 38.5)
 
 
+def _git(repo, *args):
+    """Run one git command inside a fixture repository."""
+    return subprocess.run(('git', '-C', str(repo)) + args, check=True,
+                          capture_output=True, text=True, timeout=60)
+
+
+def _ratchet_subject_chain():
+    """The subject-selection chain, exactly as the workflow ships it."""
+    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    lines = workflow.splitlines()
+    begins = [
+        index for index, line in enumerate(lines)
+        if line.lstrip().startswith('if ')
+        and 'git diff --quiet -- scripts/ci/size_baseline.py' in line]
+    assert len(begins) == 1, begins
+    start = begins[0]
+    indent = lines[start][:-len(lines[start].lstrip())]
+    end = start + next(
+        offset for offset, line in enumerate(lines[start:])
+        if line == f'{indent}fi')
+    chain = '\n'.join(lines[start:end + 1])
+    assert '.github/workflows/tests.yml' in chain, chain
+    assert 'raise coverage ratchets and tighten module sizes' in chain, chain
+    return chain
+
+
+def _subject_selected(repo, chain):
+    """The bare subject the chain announces, run in `repo`."""
+    done = subprocess.run(
+        [_util.workflow_bash(), '-e', '-o', 'pipefail', '-c', chain],
+        cwd=repo, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    line = done.stdout.strip()
+    assert line.startswith('subject='), line
+    return line[len('subject='):]
+
+
+def test_ratchet_subject_names_a_file_that_moved(tmp):
+    """A subject announces the file that moved, never the one that did not.
+
+    `git diff --quiet -- <path>` exits 0 when the path is unchanged, so an
+    unnegated condition reaches the arm for the file that did NOT move: a
+    coverage-only raise announced a module-size tighten and the other way
+    round, which titled ratchet commits for a file none of them touched.
+    """
+    chain = _ratchet_subject_chain()
+    workflow_rel = '.github/workflows/tests.yml'
+    baseline_rel = 'scripts/ci/size_baseline.py'
+    cases = (
+        ((workflow_rel,), 'raise the coverage ratchets'),
+        ((baseline_rel,), 'tighten the module size baseline'),
+        ((workflow_rel, baseline_rel),
+         'raise coverage ratchets and tighten module sizes'),
+    )
+    repo = Path(tmp) / 'subjects'
+    repo.mkdir()
+    _git(repo, 'init', '-q')
+    _git(repo, 'config', 'user.email', 'tests@example.invalid')
+    _git(repo, 'config', 'user.name', 'Tests')
+    for rel in (workflow_rel, baseline_rel):
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'# {rel}\n', encoding='utf-8')
+    _git(repo, 'add', '-f', '.')
+    _git(repo, 'commit', '-qm', 'base')
+    for changed, subject in cases:
+        for rel in (workflow_rel, baseline_rel):
+            path = repo / rel
+            path.write_text(f'# {rel}\n', encoding='utf-8')
+        for rel in changed:
+            (repo / rel).write_text(
+                f'# {rel}\n# moved\n', encoding='utf-8')
+        assert _subject_selected(repo, chain) == subject, changed
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='ciratchets_')
 
