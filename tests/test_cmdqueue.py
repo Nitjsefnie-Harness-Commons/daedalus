@@ -198,14 +198,11 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     end = actual_end
     if events and events[-1][0] == 'read':
         # A final read may straddle the deadline after a decomposed delay;
-        # pin the deadline-side endpoint after bounding its modeled cost.
+        # pin the scheduling endpoint after proving it was already in flight.
         before_last_read = actual_end - events[-1][1]
-        read_cost = events[-1][1]
         assert before_last_read <= deadline <= actual_end, (
             'final read did not straddle the deadline', actual_end, deadline,
             events)
-        assert deadline - before_last_read <= read_cost + math.ulp(deadline), (
-            'final read started too early', actual_end, deadline, events)
         end = deadline
     # A wait may take its deadline as origin + timeout or as that value's
     # next representable successor; it must stop at whichever it chose.

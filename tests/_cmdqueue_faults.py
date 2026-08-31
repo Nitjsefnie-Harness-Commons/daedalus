@@ -10,11 +10,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cmdqueue  # noqa: E402
 
-# A runaway is a wait that never ends, so the bound is on virtual time, not on
-# how a wait spends it: any number of sleeps is fine, of any size, including
-# none at all. Virtual sleeps cost no real time, so a wait that cannot finish
-# reaches this in milliseconds and fails by name instead of hanging.
+# Both limits are generous runaway guards, not polling implementation bounds.
 _RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
+_DEFAULT_MAX_SLEEPS = 100_000
 
 
 def _queued_file(tmp, name='1700000000000_000001.json'):
@@ -116,25 +114,32 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
 
 @contextlib.contextmanager
-def _virtual_cmdqueue_clock(max_sleeps=None):
+def _virtual_cmdqueue_clock(max_sleeps=_DEFAULT_MAX_SLEEPS):
     original = _cmdqueue.time
     # A large power-of-two origin exposes sleeps too small to move the clock.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
-    now = [origin]
+    elapsed = [0.0]
+    correction = [0.0]
     events = []
     sleep_count = [0]
     # Read cost exposes stale deadline samples; the fallback avoids underflow.
     read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
+    def accumulated(seconds):
+        adjusted = seconds - correction[0]
+        advanced = elapsed[0] + adjusted
+        next_correction = (advanced - elapsed[0]) - adjusted
+        return advanced, next_correction
+
     class Clock:
         def monotonic(self):
-            return now[0]
+            return origin + elapsed[0]
 
         perf_counter = monotonic
 
         def record_read(self):
             events.append(('read', read_cost))
-            now[0] += read_cost
+            elapsed[0], correction[0] = accumulated(read_cost)
 
         def sleep(self, seconds):
             if seconds < 0:
@@ -142,14 +147,15 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
             if max_sleeps is not None and sleep_count[0] >= max_sleeps:
                 raise AssertionError(
                     f'virtual clock exceeded {max_sleeps} sleeps')
-            advanced = now[0] + seconds
-            if advanced - origin > _RUNAWAY_ELAPSED:
+            advanced, next_correction = accumulated(seconds)
+            if advanced >= _RUNAWAY_ELAPSED:
                 raise AssertionError(
-                    'virtual clock ran '
-                    f'{advanced - origin:.3f}s past its origin')
+                    'virtual clock elapsed guard reached '
+                    f'{advanced:.3f}s from its origin')
             sleep_count[0] += 1
             events.append(('sleep', seconds))
-            now[0] = advanced
+            elapsed[0] = advanced
+            correction[0] = next_correction
 
     clock = Clock()
     _cmdqueue.time = clock
