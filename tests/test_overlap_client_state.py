@@ -6,6 +6,7 @@ The client-process pins live here beside the harness controls: what
 what a nonzero diagnosis must name, and the real caller that routes its states
 through them.
 """
+import json
 import re
 import subprocess
 import sys
@@ -145,6 +146,36 @@ def test_run_same_id_client_overlap_diagnoses_its_client_states(tmp):
     assert 'clients still running after grace' in message, message
 
 
+def test_a_consumed_delivery_does_not_break_the_listing(tmp):
+    """A delivery deleted between the listing and its read is skipped.
+
+    A live client's consume deletes its result, so the diagnostic can race
+    it; a vanished file is normal operation and the rest are still named.
+    """
+    root = Path(tmp) / 'results' / 'deliveries' / 'tok_extension'
+    root.mkdir(parents=True)
+    survivor = root / '1700000000000_000001.json'
+    survivor.write_text(
+        json.dumps({'deliveryId': '1700000000000_1'}), encoding='utf-8')
+    consumed = root / '1700000000001_000002.json'
+    consumed.write_text(
+        json.dumps({'deliveryId': '1700000000001_2'}), encoding='utf-8')
+
+    original = Path.read_text
+
+    def vanishes_before_read(candidate, *args, **kwargs):
+        if candidate == consumed:
+            consumed.unlink()
+        return original(candidate, *args, **kwargs)
+
+    with mock.patch.object(Path, 'read_text', vanishes_before_read):
+        report = _overlap._client_failure_diagnostics(['log line'], tmp)
+    assert 'delivery state' in report, report
+    assert ('tok_extension/1700000000000_000001.json: deliveryId '
+            '1700000000000_1') in report, report
+    assert '1700000000001_2' not in report, report
+
+
 def _overlap_client_failure_message(tmp, states=None):
     """A real overlap run whose clients are reported in supplied states.
 
@@ -160,6 +191,9 @@ def _overlap_client_failure_message(tmp, states=None):
 
     def failing_states(processes, grace, **kwargs):
         assert grace is None, grace
+        alive = [owner for owner, process in processes.items()
+                 if process.poll() is None]
+        assert not alive, f'clients reached the mock still live: {alive}'
         del kwargs
         return {owner: dict(expected[owner]) for owner in processes}
 
@@ -169,7 +203,8 @@ def _overlap_client_failure_message(tmp, states=None):
                 tmp, ['owner-a', 'owner-b'],
                 _overlap.cookie_client_argv, _overlap.client_env(),
                 'overlap-client-token',
-                _util.ROOT / 'extension' / 'background.js')
+                _util.ROOT / 'extension' / 'background.js',
+                stop_clients_after_enqueue=True)
         except AssertionError as failure:
             return str(failure)
     raise AssertionError('the caller never diagnosed its clients')
