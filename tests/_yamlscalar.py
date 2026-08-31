@@ -8,6 +8,8 @@ from yamlscalar import (  # noqa: E402
     YAMLReadError,
     _strip_inline_comment,
     decode_inline_scalar,
+    split_flow_collection,
+    split_flow_items,
     split_mapping_field,
 )
 
@@ -16,5 +18,7 @@ __all__ = (
     'YAMLReadError',
     '_strip_inline_comment',
     'decode_inline_scalar',
+    'split_flow_collection',
+    'split_flow_items',
     'split_mapping_field',
 )

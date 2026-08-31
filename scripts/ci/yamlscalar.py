@@ -49,6 +49,59 @@ def split_mapping_field(text, owner, allow_tabs=False):
     raise YAMLReadError(f'{owner} has an unsupported mapping field')
 
 
+def split_flow_collection(value, owner):
+    """Split one flow collection into its bracket and body, or return None."""
+    opening = value[:1]
+    if opening not in ('[', '{'):
+        return None
+    closing = ']' if opening == '[' else '}'
+    if len(value) < 2 or not value.endswith(closing):
+        raise YAMLReadError(f'{owner} has an unbalanced flow collection')
+    return opening, value[1:-1]
+
+
+def split_flow_items(body, owner):
+    """Split a nonempty flow collection body on its top-level commas."""
+    items = []
+    depth = 0
+    quote = None
+    start = 0
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if quote == "'":
+            if body[index:index + 2] == "''":
+                index += 2
+                continue
+            if char == "'":
+                quote = None
+        elif quote == '"':
+            if char == '\\':
+                index += 2
+                continue
+            if char == '"':
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char in '[{':
+            depth += 1
+        elif char in ']}':
+            depth -= 1
+            if depth < 0:
+                raise YAMLReadError(
+                    f'{owner} has an unbalanced flow collection')
+        elif char == ',' and depth == 0:
+            items.append(body[start:index])
+            start = index + 1
+        index += 1
+    if quote is not None or depth:
+        raise YAMLReadError(f'{owner} has an unbalanced flow collection')
+    items.append(body[start:])
+    if any(not item.strip(' ') for item in items):
+        raise YAMLReadError(f'{owner} has an empty flow item')
+    return items
+
+
 def _strip_inline_comment(value):
     """Remove one YAML comment outside quoted scalar content."""
     quote = None
