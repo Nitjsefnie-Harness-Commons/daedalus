@@ -120,11 +120,9 @@ class InvocationReplay:
         writes = []
         bodies = self.timeline.values_at(binding, inherited, limits)
         for body in bodies:
-            if body is None or body[0] != 'block':
+            if body is None:
                 continue
-            function_scope = next(
-                (index for index, scope in enumerate(self.scopes)
-                 if scope['open'] == body[1]), None)
+            function_scope = self._scope_for(body)
             if function_scope is None or function_scope in seen:
                 continue
             overrides = dict(inherited)
@@ -153,6 +151,26 @@ class InvocationReplay:
                     item, overrides, seen | {function_scope},
                     nested_optional, nested_limits))
         return writes
+
+    def concise_calls(self, call, inherited):
+        call_start, binding, _ = call
+        limits = lexical_limits(
+            self.scopes, self.scope_at(call_start), call_start)
+        found = []
+        for body in self.timeline.values_at(binding, inherited, limits):
+            if body is None or body[0] != 'expr':
+                continue
+            function_scope = self._scope_for(body)
+            found.extend(nested for nested in self.invocations
+                         if self.scope_at(nested[0]) == function_scope)
+        return found
+
+    def _scope_for(self, body):
+        inset = body[0] == 'block'
+        start, end = body[1] + inset, body[2] - inset
+        return next((index for index, scope in enumerate(self.scopes)
+                     if scope['start'] == start and scope['end'] == end),
+                    None)
 
     def _override_parameters(self, overrides, inherited, function_scope,
                              call_start, args, limits):
