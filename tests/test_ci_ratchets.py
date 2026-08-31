@@ -551,20 +551,30 @@ def _git(repo, *args):
 
 
 def _ratchet_subject_chain():
-    """The subject-selection chain, exactly as the workflow ships it."""
+    """The subject-selection chain, exactly as the workflow ships it.
+
+    The anchor is the if arm: a chain with the if/elif files exchanged
+    is refused here rather than extracted, because this test's contract
+    is this chain's spelling.
+    """
+    anchor = 'git diff --quiet -- scripts/ci/size_baseline.py'
     workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     lines = workflow.splitlines()
     begins = [
         index for index, line in enumerate(lines)
-        if line.lstrip().startswith('if ')
-        and 'git diff --quiet -- scripts/ci/size_baseline.py' in line]
-    assert len(begins) == 1, begins
+        if line.lstrip().startswith('if ') and anchor in line]
+    assert len(begins) == 1, (
+        f'expected one if arm testing {anchor!r} in tests.yml, found '
+        f'{len(begins)} at {begins}: the extracted chain shape changed')
     start = begins[0]
     indent = lines[start][:-len(lines[start].lstrip())]
-    end = start + next(
-        offset for offset, line in enumerate(lines[start:])
-        if line == f'{indent}fi')
+    end = next((index for index in range(start, len(lines))
+                if lines[index] == f'{indent}fi'), None)
+    assert end is not None, (
+        f'no fi at indent {len(indent)} below the if arm testing '
+        f'{anchor!r} at tests.yml:{start + 1}: the extracted chain '
+        'shape changed')
     chain = '\n'.join(lines[start:end + 1])
     assert '.github/workflows/tests.yml' in chain, chain
     assert 'raise coverage ratchets and tighten module sizes' in chain, chain
