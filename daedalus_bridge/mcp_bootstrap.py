@@ -4,7 +4,13 @@ Importing daedalus_mcp costs over a second — mcp, pydantic, httpx,
 opentelemetry — and every caller waiting on the bridge's Listening line paid
 it. That listener already binds on a thread of its own and announces itself
 on its own [MCP] line, so readiness never meant the front end was up.
+
+An import that never returns is the one case this costs something: the main
+thread blocks on the module lock this thread holds, so the interpreter no
+longer answers SIGINT. A dependency that is merely slow is unaffected.
 """
+import os
+import sys
 import threading
 
 from daedalus_bridge.log_safe import log_safe
@@ -14,6 +20,13 @@ def _bootstrap(local_url):
     try:
         from daedalus_mcp import server as mcp_server
         mcp_server.start_in_thread(local_url)
+    except SystemExit as e:
+        # How the front end's settings parser refuses a value, and on the
+        # main thread it stopped the bridge naming the setting. A thread's
+        # SystemExit is discarded instead, so the stop is made here: the
+        # alternative is a bridge serving a typo with no diagnostic at all.
+        print(f'[Daedalus] {log_safe(e)}', file=sys.stderr, flush=True)
+        os._exit(1)
     except Exception as e:
         # ASCII only, and it names the install: without the optional
         # dependencies the bridge otherwise starts normally and /mcp simply
@@ -26,8 +39,6 @@ def _bootstrap(local_url):
 
 def start(bridge_port):
     """Start the front end against the bridge's bound port, and don't wait."""
-    thread = threading.Thread(
+    threading.Thread(
         target=_bootstrap, args=(f'http://127.0.0.1:{bridge_port}',),
-        name='mcp-bootstrap', daemon=True)
-    thread.start()
-    return thread
+        name='mcp-bootstrap', daemon=True).start()
