@@ -12,6 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _control_writes import control_write_violations  # noqa: E402
+from _coverage_guard import (  # noqa: E402
+    _coverage_environment_violations, _synthetic_violations)
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
@@ -49,6 +51,15 @@ def _declaration_line(text):
     """The line after test_diff_coverage.py's module-level declaration."""
     assert _DECLARATION_LINE in text, 'the declaration binding shape changed'
     return text[:text.index(_DECLARATION_LINE)].count('\n') + 2
+
+
+def _with_planted_launch(target, planted):
+    """Plant `planted` after the declaration; return the original bytes."""
+    original = target.read_bytes()
+    text = _module_text(target)
+    target.write_bytes(text.replace(
+        _DECLARATION_LINE, _DECLARATION_LINE + planted, 1).encode('utf-8'))
+    return original
 
 
 def test_controls_never_write_inside_the_repository(tmp):
@@ -374,6 +385,80 @@ def test_a_class_body_binding_does_not_shield_its_comprehensions(tmp):
         "        _ = [targets.append(ROOT / 'x') for _ in [0]]\n"
         "    inner()\n"
         "    targets[0].write_bytes(b'ok')\n") == []
+
+
+def test_an_annotated_alias_of_the_launch_module_is_a_launch(tmp):
+    """Route 1: `launcher: object = subprocess` aliases the module."""
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
+    first = _declaration_line(_module_text(target))
+    original = _with_planted_launch(
+        target,
+        "launcher: object = subprocess\n"
+        "launcher.run(['python3', 'child.py'], cwd=tmp)\n")
+    try:
+        violations = _coverage_environment_violations(root)
+        assert (f'tests/test_diff_coverage.py:{first + 1}: subprocess.run '
+                'cwd=tmp declares no env=') in violations, violations
+    finally:
+        target.write_bytes(original)
+    restored = _coverage_environment_violations(root)
+    assert not any(v.startswith(f'tests/test_diff_coverage.py:{line}:')
+                   for line in (first, first + 1)
+                   for v in restored), restored
+
+
+def test_an_unresolved_callee_carrying_cwd_needs_a_declaration(tmp):
+    """The class behind route 1: any callee with cwd= is judged."""
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
+    first = _declaration_line(_module_text(target))
+    launches = (
+        ("sys.modules['subprocess'].run(['python3', 'child.py'], "
+         "cwd=tmp)\n", "sys.modules['subprocess'].run"),
+        ("getattr(subprocess, 'run')(['python3', 'child.py'], "
+         "cwd=tmp)\n", "getattr(subprocess, 'run')"),
+    )
+    for planted, callee in launches:
+        original = _with_planted_launch(target, planted)
+        try:
+            violations = _coverage_environment_violations(root)
+            assert (f'tests/test_diff_coverage.py:{first}: unresolved '
+                    f'callee {callee} cwd=tmp declares no env='
+                    ) in violations, (callee, violations)
+        finally:
+            target.write_bytes(original)
+    original = _with_planted_launch(
+        target,
+        "sys.modules['subprocess'].run(['python3', 'child.py'], cwd=tmp,\n"
+        "                              env=_COVERAGE_ENV)\n")
+    try:
+        declared = _coverage_environment_violations(root)
+        assert not any(v.startswith(f'tests/test_diff_coverage.py:{first}:')
+                       for v in declared), declared
+    finally:
+        target.write_bytes(original)
+
+
+def test_a_launcher_bound_through_an_unfollowable_form_is_refused(tmp):
+    """A binding the alias walk cannot read is refused at the binding."""
+    del tmp
+    for binding in ('for launcher in (subprocess,):\n    pass',
+                    'launcher, other = subprocess, None',
+                    'with hold(subprocess) as launcher:\n    pass',
+                    'held = (launcher := subprocess)'):
+        violations = _synthetic_violations(
+            f"""import subprocess
+{binding}
+""")
+        assert any(v == 'tests/synthetic.py:2: a launcher is bound through '
+                   'a form the guard cannot follow' for v in violations), (
+            binding, violations)
+    assert _synthetic_violations(
+        """import subprocess
+launcher = subprocess
+launcher.run(['python3', 'child.py'], cwd=ROOT)
+""") == []
 
 
 if __name__ == '__main__':
