@@ -137,7 +137,7 @@ def test_parallel_files_from_each_os_artifact_are_unioned(tmp):
     _write_remote_parallel_file(
         tmp, 'coverage-data-windows-latest',
         'runner.pid222.XbbbbbBx.Habcdef1234h',
-        r'D:\a\daedalus\daedalus\a.py', [2])
+        r'X:\synthetic\daedalus\daedalus\a.py', [2])
 
     result = subprocess.run(
         [sys.executable, str(COMBINE_SCRIPT),
