@@ -71,7 +71,7 @@ if '--jq' in args:
         for comment in state:
             print(json.dumps(comment))
     elif '/commits/' in target:
-        print('170')
+        raise SystemExit('unexpected commits query: ' + target)
     elif '/pulls/' in target:
         print(os.environ['CURRENT_HEAD'])
     elif expression:
@@ -517,6 +517,25 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
         }}},
     }
     assert evaluate(condition, non_pull_request) is False, condition
+
+
+def test_commits_query_is_refused_loudly(tmp):
+    """A commits query fails loudly instead of naming a pull request."""
+    workdir = Path(tmp) / 'commits-query'
+    (workdir / 'bin').mkdir(parents=True, exist_ok=True)
+    _write_executable(workdir / 'bin' / 'gh', _GH_COMMENT_STUB)
+    state = workdir / 'state.json'
+    state.write_text('[]', encoding='utf-8')
+    calls = workdir / 'calls.jsonl'
+    calls.write_text('', encoding='utf-8')
+    env = {**os.environ, 'STUB_STATE': str(state), 'STUB_CALLS': str(calls)}
+    script = (
+        '"$PWD/bin/gh" api '
+        f'"repos/owner/repo/commits/{40 * "B"}/pulls" --jq .number')
+    result = _run_shell_block(workdir, script, env)
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert 'unexpected commits query' in result.stderr, result.stderr
+    assert not re.search(r'\d', result.stdout), result.stdout
 
 
 def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
