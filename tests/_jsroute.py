@@ -57,40 +57,37 @@ def _js_statement_end(mask, pos):
     return len(mask)
 
 
-def _js_function_body(mask, name):
-    """`(kind, start, end)` of a same-file function's body, or None.
-
-    `kind` is 'block' for a braced body (start is the `{`) and 'expr' for a
-    concise arrow body (the span is the expression). Only the first
-    declaration of a name is read; a file that declares one twice gets the
-    first, which is the conservative half of a shape nothing here uses.
-    """
-    patterns = (
-        r'\bfunction\s+' + re.escape(name) + r'\s*\(',
-        r'\b(?:const|let|var)\s+' + re.escape(name)
-        + r'\s*=\s*(?:async\s+)?function\s*[\w$]*\s*\(',
-        r'\b(?:const|let|var)\s+' + re.escape(name)
-        + r'\s*=\s*(?:async\s*)?\(',
-    )
-    for pattern in patterns:
-        match = re.search(pattern, mask)
-        if not match:
-            continue
-        paren = match.end() - 1
+def _js_function_body_at(mask, start):
+    """Body beginning at a concrete function value occurrence, or None."""
+    start += len(mask[start:]) - len(mask[start:].lstrip())
+    async_prefix = re.match(r'async\b\s*', mask[start:])
+    if async_prefix:
+        start += async_prefix.end()
+    function = re.match(r'function(?:\s+[\w$]+)?\s*\(', mask[start:])
+    if function:
+        paren = start + function.end() - 1
         after = js_bracket_end(mask, paren)
-        arrow = re.match(r'\s*=>\s*', mask[after:])
-        if arrow:
-            body = after + arrow.end()
-            if mask[body:body + 1] == '{':
-                return ('block', body, js_bracket_end(mask, body))
-            if mask[body:body + 1] == '(':
-                return ('expr', body + 1, js_bracket_end(mask, body) - 1)
-            semi = mask.find(';', body)
-            return ('expr', body, len(mask) if semi == -1 else semi)
         brace = mask.find('{', after)
         if brace != -1:
             return ('block', brace, js_bracket_end(mask, brace))
-    return None
+        return None
+    if mask[start:start + 1] == '(':
+        after = js_bracket_end(mask, start)
+        arrow = re.match(r'\s*=>\s*', mask[after:])
+        if not arrow:
+            return None
+        body = after + arrow.end()
+    else:
+        parameter = re.match(r'[\w$]+\s*=>\s*', mask[start:])
+        if not parameter:
+            return None
+        body = start + parameter.end()
+    if mask[body:body + 1] == '{':
+        return ('block', body, js_bracket_end(mask, body))
+    if mask[body:body + 1] == '(':
+        return ('expr', body + 1, js_bracket_end(mask, body) - 1)
+    semi = mask.find(';', body)
+    return ('expr', body, len(mask) if semi == -1 else semi)
 
 
 def js_tab_routing_violations(path, rel):
@@ -149,11 +146,12 @@ def js_tab_routing_violations(path, rel):
                 state[key] = (line_of(off), value)
         return state
 
-    def helper_state(name, depth):
+    def helper_state(name, call_pos, depth):
         """What a same-file helper returns, when it returns what it built."""
         if depth > 3:
             return _JS_UNPROVABLE
-        body = _js_function_body(mask, name)
+        binding = visible_binding(name, call_pos)
+        body = function_bodies.get(binding)
         if body is None:
             return _JS_UNPROVABLE
         kind, body_start, body_end = body
@@ -203,7 +201,9 @@ def js_tab_routing_violations(path, rel):
                 return merged
         call = re.fullmatch(r'([\w$]+)\s*\(.*\)', expr, re.DOTALL)
         if call:
-            return helper_state(call.group(1), depth)
+            call_pos = span_start + mask[span_start:span_end].index(
+                call.group(1))
+            return helper_state(call.group(1), call_pos, depth)
         return _JS_UNPROVABLE
 
     declarations = list(re.finditer(
@@ -277,6 +277,7 @@ def js_tab_routing_violations(path, rel):
                'open': None, 'parent': None}]
     scope_keys = set()
     function_names = []
+    function_occurrences = []
     method_positions = set()
 
     def add_scope(open_paren, body_open, params=None):
@@ -300,6 +301,9 @@ def js_tab_routing_violations(path, rel):
             add_scope(open_paren, body_open)
             if match.group(1):
                 function_names.append((match.group(1), match.start()))
+                function_occurrences.append(
+                    (match.group(1), match.start(),
+                     _js_function_body_at(mask, match.start())))
     for open_paren, close in list(pair_end.items()):
         if mask[open_paren:open_paren + 1] != '(':
             continue
@@ -324,6 +328,12 @@ def js_tab_routing_violations(path, rel):
                 and previous in '{,;}'):
             method_positions.add(match.start())
             add_scope(open_paren, body_open)
+
+    for match in declarations:
+        body = _js_function_body_at(mask, match.end())
+        if body is not None:
+            function_occurrences.append(
+                (match.group(2), match.start(), body))
 
     for index in range(1, len(scopes)):
         scope = scopes[index]
@@ -447,18 +457,19 @@ def js_tab_routing_violations(path, rel):
         return (match.start() not in method_positions
                 and mask[after:after + 1] != '{')
 
+    function_bodies = {}
+    for function_name, definition, body in function_occurrences:
+        binding = visible_binding(function_name, definition)
+        if binding is not None:
+            function_bodies[binding] = body
+
     callable_scopes = {}
-    definitions = list(function_names)
-    definitions.extend((match.group(2), match.start())
-                       for match in declarations)
-    for function_name, definition in definitions:
-        body = _js_function_body(mask, function_name)
-        if body is None or body[0] != 'block':
+    for binding, body in function_bodies.items():
+        if body[0] != 'block':
             continue
         function_scope = next((index for index, scope in enumerate(scopes)
                                if scope['open'] == body[1]), None)
-        binding = visible_binding(function_name, definition)
-        if function_scope is not None and binding is not None:
+        if function_scope is not None:
             callable_scopes[binding] = function_scope
 
     invocations = []
