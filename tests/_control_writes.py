@@ -299,14 +299,21 @@ def _seeded_parameters(call, function, owned, trusted, mutated, context,
 
 
 def _closure_names(scope):
-    """Names a nested scope reaches without binding them itself."""
+    """Names a nested scope reaches without binding them itself.
+
+    A class body's bindings are invisible to the functions defined in
+    it, so they shield nothing below the class.
+    """
     local = _scope_local_names(scope)
+    shield = set() if isinstance(scope, ast.ClassDef) else local
     names = set()
-    for node in ast.walk(scope):
+    for node in _scope_nodes(scope):
         if isinstance(node, ast.Name) and node.id not in local:
             names.add(node.id)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             names.update(node.names)
+        elif isinstance(node, _SCOPES[1:]):
+            names |= _closure_names(node) - shield
     return names
 
 
@@ -315,7 +322,8 @@ def _escaped_names(scope):
 
     Reaching a container through another name is reaching the same
     object, so a name that is ever handed on — bound, passed, listed,
-    or reached from a nested scope — no longer proves what it holds.
+    reached from a nested scope, or declared global or nonlocal — no
+    longer proves what it holds.
     """
     nodes = list(_scope_nodes(scope))
     reads = {id(node.value) for node in nodes
@@ -327,6 +335,8 @@ def _escaped_names(scope):
     for node in nodes:
         if isinstance(node, _SCOPES[1:]):
             escaped |= _closure_names(node)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            escaped.update(node.names)
     return escaped
 
 

@@ -312,5 +312,48 @@ def test_an_alias_of_a_container_is_never_proof(tmp):
             'nested.py:9: write_bytes target path is not control-owned']
 
 
+def test_a_global_declaration_hands_the_container_to_the_module(tmp):
+    """A module-level helper reaches a control's list only through global."""
+    route = ("    global _shared\n"
+             "    first, *_shared = _real_module_copy(tmp, relative)\n"
+             "    _poison_global()\n"
+             "    _shared[-1].write_bytes(b'mutated')\n")
+    source = Path(tmp) / 'global.py'
+    for declaration in ('', '    global _shared\n'):
+        text = ("_shared = []\n"
+                "def _poison_global():\n"
+                + declaration
+                + "    _shared.append(ROOT / 'x')\n"
+                + _CONTAINER_PRELUDE + route)
+        source.write_text(text, encoding='utf-8')
+        line = text.count('\n')
+        assert control_write_violations(source, Path(tmp)) == [
+            f'global.py:{line}: write_bytes target path is not control-owned'
+        ], declaration
+
+
+def test_a_class_body_binding_does_not_shield_its_methods(tmp):
+    """A class scope is invisible to the functions defined inside it."""
+    route = ("    class _Base:\n"
+             "        targets = 1\n"
+             "        def __init_subclass__(cls):\n"
+             "            targets.append(ROOT / 'x')\n"
+             "    class _Sub(_Base):\n"
+             "        pass\n")
+    line = _CONTAINER_PRELUDE.count('\n') + route.count('\n') + 1
+    assert _container_route_violations(
+        tmp, route + "    targets[-1].write_bytes(b'mutated')\n") == [
+            f'nested.py:{line}: write_bytes target path is not control-owned']
+    assert _container_route_violations(
+        tmp,
+        "    def inner():\n"
+        "        targets = []\n"
+        "        def inner2():\n"
+        "            targets.append(ROOT / 'x')\n"
+        "        inner2()\n"
+        "    inner()\n"
+        "    targets[0].write_bytes(b'ok')\n") == []
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
