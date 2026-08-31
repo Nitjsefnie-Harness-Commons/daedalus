@@ -74,23 +74,13 @@ def test_exact_patterns_match_only_the_root_file(tmp):
     assert mod.matches('docs]', 'docs]')
 
 
-def test_an_unimplemented_pattern_shape_fails_closed(tmp):
-    """A third pattern shape must raise, never silently mismatch."""
-    del tmp
-    mod = _classifier()
-    try:
-        mod.matches('docs/*', 'docs/a.md')
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("'docs/*' was matched instead of refused")
-
-
-def test_directory_glob_prefix_rejects_unimplemented_metacharacters(tmp):
+def test_unimplemented_metacharacters_fail_closed_at_any_position(tmp):
     # `docs?`/`docs[ab]` skip the `/**` strip, hit the literal branch (#290).
     del tmp
     mod = _classifier()
-    cases = [(p, p.replace('/**', '/a.md'))
+    cases = [('docs/*', 'docs/a.md'),
+             ('do[c]s/README.md', 'do[c]s/README.md')]
+    cases += [(p, p.replace('/**', '/a.md'))
              for p in ('docs*/**', 'docs?/**', 'docs[ab]/**', 'docs]/**')]
     cases += [(p, v) for p in ('docs?', 'docs[ab]') for v in (p, 'docsa')]
     for pattern, path in cases:
@@ -99,6 +89,7 @@ def test_directory_glob_prefix_rejects_unimplemented_metacharacters(tmp):
         except ValueError:
             continue
         raise AssertionError(f'{pattern!r} was matched instead of refused')
+    assert mod.matches('docs/README.md', 'docs/README.md')
 
 
 def test_nested_glob_shape_still_fails_closed(tmp):
