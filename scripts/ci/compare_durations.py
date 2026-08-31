@@ -32,6 +32,10 @@ is simply absent and drops out of the intersection rather than contributing the
 time it took to give up. That instrument belongs to the comparison, not to
 either tree, which is what lets a release predating it be measured at all.
 
+A baseline label is whichever point the run measured against: a release tag
+on a push, and on a pull request the merge base of the branch and its base
+branch, never that branch's tip.
+
 An accepted speed change is an explicit in-tree record for one bare test
 function name. It authorizes ONE transition — from any of the recorded
 `through_baseline` labels to the next baseline. While the comparison's base
