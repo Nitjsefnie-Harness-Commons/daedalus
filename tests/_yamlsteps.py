@@ -7,6 +7,7 @@ from _yamlscalar import (
     YAMLReadError,
     _strip_inline_comment,
     decode_inline_scalar,
+    flow_depth,
     split_flow_collection,
     split_flow_items,
     split_mapping_field,
@@ -176,19 +177,23 @@ def _decode_complete_mapping(lines, start, end, parent_indent, owner):
         raise YAMLReadError(f'{owner} is not a mapping')
     field_indent = _reader._indent(lines[first])
     fields = []
-    for index in range(start, end):
+    index = start
+    while index < end:
         if not _reader._meaningful(lines[index]):
+            index += 1
             continue
         indent = _reader._indent(lines[index])
         if indent < field_indent:
             raise YAMLReadError(f'{owner} has inconsistent indentation')
         if indent != field_indent:
+            index += 1
             continue
         text, _ended = lines[index]
         field = text[indent:]
         if field.startswith('- '):
             raise YAMLReadError(f'{owner} is not a mapping')
         fields.append((index, field))
+        index = _value_extent(lines, index, end, field, owner) + 1
     values = {}
     for offset, (index, field) in enumerate(fields):
         field_end = fields[offset + 1][0] if offset + 1 < len(
@@ -211,14 +216,14 @@ def _decode_complete_value(
         entry = _reader._Entry(index, indent, raw_value)
         return _reader._scalar_value(
             lines, entry, end, f'{owner} {key}')
-    child = _reader._first_child(lines, index + 1, end, indent)
     if value:
-        joined = _flow_continuation(lines, index, end, value)
-        if joined is None and child is not None:
+        joined, close = _flow_extent(lines, index, end, value)
+        if _reader._first_child(lines, close + 1, end, indent) is not None:
             raise YAMLReadError(
                 f'{owner} {key} has unsupported nested content')
         return _decode_complete_inline(
             joined or raw_value, f'{owner} value for {key!r}')
+    child = _reader._first_child(lines, index + 1, end, indent)
     if child is None:
         raise YAMLReadError(f'{owner} {key} has no value')
     child_indent = _reader._indent(lines[child])
@@ -230,25 +235,43 @@ def _decode_complete_value(
         lines, index + 1, end, indent, f'{owner} {key}')
 
 
-def _flow_continuation(lines, index, end, value):
-    """Join the lines one flow collection spans, or None when it spans one.
+def _flow_extent(lines, index, end, value):
+    """Join the lines one flow collection spans and say where it closes.
 
-    A flow collection is the one value whose extent indentation does not
-    settle, so its continuation lines are gathered before the ordinary
-    inline decode reads it; each contributes its own line's comment strip,
-    and folding joins them with the single space YAML would.
+    A collection's extent is its own bracket depth rather than the
+    indentation of the field carrying it, so a continuation line sitting at
+    the key's own indentation still belongs to the collection and a closing
+    bracket may stand alone on a line.  Each line contributes its own
+    comment strip, and folding joins them with the single space YAML would.
+    `(None, index)` means no collection outlives the line it starts on.
     """
-    if value[:1] not in ('[', '{'):
-        return None
+    depth = flow_depth(value) if value[:1] in ('[', '{') else 0
+    if depth <= 0:
+        return None, index
     parts = [value]
+    close = end - 1
     for following in range(index + 1, end):
         if not _reader._meaningful(lines[following]):
             continue
         text, _ended = lines[following]
-        parts.append(_strip_inline_comment(text.strip(' ')))
-    if len(parts) == 1:
-        return None
-    return ' '.join(part for part in parts if part)
+        part = _strip_inline_comment(text.strip(' '))
+        parts.append(part)
+        depth += flow_depth(part)
+        if depth <= 0:
+            close = following
+            break
+    return ' '.join(part for part in parts if part), close
+
+
+def _value_extent(lines, index, end, text, owner):
+    """Return the last line index the value written at `text` spans."""
+    try:
+        _raw_key, text = split_mapping_field(text, owner)
+    except YAMLReadError:
+        pass
+    _joined, close = _flow_extent(
+        lines, index, end, _strip_inline_comment(text.strip(' ')))
+    return close
 
 
 def _decode_complete_sequence(lines, start, end, parent_indent, owner):
@@ -258,19 +281,23 @@ def _decode_complete_sequence(lines, start, end, parent_indent, owner):
         raise YAMLReadError(f'{owner} is not a sequence')
     item_indent = _reader._indent(lines[first])
     items = []
-    for index in range(start, end):
+    index = start
+    while index < end:
         if not _reader._meaningful(lines[index]):
+            index += 1
             continue
         indent = _reader._indent(lines[index])
         if indent < item_indent:
             raise YAMLReadError(f'{owner} has inconsistent indentation')
         if indent != item_indent:
+            index += 1
             continue
         text, _ended = lines[index]
         field = text[indent:]
         if not field.startswith('- '):
             raise YAMLReadError(f'{owner} contains a non-item')
         items.append(index)
+        index = _value_extent(lines, index, end, field[2:], owner) + 1
     decoded = []
     for offset, index in enumerate(items):
         item_end = items[offset + 1] if offset + 1 < len(
@@ -284,12 +311,12 @@ def _decode_complete_sequence(lines, start, end, parent_indent, owner):
         else:
             mapping_item = True
         if not mapping_item:
-            joined = _flow_continuation(
+            joined, close = _flow_extent(
                 lines, index, item_end,
                 _strip_inline_comment(raw_value.strip(' ')))
             child = _reader._first_child(
-                lines, index + 1, item_end, item_indent)
-            if joined is None and child is not None:
+                lines, close + 1, item_end, item_indent)
+            if child is not None:
                 raise YAMLReadError(
                     f'{owner} scalar item has unsupported nested content')
             decoded.append(_decode_complete_inline(
@@ -306,16 +333,23 @@ def _decode_complete_sequence_mapping(
     text, _ended = lines[index]
     field_indent = item_indent + 2
     fields = [(index, text[field_indent:])]
-    for following in range(index + 1, end):
+    following = _value_extent(
+        lines, index, end, text[field_indent:], owner) + 1
+    while following < end:
         if not _reader._meaningful(lines[following]):
+            following += 1
             continue
         indent = _reader._indent(lines[following])
         if indent < field_indent:
             raise YAMLReadError(
                 f'{owner} mapping has inconsistent indentation')
-        if indent == field_indent:
-            text, _ended = lines[following]
-            fields.append((following, text[indent:]))
+        if indent != field_indent:
+            following += 1
+            continue
+        text, _ended = lines[following]
+        fields.append((following, text[indent:]))
+        following = _value_extent(
+            lines, following, end, text[indent:], owner) + 1
     values = {}
     for offset, (field_index, field) in enumerate(fields):
         field_end = fields[offset + 1][0] if offset + 1 < len(

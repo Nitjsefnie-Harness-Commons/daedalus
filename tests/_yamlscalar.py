@@ -22,10 +22,23 @@ __all__ = (
     'YAMLReadError',
     '_strip_inline_comment',
     'decode_inline_scalar',
+    'flow_depth',
     'split_flow_collection',
     'split_flow_items',
     'split_mapping_field',
 )
+
+
+def flow_depth(text):
+    """Return the flow-bracket depth one line of content leaves open.
+
+    A flow collection spans exactly the lines its brackets hold open, so
+    this is the one measurement every reader bounds a spanning value by.
+    """
+    depth = 0
+    for _index, _char, current in _unquoted(text):
+        depth = current
+    return depth
 
 
 def split_flow_collection(value, owner):
