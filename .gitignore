@@ -314,6 +314,7 @@
 !/tests/test_extension_boundary.py
 !/tests/test_extension_policy.py
 !/tests/test_file_sizes.py
+!/tests/test_generator_second_consumption.py
 !/tests/test_ghexpr.py
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_storage.py
