@@ -397,19 +397,19 @@ def literal_truth(expr):
     return None if value is _UNSAFE_LITERAL else bool(value)
 
 
-def deferred_generator(expr):
+def deferred_generator(expr, yielded=None):
     remaining = 1
     for clause in expr.generators:
         count = literal_iterable_cardinality(clause.iter)
         if count == 0:
-            return DeferredGenerator(expr, 0)
+            return DeferredGenerator(expr, 0, yielded=yielded)
         truths = [literal_truth(condition) for condition in clause.ifs]
         if False in truths:
-            return DeferredGenerator(expr, 0, True)
+            return DeferredGenerator(expr, 0, True, yielded)
         if count is None or None in truths:
-            return DeferredGenerator(expr, None)
+            return DeferredGenerator(expr, None, yielded=yielded)
         remaining *= count
-    return DeferredGenerator(expr, remaining)
+    return DeferredGenerator(expr, remaining, yielded=yielded)
 
 
 def bind_alias_target(target, value, state, bindings):
