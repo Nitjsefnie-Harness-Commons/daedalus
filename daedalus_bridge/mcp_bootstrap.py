@@ -5,9 +5,8 @@ opentelemetry — and every caller waiting on the bridge's Listening line paid
 it. That listener already binds on a thread of its own and announces itself
 on its own [MCP] line, so readiness never meant the front end was up.
 
-An import that never returns is the one case this costs something: the main
-thread blocks on the module lock this thread holds, so the interpreter no
-longer answers SIGINT. A dependency that is merely slow is unaffected.
+An import that never returns is what this costs: the main thread blocks on
+the module lock this one holds, so the interpreter stops answering SIGINT.
 """
 import os
 import sys
@@ -23,8 +22,7 @@ def _bootstrap(local_url):
     except SystemExit as e:
         # How the front end's settings parser refuses a value, and on the
         # main thread it stopped the bridge naming the setting. A thread's
-        # SystemExit is discarded instead, so the stop is made here: the
-        # alternative is a bridge serving a typo with no diagnostic at all.
+        # SystemExit is discarded instead, so the stop is made here.
         print(f'[Daedalus] {log_safe(e)}', file=sys.stderr, flush=True)
         os._exit(1)
     except Exception as e:
