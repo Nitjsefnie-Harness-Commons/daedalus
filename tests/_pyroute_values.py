@@ -363,7 +363,7 @@ def _known_value(node, state):
     if value is None and isinstance(node, ast.Name):
         value = state.callables.get(node.id)
     return value if (is_deferred_value(value)
-                     or value in ('ext_cmd', '_ext_cmd', '?ext_cmd')) else None
+                     or sender_value(value) is not None) else None
 
 
 def deferred_expression_value(node, state, lambda_factory):

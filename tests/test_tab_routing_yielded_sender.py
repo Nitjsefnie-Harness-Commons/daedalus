@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _pyroute import py_tab_routing_violations  # noqa: E402
 from test_tab_routing import _tracked_focus_verdict  # noqa: E402
 
 
@@ -53,6 +54,28 @@ def test_yielded_sender_survives_expression_merges(tmp):
         observed.append((label, _tracked_focus_verdict(
             tmp, body, counts=True)))
         assert observed[-1][1] == (calls, 1), observed[-1]
+
+
+def test_yielded_sender_triple_members_are_pinned(tmp):
+    cases = [
+        ('underscore', '_ext_cmd = ext_cmd\n', 'send = _ext_cmd\n',
+         'ext_cmd keyword `tab`'),
+        ('known-dict', '', "send = {'k': ext_cmd}['k']\n",
+         'ext_cmd keyword `tab`'),
+        ('unprovable-dict', '',
+         "send = {'k': ext_cmd}[args.flag and 'k']\n",
+         'may be ext_cmd'),
+    ]
+    for label, before, assignment, expected_message in cases:
+        body = (assignment + 'gen = (send for _ in [1])\n'
+                f'next(gen)({_CALL})\n')
+        assert _tracked_focus_verdict(
+            tmp, body, before=before, counts=True) == (1, 1)
+        source = Path(tmp) / f'{label}.py'
+        source.write_text(before + body, encoding='utf-8')
+        found = py_tab_routing_violations(source, source.name)
+        assert len(found) == 1, found
+        assert expected_message in found[0], found
 
 
 def main():
