@@ -12,39 +12,121 @@ from pathlib import PurePosixPath, PureWindowsPath
 _ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
 
 
+_REFLECTIVE_READS = frozenset({'getattr', 'hasattr'})
+
+
+def _chain_base(node):
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        node = node.value
+    return node
+
+
+def _reaches_namespace(node):
+    """Whether an attribute chain passes a subscript or a dunder name.
+
+    `owner.__dict__[...]`, `owner.__class__` and `owner.x[...]` reach
+    the mapping a module's names live in, or an object the checker
+    cannot see, so nothing read from the owner afterwards is proved.
+    """
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        if isinstance(node, ast.Subscript) or node.attr.startswith('__'):
+            return True
+        node = node.value
+    return False
+
+
+def _store_targets(node):
+    if isinstance(node, ast.Assign):
+        return list(node.targets)
+    if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        return [node.target]
+    if isinstance(node, ast.Delete):
+        return list(node.targets)
+    return []
+
+
+def _reads_attribute(call):
+    """hasattr/getattr with a literal name read an attribute, no more."""
+    return (isinstance(call.func, ast.Name)
+            and call.func.id in _REFLECTIVE_READS and len(call.args) > 1
+            and isinstance(call.args[1], ast.Constant)
+            and isinstance(call.args[1].value, str))
+
+
+def _parents(tree):
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    return parents
+
+
+def _retired_by_store(node, retired):
+    """Whether a store retires every owner; named ones go into `retired`."""
+    for target in _store_targets(node):
+        for part in ast.walk(target):
+            if not isinstance(part, (ast.Attribute, ast.Subscript)):
+                continue
+            base = _chain_base(part)
+            names_root = (isinstance(part, ast.Attribute)
+                          and part.attr == 'ROOT')
+            if isinstance(base, ast.Name):
+                if names_root or _reaches_namespace(part):
+                    retired.add(base.id)
+            elif names_root:
+                return True
+    return False
+
+
+def _retires_all_by_setattr(node):
+    """setattr/delattr of ROOT on something the module cannot name."""
+    if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name)
+            or node.func.id not in {'setattr', 'delattr'}
+            or len(node.args) < 2 or isinstance(node.args[0], ast.Name)):
+        return False
+    name = node.args[1]
+    return not isinstance(name, ast.Constant) or name.value == 'ROOT'
+
+
+def _escapes(node, parents):
+    """Whether an owner name appears other than as an attribute's object."""
+    parent = parents.get(node)
+    if isinstance(parent, ast.Attribute) and parent.value is node:
+        return False
+    return not (isinstance(parent, ast.Call) and parent.args
+                and parent.args[0] is node and _reads_attribute(parent))
+
+
 def root_owner_names(tree):
     """Names bound by importing a module whose ROOT is the checkout root.
 
-    An attribute is only a root spelling if the object it reads from is one
-    of those modules: `import os as behaviour` then `behaviour.ROOT = tmp`
-    spells the same thing and means something else. A name whose ROOT this
-    module assigns to, by statement or by `setattr`, is not one of them.
+    An attribute is only a root spelling if the object it reads from is
+    one of those modules and the module has been reached no other way:
+    not stored through (`x.ROOT = ...`, `x.__dict__[...] = ...`), not
+    handed on bare (`setattr(x, ...)`, `vars(x)`, `alias = x`), and not
+    read through its namespace (`x.__dict__.update(...)`). A store to a
+    `ROOT` the module cannot name at all retires every owner.
     """
     owners = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             owners.update(alias.asname or alias.name for alias in node.names
                           if alias.name in _ROOT_MODULES)
+    parents = _parents(tree)
+    retired = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-            targets = [node.target]
-        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-              and node.func.id == 'setattr' and len(node.args) > 1):
-            owner, name = node.args[:2]
-            named_root = (not isinstance(name, ast.Constant)
-                          or name.value == 'ROOT')
-            if isinstance(owner, ast.Name) and named_root:
-                owners.discard(owner.id)
-            continue
-        else:
-            continue
-        for target in targets:
-            if (isinstance(target, ast.Attribute) and target.attr == 'ROOT'
-                    and isinstance(target.value, ast.Name)):
-                owners.discard(target.value.id)
-    return owners
+        if _retired_by_store(node, retired) or _retires_all_by_setattr(node):
+            return set()
+        if (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
+                and _reaches_namespace(node)):
+            base = _chain_base(node)
+            if isinstance(base, ast.Name):
+                retired.add(base.id)
+        if (isinstance(node, ast.Name) and node.id in owners
+                and isinstance(node.ctx, (ast.Load, ast.Del))
+                and _escapes(node, parents)):
+            retired.add(node.id)
+    return owners - retired
 
 
 def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):

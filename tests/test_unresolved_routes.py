@@ -492,5 +492,51 @@ launcher.run(['python3', 'child.py'], cwd=ROOT)
 """) == []
 
 
+def test_root_replaced_through_the_owner_namespace_is_not_root(tmp):
+    """Route 2 and its class: any route into the owner retires it."""
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
+    first = _declaration_line(_module_text(target))
+    launch = "subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)\n"
+    for planted, offset in (
+            ("_util.__dict__['ROOT'] = Path(tmp)\n", 1),
+            ("vars(_util)['ROOT'] = Path(tmp)\n", 1),
+            ("_util.__dict__.update({'ROOT': Path(tmp)})\n", 1),
+            ("_HELPER = _util\n_HELPER.ROOT = Path(tmp)\n", 2)):
+        original = _with_planted_launch(target, planted + launch)
+        try:
+            violations = _coverage_environment_violations(root)
+            assert (f'tests/test_diff_coverage.py:{first + offset}: '
+                    'subprocess.run cwd=_util.ROOT declares no env='
+                    ) in violations, (planted, violations)
+        finally:
+            target.write_bytes(original)
+    restored = _coverage_environment_violations(root)
+    assert not any(v.startswith(f'tests/test_diff_coverage.py:{line}:')
+                   for line in (first, first + 1, first + 2)
+                   for v in restored), restored
+
+
+def test_a_reflective_read_of_the_owner_keeps_it_an_owner(tmp):
+    """hasattr/getattr with a literal name read; they do not rebind."""
+    del tmp
+    assert _synthetic_violations(
+        """import subprocess
+import _util
+assert hasattr(_util, 'ROOT')
+value = getattr(_util, 'ROOT')
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""") == []
+    violations = _synthetic_violations(
+        """import subprocess
+import _util
+setattr(_util, 'other', 1)
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""")
+    assert violations == [
+        'tests/synthetic.py:4: subprocess.run cwd=_util.ROOT declares no '
+        'env='], violations
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
