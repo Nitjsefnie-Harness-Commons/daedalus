@@ -1,5 +1,5 @@
 """Atomic result slots and retained delivery-result files."""
-import os, json, pathlib, threading, time, uuid
+import os, json, threading, time, uuid
 
 from daedalus_bridge import atomic_file
 from daedalus_bridge.config import DELIVERY_DIR, MAX_DELIVERY_RESULTS
@@ -79,12 +79,10 @@ def delivery_result_paths(token, tab, did):
             or path_safety.unsafe_component(did)):
         raise ValueError('invalid delivery id')
     key = path_safety.derived_component(result_key(token, tab))
-    resolved_delivery_root = pathlib.Path(os.path.realpath(DELIVERY_DIR))
     delivery_dir = path_safety.under(DELIVERY_DIR, key)
     # The stripe is keyed on `key`, so the resolved directory must be the
     # one-to-one namespace entry that key names, not an alias to another one.
-    if (path_safety.path_key(delivery_dir.parent)
-            != path_safety.path_key(resolved_delivery_root)
+    if (not path_safety.same_path(delivery_dir.parent, DELIVERY_DIR)
             or delivery_dir.name != key):
         raise ValueError('delivery target is an alias')
     delivery_file = path_safety.under(
