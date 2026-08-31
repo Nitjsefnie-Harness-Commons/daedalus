@@ -283,18 +283,33 @@ def _proved_call_kind(call, context, owned, trusted_names, mutated, depth):
 
 def _seeded_parameters(call, function, owned, trusted, mutated, context,
                        depth):
-    """Kinds for the callee's parameters from this call's arguments."""
-    parameters = (function.args.posonlyargs + function.args.args
-                  + function.args.kwonlyargs)
-    if (has_spread(call) or function.args.vararg is not None
-            or function.args.kwarg is not None
+    """Kinds for the callee's parameters from this call's arguments.
+
+    A defaulted parameter the caller omits is seeded from its own default,
+    the expression the callee would actually read.
+    """
+    arguments = function.args
+    parameters = (arguments.posonlyargs + arguments.args
+                  + arguments.kwonlyargs)
+    if (has_spread(call) or arguments.vararg is not None
+            or arguments.kwarg is not None
             or len(call.args) > len(parameters)):
         return None
+    plain = arguments.posonlyargs + arguments.args
+    defaults = {parameter.arg: default for parameter, default in zip(
+        plain[len(plain) - len(arguments.defaults):], arguments.defaults)}
+    defaults.update(
+        {parameter.arg: default
+         for parameter, default in zip(arguments.kwonlyargs,
+                                       arguments.kw_defaults)
+         if default is not None})
     seeded = {}
     for index, parameter in enumerate(parameters):
         value = argument(call, parameter.arg, index)
         if value is None:
-            return None
+            if parameter.arg not in defaults:
+                return None
+            value = defaults[parameter.arg]
         seeded[parameter.arg] = _path_kind(
             value, owned, trusted, mutated, context, depth)
     return seeded
@@ -309,17 +324,26 @@ def _closure_names(scope):
     local = _scope_local_names(scope)
     in_class = isinstance(scope, ast.ClassDef)
     shield = set() if in_class else local
+    nodes = list(_scope_nodes(scope))
+    reads = {id(node.value) for node in nodes
+             if isinstance(node, ast.Subscript)}
     names = set()
-    for node in _scope_nodes(scope):
-        if isinstance(node, ast.Name) and node.id not in local:
+    for node in nodes:
+        if (isinstance(node, ast.Name) and node.id not in local
+                and id(node) not in reads):
             names.add(node.id)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             names.update(node.names)
         elif isinstance(node, _SCOPES[1:]):
             names |= _closure_names(node) - shield
         elif in_class and isinstance(node, _COMPREHENSIONS):
-            names.update(part.id for part in ast.walk(node)
-                         if isinstance(part, ast.Name))
+            bound = {part.id for generator in node.generators
+                     for part in _target_name_nodes(generator.target)}
+            names.update(
+                part.id for part in ast.walk(node)
+                if isinstance(part, ast.Name)
+                and isinstance(part.ctx, ast.Load)
+                and part.id not in bound)
     return names
 
 

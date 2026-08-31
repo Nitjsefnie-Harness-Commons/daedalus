@@ -440,5 +440,74 @@ def test_a_spread_namespace_call_is_not_the_pure_locals(tmp):
         ], spread
 
 
+def test_a_spread_keyword_is_not_a_named_argument(tmp):
+    """A `**` splat is neither a keyword nor a positional argument."""
+    source = Path(tmp) / 'splat-target.py'
+    source.write_text(
+        "import _util\n"
+        "def test_control(tmp):\n"
+        "    owned = Path(tmp) / 'repository'\n"
+        "    _util.load(owned, **{})\n",
+        encoding='utf-8')
+    assert _violations(source) == []
+
+
+def test_an_omitted_default_seeds_its_own_expression(tmp):
+    """A caller omitting a default seeds that parameter, not nothing."""
+    source = Path(tmp) / 'default-seed.py'
+    source.write_text(
+        "def _probe(tmp, name='scratch'):\n"
+        "    (Path(tmp) / name).write_bytes(b'x')\n"
+        "def test_a(tmp):\n"
+        "    _probe(tmp)\n",
+        encoding='utf-8')
+    assert _violations(source) == []
+    source.write_text(
+        "def _probe(tmp, name=None):\n"
+        "    if name is not None:\n"
+        "        (Path(tmp) / name).write_bytes(b'x')\n"
+        "def test_a(tmp):\n"
+        "    _probe(tmp, ROOT)\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'default-seed.py:3: write_bytes target path is not control-owned']
+
+
+def test_a_nested_body_subscript_read_is_not_a_handoff(tmp):
+    """Reading one element from a nested scope keeps the container proved."""
+    source = Path(tmp) / 'header-read.py'
+    source.write_text(
+        "def _copy(tmp, relative):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    return root, root / relative\n"
+        "def test_control(tmp):\n"
+        "    relative = Path('tests/probe.py')\n"
+        "    first, *targets = _copy(tmp, relative)\n"
+        "    def inner():\n"
+        "        return targets[0]\n"
+        "    inner()\n"
+        "    targets[0].write_bytes(b'ok')\n",
+        encoding='utf-8')
+    assert _violations(source) == []
+
+
+def test_a_class_body_comprehension_target_is_not_a_free_read(tmp):
+    """A comprehension's own target is not a read of the class-scope name."""
+    source = Path(tmp) / 'class-comp.py'
+    source.write_text(
+        "def _copy(tmp, relative):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    return root, root / relative\n"
+        "def test_control(tmp):\n"
+        "    relative = Path('tests/probe.py')\n"
+        "    first, *targets = _copy(tmp, relative)\n"
+        "    class _Base:\n"
+        "        targets = 1\n"
+        "        _ = [targets for targets in [0]]\n"
+        "    targets[-1].write_bytes(b'ok')\n",
+        encoding='utf-8')
+    assert _violations(source) == []
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
