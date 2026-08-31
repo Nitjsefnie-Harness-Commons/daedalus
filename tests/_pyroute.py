@@ -3,12 +3,12 @@ import ast
 import sys
 
 from _pyroute_values import (DeferredCallable, DeferredClass,
+                             DeferredContainer,
                              bind_call_arguments, callable_candidates,
-                             contains_callable, expression_callables,
+                             exposed_callables, expression_callables,
                              expression_value, follow_callable_call,
                              is_deferred_value, merge_deferred_values,
-                             payload_key,
-                             store_deferred_value)
+                             payload_key, store_deferred_value)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
@@ -96,15 +96,12 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
 
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
-                        flow_exits=None, scope_callables=None,
-                        scope_executed=None, active_callables=frozenset(),
+                        flow_exits=None, active_callables=frozenset(),
                         module_scope=False, annotation_mode=(True, True),
-                        chain=frozenset(), callable_dict_origins=None):
+                        chain=frozenset(), callable_dict_origins=None,
+                        scope_root=True):
     annotations_eager, evaluate_annotations = annotation_mode
     violations = []
-    owns_scope = scope_callables is None
-    scope_callables = [] if scope_callables is None else scope_callables
-    scope_executed = set() if scope_executed is None else scope_executed
     fallback = _copy_state_pair(pairs[0]) if pairs else None
 
     def copied(found):
@@ -152,14 +149,12 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 destination.dicts[name] = keys.copy()
         return destination
 
-    def analyze_callable(deferred, callers, executed=False, call=None):
+    def analyze_callable(deferred, callers, call=None):
         key = id(deferred)
         if key in active_callables:
             return copied(callers), None
-        if executed:
-            scope_executed.add(key)
         blocked = chain - deferred.captured
-        keep = deferred.locals | blocked
+        keep = deferred.locals | blocked | (deferred.captured - chain)
         # A deferred body's walk is pure in its entry state, so callers that
         # project onto the same state reuse the first walk's findings. The
         # payload key exists because state_signature collapses dict contents;
@@ -173,8 +168,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 if isinstance(deferred.scope, ast.Lambda)
                 else deferred.scope.body)
         for caller in callers:
-            entry_keep = (deferred.locals
-                          | deferred.state.dict_origins.keys())
+            entry_keep = keep | deferred.state.dict_origins.keys()
             entry = overlay(_copy_state_pair(deferred.state), caller,
                             entry_keep, blocked)
             if call is not None:
@@ -244,19 +238,24 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         for index, clause in enumerate(expression.generators):
             if index: active = check_expression(clause.iter, active)
             cardinality = iterable_nonempty(clause.iter, active)
-            active = consume_iterable(clause.iter, active, exhaust=True)
-            if cardinality is False: return dedupe_states([*skipped, *active])
+            active, _ = consume_iterable(clause.iter, active, exhaust=True)
+            if cardinality is False:
+                return dedupe_states([*skipped, *active]), None
             if cardinality is not True: skipped.extend(copied(active))
             for condition in clause.ifs:
                 active = check_expression(condition, active)
                 truth = literal_truth(condition)
-                if truth is False: return dedupe_states([*skipped, *active])
+                if truth is False:
+                    return dedupe_states([*skipped, *active]), None
                 if truth is None:
                     skipped.extend(copied(active))
         results = [expression.key, expression.value] if isinstance(
             expression, ast.DictComp) else [expression.elt]
         for result in results: active = check_expression(result, active)
-        return dedupe_states([*skipped, *active])
+        yielded = merge_deferred_values(
+            state.evaluated.get(id(result))
+            for state in active for result in results)
+        return dedupe_states([*skipped, *active]), yielded
 
     def advance_generator(state, generator):
         if generator.remaining is None: return
@@ -273,6 +272,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def consume_iterable(expr, current_pairs, exhaust):
         outputs = []
+        yielded = []
         for state in current_pairs:
             generator = generator_for(expr, state)
             if generator is None:
@@ -282,7 +282,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 advance_generator(state, generator)
                 outputs.append(state)
                 continue
-            consumed = consume_generator(generator, [state])
+            consumed, value = consume_generator(generator, [state])
+            if value is not None: yielded.append(value)
             if exhaust:
                 for output in consumed:
                     output.generators = {
@@ -292,7 +293,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             else:
                 for output in consumed: advance_generator(output, generator)
             outputs.extend(consumed)
-        return dedupe_states(outputs)
+        return dedupe_states(outputs), merge_deferred_values(yielded)
 
     def exhaust_generators(expressions, current_pairs):
         for state in current_pairs:
@@ -315,7 +316,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     node, callable_state(
                         node, callable_pairs([state]), annotations_eager),
                     frozenset(local_names), frozenset(chain))
-                scope_callables.append(state.evaluated[id(node)])
             return current_pairs
         if isinstance(node, ast.NamedExpr):
             current_pairs = check_expression(node.value, current_pairs)
@@ -378,13 +378,17 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 current = [state]
                 for argument in arguments:
                     current = check_expression(argument, current)
+                consumed_values = []
                 if consumer in _EAGER_ITERABLE_CALLS:
                     for argument in node.args:
-                        current = consume_iterable(
+                        current, yielded = consume_iterable(
                             argument, current, exhaust=True)
+                        if yielded is not None: consumed_values.append(yielded)
                 elif consumer in _PARTIAL_ITERABLE_CALLS and node.args:
-                    current = consume_iterable(
+                    current, yielded = consume_iterable(
                         node.args[0], current, exhaust=False)
+                    if consumer == 'next' and yielded is not None:
+                        consumed_values.append(yielded)
                 for current_state in current:
                     found = _py_call_violations(
                         node, current_state.dicts, rel,
@@ -393,6 +397,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 current, returned_value = follow_callable_call(
                     candidates, arguments, current, node, analyze_callable,
                     copied, dedupe_states)
+                consumed_value = merge_deferred_values(consumed_values)
+                if consumed_value is not None and consumer in (
+                        'frozenset', 'list', 'set', 'sorted', 'tuple'):
+                    consumed_value = DeferredContainer(
+                        {0: consumed_value}, None)
+                returned_value = merge_deferred_values(
+                    (returned_value, consumed_value))
                 if returned_value is not None:
                     for current_state in current:
                         current_state.evaluated[id(node)] = returned_value
@@ -409,7 +420,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 if index:
                     active = check_expression(generator.iter, active)
                 cardinality = iterable_nonempty(generator.iter, active)
-                active = consume_iterable(
+                active, _ = consume_iterable(
                     generator.iter, active, exhaust=True)
                 if cardinality is False:
                     return remember(node, dedupe_states([*skipped, *active]))
@@ -431,7 +442,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 node, dedupe_states([*skipped, *active]))
         if isinstance(node, ast.Starred):
             current_pairs = check_expression(node.value, current_pairs)
-            current_pairs = consume_iterable(
+            current_pairs, _ = consume_iterable(
                 node.value, current_pairs, exhaust=True)
             return remember(node, current_pairs)
         if isinstance(node, ast.AnnAssign):
@@ -448,10 +459,12 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def walk(parts, current_pairs, exits=flow_exits):
         return _py_flow_violations(
-            parts, current_pairs, rel, allowed_opaque_names, exits,
-            scope_callables, scope_executed, active_callables, module_scope,
-            (annotations_eager, evaluate_annotations),
-            callable_dict_origins=callable_dict_origins)
+            parts, current_pairs, rel, allowed_opaque_names,
+            flow_exits=exits, active_callables=active_callables,
+            module_scope=module_scope,
+            annotation_mode=(annotations_eager, evaluate_annotations),
+            chain=chain, callable_dict_origins=callable_dict_origins,
+            scope_root=False)
 
     for statement in statements:  # pylint: disable=too-many-nested-blocks
         if pairs: fallback = _copy_state_pair(pairs[0])
@@ -472,8 +485,12 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         statement, callable_pairs([state]),
                         annotations_eager),
                     frozenset(local_names), frozenset(chain))
-                scope_callables.append(deferred)
                 if pairs: state.callables[statement.name] = deferred
+                defaults = argument_defaults(statement.args)
+                if pairs and any(evaluated_value(value, state) in (
+                        'ext_cmd', '_ext_cmd', _UNPROVABLE_SENDER)
+                                 for value in defaults):
+                    analyze_callable(deferred, [state])
             continue
         if isinstance(statement, ast.ClassDef):
             for value in [*statement.decorator_list, *statement.bases,
@@ -483,7 +500,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 statement, annotations_eager)
             completed = []
             for incoming in pairs:
-                class_callables = []
                 class_state = _copy_state_pair(incoming)
                 origins = (callable_dict_origins
                            if callable_dict_origins is not None
@@ -495,13 +511,10 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 nested, results = _py_flow_violations(
                     statement.body, [class_state], rel,
                     allowed_opaque_names,
-                    scope_callables=class_callables,
-                    scope_executed=scope_executed,
                     active_callables=active_callables,
                     annotation_mode=(annotations_eager, annotations_eager),
                     chain=chain, callable_dict_origins=origins)
                 violations.extend(nested)
-                scope_callables.extend(class_callables)
                 for state in results:
                     methods = {name: state.callables[name]
                                for name in local_names
@@ -550,7 +563,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 generator_for(header, state).expression for state in pairs
                 if generator_for(header, state) is not None}
             if isinstance(statement, (ast.For, ast.AsyncFor)):
-                pairs = consume_iterable(header, pairs, exhaust=False)
+                pairs, _ = consume_iterable(header, pairs, exhaust=False)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             zero_pairs = incoming
             if (isinstance(statement, (ast.For, ast.AsyncFor))
@@ -684,7 +697,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                        statement, ast.AnnAssign) else ())
         if any(isinstance(target, (ast.Tuple, ast.List))
                for target in targets):
-            pairs = consume_iterable(statement.value, pairs, exhaust=True)
+            pairs, _ = consume_iterable(
+                statement.value, pairs, exhaust=True)
         value = getattr(statement, 'value', None)
         for state in pairs:
             apply_state_dict_statement(statement, state)
@@ -704,21 +718,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             record_exit(flow_exits, 'continue', pairs)
             pairs = []
             continue
-    if owns_scope:
-        seen = set()
-        for deferred in scope_callables:
-            key = id(deferred)
-            if key in seen: continue
-            seen.add(key)
-            callers = [state for state in pairs
-                       if any(contains_callable(value, deferred)
-                              for value in state.callables.values())]
-            if isinstance(deferred.scope, ast.Lambda) \
-                    and (not module_scope or not callers):
-                continue
-            if not callers and key in scope_executed: continue
-            if not callers: callers = pairs or [fallback or deferred.state]
-            analyze_callable(deferred, callers)
+    if scope_root and module_scope:
+        for deferred, callers in exposed_callables(pairs):
+            analyze_callable(deferred, dedupe_states(callers))
     return violations, pairs
 
 
