@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
+from _queueread import queued_command  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 from daedalus_cli import __version__  # noqa: E402
@@ -333,9 +334,7 @@ def test_exec_full_round_trip(tmp):
             text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_tab9'
-            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
-                      what='the enqueued command file')
-            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            queued = queued_command(qdir, 'the enqueued command file')
             assert queued['id'] == 'job7' and queued['code'] == 'document.title'
             # The extension's answer, posted the way the extension posts it.
             status, _ = _util.post_json(base + '/result', {
@@ -543,9 +542,7 @@ def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
             text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
-                      what='the enqueued command file')
-            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            queued = queued_command(qdir, 'the enqueued command file')
             # A foreign result first (results share one slot per tab, so the
             # own result posted after it overwrites the slot) ...
             status, _ = _util.post_json(base + '/result', {
@@ -588,9 +585,7 @@ def test_typed_command_does_not_return_a_stale_fixed_id_result(tmp):
             text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
-                      what='the fresh cookies command')
-            queued = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            queued = queued_command(qdir, 'the fresh cookies command')
             # Let the first poll observe the stale result before answering the
             # newly queued invocation as the extension would.
             time.sleep(0.7)
@@ -674,9 +669,7 @@ def _queued_extension_command(base, docroot, argv, what):
         encoding='utf-8')
     try:
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-        _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')), what=what)
-        return json.loads(
-            sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+        return queued_command(qdir, what)
     finally:
         proc.kill()
         proc.communicate()
@@ -878,9 +871,7 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
             text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
-                      what='the screenshot command')
-            command = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            command = queued_command(qdir, 'the screenshot command')
             assert command['id'] == screenshot_id, command
             status, body = _util.post_json(base + '/upload', {
                 'token': TOK,
@@ -930,10 +921,7 @@ def test_a_screenshot_download_ignores_a_later_capture_under_its_id(tmp):
             text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
-                      what='the screenshot command')
-            command = json.loads(
-                sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            command = queued_command(qdir, 'the screenshot command')
             assert command['id'] == '_ss', command
             for name, payload in (('mine.png', b'this-invocation'),
                                   ('later.png', b'the-next-invocation')):
@@ -984,9 +972,7 @@ def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
             text=True, encoding='utf-8')
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-            _wait_for(lambda: qdir.is_dir() and any(qdir.glob('*.json')),
-                      what='the screenshot command')
-            command = json.loads(sorted(qdir.glob('*.json'))[0].read_text(encoding='utf-8'))
+            command = queued_command(qdir, 'the screenshot command')
             # The result claims a stored file; nothing was uploaded, so the
             # download that follows it is refused.
             status, body = _util.post_json(base + '/result', {
