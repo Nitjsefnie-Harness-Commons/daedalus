@@ -42,8 +42,10 @@ Fixes #
 
 ## Bugs Discovered
 <!-- conditional: pointer list of ALREADY-FILED issues — number plus the
-     issue's literal title, copied exactly. No paraphrase, no description; the
-     report lives in the issue. Drop the section if none were found. -->
+     issue's literal title, copied exactly — for every defect this branch
+     surfaced: one you filed, and one that already existed and now carries
+     your sighting as a comment. No paraphrase, no description; the report
+     lives in the issue. Drop the section if none were found. -->
 
 -
 
