@@ -11,6 +11,7 @@ This lived in `scripts/` with a bespoke runner, which meant `run_tests.py`
 never ran it and it only ever executed when somebody remembered it existed.
 """
 import http.client
+import importlib.util
 import os
 import socket
 import subprocess
@@ -441,6 +442,41 @@ def test_numeric_environment_settings_fail_cleanly_at_startup(tmp):
                 f'{name}={value!r}: exit={proc.returncode}, output={output!r}')
     assert not failures, '\n'.join(failures)
 
+
+def test_an_invalid_mcp_setting_stops_the_bridge_naming_it(tmp):
+    """A refused MCP setting stops the bridge, naming the setting it refused.
+
+    The enumeration above drives `import server`, which never runs the
+    __main__ block, and the front end's own settings are read on the thread
+    that block starts - where `threading` discards the SystemExit their
+    parser raises. So this drives the real entry point and reads its exit.
+    """
+    if not all(importlib.util.find_spec(name) is not None
+               for name in ('httpx', 'mcp', 'starlette')):
+        _util.skip('the MCP front end\'s dependencies are not installed')
+    failures = []
+    for name, value, requirement in (
+            ('DAEDALUS_MCP_PORT', 'abc', 'integer from 0 to 65535'),
+            ('DAEDALUS_MCP_MAX_BODY_SIZE', '-1', 'non-negative integer')):
+        env = dict(os.environ)
+        env.update({
+            'DAEDALUS_DIR': str(Path(tmp) / name.lower()),
+            'DAEDALUS_PORT': '0',
+            'DAEDALUS_TOKEN': 'lifecycle-test',
+            'TOKEN': '',
+            'PYTHONDONTWRITEBYTECODE': '1',
+            name: value,
+        })
+        proc = subprocess.run(
+            [sys.executable, str(_util.ROOT / 'server.py')], cwd=_util.ROOT,
+            env=env, capture_output=True, text=True, timeout=60)
+        output = (proc.stdout + proc.stderr).strip()
+        if (proc.returncode == 0 or 'Traceback' in output
+                or name not in output or requirement not in output):
+            failures.append(
+                f'{name}={value!r}: exit={proc.returncode}, '
+                f'output={output!r}')
+    assert not failures, '\n'.join(failures)
 
 def test_non_finite_command_ttl_cannot_disable_the_collector(tmp):
     """The real collector must not run with a non-finite expiry bound."""
