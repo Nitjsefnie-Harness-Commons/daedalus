@@ -6,8 +6,8 @@ A control that plants a defect in a real module works on a copy, and
 the copy is the one write the checker in tests/_control_writes.py
 cannot prove from a control's own text: each file's destination comes
 from a directory listing, which no syntactic path kind can follow. So
-the loop lives here behind a runtime proof — the root must lie outside
-the checkout — and the checker proves the root at every call site.
+the loop lives here behind a runtime proof: the root must lie outside
+the checkout.
 """
 from pathlib import Path
 
