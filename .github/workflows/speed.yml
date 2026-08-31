@@ -370,16 +370,16 @@ jobs:
         # assign that blob to $ref — so the "no baseline" guard would see a
         # non-empty string, fall through, and hand actions/checkout a refspec
         # made of JSON. Hence both belts: branch on the EXIT CODE, then
-        # validate the SHAPE, so no payload can reach a git command as a ref.
+        # validate the SHAPE — `is_sha` covers the pull-request path, and
+        # the `case "$ref"` charset arm below still covers the release tag —
+        # so no payload can reach a git command as a ref.
         #
-        # A pull request's baseline is the MERGE BASE of its base and head,
-        # never the base branch's tip: a branch open while that tip moved
-        # never contained the commits merged since, so the tip charges this
-        # branch for all of them. Every SHA is checked — the two going into
-        # the comparison and the one coming back — and anything that is not
-        # 40 hexadecimal characters resolves to NO baseline. A skip says so
-        # in the summary; a comparison against a point this head cannot match
-        # is a false verdict nobody can see.
+        # A pull request's baseline is the merge base of its base and head,
+        # for the reason the file header gives. A pull request always HAS
+        # one, so a lookup that cannot produce it is infrastructure failing
+        # rather than an absent baseline: that path fails the cell instead
+        # of skipping it, which leaves an empty `point=` meaning exactly one
+        # thing — the push path found no release.
         run: |
           is_sha() {
             case "$1" in
@@ -387,15 +387,35 @@ jobs:
             esac
             [ "${#1}" -eq 40 ]
           }
+          fail() {
+            echo "No baseline: $1." >&2
+            echo "A pull request always has a merge base, so a lookup that" >&2
+            echo "cannot produce one is infrastructure to fix, not a" >&2
+            echo "measurement to skip." >&2
+            {
+              echo "### Test speed"
+              echo
+              echo "Failed: $1."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
           ref=""
           if [ "$EVENT" = pull_request ]; then
-            if is_sha "$PR_BASE" && is_sha "$PR_HEAD" \
-               && out="$(gh api -H "Cache-Control: no-cache" \
-                         "repos/$REPO/compare/$PR_BASE...$PR_HEAD" \
-                         --jq '.merge_base_commit.sha' 2>/dev/null)" \
-               && is_sha "$out"; then
-              ref="$out"
+            if ! is_sha "$PR_BASE"; then
+              fail "the payload's base SHA is not 40 lowercase hex digits"
             fi
+            if ! is_sha "$PR_HEAD"; then
+              fail "the payload's head SHA is not 40 lowercase hex digits"
+            fi
+            if ! out="$(gh api -H "Cache-Control: no-cache" \
+                        "repos/$REPO/compare/$PR_BASE...$PR_HEAD" \
+                        --jq '.merge_base_commit.sha' 2>/dev/null)"; then
+              fail "the merge-base lookup exited nonzero"
+            fi
+            if ! is_sha "$out"; then
+              fail "the merge base answered is not 40 lowercase hex digits"
+            fi
+            ref="$out"
           elif out="$(gh api -H "Cache-Control: no-cache" \
                       "repos/$REPO/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
             ref="$out"
@@ -416,11 +436,7 @@ jobs:
           # as checking out an untrusted head. Renaming this output back to
           # `ref` would silently reintroduce that alert.
           if [ -z "$ref" ]; then
-            if [ "$EVENT" = pull_request ]; then
-              why="this pull request's merge base could not be resolved"
-            else
-              why="no release exists yet to use as a baseline"
-            fi
+            why="no release exists yet to use as a baseline"
             echo "point=" >> "$GITHUB_OUTPUT"
             echo "No baseline: $why. Skipping rather than measuring against"
             echo "a point this head cannot match."

@@ -328,11 +328,11 @@ def test_speed_comparison_acceptance_expires_after_baseline_advance(tmp):
 def test_speed_comparison_acceptance_survives_pr_main_and_expires(tmp):
     """One accepted slowdown survives both workflow baseline labels."""
     compare = _compare_durations()
-    pr_base = 'BASE_SHA'
+    merge_base = 'MERGE_BASE_SHA'
     release = ACTIVE_BASELINE
     next_release = 'v0.23.0'
     accepted = _acceptance_file(
-        tmp, [_acceptance('accepted', 40.0, [pr_base, release])])
+        tmp, [_acceptance('accepted', 40.0, [merge_base, release])])
 
     old_base = _durations_tree(
         tmp, 'old-base', [{'accepted': 0.28, 'steady': 1.0}])
@@ -344,8 +344,8 @@ def test_speed_comparison_acceptance_survives_pr_main_and_expires(tmp):
             '--base', *base, '--head', *head, '--accept', str(accepted),
             '--base-label', label, '--summary-file', str(Path(tmp) / name)])
 
-    # Pull request: the base SHA authorizes the accepted transition.
-    assert run(old_base, merged_head, pr_base, 'pr-summary.md')[0] == 0
+    # Pull request: the merge base authorizes the accepted transition.
+    assert run(old_base, merged_head, merge_base, 'pr-summary.md')[0] == 0
     # Main push after merge: the release tag authorizes that same transition.
     assert run(old_base, merged_head, release, 'main-summary.md')[0] == 0
 

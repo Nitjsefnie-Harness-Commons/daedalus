@@ -285,7 +285,7 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     actions/checkout step as pulling a pull request's untrusted head when
     its `ref:` comes from a `steps.*` output whose name contains `head`,
     `branch`, `ref`, `sha` or `commit`. The baseline checkout in speed.yml
-    pulls the pull request's base SHA or a release tag — trusted code — so
+    pulls the pull request's merge base or a release tag — trusted code — so
     the output carrying it is named `point`; naming it `ref` was what drew
     the alert. This pins the name class, so a rename back goes red here
     rather than in the next default-branch analysis.
