@@ -61,6 +61,13 @@ _EXECUTABLE = "const x = {script: {version: '9.9.9'}};"
 _DECOY = "script: { version: '8.8.8' }"
 _JS = 'extension/page.js'
 
+# A duplicate spelled on the construct's own line, with spaced colons so the
+# needle counts the case's own duplicate and never the _EXECUTABLE line's:
+# a mis-scan that swallows only to the line's end hides this one while the
+# next line still reads as code.
+_SPACED_DUP = "script : { version : '9.9.9' }"
+_BEHIND = 'const dup = ' + _SPACED_DUP + ';\n' + _EXECUTABLE
+
 # (label, source, needle that must be filtered, its region kind, needle that
 # must survive as code). A case with no filtered needle pins only that its
 # executable part stays code. Each filtered needle begins strictly inside
@@ -79,6 +86,9 @@ _JS_CASES = (
     ('escaped quote in a double-quoted string',
      'const s = "script: { version: \\"8.8.8\\" }";\n' + _EXECUTABLE,
      'version: \\"8.8.8\\"', 'string', _EXECUTABLE),
+    ('escaped quote before the string closes',
+     "const s = 'it\\'s'; " + _BEHIND,
+     "it\\'s'", 'string', _SPACED_DUP),
     ('raw template decoy',
      'const t = `script: { version: \'8.8.8\' }`;\n' + _EXECUTABLE,
      _DECOY, 'string', _EXECUTABLE),
@@ -91,15 +101,34 @@ _JS_CASES = (
     ('regex literal holding a comment opener',
      'const re = /[/*]+/g;\n' + _EXECUTABLE,
      '[/*]+/g', 'regex', _EXECUTABLE),
+    ('regex class slash with code on the same line',
+     'const re = /[/*]+/g; ' + _BEHIND,
+     '[/*]+/g', 'regex', _SPACED_DUP),
+    ('regex carrying an escaped slash, code on the same line',
+     "const re = /'\\/'/; " + _BEHIND,
+     "'\\/'", 'regex', _SPACED_DUP),
     ('regex literal carrying a version pattern',
      'const re = /script: { version: \'8.8.8\' }/;\n' + _EXECUTABLE,
      _DECOY, 'regex', _EXECUTABLE),
     ('division, not a regex',
      'const d = a / b / c;\n' + _EXECUTABLE,
      None, None, _EXECUTABLE),
+    ('division after a string literal',
+     "const s = 'x' / 2; " + _BEHIND,
+     None, None, _SPACED_DUP),
+    ('regex after a keyword',
+     "function f() { return /'/; } " + _BEHIND,
+     None, None, _SPACED_DUP),
+    ('regex after a block opener',
+     "if (x) { /'/; } " + _BEHIND,
+     None, None, _SPACED_DUP),
     ('binding inside a template substitution',
      'const t = `${({script: {version: \'9.9.9\'}}).script.version}`;',
      None, None, "script: {version: '9.9.9'}"),
+    ('binding behind a nested brace in a substitution',
+     'const t = `${ {a: 1} && { ' + _SPACED_DUP + ' } } ' + _DECOY + '`;\n'
+     + _EXECUTABLE,
+     _DECOY, 'string', _SPACED_DUP),
 )
 
 
@@ -130,6 +159,20 @@ def test_a_division_slash_opens_no_region(tmp):
     assert _region_texts(_JS, source) == [("'9.9.9'", 'string')]
 
 
+def test_a_substitution_spans_to_its_own_closing_brace(tmp):
+    """A substitution does not end at a nested object's `}`: the code behind
+    a nested brace stays code, and the template text past its own `}` is
+    string again."""
+    del tmp
+    source = ('const t = `${ {a: 1} && { script : { version : \'9.9.9\' } }'
+              ' }`;\n')
+    assert _region_texts(_JS, source) == [
+        ('`', 'string'),
+        ("'9.9.9'", 'string'),
+        ('`', 'string'),
+    ]
+
+
 def test_json_regions_honour_escaped_quotes(tmp):
     """An escaped quote is content in a JSON string, not its end."""
     del tmp
@@ -158,6 +201,17 @@ def test_python_regions_filter_comments_and_strings(tmp):
         assert _covered_kind(
             source, regions.regions_for(path, source), needle) == kind, needle
     assert _surviving(regions, path, source, '__version__ = "1.2.3"') == 1
+
+
+def test_python_regions_align_across_a_form_feed(tmp):
+    """The row map splits where the tokenizer reads rows — on the newline —
+    so a form feed inside a line cannot shift the regions after it."""
+    del tmp
+    source = 'x = 1\x0c2\ny = "decoy"\nz = "1.2.3"\n'
+    regions = _checker().regions_for('daedalus_cli/__init__.py', source)
+    assert regions == [(12, 19, 'string'), (24, 31, 'string')], regions
+    assert _surviving(_checker(), 'daedalus_cli/__init__.py', source,
+                      'decoy') == 0
 
 
 # (label, source) pairs no interpreter can tokenize. Each used to leave the
@@ -343,6 +397,22 @@ def test_check_counts_a_duplicate_in_a_template_substitution(tmp):
         page.read_text(encoding='utf-8')
         + '\nconst _dup = `${({script: {version: \'9.9.9\'}})'
         + '.script.version}`;\n',
+        encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+
+
+def test_check_counts_a_duplicate_in_a_brace_nested_substitution(tmp):
+    """A binding behind a nested brace inside a substitution is executable
+    code too: the substitution ends at its own closing brace."""
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    page = copy_root / 'extension' / 'page.js'
+    page.write_text(
+        page.read_text(encoding='utf-8')
+        + '\nconst _probe = `${ {a: 1} && { script : { version : '
+        + '\'9.9.9\' } } }`;\n',
         encoding='utf-8')
     r = _run_checker(copy_root)
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)

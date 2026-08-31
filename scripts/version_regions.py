@@ -70,9 +70,17 @@ def _quoted_regions(text, delimiters):
     return regions
 
 
-# A `/` after one of these tokens is division; after anything else it opens a
-# regex literal — the standard previous-token heuristic.
+# A `/` after one of these tokens is division; after anything else — a value,
+# an operand keyword, an opening `{`, or an operator — it opens a regex
+# literal. The decision reads the previous token alone, so it cannot see
+# grammar context: a member access spelled like an operand keyword
+# (`obj.return / 2`) is misread as a regex. Either misreading costs one line,
+# never more: a regex stops at a raw newline and a string at one too, so text
+# past the line is classified as written.
 _JS_DIVISION_BEFORE = frozenset({'value', 'end', ')', ']', '}'})
+_JS_OPERAND_KEYWORDS = frozenset({'await', 'case', 'delete', 'do', 'else',
+                                  'in', 'instanceof', 'new', 'of', 'return',
+                                  'throw', 'typeof', 'void', 'yield'})
 _JS_WORD = frozenset(string.ascii_letters + string.digits + '_$')
 _JS_REGEX_FLAGS = frozenset('dgimsuvy')
 
@@ -121,13 +129,16 @@ def _scan_javascript(text, start, regions, substitution):
             i = _js_regex(text, i, regions)
             previous = 'end'
         elif ch in _JS_WORD:
+            word = i
             while i < end and text[i] in _JS_WORD:
                 i += 1
-            previous = 'value'
+            previous = ('keyword' if text[word:i] in _JS_OPERAND_KEYWORDS
+                        else 'value')
         elif ch == '{':
             depth += 1
             i += 1
-        elif substitution and ch == '}':
+            previous = '{'
+        elif substitution and depth == 0 and ch == '}':
             return i
         elif ch == '}':
             depth = max(depth - 1, 0)
@@ -275,8 +286,8 @@ def _python_regions(text, path):
     string as the binding it never was.
     """
     starts = [0]
-    for line in text.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
+    for line in text.split('\n'):
+        starts.append(starts[-1] + len(line) + 1)
     regions = []
     try:
         tokens = tokenize.generate_tokens(io.StringIO(text).readline)
