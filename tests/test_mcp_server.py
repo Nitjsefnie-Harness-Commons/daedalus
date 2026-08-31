@@ -842,7 +842,7 @@ def test_live_mcp_has_no_server_path_authority(tmp):
                             simulator_errors.append((status, body))
                     time.sleep(0.02)
             except Exception as exc:  # test-thread diagnosis, surfaced below
-                simulator_errors.append(type(exc).__name__)
+                simulator_errors.append(exc)
 
         simulator = threading.Thread(target=extension_simulator)
         simulator.start()
@@ -862,6 +862,10 @@ def test_live_mcp_has_no_server_path_authority(tmp):
                 session_ids=(session_id,))
             assert status == 200, (status, raw)
             schemas = _mcp_payload(raw)['result']['tools']
+        except Exception as caught:
+            simulator.join(timeout=20)
+            raise next((error for error in simulator_errors
+                        if isinstance(error, Exception)), caught) from None
         finally:
             stop.set()
             simulator.join(timeout=5)
@@ -918,27 +922,33 @@ def test_ping_tool_round_trip(tmp):
 
         qdir = Path(docroot) / 'commands' / TOK
         answered = set()
+        failure = []
 
         def extension(world):
-            command = queued_command(
-                qdir, 'the ping command', exclude=answered)
-            queued = sorted(path for path in qdir.glob('*.json')
-                            if path.name not in answered)
-            assert len(queued) == 1, queued
-            answered.add(queued[0].name)
-            status, _ = _util.post_json(base + '/result', {
-                'token': TOK, 'id': command['id'], 'result': 'MCP Title',
-                'error': None, 'ts': 1, 'world': world,
-                '_did': command['_did']})
-            assert status == 200, status
+            try:
+                command = queued_command(
+                    qdir, 'the ping command', exclude=answered)
+                queued = sorted(path for path in qdir.glob('*.json')
+                                if path.name not in answered)
+                assert len(queued) == 1, queued
+                answered.add(queued[0].name)
+                status, _ = _util.post_json(base + '/result', {
+                    'token': TOK, 'id': command['id'], 'result': 'MCP Title',
+                    'error': None, 'ts': 1, 'world': world,
+                    '_did': command['_did']})
+                assert status == 200, status
+            except Exception as exc:  # test-thread diagnosis, surfaced below
+                failure.append(exc)
 
-        # Distinct execution channels round-trip verbatim; neither marker says
-        # whether the JavaScript value should be trusted.
+        # Execution channels round-trip verbatim, without implying trust.
         for world in ('cdp', 'page:scripting'):
             t = threading.Thread(target=extension, args=(world,))
             t.start()
             try:
                 res = asyncio.run(mod.ping())
+            except Exception as caught:
+                t.join(timeout=20)
+                raise failure[0] if failure else caught
             finally:
                 t.join(timeout=20)
             assert res['title'] == 'MCP Title', res
@@ -1049,12 +1059,7 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
 
 
 def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
-    """include_image must inline this capture's file, not the newest one.
-
-    `_ss` is the default screenshot id, so two captures share an upload
-    directory; the tool correlated its own result and then fetched by id,
-    which answers with whichever file landed last.
-    """
+    """Inline this capture, not a later file sharing its `_ss` directory."""
     _need_deps()
     with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
         mod = _load_mcp(base)
@@ -1063,8 +1068,7 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
         failure = []
 
         def extension():
-            """Stand in for the extension: store this capture, let a later one
-            land on top of it, then answer the command."""
+            """Store this capture, supersede it, then answer its command."""
             try:
                 command = queued_command(qdir, 'the screenshot command')
                 for name, payload in (('mine.png', b'this-invocation'),
@@ -1073,8 +1077,7 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
                         'token': TOK, 'id': '_ss', 'filename': name,
                         'data': base64.b64encode(payload).decode()})
                     assert status == 200, (status, body)
-                # Stamped rather than assumed: two writes can share a
-                # timestamp, and which file is newest is the whole point.
+                # Stamp order because two writes can share a timestamp.
                 shot_dir = Path(docroot) / 'uploads' / TOK / '_ss'
                 os.utime(shot_dir / 'mine.png', (1_700_000_000, 1_700_000_000))
                 os.utime(shot_dir / 'later.png', (1_700_000_100, 1_700_000_100))
@@ -1085,13 +1088,16 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
                     'error': None, 'ts': 1, '_did': command['_did'],
                 })
                 assert status == 200, (status, body)
-            except AssertionError as exc:
+            except Exception as exc:  # test-thread diagnosis, surfaced below
                 failure.append(exc)
 
         responder = threading.Thread(target=extension, daemon=True)
         responder.start()
         try:
             answer = asyncio.run(mod.screenshot(include_image=True, timeout=25))
+        except Exception as caught:
+            responder.join(timeout=30)
+            raise failure[0] if failure else caught
         finally:
             responder.join(timeout=30)
         assert not failure, failure

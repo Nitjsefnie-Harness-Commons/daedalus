@@ -26,49 +26,52 @@ def clear_command_queue(directory):
     return {queued.name for queued in directory.glob('*.json')}
 
 
-def wait_for_command(directory, timeout, producer_alive=None,
-                     ignored_names=None):
+def _poll_queue_reads(directory, count, timeout, *, ignored_names=(),
+                      producer_alive=None, retry_vanished,
+                      check_deadline_before_read):
     deadline = time.monotonic() + timeout
-    ignored_names = set(ignored_names or ())
+    ignored_names = set(ignored_names)
     saw_queue_file = False
+    denied = None
     while True:
-        now = time.monotonic()
-        if now >= deadline:
-            return None
+        if (check_deadline_before_read
+                and time.monotonic() >= deadline):
+            return None, denied
         files = (sorted(queued for queued in directory.glob('*.json')
                         if queued.name not in ignored_names)
                  if directory.is_dir() else [])
-        if files:
+        ready = bool(files) if count is None else len(files) == count
+        if ready:
             saw_queue_file = True
+            selected = files[:1] if count is None else files
             try:
-                return json.loads(files[0].read_text(encoding='utf-8'))
-            except (FileNotFoundError, PermissionError):
-                pass
+                return [json.loads(queued.read_text(encoding='utf-8'))
+                        for queued in selected], denied
+            except FileNotFoundError:
+                if not retry_vanished:
+                    raise
+            except PermissionError as exc:
+                denied = exc
         if (not saw_queue_file and producer_alive is not None
                 and not producer_alive()):
-            return None
+            return None, denied
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            return None, denied
         time.sleep(min(POLL_DELAY, remaining))
+
+
+def wait_for_command(directory, timeout, producer_alive=None,
+                     ignored_names=None):
+    commands, _denied = _poll_queue_reads(
+        directory, None, timeout, ignored_names=ignored_names or (),
+        producer_alive=producer_alive, retry_vanished=True,
+        check_deadline_before_read=True)
+    return commands[0] if commands is not None else None
 
 
 def wait_for_commands(directory, count, timeout):
-    deadline = time.monotonic() + timeout
-    while True:
-        if time.monotonic() >= deadline:
-            return None
-        files = (sorted(directory.glob('*.json'))
-                 if directory.is_dir() else [])
-        if len(files) == count:
-            try:
-                return [json.loads(queued.read_text(encoding='utf-8'))
-                        for queued in files]
-            except (FileNotFoundError, PermissionError):
-                # A held or vanished queue file clears on its own; the
-                # partial read is discarded and the whole set retried.
-                pass
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        time.sleep(min(POLL_DELAY, remaining))
+    commands, _denied = _poll_queue_reads(
+        directory, count, timeout, retry_vanished=True,
+        check_deadline_before_read=True)
+    return commands
