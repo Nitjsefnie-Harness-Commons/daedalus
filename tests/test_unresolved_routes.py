@@ -492,17 +492,13 @@ launcher.run(['python3', 'child.py'], cwd=ROOT)
 """) == []
 
 
-def test_root_replaced_through_the_owner_namespace_is_not_root(tmp):
-    """Route 2 and its class: any route into the owner retires it."""
+def _assert_root_owner_retired(tmp, plants):
+    """Each plant, put before a cwd=_util.ROOT launch, must refuse it."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
     first = _declaration_line(_module_text(target))
     launch = "subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)\n"
-    for planted, offset in (
-            ("_util.__dict__['ROOT'] = Path(tmp)\n", 1),
-            ("vars(_util)['ROOT'] = Path(tmp)\n", 1),
-            ("_util.__dict__.update({'ROOT': Path(tmp)})\n", 1),
-            ("_HELPER = _util\n_HELPER.ROOT = Path(tmp)\n", 2)):
+    for planted, offset in plants:
         original = _with_planted_launch(target, planted + launch)
         try:
             violations = _coverage_environment_violations(root)
@@ -515,6 +511,51 @@ def test_root_replaced_through_the_owner_namespace_is_not_root(tmp):
     assert not any(v.startswith(f'tests/test_diff_coverage.py:{line}:')
                    for line in (first, first + 1, first + 2)
                    for v in restored), restored
+
+
+def test_root_replaced_through_the_owner_namespace_is_not_root(tmp):
+    """Route 2 and its class: any route into the owner retires it."""
+    _assert_root_owner_retired(tmp, (
+        ("_util.__dict__['ROOT'] = Path(tmp)\n", 1),
+        ("vars(_util)['ROOT'] = Path(tmp)\n", 1),
+        ("_util.__dict__.update({'ROOT': Path(tmp)})\n", 1),
+        ("_HELPER = _util\n_HELPER.ROOT = Path(tmp)\n", 2)))
+
+
+def test_a_second_import_of_the_owner_is_the_same_module(tmp):
+    """`import _util as _u` binds the object `_util` already names."""
+    _assert_root_owner_retired(tmp, (
+        ("import _util as _u\n_u.ROOT = Path(tmp)\n", 2),
+        ("import _util as _u\nvars(_u)['ROOT'] = Path(tmp)\n", 2)))
+
+
+def test_a_store_through_any_binding_form_retires_the_owner(tmp):
+    """for, with-as and comprehension targets store like assignment."""
+    _assert_root_owner_retired(tmp, (
+        ("for _util.ROOT in (Path(tmp),):\n    pass\n", 2),
+        ("with open(__file__) as _util.ROOT:\n    pass\n", 2),
+        ("_ = [0 for _util.ROOT in (Path(tmp),)]\n", 1)))
+
+
+def test_a_reflective_dunder_read_reaches_the_owner_namespace(tmp):
+    """getattr with a dunder literal is `_util.__dict__` spelled again."""
+    _assert_root_owner_retired(tmp, (
+        ("getattr(_util, '__dict__')['ROOT'] = Path(tmp)\n", 1),
+        ("getattr(_util, '__dict__').update({'ROOT': Path(tmp)})\n", 1)))
+
+
+def test_a_subscript_read_on_the_owner_chain_retires_it(tmp):
+    """`_util.x[...]` reaches an object the checker cannot see."""
+    del tmp
+    violations = _synthetic_violations(
+        """import subprocess
+import _util
+_first = _util.free_port[0]
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""")
+    assert violations == [
+        'tests/synthetic.py:4: subprocess.run cwd=_util.ROOT declares no '
+        'env='], violations
 
 
 def test_a_reflective_read_of_the_owner_keeps_it_an_owner(tmp):
