@@ -27,6 +27,7 @@ from test_version_contract import (  # noqa: E402
 # Duplicate `__version__` spellings the three mirror tests must all refuse:
 # a value carrying the other quote character, or a continuation spelling.
 _DUPLICATE_SPELLINGS = (('9.9.9"', "'"), ("9.9.9'", '"'), ('9.9.\\\n9', "'"))
+_PAGE_JS_PRE_COLON_WHITESPACE = ('  ', '\t', '\n')
 
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
@@ -92,26 +93,31 @@ def test_check_versions_package_value_may_contain_a_different_quote(tmp):
 
 
 def test_check_versions_refuses_a_page_js_version_with_spaced_colons(tmp):
-    """A duplicate with whitespace before both colons is valid JavaScript and
-    must be counted as a competing page.js binding (#320)."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, pattern = checker.SITES[3]
-    assert path == 'extension/page.js', path
-    page_copy = copy_root / 'extension' / 'page.js'
-    text = page_copy.read_text(encoding='utf-8')
-    canonical = re.search(pattern, text).group('v')
-    page_copy.write_text(
-        text + '\nconst _dup = { info: { script : { version : '
-        '\'9.9.9\' } } };\n',
-        encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    assert 'extension/page.js' in r.stderr, r.stderr
-    assert desc in r.stderr, r.stderr
-    assert canonical in r.stderr, r.stderr
-    assert '9.9.9' in r.stderr, r.stderr
+    """Whitespace before either colon is valid JavaScript and must be
+    counted as a competing page.js binding for every supported spelling."""
+    for script_index, script_ws in enumerate(_PAGE_JS_PRE_COLON_WHITESPACE):
+        for version_index, version_ws in enumerate(
+                _PAGE_JS_PRE_COLON_WHITESPACE):
+            copy_root = (Path(tmp) / f'case-{script_index}-{version_index}'
+                         / 'tree')
+            checker = _copy_versioned_tree(copy_root)
+            path, desc, pattern = checker.SITES[3]
+            assert path == 'extension/page.js', path
+            page_copy = copy_root / 'extension' / 'page.js'
+            text = page_copy.read_text(encoding='utf-8')
+            canonical = re.search(pattern, text).group('v')
+            duplicate = (
+                '\nconst _dup = { info: { script' + script_ws
+                + ': { version' + version_ws + ': \'9.9.9\' } } };\n')
+            page_copy.write_text(text + duplicate, encoding='utf-8')
+            r = _run_checker(copy_root)
+            context = (script_ws, version_ws, r.returncode, r.stdout, r.stderr)
+            assert r.returncode != 0, context
+            assert 'matches 2 times' in r.stderr, context
+            assert 'extension/page.js' in r.stderr, context
+            assert desc in r.stderr, context
+            assert canonical in r.stderr, context
+            assert '9.9.9' in r.stderr, context
 
 
 def main():
