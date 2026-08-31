@@ -331,7 +331,7 @@ def js_tab_routing_violations(path, rel):
     candidate_names.update(m.group(1) for _, kind, m in events
                            if kind == 'bind')
     call_pattern = (r'\b(?:' + '|'.join(map(re.escape,
-                                           sorted(candidate_names)))
+                                            sorted(candidate_names)))
                     + r')\s*\(')
     for m in re.finditer(call_pattern, mask):
         # `function extCmd(type, fields = {}, opts = {})` is where a sender is
