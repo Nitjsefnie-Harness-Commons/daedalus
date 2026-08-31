@@ -44,6 +44,25 @@ _WAIT_HARNESS = (
     'print(json.dumps(outcomes, sort_keys=True))\n')
 
 
+_GENERATION_HARNESS = (
+    'import json\n'
+    'from daedalus_cli import transport\n'
+    'calls = []\n'
+    'responses = iter((\n'
+    '    {"id": "c1", "deliveryId": "d1", "result": "R1",\n'
+    '     "error": None, "resultGeneration": "g1"},\n'
+    '    {"consumed": True, "resultGeneration": "g2"},\n'
+    '))\n'
+    'def fake_api(method, path, body=None, timeout=None):\n'
+    '    calls.append(path)\n'
+    '    return next(responses, {"pending": True})\n'
+    'transport.api = fake_api\n'
+    'result = transport.wait_for_result(\n'
+    '    "c1", "extension", "d1", 0.08, interval=0.01)\n'
+    'print(json.dumps({"result": result, "calls": calls},\n'
+    '                 sort_keys=True))\n')
+
+
 def _cli_env():
     """Environment with the durable token selected for the subprocess."""
     env = dict(os.environ)
@@ -74,6 +93,25 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
         assert outcome['consumes'] == [], outcome
         assert len(outcome['peeks']) >= 2, outcome
         assert set(outcome['peeks']) == {selector}, outcome
+
+
+def test_result_wait_rejects_receipt_for_different_generation(tmp):
+    """A consume receipt for another generation cannot claim the body."""
+    del tmp
+    run = subprocess.run(
+        [sys.executable, '-c', _GENERATION_HARNESS],
+        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
+        text=True, encoding='utf-8', timeout=10)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    outcome = json.loads(run.stdout)
+    assert outcome['result'] is None, outcome
+    peeks = [path for path in outcome['calls'] if 'consume=1' not in path]
+    consumes = [path for path in outcome['calls'] if 'consume=1' in path]
+    assert len(peeks) >= 2, outcome
+    assert set(peeks) == {'/result?tab=extension&delivery=d1'}, outcome
+    assert consumes == [
+        '/result?tab=extension&delivery=d1&consume=1&expected=g1'
+    ], outcome
 
 
 if __name__ == '__main__':
