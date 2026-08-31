@@ -15,8 +15,8 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              is_deferred_value, iterable_deferred,
                              iterable_nonempty, merge_yielded,
                              load_callable_cells, materialize_deferred,
-                             merge_deferred_values, new_deferred_callable,
-                             new_deferred_generator, payload_key,
+                             new_deferred_callable, new_deferred_generator,
+                             payload_key, sender_value,
                              store_deferred_value, sync_cells)
 from _pyroute_live import (clear_expression_cache, live_expression_value)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
@@ -120,8 +120,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             entry.dict_origins = {}
             for name, origin in callable_dict_origins.items():
                 keys = entry.dict_namespaces.get(origin, {}).get(name)
-                if keys is None:
-                    continue
+                if keys is None: continue
                 entry.dicts[name] = keys.copy()
                 entry.dict_origins[name] = origin
             projected.append(entry)
@@ -196,7 +195,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                                 dedupe_states([*fallthrough,
                                                *exits['terminal']]),
                                 tuple(value for value in exits['returns']
-                                      if is_deferred_value(value))))
+                                      if is_deferred_value(value)
+                                      or sender_value(value))))
                 cached[signature] = hit
             stored = hit[1]
             violations.extend(stored[0])
@@ -204,7 +204,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for result in stored[1]:
                 outputs.append(overlay(_copy_state_pair(caller), result,
                                        keep, blocked))
-        return dedupe_states(outputs), merge_deferred_values(returned)
+        return dedupe_states(outputs), merge_yielded(returned)
 
     def remember(node, current_pairs):
         for state in current_pairs:
@@ -223,7 +223,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             if index: active = check_expression(clause.iter, active)
             cardinality = iterable_nonempty(
                 clause.iter, active, literal_iterable_nonempty)
-            active, _ = consume_iterable(clause.iter, active, exhaust=True)
+            active, yielded = consume_iterable(clause.iter, active, True)
+            if sender_value(yielded) is not None:
+                bind_deferred_states(clause.target, yielded, active)
             if cardinality is False:
                 return dedupe_states([*skipped, *active]), None
             if cardinality is not True: skipped.extend(copied(active))
@@ -232,8 +234,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 truth = literal_truth(condition)
                 if truth is False:
                     return dedupe_states([*skipped, *active]), None
-                if truth is None:
-                    skipped.extend(copied(active))
+                if truth is None: skipped.extend(copied(active))
         results = [expression.key, expression.value] if isinstance(
             expression, ast.DictComp) else [expression.elt]
         for result in results: active = check_expression(
@@ -367,12 +368,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 elif consumer in _PARTIAL_ITERABLE_CALLS and node.args:
                     current, yielded = consume_iterable(
                         node.args[0], current, exhaust=False)
-                    if consumer == 'next':
-                        append_deferred(consumed_values, yielded)
+                    if consumer == 'next': append_deferred(
+                        consumed_values, yielded)
                 for current_state in current:
                     found = _py_call_violations(
                         node, current_state.dicts, rel,
-                        allowed_opaque_names, sender or deferred)
+                        allowed_opaque_names,
+                        sender or sender_value(deferred) or deferred)
                     violations.extend(found)
                 current, returned_value = follow_callable_call(
                     candidates, arguments, current, node, analyze_callable,
@@ -415,8 +417,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     if truth is False:
                         return remember(node, dedupe_states(
                             [*skipped, *active]))
-                    if truth is None:
-                        skipped.extend(copied(active))
+                    if truth is None: skipped.extend(copied(active))
             results = [node.key, node.value] if isinstance(
                 node, ast.DictComp) else [node.elt]
             for result in results:
@@ -612,8 +613,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         state.callables.pop(name, None)
                         state.bound.add(name)
                         bind_builtin_names(state, {name})
-                        if resolved is not None:
-                            state.aliases[name] = resolved
+                        if resolved is not None: state.aliases[name] = resolved
                     sync_cells(state, names)
             found, pairs = walk(statement.body, entered)
             violations.extend(found)
