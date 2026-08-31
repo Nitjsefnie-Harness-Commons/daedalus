@@ -397,7 +397,8 @@ def _scalar_mapping(lines, start, end, parent_indent, owner):
         if indent <= parent_indent:
             continue
         if indent != child_indent:
-            raise YAMLReadError(f'{owner} has a nested mapping value')
+            raise YAMLReadError(
+                f'{owner} has an unsupported nested mapping value')
         text, _ended = line
         field = text[indent:]
         if field.startswith('- '):
