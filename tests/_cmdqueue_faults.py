@@ -1,6 +1,7 @@
 """Fault-injection controls for test-side command queue readers."""
 import contextlib
 import inspect
+import io
 import json
 import os
 import sys
@@ -61,7 +62,9 @@ def _native_read_handle(original, candidate, args, kwargs):
 
 @contextlib.contextmanager
 def _refuse_path_operation(path, operation, failures, clock=None):
-    original = getattr(Path, operation)
+    # Path.open and Path.read_text both delegate through io.open.
+    read_operation = operation in ('open', 'read_text')
+    original = io.open if read_operation else getattr(Path, operation)
     signature = inspect.signature(original)
     target_key = _target_key(path)
     remaining = [failures]
@@ -69,7 +72,7 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
     def refused(candidate, *args, **kwargs):
         candidate_key = _target_key(candidate)
-        if (operation == 'open' and candidate_key == target_key
+        if (read_operation and candidate_key == target_key
                 and remaining[0]):
             # Native validation adds one open per faulted call.
             handle = _native_read_handle(original, candidate, args, kwargs)
@@ -90,7 +93,7 @@ def _refuse_path_operation(path, operation, failures, clock=None):
             # A call the real API refuses performed no operation, so it is
             # neither counted nor recorded as one.
             result = original(candidate, *args, **kwargs)
-            if operation == 'open' and not _plain_read(
+            if read_operation and not _plain_read(
                     result, args, kwargs):
                 return result
             calls[0] += 1
@@ -99,11 +102,17 @@ def _refuse_path_operation(path, operation, failures, clock=None):
             return result
         return original(candidate, *args, **kwargs)
 
-    setattr(Path, operation, refused)
+    if read_operation:
+        io.open = refused
+    else:
+        setattr(Path, operation, refused)
     try:
         yield calls
     finally:
-        setattr(Path, operation, original)
+        if read_operation:
+            io.open = original
+        else:
+            setattr(Path, operation, original)
 
 
 @contextlib.contextmanager
@@ -171,7 +180,7 @@ def _vanish_during_unlink(path):
 
 @contextlib.contextmanager
 def _vanish_during_read(path, clock, remove_queue=False):
-    original = Path.open
+    original = io.open
     target_key = _target_key(path)
     armed = [True]
 
@@ -188,16 +197,16 @@ def _vanish_during_read(path, clock, remove_queue=False):
             return original(candidate, *args, **kwargs)
         return original(candidate, *args, **kwargs)
 
-    Path.open = vanished
+    io.open = vanished
     try:
         yield
     finally:
-        Path.open = original
+        io.open = original
 
 
 @contextlib.contextmanager
 def _disappear_on_first_open(path):
-    original = Path.open
+    original = io.open
     target_key = _target_key(path)
     armed = [True]
 
@@ -210,16 +219,16 @@ def _disappear_on_first_open(path):
             raise FileNotFoundError(2, 'injected disappearance', str(path))
         return original(candidate, *args, **kwargs)
 
-    Path.open = missing
+    io.open = missing
     try:
         yield
     finally:
-        Path.open = original
+        io.open = original
 
 
 @contextlib.contextmanager
 def _refuse_first_queue_read(queue):
-    original = Path.open
+    original = io.open
     queue_key = _target_key(queue)
     refused_path = [None]
 
@@ -237,11 +246,11 @@ def _refuse_first_queue_read(queue):
             raise PermissionError(32, 'injected sharing violation')
         return original(candidate, *args, **kwargs)
 
-    Path.open = refused
+    io.open = refused
     try:
         yield
     finally:
-        Path.open = original
+        io.open = original
 
 
 def _path_open_failure(path, *args, **kwargs):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Transparency controls for test-side command queue fault injectors."""
+import io
 import json
 import os
 import sys
@@ -16,6 +17,23 @@ from _cmdqueue_faults import (  # noqa: E402
     _vanish_during_read,
     _virtual_cmdqueue_clock,
 )
+
+
+_CAPTURED_READ_TEXT = Path.read_text
+
+
+def test_captured_read_text_reference_still_hits_a_read_refusal(tmp):
+    _queue, queued = _queued_file(tmp)
+    for operation in ('read_text', 'open'):
+        with _refuse_path_operation(queued, operation, 1) as calls:
+            try:
+                _CAPTURED_READ_TEXT(queued, encoding='utf-8')
+            except PermissionError:
+                failure = PermissionError
+            else:
+                failure = None
+        assert failure is PermissionError, (operation, failure)
+        assert calls == [1], (operation, calls)
 
 
 def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
@@ -472,6 +490,7 @@ def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
 def test_mode_search_does_not_trust_the_mode_contains_protocol(tmp):
     queue, queued = _queued_file(tmp)
     original = Path.open
+    native_open = io.open
 
     class ReadClaimsCreate(str):
         def __contains__(self, marker):
@@ -490,7 +509,7 @@ def test_mode_search_does_not_trust_the_mode_contains_protocol(tmp):
             return 'raised', type(caught)
 
     def file_content():
-        with original(queued, mode='r', encoding='utf-8') as opened:
+        with native_open(queued, mode='r', encoding='utf-8') as opened:
             return opened.read()
 
     read_mode = ReadClaimsCreate('r')
