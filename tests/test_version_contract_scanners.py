@@ -345,12 +345,18 @@ def test_midline_html_close_marker_stays_javascript(tmp):
     del tmp
     decoy = "<span class='sl-v'>9.9.9</span>"
     code = '0; const text'
-    source = f'<script>\nconst r = 1-->0; const text = "{decoy}";\n</script>'
     regions = _checker()
-    spans = regions.regions_for(_DASHBOARD, source)
-    assert _surviving(regions, _DASHBOARD, source, code) == 1
-    assert _surviving(regions, _DASHBOARD, source, decoy) == 0
-    assert _covered_kind(source, spans, decoy) == 'string'
+    expressions = (('adjacent', '1-->0'), ('after whitespace', '1 --> 0'))
+    for label, expression in expressions:
+        source = (
+            f'<script>\nconst r = {expression}; '
+            f'const text = "{decoy}";\n</script>')
+        spans = regions.regions_for(_DASHBOARD, source)
+        assert _surviving(
+            regions, _DASHBOARD, source, code) == 1, label
+        assert _surviving(
+            regions, _DASHBOARD, source, decoy) == 0, label
+        assert _covered_kind(source, spans, decoy) == 'string', label
 
 
 def test_html_close_marker_mode_is_off_for_javascript_files(tmp):
@@ -399,6 +405,37 @@ def test_html_comments_end_at_every_javascript_line_terminator(tmp):
         source = f'<script>\n--> {decoy}{terminator}{live}</script>'
         assert _surviving(regions, _DASHBOARD, source, decoy) == 0, label
         assert _surviving(regions, _DASHBOARD, source, live) == 1, label
+
+
+def test_html_comment_uses_the_nearest_line_terminator(tmp):
+    del tmp
+    decoy = "<span class='sl-v'>9.9.9</span>"
+    live = 'const live = 1;'
+    regions = _checker()
+    orders = (('CR before LF', '\r', '\n'),
+              ('LF before CR', '\n', '\r'))
+    for label, nearer, farther in orders:
+        source = (
+            f'<script>\n--> {decoy}{nearer}{live}{farther}</script>')
+        assert _surviving(
+            regions, _DASHBOARD, source, decoy) == 0, label
+        assert _surviving(
+            regions, _DASHBOARD, source, live) == 1, label
+
+
+def test_slash_comments_in_html_end_at_unicode_line_terminators(tmp):
+    del tmp
+    decoy = "<span class='sl-v'>9.9.9</span>"
+    live = 'const live = 1;'
+    regions = _checker()
+    terminators = (('line separator', '\u2028'),
+                   ('paragraph separator', '\u2029'))
+    for label, terminator in terminators:
+        source = f'<script>\n// {decoy}{terminator}{live}</script>'
+        assert _surviving(
+            regions, _DASHBOARD, source, decoy) == 0, label
+        assert _surviving(
+            regions, _DASHBOARD, source, live) == 1, label
 
 
 _SCRIPT_END_CASES = (

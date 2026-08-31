@@ -269,15 +269,40 @@ def test_closed_tag_text_is_not_a_rail_attribute_position(tmp_path):
     assert len(list(re.finditer(pattern, dashboard))) == 1
 
 
-def test_newline_separated_rail_duplicate_is_refused(tmp_path):
+def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp_path):
+    separators = (
+        ('TAB', '\t'),
+        ('LF', '\n'),
+        ('FF', '\f'),
+        ('CR', '\r'),
+    )
+    for label, separator in separators:
+        copy_root = Path(tmp_path) / label / 'tree'
+        checker = _copy_versioned_tree(copy_root)
+        desc = 'dashboard rail footer'
+        canonical = _canonical_dashboard_value(copy_root, checker, desc)
+        duplicate = (
+            f"<div{separator}class='rail-foot'>v9.9.9</div>")
+        _path, _site_desc, pattern = _dashboard_site(checker, desc)
+        assert re.search(pattern, duplicate), label
+        _insert_before_body(copy_root, duplicate)
+        result = _run_checker(copy_root)
+        _assert_duplicate_refused(result, desc, canonical, '9.9.9')
+
+
+def test_vertical_tab_does_not_separate_a_rail_attribute(tmp_path):
     copy_root = Path(tmp_path) / 'tree'
     checker = _copy_versioned_tree(copy_root)
-    desc = 'dashboard rail footer'
-    canonical = _canonical_dashboard_value(copy_root, checker, desc)
-    duplicate = "<div\n class='rail-foot'>v9.9.9</div>"
-    _insert_before_body(copy_root, duplicate)
+    _insert_before_body(
+        copy_root, "<div\vclass='rail-foot'>v9.9.9</div>")
     result = _run_checker(copy_root)
-    _assert_duplicate_refused(result, desc, canonical, '9.9.9')
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    dashboard = (copy_root / 'dashboard' / 'index.html').read_text(
+        encoding='utf-8')
+    _path, _desc, pattern = _dashboard_site(
+        checker, 'dashboard rail footer')
+    assert len(list(re.finditer(pattern, dashboard))) == 1
 
 
 def test_uppercase_script_tag_filters_its_decoy(tmp_path):

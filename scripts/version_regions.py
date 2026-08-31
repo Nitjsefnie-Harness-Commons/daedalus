@@ -10,6 +10,7 @@ runtime does bind; a scanner that marks code as a string hides the one true
 site.
 """
 import io
+import re
 import string
 import tokenize
 
@@ -84,6 +85,7 @@ _JS_OPERAND_KEYWORDS = frozenset({'await', 'case', 'delete', 'do', 'else',
 _JS_WORD = frozenset(string.ascii_letters + string.digits + '_$')
 _JS_REGEX_FLAGS = frozenset('dgimsuvy')
 _JS_LINE_TERMINATORS = ('\n', '\r', '\u2028', '\u2029')
+_JS_LINE_TERMINATOR_RE = re.compile('[\n\r\u2028\u2029]')
 
 
 # Every scanner answers (start, end, kind) spans for the constructs a version
@@ -111,12 +113,8 @@ def _js_html_close_comment(text, position):
 
 def _js_line_comment_end(text, start):
     """The nearest JavaScript line terminator at or after `start`."""
-    close = len(text)
-    for mark in _JS_LINE_TERMINATORS:
-        found = text.find(mark, start)
-        if found != -1:
-            close = min(close, found)
-    return close
+    match = _JS_LINE_TERMINATOR_RE.search(text, start)
+    return match.start() if match else len(text)
 
 
 def _scan_javascript(text, start, regions, substitution, html_comments):
