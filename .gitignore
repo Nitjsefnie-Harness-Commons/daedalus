@@ -264,6 +264,7 @@
 !/tests/_worker_sources.py
 !/tests/_workflowrun.py
 !/tests/_workflows.py
+!/tests/_yamllines.py
 !/tests/_yamlread.py
 !/tests/_yamlscalar.py
 !/tests/_yamlsteps.py
