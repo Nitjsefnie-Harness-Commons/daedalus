@@ -100,14 +100,16 @@ def test_the_speed_gate_throws_away_its_first_round(tmp):
 
 
 def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
-    """Before merge, and against the base SHA rather than the last release.
+    """Before merge, and against the merge base rather than the last release.
+
     The gate ran on push alone, so a regression was measured only after it had
     landed. Two details make the pull-request half mean anything: the baseline
-    is the exact base SHA — the last release would fold every commit merged
-    since into the number and attribute all of it to whoever opened the pull
-    request — and the candidate is the pull request's own head rather than the
-    merge commit `actions/checkout` defaults to, which is a tree nobody
-    authored and no reviewer can point at.
+    is the merge base of the branch and its base — the last release, or the
+    base branch's tip, would fold commits the branch never made into the
+    number and attribute all of them to whoever opened the pull request — and
+    the candidate is the pull request's own head rather than the merge commit
+    `actions/checkout` defaults to, which is a tree nobody authored and no
+    reviewer can point at.
     """
     del tmp
     workflow = speed_yml()
@@ -124,13 +126,18 @@ def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     # Two open pull requests must not cancel each other.
     assert 'group: speed-${{ github.event.pull_request.number' in workflow
 
-    # The base SHA is payload; it must travel by environment rather than be
-    # expanded inside the script that consumes it.
+    # Both SHAs are payload; they must travel by environment rather than be
+    # expanded inside the script that consumes them.
     _, marker, after = workflow.partition('PR_BASE: ${{')
     assert marker, 'the base SHA does not reach the script by environment'
+    assert 'PR_HEAD: ${{' in after, 'the head SHA travels some other way'
     script, _, _ = after.partition('- name: Check out this commit')
     _, _, body = script.partition('run: |')
     assert '${{' not in body, 'an expression is interpolated into the script'
+    # The divergence point, resolved through the compare endpoint.
+    assert 'compare/$PR_BASE...$PR_HEAD' in body, body
+    assert '.merge_base_commit.sha' in body, body
+    assert 'ref="$PR_BASE"' not in body, body
 
 
 def test_the_speed_gate_is_not_manually_dispatchable(tmp):
@@ -558,6 +565,98 @@ def test_the_timing_step_reports_what_it_measured(tmp):
     result = run('base-1')
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert 'no durations' in result.stderr, result.stderr
+
+
+_BASE_SHA = '1' * 40
+_HEAD_SHA = '2' * 40
+_MERGE_BASE = '3' * 40
+
+
+def _find_baseline(tmp, name, rows, **environment):
+    """Run the `Find the baseline` step against a stubbed `gh`."""
+    workdir = Path(tmp) / name
+    workdir.mkdir(parents=True)
+    stub_path(workdir)
+    calls = workdir / 'gh-calls'
+    calls.write_text('', encoding='utf-8')
+    row_file = workdir / 'gh-rows'
+    row_file.write_text(rows, encoding='utf-8')
+    output = workdir / 'github-output'
+    output.write_text('', encoding='utf-8')
+    summary = workdir / 'summary.md'
+    summary.write_text('', encoding='utf-8')
+    result = run_workflow_script(
+        workdir,
+        speed_script(speed_yml(), 'timed', 'Find the baseline'),
+        {'REPO': 'owner/repo', 'GITHUB_OUTPUT': str(output),
+         'GITHUB_STEP_SUMMARY': str(summary), 'STUB_CALLS': str(calls),
+         'STUB_ROWS': str(row_file), 'STUB_FAIL': '',
+         **environment})
+    return (result, output.read_text(encoding='utf-8'),
+            calls.read_text(encoding='utf-8'),
+            summary.read_text(encoding='utf-8'))
+
+
+def test_a_pull_request_baseline_is_the_merge_base(tmp):
+    """The point measured against is where the branch diverged.
+
+    The payload's base SHA is the base branch's tip, which a branch open
+    while that branch moved has never contained: measuring against it folds
+    every commit merged since the divergence into this branch's number.
+    """
+    result, output, _, _ = _find_baseline(
+        tmp, 'merge-base', f'{_MERGE_BASE}\n', EVENT='pull_request',
+        PR_BASE=_BASE_SHA, PR_HEAD=_HEAD_SHA)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert output.strip() == f'point={_MERGE_BASE}', output
+    assert _BASE_SHA not in output, output
+
+
+def test_the_merge_base_comes_from_the_compare_endpoint(tmp):
+    """Both payload SHAs name the comparison the merge base is read from."""
+    _, _, calls, _ = _find_baseline(
+        tmp, 'compare', f'{_MERGE_BASE}\n', EVENT='pull_request',
+        PR_BASE=_BASE_SHA, PR_HEAD=_HEAD_SHA)
+    assert f'repos/owner/repo/compare/{_BASE_SHA}...{_HEAD_SHA}' in calls, (
+        calls)
+    assert '.merge_base_commit.sha' in calls, calls
+    assert 'Cache-Control: no-cache' in calls, calls
+
+
+def test_a_failed_merge_base_lookup_leaves_no_baseline(tmp):
+    """A lookup that exits nonzero skips instead of measuring."""
+    result, output, _, summary = _find_baseline(
+        tmp, 'failed', '', EVENT='pull_request', PR_BASE=_BASE_SHA,
+        PR_HEAD=_HEAD_SHA, STUB_FAIL='1')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert output.strip() == 'point=', output
+    assert 'merge base' in summary, summary
+
+
+def test_an_unusable_merge_base_answer_leaves_no_baseline(tmp):
+    """Only 40 hexadecimal characters are a baseline; nothing else is."""
+    answers = {
+        'blob': '{"message": "Not Found"}\n',
+        'null': 'null\n',
+        'empty': '\n',
+        'short': f'{_MERGE_BASE[:39]}\n',
+    }
+    for name, rows in answers.items():
+        result, output, _, _ = _find_baseline(
+            tmp, name, rows, EVENT='pull_request', PR_BASE=_BASE_SHA,
+            PR_HEAD=_HEAD_SHA)
+        assert result.returncode == 0, (name, result.stdout, result.stderr)
+        assert output.strip() == 'point=', (name, output)
+
+
+def test_a_push_baseline_is_still_the_latest_release_tag(tmp):
+    """The pull-request path leaves the release lookup where it was."""
+    result, output, calls, _ = _find_baseline(
+        tmp, 'push', 'v1.2.3\n', EVENT='push', PR_BASE='', PR_HEAD='')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert output.strip() == 'point=v1.2.3', output
+    assert 'repos/owner/repo/releases/latest' in calls, calls
+    assert 'compare/' not in calls, calls
 
 
 def main():

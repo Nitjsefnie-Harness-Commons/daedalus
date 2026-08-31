@@ -39,10 +39,11 @@ name: speed
 # TWO BASELINES, chosen by what the run is answering. On a push to a branch
 # the question is "is this line slower than what we shipped", so the baseline
 # is the last release. On a pull request the question is "did THIS branch make
-# it slower", so the baseline is the exact base SHA the branch would merge
-# into — comparing a branch against the last release instead would fold every
-# commit merged since that release into the number and attribute all of it to
-# whoever opened the pull request. Both go through the same machinery below.
+# it slower", so the baseline is the MERGE BASE of the branch and its base —
+# the commit the branch diverged from. The last release, or the base branch's
+# tip, would fold commits the branch never made into the number and attribute
+# all of them to whoever opened the pull request. Both go through the same
+# machinery below.
 #
 # The comparison — intersect on test name, so adding or removing a test cannot
 # move the number — lives in scripts/ci/compare_durations.py, which has its own
@@ -359,20 +360,42 @@ jobs:
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         # Values reach this script through the environment rather than through
         # `${{ }}` inside it, so nothing a payload carries is ever expanded as
         # shell.
         #
         # `gh api` on a 404 prints its JSON error body to STDOUT and exits
         # nonzero. Ending this in `|| true` would discard the exit code and
-        # assign that blob to $ref — so the "no release yet" guard would see a
+        # assign that blob to $ref — so the "no baseline" guard would see a
         # non-empty string, fall through, and hand actions/checkout a refspec
         # made of JSON. Hence both belts: branch on the EXIT CODE, then
         # validate the SHAPE, so no payload can reach a git command as a ref.
+        #
+        # A pull request's baseline is the MERGE BASE of its base and head,
+        # never the base branch's tip: a branch open while that tip moved
+        # never contained the commits merged since, so the tip charges this
+        # branch for all of them. Every SHA is checked — the two going into
+        # the comparison and the one coming back — and anything that is not
+        # 40 hexadecimal characters resolves to NO baseline. A skip says so
+        # in the summary; a comparison against a point this head cannot match
+        # is a false verdict nobody can see.
         run: |
+          is_sha() {
+            case "$1" in
+              *[!0-9a-f]*) return 1 ;;
+            esac
+            [ "${#1}" -eq 40 ]
+          }
           ref=""
           if [ "$EVENT" = pull_request ]; then
-            ref="$PR_BASE"
+            if is_sha "$PR_BASE" && is_sha "$PR_HEAD" \
+               && out="$(gh api -H "Cache-Control: no-cache" \
+                         "repos/$REPO/compare/$PR_BASE...$PR_HEAD" \
+                         --jq '.merge_base_commit.sha' 2>/dev/null)" \
+               && is_sha "$out"; then
+              ref="$out"
+            fi
           elif out="$(gh api -H "Cache-Control: no-cache" \
                       "repos/$REPO/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
             ref="$out"
@@ -386,20 +409,25 @@ jobs:
               ;;
           esac
           # The output is named `point`, not `ref`, on purpose. The value is
-          # the pull request's base SHA or a published release tag — trusted
-          # code, never the pull request's head — and CodeQL's
+          # the pull request's merge base or a published release tag —
+          # trusted code, never the pull request's head — and CodeQL's
           # untrusted-checkout heuristic reads any checkout whose ref comes
           # from a step output named like head, branch, ref, sha or commit
           # as checking out an untrusted head. Renaming this output back to
           # `ref` would silently reintroduce that alert.
           if [ -z "$ref" ]; then
+            if [ "$EVENT" = pull_request ]; then
+              why="this pull request's merge base could not be resolved"
+            else
+              why="no release exists yet to use as a baseline"
+            fi
             echo "point=" >> "$GITHUB_OUTPUT"
-            echo "No release exists yet, so there is no baseline to compare"
-            echo "against. This becomes a real gate once release.yml cuts one."
+            echo "No baseline: $why. Skipping rather than measuring against"
+            echo "a point this head cannot match."
             {
               echo "### Test speed"
               echo
-              echo "Skipped: no release exists yet to use as a baseline."
+              echo "Skipped: $why."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "point=$ref" >> "$GITHUB_OUTPUT"
