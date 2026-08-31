@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute import py_tab_routing_violations  # noqa: E402
+from test_tab_routing import _assert_focus_cases  # noqa: E402
 
 
 def _scan(tmp, body):
@@ -69,6 +70,22 @@ def test_other_branches_unchanged(tmp):
     assert not _scan(
         tmp, "    cmd = {'id': '_x', 'type': 'close-tab'}\n"
              "    api('PUT', '/command', cmd)\n")
+
+
+def test_lambda_call_reachability_matches_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('alias-before-clear',
+         f'send = ordinary\ncall = lambda: {call}\nother = call\n'
+         'send = ext_cmd\nother()\nsend = ordinary', '', '', True),
+        ('immediate-before-clear',
+         f'send = ext_cmd\n(lambda: {call})()\nsend = ordinary',
+         '', '', True),
+        ('never-called',
+         f'send = ext_cmd\ncall = lambda: {call}\nreturn 0',
+         '', '', False),
+    ]
+    _assert_focus_cases(tmp, cases)
 
 
 def main():
