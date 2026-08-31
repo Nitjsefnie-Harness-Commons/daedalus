@@ -387,6 +387,36 @@ def test_generator_second_consumption_re_resolves_yielded_name(tmp):
     assert _tracked_focus_verdict(tmp, unsafe, counts=True) == (1, 1)
 
 
+def test_generator_ifexp_yield_cache_runtime_unsafe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'send = ext_cmd\ncallback = lambda: {call}\n'
+            'gen = ((callback if args.flag else ordinary) for _ in [1])\n'
+            'next(gen)()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (1, 1)
+
+
+def test_generator_ifexp_yield_cache_runtime_safe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = ('send = ext_cmd\ncallback = ordinary\n'
+            'gen = ((callback if args.flag else lambda: ' + call + ') '
+            'for _ in [1])\nnext(gen)()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (0, 1)
+
+
+def test_generator_boolop_yield_cache_runtime_unsafe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'send = ext_cmd\ncallback = lambda: {call}\n'
+            'gen = ((callback or ordinary) for _ in [1])\nnext(gen)()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (1, 1)
+
+
+def test_generator_boolop_yield_cache_runtime_safe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'send = ext_cmd\ncallback = lambda: {call}\n'
+            'gen = ((callback and ordinary) for _ in [1])\nnext(gen)()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (0, 1)
+
+
 def test_generator_iteration_forms_match_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     local_cases = [
