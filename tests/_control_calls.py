@@ -57,6 +57,15 @@ def has_spread(call):
             or any(keyword.arg is None for keyword in call.keywords))
 
 
+def pattern_names(node):
+    """The names one match-pattern node captures; empty for any other."""
+    if isinstance(node, (ast.MatchAs, ast.MatchStar)):
+        return [node.name] if node.name else []
+    if isinstance(node, ast.MatchMapping):
+        return [node.rest] if node.rest else []
+    return []
+
+
 def _write_mode(node, position):
     if has_spread(node):
         return _UNRESOLVED_MODE
@@ -119,6 +128,10 @@ class ModuleNames:
             self.counts[node.arg] += 1
         elif isinstance(node, ast.ExceptHandler) and node.name:
             self.counts[node.name] += 1
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar,
+                               ast.MatchMapping)):
+            for name in pattern_names(node):
+                self.counts[name] += 1
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             for name in node.names:
                 self.counts[name] += 1
@@ -222,6 +235,9 @@ def _name_judgement(node, label, names):
     name = node.func.id
     if name == 'open':
         return _open_judgement(node, label, names)
+    if name in _NAMESPACES and not _is_namespace_call(node):
+        return (f'{label}:{node.lineno}: {name} callable is unresolved',
+                None, None)
     origin = names.import_origin(name)
     if (names.is_unique_def(name) or origin in _PURE_IMPORTS
             or names.is_pure_name(name)):

@@ -209,5 +209,51 @@ def test_a_starred_argument_does_not_make_path_replace_pure(tmp):
     assert control_write_violations(target, root) == []
 
 
+def test_a_container_reached_through_an_alias_is_not_proof(tmp):
+    """Route 4: mutating an alias retires the name that shares the list."""
+    relative = Path('tests/test_coverage_environment.py')
+    root, target = _real_module_copy(tmp, relative)
+    needle = "    root, target = _real_module_copy(tmp, relative)\n"
+    text = _module_text(target)
+    assert needle in text, 'the copy call shape changed'
+    first = text[:text.index(needle)].count('\n') + 1
+    mutated = text.replace(
+        needle,
+        "    first, *targets = _real_module_copy(tmp, relative)\n"
+        "    alias = targets\n"
+        "    alias.append(ROOT / 'README.md')\n"
+        "    targets[-1].write_bytes(b'mutated')\n" + needle, 1)
+    target.write_bytes(mutated.encode('utf-8'))
+    violations = control_write_violations(target, root)
+    assert violations == [
+        f'tests/test_coverage_environment.py:{first + 3}: write_bytes '
+        'target path is not control-owned'], violations
+    target.write_bytes(text.encode('utf-8'))
+    assert control_write_violations(target, root) == []
+
+
+def test_a_subscript_read_alone_keeps_a_container_proved(tmp):
+    """Only handing the name on retires it; reading through it does not."""
+    source = Path(tmp) / 'escape.py'
+    helper = (
+        "def _real_module_copy(tmp, relative):\n"
+        "    root = Path(tmp) / 'repository'\n"
+        "    return root, root / relative\n"
+        "def test_control(tmp):\n"
+        "    relative = Path('tests/probe.py')\n"
+        "    first, *targets = _real_module_copy(tmp, relative)\n")
+    source.write_text(
+        helper + "    targets[0].write_bytes(b'ok')\n", encoding='utf-8')
+    assert control_write_violations(source, Path(tmp)) == []
+    for escape in ('held = [targets]\n', 'len(targets)\n',
+                   'alias = targets\n'):
+        source.write_text(
+            helper + '    ' + escape
+            + "    targets[0].write_bytes(b'mutated')\n", encoding='utf-8')
+        assert control_write_violations(source, Path(tmp)) == [
+            'escape.py:8: write_bytes target path is not control-owned'
+        ], escape
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
