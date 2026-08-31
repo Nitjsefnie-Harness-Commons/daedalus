@@ -114,10 +114,21 @@ def test_virtual_clock_keeps_explicit_sleep_ceilings(_tmp):
         assert _has_numeric_token(message, str(max_sleeps)), message
 
 
-def test_virtual_clock_default_sleep_ceiling_stops_zero_time_runaway(_tmp):
+def test_virtual_clock_default_guard_ignores_positive_sleep_count(_tmp):
+    parts = 100_001
+    requested = _cmdqueue.POLL_DELAY / parts
+    with _virtual_cmdqueue_clock() as (clock, events, origin):
+        for _ in range(parts):
+            clock.sleep(requested)
+    assert len(events) == parts, len(events)
+    assert clock.monotonic() == origin + _cmdqueue.POLL_DELAY, (
+        clock.monotonic(), origin)
+
+
+def test_virtual_clock_default_guard_stops_zero_time_runaway(_tmp):
     failure = None
     tripped_at = None
-    expected_sleeps = 100_000
+    expected_sleeps = 200_000
     with _virtual_cmdqueue_clock() as (clock, events, origin):
         try:
             for tripped_at in range(expected_sleeps + 1):
@@ -130,7 +141,7 @@ def test_virtual_clock_default_sleep_ceiling_stops_zero_time_runaway(_tmp):
     assert clock.monotonic() == origin, (clock.monotonic(), origin)
     message = str(failure).lower()
     assert 'virtual clock' in message, message
-    assert 'sleep' in message, message
+    assert 'progress' in message, message
     assert _has_numeric_token(message, str(expected_sleeps)), message
 
 

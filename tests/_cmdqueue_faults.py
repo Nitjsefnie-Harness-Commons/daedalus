@@ -10,9 +10,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cmdqueue  # noqa: E402
 
-# Both limits are generous runaway guards, not polling implementation bounds.
+# These guard elapsed time and stalled progress, never sleep multiplicity.
 _RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
-_DEFAULT_MAX_SLEEPS = 100_000
+_NO_PROGRESS_LIMIT = 200_000
 
 
 def _queued_file(tmp, name='1700000000000_000001.json'):
@@ -114,7 +114,7 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
 
 @contextlib.contextmanager
-def _virtual_cmdqueue_clock(max_sleeps=_DEFAULT_MAX_SLEEPS):
+def _virtual_cmdqueue_clock(max_sleeps=None):
     original = _cmdqueue.time
     # A large power-of-two origin exposes sleeps too small to move the clock.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
@@ -122,10 +122,13 @@ def _virtual_cmdqueue_clock(max_sleeps=_DEFAULT_MAX_SLEEPS):
     correction = [0.0]
     events = []
     sleep_count = [0]
+    no_progress_count = [0]
     # Read cost exposes stale deadline samples; the fallback avoids underflow.
     read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
     def accumulated(seconds):
+        if seconds == 0:
+            return elapsed[0], correction[0]
         adjusted = seconds - correction[0]
         advanced = elapsed[0] + adjusted
         next_correction = (advanced - elapsed[0]) - adjusted
@@ -140,19 +143,30 @@ def _virtual_cmdqueue_clock(max_sleeps=_DEFAULT_MAX_SLEEPS):
         def record_read(self):
             events.append(('read', read_cost))
             elapsed[0], correction[0] = accumulated(read_cost)
+            no_progress_count[0] = 0
 
         def sleep(self, seconds):
             if seconds < 0:
                 raise ValueError('sleep length must be non-negative')
-            if max_sleeps is not None and sleep_count[0] >= max_sleeps:
-                raise AssertionError(
-                    f'virtual clock exceeded {max_sleeps} sleeps')
+            if max_sleeps is not None:
+                if sleep_count[0] >= max_sleeps:
+                    raise AssertionError(
+                        f'virtual clock exceeded {max_sleeps} sleeps')
             advanced, next_correction = accumulated(seconds)
             if advanced >= _RUNAWAY_ELAPSED:
                 raise AssertionError(
                     'virtual clock elapsed guard reached '
                     f'{advanced:.3f}s from its origin')
-            sleep_count[0] += 1
+            progressed = (advanced != elapsed[0]
+                          or next_correction != correction[0])
+            if not progressed and no_progress_count[0] >= _NO_PROGRESS_LIMIT:
+                raise AssertionError(
+                    'virtual clock made no progress for '
+                    f'{_NO_PROGRESS_LIMIT} sleeps')
+            if max_sleeps is not None:
+                sleep_count[0] += 1
+            no_progress_count[0] = 0 if progressed else (
+                no_progress_count[0] + 1)
             events.append(('sleep', seconds))
             elapsed[0] = advanced
             correction[0] = next_correction

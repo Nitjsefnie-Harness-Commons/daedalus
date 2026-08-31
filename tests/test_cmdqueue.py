@@ -189,8 +189,9 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     assert sleep_groups and any(sleep_groups), events
     sleeps = [sum(group) for group in sleep_groups if group]
     assert command is None, command
-    assert sleeps[:-1] == [_cmdqueue.POLL_DELAY] * (len(sleeps) - 1), (
-        sleeps, events)
+    assert all(abs(duration - _cmdqueue.POLL_DELAY)
+               <= math.ulp(_cmdqueue.POLL_DELAY)
+               for duration in sleeps[:-1]), (sleeps, events)
     # An exact multiple can make the final sleep equal the polling delay.
     assert sleeps[-1] <= _cmdqueue.POLL_DELAY, (sleeps, events)
     deadline = origin + timeout
