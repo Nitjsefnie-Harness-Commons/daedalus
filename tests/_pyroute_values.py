@@ -87,21 +87,36 @@ def callable_candidates(value):
     return ()
 
 
-def contains_callable(value, target):
-    if value is target:
-        return True
+def reachable_callables(value):
+    if isinstance(value, DeferredCallable):
+        return (value,)
     if isinstance(value, DeferredAlternatives):
-        return any(contains_callable(item, target) for item in value.values)
+        values = value.values
     if isinstance(value, DeferredContainer):
-        return any(contains_callable(item, target)
-                   for item in value.items.values())
+        values = value.items.values()
     if isinstance(value, DeferredInstance):
-        return any(contains_callable(item, target)
-                   for item in value.attributes.values())
+        values = value.attributes.values()
     if isinstance(value, DeferredClass):
-        return any(contains_callable(item, target)
-                   for item in value.methods.values())
-    return False
+        values = value.methods.values()
+    if not isinstance(value, (DeferredAlternatives, DeferredContainer,
+                              DeferredInstance, DeferredClass)):
+        return ()
+    return tuple(candidate for item in values
+                 for candidate in reachable_callables(item))
+
+
+def contains_callable(value, target):
+    return any(candidate is target for candidate in reachable_callables(value))
+
+
+def exposed_callables(states):
+    exposed = {}
+    for state in states:
+        for value in state.callables.values():
+            for deferred in reachable_callables(value):
+                exposed.setdefault(
+                    id(deferred), (deferred, []))[1].append(state)
+    return exposed.values()
 
 
 def _known_value(node, state):
@@ -113,8 +128,8 @@ def _known_value(node, state):
 
 def _selected_values(value, key, attribute=False):
     if isinstance(value, DeferredAlternatives):
-        return [_selected_values(item, key, attribute)
-                for item in value.values]
+        return [selected for item in value.values
+                for selected in _selected_values(item, key, attribute)]
     if attribute and isinstance(value, DeferredInstance):
         return [value.attributes.get(key)]
     if attribute and isinstance(value, DeferredClass):
@@ -226,7 +241,7 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
     if candidates:
         invoked = []
         for candidate in candidates:
-            branch, value = analyze(candidate, copy_states(states), True, call)
+            branch, value = analyze(candidate, copy_states(states), call)
             invoked.extend(branch)
             if value is not None:
                 returned.append(value)
@@ -235,7 +250,7 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
                  for argument in arguments for state in states
                  for candidate in expression_callables(argument, state)}
     for callback in callbacks.values():
-        states, _ = analyze(callback, states, True)
+        states, _ = analyze(callback, states)
     return states, None
 
 
