@@ -21,12 +21,30 @@ from yamlscalar import (  # noqa: E402
 __all__ = (
     'YAMLReadError',
     '_strip_inline_comment',
+    'check_plain_scalar',
     'decode_inline_scalar',
     'flow_depth',
     'split_flow_collection',
     'split_flow_items',
     'split_mapping_field',
 )
+
+
+def check_plain_scalar(value, owner):
+    """Return a plain scalar, or refuse it as outside the admitted set.
+
+    Both workflow readers apply this, so an anchor, an alias, a tag, a
+    mapping separator or a control character is a refusal wherever a plain
+    scalar is read -- never a value one reader returns raw while the other
+    rejects it.
+    """
+    if value.startswith(('&', '*', '!', '@', '`')):
+        raise YAMLReadError(f'{owner} has an unsupported plain scalar')
+    if ': ' in value or '\t' in value or any(
+            ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
+            for char in value):
+        raise YAMLReadError(f'{owner} has an unsupported plain scalar')
+    return value
 
 
 def flow_depth(text):

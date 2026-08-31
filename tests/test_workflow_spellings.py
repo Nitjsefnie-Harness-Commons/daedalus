@@ -287,7 +287,13 @@ def test_an_output_reference_must_be_exactly_one_step_lookup(tmp):
 
 
 def test_both_readers_decode_one_scalar_spelling_set(tmp):
-    """_yamlread and _yamlsteps must agree on every equivalent spelling."""
+    """_yamlread and _yamlsteps must agree on every equivalent spelling.
+
+    A refusal is as much part of the set as a value: a spelling one reader
+    reads and the other refuses is a disagreement, and an anchor or a tag
+    read raw is a WRONG value rather than a refusal, so the shapes the
+    readers once disagreed on are pinned here beside the ones they share.
+    """
     spellings = (
         '${{ !cancelled() && !failure() }}',
         "'${{ !cancelled() && !failure() }}'",
@@ -304,6 +310,13 @@ def test_both_readers_decode_one_scalar_spelling_set(tmp):
         complete = complete['if']
         assert scalar == '${{ !cancelled() && !failure() }}', spelling
         assert complete == scalar, (spelling, complete, scalar)
+    for spelling in ('a: b', '&anchor x', '!!str x', '*anchor', '@x',
+                     '`x`', 'a\x01b'):
+        source = _real(tmp, 'jobs:\n  sample:\n    if: ' + spelling + '\n')
+        assert 'unsupported' in _refuses(
+            job_scalar, source, 'sample', 'if'), spelling
+        assert 'unsupported' in _refuses(
+            complete_job_mapping, source, 'sample'), spelling
 
 
 def test_tab_indentation_is_still_refused(tmp):

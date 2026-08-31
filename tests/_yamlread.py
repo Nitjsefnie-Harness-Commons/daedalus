@@ -11,6 +11,7 @@ import re
 from _yamlscalar import (
     YAMLReadError,
     _strip_inline_comment,
+    check_plain_scalar as _check_plain_scalar,
     decode_inline_scalar as _decode_inline_scalar,
     split_mapping_field as _split_mapping_field,
 )
@@ -566,7 +567,9 @@ def _scalar_value(lines, entry, end, name):
                     f'{name} has an unsupported multiline scalar')
         # A quoting style is spelling: the decoded value is what the
         # workflow means, so it decodes rather than being refused.
-        return _decode_inline_scalar(value, name) if quoted else value
+        if quoted:
+            return _decode_inline_scalar(value, name)
+        return _check_plain_scalar(value, name)
     style, chomp, explicit = _parse_header(value, name)
     block_start = index + 1
     block_end = end
