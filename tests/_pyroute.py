@@ -3,7 +3,6 @@ import ast
 import sys
 
 from _pyroute_values import (DeferredCallable, DeferredClass,
-                             DeferredContainer,
                              bind_call_arguments, callable_candidates,
                              exposed_callables, expression_callables,
                              expression_value, follow_callable_call,
@@ -398,10 +397,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     candidates, arguments, current, node, analyze_callable,
                     copied, dedupe_states)
                 consumed_value = merge_deferred_values(consumed_values)
-                if consumed_value is not None and consumer in (
-                        'frozenset', 'list', 'set', 'sorted', 'tuple'):
-                    consumed_value = DeferredContainer(
-                        {0: consumed_value}, None)
                 returned_value = merge_deferred_values(
                     (returned_value, consumed_value))
                 if returned_value is not None:
