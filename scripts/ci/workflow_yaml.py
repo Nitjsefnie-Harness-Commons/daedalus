@@ -261,6 +261,9 @@ def _step_value(lines, start, end, indent, raw_value, owner):
             ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
             for char in value):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
+    if any(_meaningful(lines[index]) and _indent(lines[index]) > indent
+           for index in range(start + 1, end)):
+        raise YAMLReadError(f'{owner} has an unsupported multiline scalar')
     return value
 
 
