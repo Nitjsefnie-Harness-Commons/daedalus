@@ -24,8 +24,13 @@ class _HidingEnvironment(dict):
 
 def test_child_coverage_declares_scrub_and_keep(tmp):
     """The helper scrubs, keeps in a mapped tree, and rejects bad modes."""
-    environment = {'COVERAGE_PROCESS_START': 'x', 'PATH': '/bin'}
-    assert _util.child_coverage('scrub', environment) == {'PATH': '/bin'}
+    environment = dict(os.environ)
+    environment.update({'COVERAGE_PROCESS_START': 'x', 'PATH': '/bin'})
+    scrubbed = {
+        name: value for name, value in environment.items()
+        if not name.startswith('COVERAGE_')
+    }
+    assert _util.child_coverage('scrub', environment) == scrubbed
     kept = _util.child_coverage('keep', environment, cwd=Path(tmp) / 'tree')
     assert kept == environment and kept is not environment
     try:
