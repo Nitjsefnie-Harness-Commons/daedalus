@@ -78,6 +78,18 @@ def test_sender_alias_scopes_match_runtime(tmp):
         ('inner-local', "const send = extCmd;\n"
          "function inner() {\n  const send = ordinary;\n}\n"
          "inner();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('invoked-promotion', "let send = ordinary;\n"
+         "function promote() { send = extCmd; }\npromote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('invoked-demotion', "let send = extCmd;\n"
+         "function demote() { send = ordinary; }\ndemote();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('uninvoked-promotion', "let send = ordinary;\n"
+         "function promote() { send = extCmd; }\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('uninvoked-demotion', "let send = extCmd;\n"
+         "function demote() { send = ordinary; }\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
         ('conditional', "let send = extCmd;\nconst flag = false;\n"
          "if (flag) send = ordinary;\n"
          "send('focus-tab', { tab: chromeTab });\n", True),

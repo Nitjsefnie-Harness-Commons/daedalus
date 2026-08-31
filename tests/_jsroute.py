@@ -107,7 +107,8 @@ def js_tab_routing_violations(path, rel):
     call to a same-file helper that returns an object it built. Sender aliases
     follow lexical bindings through nested scopes. Rebinds in optional control
     flow merge with the state that can bypass them; differing states become
-    unprovable.
+    unprovable. Calls to known same-file functions replay writes to captured
+    bindings at the invocation point.
 
     An object that escapes into another call is marked unprovable from that
     point, and an unprovable object reaching a sender is a violation: a
@@ -437,27 +438,6 @@ def js_tab_routing_violations(path, rel):
                 return bool(found and found.group(1) in controls)
         return bool(re.search(r'\b(?:else|do)\s*$', prefix))
 
-    def sender_before(name, limit):
-        states = {}
-        call_scope = scope_at(limit)
-        ancestors = set()
-        while call_scope is not None:
-            ancestors.add(call_scope)
-            call_scope = scopes[call_scope]['parent']
-        for start, kind, match in events:
-            if start >= limit:
-                break
-            if kind != 'bind' or scope_at(start) not in ancestors:
-                continue
-            target = visible_binding(match.group(1), start)
-            if target is None:
-                continue
-            stmt_end = _js_statement_end(mask, match.end())
-            value = sender_state(match.end(), stmt_end, states)
-            states[target] = (merged_sender(states.get(target), value)
-                              if optional_write(start, limit) else value)
-        return alias_value(name, limit, states)
-
     def bare_call(match):
         prefix = mask[:match.start()].rstrip()
         if prefix.endswith('.') or prefix.endswith('function'):
@@ -466,6 +446,62 @@ def js_tab_routing_violations(path, rel):
         after = after_space(pair_end.get(open_paren, len(mask)))
         return (match.start() not in method_positions
                 and mask[after:after + 1] != '{')
+
+    callable_scopes = {}
+    definitions = list(function_names)
+    definitions.extend((match.group(2), match.start())
+                       for match in declarations)
+    for function_name, definition in definitions:
+        body = _js_function_body(mask, function_name)
+        if body is None or body[0] != 'block':
+            continue
+        function_scope = next((index for index, scope in enumerate(scopes)
+                               if scope['open'] == body[1]), None)
+        binding = visible_binding(function_name, definition)
+        if function_scope is not None and binding is not None:
+            callable_scopes[binding] = function_scope
+
+    invocations = []
+    for match in re.finditer(r'\b([\w$]+)\s*\(', mask):
+        if not bare_call(match):
+            continue
+        binding = visible_binding(match.group(1), match.start())
+        if binding in callable_scopes:
+            invocations.append((match.start(), callable_scopes[binding]))
+
+    def sender_before(name, limit):
+        states = {}
+        call_scope = scope_at(limit)
+        ancestors = set()
+        while call_scope is not None:
+            ancestors.add(call_scope)
+            call_scope = scopes[call_scope]['parent']
+        scheduled = []
+        for start, kind, match in events:
+            if kind != 'bind':
+                continue
+            if start < limit and scope_at(start) in ancestors:
+                scheduled.append((start, start, None, match))
+        for call_start, function_scope in invocations:
+            if call_start >= limit or scope_at(call_start) not in ancestors:
+                continue
+            scheduled.extend((call_start, start, call_start, match)
+                             for start, kind, match in events
+                             if kind == 'bind'
+                             and scope_at(start) == function_scope)
+        for _, start, call_start, match in sorted(scheduled):
+            target = visible_binding(match.group(1), start)
+            if target is None:
+                continue
+            stmt_end = _js_statement_end(mask, match.end())
+            value = sender_state(match.end(), stmt_end, states)
+            write_limit = limit if call_start is None else call_start
+            optional = optional_write(start, write_limit)
+            if call_start is not None:
+                optional = optional or optional_write(call_start, limit)
+            states[target] = (merged_sender(states.get(target), value)
+                              if optional else value)
+        return alias_value(name, limit, states)
 
     def names_before(limit, depth, floor=0):
         """Tracked state of named objects from the assignments before `limit`.
