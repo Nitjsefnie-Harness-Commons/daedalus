@@ -224,7 +224,8 @@ def _decode_complete_value(
         if child is not None and joined is None and (
                 value[:1] not in ('[', '{', "'", '"')):
             joined = _reader._folded_plain(
-                lines, index, end, indent, value, f'{owner} {key}')
+                lines, index, end, indent, raw_value.strip(' '),
+                f'{owner} {key}')
         elif child is not None:
             raise YAMLReadError(
                 f'{owner} {key} has unsupported nested content')

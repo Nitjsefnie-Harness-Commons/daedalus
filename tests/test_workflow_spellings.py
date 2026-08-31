@@ -214,25 +214,48 @@ def test_a_block_sequence_item_may_span_lines_too(tmp):
 def test_a_multiline_plain_scalar_folds_into_one_value(tmp):
     """A plain scalar the workflow wraps is one value, not half of one.
 
-    Folding joins the lines with the single space YAML would and strips each
-    line's own comment, so a comment on the first line cannot truncate the
-    condition at it.
+    Folding joins the lines with the single space YAML would.  A comment
+    after the last of them is the one comment position a plain scalar
+    leaves, because there the scalar has already ended.
     """
     folded = '${{ !cancelled() && !failure() }}'
-    workflow = _real(tmp, _replaced(
-        PLAIN_IF,
-        '    if: ${{ !cancelled()\n            && !failure() }}\n'))
-    assert job_scalar(workflow, 'suites', 'if') == folded
-    assert complete_job_mapping(workflow, 'suites')['if'] == folded
-    assert _job_if_expression(workflow, 'suites') == folded
-    workflow = _real(tmp, _replaced(
-        PLAIN_IF,
+    spellings = (
+        '    if: ${{ !cancelled()\n            && !failure() }}\n',
+        '    if: ${{ !cancelled()\n            && !failure() }}  # why\n',
+    )
+    for spelling in spellings:
+        workflow = _real(tmp, _replaced(PLAIN_IF, spelling))
+        assert job_scalar(workflow, 'suites', 'if') == folded, spelling
+        assert complete_job_mapping(
+            workflow, 'suites')['if'] == folded, spelling
+        assert _job_if_expression(workflow, 'suites') == folded, spelling
+
+
+def test_a_comment_ends_a_plain_scalar_rather_than_folding_past_it(tmp):
+    """A comment ends a plain scalar, so nothing continues it afterwards.
+
+    Both oracles refuse every spelling below, so folding past the comment
+    returns a value no parser produces.  The refusal is a boundary: what an
+    ended scalar followed by deeper text means, this subset does not decide.
+    """
+    spellings = (
         '    if: ${{ !cancelled()  # never when cancelled\n'
+        '            && !failure() }}\n',
+        '    if: ${{ !cancelled()\n'
+        '            # never when cancelled\n'
+        '            && !failure() }}\n',
+        '    if: ${{ !cancelled()\n'
         '            && !failure()  # nor after one\n'
-        '            }}\n'), 'comment.yml')
-    assert job_scalar(workflow, 'suites', 'if') == folded
-    assert complete_job_mapping(workflow, 'suites')['if'] == folded
-    assert _job_if_expression(workflow, 'suites') == folded
+        '            }}\n',
+    )
+    for spelling in spellings:
+        workflow = _real(tmp, _replaced(PLAIN_IF, spelling))
+        assert 'unsupported multiline scalar' in _refuses(
+            job_scalar, workflow, 'suites', 'if'), spelling
+        assert 'unsupported multiline scalar' in _refuses(
+            complete_job_mapping, workflow, 'suites'), spelling
+        assert 'unsupported multiline scalar' in _refuses(
+            _job_if_expression, workflow, 'suites'), spelling
 
 
 def test_what_wrapping_a_scalar_may_not_do_stays_refused(tmp):
