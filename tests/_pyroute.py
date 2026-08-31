@@ -240,7 +240,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         yielded = merge_deferred_values(
             live_expression_value(result, state, deferred_lambda,
                                   generator.captured)
-            or state.evaluated.get(id(result))
             for state in active for result in results)
         outputs = dedupe_states([*skipped, *active])
         if contextual: outputs = [overlay(
