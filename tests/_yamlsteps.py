@@ -219,11 +219,16 @@ def _decode_complete_value(
             lines, entry, end, f'{owner} {key}')
     if value:
         joined, close = _flow_extent(lines, index, end, value)
-        if _reader._first_child(lines, close + 1, end, indent) is not None:
+        child = _reader._first_child(lines, close + 1, end, indent)
+        if child is not None and joined is None and (
+                value[:1] not in ('[', '{', "'", '"')):
+            joined = _reader._folded_plain(
+                lines, index, end, indent, value, f'{owner} {key}')
+        elif child is not None:
             raise YAMLReadError(
                 f'{owner} {key} has unsupported nested content')
         return _decode_complete_inline(
-            joined or raw_value, f'{owner} value for {key!r}')
+            joined or value, f'{owner} value for {key!r}')
     child = _reader._first_child(lines, index + 1, end, indent)
     if child is None:
         raise YAMLReadError(f'{owner} {key} has no value')
