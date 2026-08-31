@@ -447,7 +447,7 @@ def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
 
 
 @contextlib.contextmanager
-def bridge(tmp, env=None, output=None):
+def bridge(tmp, env=None, output=None, proc_out=None):
     """Run the real server.py against a throwaway docroot.
 
     Yields (base_url, docroot). The bridge is stdlib-only, so this is a real
@@ -464,6 +464,10 @@ def bridge(tmp, env=None, output=None):
     stdout and stderr are captured and, on a startup failure, raised with the
     output attached; a bridge that dies silently would otherwise show up as an
     unexplained connection error in whichever test ran first.
+
+    `proc_out` receives the child itself. A caller waiting on something the
+    child prints after readiness has to wait without a deadline, and the
+    child dying is the only thing such a wait can give up on.
     """
     global _bridge_started
 
@@ -484,6 +488,8 @@ def bridge(tmp, env=None, output=None):
         [sys.executable, str(ROOT / 'server.py')],
         cwd=str(ROOT), env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if proc_out is not None:
+        proc_out.append(proc)
     drained = drain_lines(proc, output)
     timeout = startup_timeout()
     try:
