@@ -421,6 +421,36 @@ def test_generator_second_attribute_consumption_unsafe_to_safe(tmp):
     assert _tracked_focus_verdict(tmp, body, counts=True) == (0, 0)
 
 
+def test_generator_ifexp_subscript_consumption_safe_to_unsafe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'send = ext_cmd\nbox = [lambda: ordinary()]\n'
+            'gen = ((box[0] if True else ordinary) for _ in [1, 2])\n'
+            'first = next(gen)\n'
+            f'box[0] = lambda: {call}\n'
+            'second = next(gen)\nsecond()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (1, 1)
+
+
+def test_generator_ifexp_attribute_consumption_unsafe_to_safe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+            f'holder.fn = lambda: {call}\n'
+            'gen = ((holder.fn if True else ordinary) for _ in [1, 2])\n'
+            'first = next(gen)\n'
+            'holder.fn = ordinary\nsecond = next(gen)\nsecond()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (0, 0)
+
+
+def test_generator_ifexp_list_subscript_consumption_safe_to_unsafe(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    body = (f'send = ext_cmd\nbox = [lambda: ordinary()]\n'
+            'gen = (([box[0]] if True else [ordinary]) for _ in [1, 2])\n'
+            'first = next(gen)\n'
+            f'box[0] = lambda: {call}\n'
+            'second = next(gen)\nsecond[0]()')
+    assert _tracked_focus_verdict(tmp, body, counts=True) == (1, 1)
+
+
 def test_generator_ifexp_yield_cache_runtime_unsafe(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     body = (f'send = ext_cmd\ncallback = lambda: {call}\n'
