@@ -60,8 +60,9 @@ What is *not* in the model, and is worth reporting:
 
 The bridge speaks plain HTTP on loopback and terminates no TLS of its own. If
 you expose it, put it behind a reverse proxy that does, and read the
-[Deployment section](README.md#deployment) — it names the two things the bridge
-deliberately does not do, and what has to sit in front of it instead.
+[Security section of the README](README.md#security) — it states what the
+bridge deliberately does not supply, and what has to sit in front of it
+instead.
 
 The bridge token is the whole authorization story for control and storage
 routes. Treat it like an SSH key: it is generated on first install, it is not
