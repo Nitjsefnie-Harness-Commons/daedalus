@@ -51,7 +51,15 @@ def argument(call, name, position):
     return None
 
 
+def has_spread(call):
+    """A `*args` or `**kwargs` argument hides the call's real shape."""
+    return (any(isinstance(arg, ast.Starred) for arg in call.args)
+            or any(keyword.arg is None for keyword in call.keywords))
+
+
 def _write_mode(node, position):
+    if has_spread(node):
+        return _UNRESOLVED_MODE
     mode = argument(node, 'mode', position)
     if mode is None:
         return None
@@ -157,7 +165,8 @@ def _chain_base(node):
 
 def _is_string_replace(node):
     """str.replace takes two positional arguments; Path.replace, one."""
-    return node.func.attr == 'replace' and len(node.args) >= 2
+    return (node.func.attr == 'replace' and len(node.args) >= 2
+            and not has_spread(node))
 
 
 def _writer_target(node, spec, receiver):

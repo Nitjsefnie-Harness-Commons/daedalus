@@ -3,7 +3,8 @@ import ast
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from _control_calls import ModuleNames, argument, call_judgement
+from _control_calls import (ModuleNames, argument, call_judgement,
+                            has_spread)
 
 _UNKNOWN_PATH = 0
 _RELATIVE_PATH = 1
@@ -257,7 +258,8 @@ def _seeded_parameters(call, function, owned, trusted, mutated, context,
     """Kinds for the callee's parameters from this call's arguments."""
     parameters = (function.args.posonlyargs + function.args.args
                   + function.args.kwonlyargs)
-    if (function.args.vararg is not None or function.args.kwarg is not None
+    if (has_spread(call) or function.args.vararg is not None
+            or function.args.kwarg is not None
             or len(call.args) > len(parameters)):
         return None
     seeded = {}
