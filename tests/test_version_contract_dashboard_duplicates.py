@@ -27,6 +27,13 @@ def _insert_before_body(copy_root, markup):
                          encoding='utf-8')
 
 
+def _replace_dashboard_once(copy_root, old, new):
+    dashboard = copy_root / 'dashboard' / 'index.html'
+    text = dashboard.read_text(encoding='utf-8')
+    assert text.count(old) == 1, (old, text.count(old))
+    dashboard.write_text(text.replace(old, new), encoding='utf-8')
+
+
 def _duplicate_dashboard_version(copy_root, class_name, second_value='9.9.9',
                                  quote="'"):
     if class_name == 'rail-foot':
@@ -163,6 +170,97 @@ def test_script_raw_text_dashboard_version_decoys_are_ignored(tmp_path):
         "/* <div class='rail-foot'>v5.5.5</div> */\n"
         '</script>')
     _insert_before_body(copy_root, script)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_double_escaped_script_end_tag_does_not_expose_decoy(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    script = (
+        '<script>\n'
+        '<!--<script></script>\n'
+        'const decoy = "<span class=\'sl-v\'>9.9.9</span>";\n'
+        '//-->\n'
+        '</script>')
+    _insert_before_body(copy_root, script)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_real_status_line_after_double_escaped_script_is_counted(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    old = f'<span class="sl-v">{canonical}</span>'
+    _replace_dashboard_once(copy_root, old, '')
+    markup = (
+        '<script>\n'
+        '<!--<script></script>\n'
+        'const decoy = "<span class=\'sl-v\'>9.9.9</span>";\n'
+        f'//--></script><span class=\'sl-v\'>{canonical}</span>')
+    _insert_before_body(copy_root, markup)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_unicode_space_does_not_end_script_tag_name(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    script = (
+        '<script>\n'
+        'const notAnEndTag = "</script\xa0>";\n'
+        'const decoy = "<span class=\'sl-v\'>9.9.9</span>";\n'
+        '</script>')
+    _insert_before_body(copy_root, script)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_classic_script_html_comment_filters_decoy(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    script = (
+        '<script>\n'
+        '<!-- <span class=\'sl-v\'>9.9.9</span>\n'
+        'void 0;\n'
+        '</script>')
+    _insert_before_body(copy_root, script)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_prefixed_class_attributes_are_not_dashboard_sites(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    _copy_versioned_tree(copy_root)
+    markup = (
+        "<div x:class='rail-foot'>v9.9.9</div>\n"
+        "<span x:class='sl-v'>8.8.8</span>")
+    _insert_before_body(copy_root, markup)
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+
+
+def test_uppercase_script_tag_filters_its_decoy(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    old = f'<span class="sl-v">{canonical}</span>'
+    _replace_dashboard_once(copy_root, old, '')
+    markup = (
+        '<SCRIPT>\n'
+        'const notAnEndTag = "</SCRIPT\xa0>";\n'
+        'const decoy = "<span class=\'sl-v\'>9.9.9</span>";\n'
+        f'// open</SCRIPT><span class=\'sl-v\'>{canonical}</span>')
+    _insert_before_body(copy_root, markup)
     result = _run_checker(copy_root)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
