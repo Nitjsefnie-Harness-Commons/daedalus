@@ -94,6 +94,7 @@
 !/daedalus_bridge/env_config.py
 !/daedalus_bridge/log_safe.py
 !/daedalus_bridge/mcp_bootstrap.py
+!/daedalus_bridge/parent_watch.py
 !/daedalus_bridge/path_safety.py
 !/daedalus_bridge/result_store.py
 !/daedalus_bridge/segment_store.py
@@ -330,6 +331,7 @@
 !/tests/test_overlap_client_state.py
 !/tests/test_overlap_harness.py
 !/tests/test_owned_writes.py
+!/tests/test_parent_watch.py
 !/tests/test_path_safety.py
 !/tests/test_pr_body.py
 !/tests/test_pr_gate.py
