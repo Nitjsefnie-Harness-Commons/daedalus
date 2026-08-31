@@ -105,6 +105,48 @@ def test_flow_needs_sequence_reads_like_the_block_sequence(tmp):
         assert _job_needs(workflow, 'suites') == block, spelling
 
 
+def test_one_dependency_reads_the_same_in_all_three_shapes(tmp):
+    """A bare scalar, a block sequence and a flow sequence name one job."""
+    spellings = (
+        '    needs: changes\n',
+        '    needs:\n      - changes\n',
+        '    needs: [changes]\n',
+        "    needs: ['changes']\n",
+    )
+    for spelling in spellings:
+        workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
+        assert _job_needs(workflow, 'suites') == ['changes'], spelling
+
+
+def test_an_apostrophe_inside_a_flow_item_is_content(tmp):
+    """A quote opens a quoted node only at node start.
+
+    Everywhere else it is ordinary plain-scalar content, so these decode
+    rather than being read as an unterminated quote.
+    """
+    spellings = {
+        "    needs: [don't, x]\n": ["don't", 'x'],
+        "    needs: [it's]\n": ["it's"],
+        "    needs: [a, 5 o'clock]\n": ['a', "5 o'clock"],
+        "    needs: [dont, ca'nt]\n": ['dont', "ca'nt"],
+    }
+    for spelling, expected in spellings.items():
+        workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
+        assert _job_needs(workflow, 'suites') == expected, spelling
+
+
+def test_a_quoted_flow_item_keeps_its_own_punctuation(tmp):
+    """Quoting is what makes a comma, a quote or a backslash content."""
+    spellings = {
+        "    needs: ['a,b', pylint]\n": ['a,b', 'pylint'],
+        "    needs: ['a''b,c', pylint]\n": ["a'b,c", 'pylint'],
+        '    needs: ["a\\"b,c", pylint]\n': ['a"b,c', 'pylint'],
+    }
+    for spelling, expected in spellings.items():
+        workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
+        assert _job_needs(workflow, 'suites') == expected, spelling
+
+
 def test_flow_outputs_mapping_reads_like_the_block_mapping(tmp):
     """A flow mapping carries the same outputs as the block mapping."""
     block = _job_output_mapping(_tests_yml(), 'changes')
@@ -167,14 +209,16 @@ def test_a_sequence_where_outputs_belong_is_still_refused(tmp):
     """Outputs written as a sequence is a shape, not a spelling."""
     workflow = _real(tmp, _replaced(
         BLOCK_OUTPUTS, '    outputs:\n      - matrix\n'))
-    _refuses(_job_output_mapping, workflow, 'changes')
+    assert 'outputs is not a mapping' in _refuses(
+        _job_output_mapping, workflow, 'changes')
 
 
 def test_a_duplicate_job_field_is_still_refused(tmp):
     """Two if fields on one job stay a refusal, quoted or not."""
     workflow = _real(tmp, _replaced(
         PLAIN_IF, PLAIN_IF + '    if: "${{ always() }}"\n'))
-    _refuses(_job_if_expression, workflow, 'suites')
+    assert 'duplicate job field' in _refuses(
+        _job_if_expression, workflow, 'suites')
 
 
 def test_an_unbalanced_flow_collection_is_refused(tmp):
@@ -183,13 +227,39 @@ def test_an_unbalanced_flow_collection_is_refused(tmp):
                      '    needs: [changes]]\n',
                      '    needs: [changes, [pylint]\n'):
         workflow = _real(tmp, _replaced(BLOCK_NEEDS, spelling))
-        _refuses(_job_needs, workflow, 'suites')
+        assert 'unbalanced flow collection' in _refuses(
+            _job_needs, workflow, 'suites'), spelling
 
 
-def test_an_empty_flow_item_is_refused(tmp):
-    """A missing item is a malformed sequence, not a shorter one."""
+def test_a_trailing_comma_ends_a_flow_collection(tmp):
+    """A trailing entry separator closes the collection it terminates.
+
+    An interior empty item has no such reading and stays refused.
+    """
     workflow = _real(tmp, _replaced(BLOCK_NEEDS, '    needs: [changes, ]\n'))
-    _refuses(_job_needs, workflow, 'suites')
+    assert _job_needs(workflow, 'suites') == ['changes']
+    workflow = _real(tmp, _replaced(
+        BLOCK_OUTPUTS, "    outputs: {matrix: 'built',}\n"), 'outputs.yml')
+    assert _job_output_mapping(workflow, 'changes') == {'matrix': 'built'}
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [changes, , pylint]\n'), 'interior.yml')
+    assert 'empty flow item' in _refuses(_job_needs, workflow, 'suites')
+
+
+def test_a_flow_indicator_inside_a_plain_scalar_is_refused(tmp):
+    """An unquoted flow scalar may not carry any of `,[]{}`."""
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [${{ matrix.suite }}]\n'))
+    assert 'flow indicator' in _refuses(_job_needs, workflow, 'suites')
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [a{b}c]\n'), 'brace.yml')
+    assert 'flow indicator' in _refuses(_job_needs, workflow, 'suites')
+    workflow = _real(tmp, _replaced(
+        BLOCK_OUTPUTS,
+        '    outputs: {matrix: ${{ steps.classify.outputs.matrix }}}\n'),
+        'mapping.yml')
+    assert 'flow indicator' in _refuses(
+        _job_output_mapping, workflow, 'changes')
 
 
 def test_an_incomplete_quoted_scalar_is_refused(tmp):
@@ -198,7 +268,8 @@ def test_an_incomplete_quoted_scalar_is_refused(tmp):
                      "    if: '${{ always() }}\n",
                      '    if: "${{ always() }}" trailing\n'):
         workflow = _real(tmp, _replaced(PLAIN_IF, spelling))
-        _refuses(_job_if_expression, workflow, 'suites')
+        assert 'incomplete quoted scalar' in _refuses(
+            _job_if_expression, workflow, 'suites'), spelling
 
 
 def test_an_unrecognized_output_expression_is_still_refused(tmp):
@@ -210,7 +281,8 @@ def test_an_unrecognized_output_expression_is_still_refused(tmp):
             '      matrix: steps.classify.outputs.matrix\n',
             '      matrix: ${{ (steps.classify.outputs.matrix }}\n'):
         workflow = _real(tmp, _replaced(original, spelling))
-        _refuses(_job_output_step_ids, workflow, 'changes')
+        assert 'unsupported expression' in _refuses(
+            _job_output_step_ids, workflow, 'changes'), spelling
 
 
 def test_the_planted_targets_come_from_the_real_workflow(tmp):
