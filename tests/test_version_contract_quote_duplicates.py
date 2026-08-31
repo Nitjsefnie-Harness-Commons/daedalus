@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Duplicate `__version__` spellings the checker must refuse (#319).
+"""Duplicate version spellings the checker must refuse (#319, #320).
 
 A second assignment whose value carries the other quote character, or runs
 across a continuation, is still what Python binds at import time, so the
-three mirror tests refuse every spelling `_DUPLICATE_SPELLINGS` holds and a
-fourth pins that the widened value class still admits a foreign quote inside
-a value that is not a duplicate at all.
+three mirror tests refuse every spelling `_DUPLICATE_SPELLINGS` holds, the
+page.js duplicate-spelling coverage includes optional whitespace before
+colons, and a separate test pins that the widened value class still admits a
+foreign quote inside a value that is not a duplicate at all.
 test_version_contract.py holds the checker's other contracts; these tests
 were moved here when that file met its 700-line ceiling.
 """
@@ -88,6 +89,29 @@ def test_check_versions_package_value_may_contain_a_different_quote(tmp):
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
     assert 'version strings disagree' in r.stderr, r.stderr
     assert '9.9.9"' in r.stderr, r.stderr
+
+
+def test_check_versions_refuses_a_page_js_version_with_spaced_colons(tmp):
+    """A duplicate with whitespace before both colons is valid JavaScript and
+    must be counted as a competing page.js binding (#320)."""
+    copy_root = Path(tmp) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    path, desc, pattern = checker.SITES[3]
+    assert path == 'extension/page.js', path
+    page_copy = copy_root / 'extension' / 'page.js'
+    text = page_copy.read_text(encoding='utf-8')
+    canonical = re.search(pattern, text).group('v')
+    page_copy.write_text(
+        text + '\nconst _dup = { info: { script : { version : '
+        '\'9.9.9\' } } };\n',
+        encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'matches 2 times' in r.stderr, r.stderr
+    assert 'extension/page.js' in r.stderr, r.stderr
+    assert desc in r.stderr, r.stderr
+    assert canonical in r.stderr, r.stderr
+    assert '9.9.9' in r.stderr, r.stderr
 
 
 def main():
