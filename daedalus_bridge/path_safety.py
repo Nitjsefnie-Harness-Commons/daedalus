@@ -12,6 +12,8 @@ everywhere else.
 import os
 import pathlib
 
+from daedalus_bridge.log_safe import log_safe
+
 
 WINDOWS_DEVICE_NAMES = frozenset({
     'CON', 'PRN', 'AUX', 'NUL',
@@ -91,14 +93,27 @@ def _path_within(root, candidate):
             or candidate_key.startswith(root_key + os.sep))
 
 
-def same_path(left, right):
-    """Compare two paths, confirming a transient mismatch once."""
+def same_path(left, right, attempts=None):
+    """Compare paths twice, optionally recording each resolved pair."""
     for _attempt in range(2):
         resolved_left = os.path.realpath(left)
         resolved_right = os.path.realpath(right)
+        if attempts is not None:
+            attempts.append((resolved_left, resolved_right))
         if path_key(resolved_left) == path_key(resolved_right):
             return True
     return False
+
+
+def log_path_refusal(kind, root, parts, attempts):
+    """Emit the resolved evidence for one fail-closed path verdict."""
+    safe_parts = tuple(log_safe(part) for part in parts)
+    safe_attempts = tuple(
+        (log_safe(left), log_safe(right)) for left, right in attempts)
+    print(
+        f'[PATH-REFUSAL] kind={kind} root={log_safe(root)!r} '
+        f'parts={safe_parts!r} attempts={safe_attempts!r}',
+        flush=True)
 
 
 def under(root, *parts):
@@ -123,14 +138,17 @@ def under(root, *parts):
     Raises ValueError, which is what the routes taking these values already
     answer 400 for.
     """
+    attempts = []
     for _attempt in range(2):
         resolved_root = os.path.realpath(root)
         candidate = os.path.realpath(
             os.path.join(resolved_root, *(str(part) for part in parts)))
+        attempts.append((resolved_root, candidate))
         if _path_within(resolved_root, candidate):
             # The resolved path, not the normalized key: the key exists to
             # compare spellings, and the caller needs the filesystem's answer.
             return pathlib.Path(candidate)
+    log_path_refusal('containment', root, parts, attempts)
     raise ValueError(f'path escapes its root: {parts!r}')
 
 
