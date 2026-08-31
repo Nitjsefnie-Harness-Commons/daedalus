@@ -482,8 +482,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     frozenset(local_names), frozenset(chain))
                 if pairs: state.callables[statement.name] = deferred
                 defaults = argument_defaults(statement.args)
-                if pairs and any(evaluated_value(value, state) in (
-                        'ext_cmd', '_ext_cmd', _UNPROVABLE_SENDER)
+                unsafe = ('ext_cmd', '_ext_cmd', _UNPROVABLE_SENDER)
+                if pairs and any(evaluated_value(value, state) in unsafe
                                  for value in defaults):
                     analyze_callable(deferred, [state])
             continue
