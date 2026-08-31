@@ -362,6 +362,7 @@ AGGREGATE_ALLOWED_RESULTS = {
     # wheel is intentionally not strict: its condition skips only after a
     # failed or cancelled dependency, and aggregate rejects that dependency.
     'wheel': frozenset(('success', 'skipped')),
+    'coverage-matrix': frozenset(('success', 'skipped')),
     'coverage': frozenset(('success', 'skipped')),
 }
 CONDITION_CONTEXTS = (
@@ -449,9 +450,11 @@ def test_static_analysis_jobs_keep_their_required_ids_and_names(tmp):
 
 def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
     del tmp
-    expected = ['changes', *GATE_JOBS]
     workflow = _tests_yml()
     for job in ('suites', 'wheel', 'coverage'):
+        expected = ['changes', *GATE_JOBS]
+        if job == 'coverage':
+            expected.append('coverage-matrix')
         needs = _job_needs(workflow, job)
         assert set(needs) == set(expected), (job, needs, expected)
         assert len(needs) == len(set(needs)) == len(expected), (
@@ -604,7 +607,7 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
             assert (result.returncode == 0) is (result_name in accepted), (
                 name, result_name, accepted, result.stdout, result.stderr)
 
-    # Nine dependencies choose two, with four result states per side: 576.
+    # Ten dependencies choose two, with four result states per side: 720.
     for names in itertools.combinations(expected, 2):
         for result_names in itertools.product(
                 AGGREGATE_RESULT_STATES, repeat=2):
