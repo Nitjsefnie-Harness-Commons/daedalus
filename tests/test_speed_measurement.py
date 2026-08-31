@@ -204,6 +204,24 @@ def test_speed_summary_longest_table_orders_head_medians_and_applies_limit(
         '`late`', '`large`'], rows
 
 
+def test_speed_summary_movement_table_orders_by_absolute_delta(tmp):
+    """The largest speedup remains visible when more than ten tests move."""
+    compare = _compare_durations()
+    small_names = [f'small_{index}' for index in range(1, 12)]
+    base_tests = {name: 1.00 for name in small_names}
+    base_tests['speedup'] = 43.12
+    head_tests = {name: 1.01 for name in small_names}
+    head_tests['speedup'] = 3.46
+    base = _durations_tree(tmp, 'base', [base_tests])
+    head = _durations_tree(tmp, 'head', [head_tests])
+    shared, pairs, movements = compare.compare(
+        compare.side_rounds(base), compare.side_rounds(head))
+    lines = _render_speed_summary(compare, shared, pairs, movements)
+    header = '| test | baseline | head | delta |'
+    first_row = lines[lines.index(header) + 2]
+    assert first_row == '| `speedup` | 43.12s | 3.46s | -39.66s |', first_row
+
+
 def test_speed_summary_longest_table_shows_head_median_column(tmp):
     """The duration column is the current commit's median, even when faster."""
     compare = _compare_durations()
