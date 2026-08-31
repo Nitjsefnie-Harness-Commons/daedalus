@@ -384,14 +384,29 @@ tracking issue restores CI's ability to answer, which is the actual goal.
 
 ## Filing a second defect
 
-**File it as its own issue rather than folding it in** - or comment on the
-existing issue if one already tracks it. Confirm it yourself first: a report is
-a lead, not a source, so reproduce it with your own command against the branch
-the issue will name and put *that* output in the body. File while the
-reproduction is still in front of you; a finding held to the end of the work
-lives in a report, and nobody triages a report. Label it as you file it,
-`perceived difficulty` included - filing is the only moment that number can
-honestly be set.
+**Every defect you discover while working a pull request reaches the issue
+tracker** - a flaky test, a bug in code the branch does not touch, a guard that
+passes what it should refuse. This is not optional and not a judgement call
+about importance: a finding held in a report, a review comment or a commit
+message is a finding nobody triages. Search open and closed issues first.
+
+- **No issue tracks it: file it as its own issue rather than folding it in.**
+  Confirm it yourself first: a report is a lead, not a source, so reproduce it
+  with your own command against the branch the issue will name and put *that*
+  output in the body. File while the reproduction is still in front of you.
+  Label it as you file it, `perceived difficulty` included - filing is the
+  only moment that number can honestly be set.
+- **An issue already tracks it: comment there, and only after reading the
+  whole thread** - the body and every comment, to the end. A thread records
+  what has already been tried, reverted, ruled out or re-estimated, and a
+  sighting posted without that reading repeats a comment that is already
+  there or re-proposes an attempt the thread already records as failed. The
+  comment carries what your sighting adds: the branch and SHA, the exact
+  output, and what it changes about the thread's current understanding.
+  Never open a second issue for the same defect.
+- **Disclose it in the pull request body**, under Bugs Discovered, whichever
+  route it took: the issue you filed, or the existing issue you commented on.
+  A reviewer meets the branch's side effects in that section or not at all.
 
 **Whose defect it is comes down to who introduced it, not where it lives.** A
 defect in code the branch adds is the branch's debt and gets fixed there,
