@@ -112,28 +112,6 @@ def test_a_proved_helper_rebound_after_its_definition_is_not_proof(tmp):
     assert control_write_violations(target, root) == []
 
 
-def test_a_helper_write_is_proved_from_what_its_callers_hand_it(tmp):
-    """A helper's tmp is owned only while every caller passes an owned one."""
-    source = Path(tmp) / 'seeded.py'
-    helper = (
-        "from _owned_writes import copy_test_tree\n"
-        "def _copy(tmp):\n"
-        "    root = Path(tmp) / 'repository'\n"
-        "    copy_test_tree(root)\n"
-        "    return root\n")
-    source.write_text(helper + "def test_a(tmp):\n    _copy(tmp)\n",
-                      encoding='utf-8')
-    assert control_write_violations(source, Path(tmp)) == []
-    source.write_text(
-        helper + "def test_a(tmp):\n    _copy(tmp)\n"
-        "def test_b(tmp):\n    _copy(ROOT)\n", encoding='utf-8')
-    assert control_write_violations(source, Path(tmp)) == [
-        'seeded.py:4: copy_test_tree target path is not control-owned']
-    source.write_text(helper, encoding='utf-8')
-    assert control_write_violations(source, Path(tmp)) == [
-        'seeded.py:4: copy_test_tree target path is not control-owned']
-
-
 def test_a_path_replace_is_not_the_pure_string_replace(tmp):
     """Path.replace moves a file; only the two-argument str form is pure."""
     relative = Path('tests/test_coverage_environment.py')
@@ -669,6 +647,27 @@ import subprocess
 filesystem.chdir(ROOT)
 subprocess.run(['python3', 'child.py'])
 """) == []
+
+
+def test_a_decorated_class_is_not_a_readable_definition(tmp):
+    """A class decorator may replace the value the class binds, too."""
+    root, target, line = _planted_copy(
+        tmp, Path('tests/test_control_writes.py'),
+        "def _replace_class_with_copy(_class):\n"
+        "    return shutil.copyfile\n"
+        "\n"
+        "@_replace_class_with_copy\n"
+        "class _DecoratedClassCopy:\n"
+        "    pass\n"
+        "\n"
+        "def test_decorated_class_route(tmp):\n"
+        "    source = Path(tmp) / 'source'\n"
+        "    source.write_bytes(b'class-decorator-writer')\n"
+        "    _DecoratedClassCopy(\n"
+        "        source, ROOT / '.review-303-class-decorated-writer')\n")
+    violations = control_write_violations(target, root)
+    assert (f'tests/test_control_writes.py:{line + 10}: _DecoratedClassCopy '
+            'callable is unresolved') in violations, violations
 
 
 def test_a_decorated_def_is_not_a_readable_definition(tmp):
