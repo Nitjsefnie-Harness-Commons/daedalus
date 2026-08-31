@@ -211,19 +211,37 @@ def test_a_block_sequence_item_may_span_lines_too(tmp):
         ['changes', 'pycodestyle', 'pylint'], 'pyright']
 
 
-def test_a_multiline_plain_scalar_stays_outside_the_subset(tmp):
-    """Only a flow collection carries its own extent across lines.
+def test_a_multiline_plain_scalar_folds_into_one_value(tmp):
+    """A plain scalar the workflow wraps is one value, not half of one.
 
-    A folded plain scalar is valid YAML outside the admitted subset, so both
-    readers name that boundary rather than reading half a value.
+    Folding joins the lines with the single space YAML would and strips each
+    line's own comment, so a comment on the first line cannot truncate the
+    condition at it.
     """
+    folded = '${{ !cancelled() && !failure() }}'
     workflow = _real(tmp, _replaced(
         PLAIN_IF,
         '    if: ${{ !cancelled()\n            && !failure() }}\n'))
-    assert 'unsupported nested content' in _refuses(
-        complete_job_mapping, workflow, 'suites')
-    assert 'unsupported multiline scalar' in _refuses(
-        job_scalar, workflow, 'suites', 'if')
+    assert job_scalar(workflow, 'suites', 'if') == folded
+    assert complete_job_mapping(workflow, 'suites')['if'] == folded
+    assert _job_if_expression(workflow, 'suites') == folded
+    workflow = _real(tmp, _replaced(
+        PLAIN_IF,
+        '    if: ${{ !cancelled()  # never when cancelled\n'
+        '            && !failure() }}\n'), 'comment.yml')
+    assert job_scalar(workflow, 'suites', 'if') == folded
+    assert complete_job_mapping(workflow, 'suites')['if'] == folded
+    assert _job_if_expression(workflow, 'suites') == folded
+
+
+def test_the_shipped_wrapped_conditions_read_the_same_both_ways(tmp):
+    """The workflow the readers exist for wraps three job conditions."""
+    del tmp
+    workflow = _tests_yml()
+    for job in ('actionlint', 'coverage', 'diff-coverage'):
+        folded = _job_if_expression(workflow, job)
+        assert folded is not None and '\n' not in folded, job
+        assert complete_job_mapping(workflow, job)['if'] == folded, job
 
 
 def test_a_flow_collection_spanning_lines_must_still_close(tmp):
