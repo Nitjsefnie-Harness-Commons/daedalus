@@ -99,8 +99,13 @@ def _unquoted(text, owner='', flow=False):
         raise YAMLReadError(f'{owner} has an unbalanced flow collection')
 
 
-def split_mapping_field(text, owner, allow_tabs=False):
-    """Split one inline mapping field without mistaking quoted colons."""
+def find_mapping_field(text, owner, allow_tabs=False):
+    """Split one inline mapping field, or None when it carries no separator.
+
+    Absence of a separator is the caller's question -- a flow entry may be a
+    scalar rather than a single-pair mapping -- while a malformed field is
+    this module's refusal either way.
+    """
     if '\t' in text and not allow_tabs:
         raise YAMLReadError(f'{owner} contains an unsupported tab')
     separation = ' \t' if allow_tabs else ' '
@@ -111,7 +116,15 @@ def split_mapping_field(text, owner, allow_tabs=False):
         if not key:
             raise YAMLReadError(f'{owner} has an empty mapping key')
         return key, text[index + 1:]
-    raise YAMLReadError(f'{owner} has an unsupported mapping field')
+    return None
+
+
+def split_mapping_field(text, owner, allow_tabs=False):
+    """Split one inline mapping field without mistaking quoted colons."""
+    field = find_mapping_field(text, owner, allow_tabs)
+    if field is None:
+        raise YAMLReadError(f'{owner} has an unsupported mapping field')
+    return field
 
 
 def _strip_inline_comment(value):
