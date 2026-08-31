@@ -288,6 +288,27 @@ def test_factory_closure_cells_match_runtime(tmp):
          '    clear = 0\n    if clear:\n        send = ordinary\n'
          'return call, update', '',
          'pair = do_focus_tab(_args)', 'pair[1](True); pair[0]()', True),
+        ('conditional-match-capture',
+         f'send = ext_cmd\ndef call(): return {call}\n'
+         'def update(clear):\n    nonlocal send\n'
+         '    match 0:\n        case clear:\n            pass\n'
+         '    if clear:\n        send = ordinary\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)', 'pair[1](True); pair[0]()', True),
+        ('conditional-zero',
+         f'send = ext_cmd\ndef call(): return {call}\n'
+         'def update(clear):\n    nonlocal send\n'
+         '    if clear:\n        send = ordinary\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)', 'pair[1](0); pair[0]()', True),
+        ('conditional-cache-order',
+         f'send = ext_cmd\ndef call(): return {call}\n'
+         'def update(clear, reset=False):\n    nonlocal send\n'
+         '    if clear:\n        send = ordinary\n'
+         '    if reset:\n        send = ext_cmd\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)',
+         'pair[1](False, True); pair[1](True, False); pair[0]()', False),
     ]
     _assert_export_cases(tmp, cases)
 

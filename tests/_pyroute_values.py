@@ -614,7 +614,8 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
     return states, None
 
 
-def bind_call_arguments(deferred, call, caller, entry, sender_resolver):
+def bind_call_arguments(deferred, call, caller, entry, sender_resolver,
+                        rebound):
     args = deferred.scope.args
     positional = [*args.posonlyargs, *args.args]
     if isinstance(call.func, ast.Attribute) and positional:
@@ -637,10 +638,7 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver):
         if isinstance(expression, ast.Constant):
             literals.append((name, bool(expression.value)))
     if literals:
-        assigned = {node.id for node in ast.walk(deferred.scope)
-                    if isinstance(node, ast.Name) and isinstance(
-                        node.ctx, (ast.Store, ast.Del))}
-        literals = [item for item in literals if item[0] not in assigned]
+        literals = [item for item in literals if item[0] not in rebound]
     return tuple(literals)
 
 

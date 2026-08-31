@@ -170,13 +170,14 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         returned = []
         body = ([deferred.scope.body] if isinstance(
             deferred.scope, ast.Lambda) else deferred.scope.body)
+        rebound = rebound_names(deferred.scope)
         for caller in callers:
             entry_keep = keep | deferred.state.dict_origins.keys()
             entry = overlay(_copy_state_pair(deferred.state), caller,
                             entry_keep, blocked)
             load_callable_cells(deferred, caller, entry)
             literals = (bind_call_arguments(deferred, call, caller, entry,
-                                            resolve_sender_name)
+                                            resolve_sender_name, rebound)
                         if call is not None else ())
             signature = (state_signature(entry), payload_key(entry.dicts),
                          literals)
