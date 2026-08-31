@@ -276,6 +276,18 @@ def test_factory_closure_cells_match_runtime(tmp):
          '    if clear:\n        send = ordinary\n'
          'return call, update', '',
          'pair = do_focus_tab(_args)', 'pair[1](False); pair[0]()', True),
+        ('conditional-clearing',
+         f'send = ext_cmd\ndef call(): return {call}\n'
+         'def update(clear):\n    nonlocal send\n'
+         '    if clear:\n        send = ordinary\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)', 'pair[1](True); pair[0]()', False),
+        ('conditional-rebound',
+         f'send = ext_cmd\ndef call(): return {call}\n'
+         'def update(clear):\n    nonlocal send\n'
+         '    clear = 0\n    if clear:\n        send = ordinary\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)', 'pair[1](True); pair[0]()', True),
     ]
     _assert_export_cases(tmp, cases)
 

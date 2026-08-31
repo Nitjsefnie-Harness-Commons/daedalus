@@ -81,15 +81,13 @@ def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
                                      f'{ast.unparse(kw.value)} passed to '
                                      'ext_cmd')
         return found
-    cmd_at = next((i for i, a in enumerate(node.args)
-                   if isinstance(a, ast.Constant) and a.value == '/command'),
-                  None)
+    cmd_at = next((i for i, a in enumerate(node.args) if isinstance(
+        a, ast.Constant) and a.value == '/command'), None)
     if cmd_at is None or cmd_at + 1 >= len(node.args): return []
     keys = payload_keys(node.args[cmd_at + 1], dicts)
     if keys and 'type' in keys and _OPAQUE_TAB_SPREAD in keys:
         lineno, spread = keys[_OPAQUE_TAB_SPREAD]
-        allowed = getattr(spread, 'id', None) in allowed_opaque_names
-        if not allowed:
+        if getattr(spread, 'id', None) not in allowed_opaque_names:
             return [f'{rel}:{lineno}: opaque spread may replace `tab` on a '
                     'typed /command payload']
     if keys and 'type' in keys and 'tab' in keys:
@@ -104,7 +102,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         flow_exits=None, active_callables=frozenset(),
                         module_scope=False, annotation_mode=(True, True),
                         chain=frozenset(), callable_dict_origins=None,
-                        scope_root=True):
+                        scope_root=True, literals=None):
     annotations_eager, evaluate_annotations = annotation_mode
     violations = []
     fallback = _copy_state_pair(pairs[0]) if pairs else None
@@ -170,18 +168,18 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                                         (deferred, {}))[1]
         outputs = []
         returned = []
-        body = ([deferred.scope.body]
-                if isinstance(deferred.scope, ast.Lambda)
-                else deferred.scope.body)
+        body = ([deferred.scope.body] if isinstance(
+            deferred.scope, ast.Lambda) else deferred.scope.body)
         for caller in callers:
             entry_keep = keep | deferred.state.dict_origins.keys()
             entry = overlay(_copy_state_pair(deferred.state), caller,
                             entry_keep, blocked)
             load_callable_cells(deferred, caller, entry)
-            if call is not None:
-                bind_call_arguments(deferred, call, caller, entry,
-                                    resolve_sender_name)
-            signature = state_signature(entry), payload_key(entry.dicts)
+            literals = (bind_call_arguments(deferred, call, caller, entry,
+                                            resolve_sender_name)
+                        if call is not None else ())
+            signature = (state_signature(entry), payload_key(entry.dicts),
+                         literals)
             hit = cached.get(signature)
             if hit is None:
                 exits = new_exits()
@@ -190,7 +188,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     function_allowed_opaque(deferred.scope), exits,
                     active_callables=active_callables | {key},
                     annotation_mode=(annotations_eager, False),
-                    chain=deferred.captured | deferred.locals)
+                    chain=deferred.captured | deferred.locals,
+                    literals=literals)
                 violations.extend(nested)
                 hit = (caller, (tuple(nested),
                                 dedupe_states([*fallthrough,
@@ -301,9 +300,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for state in current_pairs:
                 bindings = ({}, {}, {})
                 bind_alias_target(node.target, node.value, state, bindings)
-                state.aliases.pop(node.target.id, None)
-                state.generators.pop(node.target.id, None)
-                state.callables.pop(node.target.id, None)
+                for attr in ('aliases', 'generators', 'callables'):
+                    getattr(state, attr).pop(node.target.id, None)
                 state.bound.add(node.target.id)
                 bind_builtin_names(state, {node.target.id})
                 state.aliases.update(bindings[0])
@@ -334,8 +332,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for comparator in node.comparators:
                 active = check_expression(comparator, active)
                 finished.extend(copied(active))
-            return remember(
-                node, dedupe_states([*finished, *active]))
+            return remember(node, dedupe_states([*finished, *active]))
         if isinstance(node, ast.Call):
             callees = check_expression(node.func, current_pairs)
             arguments = sorted([*node.args,
@@ -449,7 +446,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             module_scope=module_scope,
             annotation_mode=(annotations_eager, evaluate_annotations),
             chain=chain, callable_dict_origins=callable_dict_origins,
-            scope_root=False)
+            scope_root=False, literals=literals)
 
     for statement in statements:  # pylint: disable=too-many-nested-blocks
         if pairs: fallback = _copy_state_pair(pairs[0])
@@ -523,6 +520,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             pairs = check_expression(statement.test, pairs)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             truth = literal_truth(statement.test)
+            if truth is None and isinstance(statement.test, ast.Name):
+                truth = dict(literals or ()).get(statement.test.id)
             if truth is True:
                 found, pairs = walk(statement.body, incoming)
                 violations.extend(found)
