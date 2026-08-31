@@ -232,7 +232,7 @@ def _js_regex(text, start, regions):
 
 
 def _html_regions(text):
-    """Regions for an HTML document: comments and quoted attribute values.
+    """Regions for HTML comments, attributes and JavaScript in script tags.
 
     Quotes delimit only inside a tag, so an apostrophe in ordinary text
     opens nothing, and no backslash escapes anything.
@@ -249,10 +249,44 @@ def _html_regions(text):
             continue
         if (text[i] == '<' and i + 1 < end
                 and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
-            i = _html_tag(text, i, regions)
+            tag_start = i
+            i = _html_tag(text, tag_start, regions)
+            if _html_tag_name(text, tag_start, i) == 'script':
+                script_end = _html_script_end(text, i)
+                for start, stop, kind in _javascript_regions(
+                        text[i:script_end]):
+                    regions.append((i + start, i + stop, kind))
+                i = script_end
             continue
         i += 1
     return regions
+
+
+def _html_tag_name(text, start, end):
+    """The lowercase name of an opening tag, or an empty string."""
+    i = start + 1
+    if i >= end or not text[i].isalpha():
+        return ''
+    name_start = i
+    while i < end and (text[i].isalnum() or text[i] in '-:'):
+        i += 1
+    return text[name_start:i].lower()
+
+
+def _html_script_end(text, start):
+    """The start of the next script end tag, or the document end."""
+    i = start
+    while i < len(text):
+        i = text.find('<', i)
+        if i == -1:
+            return len(text)
+        after = i + len('</script')
+        if (text[i:after].lower() == '</script'
+                and (after == len(text) or text[after].isspace()
+                     or text[after] in '>/')):
+            return i
+        i += 1
+    return len(text)
 
 
 def _html_tag(text, start, regions):

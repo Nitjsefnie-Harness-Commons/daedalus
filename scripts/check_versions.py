@@ -93,7 +93,7 @@ SITES = [
      r'''(?P<vq>['"]?)version(?P=vq)\s*:\s*'''
      r'''(?P<q>['"`])(?P<v>(?:(?!(?P=q))[\s\S])*)(?P=q)'''),
     ('dashboard/index.html', 'dashboard rail footer',
-     r'''class=(?P<q>['"])rail-foot(?P=q)>v(?P<v>[^ <]*)'''),
+     r'''(?<![-\w])class=(?P<q>['"])rail-foot(?P=q)>v(?P<v>[^ <]*)'''),
     ('dashboard/index.html', 'dashboard status line',
      r'''<span class=(?P<q>['"])sl-v(?P=q)>(?P<v>[^<]*)</span>'''),
     # The published wheel is a version claim about the wire format, so it is
