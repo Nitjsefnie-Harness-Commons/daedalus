@@ -6,7 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute import py_tab_routing_violations  # noqa: E402
-from test_tab_routing import _assert_focus_cases  # noqa: E402
+from test_tab_routing import (  # noqa: E402
+    _assert_focus_cases, _tracked_focus_verdict)
 
 
 def _scan(tmp, body):
@@ -25,6 +26,16 @@ def _silent(tmp, body):
     found = _scan(tmp, body)
     assert not found, (f'provable-clean shape flagged:\n{body}\n'
                        + '\n'.join(found))
+
+
+def _assert_export_cases(tmp, cases):
+    observed = [
+        (label, *_tracked_focus_verdict(
+            tmp, body, before, '\n'.join((after, execute)).strip()))
+        for label, body, before, after, execute, _ in cases]
+    expected = [(label, value, value)
+                for label, _, _, _, _, value in cases]
+    assert observed == expected, observed
 
 
 def test_opaque_spread_through_unprovable_sender(tmp):
@@ -201,6 +212,129 @@ def test_module_lambda_external_exposure(tmp):
         f'send = ext_cmd\nclass Holder:\n    fn = lambda self: {call}\n'
         'del Holder\n', encoding='utf-8')
     assert not py_tab_routing_violations(source, source.name)
+
+
+def test_factory_returned_module_exposure_matches_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('factory-direct-survives',
+         f'send = ext_cmd\nreturn lambda: {call}', '',
+         'call = do_focus_tab(_args)', 'call()', True),
+        ('factory-direct-deleted',
+         f'send = ext_cmd\nreturn lambda: {call}', '',
+         'call = do_focus_tab(_args)\ndel call', '', False),
+        ('factory-list-survives',
+         f'send = ext_cmd\nreturn [lambda: {call}]', '',
+         'box = do_focus_tab(_args)', 'box[0]()', True),
+        ('factory-list-deleted',
+         f'send = ext_cmd\nreturn [lambda: {call}]', '',
+         'box = do_focus_tab(_args)\ndel box', '', False),
+        ('factory-instance-survives',
+         f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+         f'holder.fn = lambda: {call}\nreturn holder', '',
+         'holder = do_focus_tab(_args)', 'holder.fn()', True),
+        ('factory-instance-deleted',
+         f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+         f'holder.fn = lambda: {call}\nreturn holder', '',
+         'holder = do_focus_tab(_args)\ndel holder', '', False),
+    ]
+    _assert_export_cases(tmp, cases)
+
+
+def test_returned_alternative_selections_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('returned-list-invoked',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'def choose():\n    return [call] if args.flag else [ordinary]\n'
+         'box = choose()\nbox[0]()\nsend = ordinary', '', '', True),
+        ('returned-list-discarded',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'def choose():\n    return [call] if args.flag else [ordinary]\n'
+         'box = choose()\nreturn 0', '', '', False),
+        ('returned-instance-invoked',
+         f'class Holder: pass\nbad = Holder()\ngood = Holder()\n'
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'bad.fn = call\ngood.fn = ordinary\n'
+         'def choose():\n    return bad if args.flag else good\n'
+         'holder = choose()\nholder.fn()\nsend = ordinary', '', '', True),
+        ('returned-instance-discarded',
+         f'class Holder: pass\nbad = Holder()\ngood = Holder()\n'
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'bad.fn = call\ngood.fn = ordinary\n'
+         'def choose():\n    return bad if args.flag else good\n'
+         'holder = choose()\nreturn 0', '', '', False),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
+def test_generator_yielded_callables_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('named-next-invoked',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'gen = (call for _ in [1])\nnext(gen)()\nsend = ordinary',
+         '', '', True),
+        ('inline-next-invoked',
+         f'send = ext_cmd\ngen = (lambda: {call} for _ in [1])\n'
+         'next(gen)()\nsend = ordinary', '', '', True),
+        ('materialized-invoked',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'gen = (call for _ in [1])\nlist(gen)[0]()\nsend = ordinary',
+         '', '', True),
+        ('never-consumed',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'gen = (call for _ in [1])\nreturn 0', '', '', False),
+        ('consumed-not-called',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'gen = (call for _ in [1])\nnext(gen)\nsend = ordinary',
+         '', '', False),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
+def test_nested_function_reachability_matches_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('returned-nested-invoked',
+         f'send = ext_cmd\ndef make():\n    def call(): return {call}\n'
+         '    return call\nholder = make()\nholder()\nsend = ordinary',
+         '', '', True),
+        ('returned-nested-discarded',
+         f'send = ext_cmd\ndef make():\n    def call(): return {call}\n'
+         '    return call\nholder = make()', '', '', False),
+        ('inner-nested-discarded',
+         f'send = ext_cmd\ndef make():\n    def call(): return {call}\n'
+         'make()', '', '', False),
+    ]
+    _assert_focus_cases(tmp, cases)
+
+
+def test_module_container_exposure_matches_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(_args.chrome_tab))"
+    cases = [
+        ('module-block-survives', 'return 0',
+         f'send = ext_cmd\nif True:\n    call = lambda: {call}', '',
+         'call()', True),
+        ('module-block-deleted', 'return 0',
+         f'send = ext_cmd\nif True:\n    call = lambda: {call}', 'del call',
+         '', False),
+        ('module-list-survives', 'return 0',
+         f'send = ext_cmd\nbox = [lambda: {call}]', '',
+         'box[0]()', True),
+        ('module-list-deleted', 'return 0',
+         f'send = ext_cmd\nbox = [lambda: {call}]', 'del box',
+         '', False),
+        ('module-instance-survives', 'return 0',
+         f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+         f'holder.fn = lambda: {call}', '',
+         'holder.fn()', True),
+        ('module-instance-deleted', 'return 0',
+         f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+         f'holder.fn = lambda: {call}', 'del holder',
+         '', False),
+    ]
+    _assert_export_cases(tmp, cases)
 
 
 def main():
