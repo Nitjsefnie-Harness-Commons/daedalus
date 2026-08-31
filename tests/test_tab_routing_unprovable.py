@@ -379,6 +379,37 @@ def test_factory_returned_sets_match_runtime(tmp):
     _assert_export_cases(tmp, cases)
 
 
+def test_deferred_storage_invalidation_matches_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    list_body = f'send = ext_cmd\nreturn [lambda: {call}]'
+    holder_body = (
+        f'class Holder: pass\nholder = Holder()\nsend = ext_cmd\n'
+        f'holder.fn = lambda: {call}\nreturn holder')
+    cases = [
+        ('list-delete-retained', list_body, '',
+         'box = do_focus_tab(_args)', 'box[0]()', True),
+        ('list-delete-cleared', list_body, '',
+         'box = do_focus_tab(_args)\ndel box[0]', '', False),
+        ('list-overwrite-retained', list_body, '',
+         'box = do_focus_tab(_args)', 'box[0]()', True),
+        ('list-overwrite-cleared', list_body, '',
+         'box = do_focus_tab(_args)\nbox[0] = ordinary', '', False),
+        ('list-clear-retained', list_body, '',
+         'box = do_focus_tab(_args)', 'box[0]()', True),
+        ('list-clear-cleared', list_body, '',
+         'box = do_focus_tab(_args)\nbox.clear()', '', False),
+        ('attribute-delete-retained', holder_body, '',
+         'holder = do_focus_tab(_args)', 'holder.fn()', True),
+        ('attribute-delete-cleared', holder_body, '',
+         'holder = do_focus_tab(_args)\ndel holder.fn', '', False),
+        ('attribute-overwrite-retained', holder_body, '',
+         'holder = do_focus_tab(_args)', 'holder.fn()', True),
+        ('attribute-overwrite-cleared', holder_body, '',
+         'holder = do_focus_tab(_args)\nholder.fn = ordinary', '', False),
+    ]
+    _assert_export_cases(tmp, cases)
+
+
 def test_generator_materializer_shape_matches_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     prefix = (f'send = ext_cmd\ncallback = lambda: {call}\n'
