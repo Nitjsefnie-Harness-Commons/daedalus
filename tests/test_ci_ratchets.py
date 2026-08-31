@@ -575,7 +575,8 @@ def _subject_selected(repo, chain):
     """The bare subject the chain announces, run in `repo`."""
     done = subprocess.run(
         [_util.workflow_bash(), '-e', '-o', 'pipefail', '-c', chain],
-        cwd=repo, capture_output=True, text=True, timeout=60)
+        cwd=repo, env=_util.child_coverage('scrub'),
+        capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.stdout, done.stderr)
     line = done.stdout.strip()
     assert line.startswith('subject='), line
