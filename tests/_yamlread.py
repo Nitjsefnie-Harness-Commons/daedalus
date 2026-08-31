@@ -10,6 +10,7 @@ import re
 
 from _yamlscalar import (
     YAMLReadError,
+    _strip_inline_comment,
     decode_inline_scalar as _decode_inline_scalar,
     split_mapping_field as _split_mapping_field,
 )
@@ -553,8 +554,10 @@ def _scalar_value(lines, entry, end, name):
         if value[:1] in ('[', '{'):
             raise YAMLReadError(f'{name} is not a scalar')
         quoted = value[:1] in ('"', "'")
-        if not quoted and ' #' in value:
-            raise YAMLReadError(f'{name} has an unsupported inline comment')
+        if not quoted:
+            value = _strip_inline_comment(value)
+            if not value:
+                raise YAMLReadError(f'{name} has no scalar value')
         for following in range(index + 1, end):
             if (_meaningful(lines[following])
                     and _indent(lines[following]) > key_indent):

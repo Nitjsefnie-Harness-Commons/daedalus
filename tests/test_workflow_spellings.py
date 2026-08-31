@@ -183,6 +183,8 @@ def test_both_readers_decode_one_scalar_spelling_set(tmp):
         "'${{ !cancelled() && !failure() }}'",
         '"${{ !cancelled() && !failure() }}"',
         '"${{ \\x21cancelled() && \\x21failure() }}"',
+        '${{ !cancelled() && !failure() }}  # why',
+        '"${{ !cancelled() && !failure() }}"  # why',
     )
     for spelling in spellings:
         source = _real(tmp, 'jobs:\n  sample:\n    if: ' + spelling + '\n')
