@@ -109,9 +109,14 @@ def _decode_value(lines, index, end, indent, key, raw_value):
             lines, entry, end, f'step {key}')
     child = _reader._first_child(
         lines, index + 1, end, indent)
-    if child is not None:
+    if child is None:
+        return _decode_inline_value(raw_value, f'step value for {key!r}')
+    if value[:1] in ('[', '{', "'", '"'):
         raise YAMLReadError(f'step {key} has unsupported nested content')
-    return _decode_inline_value(raw_value, f'step value for {key!r}')
+    return _decode_inline_value(
+        _reader._folded_plain(
+            lines, index, end, indent, value, f'step {key}'),
+        f'step value for {key!r}')
 
 
 def _decode_scalar_mapping(lines, start, end, parent_indent, owner):
