@@ -224,6 +224,18 @@ def test_function_value_timelines_match_runtime(tmp):
          "function invoke() { promote(); }\n"
          "promote = () => { send = ordinary; };\ninvoke();\n"
          "send('focus-tab', { tab: chromeTab });\n", False),
+        ('concise-body-alias-call', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "let defer = () => send('focus-tab', { tab: chromeTab });\n"
+         "promote();\ndefer();\n", True),
+        ('uninvoked-concise-body-alias-call', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "let defer = () => send('focus-tab', { tab: chromeTab });\n"
+         "promote();\nvoid defer;\n", False),
+        ('concise-deferred-chain', "let send = ordinary;\n"
+         "let promote = ordinary;\n"
+         "const deferred = () => promote('focus-tab', { tab: chromeTab });\n"
+         "promote = extCmd;\ndeferred();\n", True),
         ('uninvoked-callable-demotion', "let send = ordinary;\n"
          "let promote = () => { send = extCmd; };\n"
          "function demote() { promote = ordinary; }\n"
