@@ -33,8 +33,8 @@ def _target_key(candidate):
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException:
-        # A failure of this injector probe is not the caller's and stays
-        # here; an interrupt is the caller's, so it is re-raised above.
+        # This probe's own failure stays here. An interrupt is never
+        # suppressed, even one a receiver itself raised.
         return None
 
 

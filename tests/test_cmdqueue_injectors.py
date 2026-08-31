@@ -664,13 +664,14 @@ def test_target_key_propagates_interrupts_but_suppresses_probe_errors(tmp):
 
         try:
             return 'returned', _target_key(Receiver())
-        except BaseException as caught:
-            return 'raised', type(caught)
+        except (KeyboardInterrupt, SystemExit) as caught:
+            return 'raised', caught
 
     for interrupt in (KeyboardInterrupt(), SystemExit(3)):
         outcome = key_outcome(interrupt)
-        assert outcome == ('raised', type(interrupt)), (
-            'injector probe swallowed an interrupt', interrupt, outcome)
+        assert outcome[0] == 'raised' and outcome[1] is interrupt, (
+            'injector probe replaced or swallowed an interrupt', interrupt,
+            outcome)
     suppressed = key_outcome(TypeError('receiver refused the path protocol'))
     assert suppressed == ('returned', None), (
         'injector probe exception reached the caller', suppressed)
