@@ -212,11 +212,12 @@ def _decode_complete_value(
             lines, entry, end, f'{owner} {key}')
     child = _reader._first_child(lines, index + 1, end, indent)
     if value:
-        if child is not None:
+        joined = _flow_continuation(lines, index, end, value)
+        if joined is None and child is not None:
             raise YAMLReadError(
                 f'{owner} {key} has nested scalar content')
         return _decode_complete_inline(
-            raw_value, f'{owner} value for {key!r}')
+            joined or raw_value, f'{owner} value for {key!r}')
     if child is None:
         raise YAMLReadError(f'{owner} {key} has no value')
     child_indent = _reader._indent(lines[child])
@@ -226,6 +227,27 @@ def _decode_complete_value(
             lines, index + 1, end, indent, f'{owner} {key}')
     return _decode_complete_mapping(
         lines, index + 1, end, indent, f'{owner} {key}')
+
+
+def _flow_continuation(lines, index, end, value):
+    """Join the lines one flow collection spans, or None when it spans one.
+
+    A flow collection is the one value whose extent indentation does not
+    settle, so its continuation lines are gathered before the ordinary
+    inline decode reads it; each contributes its own line's comment strip,
+    and folding joins them with the single space YAML would.
+    """
+    if value[:1] not in ('[', '{'):
+        return None
+    parts = [value]
+    for following in range(index + 1, end):
+        if not _reader._meaningful(lines[following]):
+            continue
+        text, _ended = lines[following]
+        parts.append(_strip_inline_comment(text.strip(' ')))
+    if len(parts) == 1:
+        return None
+    return ' '.join(part for part in parts if part)
 
 
 def _decode_complete_sequence(lines, start, end, parent_indent, owner):
@@ -261,13 +283,16 @@ def _decode_complete_sequence(lines, start, end, parent_indent, owner):
         else:
             mapping_item = True
         if not mapping_item:
+            joined = _flow_continuation(
+                lines, index, item_end,
+                _strip_inline_comment(raw_value.strip(' ')))
             child = _reader._first_child(
                 lines, index + 1, item_end, item_indent)
-            if child is not None:
+            if joined is None and child is not None:
                 raise YAMLReadError(
                     f'{owner} scalar item has nested content')
             decoded.append(_decode_complete_inline(
-                raw_value, f'{owner} item'))
+                joined or raw_value, f'{owner} item'))
             continue
         decoded.append(_decode_complete_sequence_mapping(
             lines, index, item_end, item_indent, owner))

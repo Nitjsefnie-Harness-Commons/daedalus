@@ -147,6 +147,49 @@ def test_a_quoted_flow_item_keeps_its_own_punctuation(tmp):
         assert _job_needs(workflow, 'suites') == expected, spelling
 
 
+def test_a_flow_collection_may_span_lines(tmp):
+    """Wrapping a flow collection over lines cannot change what it names."""
+    block = _job_needs(_tests_yml(), 'suites')
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS,
+        '    needs: [changes, pycodestyle, pylint,  # the fast gates\n'
+        '            pyright, eslint, actionlint]\n'))
+    assert _job_needs(workflow, 'suites') == block
+    outputs = _job_output_mapping(_tests_yml(), 'changes')
+    workflow = _real(tmp, _replaced(
+        BLOCK_OUTPUTS,
+        "    outputs: {matrix: '${{ steps.classify.outputs.matrix }}',\n"
+        "              docs_only: '${{ steps.classify.outputs.docs_only }}',\n"
+        "              workflows:"
+        " '${{ steps.classify.outputs.workflows }}'}\n"), 'outputs.yml')
+    assert _job_output_mapping(workflow, 'changes') == outputs
+    assert _job_output_step_ids(workflow, 'changes') == {'classify'}
+
+
+def test_a_block_sequence_item_may_span_lines_too(tmp):
+    """A sequence item is a value like any other, so it may span lines."""
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS,
+        '    needs:\n'
+        '      - [changes, pycodestyle,\n'
+        '         pylint]\n'
+        '      - pyright\n'))
+    assert complete_job_mapping(workflow, 'suites')['needs'] == [
+        ['changes', 'pycodestyle', 'pylint'], 'pyright']
+
+
+def test_a_flow_collection_spanning_lines_must_still_close(tmp):
+    """Spanning lines buys no relief from the flow grammar."""
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [changes,\n            pylint\n'))
+    assert 'unbalanced flow collection' in _refuses(
+        _job_needs, workflow, 'suites')
+    workflow = _real(tmp, _replaced(
+        BLOCK_NEEDS, '    needs: [changes,\n            ${{ x }}]\n'),
+        'indicator.yml')
+    assert 'flow indicator' in _refuses(_job_needs, workflow, 'suites')
+
+
 def test_flow_outputs_mapping_reads_like_the_block_mapping(tmp):
     """A flow mapping carries the same outputs as the block mapping."""
     block = _job_output_mapping(_tests_yml(), 'changes')
