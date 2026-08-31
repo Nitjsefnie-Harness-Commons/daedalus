@@ -144,12 +144,13 @@ class InvocationReplay:
             path_optional = inherited_optional or len(bodies) > 1
             for start, kind, item in sorted(operations):
                 if kind == 'bind':
-                    self._apply_assignment(
+                    applied = self._apply_assignment(
                         item, start, function_scope, path_optional,
                         overrides, inherited, limits)
-                    sources.pop(self.visible_binding(
-                        item.group(1), start), None)
-                    writes.append((start, item, path_optional))
+                    if applied:
+                        sources.pop(self.visible_binding(
+                            item.group(1), start), None)
+                        writes.append((start, item, path_optional))
                     continue
                 nested_optional = (path_optional or self.optional_write(
                     start, self.scopes[function_scope]['end']))
@@ -172,29 +173,45 @@ class InvocationReplay:
     def _override_parameters(self, overrides, inherited, function_scope,
                              call_start, args, limits, sender_sources):
         scope = self.scopes[function_scope]
-        for name, span in zip(scope['param_order'], args):
-            if name is None:
-                continue
-            expr = self.mask[span[0]:span[1]].strip()
+        for names, span in zip(scope['param_order'], args):
+            if isinstance(names, str):
+                names = (names,)
+            raw_expr = self.mask[span[0]:span[1]]
+            expr = raw_expr.strip()
+            expr_start = span[0] + len(raw_expr) - len(raw_expr.lstrip())
             if expr == 'undefined':
                 continue
-            target = self.visible_binding(name, scope['start'])
-            source = (self.visible_binding(expr, call_start)
-                      if re.fullmatch(r'[\w$]+', expr) else None)
-            direct = self.body_at(self.mask, span[0])
-            overrides[target] = (
-                self.timeline.values_at(source, inherited, limits)
-                if source is not None else (direct,))
-            sender_sources[target] = sender_sources.get(source, span)
+            for name in names:
+                source_span = span
+                source_expr = expr
+                if expr.startswith('{'):
+                    member = re.search(
+                        r'\b' + re.escape(name)
+                        + r'\s*:\s*([\w$]+)', expr)
+                    if member:
+                        source_span = (
+                            expr_start + member.start(1),
+                            expr_start + member.end(1))
+                        source_expr = member.group(1)
+                source = (self.visible_binding(source_expr, call_start)
+                          if re.fullmatch(r'[\w$]+', source_expr) else None)
+                direct = self.body_at(self.mask, source_span[0])
+                value = (
+                    self.timeline.values_at(source, inherited, limits)
+                    if source is not None else (direct,))
+                target = self.visible_binding(name, scope['start'])
+                overrides[target] = value
+                sender_sources[target] = sender_sources.get(
+                    source, source_span)
 
     def _apply_assignment(self, match, start, function_scope, path_optional,
                           overrides, inherited, limits):
         target = self.visible_binding(match.group(1), start)
         if target is None:
-            return
+            return False
         before_body = start < self.scopes[function_scope]['start']
         if before_body and target in overrides:
-            return
+            return False
         execution = limits + ((function_scope, start),)
         value = self.timeline.assignment_value(
             target, start, overrides, execution)
@@ -209,3 +226,4 @@ class InvocationReplay:
         local = owner['param_start'] <= target[1]
         if not local or target[2] > owner['end']:
             inherited[target] = value
+        return True
