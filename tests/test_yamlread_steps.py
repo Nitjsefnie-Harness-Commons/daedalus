@@ -600,65 +600,38 @@ def test_step_scalars_refuses_a_wrapped_plain_scalar(tmp):
     raise AssertionError('step_scalars truncated a wrapped plain scalar')
 
 
-def test_a_wrapped_mapping_value_must_start_as_plain(tmp):
-    """Quoted, flow, block, and empty starts are not plain continuations."""
+def test_workflow_step_items_refuses_a_wrapped_name_or_id(tmp):
+    """The CI step reader refuses wrapped identifying fields in full."""
     del tmp
-    spellings = (
-        "      A: 'one'\n        two\n",
-        '      A: [one]\n        two\n',
-        '      A: |\n        two\n',
-        '      A:\n        two\n',
-    )
-    for spelling in spellings:
-        source = 'jobs:\n  sample:\n    env:\n' + spelling
+    for key in ('name', 'id'):
+        source = (
+            'jobs:\n  sample:\n    steps:\n'
+            f'      - {key}: s\n'
+            '          t\n'
+            '        run: true\n')
         try:
-            job_mapping(source, 'sample', 'env')
+            workflow_step_items(source, 'sample')
         except YAMLReadError as error:
-            assert 'unsupported nested value' in str(error), str(error)
+            assert 'unsupported multiline scalar' in str(error), str(error)
             continue
-        raise AssertionError(f'job_mapping folded {spelling!r}')
+        raise AssertionError(
+            f'workflow_step_items truncated a wrapped step {key}')
 
 
-def test_a_wrapped_mapping_plain_must_pass_the_plain_guard(tmp):
-    """An anchor cannot enter through the mapping reader's fold path."""
+def test_step_lookup_refuses_a_wrapped_name(tmp):
+    """The named-step lookup refuses a name whose whole value wraps."""
     del tmp
     source = (
-        'jobs:\n  sample:\n    env:\n'
-        '      A: &x one\n'
-        '        two\n')
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: s\n'
+        '          t\n'
+        '        run: true\n')
     try:
-        job_mapping(source, 'sample', 'env')
-    except YAMLReadError as error:
-        assert 'unsupported plain scalar' in str(error), str(error)
-        return
-    raise AssertionError('job_mapping folded an anchored plain scalar')
-
-
-def test_a_wrapped_mapping_value_stays_in_its_own_section(tmp):
-    """One mapping value cannot absorb a sibling value's continuation."""
-    del tmp
-    source = (
-        'jobs:\n  sample:\n    env:\n'
-        '      A: one\n'
-        '      B: three\n'
-        '        four\n')
-    assert job_mapping(source, 'sample', 'env') == {
-        'A': 'one', 'B': 'three four'}
-
-
-def test_a_comment_ends_a_wrapped_mapping_value(tmp):
-    """Text after an inline comment cannot continue a mapping value."""
-    del tmp
-    source = (
-        'jobs:\n  sample:\n    env:\n'
-        '      A: one # comment\n'
-        '        two\n')
-    try:
-        job_mapping(source, 'sample', 'env')
+        step_scalar(source, 'sample', 's', 'run')
     except YAMLReadError as error:
         assert 'unsupported multiline scalar' in str(error), str(error)
         return
-    raise AssertionError('job_mapping folded past an inline comment')
+    raise AssertionError('step lookup truncated a wrapped step name')
 
 
 def test_step_mapping_fold_sees_the_unstripped_first_line(tmp):

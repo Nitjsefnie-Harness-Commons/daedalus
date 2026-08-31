@@ -369,4 +369,5 @@
 !/tests/test_workflow_triggers.py
 !/tests/test_yamlread.py
 !/tests/test_yamlread_blocks.py
+!/tests/test_yamlread_mapping_values.py
 !/tests/test_yamlread_steps.py

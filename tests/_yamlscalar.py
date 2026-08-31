@@ -4,6 +4,7 @@
 the admitted subset. Flow collections are read only by the test-side workflow
 readers, so their splitters live here rather than shipping in `scripts/ci/`.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ __all__ = (
     '_strip_inline_comment',
     'check_plain_scalar',
     'decode_inline_scalar',
+    'decode_inline_value',
     'find_mapping_field',
     'flow_depth',
     'split_flow_collection',
@@ -34,6 +36,9 @@ __all__ = (
 
 _FORBIDDEN_LEADERS = (
     '&', '*', '!', '@', '`', ':', '- ', '? ', ',', ']', '}', '%', '|', '>')
+_EXPRESSION = re.compile(r'^\$\{\{ [A-Za-z0-9_.*()[\]]+ \}\}$')
+_PLAIN_WITH_SPACES = re.compile(
+    r'^[A-Za-z0-9_.][-A-Za-z0-9_.@/+$() ]*$')
 
 
 def check_plain_scalar(value, owner):
@@ -45,13 +50,22 @@ def check_plain_scalar(value, owner):
     it.  The list comes from the grammar, not from the spellings previous
     rounds happened to find.
     """
-    if value == '-' or value.startswith(_FORBIDDEN_LEADERS):
+    if value in ('-', '?') or value.startswith(_FORBIDDEN_LEADERS):
         raise YAMLReadError(f'{owner} has an unsupported plain scalar')
     if ': ' in value or '\t' in value or any(
             ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
             for char in value):
         raise YAMLReadError(f'{owner} has an unsupported plain scalar')
     return value
+
+
+def decode_inline_value(raw_value, owner):
+    """Decode inline values admitted by complete workflow readers."""
+    value = raw_value.strip(' ')
+    if (_EXPRESSION.fullmatch(value)
+            or _PLAIN_WITH_SPACES.fullmatch(value)):
+        return value
+    return decode_inline_scalar(raw_value, owner)
 
 
 def flow_depth(text):

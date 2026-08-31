@@ -7,9 +7,11 @@ Admitted: plain, single-quoted and double-quoted scalars, folded and literal
 block scalars, block mappings and block sequences, and flow collections of
 any of those. A value spans lines only where its entry point admits the
 construct. Wrapped plain scalars fold in `job_scalar`, `job_mapping`,
-`top_level_mapping`, `step_scalar`, `step_mappings`, `workflow_mapping`, and
-`complete_job_mapping`. `step_scalars`, `step_mapping_scalar`, and nested
-scalar mappings under `step_mappings` refuse them. Folding joins with one
+`top_level_mapping`, `step_scalar` values, `step_mappings` values,
+`workflow_mapping`, and `complete_job_mapping`. `step_scalars`,
+`step_mapping_scalar`, nested scalar mappings under `step_mappings`, name and
+id fields in `workflow_step_items`, and the step-name lookup used by
+`step_scalar` and `step_mapping_scalar` refuse them. Folding joins with one
 space, and each line of a flow collection contributes its own comment strip
 because a comment between entries is content YAML skips; a comment ENDS a
 plain scalar instead, so nothing continues one after it.

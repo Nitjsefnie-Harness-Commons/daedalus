@@ -1,6 +1,5 @@
 """Decode complete step mappings from the bounded workflow YAML subset."""
 # pylint: disable=protected-access
-import re
 
 import _yamlread as _reader
 from _yamlscalar import (
@@ -8,6 +7,7 @@ from _yamlscalar import (
     _strip_inline_comment,
     check_plain_scalar,
     decode_inline_scalar,
+    decode_inline_value as _decode_inline_value,
     find_mapping_field,
     flow_depth,
     split_flow_collection,
@@ -15,11 +15,6 @@ from _yamlscalar import (
     split_mapping_field,
 )
 from workflow_yaml import workflow_step_items
-
-
-_EXPRESSION = re.compile(r'^\$\{\{ [A-Za-z0-9_.*()[\]]+ \}\}$')
-_PLAIN_WITH_SPACES = re.compile(
-    r'^[A-Za-z0-9_.][-A-Za-z0-9_.@/+$() ]*$')
 
 
 def step_mappings(workflow, job):
@@ -166,15 +161,6 @@ def _decode_scalar_mapping(lines, start, end, parent_indent, owner):
         values[key] = _decode_inline_value(
             raw_value, f'{owner} value for {key!r}')
     return values
-
-
-def _decode_inline_value(raw_value, owner):
-    """Decode the inline subset plus one complete Actions expression."""
-    value = raw_value.strip(' ')
-    if (_EXPRESSION.fullmatch(value)
-            or _PLAIN_WITH_SPACES.fullmatch(value)):
-        return value
-    return decode_inline_scalar(raw_value, owner)
 
 
 def _decode_complete_mapping(lines, start, end, parent_indent, owner):
