@@ -3,6 +3,7 @@ import contextlib
 import inspect
 import io
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -10,8 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cmdqueue  # noqa: E402
 
-# These guard elapsed time and stalled progress, never sleep multiplicity.
+# These bound runaways, never virtual pacing or sleep multiplicity.
 _RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
+_RUNAWAY_WALL = 5.0
 _NO_PROGRESS_LIMIT = 200_000
 
 
@@ -116,6 +118,7 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 @contextlib.contextmanager
 def _virtual_cmdqueue_clock(max_sleeps=None):
     original = _cmdqueue.time
+    wall_started = original.perf_counter()
     # A large power-of-two origin exposes sleeps too small to move the clock.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
     elapsed = [0.0]
@@ -134,30 +137,41 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
         next_correction = (advanced - elapsed[0]) - adjusted
         return advanced, next_correction
 
+    def check_wall_bound():
+        wall_elapsed = original.perf_counter() - wall_started
+        if wall_elapsed >= _RUNAWAY_WALL:
+            raise AssertionError(
+                'virtual clock wall-time bound reached after '
+                f'{wall_elapsed:.3f}s (limit {_RUNAWAY_WALL:.3f}s)')
+
     class Clock:
         def monotonic(self):
+            check_wall_bound()
             return origin + elapsed[0]
 
         perf_counter = monotonic
 
         def record_read(self):
+            check_wall_bound()
             events.append(('read', read_cost))
             elapsed[0], correction[0] = accumulated(read_cost)
             no_progress_count[0] = 0
 
         def sleep(self, seconds):
-            if seconds < 0:
-                raise ValueError('sleep length must be non-negative')
+            if not math.isfinite(seconds) or seconds < 0:
+                raise ValueError(
+                    'sleep length must be non-negative and finite')
             if max_sleeps is not None:
                 if sleep_count[0] >= max_sleeps:
                     raise AssertionError(
                         f'virtual clock exceeded {max_sleeps} sleeps')
+            check_wall_bound()
             advanced, next_correction = accumulated(seconds)
             if advanced >= _RUNAWAY_ELAPSED:
                 raise AssertionError(
                     'virtual clock elapsed guard reached '
                     f'{advanced:.3f}s from its origin')
-            progressed = origin + advanced != self.monotonic()
+            progressed = origin + advanced != origin + elapsed[0]
             if not progressed and no_progress_count[0] >= _NO_PROGRESS_LIMIT:
                 raise AssertionError(
                     'virtual clock made no progress for '

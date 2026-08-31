@@ -147,24 +147,61 @@ def test_virtual_clock_default_guard_stops_zero_time_runaway(_tmp):
 
 def test_virtual_clock_stops_nonzero_observable_stall(_tmp):
     failure = None
-    attempts = 0
+    tripped_at = None
     expected_sleeps = 200_000
     smallest_positive = math.ulp(0.0)
     with _virtual_cmdqueue_clock() as (clock, events, origin):
         try:
-            while True:
-                attempts += 1
+            for tripped_at in range(1, 2 * expected_sleeps + 1):
                 clock.sleep(smallest_positive)
         except AssertionError as caught:
             failure = caught
     assert isinstance(failure, AssertionError), failure
-    assert attempts == expected_sleeps + 1, attempts
+    assert tripped_at == expected_sleeps + 1, tripped_at
     assert len(events) == expected_sleeps, len(events)
     assert clock.monotonic() == origin, (clock.monotonic(), origin)
     message = str(failure).lower()
     assert 'virtual clock' in message, message
     assert 'progress' in message, message
     assert _has_numeric_token(message, str(expected_sleeps)), message
+
+
+def test_virtual_clock_bounds_wait_by_real_wall_time(_tmp):
+    original_perf_counter = _cmdqueue.time.perf_counter
+    samples = iter((100.0, 106.0))
+
+    def perf_counter():
+        return next(samples)
+
+    failure = None
+    _cmdqueue.time.perf_counter = perf_counter
+    try:
+        with _virtual_cmdqueue_clock() as (clock, events, _origin):
+            try:
+                clock.sleep(2 ** -33)
+            except AssertionError as caught:
+                failure = caught
+    finally:
+        _cmdqueue.time.perf_counter = original_perf_counter
+    assert isinstance(failure, AssertionError), failure
+    assert events == [], events
+    message = str(failure).lower()
+    assert 'virtual clock' in message, message
+    assert 'wall' in message, message
+    assert 'bound' in message, message
+
+
+def test_virtual_clock_rejects_non_finite_sleep_requests(_tmp):
+    for requested in (math.nan, math.inf, -math.inf):
+        failure = None
+        with _virtual_cmdqueue_clock() as (clock, events, origin):
+            try:
+                clock.sleep(requested)
+            except ValueError as caught:
+                failure = caught
+        assert isinstance(failure, ValueError), (requested, failure)
+        assert events == [], (requested, events)
+        assert clock.monotonic() == origin, (requested, clock.monotonic())
 
 
 if __name__ == '__main__':
