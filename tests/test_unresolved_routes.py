@@ -16,6 +16,13 @@ from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _DECLARATION_LINE = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
+_CONTAINER_PRELUDE = (
+    "def _real_module_copy(tmp, relative):\n"
+    "    root = Path(tmp) / 'repository'\n"
+    "    return root, root / relative\n"
+    "def test_control(tmp):\n"
+    "    relative = Path('tests/probe.py')\n"
+    "    first, *targets = _real_module_copy(tmp, relative)\n")
 
 
 def _module_text(target):
@@ -235,13 +242,7 @@ def test_a_container_reached_through_an_alias_is_not_proof(tmp):
 def test_a_subscript_read_alone_keeps_a_container_proved(tmp):
     """Only handing the name on retires it; reading through it does not."""
     source = Path(tmp) / 'escape.py'
-    helper = (
-        "def _real_module_copy(tmp, relative):\n"
-        "    root = Path(tmp) / 'repository'\n"
-        "    return root, root / relative\n"
-        "def test_control(tmp):\n"
-        "    relative = Path('tests/probe.py')\n"
-        "    first, *targets = _real_module_copy(tmp, relative)\n")
+    helper = _CONTAINER_PRELUDE
     source.write_text(
         helper + "    targets[0].write_bytes(b'ok')\n", encoding='utf-8')
     assert control_write_violations(source, Path(tmp)) == []
@@ -253,6 +254,62 @@ def test_a_subscript_read_alone_keeps_a_container_proved(tmp):
         assert control_write_violations(source, Path(tmp)) == [
             'escape.py:8: write_bytes target path is not control-owned'
         ], escape
+
+
+def _container_route_violations(tmp, route):
+    """The checker's answer to `route` planted after the container binds."""
+    source = Path(tmp) / 'nested.py'
+    source.write_text(_CONTAINER_PRELUDE + route, encoding='utf-8')
+    return control_write_violations(source, Path(tmp))
+
+
+def test_a_container_handed_to_a_nested_scope_header_is_not_proof(tmp):
+    """A default is a hand-off even when the whole default is the name."""
+    for header in ('held=targets', '*, held=targets', 'held: int = targets'):
+        route = (f"    def inner({header}):\n"
+                 "        held.append(ROOT / 'x')\n"
+                 "    inner()\n")
+        line = _CONTAINER_PRELUDE.count('\n') + route.count('\n') + 1
+        assert _container_route_violations(
+            tmp, route + "    targets[-1].write_bytes(b'mutated')\n") == [
+                f'nested.py:{line}: write_bytes target path is not '
+                'control-owned'], header
+
+
+def test_a_container_named_in_a_nested_scope_body_is_not_proof(tmp):
+    """A nested scope that names the container has been handed it."""
+    routes = (
+        "    def inner():\n"
+        "        targets.append(ROOT / 'x')\n"
+        "    inner()\n",
+        "    def inner():\n"
+        "        nonlocal targets\n"
+        "        targets = [ROOT / 'x']\n"
+        "    inner()\n",
+        "    class _Body:\n"
+        "        targets.append(ROOT / 'x')\n")
+    for route in routes:
+        line = _CONTAINER_PRELUDE.count('\n') + route.count('\n') + 1
+        assert _container_route_violations(
+            tmp, route + "    targets[-1].write_bytes(b'mutated')\n") == [
+                f'nested.py:{line}: write_bytes target path is not '
+                'control-owned'], route
+    assert _container_route_violations(
+        tmp,
+        "    def inner(held=None):\n"
+        "        return held\n"
+        "    inner()\n"
+        "    targets[0].write_bytes(b'ok')\n") == []
+
+
+def test_an_alias_of_a_container_is_never_proof(tmp):
+    """The alias shares the object, so a mutation through either retires it."""
+    assert _container_route_violations(
+        tmp,
+        "    alias = targets\n"
+        "    targets.append(ROOT / 'x')\n"
+        "    alias[-1].write_bytes(b'mutated')\n") == [
+            'nested.py:9: write_bytes target path is not control-owned']
 
 
 if __name__ == '__main__':

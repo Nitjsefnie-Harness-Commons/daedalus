@@ -4,7 +4,8 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 A control may call only what tests/_control_calls.py names, and may
 write only to a path its own text proves lies below storage it owns. A
-name proves a path only while it is bound once and never handed on; a
+name proves a path only while it is bound once and never handed on —
+to another name, a call, a container or a nested scope; a
 helper proves its returns from its body and is judged with the kinds
 its callers hand it, and never through a spread argument; and a call
 the tables do not name is refused, not skipped.
@@ -297,32 +298,48 @@ def _seeded_parameters(call, function, owned, trusted, mutated, context,
     return seeded
 
 
+def _closure_names(scope):
+    """Names a nested scope reaches without binding them itself."""
+    local = _scope_local_names(scope)
+    names = set()
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Name) and node.id not in local:
+            names.add(node.id)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names.update(node.names)
+    return names
+
+
 def _escaped_names(scope):
     """Names read anywhere but through their own subscript.
 
     Reaching a container through another name is reaching the same
-    object, so a name that is ever handed on — bound, passed, listed —
-    no longer proves what the container holds.
+    object, so a name that is ever handed on — bound, passed, listed,
+    or reached from a nested scope — no longer proves what it holds.
     """
-    escaped = set()
-    for node in _scope_nodes(scope):
-        for child in ast.iter_child_nodes(node):
-            if (isinstance(child, ast.Name)
-                    and isinstance(child.ctx, ast.Load)
-                    and not (isinstance(node, ast.Subscript)
-                             and node.value is child)):
-                escaped.add(child.id)
+    nodes = list(_scope_nodes(scope))
+    reads = {id(node.value) for node in nodes
+             if isinstance(node, ast.Subscript)}
+    escaped = {node.id for node in nodes
+               if isinstance(node, ast.Name)
+               and isinstance(node.ctx, ast.Load)
+               and id(node) not in reads}
+    for node in nodes:
+        if isinstance(node, _SCOPES[1:]):
+            escaped |= _closure_names(node)
     return escaped
 
 
-def _mutated_container_names(scope):
+def _mutated_container_names(scope, bindings):
     """Names whose elements a subscript can no longer prove.
 
     Ownership of a container is a claim about what it holds, and any
     mutation of it — an assignment into it or a call through one of its own
-    methods — retires the claim, whatever the method is named.
+    methods — retires the claim, whatever the method is named. A name bound
+    to another name shares that object, so it never proves an element.
     """
-    mutated = set()
+    mutated = {name for name, sources in bindings.items()
+               if any(isinstance(source, ast.Name) for source in sources)}
     for node in _scope_nodes(scope):
         mutated.update(_subscript_bases(node))
         if (isinstance(node, ast.Call)
@@ -374,7 +391,7 @@ def _owned_path_names(scope, functions=None, seeded=None, depth=0):
             bindings.setdefault(node.id, []).append(_UNKNOWN_PATH)
         for name in pattern_names(node):
             bindings.setdefault(name, []).append(_UNKNOWN_PATH)
-    mutated = _mutated_container_names(scope)
+    mutated = _mutated_container_names(scope, bindings)
     # A name resolves to one kind only when every binding agrees on it, so
     # a relative literal stays relative and a contested name stays unknown.
     kinds = {}
