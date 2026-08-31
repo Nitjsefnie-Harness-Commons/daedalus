@@ -185,6 +185,7 @@ def _job_output_mapping(workflow, job):
     if source is None:
         return None
     decoded = complete_job_mapping(source, job)
+    assert decoded is not None, job
     outputs = decoded.get('outputs')
     if not isinstance(outputs, dict):
         raise ValueError(f'job {job!r} outputs is not a mapping')
@@ -237,12 +238,7 @@ def _output_reference(value):
 
 
 def _job_if_expression(workflow, job):
-    """Return the complete job-level if expression, including continuations.
-
-    Workflows in this repository use one canonical source spelling; these
-    tests pin it, so a failure means the spelling changed rather than the
-    guard broke.
-    """
+    """Return the complete job-level if expression, including continuations."""
     source = _field_source(workflow, job, 'if')
     if source is None:
         return None
