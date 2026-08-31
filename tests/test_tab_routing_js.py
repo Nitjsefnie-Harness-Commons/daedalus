@@ -250,6 +250,53 @@ def test_function_value_timelines_match_runtime(tmp):
         ('concise-parameter-demotion', "let send = extCmd;\n"
          "const deferred = send => send('focus-tab', "
          "{ tab: chromeTab });\ndeferred(ordinary);\n", False),
+        ('parameter-only-promotion',
+         "const invoke = send => send('focus-tab', "
+         "{ tab: chromeTab });\ninvoke(extCmd);\n", True),
+        ('parameter-only-demotion',
+         "const invoke = send => send('focus-tab', "
+         "{ tab: chromeTab });\ninvoke(ordinary);\n", False),
+        ('default-parameter-promotion', "let send = ordinary;\n"
+         "const deferred = (send = ordinary) => send('focus-tab', "
+         "{ tab: chromeTab });\ndeferred(extCmd);\n", True),
+        ('default-parameter-demotion', "let send = extCmd;\n"
+         "const deferred = (send = extCmd) => send('focus-tab', "
+         "{ tab: chromeTab });\ndeferred(ordinary);\n", False),
+        ('destructured-parameter-promotion', "let send = ordinary;\n"
+         "const deferred = ({ send = ordinary } = {}) => "
+         "send('focus-tab', { tab: chromeTab });\n"
+         "deferred( { send: extCmd });\n", True),
+        ('destructured-parameter-demotion', "let send = extCmd;\n"
+         "const deferred = ({ send = extCmd } = {}) => "
+         "send('focus-tab', { tab: chromeTab });\n"
+         "deferred( { send: ordinary });\n", False),
+        ('instanceof-newline-continuation', "let send = ordinary;\n"
+         "let defer = () => ordinary\n"
+         "  instanceof (send('focus-tab', { tab: chromeTab }), Function);\n"
+         "send = extCmd;\ndefer();\n", True),
+        ('in-newline-continuation', "let send = ordinary;\n"
+         "let defer = () => ordinary\n"
+         "  in { routed: send('focus-tab', { tab: chromeTab }) };\n"
+         "send = extCmd;\ndefer();\n", True),
+        ('property-invocation-promotion', "let send = ordinary;\n"
+         "const deferred = () => send('focus-tab', "
+         "{ tab: chromeTab });\nconst holder = { deferred };\n"
+         "send = extCmd;\nholder.deferred();\n", True),
+        ('property-invocation-demotion', "let send = extCmd;\n"
+         "const deferred = () => send('focus-tab', "
+         "{ tab: chromeTab });\nconst holder = { deferred };\n"
+         "send = ordinary;\nholder.deferred();\n", False),
+        ('nested-iife-promotion', "let send = ordinary;\n"
+         "const deferred = () =>\n"
+         "  (function promote() { send = extCmd; })();\n"
+         "deferred();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('nested-iife-demotion', "let send = extCmd;\n"
+         "const deferred = () =>\n"
+         "  (function demote() { send = ordinary; })();\n"
+         "deferred();\nsend('focus-tab', { tab: chromeTab });\n", False),
+        ('semicolon-terminated-concise-body', "let send = ordinary;\n"
+         "const deferred = () => send('focus-tab', "
+         "{ tab: chromeTab });\nsend = extCmd;\ndeferred();\n", True),
         ('comma-sibling-concise-body', "let send = ordinary;\n"
          "let promote = () => { send = extCmd; };\n"
          "let spare = () => 0, defer = () => send('focus-tab', "

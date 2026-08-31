@@ -108,10 +108,14 @@ def js_bracket_end(mask, open_pos):
 
 
 def js_expression_end(mask, start):
-    """End of an unparenthesized arrow expression beginning at `start`."""
+    """End at a depth-zero comma, semicolon, ASI newline, or delimiter."""
     depth = 0
     previous_continues = '+-*/%&|^!?:.=<>~([{'
     next_continues = '.([?*/%&|^!:<>=~'
+    word_continues_before = {
+        'await', 'delete', 'in', 'instanceof', 'new', 'typeof', 'void',
+        'yield'}
+    word_continues_after = {'in', 'instanceof'}
     for pos in range(start, len(mask)):
         char = mask[pos]
         if char in '([{':
@@ -130,6 +134,13 @@ def js_expression_end(mask, start):
             if before[-1] in previous_continues:
                 continue
             if after[:1] in next_continues:
+                continue
+            before_word = re.search(r'([\w$]+)$', before)
+            after_word = re.match(r'([\w$]+)', after)
+            if (before_word
+                    and before_word.group(1) in word_continues_before):
+                continue
+            if after_word and after_word.group(1) in word_continues_after:
                 continue
             if after.startswith(('+', '-')) and not after.startswith(
                     ('++', '--')):
