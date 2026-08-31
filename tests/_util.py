@@ -193,6 +193,10 @@ def load(path, name=None):
     return mod
 
 
+_PARENT_WATCH = load(
+    ROOT / 'daedalus_bridge' / 'parent_watch.py', 'fixture_parent_watch')
+
+
 def log_safe_cases():
     """The contract both log-safe implementations in this tree must satisfy.
 
@@ -484,15 +488,15 @@ def bridge(tmp, env=None, output=None, proc_out=None):
         'PYTHONUNBUFFERED': '1',
     })
     child_env.update(env or {})
-    proc = subprocess.Popen(
-        [sys.executable, str(ROOT / 'server.py')],
-        cwd=str(ROOT), env=child_env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    if proc_out is not None:
-        proc_out.append(proc)
-    drained = drain_lines(proc, output)
-    timeout = startup_timeout()
+    proc, write_fd = _PARENT_WATCH.spawn(
+        [sys.executable, str(ROOT / 'server.py')], env=child_env,
+        cwd=str(ROOT), stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True)
     try:
+        if proc_out is not None:
+            proc_out.append(proc)
+        drained = drain_lines(proc, output)
+        timeout = startup_timeout()
         port = await_listening_line(proc, drained, timeout=timeout)
         base = f'http://127.0.0.1:{port}'
         started = time.time()
@@ -517,12 +521,15 @@ def bridge(tmp, env=None, output=None, proc_out=None):
         _bridge_started = True
         yield base, docroot
     finally:
-        proc.terminate()
         try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=10)
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=10)
+        finally:
+            os.close(write_fd)
 
 
 def request(url, method='GET', body=None, headers=None, timeout=10):

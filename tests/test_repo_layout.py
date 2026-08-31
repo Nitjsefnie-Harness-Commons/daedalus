@@ -23,6 +23,7 @@ BRIDGE_PACKAGE = (
     'env_config.py',
     'log_safe.py',
     'mcp_bootstrap.py',
+    'parent_watch.py',
     'path_safety.py',
     'result_store.py',
     'segment_store.py',
@@ -151,7 +152,7 @@ def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
 
 
 def test_the_bridge_modules_live_in_the_bridge_package(tmp):
-    """The package holds exactly its twelve modules; the root holds none."""
+    """The package holds exactly its thirteen modules; the root holds none."""
     del tmp
     tracked = _tracked_python()
     packaged = sorted(
