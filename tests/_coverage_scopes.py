@@ -15,42 +15,30 @@ _ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
 _REFLECTIVE_READS = frozenset({'getattr', 'hasattr'})
 
 
-def _chain_base(node):
+def _chain(node):
+    parts = []
     while isinstance(node, (ast.Attribute, ast.Subscript)):
+        parts.append(node)
         node = node.value
-    return node
+    return parts, node
 
 
-def _reaches_namespace(node):
-    """Whether an attribute chain passes a subscript or a dunder name.
-
-    `owner.__dict__[...]`, `owner.__class__` and `owner.x[...]` reach
-    the mapping a module's names live in, or an object the checker
-    cannot see, so nothing read from the owner afterwards is proved.
-    """
-    while isinstance(node, (ast.Attribute, ast.Subscript)):
-        if isinstance(node, ast.Subscript) or node.attr.startswith('__'):
-            return True
-        node = node.value
-    return False
+def _reaches_namespace(parts):
+    return any(isinstance(part, ast.Subscript) or part.attr.startswith('__')
+               for part in parts)
 
 
-def _store_targets(node):
-    if isinstance(node, ast.Assign):
-        return list(node.targets)
-    if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-        return [node.target]
-    if isinstance(node, ast.Delete):
-        return list(node.targets)
-    return []
+def _names_root(parts):
+    return any(isinstance(part, ast.Attribute) and part.attr == 'ROOT'
+               for part in parts)
 
 
 def _reads_attribute(call):
-    """hasattr/getattr with a literal name read an attribute, no more."""
     return (isinstance(call.func, ast.Name)
             and call.func.id in _REFLECTIVE_READS and len(call.args) > 1
             and isinstance(call.args[1], ast.Constant)
-            and isinstance(call.args[1].value, str))
+            and isinstance(call.args[1].value, str)
+            and not call.args[1].value.startswith('__'))
 
 
 def _parents(tree):
@@ -61,25 +49,7 @@ def _parents(tree):
     return parents
 
 
-def _retired_by_store(node, retired):
-    """Whether a store retires every owner; named ones go into `retired`."""
-    for target in _store_targets(node):
-        for part in ast.walk(target):
-            if not isinstance(part, (ast.Attribute, ast.Subscript)):
-                continue
-            base = _chain_base(part)
-            names_root = (isinstance(part, ast.Attribute)
-                          and part.attr == 'ROOT')
-            if isinstance(base, ast.Name):
-                if names_root or _reaches_namespace(part):
-                    retired.add(base.id)
-            elif names_root:
-                return True
-    return False
-
-
 def _retires_all_by_setattr(node):
-    """setattr/delattr of ROOT on something the module cannot name."""
     if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name)
             or node.func.id not in {'setattr', 'delattr'}
             or len(node.args) < 2 or isinstance(node.args[0], ast.Name)):
@@ -89,7 +59,6 @@ def _retires_all_by_setattr(node):
 
 
 def _escapes(node, parents):
-    """Whether an owner name appears other than as an attribute's object."""
     parent = parents.get(node)
     if isinstance(parent, ast.Attribute) and parent.value is node:
         return False
@@ -98,35 +67,32 @@ def _escapes(node, parents):
 
 
 def root_owner_names(tree):
-    """Names bound by importing a module whose ROOT is the checkout root.
-
-    An attribute is only a root spelling if the object it reads from is
-    one of those modules and the module has been reached no other way:
-    not stored through (`x.ROOT = ...`, `x.__dict__[...] = ...`), not
-    handed on bare (`setattr(x, ...)`, `vars(x)`, `alias = x`), and not
-    read through its namespace (`x.__dict__.update(...)`). A store to a
-    `ROOT` the module cannot name at all retires every owner.
-    """
-    owners = set()
+    """Import-bound names of a root module reached only by attribute reads."""
+    modules = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            owners.update(alias.asname or alias.name for alias in node.names
-                          if alias.name in _ROOT_MODULES)
+            modules.update((alias.asname or alias.name, alias.name)
+                           for alias in node.names
+                           if alias.name in _ROOT_MODULES)
     parents = _parents(tree)
     retired = set()
     for node in ast.walk(tree):
-        if _retired_by_store(node, retired) or _retires_all_by_setattr(node):
-            return set()
-        if (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
-                and _reaches_namespace(node)):
-            base = _chain_base(node)
-            if isinstance(base, ast.Name):
+        if isinstance(node, (ast.Attribute, ast.Subscript)):
+            parts, base = _chain(node)
+            stored = isinstance(node.ctx, (ast.Store, ast.Del))
+            if not isinstance(base, ast.Name):
+                if stored and _names_root(parts):
+                    return set()
+            elif _reaches_namespace(parts) or (stored and _names_root(parts)):
                 retired.add(base.id)
-        if (isinstance(node, ast.Name) and node.id in owners
+        elif _retires_all_by_setattr(node):
+            return set()
+        elif (isinstance(node, ast.Name) and node.id in modules
                 and isinstance(node.ctx, (ast.Load, ast.Del))
                 and _escapes(node, parents)):
             retired.add(node.id)
-    return owners - retired
+    gone = {modules[name] for name in retired if name in modules}
+    return {name for name, module in modules.items() if module not in gone}
 
 
 def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):
