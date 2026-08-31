@@ -338,6 +338,40 @@ def test_hostile_post_resolves_job_shell_and_environment(tmp):
     assert len(_workflowrun.recorded_writes(calls)) == 1
 
 
+def test_commits_query_is_refused_loudly(tmp):
+    """A commits query fails loudly instead of naming a pull request."""
+    workdir = Path(tmp) / 'commits-query'
+    (workdir / 'bin').mkdir(parents=True)
+    commenter._write_executable(  # pylint: disable=protected-access
+        workdir / 'bin' / 'gh',
+        commenter._GH_COMMENT_STUB)  # pylint: disable=protected-access
+    state_path = workdir / 'state.json'
+    calls_path = workdir / 'calls.jsonl'
+    output_path = workdir / 'github-output'
+    state_path.write_text('[]', encoding='utf-8')
+    calls_path.write_text('', encoding='utf-8')
+    output_path.write_text('', encoding='utf-8')
+    env = {
+        **os.environ,
+        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
+        'GH_TOKEN': _SENTINEL,
+        'REPO': 'owner/repo', 'HEAD_REPO': 'owner/repo',
+        'HEAD_SHA': _HEAD_SHA, 'CURRENT_HEAD': _HEAD_SHA,
+        'EVENT_NUMBERS': '',
+        'GITHUB_OUTPUT': str(output_path),
+        'STUB_STATE': str(state_path),
+        'STUB_CALLS': str(calls_path),
+    }
+    resolve = commenter._run_block(  # pylint: disable=protected-access
+        _workflow(), 'Resolve the target pull request from the event')
+    result = _workflowrun.run_step(workdir, {'run': resolve}, env)
+    published = output_path.read_text(encoding='utf-8')
+    assert not published.strip(), published
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert 'unexpected commits query' in result.stderr, result.stderr
+    assert not result.stdout.strip(), result.stdout
+
+
 def test_privileged_steps_are_an_exact_allowlist(tmp):
     """Every field and unknown key is part of the privileged contract."""
     del tmp
