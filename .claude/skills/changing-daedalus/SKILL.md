@@ -340,6 +340,16 @@ re-post on the strength of it. Check on your next natural touch of the issue;
 the check still matters, because the workflow declines silently for a closed
 issue, a pull request, a bot comment, or an inexact body.
 
+**Declare an absorbed issue in the pull request body the moment it is
+absorbed.** A branch that takes on work filed under a second issue - a finding
+parked by its own review, or an issue another session would otherwise start -
+adds that issue to its body, closing keyword included, in the same pass that
+decides the absorption. The claim workflow records who owns the issue a branch
+was opened for; it says nothing about what the branch grew to cover, so an
+absorption visible nowhere but the owning session's context leaves the issue
+reading as free work, and the collision surfaces only as two branches carrying
+the same fix.
+
 **Release an issue your merge did not finish**, and note what remains in the
 same comment. The ordering is load-bearing: `claim.yml` gates unclaim on the
 issue being open, so an issue a merge keyword closed can never be unassigned
