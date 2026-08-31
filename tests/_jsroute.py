@@ -13,6 +13,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _jsread import (js_bracket_end, js_mask,  # noqa: E402
                      js_object_entries, js_split_top_level)
+from _jsroute_timeline import (  # noqa: E402
+    FunctionTimeline, InvocationReplay, declaration_bindings,
+    function_reference, lexical_limits)
 
 
 # A name whose object exists but whose contents this scanner cannot prove.
@@ -101,19 +104,12 @@ def js_tab_routing_violations(path, rel):
     aliases of such names; ternary initializers whose branches both resolve;
     `Object.assign` writes; same-name direct property writes; tracked object
     spreads; literal computed keys; the third extCmd options argument; and a
-    call to a same-file helper that returns an object it built. Sender aliases
-    follow lexical bindings through nested scopes. Rebinds in optional control
-    flow merge with the state that can bypass them; differing states become
-    unprovable. Calls to known same-file functions replay writes to captured
-    bindings at the invocation point.
+    same-file helper return. Sender and callable aliases follow lexical
+    bindings and optional states; known calls replay captured writes.
 
-    An object that escapes into another call is marked unprovable from that
-    point, and an unprovable object reaching a sender is a violation: a
-    helper that writes `target.tab` through a parameter cannot be followed,
-    so it is reported rather than trusted. An unresolvable sender argument
-    is reported for the same reason. An unseen name — a parameter or import
-    — stays unknown rather than unprovable. A simple alias bound only to one
-    inherits that silence; it does not become a new unprovable sender.
+    Escaped objects, unresolved sender arguments, and unseen helper mutations
+    are unprovable. Unseen parameter or import names stay unknown, and a
+    simple alias to one inherits that silence.
     """
     text = path.read_text(encoding='utf-8')
     mask = js_mask(text)
@@ -151,9 +147,11 @@ def js_tab_routing_violations(path, rel):
         if depth > 3:
             return _JS_UNPROVABLE
         binding = visible_binding(name, call_pos)
-        body = function_bodies.get(binding)
-        if body is None:
+        limits = lexical_limits(scopes, scope_at(call_pos), call_pos)
+        bodies = timeline.values_at(binding, limits=limits)
+        if len(bodies) != 1 or bodies[0] is None:
             return _JS_UNPROVABLE
+        body = bodies[0]
         kind, body_start, body_end = body
         inner = names_before(body_end, depth + 1, floor=body_start)
         if kind == 'expr':
@@ -261,36 +259,44 @@ def js_tab_routing_violations(path, rel):
             pos += 1
         return pos
 
-    def parameter_names(start, end):
+    def parameters(start, end):
         names = set()
+        order = []
         for left, right in js_split_top_level(mask, text, start, end):
             equals = _js_top_level(mask, left, right, '=')
             right = right if equals is None else equals
             value = mask[left:right].strip().removeprefix('...').strip()
             if re.fullmatch(r'[\w$]+', value):
                 names.add(value)
+                order.append(value)
             else:
                 names.update(re.findall(r'\b[\w$]+\b', value))
-        return names
+                order.append(None)
+        return names, order
 
     scopes = [{'start': 0, 'end': len(mask), 'params': set(),
+               'param_start': 0, 'param_order': [],
                'open': None, 'parent': None}]
     scope_keys = set()
     function_names = []
     function_occurrences = []
     method_positions = set()
 
-    def add_scope(open_paren, body_open, params=None):
+    def add_scope(open_paren, body_open, params=None, param_start=None):
         body_end = pair_end.get(body_open, len(mask))
         key = (body_open + 1, body_end - 1)
         if key in scope_keys:
             return
         scope_keys.add(key)
         if params is None:
-            params = parameter_names(
+            params, param_order = parameters(
                 open_paren + 1, pair_end[open_paren] - 1)
+            param_start = open_paren + 1
+        else:
+            param_order = list(params)
         scopes.append({'start': key[0], 'end': key[1],
-                       'params': params,
+                       'params': params, 'param_start': param_start,
+                       'param_order': param_order,
                        'open': body_open, 'parent': None})
 
     for match in re.finditer(
@@ -314,7 +320,7 @@ def js_tab_routing_violations(path, rel):
                 add_scope(open_paren, body_open)
     for match in re.finditer(r'\b([\w$]+)\s*=>\s*\{', mask):
         body_open = mask.index('{', match.start(), match.end())
-        add_scope(None, body_open, {match.group(1)})
+        add_scope(None, body_open, {match.group(1)}, match.start())
     for match in re.finditer(r'\b([\w$]+)\s*\(', mask):
         if match.group(1) in ('if', 'for', 'while', 'switch', 'catch'):
             continue
@@ -329,25 +335,19 @@ def js_tab_routing_violations(path, rel):
             method_positions.add(match.start())
             add_scope(open_paren, body_open)
 
-    for match in declarations:
-        body = _js_function_body_at(mask, match.end())
-        if body is not None:
-            function_occurrences.append(
-                (match.group(2), match.start(), body))
-
     for index in range(1, len(scopes)):
         scope = scopes[index]
         parents = [(candidate['end'] - candidate['start'], parent)
                    for parent, candidate in enumerate(scopes)
                    if parent != index
-                   and candidate['start'] <= scope['start']
+                   and candidate['param_start'] <= scope['param_start']
                    and scope['end'] <= candidate['end']]
         scope['parent'] = min(parents)[1] if parents else 0
 
     def scope_at(pos):
-        found = [(scope['end'] - scope['start'], index)
+        found = [(scope['end'] - scope['param_start'], index)
                  for index, scope in enumerate(scopes)
-                 if scope['start'] <= pos < scope['end']]
+                 if scope['param_start'] <= pos < scope['end']]
         return min(found)[1] if found else 0
 
     brace_ranges = [(opening + 1, end - 1)
@@ -369,10 +369,10 @@ def js_tab_routing_violations(path, rel):
 
     for scope in scopes[1:]:
         for name in scope['params']:
-            add_binding(name, (scope['start'], scope['end']))
-    for match in declarations:
-        add_binding(match.group(2), lexical_range(
-            match.start(), function_only=match.group(1) == 'var'))
+            add_binding(name, (scope['param_start'], scope['end']))
+    for kind, name, pos in declaration_bindings(
+            mask, text, js_split_top_level):
+        add_binding(name, lexical_range(pos, function_only=kind == 'var'))
     for name, pos in function_names:
         add_binding(name, lexical_range(pos))
 
@@ -457,28 +457,38 @@ def js_tab_routing_violations(path, rel):
         return (match.start() not in method_positions
                 and mask[after:after + 1] != '{')
 
-    function_bodies = {}
+    timeline = FunctionTimeline(optional_write)
     for function_name, definition, body in function_occurrences:
         binding = visible_binding(function_name, definition)
         if binding is not None:
-            function_bodies[binding] = body
-
-    callable_scopes = {}
-    for binding, body in function_bodies.items():
-        if body[0] != 'block':
-            continue
-        function_scope = next((index for index, scope in enumerate(scopes)
-                               if scope['open'] == body[1]), None)
-        if function_scope is not None:
-            callable_scopes[binding] = function_scope
-
+            timeline.add(binding, scope_at(definition), binding[1],
+                         definition, body)
+    for match in bindings:
+        binding = visible_binding(match.group(1), match.start())
+        if binding is not None:
+            value = _js_function_body_at(mask, match.end())
+            alias = re.match(r'\s*([\w$]+)\s*(?=[,;)\n])',
+                             mask[match.end():])
+            source = (visible_binding(alias.group(1), match.start())
+                      if value is None and alias else None)
+            owner = scope_at(match.start())
+            if source is not None:
+                value = function_reference(source, match.start(), owner)
+            timeline.add(binding, owner, match.start(), match.start(), value)
     invocations = []
     for match in re.finditer(r'\b([\w$]+)\s*\(', mask):
         if not bare_call(match):
             continue
         binding = visible_binding(match.group(1), match.start())
-        if binding in callable_scopes:
-            invocations.append((match.start(), callable_scopes[binding]))
+        if binding is None:
+            continue
+        open_paren = mask.index('(', match.start())
+        args = js_split_top_level(mask, text, open_paren + 1,
+                                  pair_end[open_paren] - 1)
+        invocations.append((match.start(), binding, args))
+    replay = InvocationReplay(
+        timeline, scopes, events, invocations, mask, scope_at,
+        visible_binding, _js_function_body_at, optional_write)
 
     def sender_before(name, limit):
         states = {}
@@ -492,22 +502,29 @@ def js_tab_routing_violations(path, rel):
             if kind != 'bind':
                 continue
             if start < limit and scope_at(start) in ancestors:
-                scheduled.append((start, start, None, match))
-        for call_start, function_scope in invocations:
+                scheduled.append((start, 0, start, None, False, match))
+        runtime_values = {}
+        previous_call = -1
+        for call in invocations:
+            call_start = call[0]
             if call_start >= limit or scope_at(call_start) not in ancestors:
                 continue
-            scheduled.extend((call_start, start, call_start, match)
-                             for start, kind, match in events
-                             if kind == 'bind'
-                             and scope_at(start) == function_scope)
-        for _, start, call_start, match in sorted(scheduled):
+            replay.clear_between(
+                runtime_values, previous_call, call_start, ancestors)
+            scheduled.extend((call_start, order, start, call_start,
+                              path_optional, match)
+                             for order, (start, match, path_optional)
+                             in enumerate(replay.writes(
+                                 call, runtime_values), 1))
+            previous_call = call_start
+        for _, _, start, call_start, path_optional, match in sorted(scheduled):
             target = visible_binding(match.group(1), start)
             if target is None:
                 continue
             stmt_end = _js_statement_end(mask, match.end())
             value = sender_state(match.end(), stmt_end, states)
             write_limit = limit if call_start is None else call_start
-            optional = optional_write(start, write_limit)
+            optional = path_optional or optional_write(start, write_limit)
             if call_start is not None:
                 optional = optional or optional_write(call_start, limit)
             states[target] = (merged_sender(states.get(target), value)
