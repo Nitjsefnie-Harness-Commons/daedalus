@@ -44,6 +44,7 @@ def _copy_versioned_tree(dest):
     checker = _util.load(ROOT / 'scripts' / 'check_versions.py', 'check_versions_ro')
     rel_paths = {p for p, _, _ in checker.SITES}
     rel_paths.add('scripts/check_versions.py')
+    rel_paths.add('scripts/version_regions.py')
     for rel in rel_paths:
         src = ROOT / rel
         dst = Path(dest) / rel
