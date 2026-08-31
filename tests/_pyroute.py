@@ -3,11 +3,13 @@ import ast
 import sys
 
 from _pyroute_values import (DeferredCallable, DeferredClass,
-                             bind_call_arguments, callable_candidates,
+                             advance_generator, bind_call_arguments,
+                             callable_candidates,
                              exposed_callables, expression_callables,
                              expression_value, follow_callable_call,
-                             is_deferred_value, merge_deferred_values,
-                             payload_key, store_deferred_value)
+                             is_deferred_value, load_callable_cells,
+                             merge_deferred_values, payload_key,
+                             store_deferred_value, sync_cells)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
@@ -140,6 +142,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         destination.dict_namespaces.update({
             scope: {name: keys.copy() for name, keys in values.items()}
             for scope, values in source.dict_namespaces.items()})
+        destination.cells.update(source.cells)
         for name, origin in destination.dict_origins.items():
             keys = destination.dict_namespaces.get(origin, {}).get(name)
             if keys is None:
@@ -170,6 +173,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             entry_keep = keep | deferred.state.dict_origins.keys()
             entry = overlay(_copy_state_pair(deferred.state), caller,
                             entry_keep, blocked)
+            load_callable_cells(deferred, caller, entry)
             if call is not None:
                 bind_call_arguments(deferred, call, caller, entry,
                                     resolve_sender_name)
@@ -256,19 +260,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for state in active for result in results)
         return dedupe_states([*skipped, *active]), yielded
 
-    def advance_generator(state, generator):
-        if generator.remaining is None: return
-        remaining = max(0, generator.remaining - 1)
-        advanced = DeferredGenerator(generator.expression, remaining)
-        for name, value in list(state.generators.items()):
-            if value is not generator: continue
-            if remaining:
-                state.generators[name] = advanced
-            else:
-                del state.generators[name]
-        for key, value in list(state.evaluated.items()):
-            if value is generator: state.evaluated[key] = advanced
-
     def consume_iterable(expr, current_pairs, exhaust):
         outputs = []
         yielded = []
@@ -309,12 +300,15 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 current_pairs = check_expression(default, current_pairs)
             if defaults: check_expression(node.body, [callable_state(
                 node, callable_pairs(current_pairs), annotations_eager)])
-            local_names = lexical_scope_names(node, annotations_eager)[0]
+            local_names, global_names, _ = lexical_scope_names(
+                node, annotations_eager)
             for state in current_pairs:
                 state.evaluated[id(node)] = DeferredCallable(
                     node, callable_state(
                         node, callable_pairs([state]), annotations_eager),
-                    frozenset(local_names), frozenset(chain))
+                    frozenset(local_names),
+                    frozenset(chain - local_names - global_names),
+                    state.namespace, state.cells)
             return current_pairs
         if isinstance(node, ast.NamedExpr):
             current_pairs = check_expression(node.value, current_pairs)
@@ -329,6 +323,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 state.aliases.update(bindings[0])
                 state.generators.update(bindings[1])
                 state.callables.update(bindings[2])
+                sync_cells(state, {node.target.id})
             return remember(node, current_pairs)
         if isinstance(node, ast.BoolOp):
             current_pairs = check_expression(node.values[0], current_pairs)
@@ -467,7 +462,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for value in definition_values(statement, annotations_eager):
                 pairs = check_expression(value, pairs)
             defining = pairs or ([fallback] if fallback is not None else [])
-            local_names, _, _ = lexical_scope_names(
+            local_names, global_names, _ = lexical_scope_names(
                 statement, annotations_eager)
             for state in defining:
                 state.aliases.pop(statement.name, None)
@@ -479,8 +474,11 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     statement, callable_state(
                         statement, callable_pairs([state]),
                         annotations_eager),
-                    frozenset(local_names), frozenset(chain))
+                    frozenset(local_names),
+                    frozenset(chain - local_names - global_names),
+                    state.namespace, state.cells)
                 if pairs: state.callables[statement.name] = deferred
+                sync_cells(state, {statement.name})
                 defaults = argument_defaults(statement.args)
                 unsafe = ('ext_cmd', '_ext_cmd', _UNPROVABLE_SENDER)
                 if pairs and any(evaluated_value(value, state) in unsafe
@@ -522,6 +520,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     state.callables[statement.name] = DeferredClass(methods)
                     state.bound.add(statement.name)
                     bind_builtin_names(state, {statement.name})
+                    sync_cells(state, {statement.name})
                     completed.append(state)
             pairs = dedupe_states(completed)
             continue
@@ -615,6 +614,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         bind_builtin_names(state, {name})
                         if resolved is not None:
                             state.aliases[name] = resolved
+                    sync_cells(state, names)
             found, pairs = walk(statement.body, entered)
             violations.extend(found)
             continue

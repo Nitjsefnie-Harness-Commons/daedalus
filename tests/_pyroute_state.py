@@ -3,8 +3,8 @@ import ast
 import operator
 from dataclasses import dataclass, field
 
-from _pyroute_values import DeferredGenerator, is_deferred_value
-
+from _pyroute_values import (CellState, DeferredGenerator, is_deferred_value,
+                             merge_cell_states, sync_cells)
 
 OPAQUE_TAB_SPREAD = object()
 UNPROVABLE_SENDER = '?ext_cmd'
@@ -30,6 +30,7 @@ class FlowState:
     dict_origins: dict = field(default_factory=dict)
     dict_namespaces: dict = field(default_factory=dict)
     namespace: int = 0
+    cells: CellState = field(default_factory=CellState)
 
     def copy(self):
         return FlowState(
@@ -39,7 +40,7 @@ class FlowState:
             dict(self.callables), set(self.bound), dict(self.dict_origins),
             {scope: {name: keys.copy() for name, keys in values.items()}
              for scope, values in self.dict_namespaces.items()},
-            self.namespace)
+            self.namespace, self.cells.copy())
 
 
 def scope_nodes(scope):
@@ -470,6 +471,8 @@ def apply_alias_statement(node, state):
             state.bound.add(local)
             if imported.name in ('ext_cmd', '_ext_cmd'):
                 aliases[local] = imported.name
+        sync_cells(state, {imported.asname or imported.name
+                           for imported in node.names})
         return
     if isinstance(node, ast.Import):
         for imported in node.names:
@@ -479,6 +482,8 @@ def apply_alias_statement(node, state):
             state.generators.pop(local, None)
             state.callables.pop(local, None)
             state.bound.add(local)
+        sync_cells(state, {(imported.asname or imported.name).split('.')[0]
+                           for imported in node.names})
         return
     targets = (node.targets if isinstance(node, (ast.Assign, ast.Delete))
                else [node.target] if isinstance(
@@ -503,6 +508,7 @@ def apply_alias_statement(node, state):
     aliases.update(bindings[0])
     state.generators.update(bindings[1])
     state.callables.update(bindings[2])
+    sync_cells(state, names)
 
 
 def value_signature(value):
@@ -652,6 +658,7 @@ def callable_state(scope, states, annotations_eager=True):
         *(state.builtin_locals for state in states))
     local_names, global_names, nonlocals = lexical_scope_names(
         scope, annotations_eager)
+    cells = merge_cell_states(states).without(local_names)
     builtin_locals = (inherited_locals
                       | ((local_names | nonlocals) & BUILTIN_CONSUMERS)) \
         - global_names
@@ -687,7 +694,7 @@ def callable_state(scope, states, annotations_eager=True):
             aliases[parameter.arg] = resolved
     return FlowState(
         dicts, aliases, generators, {}, builtin_globals, builtin_locals,
-        callables, bound, dict_origins, dict_namespaces, id(scope))
+        callables, bound, dict_origins, dict_namespaces, id(scope), cells)
 
 
 def function_allowed_opaque(node):
@@ -705,6 +712,7 @@ def clear_names(states, names):
             state.aliases.pop(name, None)
             state.generators.pop(name, None)
             state.callables.pop(name, None)
+        sync_cells(state, names)
 
 
 def new_exits():

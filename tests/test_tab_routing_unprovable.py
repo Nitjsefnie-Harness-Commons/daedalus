@@ -241,6 +241,39 @@ def test_factory_returned_module_exposure_matches_runtime(tmp):
     _assert_export_cases(tmp, cases)
 
 
+def test_factory_closure_cells_match_runtime(tmp):
+    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    cases = [
+        ('direct-setting',
+         f'send = ordinary\ncall = lambda: {call}\n'
+         'send = ext_cmd\nreturn call', '',
+         'call = do_focus_tab(_args)', 'call()', True),
+        ('direct-clearing',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'send = ordinary\nreturn call', '',
+         'call = do_focus_tab(_args)', 'call()', False),
+        ('list-setting',
+         f'send = ordinary\ncall = lambda: {call}\n'
+         'send = ext_cmd\nreturn [call]', '',
+         'box = do_focus_tab(_args)', 'box[0]()', True),
+        ('list-clearing',
+         f'send = ext_cmd\ncall = lambda: {call}\n'
+         'send = ordinary\nreturn [call]', '',
+         'box = do_focus_tab(_args)', 'box[0]()', False),
+        ('setter-setting',
+         f'send = ordinary\ndef call(): return {call}\n'
+         'def update():\n    nonlocal send\n    send = ext_cmd\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)', 'pair[1](); pair[0]()', True),
+        ('setter-clearing',
+         f'send = ext_cmd\ndef call(): return {call}\n'
+         'def update():\n    nonlocal send\n    send = ordinary\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)', 'pair[1](); pair[0]()', False),
+    ]
+    _assert_export_cases(tmp, cases)
+
+
 def test_returned_alternative_selections_match_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     cases = [
