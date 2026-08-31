@@ -270,6 +270,12 @@ def test_factory_closure_cells_match_runtime(tmp):
          'def update():\n    nonlocal send\n    send = ordinary\n'
          'return call, update', '',
          'pair = do_focus_tab(_args)', 'pair[1](); pair[0]()', False),
+        ('conditional-preserve',
+         f'send = ext_cmd\ndef call(): return {call}\n'
+         'def update(clear):\n    nonlocal send\n'
+         '    if clear:\n        send = ordinary\n'
+         'return call, update', '',
+         'pair = do_focus_tab(_args)', 'pair[1](False); pair[0]()', True),
     ]
     _assert_export_cases(tmp, cases)
 
