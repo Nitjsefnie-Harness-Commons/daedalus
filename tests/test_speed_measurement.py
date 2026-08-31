@@ -37,6 +37,19 @@ def _time_tests():
     return _util.load(ROOT / 'scripts' / 'ci' / 'time_tests.py')
 
 
+def _render_speed_summary(compare, shared, pairs, movements, limit=10):
+    lines = []
+    compare.render(lines, 'baseline', shared, pairs, movements, limit=limit)
+    return lines
+
+
+def _longest_rows(lines):
+    header = '| test | head median | share of covered set |'
+    assert header in lines, 'longest-running-tests table is missing'
+    start = lines.index(header)
+    return lines[start + 2:]
+
+
 def test_speed_comparison_pairs_whole_rounds_rather_than_per_test_minima(tmp):
     """Every total reported has to be one a complete round actually achieved.
 
@@ -172,6 +185,68 @@ def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
     assert compare.main(['--base', str(old), '--head', *head,
                          '--summary-file', str(summary)]) == 0
     assert 'produced no per-test durations' in summary.read_text(encoding='utf-8')
+
+
+def test_speed_summary_longest_table_orders_head_medians_and_applies_limit(
+        tmp):
+    """The expensive table is independent of the movement ordering."""
+    del tmp
+    compare = _compare_durations()
+    lines = _render_speed_summary(
+        compare, ['small', 'middle', 'large'], [(6.0, 12.0, 2.0)], [
+            ('middle', 4.0, 6.0, 2.0),
+            ('large', 5.0, 9.0, 4.0),
+            ('small', 1.0, 2.0, 1.0),
+        ], limit=2)
+    rows = _longest_rows(lines)
+    assert [row.split('|')[1].strip() for row in rows] == [
+        '`large`', '`middle`'], rows
+
+
+def test_speed_summary_longest_table_shows_head_median_column(tmp):
+    """The duration column is the current commit's median, not baseline."""
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'test': 1.0}])
+    head = _durations_tree(tmp, 'head', [{'test': 9.0}])
+    shared, pairs, movements = compare.compare(
+        compare.side_rounds(base), compare.side_rounds(head))
+    rows = _longest_rows(_render_speed_summary(compare, shared, pairs,
+                                               movements))
+    assert rows == ['| `test` | 9.00s | 1.000 |'], rows
+
+
+def test_speed_summary_longest_table_shares_only_the_covered_set(tmp):
+    """Shares exclude a head test that is absent from the shared set."""
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [
+        {'shared_fast': 1.0, 'shared_slow': 2.0, 'base_only': 50.0}])
+    head = _durations_tree(tmp, 'head', [
+        {'shared_fast': 3.0, 'shared_slow': 9.0, 'head_only': 100.0}])
+    shared, pairs, movements = compare.compare(
+        compare.side_rounds(base), compare.side_rounds(head))
+    assert shared == ['shared_fast', 'shared_slow'], shared
+    lines = _render_speed_summary(compare, shared, pairs, movements)
+    rows = _longest_rows(lines)
+    assert rows == [
+        '| `shared_slow` | 9.00s | 0.750 |',
+        '| `shared_fast` | 3.00s | 0.250 |',
+    ], rows
+    assert ('Shares are of the covered-set head-median total used by the '
+            'paired ratio.') in lines
+
+
+def test_speed_summary_longest_table_preserves_empty_shared_early_return(tmp):
+    """A shared set gets the table; empty shared stays table-free."""
+    del tmp
+    compare = _compare_durations()
+    populated = []
+    assert compare.render(populated, 'baseline', ['test'], [(1.0, 2.0, 2.0)],
+                          [('test', 1.0, 2.0, 1.0)]) == 2.0
+    assert '| test | head median | share of covered set |' in populated
+
+    empty = []
+    assert compare.render(empty, 'baseline', [], [], []) is None
+    assert not any('Longest-running tests' in line for line in empty), empty
 
 
 def _selection_tree(tmp):
