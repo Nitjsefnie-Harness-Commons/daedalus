@@ -145,6 +145,28 @@ def test_virtual_clock_default_guard_stops_zero_time_runaway(_tmp):
     assert _has_numeric_token(message, str(expected_sleeps)), message
 
 
+def test_virtual_clock_stops_nonzero_observable_stall(_tmp):
+    failure = None
+    attempts = 0
+    expected_sleeps = 200_000
+    smallest_positive = math.ulp(0.0)
+    with _virtual_cmdqueue_clock() as (clock, events, origin):
+        try:
+            while True:
+                attempts += 1
+                clock.sleep(smallest_positive)
+        except AssertionError as caught:
+            failure = caught
+    assert isinstance(failure, AssertionError), failure
+    assert attempts == expected_sleeps + 1, attempts
+    assert len(events) == expected_sleeps, len(events)
+    assert clock.monotonic() == origin, (clock.monotonic(), origin)
+    message = str(failure).lower()
+    assert 'virtual clock' in message, message
+    assert 'progress' in message, message
+    assert _has_numeric_token(message, str(expected_sleeps)), message
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals())),
                           tmp_prefix='cmdqueue_clock_'))

@@ -157,8 +157,7 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
                 raise AssertionError(
                     'virtual clock elapsed guard reached '
                     f'{advanced:.3f}s from its origin')
-            progressed = (advanced != elapsed[0]
-                          or next_correction != correction[0])
+            progressed = origin + advanced != self.monotonic()
             if not progressed and no_progress_count[0] >= _NO_PROGRESS_LIMIT:
                 raise AssertionError(
                     'virtual clock made no progress for '
