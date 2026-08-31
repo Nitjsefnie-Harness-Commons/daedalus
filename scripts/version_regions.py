@@ -88,18 +88,18 @@ _JS_REGEX_FLAGS = frozenset('dgimsuvy')
 # Every scanner answers (start, end, kind) spans for the constructs a version
 # pattern inside is not a binding in; text no span covers is code.
 
-def _javascript_regions(text):
+def _javascript_regions(text, html_comments=False):
     """Regions for JavaScript comments, quoted strings, template literals and
     regex literals. A regex literal is its own kind: a version spelled inside
     one is a pattern and not a site, but the literal has to end where
     JavaScript ends it so the code after it is not swallowed.
     """
     regions = []
-    _scan_javascript(text, 0, regions, False)
+    _scan_javascript(text, 0, regions, False, html_comments)
     return regions
 
 
-def _scan_javascript(text, start, regions, substitution):
+def _scan_javascript(text, start, regions, substitution, html_comments):
     """Scan JavaScript code from `start` into `regions`, answering where the
     scan stopped: the end of the text, or — inside a template substitution —
     the `}` that closes it. A substitution is scanned recursively as the code
@@ -113,8 +113,10 @@ def _scan_javascript(text, start, regions, substitution):
         ch = text[i]
         if ch in ' \t\r\n':
             i += 1
-        elif text.startswith('//', i) or text.startswith('/*', i):
-            closer, skip = ('\n', 0) if text[i + 1] == '/' else ('*/', 2)
+        elif (text.startswith('//', i) or text.startswith('/*', i)
+              or html_comments and text.startswith('<!--', i)):
+            line = text[i + 1] == '/' or text.startswith('<!--', i)
+            closer, skip = ('\n', 0) if line else ('*/', 2)
             close = text.find(closer, i + 2)
             close = end if close == -1 else close + skip
             regions.append((i, close, 'comment'))
@@ -123,7 +125,7 @@ def _scan_javascript(text, start, regions, substitution):
             i = _js_string(text, i, regions)
             previous = 'end'
         elif ch == '`':
-            i = _js_template(text, i, regions)
+            i = _js_template(text, i, regions, html_comments)
             previous = 'end'
         elif ch == '/' and previous not in _JS_DIVISION_BEFORE:
             i = _js_regex(text, i, regions)
@@ -173,7 +175,7 @@ def _js_string(text, start, regions):
     return i
 
 
-def _js_template(text, start, regions):
+def _js_template(text, start, regions, html_comments):
     """Record one template literal: its own text is string, and each
     `${...}` substitution is scanned recursively as the code it is.
     """
@@ -190,7 +192,8 @@ def _js_template(text, start, regions):
         elif text.startswith('${', i):
             if i > chunk:
                 regions.append((chunk, i, 'string'))
-            close = _scan_javascript(text, i + 2, regions, True)
+            close = _scan_javascript(
+                text, i + 2, regions, True, html_comments)
             if close == end:
                 return end
             i = chunk = close + 1
@@ -254,7 +257,7 @@ def _html_regions(text):
             if _html_tag_name(text, tag_start, i) == 'script':
                 script_end = _html_script_end(text, i)
                 for start, stop, kind in _javascript_regions(
-                        text[i:script_end]):
+                        text[i:script_end], html_comments=True):
                     regions.append((i + start, i + stop, kind))
                 i = script_end
             continue
@@ -274,19 +277,58 @@ def _html_tag_name(text, start, end):
 
 
 def _html_script_end(text, start):
-    """The start of the next script end tag, or the document end."""
+    """The real script end tag after `start`, or the document end."""
+    state = 'data'
     i = start
     while i < len(text):
-        i = text.find('<', i)
-        if i == -1:
-            return len(text)
-        after = i + len('</script')
-        if (text[i:after].lower() == '</script'
-                and (after == len(text) or text[after].isspace()
-                     or text[after] in '>/')):
-            return i
+        ch = text[i]
+        if state == 'data':
+            if text.startswith('<!--', i):
+                state = 'escaped-dash-dash'
+                i += 4
+                continue
+            if _html_script_name(text, i, '</script') is not None:
+                return i
+        elif state.startswith('escaped'):
+            if _html_script_name(text, i, '</script') is not None:
+                return i
+            if _html_script_name(text, i, '<script') is not None:
+                state = 'double-escaped'
+            elif ch == '<':
+                state = 'escaped'
+            elif state == 'escaped':
+                state = 'escaped-dash' if ch == '-' else state
+            elif state == 'escaped-dash':
+                state = ('escaped-dash-dash' if ch == '-'
+                         else 'escaped')
+            elif ch == '>':
+                state = 'data'
+            elif ch != '-':
+                state = 'escaped'
+        elif _html_script_name(text, i, '</script') is not None:
+            state = 'escaped'
+        elif ch == '<':
+            state = 'double-escaped'
+        elif state == 'double-escaped':
+            state = 'double-escaped-dash' if ch == '-' else state
+        elif state == 'double-escaped-dash':
+            state = ('double-escaped-dash-dash' if ch == '-'
+                     else 'double-escaped')
+        elif ch == '>':
+            state = 'data'
+        elif ch != '-':
+            state = 'double-escaped'
         i += 1
     return len(text)
+
+
+def _html_script_name(text, start, token):
+    """The index after a script token's name when HTML recognizes it."""
+    after = start + len(token)
+    if (text[start:after].lower() == token
+            and after < len(text) and text[after] in '\t\n\f />'):
+        return after
+    return None
 
 
 def _html_tag(text, start, regions):
