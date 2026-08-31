@@ -3,11 +3,10 @@ import contextlib
 import io
 import json
 import os
-import re
 import subprocess
 
 import _util
-from _ghexpr import evaluate, evaluate_if
+from _ghexpr import ExpressionError, evaluate, evaluate_if, sole_context_path
 from _repo import ROOT
 from _yamlread import (
     _decoded_mapping_entry, _first_child, _indent, _lines, _meaningful,
@@ -82,27 +81,22 @@ def _job_section(workflow, job):
 def _job_needs(workflow, job):
     """The job names listed under `needs:` on the named job.
 
-    Workflows in this repository use one canonical source spelling; these
-    tests pin it, so a failure means the spelling changed rather than the
-    guard broke.
+    A bare scalar, a block sequence and a flow sequence all name the same
+    dependencies, so all three decode to the same list; a shape that is not
+    a name or a list of names is refused rather than read.
     """
-    names = []
-    in_needs = False
-    for line in _job_section(workflow, job)[1:]:
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
-        if in_needs:
-            if stripped.startswith('- '):
-                names.append(stripped[2:])
-                continue
-            return names
-        if line.startswith('    needs:'):
-            inline = stripped[len('needs:'):].strip()
-            if inline:
-                return [inline]
-            in_needs = True
-    return names
+    source = _field_source(workflow, job, 'needs')
+    if source is None:
+        return []
+    decoded = complete_job_mapping(source, job)
+    assert decoded is not None, job
+    needs = decoded.get('needs')
+    if isinstance(needs, str):
+        return [needs]
+    if not isinstance(needs, list) or not all(
+            isinstance(name, str) for name in needs):
+        raise ValueError(f'job {job!r} needs is not a list of job names')
+    return needs
 
 
 def _job_step_ids(workflow, job):
@@ -206,28 +200,40 @@ def _job_names_with_outputs(workflow):
 def _job_output_step_ids(workflow, job):
     """Return step IDs referenced by a job's output expressions.
 
-    Workflows in this repository use one canonical source spelling; these
-    tests pin it, so a failure means the spelling changed rather than the
-    guard broke.
+    The reference is parsed rather than pattern-matched, so parentheses and
+    spacing do not change which step an output names; anything that is not
+    one complete `steps.<id>.outputs.<name>` lookup is refused.
     """
     outputs = _job_output_mapping(workflow, job)
     if outputs is None:
         return set()
     references = set()
-    pattern = re.compile(
-        r'^\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.'
-        r'[A-Za-z0-9_-]+\s*\}\}$')
     for name, value in outputs.items():
         if not isinstance(value, str):
             raise ValueError(
                 f'job {job!r} output {name!r} is not a scalar expression')
-        match = pattern.fullmatch(value)
-        if match is None:
+        path = _output_reference(value)
+        if path is None:
             raise ValueError(
                 f'job {job!r} output {name!r} has unsupported expression: '
                 f'{value!r}')
-        references.add(match.group(1))
+        references.add(path[1])
     return references
+
+
+def _output_reference(value):
+    """Return the step lookup one output expression names, or None."""
+    expression = value.strip()
+    if not (expression.startswith('${{') and expression.endswith('}}')):
+        return None
+    try:
+        path = sole_context_path(expression)
+    except ExpressionError:
+        return None
+    if (path is None or len(path) != 4 or path[0] != 'steps'
+            or path[2] != 'outputs'):
+        return None
+    return path
 
 
 def _job_if_expression(workflow, job):

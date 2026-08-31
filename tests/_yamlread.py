@@ -552,16 +552,17 @@ def _scalar_value(lines, entry, end, name):
     if value[:1] not in ('>', '|'):
         if value[:1] in ('[', '{'):
             raise YAMLReadError(f'{name} is not a scalar')
-        if value[:1] in ('"', "'"):
-            raise YAMLReadError(f'{name} has an unsupported quoted scalar')
-        if ' #' in value:
+        quoted = value[:1] in ('"', "'")
+        if not quoted and ' #' in value:
             raise YAMLReadError(f'{name} has an unsupported inline comment')
         for following in range(index + 1, end):
             if (_meaningful(lines[following])
                     and _indent(lines[following]) > key_indent):
                 raise YAMLReadError(
                     f'{name} has an unsupported multiline scalar')
-        return value
+        # A quoting style is spelling: the decoded value is what the
+        # workflow means, so it decodes rather than being refused.
+        return _decode_inline_scalar(value, name) if quoted else value
     style, chomp, explicit = _parse_header(value, name)
     block_start = index + 1
     block_end = end
