@@ -13,6 +13,7 @@ from daedalus_cli.transport import token as _configured_token
 from daedalus_bridge import atomic_file
 from daedalus_bridge import command_queue
 from daedalus_bridge.log_safe import log_safe
+from daedalus_bridge import mcp_bootstrap
 from daedalus_bridge import result_store
 from daedalus_bridge import segment_store
 from daedalus_bridge import stream_service
@@ -1948,17 +1949,7 @@ if __name__ == '__main__':
         name='command-gc', daemon=True).start()
     httpd = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
     bridge_port = httpd.server_address[1]
-    try:
-        from daedalus_mcp import server as mcp_server
-        mcp_server.start_in_thread(f'http://127.0.0.1:{bridge_port}')
-    except Exception as e:
-        # ASCII only, and it names the install: without the optional
-        # dependencies the bridge otherwise starts normally and /mcp simply
-        # is not there, which reads as a client problem rather than a
-        # missing extra.
-        print('[Daedalus] MCP bootstrap failed, so /mcp is not served - '
-              'install its dependencies with: pip install ".[mcp]" - '
-              f'{log_safe(e)}', flush=True)
+    mcp_bootstrap.start(bridge_port)
     # ASCII only, deliberately: this line is the bridge's sole readiness
     # signal, and a console whose code page cannot encode a decorative
     # character raises rather than degrading, so the announcement would be

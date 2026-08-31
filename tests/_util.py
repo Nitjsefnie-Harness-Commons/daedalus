@@ -388,11 +388,12 @@ def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
 
     The announcement is SEARCHED FOR across every line the child has printed
     so far, not assumed to be the first one. A bridge prints whatever its
-    platform gives it cause to before it gets that far — a malloc-tuning
-    diagnostic where mallopt is not a glibc symbol, an MCP bootstrap failure
-    where that front end's dependencies are missing — and a reader that
-    inspected only the first line would take one of those for the
-    announcement, miss the port, and time out on a bridge that came up fine.
+    platform gives it cause to — a malloc-tuning diagnostic where mallopt is
+    not a glibc symbol before it gets that far, an MCP bootstrap failure from
+    its own thread at whatever moment that front end's missing dependencies
+    surface — and a reader that inspected only the first line would take one
+    of those for the announcement, miss the port, and time out on a bridge
+    that came up fine.
 
     The scan stays bounded in both directions: a child that exits is
     reported the moment it does, and one that stays up without announcing
