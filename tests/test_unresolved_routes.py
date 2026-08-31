@@ -579,5 +579,49 @@ subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
         'env='], violations
 
 
+def test_an_alias_of_the_os_module_still_moves_the_cwd(tmp):
+    """Route 3: `import os as filesystem; filesystem.chdir(tmp)` taints."""
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
+    first = _declaration_line(_module_text(target))
+    original = _with_planted_launch(
+        target,
+        "import os as filesystem\n"
+        "filesystem.chdir(tmp)\n"
+        "subprocess.run(['python3', 'child.py'])\n")
+    try:
+        violations = _coverage_environment_violations(root)
+        assert (f'tests/test_diff_coverage.py:{first + 2}: subprocess.run '
+                f'os.chdir at line {first + 1} may have moved the cwd '
+                'declares no env=') in violations, violations
+    finally:
+        target.write_bytes(original)
+    restored = _coverage_environment_violations(root)
+    assert not any(v.startswith(f'tests/test_diff_coverage.py:{line}:')
+                   for line in (first, first + 1, first + 2)
+                   for v in restored), restored
+
+
+def test_every_spelling_of_a_cwd_change_taints_an_inherited_cwd(tmp):
+    """contextlib.chdir, fchdir, an aliased import: all move the cwd."""
+    del tmp
+    for mover in ('import contextlib\nwith contextlib.chdir(tmp):\n    pass',
+                  'import os\nos.fchdir(handle)',
+                  'from os import chdir as move\nmover = move\nmover(tmp)'):
+        violations = _synthetic_violations(
+            f"""import subprocess
+{mover}
+subprocess.run(['python3', 'child.py'])
+""")
+        assert any('may have moved the cwd' in v for v in violations), (
+            mover, violations)
+    assert _synthetic_violations(
+        """import os as filesystem
+import subprocess
+filesystem.chdir(ROOT)
+subprocess.run(['python3', 'child.py'])
+""") == []
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
