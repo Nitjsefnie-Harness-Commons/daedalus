@@ -586,6 +586,35 @@ def test_an_indicator_a_plain_scalar_cannot_open_with_is_refused(tmp):
         assert _refuses(_job_needs, workflow, 'suites'), spelling
 
 
+def _plain_indicator_refusal(tmp, value):
+    """Plant one reserved leader into the real workflow and refuse it."""
+    spelling = f'    if: {value}\n'
+    workflow = _real(tmp, _replaced(PLAIN_IF, spelling))
+    assert _refuses(job_scalar, workflow, 'suites', 'if'), spelling
+    assert _refuses(complete_job_mapping, workflow, 'suites'), spelling
+    assert _refuses(_job_if_expression, workflow, 'suites'), spelling
+
+
+def test_a_comma_cannot_open_a_plain_scalar(tmp):
+    """A comma opens flow content; it cannot be a block scalar leader."""
+    _plain_indicator_refusal(tmp, ',x')
+
+
+def test_a_closing_square_bracket_cannot_open_a_plain_scalar(tmp):
+    """A closing square bracket cannot lead a block plain scalar."""
+    _plain_indicator_refusal(tmp, ']x')
+
+
+def test_a_closing_brace_cannot_open_a_plain_scalar(tmp):
+    """A closing brace cannot lead a block plain scalar."""
+    _plain_indicator_refusal(tmp, '}x')
+
+
+def test_a_question_mark_and_space_cannot_open_a_plain_scalar(tmp):
+    """A question-mark key indicator cannot lead a plain scalar."""
+    _plain_indicator_refusal(tmp, '? x')
+
+
 def test_a_flow_indicator_inside_a_plain_scalar_is_refused(tmp):
     """An unquoted flow scalar may not carry any of `,[]{}`."""
     workflow = _real(tmp, _replaced(
