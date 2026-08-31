@@ -236,6 +236,27 @@ def test_function_value_timelines_match_runtime(tmp):
          "let promote = ordinary;\n"
          "const deferred = () => promote('focus-tab', { tab: chromeTab });\n"
          "promote = extCmd;\ndeferred();\n", True),
+        ('transitive-concise-invocation', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "let inner = () => send('focus-tab', { tab: chromeTab });\n"
+         "let outer = () => inner();\npromote();\nouter();\n", True),
+        ('block-wrapped-concise-invocation', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "let inner = () => send('focus-tab', { tab: chromeTab });\n"
+         "function outer() { inner(); }\npromote();\nouter();\n", True),
+        ('concise-parameter-promotion', "let send = ordinary;\n"
+         "const deferred = send => send('focus-tab', "
+         "{ tab: chromeTab });\ndeferred(extCmd);\n", True),
+        ('concise-parameter-demotion', "let send = extCmd;\n"
+         "const deferred = send => send('focus-tab', "
+         "{ tab: chromeTab });\ndeferred(ordinary);\n", False),
+        ('comma-sibling-concise-body', "let send = ordinary;\n"
+         "let promote = () => { send = extCmd; };\n"
+         "let spare = () => 0, defer = () => send('focus-tab', "
+         "{ tab: chromeTab });\npromote();\ndefer();\nvoid spare;\n", True),
+        ('asi-terminated-concise-body', "let send = ordinary;\n"
+         "let defer = () => send('focus-tab', { tab: chromeTab })\n"
+         "send = extCmd;\ndefer();\n", True),
         ('uninvoked-callable-demotion', "let send = ordinary;\n"
          "let promote = () => { send = extCmd; };\n"
          "function demote() { promote = ordinary; }\n"
