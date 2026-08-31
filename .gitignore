@@ -236,6 +236,7 @@
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_overlap.py
+!/tests/_owned_writes.py
 !/tests/_prgate.py
 !/tests/_prgate_race.py
 !/tests/_pyroute.py
@@ -327,6 +328,7 @@
 !/tests/test_mcp_transport_guards.py
 !/tests/test_overlap_client_state.py
 !/tests/test_overlap_harness.py
+!/tests/test_owned_writes.py
 !/tests/test_path_safety.py
 !/tests/test_pr_body.py
 !/tests/test_pr_gate.py
@@ -357,6 +359,7 @@
 !/tests/test_tab_routing_performance.py
 !/tests/test_tab_routing_unprovable.py
 !/tests/test_teardown_retry.py
+!/tests/test_unresolved_routes.py
 !/tests/test_version_contract.py
 !/tests/test_version_contract_empty_rev.py
 !/tests/test_version_contract_quote_duplicates.py
