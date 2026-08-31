@@ -121,9 +121,25 @@ def test_exited_child_unfinished_drain_is_reported(tmp):
 
 
 def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
-    """The first successful bridge start consumes the cold allowance."""
+    """The first successful bridge start consumes the cold allowance.
+
+    The allowance is read off what the fixture PASSES to the wait, through a
+    stand-in that records it and refuses. Pinning it by patching the
+    allowance to a fraction of a second and requiring the real start to miss
+    it made the assertion depend on the bridge being slow, so it stopped
+    holding on the first host where startup got fast enough.
+    """
     assert hasattr(_util, '_bridge_started'), 'fixture has no start state'
     saved_started = _util._bridge_started
+    real_await = _util.await_listening_line
+    spent = []
+
+    def refusing_await(proc, drained, timeout=None):
+        """Record the allowance the fixture chose, and refuse to wait."""
+        del proc, drained
+        spent.append(timeout)
+        raise RuntimeError('the stand-in refused to wait')
+
     try:
         _util._bridge_started = False
         assert _util.startup_timeout() == _util.COLD_START_TIMEOUT
@@ -131,26 +147,33 @@ def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
         assert _util.startup_timeout() == _util.WARM_START_TIMEOUT
         assert _util.COLD_START_TIMEOUT > _util.WARM_START_TIMEOUT
 
+        _util.await_listening_line = refusing_await
         _util._bridge_started = False
-        real_startup_timeout = _util.startup_timeout
-        _util.startup_timeout = lambda: 0.001
+        failure = ''
         try:
-            failure = ''
-            try:
-                with _util.bridge(tmp):
-                    pass
-            except RuntimeError as exc:
-                failure = str(exc)
-            assert 'did not announce its port in 0.001s' in failure, failure
-            assert _util._bridge_started is False
-        finally:
-            _util.startup_timeout = real_startup_timeout
+            with _util.bridge(tmp):
+                pass
+        except RuntimeError as exc:
+            failure = str(exc)
+        assert failure == 'the stand-in refused to wait', failure
+        assert spent == [_util.COLD_START_TIMEOUT], spent
+        assert _util._bridge_started is False, 'a failed start marked warm'
+
+        _util._bridge_started = True
+        try:
+            with _util.bridge(tmp):
+                pass
+        except RuntimeError:
+            pass
+        assert spent[-1] == _util.WARM_START_TIMEOUT, spent
+        _util.await_listening_line = real_await
 
         _util._bridge_started = False
         with _util.bridge(tmp):
             pass
         assert _util._bridge_started is True
     finally:
+        _util.await_listening_line = real_await
         _util._bridge_started = saved_started
 
 
