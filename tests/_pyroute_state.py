@@ -549,10 +549,10 @@ def state_signature(state):
         (name, value.expression.lineno, value.expression.col_offset,
          value.remaining, value.evaluate_zero)
         for name, value in state.generators.items()))
-    found = state.evaluated
-    evaluated = []
+    found, evaluated = state.evaluated, []
     for key in sorted(found):
         value = found[key]
+        if value is None: continue
         evaluated.append((key, value if value.__class__ is
                           not DeferredGenerator else value_signature(value)))
     return (tuple(payloads), tuple(sorted(state.aliases.items())),
