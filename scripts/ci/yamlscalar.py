@@ -1,4 +1,29 @@
-"""Decode the bounded inline YAML scalar subset used by workflow policy."""
+"""Decode the bounded inline YAML scalar subset used by workflow policy.
+
+The workflow readers built on this admit one subset and refuse the rest, and
+a refusal is one of exactly two things.
+
+Admitted: plain, single-quoted and double-quoted one-line scalars, folded and
+literal block scalars, block mappings and block sequences, and flow
+collections of any of those -- spanning lines where the collection itself
+does. Equivalent spellings decode to the same value, so quoting a scalar or
+rewriting a block collection in flow style changes nothing a reader sees.
+
+Refused as invalid YAML: an unterminated quote or bracket, an unquoted flow
+scalar carrying any of `,[]{}`, an interior empty flow item, an empty mapping
+key, a duplicate key, a tab in indentation, inconsistent indentation, a
+malformed block-scalar header or escape, and a control or surrogate
+character.
+
+Refused as a boundary of this subset, which every such message names with
+the word `unsupported`: a tab inside a value, a multiline plain scalar,
+nested content under a scalar, an anchor, an alias or a tag, and a plain
+scalar outside the character set the reader admits. A shape refusal
+("... is not a mapping") names the shape the reader requires instead.
+
+Deciding full YAML validity is not this module's job. `actionlint` is the
+CI-side oracle for that and gates every workflow change.
+"""
 import re
 
 
@@ -83,37 +108,6 @@ def split_mapping_field(text, owner, allow_tabs=False):
             raise YAMLReadError(f'{owner} has an empty mapping key')
         return key, text[index + 1:]
     raise YAMLReadError(f'{owner} has an unsupported mapping field')
-
-
-def split_flow_collection(value, owner):
-    """Split one flow collection into its bracket and body, or return None."""
-    opening = value[:1]
-    if opening not in ('[', '{'):
-        return None
-    closing = ']' if opening == '[' else '}'
-    if len(value) < 2 or not value.endswith(closing):
-        raise YAMLReadError(f'{owner} has an unbalanced flow collection')
-    return opening, value[1:-1]
-
-
-def split_flow_items(body, owner):
-    """Split a nonempty flow collection body on its top-level commas.
-
-    A trailing comma is the separator that terminates the last entry, so it
-    yields the collection without it; an interior empty item is malformed.
-    """
-    items = []
-    start = 0
-    for index, char, depth in _unquoted(body, owner, flow=True):
-        if char == ',' and depth == 0:
-            items.append(body[start:index])
-            start = index + 1
-    items.append(body[start:])
-    if len(items) > 1 and not items[-1].strip(' '):
-        items.pop()
-    if any(not item.strip(' ') for item in items):
-        raise YAMLReadError(f'{owner} has an empty flow item')
-    return items
 
 
 def _strip_inline_comment(value):

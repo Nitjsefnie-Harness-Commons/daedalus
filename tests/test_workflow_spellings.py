@@ -119,11 +119,7 @@ def test_one_dependency_reads_the_same_in_all_three_shapes(tmp):
 
 
 def test_an_apostrophe_inside_a_flow_item_is_content(tmp):
-    """A quote opens a quoted node only at node start.
-
-    Everywhere else it is ordinary plain-scalar content, so these decode
-    rather than being read as an unterminated quote.
-    """
+    """A quote opens a node only at node start; elsewhere it is content."""
     spellings = {
         "    needs: [don't, x]\n": ["don't", 'x'],
         "    needs: [it's]\n": ["it's"],
@@ -178,6 +174,21 @@ def test_a_block_sequence_item_may_span_lines_too(tmp):
         ['changes', 'pycodestyle', 'pylint'], 'pyright']
 
 
+def test_a_multiline_plain_scalar_stays_outside_the_subset(tmp):
+    """Only a flow collection carries its own extent across lines.
+
+    A folded plain scalar is valid YAML outside the admitted subset, so both
+    readers name that boundary rather than reading half a value.
+    """
+    workflow = _real(tmp, _replaced(
+        PLAIN_IF,
+        '    if: ${{ !cancelled()\n            && !failure() }}\n'))
+    assert 'unsupported nested content' in _refuses(
+        complete_job_mapping, workflow, 'suites')
+    assert 'unsupported multiline scalar' in _refuses(
+        job_scalar, workflow, 'suites', 'if')
+
+
 def test_a_flow_collection_spanning_lines_must_still_close(tmp):
     """Spanning lines buys no relief from the flow grammar."""
     workflow = _real(tmp, _replaced(
@@ -222,8 +233,8 @@ def test_parenthesised_output_reference_names_the_same_step(tmp):
 def test_an_output_reference_must_be_exactly_one_step_lookup(tmp):
     """Each limb of the `steps.<id>.outputs.<name>` shape is pinned alone.
 
-    Every spelling here differs from the accepted reference in exactly one
-    field, so dropping any single limb of the check leaves one accepted.
+    Every spelling differs from the accepted reference in exactly one field,
+    so dropping any single limb leaves one of them accepted.
     """
     original = '      matrix: ${{ steps.classify.outputs.matrix }}\n'
     spellings = (
@@ -296,10 +307,7 @@ def test_an_unbalanced_flow_collection_is_refused(tmp):
 
 
 def test_a_trailing_comma_ends_a_flow_collection(tmp):
-    """A trailing entry separator closes the collection it terminates.
-
-    An interior empty item has no such reading and stays refused.
-    """
+    """A trailing separator closes a collection; an interior gap does not."""
     workflow = _real(tmp, _replaced(BLOCK_NEEDS, '    needs: [changes, ]\n'))
     assert _job_needs(workflow, 'suites') == ['changes']
     workflow = _real(tmp, _replaced(

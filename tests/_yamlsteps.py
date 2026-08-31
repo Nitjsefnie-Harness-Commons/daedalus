@@ -107,7 +107,7 @@ def _decode_value(lines, index, end, indent, key, raw_value):
     child = _reader._first_child(
         lines, index + 1, end, indent)
     if child is not None:
-        raise YAMLReadError(f'step {key} has nested scalar content')
+        raise YAMLReadError(f'step {key} has unsupported nested content')
     return _decode_inline_value(raw_value, f'step value for {key!r}')
 
 
@@ -153,7 +153,8 @@ def _decode_scalar_mapping(lines, start, end, parent_indent, owner):
         child = _reader._first_child(
             lines, index + 1, field_end, child_indent)
         if child is not None:
-            raise YAMLReadError(f'{owner} has a nested mapping value')
+            raise YAMLReadError(
+                f'{owner} has an unsupported nested mapping value')
         values[key] = _decode_inline_value(
             raw_value, f'{owner} value for {key!r}')
     return values
@@ -215,7 +216,7 @@ def _decode_complete_value(
         joined = _flow_continuation(lines, index, end, value)
         if joined is None and child is not None:
             raise YAMLReadError(
-                f'{owner} {key} has nested scalar content')
+                f'{owner} {key} has unsupported nested content')
         return _decode_complete_inline(
             joined or raw_value, f'{owner} value for {key!r}')
     if child is None:
@@ -290,7 +291,7 @@ def _decode_complete_sequence(lines, start, end, parent_indent, owner):
                 lines, index + 1, item_end, item_indent)
             if joined is None and child is not None:
                 raise YAMLReadError(
-                    f'{owner} scalar item has nested content')
+                    f'{owner} scalar item has unsupported nested content')
             decoded.append(_decode_complete_inline(
                 joined or raw_value, f'{owner} item'))
             continue
