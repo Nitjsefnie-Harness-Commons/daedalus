@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _yamlsteps  # noqa: E402
 from _yamlread import (  # noqa: E402
-    YAMLReadError, _comment, job_scalar, step_scalar, step_scalars,
+    YAMLReadError, _comment, job_mapping, job_scalar, step_scalar,
+    step_scalars,
 )
 from _yamlscalar import decode_inline_scalar  # noqa: E402
 from workflow_yaml import workflow_step_items  # noqa: E402
@@ -557,6 +558,31 @@ def test_a_step_scalar_stops_where_its_own_field_stops(tmp):
     for workflow, job, step, key, expected in shipped:
         assert step_scalar(workflow, job, step, key) == expected, (
             job, step, key)
+
+
+def test_every_reader_folds_a_wrapped_plain_scalar(tmp):
+    """The subset folds plain scalars, so no entry point may refuse one.
+
+    A reader that refuses what its siblings fold makes one workflow two
+    documents depending on which reader opened it.
+    """
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: s\n'
+        '        run: python3 x.py --a\n'
+        '          --b\n')
+    assert _yamlsteps.step_mappings(source, 'sample') == [
+        {'name': 's', 'run': 'python3 x.py --a --b'}]
+    assert step_scalar(
+        source, 'sample', 's', 'run') == 'python3 x.py --a --b'
+    source = (
+        'jobs:\n  sample:\n    env:\n'
+        '      A: one\n'
+        '        two\n'
+        '      B: three\n')
+    assert job_mapping(source, 'sample', 'env') == {
+        'A': 'one two', 'B': 'three'}
 
 
 if __name__ == '__main__':
