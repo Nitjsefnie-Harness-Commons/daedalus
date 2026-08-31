@@ -1,10 +1,35 @@
 """Deferred values and expression helpers for Python routing flow."""
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from _pyroute_state import FlowState
+
+
+@dataclass(frozen=True)
+class CellBinding:
+    alias: object = None
+    generator: object = None
+    deferred: object = None
+    payload: object = None
+    bound: bool = False
+
+
+@dataclass
+class CellState:
+    origins: dict = field(default_factory=dict)
+    values: dict = field(default_factory=dict)
+
+    def copy(self):
+        return CellState(dict(self.origins), dict(self.values))
+
+    def update(self, other):
+        self.values.update(other.values)
+
+    def without(self, names):
+        return CellState({name: key for name, key in self.origins.items()
+                          if name not in names}, self.values)
 
 
 @dataclass(frozen=True)
@@ -24,6 +49,17 @@ class DeferredCallable:
     state: 'FlowState'
     locals: frozenset
     captured: frozenset = frozenset()
+    origin: int = 0
+    closure: CellState = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self):
+        closure = self.closure or self.state.cells
+        for name in self.captured:
+            key = closure.origins.setdefault(name, (self.origin, name))
+            binding = _binding_from_state(self.state, name)
+            closure.values.setdefault(key, binding)
+            self.state.cells.origins[name] = key
+            self.state.cells.values.setdefault(key, binding)
 
 
 @dataclass(frozen=True)
@@ -61,6 +97,112 @@ DEFERRED_VALUES = (DeferredCallable, DeferredClass, DeferredAlternatives,
 
 def is_deferred_value(value):
     return isinstance(value, DEFERRED_VALUES)
+
+
+def _binding_from_state(state, name):
+    payload = state.dicts.get(name)
+    return CellBinding(
+        state.aliases.get(name), state.generators.get(name),
+        state.callables.get(name), payload.copy() if payload is not None
+        else None, name in state.bound)
+
+
+def _apply_binding(state, name, key, binding):
+    state.aliases.pop(name, None)
+    state.generators.pop(name, None)
+    state.callables.pop(name, None)
+    state.dicts.pop(name, None)
+    origin = state.dict_origins.pop(name, None)
+    if origin is not None:
+        state.dict_namespaces.setdefault(origin, {}).pop(name, None)
+    if binding.alias is not None:
+        state.aliases[name] = binding.alias
+    if binding.generator is not None:
+        state.generators[name] = binding.generator
+    if binding.deferred is not None:
+        state.callables[name] = binding.deferred
+    if binding.payload is not None:
+        payload = binding.payload.copy()
+        state.dicts[name] = payload
+        state.dict_origins[name] = key[0]
+        state.dict_namespaces.setdefault(key[0], {})[name] = payload.copy()
+    if binding.bound:
+        state.bound.add(name)
+    else:
+        state.bound.discard(name)
+
+
+def sync_cells(state, names):
+    for name in names:
+        key = state.cells.origins.get(name)
+        if key is not None:
+            state.cells.values[key] = _binding_from_state(state, name)
+
+
+def load_callable_cells(deferred, caller, entry):
+    for name in deferred.captured:
+        key = deferred.state.cells.origins.get(name)
+        if key is None:
+            continue
+        binding = caller.cells.values.get(
+            key, deferred.state.cells.values.get(key))
+        if binding is None:
+            continue
+        entry.cells.origins[name] = key
+        entry.cells.values[key] = binding
+        _apply_binding(entry, name, key, binding)
+
+
+def merge_cell_states(states):
+    if len(states) == 1:
+        return states[0].cells
+    origins = {}
+    names = {name for state in states for name in state.cells.origins}
+    for name in names:
+        keys = [state.cells.origins.get(name) for state in states]
+        if keys[0] is not None and all(key == keys[0] for key in keys):
+            origins[name] = keys[0]
+    values = {}
+    for key in set(origins.values()):
+        bindings = [state.cells.values.get(key) for state in states]
+        if all(_binding_signature(item) == _binding_signature(bindings[0])
+               for item in bindings):
+            values[key] = bindings[0]
+    return CellState(origins, values)
+
+
+def _binding_signature(binding):
+    if binding is None:
+        return None
+    generator = binding.generator
+    generator_key = (generator.expression.lineno,
+                     generator.expression.col_offset,
+                     generator.remaining, generator.evaluate_zero) \
+        if isinstance(generator, DeferredGenerator) else None
+    payload = (tuple(sorted(
+        (key, value[0], id(value[1]))
+        for key, value in binding.payload.items()))
+        if binding.payload is not None else None)
+    return (binding.alias, generator_key,
+            id(binding.deferred) if binding.deferred is not None else None,
+            payload, binding.bound)
+
+
+def advance_generator(state, generator):
+    if generator.remaining is None:
+        return
+    remaining = max(0, generator.remaining - 1)
+    advanced = DeferredGenerator(generator.expression, remaining)
+    for name, value in list(state.generators.items()):
+        if value is not generator:
+            continue
+        if remaining:
+            state.generators[name] = advanced
+        else:
+            del state.generators[name]
+    for key, value in list(state.evaluated.items()):
+        if value is generator:
+            state.evaluated[key] = advanced
 
 
 def merge_deferred_values(values):
@@ -291,6 +433,7 @@ def store_deferred_value(statement, state):
             attributes = dict(owner.attributes)
             attributes[target.attr] = value
             state.callables[owner_name] = DeferredInstance(attributes)
+            sync_cells(state, {owner_name})
         elif isinstance(target, ast.Subscript) \
                 and isinstance(owner, DeferredContainer) \
                 and isinstance(target.slice, ast.Constant):
@@ -298,6 +441,7 @@ def store_deferred_value(statement, state):
             items[target.slice.value] = value
             state.callables[owner_name] = DeferredContainer(
                 items, owner.length)
+            sync_cells(state, {owner_name})
 
 
 def payload_key(dicts):
