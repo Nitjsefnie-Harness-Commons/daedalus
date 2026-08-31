@@ -354,6 +354,7 @@
 !/tests/test_stream_service.py
 !/tests/test_suite_runner.py
 !/tests/test_tab_routing.py
+!/tests/test_tab_routing_js.py
 !/tests/test_tab_routing_performance.py
 !/tests/test_tab_routing_unprovable.py
 !/tests/test_teardown_retry.py
