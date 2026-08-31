@@ -83,6 +83,7 @@ _JS_OPERAND_KEYWORDS = frozenset({'await', 'case', 'delete', 'do', 'else',
                                   'throw', 'typeof', 'void', 'yield'})
 _JS_WORD = frozenset(string.ascii_letters + string.digits + '_$')
 _JS_REGEX_FLAGS = frozenset('dgimsuvy')
+_JS_LINE_TERMINATORS = ('\n', '\r', '\u2028', '\u2029')
 
 
 # Every scanner answers (start, end, kind) spans for the constructs a version
@@ -102,10 +103,20 @@ def _javascript_regions(text, html_comments=False):
 def _js_html_close_comment(text, position):
     """Whether `-->` at `position` starts an HTML-like line comment."""
     line_start = max(text.rfind(mark, 0, position)
-                     for mark in ('\n', '\r', '\u2028', '\u2029')) + 1
+                     for mark in _JS_LINE_TERMINATORS) + 1
     prefix = text[line_start:position]
     return (text.startswith('-->', position)
-            and (not prefix or prefix.isspace()))
+            and all(ch.isspace() or ch == '\ufeff' for ch in prefix))
+
+
+def _js_line_comment_end(text, start):
+    """The nearest JavaScript line terminator at or after `start`."""
+    close = len(text)
+    for mark in _JS_LINE_TERMINATORS:
+        found = text.find(mark, start)
+        if found != -1:
+            close = min(close, found)
+    return close
 
 
 def _scan_javascript(text, start, regions, substitution, html_comments):
@@ -128,8 +139,11 @@ def _scan_javascript(text, start, regions, substitution, html_comments):
         elif (text.startswith('//', i) or text.startswith('/*', i)
               or html_line):
             line = text[i + 1] == '/' or html_line
-            closer, skip = ('\n', 0) if line else ('*/', 2)
-            close = text.find(closer, i + 2)
+            if line and html_comments:
+                close, skip = _js_line_comment_end(text, i + 2), 0
+            else:
+                closer, skip = ('\n', 0) if line else ('*/', 2)
+                close = text.find(closer, i + 2)
             close = end if close == -1 else close + skip
             regions.append((i, close, 'comment'))
             i = close

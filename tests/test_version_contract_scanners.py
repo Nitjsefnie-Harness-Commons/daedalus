@@ -360,6 +360,47 @@ def test_html_close_marker_mode_is_off_for_javascript_files(tmp):
     assert _surviving(_checker(), _JS, source, _SPACED_DUP) == 1
 
 
+_HTML_CLOSE_STARTS = (
+    ('script text start', ''),
+    ('LF', 'const before = 0;\n'),
+    ('CR', 'const before = 0;\r'),
+    ('CRLF', 'const before = 0;\r\n'),
+    ('line separator', 'const before = 0;\u2028'),
+    ('paragraph separator', 'const before = 0;\u2029'),
+    ('zero-width no-break space', 'const before = 0;\n\ufeff'),
+)
+
+
+def test_html_close_comments_begin_at_every_javascript_line_start(tmp):
+    del tmp
+    decoy = "<span class='sl-v'>9.9.9</span>"
+    live = 'const live = 1;'
+    regions = _checker()
+    for label, prefix in _HTML_CLOSE_STARTS:
+        source = f'<script>{prefix}--> {decoy}\n{live}</script>'
+        assert _surviving(regions, _DASHBOARD, source, decoy) == 0, label
+        assert _surviving(regions, _DASHBOARD, source, live) == 1, label
+
+
+_HTML_LINE_TERMINATORS = (
+    ('LF', '\n'),
+    ('CR', '\r'),
+    ('line separator', '\u2028'),
+    ('paragraph separator', '\u2029'),
+)
+
+
+def test_html_comments_end_at_every_javascript_line_terminator(tmp):
+    del tmp
+    decoy = "<span class='sl-v'>9.9.9</span>"
+    live = 'const live = 1;'
+    regions = _checker()
+    for label, terminator in _HTML_LINE_TERMINATORS:
+        source = f'<script>\n--> {decoy}{terminator}{live}</script>'
+        assert _surviving(regions, _DASHBOARD, source, decoy) == 0, label
+        assert _surviving(regions, _DASHBOARD, source, live) == 1, label
+
+
 _SCRIPT_END_CASES = (
     ('escaped entry and dash-dash exit',
      '<!--><script></script>tail</script>'),
