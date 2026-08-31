@@ -3,6 +3,9 @@ import ast
 import operator
 from dataclasses import dataclass, field
 
+from _pyroute_values import (DeferredCallable, DeferredClass,
+                             DeferredGenerator)
+
 
 OPAQUE_TAB_SPREAD = object()
 UNPROVABLE_SENDER = '?ext_cmd'
@@ -38,32 +41,6 @@ class FlowState:
             {scope: {name: keys.copy() for name, keys in values.items()}
              for scope, values in self.dict_namespaces.items()},
             self.namespace)
-
-
-@dataclass(frozen=True)
-class DeferredGenerator:
-    """A generator expression and its known remaining yield count."""
-
-    expression: ast.GeneratorExp
-    remaining: int | None
-    evaluate_zero: bool = False
-
-
-@dataclass(frozen=True)
-class DeferredCallable:
-    """A callable body and its definition-time lexical state."""
-
-    scope: ast.AST
-    state: FlowState
-    locals: frozenset
-    captured: frozenset = frozenset()
-
-
-@dataclass(frozen=True)
-class DeferredClass:
-    """Methods belonging to one statically known class object."""
-
-    methods: dict
 
 
 def scope_nodes(scope):
@@ -345,6 +322,8 @@ def rebound_names(node):
 def evaluated_value(value, state):
     if id(value) in state.evaluated:
         return state.evaluated[id(value)]
+    if isinstance(value, ast.Name) and value.id in state.callables:
+        return state.callables[value.id]
     return resolve_sender_name(value, state.aliases)
 
 
@@ -440,6 +419,11 @@ def bind_alias_target(target, value, state, bindings):
         resolved = evaluated_value(value, state)
         if isinstance(resolved, DeferredGenerator):
             bindings[1][target.id] = resolved
+        elif isinstance(resolved, (DeferredCallable, DeferredClass)):
+            bindings[2][target.id] = resolved
+            sender = resolve_sender_name(value, state.aliases)
+            if sender is not None:
+                bindings[0][target.id] = sender
         elif resolved is not None:
             bindings[0][target.id] = resolved
         return
@@ -504,7 +488,7 @@ def apply_alias_statement(node, state):
                    node, (ast.AnnAssign, ast.AugAssign)) else None)
     if targets is None:
         return
-    bindings = ({}, {})
+    bindings = ({}, {}, {})
     if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
         for target in targets:
             bind_alias_target(target, node.value, state, bindings)
@@ -521,6 +505,7 @@ def apply_alias_statement(node, state):
         state.callables.pop(name, None)
     aliases.update(bindings[0])
     state.generators.update(bindings[1])
+    state.callables.update(bindings[2])
 
 
 def value_signature(value):
@@ -528,6 +513,8 @@ def value_signature(value):
         expr = value.expression
         return ('generator', expr.lineno, expr.col_offset, value.remaining,
                 value.evaluate_zero)
+    if isinstance(value, (DeferredCallable, DeferredClass)):
+        return ('callable', id(value))
     return value
 
 
@@ -553,8 +540,7 @@ def state_signature(state):
     for key in sorted(found):
         value = found[key]
         if value is None: continue
-        evaluated.append((key, value if value.__class__ is
-                          not DeferredGenerator else value_signature(value)))
+        evaluated.append((key, value_signature(value)))
     return (tuple(payloads), tuple(sorted(state.aliases.items())),
             generators, tuple(evaluated),
             tuple(sorted(state.builtin_globals)),
@@ -707,7 +693,7 @@ def callable_state(scope, states, annotations_eager=True):
 
 def function_allowed_opaque(node):
     return (frozenset({node.args.kwarg.arg})
-            if node.name in ('ext_cmd', '_ext_cmd')
+            if getattr(node, 'name', None) in ('ext_cmd', '_ext_cmd')
             and node.args.kwarg is not None else frozenset())
 
 
