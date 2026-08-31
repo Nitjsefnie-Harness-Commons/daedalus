@@ -32,19 +32,18 @@ __all__ = (
 )
 
 
-# Indicators YAML forbids a plain scalar from opening with.
-_PLAIN_LEADERS = ('&', '*', '!', '@', '`', ':', '- ')
+_FORBIDDEN_LEADERS = ('&', '*', '!', '@', '`', ':', '- ')
 
 
 def check_plain_scalar(value, owner):
     """Return a plain scalar, or refuse it as outside the admitted set.
 
     Both workflow readers apply this, so an anchor, an alias, a tag, a
-    mapping separator or a control character is a refusal wherever a plain
-    scalar is read -- never a value one reader returns raw while the other
-    rejects it.
+    mapping separator, a leading block-sequence dash or a control character
+    is a refusal wherever a plain scalar is read -- never a value one reader
+    returns raw while the other rejects it.
     """
-    if value == '-' or value.startswith(_PLAIN_LEADERS):
+    if value == '-' or value.startswith(_FORBIDDEN_LEADERS):
         raise YAMLReadError(f'{owner} has an unsupported plain scalar')
     if ': ' in value or '\t' in value or any(
             ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
