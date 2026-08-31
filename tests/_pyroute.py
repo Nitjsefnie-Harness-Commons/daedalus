@@ -694,7 +694,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                for target in targets):
             pairs, _ = consume_iterable(
                 statement.value, pairs, exhaust=True)
-        value = getattr(statement, 'value', None)
         for state in pairs:
             apply_state_dict_statement(statement, state)
             apply_alias_statement(statement, state)
