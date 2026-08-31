@@ -91,6 +91,8 @@ class DeferredContainer:
     items: dict
     length: int | None = None
     kind: str = 'list'
+    identity: object = field(default_factory=object, compare=False,
+                             repr=False)
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,8 @@ class DeferredInstance:
     """Deferred attributes on one locally constructed instance."""
 
     attributes: dict
+    identity: object = field(default_factory=object, compare=False,
+                             repr=False)
 
 
 DEFERRED_VALUES = (DeferredGenerator, DeferredCallable, DeferredClass,
@@ -632,6 +636,8 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver):
 
 
 def store_deferred_value(statement, state):
+    # pylint: disable-next=import-outside-toplevel
+    from _pyroute_storage import replace_deferred_storage
     if isinstance(statement, ast.Expr) \
             and isinstance(statement.value, ast.Call):
         call = statement.value
@@ -639,8 +645,9 @@ def store_deferred_value(statement, state):
         owner = state.callables.get(owner_name)
         if getattr(call.func, 'attr', None) == 'clear' \
                 and isinstance(owner, DeferredContainer):
-            state.callables[owner_name] = DeferredContainer(
-                {}, 0, owner.kind)
+            replacement = DeferredContainer(
+                {}, 0, owner.kind, owner.identity)
+            replace_deferred_storage(state, owner, replacement)
             sync_cells(state, {owner_name})
         return
     if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Delete)):
@@ -660,7 +667,8 @@ def store_deferred_value(statement, state):
                 attributes.pop(target.attr, None)
             else:
                 attributes[target.attr] = value
-            state.callables[owner_name] = DeferredInstance(attributes)
+            replacement = DeferredInstance(attributes, owner.identity)
+            replace_deferred_storage(state, owner, replacement)
             sync_cells(state, {owner_name})
         elif isinstance(target, ast.Subscript) \
                 and isinstance(owner, DeferredContainer) \
@@ -670,8 +678,9 @@ def store_deferred_value(statement, state):
                 items.pop(target.slice.value, None)
             else:
                 items[target.slice.value] = value
-            state.callables[owner_name] = DeferredContainer(
-                items, owner.length, owner.kind)
+            replacement = DeferredContainer(
+                items, owner.length, owner.kind, owner.identity)
+            replace_deferred_storage(state, owner, replacement)
             sync_cells(state, {owner_name})
 
 
