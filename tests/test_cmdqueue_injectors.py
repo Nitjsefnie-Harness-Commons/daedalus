@@ -14,6 +14,7 @@ from _cmdqueue_faults import (  # noqa: E402
     _queued_file,
     _refuse_first_queue_read,
     _refuse_path_operation,
+    _target_key,
     _vanish_during_read,
     _virtual_cmdqueue_clock,
 )
@@ -653,6 +654,26 @@ def test_vanish_reopen_preserves_bytes_receiver_error(tmp):
         with _vanish_during_read(queued, clock):
             actual = missing_outcome()
     assert actual == expected, (actual, expected)
+
+
+def test_target_key_propagates_interrupts_but_suppresses_probe_errors(tmp):
+    def key_outcome(failure):
+        class Receiver:
+            def __fspath__(self):
+                raise failure
+
+        try:
+            return 'returned', _target_key(Receiver())
+        except BaseException as caught:
+            return 'raised', type(caught)
+
+    for interrupt in (KeyboardInterrupt(), SystemExit(3)):
+        outcome = key_outcome(interrupt)
+        assert outcome == ('raised', type(interrupt)), (
+            'injector probe swallowed an interrupt', interrupt, outcome)
+    suppressed = key_outcome(TypeError('receiver refused the path protocol'))
+    assert suppressed == ('returned', None), (
+        'injector probe exception reached the caller', suppressed)
 
 
 if __name__ == '__main__':
