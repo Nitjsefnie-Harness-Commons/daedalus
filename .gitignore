@@ -370,6 +370,7 @@
 !/tests/test_worker_runtime.py
 !/tests/test_workflow_bash.py
 !/tests/test_workflow_parsing.py
+!/tests/test_workflow_spellings.py
 !/tests/test_workflow_triggers.py
 !/tests/test_yamlread.py
 !/tests/test_yamlread_blocks.py
