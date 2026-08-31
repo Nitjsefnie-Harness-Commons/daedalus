@@ -2,19 +2,15 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-A Python child that inherits COVERAGE_* into a working directory that
+A Python child inheriting COVERAGE_* into a working directory that
 [tool.coverage.paths] does not map back onto the repository records
-coverage against paths that vanish with the temporary tree, and a later
-`coverage combine` fails with `No source for code`. The guard fails
-CLOSED WITHIN WHAT IT RECOGNISES: for a call it recognises as a launch,
-it proves the working directory safe or requires a declaration, and an
-expression it cannot resolve is a violation rather than an exemption.
-
-Recognition itself is enumerated — the launch callables and their module
-aliases, the namespaces that can rebind the helper, the writer calls in
-tests/_control_writes.py — so a call reached through a route not in those
-sets is not judged at all. That boundary is deliberate and is where to
-look first when this guard passes something it should not.
+paths that vanish with the temporary tree, and `coverage combine` later
+fails with `No source for code`. A launch proves its working directory
+safe or declares. A recognised launcher is judged on every call; any
+other callee only when the call spells a working directory the guard
+can read: a `cwd=` keyword, or a `**` spread of a mapping literal that
+names `cwd`. A spread it cannot read is not judged — that boundary is
+where to look first when this guard passes something it should not.
 """
 import ast
 
@@ -27,23 +23,17 @@ _LAUNCHERS = frozenset(
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
-# The launches that declare 'keep', as module::function so an unrelated
-# edit above a site does not churn the list. A keep site with no entry
-# fails, and an entry with no keep site fails. Every tree below sits
-# under the `*/tree` anchor that [tool.coverage.paths] maps back onto
-# the repository (see pyproject.toml).
+# Keep launches as module::function, so an edit above a site does not
+# churn the list; each tree sits under the `*/tree` anchor that
+# [tool.coverage.paths] maps back onto the repository (pyproject.toml).
 _KEEP_ALLOWLIST = frozenset({
-    # The fixture hands the child a synthetic COVERAGE_PROCESS_START and
-    # asserts it arrives; a scrub would strip the very variable under test.
+    # A synthetic COVERAGE_PROCESS_START is the variable under test.
     'tests/test_coverage_suites.py::_coverage_tree',
-    # run_tests.py is measured where it stands in the copied tree;
-    # scrubbing would report the file every one of those tests drives at 0%.
+    # run_tests.py is measured where it stands in the copied tree.
     'tests/test_suite_runner.py::_runner_tree',
     # The copied checker runs from the mapped copy so its lines count.
     'tests/test_version_contract.py::_run_checker',
-    # Same mapped copy: drift detection is the checker's main path.
     'tests/test_version_contract.py::test_check_versions_detects_drift',
-    # Same mapped copy: site completeness is asserted from its output.
     'tests/test_version_contract.py::'
     'test_check_versions_sites_all_present_in_copy',
 })
@@ -110,13 +100,7 @@ class _ModuleFacts:
         self._collect_bindings(tree.body)
 
     def _propagate_aliases(self, tree):
-        """Follow plain-name aliases of a launch callable or _util.
-
-        Iterated to a fixpoint rather than read once, so an alias of an
-        alias resolves to the same object at any depth. An annotated
-        binding is a binding: `launcher: object = subprocess` aliases
-        the module exactly as the unannotated spelling does.
-        """
+        """Follow plain-name aliases of a launcher or _util to a fixpoint."""
         aliases = []
         for node in ast.walk(tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -173,8 +157,7 @@ class _ModuleFacts:
                   and isinstance(function.value, ast.Name)
                   and function.value.id in self.declaration_modules):
             return None
-        # The helper takes `mode` by keyword too, and refusing that spelling
-        # would reject a valid call of the API this guard exists to read.
+        # `mode` arrives by keyword too; refusing it would reject a valid call.
         mode = _keyword_or_arg(node, 'mode', 0)
         if mode is None:
             return 'invalid'
@@ -198,15 +181,25 @@ def _names_one_of(value, names):
     return isinstance(value, ast.Name) and value.id in names
 
 
-def _launch_method(node, facts):
-    """How this call is judged as a launch, or None when it is not one.
+def _spread_names_cwd(node):
+    """Whether a ** spread of the call is a mapping literal naming cwd."""
+    for keyword in node.keywords:
+        value = keyword.value
+        if keyword.arg is not None:
+            continue
+        if isinstance(value, ast.Dict) and any(
+                isinstance(key, ast.Constant) and key.value == 'cwd'
+                for key in value.keys):
+            return True
+        if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                and value.func.id == 'dict'
+                and any(item.arg == 'cwd' for item in value.keywords)):
+            return True
+    return False
 
-    A recognised launch is judged by its subprocess method. Any other
-    call that carries `cwd=` is judged as a launch too — the guard does
-    not know what the callee does with a working directory, so it must
-    declare — except the declaration helper itself, whose `cwd=` is the
-    proof a keep launch gives.
-    """
+
+def _launch_method(node, facts):
+    """A recognised launcher, or any callee that spells cwd readably."""
     function = node.func
     if (isinstance(function, ast.Attribute)
             and function.attr in _LAUNCHERS
@@ -218,7 +211,8 @@ def _launch_method(node, facts):
         return f'subprocess.{function.id}'
     if facts.declaration_mode(node) is not None:
         return None
-    if any(keyword.arg == 'cwd' for keyword in node.keywords):
+    if (any(keyword.arg == 'cwd' for keyword in node.keywords)
+            or _spread_names_cwd(node)):
         return f'unresolved callee {ast.unparse(function)}'
     return None
 
@@ -236,9 +230,8 @@ def _unresolved_cwd(node, facts, shadowed):
             spread = True
     if spread:
         return 'cwd may arrive through a ** spread'
-    # Not `line < node.lineno`: a helper defined above the chdir is still
-    # called after it, so any non-root chdir in the module taints an
-    # inherited cwd.
+    # Not `line < node.lineno`: a helper defined above a chdir still runs
+    # after it.
     moved = [line for line, is_root in facts.chdir_calls if not is_root]
     if moved:
         return f'os.chdir at line {moved[0]} may have moved the cwd'
@@ -350,9 +343,8 @@ def _keep_cwd_problem(node, call, shadowed):
     if launch is None:
         return f"{_DECLARATION}('keep') cwd is not the launch's cwd"
     core = _cwd_core(declared, shadowed)
-    # Equal spellings are not equal values: two `next(paths)` operands
-    # unparse the same and yield different directories, so the shared cwd
-    # has to be one name looked up twice.
+    # Two `next(paths)` operands unparse alike and differ at runtime, so
+    # the shared cwd must be one name looked up twice.
     if not isinstance(core, ast.Name):
         return f"{_DECLARATION}('keep') cwd is not a plain name"
     if core.id != getattr(_cwd_core(launch, shadowed), 'id', None):
@@ -452,9 +444,8 @@ def _namespace_lookups(tree):
 def _declaration_name_violations(tree, facts, relative):
     """A declaration name appears at its binding and as env=, nowhere else.
 
-    Aliasing the name mutates the same dict the launches use, and
-    following aliases is data-flow analysis, so the appearance itself is
-    the violation: a syntactic count of occurrences, not control flow.
+    An alias shares the dict the launches use and following aliases is
+    data flow, so the appearance itself is the violation.
     """
     violations = []
     env_values = _env_keyword_values(tree)
@@ -483,9 +474,8 @@ def _declaration_name_violations(tree, facts, relative):
 def _is_module_namespace(node, facts):
     """Whether an expression is a mapping of module names.
 
-    `globals()`, `locals()` and `vars()` at module scope, and the
-    `__dict__` or `vars(...)` of an imported helper module: assigning
-    through any of them rebinds the name it keys.
+    globals()/locals()/vars() at module scope, or the __dict__ or
+    vars(...) of an imported helper module.
     """
     if (isinstance(node, ast.Attribute) and node.attr == '__dict__'
             and isinstance(node.value, ast.Name)
@@ -563,9 +553,8 @@ def _mutates_module_namespace(node, facts):
 def _helper_rebind_violations(tree, facts, relative):
     """A module may never assign to child_coverage or its local alias.
 
-    `_util.child_coverage = lambda _mode: dict(os.environ)` makes every
-    later declaration a no-op while reading exactly like one. Assignment
-    targets only — syntax, not control flow.
+    A rebound helper makes every later declaration a no-op while reading
+    exactly like one. Assignment targets only: syntax, not control flow.
     """
     violations = []
     for node in ast.walk(tree):
@@ -613,12 +602,7 @@ def _bound_values(node):
 
 
 def _carried_parts(value):
-    """The sub-expressions a bound value may hand on unchanged.
-
-    A container's elements and a call's arguments, since
-    `nullcontext(subprocess)` gives the module back from `__enter__`;
-    never a callee, whose result is a launch _visit judges on its own.
-    """
+    """A bound value's elements and call arguments; a callee is not entered."""
     if isinstance(value, ast.Call):
         for part in [*value.args,
                      *(keyword.value for keyword in value.keywords)]:
@@ -633,13 +617,7 @@ def _carried_parts(value):
 
 
 def _unfollowable_launcher_bindings(tree, facts, relative):
-    """A launcher bound through a form alias-following cannot read.
-
-    `for launcher in (subprocess,)`, `a, b = subprocess.run, x`, a
-    walrus or a with-target binds the launch module or a launcher to a
-    name the alias walk never sees, and a launch through that name with
-    no cwd= would be judged as nothing. The binding is the violation.
-    """
+    """A launcher bound where the alias walk cannot see is refused there."""
     violations = []
     for node in ast.walk(tree):
         for value in _bound_values(node):
