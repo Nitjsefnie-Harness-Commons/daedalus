@@ -6,7 +6,7 @@ import re
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -59,32 +59,39 @@ def _matrix_rows(expression):
     return rows
 
 
+def _capture_updates(step, tmp, workspace):
+    github_env = Path(tmp) / 'github-env'
+    environment = dict(os.environ)
+    environment['GITHUB_ENV'] = str(github_env)
+    environment['GITHUB_WORKSPACE'] = PureWindowsPath(workspace).as_posix()
+    result = subprocess.run(
+        [_util.workflow_bash(), '-c', step['run']],
+        env=environment, capture_output=True, text=True,
+        check=False)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    updates = {}
+    for line in github_env.read_text(encoding='utf-8').splitlines():
+        name, separator, value = line.partition('=')
+        assert separator and name not in updates, line
+        updates[name] = value
+    return updates
+
+
 def _assert_capture_step(step, tmp):
     ubuntu = {'ubuntu-latest'}
     assert _matrix_rows(step['if']) == ubuntu, step
     assert step.get('shell') == 'bash', step
     for operating_system in _SUPPORTED_MATRIX['os']:
-        workspace = Path(tmp) / operating_system
-        workspace.mkdir(parents=True)
-        github_env = workspace / 'github-env'
+        workspace_dir = Path(tmp) / operating_system
+        workspace_dir.mkdir(parents=True)
+        workspace = workspace_dir.as_posix()
         updates = {}
         if operating_system in ubuntu:
-            environment = dict(os.environ)
-            environment['GITHUB_ENV'] = str(github_env)
-            environment['GITHUB_WORKSPACE'] = str(workspace)
-            result = subprocess.run(
-                [_util.workflow_bash(), '-c', step['run']],
-                env=environment, capture_output=True, text=True,
-                check=False)
-            assert result.returncode == 0, (result.stdout, result.stderr)
-            for line in github_env.read_text(encoding='utf-8').splitlines():
-                name, separator, value = line.partition('=')
-                assert separator and name not in updates, line
-                updates[name] = value
+            updates = _capture_updates(step, workspace_dir, workspace)
         expected = {}
         if operating_system in ubuntu:
-            expected[_CAPTURE_KEY] = str(
-                workspace / '.node-v8-coverage')
+            expected[_CAPTURE_KEY] = (
+                f'{workspace}/.node-v8-coverage')
         assert updates == expected, (operating_system, updates)
 
 
@@ -338,6 +345,18 @@ def _assert_coverage_artifact_flow(workflow, tmp):
 def test_coverage_combines_measurements_from_every_supported_os(tmp):
     """The final gates must consume one artifact from each OS leg."""
     _assert_coverage_artifact_flow(_workflow(), tmp)
+
+
+def test_capture_step_uses_a_posix_workspace_shape(tmp):
+    """A backslash-shaped fake must model the Ubuntu runner workspace."""
+    _name, matrix_job = _matrix_job(_workflow())
+    capture = [step for step in matrix_job['steps']
+               if _CAPTURE_KEY in step.get('run', '')]
+    assert len(capture) == 1, capture
+    updates = _capture_updates(capture[0], tmp, r'workspace\checkout')
+    assert updates == {
+        _CAPTURE_KEY: 'workspace/checkout/.node-v8-coverage',
+    }
 
 
 def test_matrix_job_identifier_is_not_a_contract(tmp):
