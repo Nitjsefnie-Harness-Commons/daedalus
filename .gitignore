@@ -239,6 +239,7 @@
 !/tests/_prgate.py
 !/tests/_prgate_race.py
 !/tests/_pyroute.py
+!/tests/_pyroute_live.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
 !/tests/_pyroute_values.py

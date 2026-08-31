@@ -10,7 +10,6 @@ EAGER_ITERABLE_CALLS = frozenset({
     'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
 })
 PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
-_LIVE_UNRESOLVED = object()
 
 
 @dataclass(frozen=True)
@@ -377,26 +376,6 @@ def deferred_expression_value(node, state, lambda_factory):
         if items:
             return DeferredContainer(items, len(node.values), 'dict')
     return None
-
-
-def live_expression_value(node, state, lambda_factory, captured):
-    evaluated = state.evaluated
-    cached = evaluated.get(id(node), _LIVE_UNRESOLVED)
-    state.evaluated = {key: value for key, value in evaluated.items()
-                       if key != id(node)}
-    try:
-        value = deferred_expression_value(
-            node, state, lambda item, current:
-            lambda_factory(item, current, captured))
-    finally:
-        state.evaluated = evaluated
-    resolved = (value is not None or isinstance(node, ast.Constant)
-                or (isinstance(node, ast.Name) and node.id in state.bound
-                    and node.id not in state.aliases))
-    if resolved: evaluated[id(node)] = value
-    elif cached is not _LIVE_UNRESOLVED: evaluated[id(node)] = cached
-    else: evaluated.pop(id(node), None)
-    return value if resolved else cached
 
 
 def new_deferred_generator(node, state, captured, lambda_factory,
