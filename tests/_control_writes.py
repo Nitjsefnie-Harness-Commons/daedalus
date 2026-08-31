@@ -148,15 +148,17 @@ def _path_kind(node, owned_names, trusted_names, mutated_names=(),
 
 
 def _nested_scope_expressions(node):
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        yield from node.decorator_list
-        yield from node.args.defaults
-        yield from (value for value in node.args.kw_defaults
-                    if value is not None)
-    elif isinstance(node, ast.ClassDef):
+    """What a nested scope's header evaluates in the enclosing scope."""
+    if isinstance(node, ast.ClassDef):
         yield from node.decorator_list
         yield from node.bases
         yield from (keyword.value for keyword in node.keywords)
+        return
+    if not isinstance(node, ast.Lambda):
+        yield from node.decorator_list
+    yield from node.args.defaults
+    yield from (value for value in node.args.kw_defaults
+                if value is not None)
 
 
 def _scope_nodes(scope):
@@ -287,19 +289,10 @@ def _mutated_container_names(scope):
 
 def _owned_path_names(scope, functions=None, seeded=None, depth=0):
     bindings = {}
-    arguments = []
-    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-        arguments = (scope.args.posonlyargs + scope.args.args
-                     + scope.args.kwonlyargs)
-    is_control = (isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
-                  and scope.name.startswith('test_'))
-    if is_control and any(argument.arg == 'tmp' for argument in arguments):
-        bindings['tmp'] = [_CONTROL_OWNED_PATH]
     for name, kind in (seeded or {}).items():
         bindings.setdefault(name, []).append(kind)
     local_names = _scope_local_names(scope)
-    context = {name: function for name, function in (functions or {}).items()
-               if name not in local_names}
+    context = functions or {}
     trusted_names = {'Path', 'str', 'os'} - local_names
     modelled = set()
     for node in _scope_nodes(scope):
@@ -386,21 +379,37 @@ def _meet_seeding(seedings, name, function, seeded):
         target[parameter.arg] = kind
 
 
+def _runner_seeding(function):
+    """What the runner hands a control nothing else calls: its tmp."""
+    parameters = (function.args.posonlyargs + function.args.args
+                  + function.args.kwonlyargs)
+    if any(parameter.arg == 'tmp' for parameter in parameters):
+        return {'tmp': _CONTROL_OWNED_PATH}
+    return None
+
+
 class _ModuleJudgement:
     """One module's scopes, judged in an order that seeds its helpers.
 
     A helper's body is judged with its parameters seeded from the kinds
     every caller hands it, once every caller has been judged; a helper
-    nobody calls, or one in a call cycle, is judged unseeded.
+    nobody calls, or one in a call cycle, is judged unseeded. A test_
+    function anything in the module names is a helper too.
     """
 
     def __init__(self, tree, label):
         self.label = label
         self.names = ModuleNames(tree)
         self.functions = _module_functions(tree, self.names)
+        named = {node.id for node in ast.walk(tree)
+                 if isinstance(node, ast.Name)
+                 and isinstance(node.ctx, ast.Load)}
         self.helpers = {name: function
                         for name, function in self.functions.items()
-                        if not name.startswith('test_')}
+                        if not name.startswith('test_') or name in named}
+        self.controls = {function
+                         for name, function in self.functions.items()
+                         if name not in self.helpers}
         self.seedings = {}
         self.violations = []
         helper_nodes = set(self.helpers.values())
@@ -409,25 +418,20 @@ class _ModuleJudgement:
             if isinstance(node, _SCOPES[1:]) and node not in helper_nodes]
 
     def judge(self, scope, seeded):
-        local_names = _scope_local_names(scope)
         owned, mutated = _owned_path_names(scope, self.functions, seeded)
-        context = {name: function
-                   for name, function in self.functions.items()
-                   if name not in local_names}
-        trusted = {'Path', 'str', 'os'} - local_names
+        trusted = {'Path', 'str', 'os'} - _scope_local_names(scope)
         for node in _scope_nodes(scope):
             if not isinstance(node, ast.Call):
                 continue
             if (isinstance(node.func, ast.Name)
-                    and node.func.id in self.helpers
-                    and node.func.id in context):
+                    and node.func.id in self.helpers):
                 function = self.helpers[node.func.id]
                 _meet_seeding(self.seedings, node.func.id, function,
                               _seeded_parameters(node, function, owned,
                                                  trusted, mutated,
-                                                 context, 0))
+                                                 self.functions, 0))
             message = _call_violation(node, self.label, self.names, owned,
-                                      trusted, mutated, context)
+                                      trusted, mutated, self.functions)
             if message is not None:
                 self.violations.append((node.lineno, message))
 
@@ -438,7 +442,8 @@ class _ModuleJudgement:
                 callers[call.func.id].add(scope)
         judged = set()
         for scope in self.scopes:
-            self.judge(scope, None)
+            self.judge(scope, _runner_seeding(scope)
+                       if scope in self.controls else None)
             judged.add(scope)
         pending = dict(self.helpers)
         while pending:
