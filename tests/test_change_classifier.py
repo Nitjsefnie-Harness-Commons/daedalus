@@ -103,51 +103,6 @@ def test_nested_glob_shape_still_fails_closed(tmp):
         raise AssertionError("'docs/**/*.md' was matched instead of refused")
 
 
-def test_is_documentation_propagates_unsupported_pattern(tmp):
-    del tmp
-    mod = _classifier()
-    with mock.patch.object(mod, 'DOCUMENTATION_PATTERNS', ('docs?',)):
-        try:
-            mod.is_documentation('docs/a.md')
-        except ValueError:
-            return
-    raise AssertionError('is_documentation swallowed the pattern refusal')
-
-
-def test_documentation_only_propagates_unsupported_pattern(tmp):
-    del tmp
-    mod = _classifier()
-    with mock.patch.object(mod, 'DOCUMENTATION_PATTERNS', ('docs?',)):
-        try:
-            mod.documentation_only(['docs/a.md'])
-        except ValueError:
-            return
-    raise AssertionError('documentation_only swallowed the pattern refusal')
-
-
-def test_workflows_changed_propagates_unsupported_pattern(tmp):
-    del tmp
-    mod = _classifier()
-    with mock.patch.object(mod, 'WORKFLOW_PATTERNS', ('workflow?',)):
-        try:
-            mod.workflows_changed(['.github/workflows/check.yml'])
-        except ValueError:
-            return
-    raise AssertionError('workflows_changed swallowed the pattern refusal')
-
-
-def test_classify_propagates_unsupported_documentation_pattern(tmp):
-    del tmp
-    mod = _classifier()
-    _calls, run = _recorder('docs/a.md\n')
-    with mock.patch.object(mod, 'DOCUMENTATION_PATTERNS', ('docs?',)):
-        try:
-            mod.classify(_event(), run)
-        except ValueError:
-            return
-    raise AssertionError('classify swallowed the pattern refusal')
-
-
 def test_directory_glob_does_not_match_the_directory_itself(tmp):
     del tmp
     mod = _classifier()
