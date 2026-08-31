@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _realbrowser_workers  # noqa: E402
-from _repo import EXTENSION_ROOT  # noqa: E402
+from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from test_real_browser_harness import (  # noqa: E402
     _ProcessDouble, _browser_requirements, _enter_fixture)
 
@@ -311,7 +311,8 @@ def _diagnosis(tmp, ours, control, poll=None):
     def launch(args, *, cwd, stdin, stdout, stderr):
         nonlocal active_launch
         active_launch = len(launches)
-        return popen(args, cwd=cwd, stdin=stdin, stdout=stdout,
+        assert cwd == ROOT, cwd
+        return popen(args, cwd=ROOT, stdin=stdin, stdout=stdout,
                      stderr=stderr)
 
     patches = (

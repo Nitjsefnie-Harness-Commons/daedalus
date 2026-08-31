@@ -113,29 +113,34 @@ class _ModuleFacts:
         """Follow plain-name aliases of a launch callable or _util.
 
         Iterated to a fixpoint rather than read once, so an alias of an
-        alias resolves to the same object at any depth.
+        alias resolves to the same object at any depth. An annotated
+        binding is a binding: `launcher: object = subprocess` aliases
+        the module exactly as the unannotated spelling does.
         """
-        aliases = [(node.targets[0].id, node.value) for node in ast.walk(tree)
-                   if isinstance(node, ast.Assign) and len(node.targets) == 1
-                   and isinstance(node.targets[0], ast.Name)]
+        aliases = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                aliases.append((node.targets[0].id, node.value))
+            elif (isinstance(node, ast.AnnAssign) and node.value is not None
+                  and isinstance(node.target, ast.Name)):
+                aliases.append((node.target.id, node.value))
+        followed = (
+            (self.launch_callables,
+             lambda value: _is_launch_value(value, self)),
+            (self.declaration_modules,
+             lambda value: _names_one_of(value, self.declaration_modules)),
+            (self.subprocess_modules,
+             lambda value: _names_one_of(value, self.subprocess_modules)),
+        )
         changed = True
         while changed:
             changed = False
             for name, value in aliases:
-                if (name not in self.launch_callables
-                        and _is_launch_value(value, self)):
-                    self.launch_callables.add(name)
-                    changed = True
-                if (name not in self.declaration_modules
-                        and isinstance(value, ast.Name)
-                        and value.id in self.declaration_modules):
-                    self.declaration_modules.add(name)
-                    changed = True
-                if (name not in self.subprocess_modules
-                        and isinstance(value, ast.Name)
-                        and value.id in self.subprocess_modules):
-                    self.subprocess_modules.add(name)
-                    changed = True
+                for names, follows in followed:
+                    if name not in names and follows(value):
+                        names.add(name)
+                        changed = True
 
     def _collect_bindings(self, statements):
         for node in statements:
@@ -189,17 +194,32 @@ def _is_launch_value(value, facts):
             and value.value.id in facts.subprocess_modules)
 
 
+def _names_one_of(value, names):
+    return isinstance(value, ast.Name) and value.id in names
+
+
 def _launch_method(node, facts):
-    """'run' or 'Popen' when `node` launches through subprocess."""
+    """How this call is judged as a launch, or None when it is not one.
+
+    A recognised launch is judged by its subprocess method. Any other
+    call that carries `cwd=` is judged as a launch too — the guard does
+    not know what the callee does with a working directory, so it must
+    declare — except the declaration helper itself, whose `cwd=` is the
+    proof a keep launch gives.
+    """
     function = node.func
     if (isinstance(function, ast.Attribute)
             and function.attr in _LAUNCHERS
             and isinstance(function.value, ast.Name)
             and function.value.id in facts.subprocess_modules):
-        return function.attr
+        return f'subprocess.{function.attr}'
     if (isinstance(function, ast.Name)
             and function.id in facts.launch_callables):
-        return function.id
+        return f'subprocess.{function.id}'
+    if facts.declaration_mode(node) is not None:
+        return None
+    if any(keyword.arg == 'cwd' for keyword in node.keywords):
+        return f'unresolved callee {ast.unparse(function)}'
     return None
 
 
@@ -373,7 +393,7 @@ def _check_launch(node, method, relative, function, facts, tree, keeps,
         problem = _keep_cwd_problem(node, call, shadowed)
     if problem is not None:
         violations.append(
-            f'{relative}:{node.lineno}: subprocess.{method} {why} {problem}')
+            f'{relative}:{node.lineno}: {method} {why} {problem}')
     elif mode == 'keep':
         keeps.append((relative, function))
 
@@ -571,6 +591,67 @@ def _helper_rebind_violations(tree, facts, relative):
     return violations
 
 
+def _bound_values(node):
+    """The values a statement binds through a form aliases cannot follow."""
+    if isinstance(node, ast.Assign):
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            return []
+        return [node.value]
+    if isinstance(node, ast.AnnAssign):
+        if node.value is None or isinstance(node.target, ast.Name):
+            return []
+        return [node.value]
+    if isinstance(node, ast.AugAssign):
+        return [node.value]
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        return [node.iter]
+    if isinstance(node, ast.withitem) and node.optional_vars is not None:
+        return [node.context_expr]
+    if isinstance(node, ast.NamedExpr):
+        return [node.value]
+    return []
+
+
+def _carried_parts(value):
+    """The sub-expressions a bound value may hand on unchanged.
+
+    A container's elements and a call's arguments, since
+    `nullcontext(subprocess)` gives the module back from `__enter__`;
+    never a callee, whose result is a launch _visit judges on its own.
+    """
+    if isinstance(value, ast.Call):
+        for part in [*value.args,
+                     *(keyword.value for keyword in value.keywords)]:
+            yield from _carried_parts(part)
+    elif isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+        for part in value.elts:
+            yield from _carried_parts(part)
+    elif isinstance(value, ast.Starred):
+        yield from _carried_parts(value.value)
+    else:
+        yield value
+
+
+def _unfollowable_launcher_bindings(tree, facts, relative):
+    """A launcher bound through a form alias-following cannot read.
+
+    `for launcher in (subprocess,)`, `a, b = subprocess.run, x`, a
+    walrus or a with-target binds the launch module or a launcher to a
+    name the alias walk never sees, and a launch through that name with
+    no cwd= would be judged as nothing. The binding is the violation.
+    """
+    violations = []
+    for node in ast.walk(tree):
+        for value in _bound_values(node):
+            if any(_names_one_of(part, facts.subprocess_modules)
+                   or _is_launch_value(part, facts)
+                   for part in _carried_parts(value)):
+                violations.append(
+                    f'{relative}:{value.lineno}: a launcher is bound '
+                    'through a form the guard cannot follow')
+    return violations
+
+
 def _analyze(relative, source, keeps):
     tree = ast.parse(source, filename=relative)
     facts = _ModuleFacts(tree)
@@ -578,6 +659,7 @@ def _analyze(relative, source, keeps):
     _visit(tree, relative, '<module>', facts, tree, keeps, violations)
     violations.extend(_declaration_name_violations(tree, facts, relative))
     violations.extend(_helper_rebind_violations(tree, facts, relative))
+    violations.extend(_unfollowable_launcher_bindings(tree, facts, relative))
     return violations
 
 
