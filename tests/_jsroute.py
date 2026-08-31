@@ -99,20 +99,21 @@ def js_tab_routing_violations(path, rel):
     only as the literal 'extension'. runCommand objects carrying `code` are
     eval sends and route by tab legitimately.
 
-    Resolved before the call: inline object literals, names initialized by
-    object literals, aliases of such names, ternary initializers whose
-    branches both resolve, `Object.assign` writes, same-name direct property
-    writes, tracked object spreads, literal computed keys, the third extCmd
-    options argument, and a call to a same-file helper that returns an
-    object it built.
+    Resolved before the call: local and transitive aliases of sender
+    functions; inline object literals; names initialized by object literals;
+    aliases of such names; ternary initializers whose branches both resolve;
+    `Object.assign` writes; same-name direct property writes; tracked object
+    spreads; literal computed keys; the third extCmd options argument; and a
+    call to a same-file helper that returns an object it built. A simple
+    sender alias is removed when that name is rebound.
 
     An object that escapes into another call is marked unprovable from that
     point, and an unprovable object reaching a sender is a violation: a
     helper that writes `target.tab` through a parameter cannot be followed,
     so it is reported rather than trusted. An unresolvable sender argument
-    is reported for the same reason. A name this scanner never saw assigned
-    — a parameter, an import — stays unknown rather than unprovable, which
-    is the one silence left.
+    is reported for the same reason. An unseen name — a parameter or import
+    — stays unknown rather than unprovable. A simple alias bound only to one
+    inherits that silence; it does not become a new unprovable sender.
     """
     text = path.read_text(encoding='utf-8')
     mask = js_mask(text)
@@ -153,7 +154,7 @@ def js_tab_routing_violations(path, rel):
         if body is None:
             return _JS_UNPROVABLE
         kind, body_start, body_end = body
-        inner = names_before(body_end, depth + 1, floor=body_start)
+        inner, _ = names_before(body_end, depth + 1, floor=body_start)
         if kind == 'expr':
             return resolve(body_start, body_end, inner, depth + 1)
         returns = list(re.finditer(r'\breturn\b',
@@ -202,9 +203,26 @@ def js_tab_routing_violations(path, rel):
             return helper_state(call.group(1), depth)
         return _JS_UNPROVABLE
 
+    def sender_state(span_start, span_end, aliases):
+        """Resolve a sender binding, preserving unknown-name silence."""
+        expr = mask[span_start:span_end].strip()
+        if re.fullmatch(r'[\w$]+', expr):
+            if expr in senders:
+                return expr
+            return aliases.get(expr)
+        for name in re.findall(r'\b[\w$]+\b', expr):
+            if (name in senders
+                    or aliases.get(name) in (*senders, _JS_UNPROVABLE)):
+                return _JS_UNPROVABLE
+        return None
+
     events = []  # (pos, kind, match)
     for m in re.finditer(r'\b(?:const|let|var)\s+([\w$]+)\s*=', mask):
         events.append((m.start(), 'init', m))
+    for m in re.finditer(r'\b([\w$]+)\s*=(?!=|>)', mask):
+        if mask[:m.start()].rstrip().endswith('.'):
+            continue
+        events.append((m.start(), 'bind', m))
     for m in re.finditer(r'\b([\w$]+)\s*\.\s*tab(?![\w$])\s*=', mask):
         events.append((m.start(), 'prop', m))
     for m in re.finditer(r'\bObject\s*\.\s*assign\s*\(', mask):
@@ -240,6 +258,7 @@ def js_tab_routing_violations(path, rel):
         the call. `floor` restricts the walk to one function body.
         """
         named = {}
+        aliases = {}
         for start, kind, m in events:
             if start >= limit:
                 break
@@ -249,6 +268,13 @@ def js_tab_routing_violations(path, rel):
                 name = m.group(1)
                 stmt_end = _js_statement_end(mask, m.end())
                 named[name] = resolve(m.end(), stmt_end, named, depth)
+            elif kind == 'bind':
+                name = m.group(1)
+                stmt_end = _js_statement_end(mask, m.end())
+                sender = sender_state(m.end(), stmt_end, aliases)
+                aliases.pop(name, None)
+                if sender is not None:
+                    aliases[name] = sender
             elif kind == 'assign':
                 open_paren = mask.index('(', m.start())
                 call_end = js_bracket_end(mask, open_paren)
@@ -273,6 +299,9 @@ def js_tab_routing_violations(path, rel):
                         state.update(merged)
                 named[target] = state
             elif kind == 'escape':
+                if (m.group(1) in senders
+                        or aliases.get(m.group(1)) in senders):
+                    continue
                 open_paren = mask.index('(', m.start())
                 call_end = js_bracket_end(mask, open_paren)
                 for span in js_split_top_level(mask, text, open_paren + 1,
@@ -292,13 +321,19 @@ def js_tab_routing_violations(path, rel):
                     state = {}
                 state['tab'] = (line_of(m.start()), text[eq + 1:semi].strip())
                 named[name] = state
-        return named
+        return named, aliases
 
     def argument_state(span, named):
         start, end = span
         return resolve(start, end, named, 0)
 
-    for m in re.finditer(r'\b(?:extCmd|extcmd|runCommand)\s*\(', mask):
+    candidate_names = set(senders)
+    candidate_names.update(m.group(1) for _, kind, m in events
+                           if kind == 'bind')
+    call_pattern = (r'\b(?:' + '|'.join(map(re.escape,
+                                           sorted(candidate_names)))
+                    + r')\s*\(')
+    for m in re.finditer(call_pattern, mask):
         # `function extCmd(type, fields = {}, opts = {})` is where a sender is
         # declared, not where one is called; its parameter list is not a
         # payload and resolving it would report the definition of every
@@ -311,19 +346,18 @@ def js_tab_routing_violations(path, rel):
         args = js_split_top_level(mask, text, open_paren + 1, call_end - 1)
         tab_entries = []
         unprovable = []
-        named = names_before(m.start(), 0)
-        if call_name == 'runCommand':
-            if not args:
-                continue
+        named, aliases = names_before(m.start(), 0)
+        sender = call_name if call_name in senders else aliases.get(call_name)
+        if sender is None:
+            continue
+        if sender in ('runCommand', _JS_UNPROVABLE) and args:
             keys = argument_state(args[0], named)
             if keys is _JS_UNPROVABLE:
                 unprovable.append(line_of(m.start()))
             # A `type` key makes this a typed send; eval sends carry `code`.
             elif keys and 'type' in keys and 'tab' in keys:
                 tab_entries.append(keys['tab'])
-        else:  # extCmd(type, fields, ...)
-            if len(args) < 2:
-                continue
+        if sender in ('extCmd', 'extcmd', _JS_UNPROVABLE) and len(args) >= 2:
             fields = argument_state(args[1], named)
             if fields is _JS_UNPROVABLE:
                 unprovable.append(line_of(m.start()))
