@@ -411,9 +411,8 @@ def test_an_open_quote_names_the_collection_rather_than_the_item(tmp):
 
     A planted real workflow cannot isolate this limb: an unterminated quote
     eats the closing bracket, so the field extent runs to the end of the job
-    and the outer close check answers first. Hence the minimal source. The
-    pin is the message, because over every flow spelling of length three and
-    four in the indicator alphabet the limb changes no verdict -- only which
+    and the outer close check answers first. The pin is the message, because
+    over the whole flow alphabet the limb changes no verdict, only which
     refusal names the input.
     """
     del tmp
