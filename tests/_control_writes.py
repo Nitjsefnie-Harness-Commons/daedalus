@@ -306,12 +306,18 @@ def _seeded_parameters(call, function, owned, trusted, mutated, context,
     seeded = {}
     for index, parameter in enumerate(parameters):
         value = argument(call, parameter.arg, index)
-        if value is None:
-            if parameter.arg not in defaults:
-                return None
-            value = defaults[parameter.arg]
-        seeded[parameter.arg] = _path_kind(
-            value, owned, trusted, mutated, context, depth)
+        if value is not None:
+            seeded[parameter.arg] = _path_kind(
+                value, owned, trusted, mutated, context, depth)
+            continue
+        if parameter.arg not in defaults:
+            return None
+        # A default is evaluated in its definition scope, which no call
+        # site's environment can stand in for; only a literal proves.
+        default = defaults[parameter.arg]
+        seeded[parameter.arg] = (
+            _literal_path_kind(default.value)
+            if isinstance(default, ast.Constant) else _UNKNOWN_PATH)
     return seeded
 
 

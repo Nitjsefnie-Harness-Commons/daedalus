@@ -473,6 +473,23 @@ def test_an_omitted_default_seeds_its_own_expression(tmp):
         'default-seed.py:3: write_bytes target path is not control-owned']
 
 
+def test_a_default_is_judged_in_its_definition_scope(tmp):
+    """An omitted default is the def's own scope's value, not the caller's."""
+    source = Path(tmp) / 'default-scope.py'
+    source.write_text(
+        "tmp = ROOT\n"
+        "\n"
+        "def _default_target(target=tmp):\n"
+        "    (Path(target) / '.review-303-default-seed').write_bytes(\n"
+        "        b'default-seed')\n"
+        "\n"
+        "def test_route(tmp):\n"
+        "    _default_target()\n",
+        encoding='utf-8')
+    assert _violations(source) == [
+        'default-scope.py:4: write_bytes target path is not control-owned']
+
+
 def test_a_nested_body_subscript_read_is_not_a_handoff(tmp):
     """Reading one element from a nested scope keeps the container proved."""
     source = Path(tmp) / 'header-read.py'

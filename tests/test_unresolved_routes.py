@@ -671,5 +671,25 @@ subprocess.run(['python3', 'child.py'])
 """) == []
 
 
+def test_a_decorated_def_is_not_a_readable_definition(tmp):
+    """A decorator may replace the value the def binds, so it proves none."""
+    root, target, line = _planted_copy(
+        tmp, Path('tests/test_control_writes.py'),
+        "def _replace_with_copy(_function):\n"
+        "    return shutil.copyfile\n"
+        "\n"
+        "@_replace_with_copy\n"
+        "def _decorated_copy(source, destination):\n"
+        "    return source, destination\n"
+        "\n"
+        "def test_route(tmp):\n"
+        "    source = Path(tmp) / 'source'\n"
+        "    source.write_bytes(b'decorated-writer')\n"
+        "    _decorated_copy(source, ROOT / '.review-303-decorated-writer')\n")
+    violations = control_write_violations(target, root)
+    assert (f'tests/test_control_writes.py:{line + 10}: _decorated_copy '
+            'callable is unresolved') in violations, violations
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
