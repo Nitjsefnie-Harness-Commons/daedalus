@@ -23,6 +23,8 @@ _CONTROL_OWNED_PATH = 2
 _MAX_PROOF_DEPTH = 2
 _SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
            ast.ClassDef, ast.Lambda)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
+                   ast.GeneratorExp)
 
 
 def _bound_names(target):
@@ -302,10 +304,11 @@ def _closure_names(scope):
     """Names a nested scope reaches without binding them itself.
 
     A class body's bindings are invisible to the functions defined in
-    it, so they shield nothing below the class.
+    it, comprehensions included, so they shield nothing below the class.
     """
     local = _scope_local_names(scope)
-    shield = set() if isinstance(scope, ast.ClassDef) else local
+    in_class = isinstance(scope, ast.ClassDef)
+    shield = set() if in_class else local
     names = set()
     for node in _scope_nodes(scope):
         if isinstance(node, ast.Name) and node.id not in local:
@@ -314,6 +317,9 @@ def _closure_names(scope):
             names.update(node.names)
         elif isinstance(node, _SCOPES[1:]):
             names |= _closure_names(node) - shield
+        elif in_class and isinstance(node, _COMPREHENSIONS):
+            names.update(part.id for part in ast.walk(node)
+                         if isinstance(part, ast.Name))
     return names
 
 
