@@ -10,8 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ghexpr import evaluate_if  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wfgraph import _job_names  # noqa: E402
+from _wfgraph import _job_names, _matrix_job_running  # noqa: E402
 from _yamlread import job_mapping, step_mapping_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -39,18 +40,52 @@ def _workflow():
 
 
 def _matrix_job(workflow):
-    matches = []
-    for name in _job_names(workflow):
-        job = complete_job_mapping(workflow, name)
-        matrix = job.get('strategy', {}).get('matrix')
-        measures = [
-            step for step in job.get('steps', [])
-            if 'coverage_suites.py' in step.get('run', '')
-        ]
-        if matrix == _SUPPORTED_MATRIX and measures:
-            matches.append((name, job))
-    assert len(matches) == 1, matches
-    return matches[0]
+    return _matrix_job_running(
+        workflow, _SUPPORTED_MATRIX, 'coverage_suites.py')
+
+
+def _matrix_rows(expression):
+    rows = set()
+    for operating_system in _SUPPORTED_MATRIX['os']:
+        context = {
+            'matrix': {'os': operating_system},
+            'status': {
+                'success': True, 'failure': False, 'cancelled': False,
+            },
+            'steps': {'measure': {'conclusion': 'success'}},
+        }
+        if evaluate_if(expression, context):
+            rows.add(operating_system)
+    return rows
+
+
+def _assert_capture_step(step, tmp):
+    ubuntu = {'ubuntu-latest'}
+    assert _matrix_rows(step['if']) == ubuntu, step
+    assert step.get('shell') == 'bash', step
+    for operating_system in _SUPPORTED_MATRIX['os']:
+        workspace = Path(tmp) / operating_system
+        workspace.mkdir(parents=True)
+        github_env = workspace / 'github-env'
+        updates = {}
+        if operating_system in ubuntu:
+            environment = dict(os.environ)
+            environment['GITHUB_ENV'] = str(github_env)
+            environment['GITHUB_WORKSPACE'] = str(workspace)
+            result = subprocess.run(
+                [_util.workflow_bash(), '-c', step['run']],
+                env=environment, capture_output=True, text=True,
+                check=False)
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            for line in github_env.read_text(encoding='utf-8').splitlines():
+                name, separator, value = line.partition('=')
+                assert separator and name not in updates, line
+                updates[name] = value
+        expected = {}
+        if operating_system in ubuntu:
+            expected[_CAPTURE_KEY] = str(
+                workspace / '.node-v8-coverage')
+        assert updates == expected, (operating_system, updates)
 
 
 def _pth_program(command):
@@ -252,7 +287,7 @@ def test_coverage_job_publishes_distinct_python_and_javascript_metrics(tmp):
                      upload, re.MULTILINE), upload
 
 
-def _assert_coverage_artifact_flow(workflow):
+def _assert_coverage_artifact_flow(workflow, tmp):
     matrix_name, matrix_job = _matrix_job(workflow)
     measure = [step for step in matrix_job['steps']
                if 'coverage_suites.py' in step.get('run', '')]
@@ -268,11 +303,12 @@ def _assert_coverage_artifact_flow(workflow):
     javascript = [step for step in uploads
                   if '.node-v8-coverage' in step['with']['path']]
     assert len(javascript) == 1, uploads
-    assert "matrix.os == 'ubuntu-latest'" in javascript[0]['if']
+    assert _matrix_rows(javascript[0]['if']) == {'ubuntu-latest'}
     python_only = [step for step in uploads if step not in javascript]
     assert len(python_only) == 1, uploads
     assert python_only[0]['with']['path'].strip() == '.coverage.*'
-    assert "matrix.os != 'ubuntu-latest'" in python_only[0]['if']
+    assert _matrix_rows(python_only[0]['if']) == {
+        'windows-latest', 'macos-latest'}
     for step in uploads:
         assert step['with']['include-hidden-files'] == 'true', step
         assert step['with']['if-no-files-found'] == 'error', step
@@ -282,10 +318,7 @@ def _assert_coverage_artifact_flow(workflow):
     capture = [step for step in matrix_job['steps']
                if _CAPTURE_KEY in step.get('run', '')]
     assert len(capture) == 1, capture
-    assert capture[0]['if'] == "${{ matrix.os == 'ubuntu-latest' }}"
-    assert capture[0]['run'] == (
-        'echo "NODE_V8_COVERAGE=$GITHUB_WORKSPACE/.node-v8-coverage" '
-        '>> "$GITHUB_ENV"')
+    _assert_capture_step(capture[0], tmp)
 
     coverage = complete_job_mapping(workflow, 'coverage')
     assert matrix_name in coverage['needs']
@@ -304,18 +337,20 @@ def _assert_coverage_artifact_flow(workflow):
 
 def test_coverage_combines_measurements_from_every_supported_os(tmp):
     """The final gates must consume one artifact from each OS leg."""
-    del tmp
-    _assert_coverage_artifact_flow(_workflow())
+    _assert_coverage_artifact_flow(_workflow(), tmp)
 
 
 def test_matrix_job_identifier_is_not_a_contract(tmp):
     """A consistent private job rename must preserve the dataflow guard."""
-    del tmp
     workflow = _workflow()
     name, _job = _matrix_job(workflow)
-    renamed = workflow.replace(name, 'platform-coverage-measurements')
+    replacement = next(
+        candidate for candidate in (
+            'platform-coverage-measurements', 'os-coverage-measurements')
+        if candidate not in _job_names(workflow))
+    renamed = workflow.replace(name, replacement)
     assert renamed != workflow
-    _assert_coverage_artifact_flow(renamed)
+    _assert_coverage_artifact_flow(renamed, tmp)
 
 
 def test_subprocess_startup_program_starts_coverage(tmp):
@@ -328,7 +363,7 @@ def test_subprocess_startup_program_starts_coverage(tmp):
     program = _pth_program(command)
     workdir = Path(tmp) / 'tree'
     workdir.mkdir()
-    env = _util.coverage_free_environment(os.environ)
+    env = dict(os.environ)
     env['COVERAGE_PROCESS_START'] = str(ROOT / 'pyproject.toml')
     env['COVERAGE_FILE'] = str(Path(tmp) / '.coverage')
     probe = program + 'assert coverage.Coverage.current() is not None\n'

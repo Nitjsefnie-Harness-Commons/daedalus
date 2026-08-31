@@ -28,7 +28,8 @@ from _ghexpr import evaluate_if  # noqa: E402
 from _wfgraph import (  # noqa: E402
     _actionlint_runs, _job_condition_runs,
     _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
-    _job_names_with_outputs, _job_step_ids, _run_aggregate, _tests_yml,
+    _job_names_with_outputs, _job_step_ids, _matrix_job_running,
+    _run_aggregate, _tests_yml,
     aggregate_expected)
 
 
@@ -351,6 +352,11 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
 
 
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
+_MEASUREMENT_JOB, _ = _matrix_job_running(
+    _tests_yml(),
+    {'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
+     'python': ['3.13']},
+    'coverage_suites.py')
 AGGREGATE_ALLOWED_RESULTS = {
     'changes': frozenset(('success',)),
     'pycodestyle': frozenset(('success',)),
@@ -359,10 +365,8 @@ AGGREGATE_ALLOWED_RESULTS = {
     'eslint': frozenset(('success',)),
     'actionlint': frozenset(('success', 'skipped')),
     'suites': frozenset(('success', 'skipped')),
-    # wheel is intentionally not strict: its condition skips only after a
-    # failed or cancelled dependency, and aggregate rejects that dependency.
     'wheel': frozenset(('success', 'skipped')),
-    'coverage-matrix': frozenset(('success', 'skipped')),
+    _MEASUREMENT_JOB: frozenset(('success', 'skipped')),
     'coverage': frozenset(('success', 'skipped')),
 }
 CONDITION_CONTEXTS = (
@@ -454,7 +458,7 @@ def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
     for job in ('suites', 'wheel', 'coverage'):
         expected = ['changes', *GATE_JOBS]
         if job == 'coverage':
-            expected.append('coverage-matrix')
+            expected.append(_MEASUREMENT_JOB)
         needs = _job_needs(workflow, job)
         assert set(needs) == set(expected), (job, needs, expected)
         assert len(needs) == len(set(needs)) == len(expected), (
@@ -565,7 +569,8 @@ def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
 
 def test_aggregate_waits_on_every_job_it_checks(tmp):
     del tmp
-    needs = _job_needs(_tests_yml(), 'aggregate')
+    workflow = _tests_yml()
+    needs = _job_needs(workflow, 'aggregate')
     expected = tuple(AGGREGATE_ALLOWED_RESULTS)
     assert set(needs) == set(expected), (needs, expected)
     assert len(needs) == len(set(needs)) == len(expected), (
@@ -593,8 +598,9 @@ def test_aggregate_failing_result_matches_the_bash_launcher(tmp):
 def test_aggregate_script_accepts_only_tabled_results(tmp):
     """The aggregate result domain is one contract for every dependency."""
     del tmp
+    workflow = _tests_yml()
     expected = tuple(AGGREGATE_ALLOWED_RESULTS)
-    needs = _job_needs(_tests_yml(), 'aggregate')
+    needs = _job_needs(workflow, 'aggregate')
     assert set(needs) == set(expected), (needs, expected)
     assert len(needs) == len(set(needs)) == len(expected), (
         needs, expected)
@@ -614,11 +620,10 @@ def test_aggregate_script_accepts_only_tabled_results(tmp):
             results = dict(all_success, **dict(zip(names, result_names)))
             expected_success = aggregate_expected(
                 results, AGGREGATE_ALLOWED_RESULTS)
-            result = _run_aggregate(_tests_yml(), results)
+            result = _run_aggregate(workflow, results)
             assert (result.returncode == 0) is expected_success, (
                 names, result_names, result.stdout, result.stderr)
 
-    workflow = _tests_yml()
     docs_only = dict(all_success)
     for job, outputs in (
             ('actionlint', {'workflows': 'false'}),

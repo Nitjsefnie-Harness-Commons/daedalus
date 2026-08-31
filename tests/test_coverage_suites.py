@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """coverage_suites.py: concurrent measurement without mixed suite output."""
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -218,15 +219,29 @@ def test_every_suite_is_measured_in_its_own_process(tmp):
 
 def test_concurrent_measurements_write_distinct_coverage_files(tmp):
     """Concurrent suites must not overwrite another suite's data."""
-    suites = {'test_alpha.py': "print('alpha')\n",
-              'test_beta.py': "print('beta')\n",
-              'test_gamma.py': "print('gamma')\n"}
+    suite_source = """import os
+from pathlib import Path
+Path(__file__).with_suffix('.pid').write_text(
+    str(os.getpid()), encoding='ascii')
+"""
+    suites = {name: suite_source for name in (
+        'test_alpha.py', 'test_beta.py', 'test_gamma.py')}
     result, _invocations = _coverage_tree(
         tmp, suites, real_coverage=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    data_files = list((Path(tmp) / 'tree').glob('.coverage.*'))
-    assert len(data_files) == len(suites), data_files
-    assert len({path.name for path in data_files}) == len(suites), data_files
+    tree = Path(tmp) / 'tree'
+    suite_pids = {
+        int((tree / 'tests' / Path(name).with_suffix('.pid')).read_text(
+            encoding='ascii'))
+        for name in suites
+    }
+    data_pids = []
+    for data_file in tree.glob('.coverage.*'):
+        match = re.search(r'\.pid([0-9]+)\.', data_file.name)
+        assert match is not None, data_file
+        data_pids.append(int(match.group(1)))
+    assert suite_pids <= set(data_pids), (suite_pids, data_pids)
+    assert len(data_pids) == len(set(data_pids)), data_pids
 
 
 def test_measured_children_keep_coverage_start_but_not_runner_stdin(tmp):

@@ -137,6 +137,19 @@ def _job_names(workflow):
     return tuple(names)
 
 
+def _matrix_job_running(workflow, matrix, command):
+    """Return the unique job with one matrix that runs a command."""
+    matches = []
+    for name in _job_names(workflow):
+        job = complete_job_mapping(workflow, name)
+        if (job.get('strategy', {}).get('matrix') == matrix
+                and any(command in step.get('run', '')
+                        for step in job.get('steps', []))):
+            matches.append((name, job))
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
 def _line_indent(line):
     """Return a source line's space indentation."""
     return len(line) - len(line.lstrip(' '))
