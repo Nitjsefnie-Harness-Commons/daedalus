@@ -18,7 +18,7 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              merge_deferred_values, new_deferred_callable,
                              new_deferred_generator, payload_key,
                              store_deferred_value, sync_cells)
-from _pyroute_live import live_expression_value
+from _pyroute_live import (clear_expression_cache, live_expression_value)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
@@ -236,7 +236,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     skipped.extend(copied(active))
         results = [expression.key, expression.value] if isinstance(
             expression, ast.DictComp) else [expression.elt]
-        for result in results: active = check_expression(result, active)
+        for result in results: active = check_expression(
+            clear_expression_cache(result, active), active)
         yielded = merge_deferred_values(
             live_expression_value(result, state, deferred_lambda,
                                   generator.captured)
