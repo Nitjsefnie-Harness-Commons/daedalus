@@ -1,11 +1,33 @@
 #!/usr/bin/env python3
 """Sender-alias boundaries for the JavaScript tab-routing scanner."""
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
+
+
+_RUNTIME_PREFIX = """const calls = [];
+const extCmd = (...args) => calls.push(args);
+const ordinary = () => undefined;
+const chromeTab = 41;
+"""
+
+
+def _runtime_and_guard(source, path):
+    script = (_RUNTIME_PREFIX + source
+              + "\nprocess.stdout.write(calls.length ? '1' : '0');\n")
+    path.write_text(script, encoding='utf-8')
+    node = shutil.which('node')
+    assert node, 'node is required to execute JavaScript routing controls'
+    ran = subprocess.run([node, str(path)], capture_output=True, text=True,
+                         timeout=30)
+    assert ran.returncode == 0, (ran.returncode, ran.stdout, ran.stderr)
+    guard = bool(js_tab_routing_violations(path, path.name))
+    return ran.stdout == '1', guard
 
 
 def test_sender_aliases_follow_source_order(tmp):
@@ -40,6 +62,47 @@ def test_sender_aliases_follow_source_order(tmp):
         observed.append((label, len(js_tab_routing_violations(
             source, source.name))))
     expected = [(label, count) for label, _, count in cases]
+    assert observed == expected, observed
+
+
+def test_sender_alias_scopes_match_runtime(tmp):
+    cases = [
+        ('parameter-shadow', "const send = extCmd;\n"
+         "function inner(send) {\n"
+         "  send('focus-tab', { tab: chromeTab });\n}\n"
+         "inner(ordinary);\n", False),
+        ('arrow-shadow', "const send = extCmd;\n"
+         "const inner = send => {\n"
+         "  send('focus-tab', { tab: chromeTab });\n};\n"
+         "inner(ordinary);\n", False),
+        ('inner-local', "const send = extCmd;\n"
+         "function inner() {\n  const send = ordinary;\n}\n"
+         "inner();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('conditional', "let send = extCmd;\nconst flag = false;\n"
+         "if (flag) send = ordinary;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('loop', "let send = extCmd;\nconst items = [];\n"
+         "for (const item of items) send = ordinary;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('member-call', "const send = extCmd;\n"
+         "const box = { send: ordinary };\n"
+         "box.send('focus-tab', { tab: chromeTab });\n", False),
+        ('method-declaration', "const send = extCmd;\n"
+         "const box = { send(type, {tab}) {} };\nvoid box;\n", False),
+        ('sibling-shadow', "function first() { const send = extCmd; }\n"
+         "function second(send) {\n"
+         "  send('focus-tab', { tab: chromeTab });\n}\n"
+         "first();\nsecond(ordinary);\n", False),
+        ('inherited-alias', "const send = extCmd;\nfunction inner() {\n"
+         "  send('focus-tab', { tab: chromeTab });\n}\ninner();\n", True),
+        ('block-shadow', "const send = extCmd;\n{\n"
+         "  const send = ordinary;\n"
+         "  send('focus-tab', { tab: chromeTab });\n}\n", False),
+    ]
+    path = Path(tmp) / 'scope.js'
+    observed = [(label, *_runtime_and_guard(source, path))
+                for label, source, _ in cases]
+    expected = [(label, value, value) for label, _, value in cases]
     assert observed == expected, observed
 
 
