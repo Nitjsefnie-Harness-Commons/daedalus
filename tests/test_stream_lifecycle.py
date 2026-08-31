@@ -132,27 +132,29 @@ def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
     """
     blocked = 'import sys\nsys.modules["daedalus_mcp.server"] = None\n'
     output = []
+    child = []
     with _util.bridge(tmp,
                       env={'PYTHONPATH': _noise_path(tmp, 'nomcp', blocked)},
-                      output=output) as (base, _docroot):
+                      output=output, proc_out=child) as (base, _docroot):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
-        while True:
-            reported = [line for line in output
-                        if 'MCP bootstrap failed' in line]
-            if reported:
-                break
-            time.sleep(0.01)
+        reported = _await_alive(
+            child[0], output,
+            lambda: [line for line in output
+                     if 'MCP bootstrap failed' in line],
+            'the bridge died without reporting the failed MCP bootstrap')
     assert any('.[mcp]' in line for line in reported), reported
 
 
-def _held_mcp_import(tmp, entered, release):
+def _held_mcp_import(tmp, entered, release, left):
     """A PYTHONPATH whose sitecustomize holds the daedalus_mcp import open.
 
     The finder sits ahead of the real ones on sys.meta_path, so it blocks
     where the bridge asks for the module rather than wherever that module's
     own dependencies resolve, and it stays blocked until this test says
-    otherwise.
+    otherwise. It marks both edges of the block: `entered` on the way in and
+    `left` on the way out, which is what lets the caller assert the import
+    was still held when it read the announcement.
     """
     body = (
         'import os, sys, time\n'
@@ -164,6 +166,7 @@ def _held_mcp_import(tmp, entered, release):
         f'        open({str(entered)!r}, "w").close()\n'
         f'        while not os.path.exists({str(release)!r}):\n'
         '            time.sleep(0.01)\n'
+        f'        open({str(left)!r}, "w").close()\n'
         'sys.meta_path.insert(0, _Held)\n'
     )
     return _noise_path(tmp, 'held-mcp-import', body)
@@ -188,11 +191,8 @@ def _await_alive(proc, drained, probe, what):
 def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
     """The announcement must not be gated on the optional front end.
 
-    Importing daedalus_mcp pulls in mcp, pydantic, httpx and opentelemetry,
-    about a second of it, and every caller waiting on readiness paid that —
-    the bridge fixture a couple of hundred times per test run. The MCP
-    listener binds on a thread of its own and announces itself on its own
-    [MCP] line, so the Listening line never meant the front end was up.
+    daedalus_bridge/mcp_bootstrap.py carries what that import costs and why
+    readiness never meant the front end was up; this pins the ordering.
 
     The import is held open rather than timed: the announcement arriving
     while the finder is still blocked is what says the bootstrap is off the
@@ -200,6 +200,7 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
     """
     entered = Path(tmp) / 'mcp-import-entered'
     release = Path(tmp) / 'mcp-import-released'
+    left = Path(tmp) / 'mcp-import-left'
     env = dict(os.environ)
     env.update({
         'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
@@ -209,7 +210,7 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
         'TOKEN': '',
         'PYTHONDONTWRITEBYTECODE': '1',
         'PYTHONUNBUFFERED': '1',
-        'PYTHONPATH': _held_mcp_import(tmp, entered, release),
+        'PYTHONPATH': _held_mcp_import(tmp, entered, release, left),
     })
     proc = subprocess.Popen(
         [sys.executable, str(_util.ROOT / 'server.py')],
@@ -222,7 +223,7 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
         port = _await_alive(
             proc, drained, lambda: _util.listening_port(drained),
             'the bridge announced no port while the import was held')
-        assert not release.exists(), 'the import was let go before the wait'
+        assert not left.exists(), 'the import was let go before readiness'
         status, health = _util.get_json(f'http://127.0.0.1:{port}/health')
         assert status == 200 and health['ok'] is True, (status, health)
     finally:

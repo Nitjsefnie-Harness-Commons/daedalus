@@ -142,14 +142,14 @@ def _start_mcp_in_process(base):
     raise AssertionError('MCP listener did not announce its port in 10s')
 
 
-def _await_mcp_line(output, timeout=10):
+def _await_mcp_line(output, proc):
     """Read the child's actual MCP port off its drained stdout.
 
     The startup line follows the bind, so its number is the bound port
-    itself. A crash line is raised with its own text — it is the original
-    error, not something to translate or retry.
+    itself. A crash line is raised verbatim, not translated. The wait has no
+    deadline: one here would bound the front end's import now that readiness
+    does not cover it, and an exited child is all it can honestly watch for.
     """
-    deadline = time.time() + timeout
     seen = 0
     while True:
         pending = output[seen:]
@@ -165,9 +165,9 @@ def _await_mcp_line(output, timeout=10):
                 return port
             if '[MCP] serve crashed:' in line:
                 raise AssertionError(line.rstrip())
-        if time.time() > deadline:
+        if proc.poll() is not None:
             raise AssertionError(
-                'MCP listener did not announce its port in 10s:\n'
+                'the bridge exited before announcing its MCP port:\n'
                 + ''.join(output))
         time.sleep(0.05)
 
@@ -180,10 +180,10 @@ def _bridge_with_live_mcp(tmp, env):
     its stdout, which the bridge fixture's drain thread relays here. No drawn
     number, no retry: a startup crash arrives as its own line, verbatim.
     """
-    output = []
-    child_env = {**env, 'DAEDALUS_MCP_PORT': '0'}
-    with _util.bridge(tmp, env=child_env, output=output) as (base, _docroot):
-        port = _await_mcp_line(output)
+    output, child = [], []
+    with _util.bridge(tmp, env={**env, 'DAEDALUS_MCP_PORT': '0'},
+                      output=output, proc_out=child) as (base, _docroot):
+        port = _await_mcp_line(output, child[0])
         _wait_for_mcp(port)
         yield base, port
 
