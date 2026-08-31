@@ -27,6 +27,11 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
 
+_BASE_SHA = '1' * 40
+_HEAD_SHA = '2' * 40
+_MERGE_BASE = '3' * 40
+
+
 def _compare_durations():
     return _util.load(ROOT / 'scripts' / 'ci' / 'compare_durations.py')
 
@@ -104,12 +109,10 @@ def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
 
     The gate ran on push alone, so a regression was measured only after it had
     landed. Two details make the pull-request half mean anything: the baseline
-    is the merge base of the branch and its base — the last release, or the
-    base branch's tip, would fold commits the branch never made into the
-    number and attribute all of them to whoever opened the pull request — and
-    the candidate is the pull request's own head rather than the merge commit
-    `actions/checkout` defaults to, which is a tree nobody authored and no
-    reviewer can point at.
+    is the merge base of the branch and its base, for the reason speed.yml's
+    header gives, and the candidate is the pull request's own head rather than
+    the merge commit `actions/checkout` defaults to, which is a tree nobody
+    authored and no reviewer can point at.
     """
     del tmp
     workflow = speed_yml()
@@ -134,10 +137,6 @@ def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     script, _, _ = after.partition('- name: Check out this commit')
     _, _, body = script.partition('run: |')
     assert '${{' not in body, 'an expression is interpolated into the script'
-    # The divergence point, resolved through the compare endpoint.
-    assert 'compare/$PR_BASE...$PR_HEAD' in body, body
-    assert '.merge_base_commit.sha' in body, body
-    assert 'ref="$PR_BASE"' not in body, body
 
 
 def test_the_speed_gate_is_not_manually_dispatchable(tmp):
@@ -567,11 +566,6 @@ def test_the_timing_step_reports_what_it_measured(tmp):
     assert 'no durations' in result.stderr, result.stderr
 
 
-_BASE_SHA = '1' * 40
-_HEAD_SHA = '2' * 40
-_MERGE_BASE = '3' * 40
-
-
 def _find_baseline(tmp, name, rows, **environment):
     """Run the `Find the baseline` step against a stubbed `gh`."""
     workdir = Path(tmp) / name
@@ -600,9 +594,8 @@ def _find_baseline(tmp, name, rows, **environment):
 def test_a_pull_request_baseline_is_the_merge_base(tmp):
     """The point measured against is where the branch diverged.
 
-    The payload's base SHA is the base branch's tip, which a branch open
-    while that branch moved has never contained: measuring against it folds
-    every commit merged since the divergence into this branch's number.
+    Not the payload's base SHA, which is the base branch's tip; speed.yml's
+    header gives the reason.
     """
     result, output, _, _ = _find_baseline(
         tmp, 'merge-base', f'{_MERGE_BASE}\n', EVENT='pull_request',
@@ -623,30 +616,69 @@ def test_the_merge_base_comes_from_the_compare_endpoint(tmp):
     assert 'Cache-Control: no-cache' in calls, calls
 
 
-def test_a_failed_merge_base_lookup_leaves_no_baseline(tmp):
-    """A lookup that exits nonzero skips instead of measuring."""
-    result, output, _, summary = _find_baseline(
-        tmp, 'failed', '', EVENT='pull_request', PR_BASE=_BASE_SHA,
+def test_an_unresolvable_merge_base_fails_the_gate(tmp):
+    """A pull request always has a merge base, so failing to find one is red.
+
+    Skipping would report the check green having measured nothing. `long`
+    and `not-hex` pin the two halves of the shape check apart: every other
+    answer here is already refused by length alone.
+    """
+    answers = {
+        'lookup-failed': ('', '1'),
+        'blob': ('{"message": "Not Found"}\n', ''),
+        'null': ('null\n', ''),
+        'empty': ('\n', ''),
+        'short': (f'{_MERGE_BASE[:39]}\n', ''),
+        'long': (f'{_MERGE_BASE}a\n', ''),
+        'not-hex': (f'{"z" * 40}\n', ''),
+    }
+    for name, (rows, failing) in answers.items():
+        result, output, _, summary = _find_baseline(
+            tmp, name, rows, EVENT='pull_request', PR_BASE=_BASE_SHA,
+            PR_HEAD=_HEAD_SHA, STUB_FAIL=failing)
+        assert result.returncode != 0, (name, result.stdout, result.stderr)
+        assert 'point=' not in output, (name, output)
+        assert 'No baseline' in result.stderr, (name, result.stderr)
+        assert 'Failed:' in summary, (name, summary)
+
+
+def test_a_malformed_payload_sha_fails_before_any_api_call(tmp):
+    """Neither payload SHA reaches the compare endpoint unchecked.
+
+    The empty call log is the half that proves the refusal came first: a
+    dropped guard still fails a later check, but only after asking the API
+    about a SHA the payload made up.
+    """
+    for name, payload in (
+            ('bad-base', {'PR_BASE': 'nope', 'PR_HEAD': _HEAD_SHA}),
+            ('bad-head', {'PR_BASE': _BASE_SHA, 'PR_HEAD': 'nope'})):
+        result, output, calls, summary = _find_baseline(
+            tmp, name, f'{_MERGE_BASE}\n', EVENT='pull_request', **payload)
+        assert result.returncode != 0, (name, result.stdout, result.stderr)
+        assert calls == '', (name, calls)
+        assert 'point=' not in output, (name, output)
+        assert 'Failed:' in summary, (name, summary)
+
+
+def test_an_empty_verdict_table_can_only_mean_no_release(tmp):
+    """The cause the aggregate states is the only one that can produce it.
+
+    An empty table on a green run is reported as "no release existed", which
+    is a claim about the baseline step, so it is pinned against that step.
+    """
+    assert 'no release existed to measure' in speed_script(
+        speed_yml(), 'speed', 'Aggregate the cell verdicts')
+    result, output, _, _ = _find_baseline(
+        tmp, 'unresolved', '', EVENT='pull_request', PR_BASE=_BASE_SHA,
         PR_HEAD=_HEAD_SHA, STUB_FAIL='1')
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert 'point=' not in output, output
+    result, output, _, summary = _find_baseline(
+        tmp, 'no-release', '', EVENT='push', PR_BASE='', PR_HEAD='',
+        STUB_FAIL='1')
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert output.strip() == 'point=', output
-    assert 'merge base' in summary, summary
-
-
-def test_an_unusable_merge_base_answer_leaves_no_baseline(tmp):
-    """Only 40 hexadecimal characters are a baseline; nothing else is."""
-    answers = {
-        'blob': '{"message": "Not Found"}\n',
-        'null': 'null\n',
-        'empty': '\n',
-        'short': f'{_MERGE_BASE[:39]}\n',
-    }
-    for name, rows in answers.items():
-        result, output, _, _ = _find_baseline(
-            tmp, name, rows, EVENT='pull_request', PR_BASE=_BASE_SHA,
-            PR_HEAD=_HEAD_SHA)
-        assert result.returncode == 0, (name, result.stdout, result.stderr)
-        assert output.strip() == 'point=', (name, output)
+    assert 'no release exists yet' in summary, summary
 
 
 def test_a_push_baseline_is_still_the_latest_release_tag(tmp):
