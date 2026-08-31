@@ -126,7 +126,7 @@ def test_recognises_a_keyword_open(tmp):
     assert _violations(source) == [
         "keyword-open.py:2: open mode 'ab' target path is not "
         + 'control-owned',
-        'keyword-open.py:4: open target is unresolved',
+        "keyword-open.py:4: open mode 'ab' target is unresolved",
     ]
 
 
@@ -198,7 +198,8 @@ def test_refuses_a_shadowed_open_callable(tmp):
         "    open(target, 'wb')\n",
         encoding='utf-8')
     assert _violations(source) == [
-        'shadowed-open.py:5: open callable is unresolved'
+        'shadowed-open.py:3: mutate_checkout callable is unresolved',
+        'shadowed-open.py:5: open callable is unresolved',
     ]
 
 
@@ -251,6 +252,7 @@ def test_resolves_only_control_owned_paths(tmp):
         + 'control-owned',
         "writer-shapes.py:23: open mode 'xb' target path is not "
         + 'control-owned',
+        'writer-shapes.py:24: manager callable is unresolved',
         'writer-shapes.py:25: write_text target path is not control-owned',
         'writer-shapes.py:26: write_bytes target path is not control-owned',
         'writer-shapes.py:27: write_text target path is not control-owned',
