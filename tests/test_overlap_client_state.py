@@ -210,6 +210,25 @@ def _overlap_client_failure_message(tmp, states=None):
     raise AssertionError('the caller never diagnosed its clients')
 
 
+def test_the_diagnosis_keeps_the_announcement_a_noisy_log_would_bury(tmp):
+    """The bridge the clients were talking to is named however loud it got.
+
+    The log tail is a fixed window, and a client that dies mid-request makes
+    the bridge print a traceback per connection - on Windows a flood of them,
+    which is what pushed the announcement out of the window and reddened both
+    Windows legs. Which bridge the diagnosis is about cannot depend on how
+    much the bridge had to say afterwards, so it is selected rather than
+    hoped for.
+    """
+    announcement = '[Daedalus] Listening on 127.0.0.1:41234 - base=/tmp/x\n'
+    noise = [f'ConnectionResetError: [WinError 10054] {n}\n'
+             for n in range(80)]
+    message = _overlap._client_failure_diagnostics(
+        [announcement] + noise, tmp)
+    assert '[Daedalus] Listening on 127.0.0.1:41234' in message, message
+    assert noise[-1].strip() in message, message
+
+
 def test_a_client_failure_names_the_bridge_log_and_delivery_state(tmp):
     """A client failure carries the bridge log tail and the delivery record.
 
@@ -218,8 +237,9 @@ def test_a_client_failure_names_the_bridge_log_and_delivery_state(tmp):
     what it retained per delivery.
     """
     message = _overlap_client_failure_message(tmp)
-    assert 'bridge log tail' in message, message
+    assert 'bridge announcement' in message, message
     assert '[Daedalus] Listening on 127.0.0.1:' in message, message
+    assert 'bridge log tail' in message, message
     assert 'delivery state' in message, message
     assert re.search(
         r'_extension/\d+_\d+\.json: deliveryId \d+_\d+', message), message

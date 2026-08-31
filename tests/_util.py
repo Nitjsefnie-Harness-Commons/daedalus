@@ -380,6 +380,30 @@ def _startup_observations(proc, drained, waited):
             f'{capture}:\n' + ''.join(lines))
 
 
+LISTENING = re.compile(r'\[Daedalus\] Listening on 127\.0\.0\.1:(\d+)')
+
+
+def listening_port(lines):
+    """The port off the bridge's announcement, or None until it arrives."""
+    for line in list(lines):
+        match = LISTENING.search(line)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def listening_line(lines):
+    """The announcement itself, or None until it arrives.
+
+    Callers that want the line rather than the port share this match so one
+    spelling of the announcement serves the whole harness.
+    """
+    for line in list(lines):
+        if LISTENING.search(line):
+            return line
+    return None
+
+
 def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
     """Return the port the child actually bound, read from its Listening line.
 
@@ -406,11 +430,9 @@ def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
     while True:
         pending = drained[seen:]
         seen += len(pending)
-        for line in pending:
-            match = re.search(r'\[Daedalus\] Listening on 127\.0\.0\.1:(\d+)',
-                              line)
-            if match:
-                return int(match.group(1))
+        port = listening_port(pending)
+        if port is not None:
+            return port
         if proc.poll() is not None:
             raise RuntimeError(
                 'bridge exited during startup: '

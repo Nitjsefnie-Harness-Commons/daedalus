@@ -169,15 +169,6 @@ def _held_mcp_import(tmp, entered, release):
     return _noise_path(tmp, 'held-mcp-import', body)
 
 
-def _listening_port(drained):
-    """The port off the announcement, or None while it has not arrived."""
-    for line in list(drained):
-        _, marker, rest = line.partition('[Daedalus] Listening on 127.0.0.1:')
-        if marker:
-            return int(rest.split(' ', 1)[0])
-    return None
-
-
 def _await_alive(proc, drained, probe, what):
     """Poll `probe` with no deadline, giving up only when the child dies.
 
@@ -229,7 +220,7 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
         _await_alive(proc, drained, entered.exists,
                      'the bridge never asked for daedalus_mcp')
         port = _await_alive(
-            proc, drained, lambda: _listening_port(drained),
+            proc, drained, lambda: _util.listening_port(drained),
             'the bridge announced no port while the import was held')
         assert not release.exists(), 'the import was let go before the wait'
         status, health = _util.get_json(f'http://127.0.0.1:{port}/health')

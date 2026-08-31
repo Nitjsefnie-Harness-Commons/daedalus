@@ -555,7 +555,13 @@ def cookie_client_argv(owner):
 
 
 def _client_failure_diagnostics(bridge_log, docroot):
-    """The bridge log tail and the retained deliveries, for one diagnosis."""
+    """The announcement, the log tail and the deliveries, for one diagnosis.
+
+    The announcement is selected out of the whole log rather than left to the
+    tail: it names which bridge this was, and a client dying mid-request
+    makes the bridge print enough afterwards to push it out of the window.
+    """
+    announced = _util.listening_line(bridge_log) or 'no announcement captured'
     tail = ''.join(bridge_log[-40:]).strip() or 'no bridge log captured'
     root = Path(docroot) / 'results' / 'deliveries'
     lines = []
@@ -569,7 +575,8 @@ def _client_failure_diagnostics(bridge_log, docroot):
         lines.append(
             f"{relative}: deliveryId {record['deliveryId']}")
     delivery = '\n'.join(lines) or 'no delivery retained'
-    return f'bridge log tail:\n{tail}\ndelivery state:\n{delivery}'
+    return (f'bridge announcement:\n{announced.strip()}\n'
+            f'bridge log tail:\n{tail}\ndelivery state:\n{delivery}')
 
 
 def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
