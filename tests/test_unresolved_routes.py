@@ -440,9 +440,40 @@ def test_an_unresolved_callee_carrying_cwd_needs_a_declaration(tmp):
         target.write_bytes(original)
 
 
+def test_a_readable_spread_carrying_cwd_is_judged_like_the_keyword(tmp):
+    """`**{'cwd': tmp}` spells a working directory the guard can read."""
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
+    first = _declaration_line(_module_text(target))
+    for spread in ("{'cwd': tmp}", 'dict(cwd=tmp)'):
+        original = _with_planted_launch(
+            target,
+            "sys.modules['subprocess'].run(['python3', 'child.py'],\n"
+            f"                              **{spread})\n")
+        try:
+            violations = _coverage_environment_violations(root)
+            assert (f'tests/test_diff_coverage.py:{first}: unresolved '
+                    "callee sys.modules['subprocess'].run cwd may arrive "
+                    'through a ** spread declares no env='
+                    ) in violations, (spread, violations)
+        finally:
+            target.write_bytes(original)
+
+
 def test_a_launcher_bound_through_an_unfollowable_form_is_refused(tmp):
     """A binding the alias walk cannot read is refused at the binding."""
-    del tmp
+    relative = Path('tests/test_diff_coverage.py')
+    root, target = _real_module_copy(tmp, relative)
+    first = _declaration_line(_module_text(target))
+    original = _with_planted_launch(
+        target, 'for launcher in (subprocess,):\n    pass\n')
+    try:
+        violations = _coverage_environment_violations(root)
+        assert (f'tests/test_diff_coverage.py:{first}: a launcher is bound '
+                'through a form the guard cannot follow') in violations, (
+            violations)
+    finally:
+        target.write_bytes(original)
     for binding in ('for launcher in (subprocess,):\n    pass',
                     'launcher, other = subprocess, None',
                     'with hold(subprocess) as launcher:\n    pass',
