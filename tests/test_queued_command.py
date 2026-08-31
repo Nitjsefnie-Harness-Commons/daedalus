@@ -7,6 +7,7 @@ absorbed, one that survives the bounded wait is raised as itself, a queue
 that never fills fails as a timeout, the oldest entry is the one parsed,
 and an entry that is gone is not retried.
 """
+import ast
 import json
 import sys
 from pathlib import Path
@@ -111,6 +112,90 @@ def test_a_queue_read_returns_the_oldest_entry(tmp):
         entry.write_text(json.dumps({'id': identifier}), encoding='utf-8')
     command = _queueread.queued_command(qdir, 'the pinned queue read')
     assert command['id'] == 'older', command
+
+
+def test_a_queue_read_skips_excluded_names_and_retries_refusal(tmp):
+    """The oldest entry outside the handled-name set is read safely.
+
+    A stale entry must not win merely because it sorts first, and the
+    eligible entry still needs the Windows denial retry.
+    """
+    qdir = Path(tmp) / 'commands' / 'tok_extension'
+    qdir.mkdir(parents=True)
+    stale = qdir / '1700000000000_000001.json'
+    entry = qdir / '1700000000001_000002.json'
+    stale.write_text('not json', encoding='utf-8')
+    entry.write_text(json.dumps({'id': 'current'}), encoding='utf-8')
+    wrapper, refusals = _denying_read(entry, times=1)
+    with mock.patch.object(Path, 'read_text', wrapper):
+        command = _queueread.queued_command(
+            qdir, 'the pinned queue read', exclude={stale.name})
+    assert command['id'] == 'current', command
+    assert len(refusals) == 1, refusals
+
+
+def test_a_multi_queue_read_retries_a_refusal_and_reads_all(tmp):
+    """A plural queue read retries a transient denial before its full set."""
+    qdir = Path(tmp) / 'commands' / 'tok_extension'
+    qdir.mkdir(parents=True)
+    entries = [qdir / f'170000000000{i}_00000{i}.json' for i in (1, 2)]
+    for entry, identifier in zip(entries, ('first', 'second')):
+        entry.write_text(json.dumps({'id': identifier}), encoding='utf-8')
+    wrapper, refusals = _denying_read(entries[0], times=1)
+    with mock.patch.object(Path, 'read_text', wrapper):
+        commands = _queueread.queued_commands(
+            qdir, 'the pinned queue reads', len(entries))
+    assert [command['id'] for command in commands] == ['first', 'second'], (
+        commands)
+    assert len(refusals) == 1, refusals
+
+
+def test_a_multi_queue_read_denied_for_good_fails_as_the_denial_it_is(tmp):
+    """A plural read raises a persistent denial instead of timing out."""
+    qdir = Path(tmp) / 'commands' / 'tok_extension'
+    qdir.mkdir(parents=True)
+    entry = qdir / '1700000000000_000001.json'
+    entry.write_text(json.dumps({'id': 'only'}), encoding='utf-8')
+    wrapper, refusals = _denying_read(entry, times=100)
+    failure = None
+    with mock.patch.object(Path, 'read_text', wrapper):
+        try:
+            _queueread.queued_commands(
+                qdir, 'the pinned queue reads', 1, timeout=0.2)
+        except PermissionError as denied:
+            failure = denied
+    if failure is None:
+        raise AssertionError('the persistent plural denial needs a denial')
+    assert len(refusals) > 1, refusals
+    assert failure.filename == str(entry), failure
+
+
+def test_mcp_suite_routes_queue_reads_through_the_bounded_reader(tmp):
+    """The MCP suite has no direct JSON parse of a queue `read_text` call.
+
+    This catches the unprotected `json.loads(...)` applied to a
+    `.read_text(...)` queue entry. It deliberately does not reject a future
+    non-queue `read_text` use, which would be a different defect.
+    """
+    del tmp
+    source_path = Path(__file__).with_name('test_mcp_server.py')
+    tree = ast.parse(source_path.read_text(encoding='utf-8'))
+    violations = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'loads'
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == 'json'):
+            continue
+        if any(isinstance(child, ast.Call)
+               and isinstance(child.func, ast.Attribute)
+               and child.func.attr == 'read_text'
+               for argument in node.args for child in ast.walk(argument)):
+            violations.append(node.lineno)
+    assert not violations, (
+        'MCP queue entries must use queued_command(s), not direct reads: '
+        f'{violations}')
 
 
 def test_a_queue_read_times_out_on_a_queue_that_never_fills(tmp):
