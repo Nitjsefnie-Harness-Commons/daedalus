@@ -307,9 +307,8 @@ def render(lines, base_label, shared, pairs, movements, limit=10):
     lines.append('')
     lines.append('Longest-running tests (head median, covered-set share):')
     lines.append('')
-    lines.append(
-        'Shares are of the covered-set head-median total used by the '
-        'paired ratio.')
+    lines.append('Shares sum head medians over the same covered set used by '
+                 'the paired ratio.')
     lines.append('')
     lines.append('| test | head median | share of covered set |')
     lines.append('|---|---:|---:|')

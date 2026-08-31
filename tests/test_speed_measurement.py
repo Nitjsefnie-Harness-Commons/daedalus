@@ -189,7 +189,7 @@ def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
 
 def test_speed_summary_longest_table_orders_head_medians_and_applies_limit(
         tmp):
-    """The expensive table is independent of the movement ordering."""
+    """The expensive table sorts all movements before applying its limit."""
     del tmp
     compare = _compare_durations()
     lines = _render_speed_summary(
@@ -197,42 +197,66 @@ def test_speed_summary_longest_table_orders_head_medians_and_applies_limit(
             ('middle', 4.0, 6.0, 2.0),
             ('large', 5.0, 9.0, 4.0),
             ('small', 1.0, 2.0, 1.0),
+            ('late', 2.0, 12.0, 10.0),
         ], limit=2)
     rows = _longest_rows(lines)
     assert [row.split('|')[1].strip() for row in rows] == [
-        '`large`', '`middle`'], rows
+        '`late`', '`large`'], rows
 
 
 def test_speed_summary_longest_table_shows_head_median_column(tmp):
-    """The duration column is the current commit's median, not baseline."""
+    """The duration column is the current commit's median, even when faster."""
     compare = _compare_durations()
-    base = _durations_tree(tmp, 'base', [{'test': 1.0}])
-    head = _durations_tree(tmp, 'head', [{'test': 9.0}])
+    base = _durations_tree(tmp, 'base', [{'test': 1.0, 'improving': 9.0}])
+    head = _durations_tree(tmp, 'head', [{'test': 9.0, 'improving': 3.0}])
     shared, pairs, movements = compare.compare(
         compare.side_rounds(base), compare.side_rounds(head))
     rows = _longest_rows(_render_speed_summary(compare, shared, pairs,
                                                movements))
-    assert rows == ['| `test` | 9.00s | 1.000 |'], rows
+    assert rows == [
+        '| `test` | 9.00s | 0.750 |',
+        '| `improving` | 3.00s | 0.250 |',
+    ], rows
 
 
 def test_speed_summary_longest_table_shares_only_the_covered_set(tmp):
-    """Shares exclude a head test that is absent from the shared set."""
+    """Shares use every covered head median, not round or displayed totals."""
     compare = _compare_durations()
     base = _durations_tree(tmp, 'base', [
-        {'shared_fast': 1.0, 'shared_slow': 2.0, 'base_only': 50.0}])
+        {'shared_alpha': 1.0, 'shared_beta': 1.0, 'shared_gamma': 1.0,
+         'base_only': 50.0},
+        {'shared_alpha': 1.0, 'shared_beta': 1.0, 'shared_gamma': 1.0,
+         'base_only': 50.0},
+    ])
     head = _durations_tree(tmp, 'head', [
-        {'shared_fast': 3.0, 'shared_slow': 9.0, 'head_only': 100.0}])
+        {'shared_alpha': 4.0, 'shared_beta': 7.0, 'shared_gamma': 1.0,
+         'head_only': 100.0},
+        {'shared_alpha': 8.0, 'shared_beta': 3.0, 'shared_gamma': 5.0,
+         'head_only': 100.0},
+    ])
     shared, pairs, movements = compare.compare(
         compare.side_rounds(base), compare.side_rounds(head))
-    assert shared == ['shared_fast', 'shared_slow'], shared
-    lines = _render_speed_summary(compare, shared, pairs, movements)
+    assert shared == ['shared_alpha', 'shared_beta', 'shared_gamma'], shared
+    lines = _render_speed_summary(compare, shared, pairs, movements, limit=2)
     rows = _longest_rows(lines)
     assert rows == [
-        '| `shared_slow` | 9.00s | 0.750 |',
-        '| `shared_fast` | 3.00s | 0.250 |',
+        '| `shared_alpha` | 6.00s | 0.429 |',
+        '| `shared_beta` | 5.00s | 0.357 |',
     ], rows
-    assert ('Shares are of the covered-set head-median total used by the '
-            'paired ratio.') in lines
+    assert ('Shares sum head medians over the same covered set used by '
+            'the paired ratio.') in lines
+
+
+def test_speed_summary_longest_table_renders_zero_head_share(tmp):
+    """A covered set with no head time renders a guarded zero share."""
+    compare = _compare_durations()
+    base = _durations_tree(tmp, 'base', [{'zero': 1.0}])
+    head = _durations_tree(tmp, 'head', [{'zero': 0.0}])
+    shared, pairs, movements = compare.compare(
+        compare.side_rounds(base), compare.side_rounds(head))
+    rows = _longest_rows(_render_speed_summary(compare, shared, pairs,
+                                               movements))
+    assert rows == ['| `zero` | 0.00s | 0.000 |'], rows
 
 
 def test_speed_summary_longest_table_preserves_empty_shared_early_return(tmp):
