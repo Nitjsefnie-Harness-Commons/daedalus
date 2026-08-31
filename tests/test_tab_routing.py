@@ -126,8 +126,7 @@ def test_generator_break_tracks_only_remaining_effects(tmp):
                        False),
                       (f'{label}-clearing', 'ext_cmd', 'ordinary', iterable,
                        True)])
-    for condition in ('True', 'False'):
-        two = condition == 'True'
+    for condition, two in (('True', True), ('False', False)):
         specs.extend([(f'filter-{condition}-setting', 'ordinary', 'ext_cmd',
                        f'[1, 2] if {condition}', two),
                       (f'filter-{condition}-clearing', 'ext_cmd', 'ordinary',
@@ -158,6 +157,12 @@ def test_generator_filter_short_circuit_skips_later_effects(tmp):
                                  iterable=f'[1] if {filters}'), '', '', result)
              for label, initial, filters, result in specs]
     _assert_focus_cases(tmp, cases)
+    call = "next(gen)('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+    actual = [_tracked_focus_verdict(tmp, body + call, counts=True)
+              for body in ('send = ext_cmd\ngen = (send for _ in [1])\n',
+                           'send = ordinary\nif not args.flag:\n'
+                           '    send = ext_cmd\ngen = (send for _ in [1])\n')]
+    assert actual == [(1, 1), (0, 1)], actual
 
 
 def test_builtin_consumers_follow_python_scope_identity(tmp):
@@ -226,7 +231,6 @@ def test_builtin_consumers_follow_python_scope_identity(tmp):
 
 def test_deferred_annotation_and_class_state_flow_matches_runtime(tmp):
     call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
-    module_call = "send('_focus', 'focus-tab', tab=int(_args.chrome_tab))"
     cases = []
     for label, initial, effect, expected in _DIRECTIONS:
         before = f'send = {initial}\n'
@@ -246,9 +250,8 @@ def test_deferred_annotation_and_class_state_flow_matches_runtime(tmp):
             (f'generator-{label}', f'list(gen)\n{call}', before + old_gen,
              new_gen + 'do_focus_tab(_args)', expected),
             (f'propagation-{label}', 'list(gen)',
-             before + old_gen, (new_gen
-                                + f'do_focus_tab(_args)\n{module_call}'),
-             expected),
+             before + old_gen, new_gen + f'do_focus_tab(_args)\n'
+             f'{call.replace("args", "_args")}', expected),
             (f'global-{label}', f'global send\n{call}', before,
              after, expected),
             (f'early-{label}', call, before,
@@ -281,7 +284,6 @@ def test_deferred_annotation_and_class_state_flow_matches_runtime(tmp):
                'def decorate(value): return lambda cls: cls\n'
                'def base_factory(*values): return Base\n'
                'def meta_factory(*values): return type\n')
-    call = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
     shapes = [
         ('body', 'class Inner:\n    list(gen)'),
         ('decorator', '@decorate(list(gen))\nclass Inner: pass'),
@@ -758,7 +760,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
            "  // fields['tab'] = Number(tabSel.value) would be wrong\n"
            "  let done = false;\n  await extCmd('cookies', fields);",
            'q')]
-
     disclosed_js_limits = [
         ('assignment after the call that runs before it',
          "async function send() {\n"
@@ -769,9 +770,8 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
          "async function f(fields) {\n"
          "  await extCmd('screenshot', fields);\n"
          "}\n"), ]
-    fixture = Path(tmp) / 'sender'
 
-    def scan(lang, source):
+    def scan(lang, source, fixture=Path(tmp) / 'sender'):
         path = fixture.with_suffix('.py' if lang == 'py' else '.js')
         path.write_text(source, encoding='utf-8')
         return (py_tab_routing_violations if lang == 'py'

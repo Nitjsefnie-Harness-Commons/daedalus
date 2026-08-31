@@ -12,8 +12,8 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              expression_callables, expression_value,
                              follow_callable_call,
                              generator_context, generator_for,
-                             is_deferred_value,
-                             iterable_deferred, iterable_nonempty,
+                             is_deferred_value, iterable_deferred,
+                             iterable_nonempty, merge_yielded,
                              load_callable_cells, materialize_deferred,
                              merge_deferred_values, new_deferred_callable,
                              new_deferred_generator, payload_key,
@@ -238,7 +238,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             expression, ast.DictComp) else [expression.elt]
         for result in results: active = check_expression(
             clear_expression_cache(result, active), active)
-        yielded = merge_deferred_values(
+        yielded = merge_yielded(
             live_expression_value(result, state, deferred_lambda,
                                   generator.captured)
             for state in active for result in results)
@@ -273,7 +273,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             else:
                 for output in consumed: advance_generator(output, generator)
             outputs.extend(consumed)
-        return dedupe_states(outputs), merge_deferred_values(yielded)
+        return dedupe_states(outputs), merge_yielded(yielded)
 
     def deferred_lambda(node, state, capture_chain):
         local_names, global_names, _ = lexical_scope_names(
@@ -372,13 +372,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 for current_state in current:
                     found = _py_call_violations(
                         node, current_state.dicts, rel,
-                        allowed_opaque_names, sender)
+                        allowed_opaque_names, sender or deferred)
                     violations.extend(found)
                 current, returned_value = follow_callable_call(
                     candidates, arguments, current, node, analyze_callable,
                     copied, dedupe_states)
-                consumed_value = merge_deferred_values(consumed_values)
-                returned_value = merge_deferred_values(
+                consumed_value = merge_yielded(consumed_values)
+                returned_value = merge_yielded(
                     (returned_value, consumed_value))
                 if returned_value is not None:
                     for current_state in current:

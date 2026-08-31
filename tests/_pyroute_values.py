@@ -298,6 +298,17 @@ def merge_deferred_values(values):
         tuple(merged))
 
 
+def sender_value(value):
+    return value if value in ('ext_cmd', '_ext_cmd', '?ext_cmd') else None
+
+
+def merge_yielded(values):
+    values = list(values)
+    deferred = merge_deferred_values(values)
+    return deferred if deferred is not None else next(
+        (value for value in values if sender_value(value) is not None), None)
+
+
 def callable_candidates(value):
     if isinstance(value, DeferredCallable):
         return (value,)
@@ -346,7 +357,8 @@ def _known_value(node, state):
     value = state.evaluated.get(id(node))
     if value is None and isinstance(node, ast.Name):
         value = state.callables.get(node.id)
-    return value if is_deferred_value(value) else None
+    return value if (is_deferred_value(value)
+                     or value in ('ext_cmd', '_ext_cmd', '?ext_cmd')) else None
 
 
 def deferred_expression_value(node, state, lambda_factory):
