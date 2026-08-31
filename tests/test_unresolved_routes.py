@@ -16,7 +16,6 @@ from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _DECLARATION_LINE = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
-_LAUNCH_MODULE = Path('tests/test_diff_coverage.py')
 
 
 def _module_text(target):

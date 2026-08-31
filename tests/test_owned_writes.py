@@ -29,9 +29,10 @@ def test_copy_test_tree_copies_every_test_module_below_the_root(tmp):
 
 
 def test_copy_test_tree_refuses_a_root_inside_the_checkout(tmp):
-    """The checkout itself, and any directory below it, is refused."""
-    del tmp
-    for root in (ROOT, ROOT / '.probe'):
+    """The checkout, a directory below it, and a link to it are refused."""
+    link = Path(tmp) / 'checkout-link'
+    link.symlink_to(ROOT, target_is_directory=True)
+    for root in (ROOT, ROOT / '.probe', link):
         try:
             copy_test_tree(root)
         except ValueError as error:
