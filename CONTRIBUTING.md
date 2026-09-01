@@ -137,7 +137,7 @@ The rest of the gate runs on GitHub:
 | `lint` / `types` / `eslint` | pycodestyle and pylint, pyright, and eslint over the shipped JavaScript. |
 | `codeql` | Security analysis for Python and JavaScript. Findings go to the Security tab, not the build. Also weekly, because a new query only ever sees code that changed after it shipped. |
 | `actionlint` | `actionlint` + `zizmor` over the workflows themselves. A broken workflow does not go red, it silently stops running. |
-| `speed` | Runs the last release's suite and yours on the same runner, interleaved, and fails if the tests present in both got more than 30% slower. |
+| `tests` (`speed` check) | Verdict job; fails above 30% slowdown. |
 | `release` | Builds and publishes the wheel, the sdist and `SHA256SUMS` on a `v*` tag. |
 
 Coverage is two numbers, published and gated separately, and they are
