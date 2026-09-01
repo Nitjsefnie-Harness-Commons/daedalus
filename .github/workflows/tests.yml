@@ -20,7 +20,14 @@ on:
     # unfiltered set.
     # release.yml names no workflow of its own — it waits on the runs
     # for the tagged SHA and fails when the count of non-release runs
-    # is zero; speed and version keep their path filters.
+    # is zero; version keeps its path filter.
+    #
+    # Documentation-only runs are narrowed inside the workflow instead, by
+    # the classifier's docs_only output: one suite leg runs, coverage and
+    # the speed measurement skip, and the required checks still report.
+  # `pull_request`, never `pull_request_target`: the speed cells check out
+  # and RUN the proposed code, and pull_request_target would run it with a
+  # writable token and the base repository's secrets in reach.
   pull_request:
   workflow_dispatch:
 
@@ -883,6 +890,646 @@ jobs:
             pr-number.txt
           if-no-files-found: error
 
+
+  # Did the test suite get slower since the last release?
+  #
+  # THE MEASUREMENT ONLY MEANS ANYTHING BECAUSE BOTH BUILDS RUN IN ONE CELL. A
+  # GitHub runner's speed varies by roughly a factor of two between jobs, so a
+  # duration recorded in one job compared against a duration recorded in another
+  # measures the runners, not the code. Every cell checks out the last release
+  # AND this commit, runs both on the same machine, and reports the ratio; the
+  # paired comparison never crosses a cell, and the final job combines verdicts,
+  # never seconds.
+  #
+  # ONE ROUND IS DISCARDED BEFORE ANY MEASUREMENT, and it is not ceremony. The
+  # first suite a job runs pays for a cold page cache, and interleaving does not
+  # share that cost — it lands entirely on whichever side goes first, which was
+  # always the baseline. Measured over the eight successful runs that kept their
+  # duration artifacts, the baseline's first round exceeded its second by 19.14s
+  # on average and was the largest of the four totals in 8 of 8 runs, while the
+  # head's first round exceeded its second by 0.96s. On a ~290s suite that is a
+  # 6.5% bias in the first pair, in the same direction every time, so no number
+  # of rounds averages it away: it made every verdict roughly 3% optimistic.
+  # (Not bytecode — PYTHONDONTWRITEBYTECODE is set below, so every round
+  # recompiles. The previous shape, a minimum across rounds, hid this by
+  # discarding the inflated value rather than by not producing it.)
+  #
+  # Rounds are INTERLEAVED — base, head, base, head — and compared IN PAIRS:
+  # round 1 of the baseline against round 1 of this commit, and so on. Pairing
+  # is what keeps every reported total one that a complete run achieved;
+  # interleaving is what puts whatever the runner was doing into both halves of
+  # each ratio. The verdict is the MEDIAN of those paired ratios, so one pair
+  # spoiled by a noisy neighbour cannot decide it.
+  #
+  # Each side installs ITS OWN dependencies from ITS OWN tree. That is not
+  # incidental here: the baseline floors the versions this line pins exactly, so
+  # the two sides resolve differently on purpose — and a release that got slower
+  # because a bumped library got slower is a real regression that holding
+  # dependencies fixed would hide.
+  #
+  # TWO BASELINES, chosen by what the run is answering. On a push to a branch
+  # the question is "is this line slower than what we shipped", so the baseline
+  # is the last release. On a pull request the question is "did THIS branch make
+  # it slower", so the baseline is the MERGE BASE of the branch and its base —
+  # the commit the branch diverged from. The last release, or the base branch's
+  # tip, would fold commits the branch never made into the number and attribute
+  # all of them to whoever opened the pull request. Both go through the same
+  # machinery below.
+  #
+  # The comparison — intersect on test name, so adding or removing a test cannot
+  # move the number — lives in scripts/ci/compare_durations.py, which has its own
+  # tests. Its module docstring explains why total wall time is the wrong metric.
+  #
+  # The timing is done BY THIS COMMIT'S instrument, for both sides. Durations
+  # that a checkout had to report about itself would only ever exist on the side
+  # that already carried the feature — which is the side whose speed was never in
+  # question. scripts/ci/time_tests.py asks nothing of the tree it measures: it
+  # runs each suite with -u and reads the wall clock as each result line arrives,
+  # so any release, however old, is measurable.
+  #
+  # THE WORK IS SPLIT TWO WAYS, because a benchmark of a broken tree is a
+  # number nobody can act on and a whole-tree benchmark is one long queue.
+  #
+  # `timed` is the matrix. Each cell owns one disjoint slice of `tests/` and
+  # carries the whole measurement inside it: two checkouts, one virtualenv per
+  # side, a discarded warm-up, interleaved measured rounds, and the comparison.
+  # A cell fails when ITS comparison fails, so a slowdown is attributable to a
+  # slice of the suite rather than buried in a 55-minute total. Its `name:` is
+  # static on purpose: a skipped matrix job still creates one check run, named
+  # after the job's `name:` verbatim, and an expression there would print the
+  # raw template into that name whenever the cells never started.
+  #
+  # The ordering that keeps the cells off a broken tree is a dependency, not a
+  # poll: `timed` names the aggregate in `needs`, so a red or cancelled
+  # aggregate skips every cell, and no runner is held or spent benchmarking a
+  # tree nobody can ship. A documentation-only run skips the same way, through
+  # the classifier's docs_only output — the workflow that kept those runs out
+  # by trigger cannot keep one job out of this one.
+  #
+  # `speed` is the single verdict and the only cell-independent check name. It
+  # needs the aggregate and the matrix and runs whatever they concluded, so a
+  # skip is explained rather than left as a missing check; it fails when any
+  # cell failed, and it builds the per-cell table out of the verdict record
+  # each cell left in the artifact it uploaded — never out of check runs, which
+  # a skipped cell leaves none of.
+  timed:
+    # Static, and free of expressions on purpose: a matrix job this run never
+    # started still gets one check run, named after this field verbatim, and
+    # an expression here would print the raw template into that name. A cell
+    # that did run still gets its group appended by GitHub, and attributes
+    # itself to the verdict job through the record it uploads.
+    name: timed
+    needs:
+      - changes
+      - aggregate
+    # The aggregate is what the cells wait on, and the status functions turn a
+    # red or cancelled one into a skip: the result travels through `needs`
+    # instead of a job polling the Checks API for it. `docs_only` skips a
+    # documentation-only run, where no measurement can mean anything.
+    if: ${{ !cancelled() && !failure()
+               && needs.changes.outputs.docs_only != 'true'
+               && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+
+    # This job checks out a pull request's OWN head and runs it, and an
+    # environment is the only control GitHub offers that decides whose code
+    # gets to start at all. A branch pushed to this repository is already
+    # the work of someone who can push here, so it benchmarks with no
+    # ceremony; a fork is not, so it waits for a reviewer. Both names exist
+    # as environments: `benchmark` carries no protection rules,
+    # `fork-benchmark` requires a review before the job starts.
+    #
+    # This gates the measuring cells and nothing else. The verdict job reads
+    # the cells' own artifacts and writes a summary, and neither touches the
+    # tree. tests.yml still runs a fork's code on its
+    # `suites`, `wheel` and `coverage` jobs; the lever that would gate every
+    # workflow at once is the repository's `fork-pr-contributor-approval`
+    # setting, moving from `first_time_contributors` to
+    # `all_external_contributors`.
+    #
+    # The cost of naming an environment here: every same-repo push and pull
+    # request writes a deployment record per cell, and `benchmark` is a real
+    # environment, so a secret attached to it later is in reach of every
+    # branch pushed to this repository.
+    environment: >-
+      ${{ github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name != github.repository
+      && 'fork-benchmark' || 'benchmark' }}
+    # Two discarded warm-up runs, four measured ones, and two installs —
+    # the whole budget a single cell needs, however many cells run beside it.
+    timeout-minutes: 90
+
+    strategy:
+      # A slow or failing slice must not cancel its siblings: each cell owns
+      # a verdict, and losing the others to one of them is a smaller
+      # measurement, not a faster one.
+      fail-fast: false
+      matrix:
+        # One cell per slice of `tests/`. The named groups are disjoint, and
+        # the last cell is the catch-all: it takes every suite file the named
+        # globs do not match, so a suite added later and matched by nothing is
+        # still measured rather than silently dropping out of the gate.
+        include:
+          - group: bridge
+            suites: >-
+              test_bridge_credentials.py test_bridge_requests.py
+              test_bridge_uploads.py test_bridge_startup.py
+              test_bridge_tabs.py test_path_safety.py
+          - group: bridge-delivery
+            suites: >-
+              test_bridge_results.py test_bridge_streams.py
+              test_delivery_*.py test_result_*.py test_control_*.py
+          - group: queue
+            suites: >-
+              test_cmdqueue*.py test_command_queue*.py test_stream_*.py
+          - group: segment
+            suites: >-
+              test_segment_*.py
+          - group: mcp
+            suites: >-
+              test_mcp_*.py
+          - group: cli
+            suites: >-
+              test_cli*.py test_pr_*.py
+          - group: repo-ci
+            suites: >-
+              test_ci_*.py test_workflow_*.py test_yamlread*.py
+              test_wf*.py test_ghexpr.py test_speed_gate.py
+              test_speed_measurement.py
+              test_suite_runner.py test_child_coverage.py
+              test_worker_runtime.py test_worker_module_boundary.py
+              test_change_classifier.py test_version_contract.py
+              test_release_scan.py test_repo_layout.py test_file_sizes.py
+              test_gitignore_*.py test_checkout_pin.py
+          - group: coverage
+            suites: >-
+              test_coverage_*.py test_diff_coverage.py
+              test_diff_coverage_*.py test_js_coverage*.py
+          - group: browser
+            suites: >-
+              test_real_browser_*.py test_eval_relay.py test_gm_*.py
+              test_vm_file_load_guard.py test_extension_*.py
+              test_worker_route_guard.py
+          - group: dashboard
+            suites: >-
+              test_dashboard_*.py test_overlap_harness.py test_js_lines.py
+          - group: tab-routing
+            suites: test_tab_routing.py
+          - group: catchall
+            suites: '*'
+            except: >-
+              test_bridge_credentials.py test_bridge_requests.py
+              test_bridge_uploads.py test_bridge_startup.py
+              test_bridge_tabs.py test_path_safety.py
+              test_bridge_results.py test_bridge_streams.py
+              test_delivery_*.py test_result_*.py test_control_*.py
+              test_cmdqueue*.py test_command_queue*.py test_stream_*.py
+              test_segment_*.py
+              test_mcp_*.py
+              test_cli*.py test_pr_*.py
+              test_ci_*.py test_workflow_*.py test_yamlread*.py
+              test_wf*.py test_ghexpr.py test_speed_gate.py
+              test_speed_measurement.py
+              test_suite_runner.py test_child_coverage.py
+              test_worker_runtime.py test_worker_module_boundary.py
+              test_change_classifier.py test_version_contract.py
+              test_release_scan.py test_repo_layout.py test_file_sizes.py
+              test_gitignore_*.py test_checkout_pin.py
+              test_coverage_*.py test_diff_coverage.py
+              test_diff_coverage_*.py test_js_coverage*.py
+              test_real_browser_*.py test_eval_relay.py test_gm_*.py
+              test_vm_file_load_guard.py test_extension_*.py
+              test_worker_route_guard.py
+              test_dashboard_*.py test_overlap_harness.py test_js_lines.py
+              test_tab_routing.py
+
+    env:
+      # Fractional slowdown that fails the job.
+      MAX_REGRESSION: "0.30"
+      ROUNDS: "2"
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      - name: Find the baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        # Values reach this script through the environment rather than through
+        # `${{ }}` inside it, so nothing a payload carries is ever expanded as
+        # shell.
+        #
+        # `gh api` on a 404 prints its JSON error body to STDOUT and exits
+        # nonzero. Ending this in `|| true` would discard the exit code and
+        # assign that blob to $ref — so the "no baseline" guard would see a
+        # non-empty string, fall through, and hand actions/checkout a refspec
+        # made of JSON. Hence both belts: branch on the EXIT CODE, then
+        # validate the SHAPE — `is_sha` covers the pull-request path, and
+        # the `case "$ref"` charset arm below still covers the release tag —
+        # so no payload can reach a git command as a ref.
+        #
+        # A pull request's baseline is the merge base of its base and head,
+        # for the reason the file header gives. A pull request always HAS
+        # one, so a lookup that cannot produce it is infrastructure failing
+        # rather than an absent baseline: that path fails the cell instead
+        # of skipping it, which leaves an empty `point=` meaning exactly one
+        # thing — the push path found no release.
+        run: |
+          is_sha() {
+            case "$1" in
+              *[!0-9a-f]*) return 1 ;;
+            esac
+            [ "${#1}" -eq 40 ]
+          }
+          fail() {
+            echo "No baseline: $1." >&2
+            echo "A pull request always has a merge base, so a lookup that" >&2
+            echo "cannot produce one is infrastructure to fix, not a" >&2
+            echo "measurement to skip." >&2
+            {
+              echo "### Test speed"
+              echo
+              echo "Failed: $1."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          ref=""
+          if [ "$EVENT" = pull_request ]; then
+            if ! is_sha "$PR_BASE"; then
+              fail "the payload's base SHA is not 40 lowercase hex digits"
+            fi
+            if ! is_sha "$PR_HEAD"; then
+              fail "the payload's head SHA is not 40 lowercase hex digits"
+            fi
+            if ! out="$(gh api -H "Cache-Control: no-cache" \
+                        "repos/$REPO/compare/$PR_BASE...$PR_HEAD" \
+                        --jq '.merge_base_commit.sha' 2>/dev/null)"; then
+              fail "the merge-base lookup exited nonzero"
+            fi
+            if ! is_sha "$out"; then
+              fail "the merge base answered is not 40 lowercase hex digits"
+            fi
+            ref="$out"
+          elif out="$(gh api -H "Cache-Control: no-cache" \
+                      "repos/$REPO/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
+            ref="$out"
+          fi
+          case "$ref" in
+            null) ref="" ;;
+            *[!A-Za-z0-9._-]*)
+              echo "Unexpected payload where a ref was expected; treating" >&2
+              echo "as 'no baseline' rather than passing it to git." >&2
+              ref=""
+              ;;
+          esac
+          # The output is named `point`, not `ref`, on purpose. The value is
+          # the pull request's merge base or a published release tag —
+          # trusted code, never the pull request's head — and CodeQL's
+          # untrusted-checkout heuristic reads any checkout whose ref comes
+          # from a step output named like head, branch, ref, sha or commit
+          # as checking out an untrusted head. Renaming this output back to
+          # `ref` would silently reintroduce that alert.
+          if [ -z "$ref" ]; then
+            why="no release exists yet to use as a baseline"
+            echo "point=" >> "$GITHUB_OUTPUT"
+            echo "No baseline: $why. Skipping rather than measuring against"
+            echo "a point this head cannot match."
+            {
+              echo "### Test speed"
+              echo
+              echo "Skipped: $why."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "point=$ref" >> "$GITHUB_OUTPUT"
+            echo "Baseline: $ref"
+          fi
+
+      - name: Check out this commit
+        if: steps.baseline.outputs.point != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The exact head of the pull request, not the merge commit checkout
+          # defaults to on that event: the merge commit is a tree nobody
+          # authored, and a duration measured on it belongs to no reviewable
+          # SHA. On a push there is no pull request and github.sha is the
+          # pushed commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: head
+          persist-credentials: false
+
+      - name: Check out the baseline
+        if: steps.baseline.outputs.point != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ steps.baseline.outputs.point }}
+          path: base
+          persist-credentials: false
+
+      # No `cache: pip`. setup-python saves its cache in a post-job step, so
+      # asking for one here would have this job write cross-run state after it
+      # has already run the code it was measuring. Without the input that post
+      # step is a no-op, so this job declares no cache action at all — which
+      # is not the same as having no cache reachable: code running here still
+      # has whatever Actions cache scope its event grants.
+      #
+      # This is not what answers the cache-poisoning findings — those name the
+      # trigger, which is why `workflow_dispatch` is gone above. It is not a
+      # measurement fix either: both installs finish before the discarded
+      # warm-up, so a warm or cold pip cache moves setup time rather than the
+      # ratio the job reports.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        if: steps.baseline.outputs.point != ''
+        with:
+          python-version: "3.13"
+
+      - name: Build one virtualenv per side
+        if: steps.baseline.outputs.point != ''
+        # Separate environments because the two sides pin different versions,
+        # and a shared one would silently benchmark whichever resolved last
+        # against both trees. Each side installs its OWN requirements-test.txt
+        # beside the package: the coverage suites one cell selects import
+        # `coverage`, which only the test requirements carry.
+        run: |
+          for side in base head; do
+            python -m venv "venv-$side"
+            "venv-$side/bin/python" -m pip install --quiet --upgrade pip
+            "venv-$side/bin/python" -m pip install --quiet \
+              "./${side}" "./${side}[mcp]" -r "./${side}/requirements-test.txt"
+          done
+          # grep rather than `head -2`: head closes the pipe after two lines,
+          # pip takes the broken pipe, prints "ERROR: Pipe to stdout was
+          # broken" and exits 120 — a nonzero producer hidden behind a
+          # successful truncation. grep reads the whole stream, so there is
+          # no early close to report, and under pipefail a pip that genuinely
+          # failed still fails the step.
+          echo "base mcp:"; "venv-base/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
+          echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
+
+      - name: Run both suites, interleaved
+        if: steps.baseline.outputs.point != ''
+        env:
+          # The cell's slice of the tree, as space-separated globs over the
+          # suite file names. Both are empty when the matrix cell names
+          # neither, and the instrument then times every suite.
+          SUITES_ONLY: ${{ matrix.suites }}
+          SUITES_EXCEPT: ${{ matrix.except }}
+        # A failing test does NOT fail this job: tests.yml owns that verdict,
+        # and a non-passing test is simply absent from the side's durations and
+        # drops out of the intersection. What this step must guarantee is that
+        # every round produced usable reports on BOTH sides, so it checks for
+        # them explicitly rather than trusting an exit code it ignores.
+        run: |
+          # set -f keeps the glob metacharacters away from the shell's own
+          # pathname expansion — they have to reach the instrument as
+          # patterns — and the unquoted expansion below is what turns the
+          # matrix's space-separated list into one argument per glob. It is
+          # turned off again before the step's own globs run: the guard that
+          # checks every round's reports below has to expand those globs,
+          # and under noglob it would stat one literal path and report a
+          # step that measured everything as having produced nothing.
+          set -f
+          selection=()
+          if [ -n "$SUITES_ONLY" ]; then
+            # shellcheck disable=SC2086,SC2206
+            selection+=(--only $SUITES_ONLY)
+          fi
+          if [ -n "$SUITES_EXCEPT" ]; then
+            # shellcheck disable=SC2086,SC2206
+            selection+=(--except $SUITES_EXCEPT)
+          fi
+          set +f
+
+          mkdir -p reports
+          # Round 0 is thrown away. It is written outside the reports/base-*
+          # and reports/head-* globs the comparison reads, so nothing has to
+          # remember to exclude it, and it is uploaded with the rest because
+          # the size of what it absorbs is the evidence for doing it at all.
+          for side in base head; do
+            echo "::group::$side warm-up (discarded)"
+            python3 head/scripts/ci/time_tests.py \
+              --tree "$side" \
+              --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
+              --out "$GITHUB_WORKSPACE/reports/warmup/$side" \
+              "${selection[@]}" \
+              || echo "$side warm-up: timing reported a problem"
+            echo "::endgroup::"
+          done
+
+          for round in $(seq 1 "$ROUNDS"); do
+            for side in base head; do
+              echo "::group::$side round $round"
+              python3 head/scripts/ci/time_tests.py \
+                --tree "$side" \
+                --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
+                --out "$GITHUB_WORKSPACE/reports/$side-$round" \
+                "${selection[@]}" \
+                || echo "$side round $round: timing reported a problem"
+              echo "::endgroup::"
+            done
+          done
+
+          missing=0
+          for round in $(seq 1 "$ROUNDS"); do
+            for side in base head; do
+              if ! ls "reports/$side-$round"/*.json >/dev/null 2>&1; then
+                echo "MISSING: reports/$side-$round has no durations" >&2
+                missing=1
+              fi
+            done
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "A side produced no durations at all, which is a setup" >&2
+            echo "failure rather than a speed result." >&2
+            exit 1
+          fi
+          ls -la reports/*/
+
+      - name: Compare
+        id: compare
+        if: steps.baseline.outputs.point != ''
+        env:
+          BASE_LABEL: ${{ steps.baseline.outputs.point }}
+        # The comparator comes from the HEAD checkout, so an improvement to the
+        # comparison itself takes effect on the commit that makes it rather
+        # than one release later. The round directories hold this cell's
+        # reports alone, and the comparison intersects on test name, so a
+        # slice of the tree compares correctly on its own.
+        # accepted_speed_changes.json is reviewed in-tree and bounded per
+        # test; any other regression, or an accepted test past its bound,
+        # still fails this cell.
+        run: |
+          # shellcheck disable=SC2046
+          python3 head/scripts/ci/compare_durations.py \
+            --base $(ls -d reports/base-*) \
+            --head $(ls -d reports/head-*) \
+            --accept head/scripts/ci/accepted_speed_changes.json \
+            --max-regression "$MAX_REGRESSION" \
+            --base-label "$BASE_LABEL" \
+            --require-measurements \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Record the cell verdict
+        # Runs whenever the cell did work, a failed comparison included: the
+        # cell that failed its comparison is exactly the one whose verdict
+        # the final job has to be able to show, and it reads these records
+        # out of the artifacts rather than out of check runs, which a cell
+        # that never started leaves none of behind.
+        if: ${{ !cancelled() && steps.baseline.outputs.point != '' }}
+        env:
+          GROUP: ${{ matrix.group }}
+          VERDICT: ${{ steps.compare.outcome }}
+        run: |
+          mkdir -p reports
+          case "$VERDICT" in
+            success) verdict=pass ;;
+            *) verdict=fail ;;
+          esac
+          printf '{"group": "%s", "verdict": "%s"}\n' "$GROUP" "$verdict" \
+            > reports/verdict.json
+
+      - name: Upload the duration summaries
+        if: ${{ !cancelled() && steps.baseline.outputs.point != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          # One artifact per cell: a name the whole matrix shares would
+          # collide, and a reader looking for one slice's numbers should not
+          # have to download every other slice's.
+          name: speed-durations-${{ matrix.group }}
+          path: reports/
+          if-no-files-found: warn
+
+  speed:
+    # The one verdict, and the check name the measurement reports under. It
+    # runs whatever the aggregate and the cells concluded, so a skip is
+    # explained instead of left as a missing check, and it stays off manual
+    # runs with the cells: a dispatched run names no measurement, so its
+    # verdict would describe a run nobody asked for.
+    needs:
+      - changes
+      - aggregate
+      - timed
+    if: ${{ always() && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # Every cell that measured uploaded one artifact named after its group,
+      # and each carries the group's verdict beside its reports. A pattern
+      # that matches nothing is fine: it is what a run with no baseline to
+      # measure against looks like, and the verdict step explains an empty
+      # table rather than failing the job for having nothing to read.
+      - name: Fetch the cells' verdicts
+        # actions/download-artifact v7.0.0
+        uses: >-
+          actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          pattern: speed-durations-*
+          path: cells
+
+      - name: Aggregate the cell verdicts
+        if: ${{ always() }}
+        env:
+          # The needs results are the verdict; they reach the script by
+          # environment because a needs result is workflow state, and no
+          # expression is interpolated into the script itself. `cancelled()`
+          # has no env form, and it is not needed: a cancelled run shows up
+          # here as a cancelled or skipped need.
+          AGGREGATE: ${{ needs.aggregate.result }}
+          TIMED: ${{ needs.timed.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        # A cancelled run produced no measurement and gets no verdict. A
+        # documentation-only change gives the cells nothing to measure, and a
+        # red aggregate is the signal that the tree is broken: this job says
+        # so instead of failing again on cells that never ran. Any other time,
+        # the cells ran, and one failed cell fails this job — while the table
+        # beside that verdict is read out of what the cells themselves wrote.
+        run: |
+          if [ "$AGGREGATE" = "cancelled" ] || [ "$TIMED" = "cancelled" ]; then
+            {
+              echo "### Test speed"
+              echo
+              echo "The run was cancelled, so no speed verdict was produced."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$DOCS_ONLY" = "true" ]; then
+            {
+              echo "### Test speed"
+              echo
+              echo "Not run: this change touched documentation only, so there" \
+                   "is no code here to benchmark. That is the classifier's" \
+                   "docs-only verdict, not a failed measurement."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$AGGREGATE" != "success" ]; then
+            {
+              echo "### Test speed"
+              echo
+              echo "Not run: the correctness aggregate on this commit is" \
+                   "\`$AGGREGATE\`, and speed benchmarks a tree only once" \
+                   "its tests pass. That red is the signal; the skipped" \
+                   "cells add nothing to it."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Each measuring cell uploaded a verdict record named after the
+          # group it benchmarked, so the rows below come from the cells'
+          # own conclusions rather than from a list restated here. A record
+          # that cannot be read is reported and left out of the table rather
+          # than turned into a verdict; the job's own verdict still comes
+          # from the matrix result alone.
+          table="$(for record in cells/*/verdict.json; do
+            [ -f "$record" ] || continue
+            line="$(cat "$record")"
+            group="${line#*'{"group": "'}"
+            verdict="${line#*', "verdict": "'}"
+            if [ "$group" = "$line" ] || [ "$verdict" = "$line" ]; then
+              echo "Unreadable verdict record: $record" >&2
+              continue
+            fi
+            group="${group%%\"*}"
+            verdict="${verdict%%\"*}"
+            # shellcheck disable=SC2016  # the backticks are markdown
+            printf '| %s | %s | `speed-durations-%s` |\n' \
+              "$group" "$verdict" "$group"
+          done)"
+
+          {
+            echo "### Test speed"
+            echo
+            echo "Each cell benchmarks its own slice of the suite: baseline" \
+                 "and head on one runner, warm-up discarded, rounds" \
+                 "interleaved. No number crosses runners, and the verdict is" \
+                 "per cell."
+            echo
+            echo "| cell | verdict | durations artifact |"
+            echo "|---|---|---|"
+            printf '%s\n' "$table"
+            if [ -z "$table" ]; then
+              echo
+              echo "No cell uploaded a verdict, so the table is empty. On a" \
+                   "green run that means no release existed to measure" \
+                   "against; the verdict still came from the matrix job."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$TIMED" != "success" ]; then
+            echo "At least one speed cell failed; its own summary carries" >&2
+            echo "the paired ratios that decided it." >&2
+            exit 1
+          fi
+          if [ -n "$table" ]; then
+            echo "Every speed cell passed."
+          else
+            echo "No cell uploaded a verdict, so no speed comparison ran."
+          fi
   aggregate:
     name: Aggregate workflow checks
     if: ${{ always() }}

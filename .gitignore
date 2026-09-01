@@ -80,7 +80,6 @@
 !/.github/workflows/pr-gate.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
-!/.github/workflows/speed.yml
 !/.github/workflows/tests.yml
 !/.github/workflows/version.yml
 
