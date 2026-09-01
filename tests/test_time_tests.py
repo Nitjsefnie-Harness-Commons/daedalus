@@ -76,6 +76,74 @@ def test_timing_replays_a_span_when_a_parent_chain_breaks(tmp):
         'outer_before', 'test_a', 'test_b', 'outer_after'}
 
 
+def test_timing_replays_a_child_when_its_parent_later_breaks(tmp):
+    names = _timed_names(tmp, _script(
+        '  PASS  suite_before', '=== outer.py ===',
+        '  PASS  outer_direct_before', '=== inner.py ===',
+        '  PASS  inner_real', '--- timed 1 passing tests in inner.py',
+        '  PASS  outer_direct_after',
+        '--- timed 1 passing tests in outer.py',
+        '--- timed 2 passing tests in outer.py', '  PASS  suite_after'))
+    assert set(names) == {
+        'suite_before', 'outer_direct_before', 'inner_real',
+        'outer_direct_after', 'suite_after'}
+
+
+def test_timing_replays_a_child_when_its_poisoned_parent_is_open(tmp):
+    names = _timed_names(tmp, _script(
+        '  PASS  suite_before', '=== outer.py ===',
+        '  PASS  outer_direct_before', '=== inner.py ===',
+        '  PASS  inner_real', '--- timed 1 passing tests in inner.py',
+        '--- timed 0 passing tests in outer.py',
+        '  PASS  outer_after', '  PASS  suite_after'))
+    assert set(names) == {
+        'suite_before', 'outer_direct_before', 'inner_real',
+        'outer_after', 'suite_after'}
+
+
+def test_timing_replays_a_child_when_its_parent_is_unclosed(tmp):
+    names = _timed_names(tmp, _script(
+        '  PASS  suite_before', '=== outer.py ===',
+        '  PASS  outer_before', '=== inner.py ===', '  PASS  inner_real',
+        '--- timed 1 passing tests in inner.py',
+        '  PASS  outer_after', '  PASS  suite_after'))
+    assert set(names) == {
+        'suite_before', 'outer_before', 'inner_real',
+        'outer_after', 'suite_after'}
+
+
+def test_timing_replays_a_deep_child_when_its_parent_chain_is_open(tmp):
+    names = _timed_names(tmp, _script(
+        '  PASS  suite_before', '=== outer.py ===',
+        '  PASS  outer_direct_before', '=== middle.py ===',
+        '  PASS  middle_direct_before', '=== inner.py ===',
+        '  PASS  inner_real', '--- timed 1 passing tests in inner.py',
+        '=== dangling.py ===', '  PASS  dangling_real',
+        '--- timed 0 passing tests in outer.py',
+        '  PASS  outer_after', '  PASS  suite_after'))
+    assert set(names) == {
+        'suite_before', 'outer_direct_before', 'middle_direct_before',
+        'inner_real', 'dangling_real', 'outer_after', 'suite_after'}
+
+
+def test_timing_does_not_pop_a_poisoned_frame_on_a_later_match(tmp):
+    names = _timed_names(tmp, _script(
+        '  PASS  suite_before', '=== outer.py ===',
+        '  PASS  outer_direct', '--- timed 2 passing tests in outer.py',
+        '--- timed 1 passing tests in outer.py', '  PASS  suite_after'))
+    assert set(names) == {'suite_before', 'outer_direct', 'suite_after'}
+
+
+def test_timing_does_not_validate_a_poisoned_frame_after_count_drift(tmp):
+    names = _timed_names(tmp, _script(
+        '  PASS  suite_before', '=== outer.py ===',
+        '  PASS  outer_before', '--- timed 0 passing tests in outer.py',
+        '  PASS  outer_after', '--- timed 2 passing tests in outer.py',
+        '  PASS  suite_after'))
+    assert set(names) == {
+        'suite_before', 'outer_before', 'outer_after', 'suite_after'}
+
+
 def test_timing_requires_a_count_on_a_relay_end_marker(tmp):
     names = _timed_names(tmp, _script(
         '  PASS  outer_before', '=== fixture.py ===', '  PASS  test_a',
