@@ -75,7 +75,7 @@ def time_suite(python, suite, cwd):
     for index, (line, _now) in enumerate(lines):
         start = _RELAY_START.fullmatch(line)
         if start:
-            stack.append([start.group(1), index, 0])
+            stack.append([start.group(1), index, 0, False])
             continue
         match = _RESULT.match(line)
         if match and stack:
@@ -85,10 +85,22 @@ def time_suite(python, suite, cwd):
         end = _RELAY_END.fullmatch(line)
         if end and stack:
             count, name = end.groups()
-            candidate = stack[-1]
-            if name == candidate[0] and int(count) == candidate[2]:
+            matching = next(
+                (index for index in range(len(stack) - 1, -1, -1)
+                 if stack[index][0] == name), None)
+            if matching is None:
+                continue
+            candidate = stack[matching]
+            if matching != len(stack) - 1:
+                for frame in stack[matching:]:
+                    frame[3] = True
+                continue
+            if candidate[3] or int(count) != candidate[2]:
+                candidate[3] = True
+                continue
+            if not any(frame[3] for frame in stack[:-1]):
                 suppressed.append((candidate[1], index))
-                stack.pop()
+            stack.pop()
 
     def is_suppressed(index):
         return any(start <= index <= end for start, end in suppressed)
