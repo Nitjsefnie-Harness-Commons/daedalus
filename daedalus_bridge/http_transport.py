@@ -465,6 +465,7 @@ class RequestMixin(BaseHTTPRequestHandler):
         route that forgot to answer — a programming error, refused here
         rather than served as an empty 200.
         """
+        # NamedTuples are tuples: these precede the tuple branch.
         if isinstance(result, FileAnswer):
             return self.send_file(result.path, result.mime)
         if isinstance(result, BytesAnswer):

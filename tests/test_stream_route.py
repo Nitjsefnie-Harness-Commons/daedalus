@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Delivery-loop guarantees for the GET /stream route module."""
+"""Delivery-loop guarantees for the GET /stream route module.
+
+The wake controls below reach into `command_queue._cmd_events` by its
+private name on purpose: that dictionary is the wiring the loop waits
+on, so a rename must fail here loudly rather than leave the loop
+waiting on an event nothing sets.
+"""
 import json
 import threading
 

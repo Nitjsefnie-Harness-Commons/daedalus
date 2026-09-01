@@ -185,7 +185,9 @@ def poll_legacy(cmd_dir, token):
         cmd_file = path_safety.under(cmd_dir, legacy_name)
     except ValueError:
         return 400, {'error': 'invalid path component'}
-    with command_queue.claimed(legacy_claim_key(legacy_name)) as owned:
+    # Keyed off the resolved name, as `drain_legacy_file` is: both
+    # consumers of one file must land on one key.
+    with command_queue.claimed(legacy_claim_key(cmd_file.name)) as owned:
         if not owned:
             return 200, {}
         data = {}
