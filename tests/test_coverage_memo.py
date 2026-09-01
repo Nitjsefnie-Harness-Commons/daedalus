@@ -128,5 +128,25 @@ def test_the_materialised_nodes_match_a_fresh_walk(tmp):
     assert _coverage_memo.nodes(tree) == list(ast.walk(tree))
 
 
+def test_a_different_analyser_is_not_served_the_earlier_answer(tmp):
+    """The analyser is part of the key, so a swap is a miss."""
+    root = _tree(tmp, {
+        'probe_analyser.py': _SAFE.format(note='memo analyser probe')})
+    _, before = _recorded_analyses(root, 1)
+    real = _coverage_guard._analyze
+
+    def stricter(relative, source, keeps):
+        return real(relative, source, keeps) + [f'{relative}: stricter']
+
+    _coverage_guard._analyze = stricter
+    try:
+        after = _coverage_guard._coverage_environment_violations(root)
+    finally:
+        _coverage_guard._analyze = real
+    marker = 'tests/probe_analyser.py: stricter'
+    assert marker not in before[0], before
+    assert marker in after, after
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
