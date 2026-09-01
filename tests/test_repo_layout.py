@@ -29,6 +29,7 @@ BRIDGE_PACKAGE = (
     'result_store.py',
     'segment_store.py',
     'stream_service.py',
+    'tab_registry.py',
 )
 
 MCP_PACKAGE = (
