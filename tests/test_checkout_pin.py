@@ -142,10 +142,10 @@ def test_checkout_pin_checks_mixed_case_checkout_actions(tmp):
 def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
     """A leading GitHub access cannot exempt later dotted accesses."""
     del tmp
-    path = ROOT / '.github' / 'workflows' / 'speed.yml'
-    speed = path.read_text(encoding='utf-8')
+    path = ROOT / '.github' / 'workflows' / 'tests.yml'
+    tests = path.read_text(encoding='utf-8')
     original = '${{ steps.baseline.outputs.point }}'
-    assert original in speed
+    assert original in tests
     needs = (
         'name: mixed contexts\n'
         'on: push\n'
@@ -168,14 +168,14 @@ def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
     cases = (
         (
             '${{ github.sha || steps.baseline.outputs.ref }}',
-            speed.replace(
+            tests.replace(
                 original,
                 '${{ github.sha || steps.baseline.outputs.ref }}', 1),
             'ref',
         ),
         (
             '${{ github.sha || env.base_ref }}',
-            speed.replace(
+            tests.replace(
                 original, '${{ github.sha || env.base_ref }}', 1),
             'base_ref',
         ),
@@ -284,11 +284,11 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     CodeQL's untrusted-checkout query (code-scanning alert #82) reads an
     actions/checkout step as pulling a pull request's untrusted head when
     its `ref:` comes from a `steps.*` output whose name contains `head`,
-    `branch`, `ref`, `sha` or `commit`. The baseline checkout in speed.yml
-    pulls the pull request's merge base or a release tag — trusted code — so
-    the output carrying it is named `point`; naming it `ref` was what drew
-    the alert. This pins the name class, so a rename back goes red here
-    rather than in the next default-branch analysis.
+    `branch`, `ref`, `sha` or `commit`. The speed measurement's baseline
+    checkout pulls the pull request's merge base or a release tag — trusted
+    code — so the output carrying it is named `point`; naming it `ref` was
+    what drew the alert. This pins the name class, so a rename back goes red
+    here rather than in the next default-branch analysis.
 
     The pin is a conservative superset of the analyser heuristic's checked
     identifier-name class for non-`github` dotted expressions: every segment

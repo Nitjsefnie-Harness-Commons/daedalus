@@ -536,8 +536,6 @@ def test_a_step_scalar_stops_where_its_own_field_stops(tmp):
     assert step_scalar(source, 'sample', 's', 'shell') == 'bash'
     tests_yml = (_util.ROOT / '.github/workflows/tests.yml').read_text(
         encoding='utf-8')
-    speed_yml = (_util.ROOT / '.github/workflows/speed.yml').read_text(
-        encoding='utf-8')
     measured = "${{ !cancelled() && steps.measure.conclusion == 'success' }}"
     shipped = (
         (tests_yml, 'actionlint', 'Install zizmor', 'id', 'install_zizmor'),
@@ -552,7 +550,7 @@ def test_a_step_scalar_stops_where_its_own_field_stops(tmp):
          "${{ !cancelled() && steps.measure.conclusion == 'success'"
          " && github.event_name == 'push'"
          " && github.ref == 'refs/heads/main' }}"),
-        (speed_yml, 'timed', 'Build one virtualenv per side', 'if',
+        (tests_yml, 'timed', 'Build one virtualenv per side', 'if',
          "steps.baseline.outputs.point != ''"),
     )
     for workflow, job, step, key, expected in shipped:

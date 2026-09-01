@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -481,6 +482,45 @@ def test_speed_comparison_active_unmeasured_acceptance_not_expired(tmp):
     expired_text = expired_summary.read_text(encoding='utf-8')
     assert ('expired at baseline baseline; not measured this run'
             in expired_text), expired_text
+
+
+def test_the_accepted_speed_manifest_matches_test_names_in_the_tree(tmp):
+    """The tracked manifest is strict and cannot silently drift from tests."""
+    del tmp
+    path = ROOT / 'scripts' / 'ci' / 'accepted_speed_changes.json'
+    acceptances = _compare_durations()._load_acceptances(path)
+    assert isinstance(acceptances, list), acceptances
+    sources = [
+        suite.read_text(encoding='utf-8')
+        for suite in sorted((ROOT / 'tests').glob('*.py'))]
+    for acceptance in acceptances:
+        assert isinstance(acceptance, dict), acceptance
+        assert set(acceptance) == {
+            'test', 'max_ratio', 'reason', 'through_baseline'}, acceptance
+        name = acceptance['test']
+        assert isinstance(name, str) and name.strip(), acceptance
+        bound = acceptance['max_ratio']
+        assert (isinstance(bound, (int, float))
+                and not isinstance(bound, bool) and bound > 0), acceptance
+        assert isinstance(acceptance['reason'], str), acceptance
+        baseline = acceptance['through_baseline']
+        assert isinstance(baseline, list) and baseline, acceptance
+        assert all(isinstance(label, str) and label.strip()
+                   for label in baseline), acceptance
+        assert len(baseline) == len(set(baseline)), acceptance
+        needle = re.compile(r'^\s*def\s+' + re.escape(name) + r'\s*\(',
+                            re.MULTILINE)
+        assert any(needle.search(source) for source in sources), name
+
+
+def test_the_accepted_speed_manifest_can_be_empty_or_missing(tmp):
+    """Removing every acceptance, or the file, is ordinary cleanup."""
+    compare = _compare_durations()
+    empty = Path(tmp) / 'empty.json'
+    empty.write_text('{"acceptances": []}', encoding='utf-8')
+    missing = Path(tmp) / 'missing.json'
+    assert compare._load_acceptances(empty) == []
+    assert compare._load_acceptances(missing) == []
 
 
 def main():
