@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Pin routing state identity semantics and growth."""
+from collections import Counter
 import sys
-import time
 from pathlib import Path
-from statistics import median
 from types import ModuleType, SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -81,7 +80,7 @@ def test_state_neutral_short_circuits_scale_linearly(tmp):
     assert wide <= narrow * 2, (narrow, wide)
 
 
-def _js_member_scan_seconds(tmp, count):
+def _js_member_scan_operations(tmp, count):
     source = Path(tmp) / f'js_member_calls_{count}.js'
     lines = ["const ordinary = () => undefined;\n"]
     for index in range(count):
@@ -92,21 +91,34 @@ def _js_member_scan_seconds(tmp, count):
         lines.append(f"const box{index} = {{ run: run{index} }};\n")
         lines.append(f"box{index}.run();\n")
     source.write_text(''.join(lines), encoding='utf-8')
-    started = time.perf_counter()
-    violations = js_tab_routing_violations(source, source.name)
+    work = Counter()
+    violations = js_tab_routing_violations(
+        source, source.name, work=work)
     assert len(violations) == count, (count, len(violations))
-    return time.perf_counter() - started
+    return sum(work.values())
+
+
+def _subquadratic_growth(samples):
+    return all(
+        larger < smaller * 3.5
+        for (_, smaller), (_, larger) in zip(samples, samples[1:]))
 
 
 def test_javascript_call_replay_scales_without_global_rescans(tmp):
     samples = [
-        (count, median(
-            _js_member_scan_seconds(tmp, count) for _ in range(3)))
+        (count, _js_member_scan_operations(tmp, count))
         for count in (200, 400, 800, 1600)
     ]
-    assert samples[-1][1] < 3.0, samples
-    for (_, smaller), (_, larger) in zip(samples, samples[1:]):
-        assert larger <= smaller * 2.7, samples
+    assert _subquadratic_growth(samples), samples
+    assert _js_member_scan_operations(tmp, 400) == samples[1][1]
+
+
+def test_javascript_growth_gate_rejects_quadratic_work(tmp):
+    del tmp
+    quadratic = [
+        (200, 40000), (400, 160000),
+        (800, 640000), (1600, 2560000)]
+    assert not _subquadratic_growth(quadratic), quadratic
 
 
 def main():

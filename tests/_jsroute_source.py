@@ -17,6 +17,12 @@ BUILTIN_CHAINS = {
         'endsWith', 'includes', 'slice', 'startsWith', 'substring', 'trim'}}
 
 
+def record_work(work, name, amount=1):
+    """Add deterministic scanner work to an optional counter."""
+    if work is not None:
+        work[name] = work.get(name, 0) + amount
+
+
 def statement_end(mask, position):
     """Return a statement's semicolon, ASI newline, or source end."""
     depth = 0
@@ -99,10 +105,12 @@ class _Intervals:
 class SourceIndex:
     """Cache source positions, function bodies, and lexical ownership."""
 
-    def __init__(self, text, mask, body_reader):
+    def __init__(self, text, mask, body_reader, work=None):
         self.text = text
         self.mask = mask
         self._body_reader = body_reader
+        self.work = work
+        record_work(work, 'source_characters', len(text))
         self._bodies = {}
         self._line_starts = [0]
         self._line_starts.extend(
@@ -114,14 +122,19 @@ class SourceIndex:
 
     def body_at(self, mask, start):
         del mask
+        record_work(self.work, 'source_body_queries')
         if start not in self._bodies:
+            record_work(self.work, 'source_body_misses')
             self._bodies[start] = self._body_reader(self.mask, start)
         return self._bodies[start]
 
     def line_of(self, position):
+        record_work(self.work, 'source_line_queries')
         return bisect_right(self._line_starts, position)
 
     def configure_ranges(self, scopes, braces):
+        record_work(
+            self.work, 'source_range_entries', len(scopes) + len(braces))
         self._scopes = scopes
         self._scope = _Intervals(
             ((scope['param_start'], scope['end'], index)
@@ -131,9 +144,11 @@ class SourceIndex:
             (0, len(self.mask)))
 
     def scope_at(self, position):
+        record_work(self.work, 'source_scope_queries')
         return self._scope.at(position)
 
     def lexical_range(self, position, function_only=False):
+        record_work(self.work, 'source_range_queries')
         if function_only:
             scope = self._scopes[self.scope_at(position)]
             return scope['start'], scope['end']

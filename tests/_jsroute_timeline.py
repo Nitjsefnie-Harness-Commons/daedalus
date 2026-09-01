@@ -4,6 +4,7 @@ import re
 from typing import NamedTuple
 
 from _jsroute_calls import parameter_bindings, parameter_sources
+from _jsroute_source import record_work
 
 
 class ReplayResult(NamedTuple):
@@ -119,7 +120,7 @@ class InvocationReplay:
     """Replay callable-binding writes in the order known calls execute."""
 
     def __init__(self, timeline, scopes, events, invocations, source,
-                 scope_at, visible_binding, optional_write):
+                 scope_at, visible_binding, optional_write, work=None):
         self.timeline = timeline
         self.scopes = scopes
         self.mask = source['mask']
@@ -129,6 +130,7 @@ class InvocationReplay:
         self.body_at = source['body']
         self.expression_end = source['expression_end']
         self.optional_write = optional_write
+        self.work = work
         self.top_level = source['top_level']
         self.computed_key = source['computed_key']
         self.body_scopes = {
@@ -151,6 +153,9 @@ class InvocationReplay:
                 (call['order'], 'call', call))
         for operations in self.operations.values():
             operations.sort(key=lambda item: item[0])
+        record_work(
+            work, 'replay_index_entries',
+            sum(len(items) for items in self.operations.values()))
         self.bind_starts = {
             owner: [item[0] for item in values]
             for owner, values in self.bind_events.items()}
@@ -160,14 +165,17 @@ class InvocationReplay:
             starts = self.bind_starts.get(owner, ())
             lower_index = bisect_right(starts, lower)
             upper_index = bisect_left(starts, upper)
-            for start, match in self.bind_events.get(
-                    owner, ())[lower_index:upper_index]:
+            selected = self.bind_events.get(
+                owner, ())[lower_index:upper_index]
+            record_work(self.work, 'replay_clear_entries', len(selected))
+            for start, match in selected:
                 values.pop(
                     self.visible_binding(match.group(1), start), None)
 
     def run(self, call, inherited, seen=frozenset(),
             inherited_optional=False, limits=None, sender_sources=None,
             execution=None):
+        record_work(self.work, 'replay_calls')
         call_start = call['start']
         if limits is None:
             limits = lexical_limits(
@@ -179,6 +187,8 @@ class InvocationReplay:
         unknowns = []
         active_sources = (sender_sources if sender_sources is not None
                           else {})
+        record_work(
+            self.work, 'replay_argument_calls', len(call['argument_calls']))
         for argument_call in call['argument_calls']:
             calls.append((argument_call, execution,
                           dict(active_sources)))
@@ -198,6 +208,7 @@ class InvocationReplay:
         else:
             bodies = self.timeline.values_at(
                 call['binding'], inherited, limits)
+        record_work(self.work, 'replay_body_candidates', len(bodies))
         for body in bodies:
             if body is None:
                 continue
@@ -210,8 +221,9 @@ class InvocationReplay:
                 overrides, inherited, function_scope, call_start,
                 call['args'], limits, sources)
             path_optional = inherited_optional or len(bodies) > 1
-            for start, kind, item in self.operations.get(
-                    function_scope, ()):
+            operations = self.operations.get(function_scope, ())
+            record_work(self.work, 'replay_operations', len(operations))
+            for start, kind, item in operations:
                 if kind == 'bind':
                     applied = self._apply_assignment(
                         item, start, function_scope, path_optional,
