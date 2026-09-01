@@ -61,9 +61,9 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
     kept whatever arrived: -1 evicted the only event on arrival, leaving an
     empty capture, and 1e9 buffered everything.
 
-    What is NOT enforced: `js_mask` does not parse regex literals, so a
-    harmless regex containing `const NET_CAPTURE_MAX = 19999;` is counted as
-    a declaration and produces a false positive.
+    What is NOT enforced: a regex body is blanked rather than read, so a
+    declaration written inside one is not counted; where the previous-token
+    guess behind that body is wrong, the mask can still desynchronise.
     """
     del tmp
     worker_sources = _worker_sources()
@@ -346,9 +346,10 @@ def test_every_content_script_message_type_has_a_background_branch(tmp):
     relay from regressing the same way.) Duplicate object keys are evaluated
     in source order, so the last `type` is checked. Unreadable send shapes
     fail closed, and only unmasked comparisons inside the listener count as
-    handlers. What is NOT enforced: `js_mask` does not parse regex literals,
-    so a regex literal containing a full `msg.type === 'value'` comparison
-    could still look like code to the handler scan.
+    handlers. What is NOT enforced: a regex body is blanked rather than
+    read, so a comparison written inside one is not seen; where the
+    previous-token guess behind that body is wrong, the mask can still
+    desynchronise.
     """
     del tmp
     content = (ROOT / 'extension' / 'content.js').read_text(encoding='utf-8')
