@@ -2,10 +2,10 @@
 
 Request target and query parsing, credential resolution, the body-length
 refusal rules, the refusal drains and response writing live here as
-`RequestMixin`, which `server.py`'s Handler mixes in ahead of
-BaseHTTPRequestHandler. Route modules stay free of the socket: each returns
-an answer — a `(status, payload)` pair, a `FileAnswer` or a `BytesAnswer` —
-and the handler writes it with `answer`.
+`RequestMixin`, the base `server.py`'s Handler derives from. Route modules
+stay free of the socket: each returns an answer — a `(status, payload)`
+pair, a `FileAnswer` or a `BytesAnswer` — and the handler writes it with
+`answer`.
 
 This is the one bridge module that reads `daedalus_bridge.config` directly,
 because it is transport rather than a route: a route takes its directories
@@ -13,6 +13,7 @@ and limits as parameters.
 """
 import ctypes, ctypes.util
 import hmac, json, pathlib, shutil, typing
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
@@ -95,14 +96,12 @@ UNDECLARED_BODY_DRAIN_SECONDS = 0.25
 
 class FileAnswer(typing.NamedTuple):
     """A stored file to stream back, and the type to serve it as."""
-
     path: pathlib.Path
     mime: str
 
 
 class BytesAnswer(typing.NamedTuple):
     """A body already in memory, its type, and extra response headers."""
-
     data: bytes
     mime: str
     headers: tuple
@@ -130,8 +129,16 @@ class JSONObject(dict):
         return super().__eq__(other)
 
 
-class RequestMixin:
-    """Everything a Handler does with the socket, off the route bodies."""
+class RequestMixin(BaseHTTPRequestHandler):
+    """Everything a Handler does with the socket, off the route bodies.
+
+    It derives from BaseHTTPRequestHandler because every method below reads
+    that class's request state and calls its response writers; saying so in
+    the class statement is what lets a type checker verify the requirement
+    rather than take it on trust. It overrides nothing the framework
+    defines, so a Handler deriving from this reaches the same methods in the
+    same order as one that mixed it in.
+    """
 
     def _request_target(self):
         """Parse the request target, answering 400 when it is malformed.
