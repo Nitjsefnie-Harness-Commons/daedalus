@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+
 
 ACTIVE_BASELINE = 'v0.22.0'
 

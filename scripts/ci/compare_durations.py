@@ -52,6 +52,12 @@ import statistics
 import sys
 from pathlib import Path
 
+if __package__:
+    # pylint: disable-next=relative-beyond-top-level
+    from .zeroed_suites import zeroed_on_both_sides
+else:
+    from zeroed_suites import zeroed_on_both_sides
+
 
 def round_durations(directory):
     """Every test duration from one round, merged across its suites."""
@@ -353,6 +359,21 @@ def main(argv=None):
     base_rounds = side_rounds(args.base)
     head_rounds = side_rounds(args.head)
     lines = []
+    # Checked before any verdict can be rendered, because this is the one
+    # failure the intersection cannot surface on its own: the lost suites are
+    # gone from the covered set before the first total is summed.
+    zeroed = zeroed_on_both_sides(args.base, args.head)
+    if zeroed:
+        names = ', '.join(f'`{name}.py`' for name in zeroed)
+        lines.append('### Test speed')
+        lines.append('')
+        lines.append(f'Failed: {names} timed zero tests on both sides, so '
+                     'the covered set is smaller than the suites the cell '
+                     'selected. A missing dependency in the timed '
+                     'virtualenvs fails every suite of a coverage tool the '
+                     'same way.')
+        _emit(lines, args.summary_file)
+        return 1
     # A baseline with no durations is a measurement that did not happen, not
     # a fast baseline. The timing instrument belongs to the head checkout and
     # asks nothing of the tree it measures, so an empty side means the timing

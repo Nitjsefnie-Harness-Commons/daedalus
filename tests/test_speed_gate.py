@@ -26,6 +26,8 @@ from _yamlread import job_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+
 
 _BASE_SHA = '1' * 40
 _HEAD_SHA = '2' * 40
@@ -355,7 +357,6 @@ def test_a_cell_records_its_verdict_beside_its_reports(tmp):
     """
     workflow = speed_yml()
     section = '\n'.join(_job_section(workflow, 'timed'))
-    # The comparison is the named step the verdict is read back from.
     _, marker, after = section.partition('- name: Compare\n')
     assert marker, section
     compare_block, marker, _ = after.partition('- name:')
