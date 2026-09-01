@@ -100,6 +100,8 @@ _DROPPED_LINES = (
     'set -o pipefail',
     'set -e -u -o pipefail',
     'sleep 300 # wait for the service',
+    'sleep 300  # wait for the service',
+    'sleep 300   ',
     'set -euo pipefail # strict',
 )
 
