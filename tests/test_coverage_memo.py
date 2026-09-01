@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _coverage_guard  # noqa: E402
 import _coverage_memo  # noqa: E402
 import _util  # noqa: E402
-from _coverage_guard import _coverage_environment_violations  # noqa: E402
 
 # A launch that inherits its cwd and never chdirs is provably safe, so a
 # probe module built from this contributes no violations of its own.
@@ -56,8 +55,8 @@ def _recorded_analyses(root, scans):
 
     _coverage_guard._analyze = recorder
     try:
-        results = [_coverage_environment_violations(root)
-                   for _ in range(scans)]
+        scan = _coverage_guard._coverage_environment_violations
+        results = [scan(root) for _ in range(scans)]
     finally:
         _coverage_guard._analyze = real
     return calls, results
