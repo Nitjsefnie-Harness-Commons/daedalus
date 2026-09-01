@@ -303,11 +303,9 @@ def sender_value(value):
 
 
 def merge_yielded(values):
-    values = list(values)
+    values = list(values)  # Duplicate senders become unprovable; no weakening.
     deferred = merge_deferred_values(values)
     sender = next(filter(None, map(sender_value, values)), None)
-    # Multiple distinct merge slots agreeing on a sender escalate it to the
-    # unprovable form; this can only strengthen, never silence or duplicate.
     sender = '?ext_cmd' if sender and values.count(sender) > 1 else sender
     if deferred is None or sender is None: return sender or deferred
     alternatives = (deferred.values if isinstance(deferred,
