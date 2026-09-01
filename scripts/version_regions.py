@@ -21,6 +21,7 @@ except ModuleNotFoundError:
 
 _html_tag = _html_context.html_tag
 _html_tag_context = _html_context.html_tag_context
+_html_text_mode = _html_context.html_text_mode
 
 
 def regions_for(path, text):
@@ -289,17 +290,20 @@ def _html_regions(text):
             i = _html_tag(text, tag_start, regions)
             tag_name, html_context, _opened_html = _html_tag_context(
                 text, tag_start, i, contexts)
-            if html_context and tag_name == 'script':
+            text_mode = _html_text_mode(tag_name) if html_context else None
+            if text_mode == 'script':
                 script_end = _html_script_end(text, i)
                 for start, stop, kind in _javascript_regions(
                         text[i:script_end], html_comments=True):
                     regions.append((i + start, i + stop, kind))
                 i = script_end
-            elif (html_context
-                  and tag_name in ('style', 'title', 'textarea')):
+            elif text_mode == 'closer':
                 text_end = _html_text_end(text, i, tag_name)
                 regions.append((i - 1, text_end, 'inert'))
                 i = text_end
+            elif text_mode == 'eof':
+                regions.append((i - 1, end, 'inert'))
+                i = end
             elif html_context and tag_name == 'template':
                 template_end = _html_template_end(text, i)
                 regions.append((i - 1, template_end, 'inert'))
@@ -325,6 +329,7 @@ def _html_template_end(text, start):
             i = _html_tag(text, tag_start, [])
             tag_name, html_context, _opened_html = _html_tag_context(
                 text, tag_start, i, contexts)
+            text_mode = _html_text_mode(tag_name) if html_context else None
             if html_context and tag_name == 'template':
                 depth += 1
             elif (html_context and _html_tag_token_end(
@@ -332,11 +337,12 @@ def _html_template_end(text, start):
                 depth -= 1
                 if depth == 0:
                     return tag_start
-            elif html_context and tag_name == 'script':
+            elif text_mode == 'script':
                 i = _html_script_end(text, i)
-            elif (html_context
-                  and tag_name in ('style', 'title', 'textarea')):
+            elif text_mode == 'closer':
                 i = _html_text_end(text, i, tag_name)
+            elif text_mode == 'eof':
+                return len(text)
             continue
         i += 1
     return len(text)

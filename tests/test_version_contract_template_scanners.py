@@ -229,6 +229,85 @@ def test_outer_html_text_mode_version_markup_is_decoy(tmp):
         assert _surviving(regions, _DASHBOARD, source, _SITE) == 1, tag
 
 
+def _assert_raw_text_does_not_poison_context(tag):
+    site = _HTML_TEMPLATE_SITES[1]
+    source = f'<{tag}><svg></{tag}><template>{site}</template>'
+    assert _surviving(_checker(), _DASHBOARD, source, site) == 0
+
+
+def _assert_raw_text_ignores_false_template_closer(tag):
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    source = (f'<template><{tag}></template></{tag}>{site}'
+              f'</template><div {_SITE}</div>')
+    assert _surviving(regions, _DASHBOARD, source, site) == 0
+    assert _surviving(regions, _DASHBOARD, source, _SITE) == 1
+
+
+def test_xmp_does_not_poison_foreign_context(tmp):
+    del tmp
+    _assert_raw_text_does_not_poison_context('xmp')
+
+
+def test_iframe_does_not_poison_foreign_context(tmp):
+    del tmp
+    _assert_raw_text_does_not_poison_context('iframe')
+
+
+def test_noembed_does_not_poison_foreign_context(tmp):
+    del tmp
+    _assert_raw_text_does_not_poison_context('noembed')
+
+
+def test_noframes_does_not_poison_foreign_context(tmp):
+    del tmp
+    _assert_raw_text_does_not_poison_context('noframes')
+
+
+def test_xmp_ignores_a_false_template_closer(tmp):
+    del tmp
+    _assert_raw_text_ignores_false_template_closer('xmp')
+
+
+def test_iframe_ignores_a_false_template_closer(tmp):
+    del tmp
+    _assert_raw_text_ignores_false_template_closer('iframe')
+
+
+def test_noembed_ignores_a_false_template_closer(tmp):
+    del tmp
+    _assert_raw_text_ignores_false_template_closer('noembed')
+
+
+def test_noframes_ignores_a_false_template_closer(tmp):
+    del tmp
+    _assert_raw_text_ignores_false_template_closer('noframes')
+
+
+def test_check_accepts_xmp_namespace_text(tmp):
+    site = _HTML_TEMPLATE_SITES[1]
+    markup = f'<xmp><svg></xmp><template>{site}</template>'
+    result = _run_dashboard_markup(tmp, markup)
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr)
+
+
+def test_plaintext_consumes_the_document_remainder(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    source = f'<plaintext><template>{site}</template><div {_SITE}</div>'
+    regions = _checker()
+    assert _surviving(regions, _DASHBOARD, source, site) == 0
+    assert _surviving(regions, _DASHBOARD, source, _SITE) == 0
+
+
+def test_noscript_uses_the_scripting_enabled_text_mode(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    source = f'<noscript><svg></noscript><template>{site}</template>'
+    assert _surviving(_checker(), _DASHBOARD, source, site) == 0
+
+
 def test_foreign_text_spellings_follow_the_current_namespace(tmp):
     del tmp
     site = _HTML_TEMPLATE_SITES[1]

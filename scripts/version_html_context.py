@@ -8,6 +8,24 @@ _FOREIGN_BREAKOUT = frozenset(
      'h4 h5 h6 head hr i img li listing menu meta nobr ol p pre ruby s '
      'small span strong strike sub sup table tt u ul var').split())
 _MATH_TEXT_INTEGRATION = frozenset(('mi', 'mo', 'mn', 'ms', 'mtext'))
+# Model Chromium's scripting-enabled DOM: noscript content stays text.
+_HTML_TEXT_MODES = {
+    'script': 'script',
+    'style': 'closer',
+    'title': 'closer',
+    'textarea': 'closer',
+    'xmp': 'closer',
+    'iframe': 'closer',
+    'noembed': 'closer',
+    'noframes': 'closer',
+    'noscript': 'closer',
+    'plaintext': 'eof',
+}
+
+
+def html_text_mode(tag_name):
+    """The HTML text parsing mode for `tag_name`, if it has one."""
+    return _HTML_TEXT_MODES.get(tag_name)
 
 
 def html_tag_name(text, start, end):
