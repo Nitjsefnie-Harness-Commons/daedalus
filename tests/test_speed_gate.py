@@ -26,8 +26,6 @@ from _yamlread import job_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
-sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-
 
 _BASE_SHA = '1' * 40
 _HEAD_SHA = '2' * 40
