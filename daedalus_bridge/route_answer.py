@@ -12,12 +12,14 @@ import typing
 
 class FileAnswer(typing.NamedTuple):
     """A stored file to stream back, and the type to serve it as."""
+
     path: pathlib.Path
     mime: str
 
 
 class BytesAnswer(typing.NamedTuple):
     """A body already in memory, its type, and extra response headers."""
+
     data: bytes
     mime: str
     headers: tuple

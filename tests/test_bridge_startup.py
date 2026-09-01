@@ -402,6 +402,35 @@ def test_startup_survives_an_undecodable_byte_in_the_data_root(tmp):
         assert status == 200 and health['ok'] is True, (status, health)
 
 
+def test_startup_reports_malloc_tuning_it_could_not_apply(tmp):
+    """The diagnostic still reaches an operator, from the entry point.
+
+    The transport holds the message instead of printing it at import, so
+    the only thing that proves the report survived is a real child: it goes
+    out before the readiness line, where a reader watching startup sees it.
+    """
+    directory = Path(tmp) / 'noglibc'
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'sitecustomize.py').write_text(
+        'import ctypes.util\n'
+        '_real = ctypes.util.find_library\n'
+        'ctypes.util.find_library = (\n'
+        "    lambda name: 'daedalus-absent-libc.so'\n"
+        "    if name == 'c' else _real(name))\n",
+        encoding='utf-8')
+    output = []
+    with _util.bridge(tmp, env={'PYTHONPATH': str(directory)},
+                      output=output) as (base, _docroot):
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
+    note_at = next((index for index, line in enumerate(output)
+                    if 'malloc tuning unavailable' in line), None)
+    listening_at = next((index for index, line in enumerate(output)
+                         if 'Listening on' in line), None)
+    assert note_at is not None, output
+    assert listening_at is not None and note_at < listening_at, output
+
+
 def test_an_explicit_port_collision_surfaces_verbatim(tmp):
     """A caller that forces an occupied port still gets the original error.
 

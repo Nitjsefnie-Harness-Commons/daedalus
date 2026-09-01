@@ -150,7 +150,6 @@ def store_upload(upload_dir, body):
         return 400, {'error': 'missing id'}
     if not data_b64:
         return 400, {'error': 'missing data'}
-    # Sanitize path components
     for val in (token, upload_id, filename):
         if path_safety.unsafe_component(val):
             return 400, {'error': 'invalid path component'}
@@ -268,10 +267,8 @@ def latest_screenshot(upload_dir, token, params):
         return 400, {'error': 'invalid path component'}
     if not token_dir.is_dir():
         return 404, {'error': 'no uploads'}
-    # If id specified, look in that subdir; otherwise search all subdirs
     search_dirs = ([token_dir / upload_id] if upload_id
                    else sorted(token_dir.iterdir()))
-    # Find most recent image file
     latest = None
     for d in search_dirs:
         if not d.is_dir():

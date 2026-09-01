@@ -35,12 +35,22 @@ from daedalus_bridge.log_safe import log_safe
 # inflates RSS to a high-water-mark (~900MB observed) that never recedes. Cap
 # the arenas and actively trim freed heap after large request bodies/files.
 TRIM_THRESHOLD = 256 * 1024  # only trim after handling payloads larger than this
+_TUNING_NOTE = None
 try:
     _LIBC = ctypes.CDLL(ctypes.util.find_library('c') or 'libc.so.6', use_errno=True)
     _LIBC.mallopt(-8, 2)  # M_ARENA_MAX = -8: cap concurrent arenas at 2
 except Exception as _e:  # non-glibc / unavailable
     _LIBC = None
-    print(f'[Daedalus] malloc tuning unavailable: {log_safe(_e)}', flush=True)
+    _TUNING_NOTE = f'[Daedalus] malloc tuning unavailable: {log_safe(_e)}'
+
+
+def malloc_tuning_note():
+    """The tuning diagnostic to print at startup, or None where it worked.
+
+    Reported by the entry point rather than at import, so importing this
+    module writes nothing to stdout.
+    """
+    return _TUNING_NOTE
 
 
 def malloc_trim():
@@ -474,7 +484,8 @@ class RequestMixin(BaseHTTPRequestHandler):
             f'or a BytesAnswer, not {type(result).__name__}')
 
     def send_file(self, path, mime):
-        """Serve a binary file, streamed rather than buffered whole in RAM."""
+        """Serve a binary file, streamed so large files aren't fully
+        buffered in RAM."""
         size = path.stat().st_size
         self.send_response(200)
         self.send_header('Content-Type', mime)

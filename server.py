@@ -423,6 +423,9 @@ class Handler(RequestMixin):
 
 
 if __name__ == '__main__':
+    _tuning_note = http_transport.malloc_tuning_note()
+    if _tuning_note:
+        print(_tuning_note, flush=True)
     parent_watch.start()
     for directory in (CMD_DIR, RES_DIR, UPLOAD_DIR, SEG_DIR):
         directory.mkdir(parents=True, exist_ok=True)

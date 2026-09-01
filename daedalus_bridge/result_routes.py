@@ -4,6 +4,13 @@
 the result directory as a parameter. `result_store` owns the locks, the slot
 primitives and the accepted-delivery record; both routes call it exactly as
 the request handler used to.
+
+`res_dir` is only half a parameter: the slot paths these routes build are
+resolved under it, while the delivery paths come back from `result_store`,
+which resolves them from configuration (`DELIVERY_DIR`). Passing anything
+but the configured results root therefore splits one result across two
+trees, so it stays a parameter in name until `result_store` is
+parameterised too — issue 484.
 """
 import json
 import time

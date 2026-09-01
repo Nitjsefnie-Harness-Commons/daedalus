@@ -214,7 +214,8 @@ def test_the_module_needs_no_configuration_of_its_own(_tmp):
     refused = subprocess.run(
         [sys.executable, '-c', 'import daedalus_bridge.result_store'],
         env=env, capture_output=True, text=True, check=False)
-    assert refused.returncode != 0, refused.stdout
+    assert refused.returncode != 0, refused.stderr
+    assert 'DAEDALUS_DIR' in refused.stderr, refused.stderr
     stubbed = subprocess.run(
         [sys.executable, '-c', _STUBBED_IMPORT],
         env=env, capture_output=True, text=True, check=False)

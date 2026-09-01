@@ -194,6 +194,47 @@ def test_the_answer_types_import_without_daedalus_configuration(_tmp):
     assert done.returncode == 0, done.stderr
 
 
+def _no_glibc_path(tmp):
+    """A PYTHONPATH directory whose sitecustomize hides libc from ctypes.
+
+    `find_library('c')` is what the tuning setup resolves, so pointing it at
+    a name no loader can open drives the unavailable branch on a glibc host
+    as well — deterministically, and without touching any other library.
+    """
+    directory = Path(tmp) / 'noglibc'
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'sitecustomize.py').write_text(
+        'import ctypes.util\n'
+        '_real = ctypes.util.find_library\n'
+        'ctypes.util.find_library = (\n'
+        "    lambda name: 'daedalus-absent-libc.so'\n"
+        "    if name == 'c' else _real(name))\n",
+        encoding='utf-8')
+    return str(directory)
+
+
+def test_importing_the_transport_prints_nothing(tmp):
+    """The tuning diagnostic is startup output, not import output.
+
+    Importing a module is not a moment anything is entitled to write to
+    stdout: a caller that imports the transport to read one constant gets
+    the line too, and a tool parsing its own stdout gets it in the middle
+    of the answer. The message survives as a value the entry point prints.
+    """
+    env = dict(os.environ)
+    env['PYTHONPATH'] = os.pathsep.join(
+        [_no_glibc_path(tmp), str(_util.ROOT)])
+    done = subprocess.run(
+        [sys.executable, '-c',
+         'import daedalus_bridge.http_transport as t\n'
+         'import sys\n'
+         'sys.stderr.write(repr(t.malloc_tuning_note()))\n'],
+        env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == '', done.stdout
+    assert 'malloc tuning unavailable' in done.stderr, done.stderr
+
+
 def test_the_transport_re_exports_the_answer_types(_tmp):
     """`server.py` and Task 1's controls import them from here."""
     from daedalus_bridge import route_answer  # noqa: PLC0415

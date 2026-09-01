@@ -114,10 +114,15 @@ def test_resolve_targets_names_the_four_paths_under_cmd_dir(tmp):
 
     targets = route.resolve_targets(root, 'tok', 'chrome1')
 
-    assert targets.queue == root / 'tok_chrome1', targets.queue
-    assert targets.legacy == root / 'tok_chrome1.json', targets.legacy
-    assert targets.broadcast_queue == root / 'tok', targets.broadcast_queue
-    assert targets.broadcast_legacy == root / 'tok.json', (
+    # Resolved expectations: `path_safety.under` resolves what it returns,
+    # and a temp root reached through a symlink (macOS `/var/folders`)
+    # spells the same directory differently unresolved.
+    assert targets.queue == (root / 'tok_chrome1').resolve(), targets.queue
+    assert targets.legacy == (root / 'tok_chrome1.json').resolve(), (
+        targets.legacy)
+    assert targets.broadcast_queue == (root / 'tok').resolve(), (
+        targets.broadcast_queue)
+    assert targets.broadcast_legacy == (root / 'tok.json').resolve(), (
         targets.broadcast_legacy)
     assert targets.legacy_name == 'tok_chrome1.json', targets.legacy_name
 
@@ -204,7 +209,9 @@ def test_each_scan_is_preceded_by_its_own_clear_and_idle_waits(tmp):
 
         def wait(self, timeout=None):
             log.append('wait')
-            return super().wait(timeout)
+            # The ordering is what this pins. Delegating would block the
+            # idle tick out in full against an event nothing will set.
+            return False
 
     ev = Recording()
     with cq._cmd_events_lock:
