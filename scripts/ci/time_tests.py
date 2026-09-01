@@ -102,6 +102,10 @@ def time_suite(python, suite, cwd):
                 suppressed.append((candidate[1], index))
             stack.pop()
 
+    for frame in stack:
+        suppressed = [
+            span for span in suppressed if span[0] < frame[1]]
+
     def is_suppressed(index):
         return any(start <= index <= end for start, end in suppressed)
 
