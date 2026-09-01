@@ -340,6 +340,49 @@ def test_html_regions_classify_adversarial_cases(tmp):
         assert _region_texts(_DASHBOARD, source) == expected, label
 
 
+_HTML_TEMPLATE_SITES = (
+    '<div class="rail-foot">v9.9.9</div>',
+    '<span class="sl-v">9.9.9</span>',
+)
+
+
+def test_html_template_version_sites_are_inert(tmp):
+    del tmp
+    regions = _checker()
+    for site in _HTML_TEMPLATE_SITES:
+        source = '<template>' + site + '</template>'
+        spans = regions.regions_for(_DASHBOARD, source)
+        assert _surviving(regions, _DASHBOARD, source, site) == 0, site
+        assert _covered_kind(source, spans, site) == 'inert', site
+        assert [kind for _start, _end, kind in spans] == ['inert'], site
+
+
+def test_html_scanning_resumes_after_a_closed_template(tmp):
+    del tmp
+    decoy = _HTML_TEMPLATE_SITES[0]
+    source = '<template>' + decoy + '</template><div ' + _SITE + '</div>'
+    regions = _checker()
+    assert _surviving(regions, _DASHBOARD, source, decoy) == 0
+    assert _surviving(regions, _DASHBOARD, source, _SITE) == 1
+
+
+def test_nested_html_template_content_stays_inert(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[0]
+    source = '<template><template></template>' + site + '</template>'
+    assert _surviving(_checker(), _DASHBOARD, source, site) == 0
+
+
+def test_html_template_closer_in_a_quoted_attribute_is_inert(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    source = ('<template><div title="</template>">' + site
+              + '</div></template><div ' + _SITE + '</div>')
+    regions = _checker()
+    assert _surviving(regions, _DASHBOARD, source, site) == 0
+    assert _surviving(regions, _DASHBOARD, source, _SITE) == 1
+
+
 def test_midline_html_close_marker_stays_javascript(tmp):
     """A mid-line `-->` is an operator sequence, not an HTML comment."""
     del tmp
@@ -488,6 +531,21 @@ def test_check_survives_the_html_adversarial_cases(tmp):
         r = _run_checker(copy_root)
         assert r.returncode == 0, (label, r.returncode, r.stdout, r.stderr)
         assert 'ok:' in r.stdout, (label, r.stdout)
+
+
+def test_check_ignores_version_sites_in_html_template_content(tmp):
+    copy_root = Path(tmp) / 'tree'
+    _copy_versioned_tree(copy_root)
+    dashboard = copy_root / _DASHBOARD
+    text = dashboard.read_text(encoding='utf-8')
+    markup = ''.join('<template>' + site + '</template>\n'
+                     for site in _HTML_TEMPLATE_SITES)
+    assert text.count('</body>') == 1, text
+    dashboard.write_text(text.replace('</body>', markup + '</body>'),
+                         encoding='utf-8')
+    r = _run_checker(copy_root)
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    assert 'ok:' in r.stdout, r.stdout
 
 
 def test_check_counts_a_duplicate_after_a_regex_literal(tmp):
