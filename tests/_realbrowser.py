@@ -221,7 +221,7 @@ def _environment_verdicts_closed():
 
 
 def _launch_and_reach(node, browser, loaded, profile, worker_script,
-                      page_url, started):
+                      page_url, started, worker_ready_patience=30.0):
     browser_args = _browser_args(browser, loaded, profile)
     try:
         process = subprocess.Popen(
@@ -253,13 +253,15 @@ def _launch_and_reach(node, browser, loaded, profile, worker_script,
         raise FirstNavigationTimeout(
             page_url, request_arrived) from why
     worker_target = _reached_worker(
-        node, browser, workers, devtools_port, worker_script)
+        node, browser, workers, devtools_port, worker_script,
+        patience=worker_ready_patience)
     return process, worker_target, devtools_port, page_target
 
 
 @contextlib.contextmanager
 def real_extension_page(tmp, bridge_url, token, page_url,
-                        extension_root=None, extra_extensions=()):
+                        extension_root=None, extra_extensions=(),
+                        worker_ready_patience=30.0, page_ready_timeout=15.0):
     """Yield (node, page target, tab id) for a real page under the extension.
 
     Every test that reaches a real browser comes through here, so this is
@@ -281,6 +283,9 @@ def real_extension_page(tmp, bridge_url, token, page_url,
     extension source itself: this suite also runs background.js, content.js
     and page.js under Node, which does not need a browser and fails outright
     if that source is broken.
+
+    The two ready waits keep their production deadlines by default; a test
+    that pins a classification rather than patience passes smaller values.
     """
     node, browser = browser_requirements()
     extension = (extension_root or EXTENSION_ROOT).resolve()
@@ -295,7 +300,8 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         try:
             launch = _launch_and_reach(
                 node, browser, loaded, Path(tmp) / 'chromium-profile',
-                worker_script, page_url, started)
+                worker_script, page_url, started,
+                worker_ready_patience=worker_ready_patience)
         except BrowserEnvironmentSkipped as first_absence:
             if len(started) == started_before_launch:
                 raise
@@ -309,7 +315,8 @@ def real_extension_page(tmp, bridge_url, token, page_url,
                 launch = _launch_and_reach(
                     node, browser, loaded,
                     Path(tmp) / 'chromium-profile-recovery', worker_script,
-                    page_url, started)
+                    page_url, started,
+                    worker_ready_patience=worker_ready_patience)
             except BrowserEnvironmentSkipped as recovery_absence:
                 if len(started) == started_before_recovery:
                     recovery_observation = (
@@ -327,22 +334,39 @@ def real_extension_page(tmp, bridge_url, token, page_url,
         with _environment_verdicts_closed():
             yield from _configured_fixture(
                 node, bridge_url, token, worker_target, devtools_port,
-                worker_script, page_target, page_url)
+                worker_script, page_target, page_url,
+                page_ready_timeout=page_ready_timeout)
     finally:
         for process in started:
             _retire_browser(process)
 
 
-def _reached_worker(node, browser, workers, devtools_port, worker_script):
-    """Return the target after this extension's worker answers its probe."""
-    deadline = time.time() + 30
+def _reached_worker(node, browser, workers, devtools_port, worker_script,
+                    patience=30.0):
+    """Return the target after this extension's worker answers its probe.
+
+    Two clocks guard the one loop, and only one of them is a patience. A
+    worker that has answered no evaluation leaves the machine question open:
+    whether this browser can reach a worker at all. That clock keeps its full
+    thirty seconds from the start of the wait and is deliberately not a
+    parameter; that patience is what keeps a cold runner from being read as a
+    broken extension. Once a worker answers, contact is demonstrated and what
+    is still pending is the extension's own boot, given `patience` seconds
+    from that first answer.
+    """
+    never_answered_deadline = time.time() + 30
+    answered_deadline = None
     last_error = 'no evaluation was attempted'
     answered = False
-    while time.time() < deadline:
+    while (time.time() < never_answered_deadline
+           and (answered_deadline is None
+                or time.time() < answered_deadline)):
         worker_target, reached, error = ready_worker(node, workers)
         answered = answered or reached
         if worker_target:
             return worker_target
+        if reached and answered_deadline is None:
+            answered_deadline = time.time() + patience
         last_error = error
         try:
             workers = _worker_targets(
@@ -364,7 +388,8 @@ def _reached_worker(node, browser, workers, devtools_port, worker_script):
 
 
 def _configured_fixture(node, bridge_url, token, worker_target,
-                        devtools_port, worker_script, page_target, page_url):
+                        devtools_port, worker_script, page_target, page_url,
+                        page_ready_timeout=15.0):
     """Configure the reached worker, load the page, and yield the tab."""
     storage = json.dumps({
         'daedalus-token': token,
@@ -399,7 +424,7 @@ def _configured_fixture(node, bridge_url, token, worker_target,
         f'). Worker state: {worker_state(node, worker_target)}')
     cdp_call(node, page_target, 'Page.navigate', {'url': page_url})
 
-    deadline = time.time() + 15
+    deadline = time.time() + page_ready_timeout
     while time.time() < deadline:
         if cdp_eval(
                 node, page_target,

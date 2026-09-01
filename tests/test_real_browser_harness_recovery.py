@@ -53,17 +53,21 @@ def _navigate(node, target, method, params):
     return {}
 
 
-def _reached(node, browser, workers, port, worker_script):
+def _reached(node, browser, workers, port, worker_script, patience=30.0):
+    """The fixture threads its patience; this control pins the default."""
     assert node == 'node-for-control', node
     assert browser == '/controlled/chromium', browser
     assert workers == _ready_targets()[1], workers
     assert port == '9222', port
     assert worker_script == 'background.js', worker_script
+    assert patience == 30.0, patience
     return 'ws://worker'
 
 
 def _configured(node, bridge_url, token, worker_target, devtools_port,
-                worker_script, page_target, page_url):
+                worker_script, page_target, page_url,
+                page_ready_timeout=15.0):
+    """The fixture threads its page-ready timeout; this pins the default."""
     assert node == 'node-for-control', node
     assert bridge_url == 'http://127.0.0.1:1', bridge_url
     assert token == 'controltoken', token
@@ -72,6 +76,7 @@ def _configured(node, bridge_url, token, worker_target, devtools_port,
     assert worker_script == 'background.js', worker_script
     assert page_target == 'ws://page', page_target
     assert page_url == 'http://127.0.0.1:2/plain.html', page_url
+    assert page_ready_timeout == 15.0, page_ready_timeout
     yield node, page_target, 'controlled-tab'
 
 
