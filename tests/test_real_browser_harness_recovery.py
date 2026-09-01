@@ -53,35 +53,47 @@ def _navigate(node, target, method, params):
     return {}
 
 
-def _reached(node, browser, workers, port, worker_script, patience=30.0):
-    """The fixture threads its patience; this control pins the default."""
-    assert node == 'node-for-control', node
-    assert browser == '/controlled/chromium', browser
-    assert workers == _ready_targets()[1], workers
-    assert port == '9222', port
-    assert worker_script == 'background.js', worker_script
-    assert patience == 30.0, patience
-    return 'ws://worker'
+def _reached_double(expected_patience, outcomes):
+    """The fixture threads its patience; this double pins what arrives."""
+    pending = list(outcomes)
+
+    def _reached(node, browser, workers, port, worker_script, patience=30.0):
+        assert node == 'node-for-control', node
+        assert browser == '/controlled/chromium', browser
+        assert workers == _ready_targets()[1], workers
+        assert port == '9222', port
+        assert worker_script == 'background.js', worker_script
+        assert patience == expected_patience, patience
+        outcome = pending[0] if len(pending) == 1 else pending.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+    return _reached
 
 
-def _configured(node, bridge_url, token, worker_target, devtools_port,
-                worker_script, page_target, page_url,
-                page_ready_timeout=15.0):
-    """The fixture threads its page-ready timeout; this pins the default."""
-    assert node == 'node-for-control', node
-    assert bridge_url == 'http://127.0.0.1:1', bridge_url
-    assert token == 'controltoken', token
-    assert worker_target == 'ws://worker', worker_target
-    assert devtools_port == '9222', devtools_port
-    assert worker_script == 'background.js', worker_script
-    assert page_target == 'ws://page', page_target
-    assert page_url == 'http://127.0.0.1:2/plain.html', page_url
-    assert page_ready_timeout == 15.0, page_ready_timeout
-    yield node, page_target, 'controlled-tab'
+def _configured_double(expected_timeout):
+    """The fixture threads its page timeout; this double pins what arrives."""
+
+    def _configured(node, bridge_url, token, worker_target, devtools_port,
+                    worker_script, page_target, page_url,
+                    page_ready_timeout=15.0):
+        assert node == 'node-for-control', node
+        assert bridge_url == 'http://127.0.0.1:1', bridge_url
+        assert token == 'controltoken', token
+        assert worker_target == 'ws://worker', worker_target
+        assert devtools_port == '9222', devtools_port
+        assert worker_script == 'background.js', worker_script
+        assert page_target == 'ws://page', page_target
+        assert page_url == 'http://127.0.0.1:2/plain.html', page_url
+        assert page_ready_timeout == expected_timeout, page_ready_timeout
+        yield node, page_target, 'controlled-tab'
+    return _configured
 
 
 @contextlib.contextmanager
-def _recovery_runtime(tmp, waits, verdict, recovery_failure=None):
+def _recovery_runtime(tmp, waits, verdict, recovery_failure=None,
+                      worker_waits=None, worker_ready_patience=30.0,
+                      page_ready_timeout=15.0):
     popen, processes, launches = _process_launches(recovery_failure)
     wait_calls = []
 
@@ -99,8 +111,12 @@ def _recovery_runtime(tmp, waits, verdict, recovery_failure=None):
         mock.patch.object(
             _realbrowser, '_wait_for_devtools', wait_for_devtools),
         mock.patch.object(_realbrowser, 'cdp_call', _navigate),
-        mock.patch.object(_realbrowser, '_reached_worker', _reached),
-        mock.patch.object(_realbrowser, '_configured_fixture', _configured),
+        mock.patch.object(
+            _realbrowser, '_reached_worker',
+            _reached_double(worker_ready_patience,
+                            worker_waits or ['ws://worker'])),
+        mock.patch.object(_realbrowser, '_configured_fixture',
+                          _configured_double(page_ready_timeout)),
     )
     if verdict is not None:
         patches += (mock.patch.object(
@@ -156,6 +172,42 @@ def test_contention_relaunch_recovers_the_fixture(tmp):
         (Path(profiles[1]), processes[1], 'background.js'),
     ], wait_calls
     verdict.assert_called_once()
+    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+
+
+def test_a_callers_waits_reach_both_ready_waits(tmp):
+    """A caller's patience and page timeout survive the entry point."""
+    first_absence = _realbrowser.BrowserEnvironmentSkipped(
+        'controlled first-launch worker absence')
+    verdict = mock.Mock(return_value=(
+        True, 'controlled contention evidence'))
+    yielded = []
+    with _recovery_runtime(
+            tmp, [_ready_targets(), _ready_targets()], verdict,
+            worker_waits=[first_absence, 'ws://worker'],
+            worker_ready_patience=2.0, page_ready_timeout=2.0) as runtime:
+        processes, launches, wait_calls = runtime
+        with _realbrowser.real_extension_page(
+                tmp, 'http://127.0.0.1:1', 'controltoken',
+                'http://127.0.0.1:2/plain.html',
+                worker_ready_patience=2.0,
+                page_ready_timeout=2.0) as fixture:
+            yielded.append(fixture)
+
+    assert yielded == [
+        ('node-for-control', 'ws://page', 'controlled-tab')], yielded
+    assert len(launches) == 2, launches
+    profiles = _profile_args(launches)
+    assert profiles == [
+        str(Path(tmp) / 'chromium-profile'),
+        str(Path(tmp) / 'chromium-profile-recovery'),
+    ], profiles
+    assert wait_calls == [
+        (Path(profiles[0]), processes[0], 'background.js'),
+        (Path(profiles[1]), processes[1], 'background.js'),
+    ], wait_calls
+    verdict.assert_called_once()
+    assert [item.terminated for item in processes] == [True, True], processes
     assert [item.wait_timeouts for item in processes] == [[10], [10]]
 
 
