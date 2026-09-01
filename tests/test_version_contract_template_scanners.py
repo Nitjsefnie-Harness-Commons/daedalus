@@ -15,6 +15,10 @@ from test_version_contract_scanners import (
 
 
 _HTML_TEXT_MODE_TAGS = ('script', 'style', 'title', 'textarea')
+_FOREIGN_HTML_START_TAGS = tuple(
+    ('b big blockquote body br center code dd div dl dt em embed h1 h2 h3 '
+     'h4 h5 h6 head hr i img li listing menu meta nobr ol p pre ruby s '
+     'small span strong strike sub sup table tt u ul var').split())
 
 
 def _run_dashboard_markup(root, markup):
@@ -166,6 +170,153 @@ def test_stray_foreign_closer_does_not_create_context(tmp):
     site = _HTML_TEMPLATE_SITES[1]
     source = f'</svg><template>{site}</template>'
     assert _surviving(_checker(), _DASHBOARD, source, site) == 0
+
+
+def test_math_text_integration_exceptions_stay_foreign(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for tag in ('mglyph', 'malignmark'):
+        source = (f'<math><mi><{tag}><template>{site}</template>'
+                  f'</{tag}></mi></math>')
+        assert _surviving(regions, _DASHBOARD, source, site) == 1, tag
+
+
+def test_check_refuses_math_text_exception_template_site(tmp):
+    site = _HTML_TEMPLATE_SITES[1]
+    markup = ('<math><mi><mglyph><template>' + site
+              + '</template></mglyph></mi></math>')
+    result = _run_dashboard_markup(tmp, markup)
+    assert result.returncode != 0, (result.returncode, result.stdout,
+                                    result.stderr)
+    assert 'matches 2 times' in result.stderr, result.stderr
+    assert 'dashboard status line' in result.stderr, result.stderr
+
+
+def test_self_closed_math_text_exception_restores_html_routing(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    source = f'<math><mi><mglyph/><template>{site}</template></mi></math>'
+    assert _surviving(_checker(), _DASHBOARD, source, site) == 0
+
+
+def test_outer_html_text_modes_do_not_poison_foreign_context(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for tag in ('style', 'title', 'textarea'):
+        source = f'<{tag}><svg></{tag}><template>{site}</template>'
+        assert _surviving(regions, _DASHBOARD, source, site) == 0, tag
+
+
+def test_check_accepts_outer_html_text_mode_namespace_text(tmp):
+    site = _HTML_TEMPLATE_SITES[1]
+    markup = ''.join(
+        f'<{tag}><svg></{tag}><template>{site}</template>'
+        for tag in ('style', 'title', 'textarea'))
+    result = _run_dashboard_markup(tmp, markup)
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr)
+
+
+def test_outer_html_text_mode_version_markup_is_decoy(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for tag in ('style', 'title', 'textarea'):
+        source = f'<{tag}>{site}</{tag}><div {_SITE}></div>'
+        assert _surviving(regions, _DASHBOARD, source, site) == 0, tag
+        assert _surviving(regions, _DASHBOARD, source, _SITE) == 1, tag
+
+
+def test_foreign_text_spellings_follow_the_current_namespace(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for namespace in ('svg', 'math'):
+        for tag in _HTML_TEXT_MODE_TAGS:
+            source = (f'<{namespace}><{tag}><div></div></{tag}>'
+                      f'<template>{site}</template></{namespace}>')
+            expected = int(namespace == 'svg' and tag == 'title')
+            assert _surviving(
+                regions, _DASHBOARD, source, site) == expected, (
+                    namespace, tag)
+
+
+def test_all_foreign_html_start_tags_break_out(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for tag in _FOREIGN_HTML_START_TAGS:
+        source = (f'<svg><g><{tag}><template>{site}</template>'
+                  f'</{tag}></g></svg>')
+        assert _surviving(regions, _DASHBOARD, source, site) == 0, tag
+
+
+def test_foreign_font_breakout_requires_a_named_attribute(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for attribute in ('color', 'face', 'size'):
+        source = (f'<svg><font {attribute}><template>{site}</template>'
+                  '</font></svg>')
+        assert _surviving(
+            regions, _DASHBOARD, source, site) == 0, attribute
+    source = f'<svg><font><template>{site}</template></font></svg>'
+    assert _surviving(regions, _DASHBOARD, source, site) == 1
+
+
+def test_self_closed_foreign_html_start_tag_still_breaks_out(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    source = f'<svg><g><div/><template>{site}</template></g></svg>'
+    assert _surviving(_checker(), _DASHBOARD, source, site) == 0
+
+
+def test_foreign_br_and_p_end_tags_break_out(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for tag in ('br', 'p'):
+        source = f'<svg><g></{tag}><template>{site}</template>'
+        assert _surviving(regions, _DASHBOARD, source, site) == 0, tag
+
+
+def test_foreign_breakout_applies_in_math_and_stops_at_integration(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    sources = (
+        f'<math><mrow><div></div><template>{site}</template></math>',
+        ('<svg><foreignObject><svg><g><div></div>'
+         f'<template>{site}</template></svg></foreignObject></svg>'),
+        ('<math><mi><mglyph><div></div>'
+         f'<template>{site}</template></mglyph></mi></math>'),
+    )
+    for source in sources:
+        assert _surviving(regions, _DASHBOARD, source, site) == 0, source
+
+
+def test_annotation_xml_direct_svg_uses_the_svg_namespace(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    direct = ('<math><annotation-xml><svg><foreignObject><template>' + site
+              + '</template></foreignObject></svg></annotation-xml></math>')
+    nested = ('<math><annotation-xml><mrow><svg><foreignObject><template>'
+              + site + '</template></foreignObject></svg></mrow>'
+              '</annotation-xml></math>')
+    assert _surviving(regions, _DASHBOARD, direct, site) == 0
+    assert _surviving(regions, _DASHBOARD, nested, site) == 1
+
+
+def test_non_special_foreign_start_tags_remain_foreign(tmp):
+    del tmp
+    site = _HTML_TEMPLATE_SITES[1]
+    regions = _checker()
+    for tag in ('section', 'html'):
+        source = f'<svg><{tag}><template>{site}</template></{tag}></svg>'
+        assert _surviving(regions, _DASHBOARD, source, site) == 1, tag
 
 
 def main():
