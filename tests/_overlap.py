@@ -290,7 +290,7 @@ _KILLED_CLIENT_PIPE_RELEASE_S = 20
 
 
 def overlap_child_timeout(order, wait_between,
-                          inner_wait=_OVERLAP_INNER_WAIT_S):
+                          inner_wait=_OVERLAP_INNER_WAIT_S, outer_slack=0):
     """How long to let the overlap harness run before killing it.
 
     Every wait names what it was waiting for and has its own bound except the
@@ -301,14 +301,18 @@ def overlap_child_timeout(order, wait_between,
     slack per result. Those inner failures report first. A genuinely stuck
     result POST instead reaches the backstop, making its diagnosis take the
     outer bound rather than an inner one.
+
+    Outer slack is added once, on top of those allowances, so a caller whose
+    inner bounds were shrunk can keep the backstop it had without paying the
+    old inner waits again.
     """
     waits = 3 + len(order) + (len(order) - 1 if wait_between else 0)
-    return inner_wait * (waits + 1)
+    return inner_wait * (waits + 1) + outer_slack
 
 
 def run_background_overlap(background, commands, order, result_base='',
                            token='overlap-token', wait_between=False,
-                           inner_wait=_OVERLAP_INNER_WAIT_S):
+                           inner_wait=_OVERLAP_INNER_WAIT_S, outer_slack=0):
     """Run same-id cookie commands through the shipped background worker."""
     # Fabricated suite-runner trees copy _util.py without this helper.
     from _worker_sources import import_scripts_stub
@@ -317,7 +321,8 @@ def run_background_overlap(background, commands, order, result_base='',
     if not node:
         raise AssertionError(
             'node is required to execute the extension worker')
-    timeout = overlap_child_timeout(order, wait_between, inner_wait)
+    timeout = overlap_child_timeout(
+        order, wait_between, inner_wait, outer_slack)
     harness = _BACKGROUND_OVERLAP_HARNESS.replace(
         '__IMPORT_SCRIPTS_STUB__', import_scripts_stub('context'))
     process = subprocess.Popen(
@@ -505,13 +510,14 @@ def _slow_result_server(post_delay=0, post_status=200, post_statuses=None,
 
 
 def _harness_failure(background, inner_wait=1, commands=None, order=None,
-                     result_base='', wait_between=False):
+                     result_base='', wait_between=False, outer_slack=0):
     commands = commands or [{'id': '_cookies', 'domain': 'owner-a'}]
     order = order or ['owner-a']
     try:
         run_background_overlap(
             background, commands, order, result_base=result_base,
-            wait_between=wait_between, inner_wait=inner_wait)
+            wait_between=wait_between, inner_wait=inner_wait,
+            outer_slack=outer_slack)
     except AssertionError as failure:
         return str(failure)
     except subprocess.TimeoutExpired as failure:
