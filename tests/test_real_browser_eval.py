@@ -116,9 +116,11 @@ def test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp):
         with eval_page_server() as pages:
             reported = None
             try:
+                # The verdict is certain - the ready probe can never go true -
+                # so the short patience only skips waiting for it.
                 with real_extension_page(
                         tmp, bridge_url, token, pages + '/plain.html',
-                        extension_root=broken):
+                        extension_root=broken, worker_ready_patience=2.0):
                     raise AssertionError(
                         'the fixture yielded with a worker that cannot boot')
             except BrowserEnvironmentSkipped:
@@ -155,8 +157,11 @@ def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):
             page_url = pages + '/never-ready.html'
             reported = None
             try:
+                # A 404 never sets __evalPageReady, so the short timeout
+                # waits only on a verdict already decided.
                 with real_extension_page(
-                        tmp, bridge_url, token, page_url):
+                        tmp, bridge_url, token, page_url,
+                        page_ready_timeout=2.0):
                     raise AssertionError(
                         'the fixture yielded a page that never reported ready')
             except BrowserEnvironmentSkipped:
