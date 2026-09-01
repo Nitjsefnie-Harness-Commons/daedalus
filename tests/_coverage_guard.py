@@ -22,6 +22,7 @@ capture.
 """
 import ast
 
+from _coverage_memo import analysed
 from _coverage_scopes import (
     _is_root_spelling, _scope_shadows, _shadowed_names, root_owner_names)
 
@@ -685,8 +686,8 @@ def _coverage_environment_violations(root):
     keeps = []
     for path in sorted((root / 'tests').glob('*.py')):
         relative = path.relative_to(root).as_posix()
-        violations.extend(_analyze(
-            relative, path.read_text(encoding='utf-8'), keeps))
+        violations.extend(analysed(
+            _analyze, relative, path.read_text(encoding='utf-8'), keeps))
     violations.extend(_unlisted_keeps(keeps))
     declared = {_keep_site(module, function) for module, function in keeps}
     for entry in sorted(_KEEP_ALLOWLIST - declared):
