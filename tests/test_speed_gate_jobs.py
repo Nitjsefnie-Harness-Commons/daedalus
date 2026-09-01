@@ -21,7 +21,8 @@ from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
 # A duration is one or more digit groups, each with an optional unit.
-_DURATION = r'(?:\d+[smhd]?)+'
+# Linear: (\d+[smhd]?)+ backtracks catastrophically on a failing match.
+_DURATION = r'\d+(?:[smhd]\d*)*'
 
 _WAIT = (re.compile(rf'sleep(?: {_DURATION})+'),
          re.compile(rf'Start-Sleep -(?:S|Seconds)(?: {_DURATION})+'),
@@ -34,7 +35,8 @@ _OPTION_LINE = re.compile(r'set (?:-\w+ )*-\w+(?: \S+)?')
 
 def _wait_only(script):
     for raw in script.splitlines():
-        line = raw.split('#', 1)[0].strip()
+        # bash starts a comment only at a word-initial '#'.
+        line = re.sub(r'(^|\s)#.*$', '', raw).strip()
         if not line or _OPTION_LINE.fullmatch(line):
             continue
         if not any(each.fullmatch(line) for each in _WAIT):
@@ -72,6 +74,10 @@ jobs:
 
           # wait for the service
           sleep 300
+  mixed:
+    steps:
+      - run: echo doing-real-work
+      - run: sleep 300
 """
 
 _WAIT_SCRIPTS = (
@@ -104,11 +110,17 @@ _WORK_SCRIPTS = (
     'sleep',
     'timeout 5 sleep $(touch marker)',
     'timeout 5m 30s sleep 300',
+    'sleep 300#touch marker',
+    'sleep ' + '0' * 28 + '!',
 )
 
 
 def test_the_pin_refuses_a_synthetic_waiting_job_end_to_end(tmp):
-    """The machinery must name the waiting job, not the uses-only job."""
+    """The machinery must name the waiting job, not the uses-only job.
+
+    ``mixed`` is the work-plus-wait control pinning the universal
+    quantifier: such a job is never classified.
+    """
     del tmp
     assert wait_only_jobs(_SYNTHETIC) == ['stall'], wait_only_jobs(_SYNTHETIC)
     # Second refusal over the real tree, so losing either test's own line
