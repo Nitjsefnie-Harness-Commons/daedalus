@@ -64,7 +64,7 @@ def _js_word_before(mask, position):
     return mask[position:end]
 
 
-def js_tab_routing_violations(path, rel):
+def js_tab_routing_violations(path, rel, work=None):
     """The dashboard side of the same contract: the fields object of an
     extCmd call, and a runCommand object carrying `type`, may contain `tab`
     only as the literal 'extension'. runCommand objects carrying `code` are
@@ -84,7 +84,7 @@ def js_tab_routing_violations(path, rel):
     """
     text = path.read_text(encoding='utf-8')
     mask = js_mask(text)
-    source_index = SourceIndex(text, mask, function_body_at)
+    source_index = SourceIndex(text, mask, function_body_at, work)
     body_at = source_index.body_at
     violations = []
     senders = ('extCmd', 'extcmd', 'runCommand')
@@ -484,7 +484,7 @@ def js_tab_routing_violations(path, rel):
         'body': body_at, 'expression_end': js_expression_end}
     invocation_resolution['receivers'] = ReceiverIndex(
         mask, text, {'end': pair_end, 'start': pair_start}, bindings,
-        invocation_resolution, invocation_reader, senders)
+        invocation_resolution, invocation_reader, senders, work)
     for match in bindings:
         expression_end = js_expression_end(mask, match.end())
         expression = mask[match.end():expression_end].strip()
@@ -513,7 +513,7 @@ def js_tab_routing_violations(path, rel):
          'computed_key': invocation_resolution[
              'receivers'].computed_key,
          'expression_end': js_expression_end},
-        scope_at, visible_binding, optional_write)
+        scope_at, visible_binding, optional_write, work)
 
     reached_calls = {}
     reached_unknowns = []
