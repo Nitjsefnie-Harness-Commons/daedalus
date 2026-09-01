@@ -168,9 +168,8 @@ def test_the_speed_cells_are_not_manually_dispatchable(tmp):
     names the trigger rather than any cache input: `(workflow_dispatch)`.
     They are false positives — the query treats a dispatched run as holding
     the default branch's cache scope whatever ref it was started on, while a
-    real run's scope follows the ref it was given. The measuring job cannot
-    give the trigger up the way the workflow it moved out of did, because the
-    other jobs here are dispatched deliberately, so the exclusion lives on
+    real run's scope follows the ref it was given. The trigger stays, because
+    the other jobs here are dispatched deliberately, so the exclusion lives on
     the jobs whose checkout is a step output, where it also keeps a manual
     run from spending six whole-suite executions on whatever ref it names.
     """
@@ -193,12 +192,10 @@ def test_the_speed_cells_are_not_manually_dispatchable(tmp):
 def test_the_speed_gate_depends_on_the_exact_aggregate_job(tmp):
     """The measurement starts from a dependency, not from a poll.
 
-    The wait this replaces held a runner for the whole tests run to learn one
-    bit — that the aggregate concluded green — and failed on anything else,
-    which is what kept the cells from benchmarking a tree nobody can ship.
-    `needs:` buys the same bit from the scheduler and spends no runner on it,
-    and absence is still not a pass: a red or cancelled aggregate skips the
-    cells rather than reporting a measurement.
+    `needs:` is what tells the cells the aggregate concluded green, and it
+    spends no runner on the answer. Absence is not a pass either way: a red
+    or cancelled aggregate skips the cells rather than reporting a
+    measurement.
     """
     del tmp
     workflow = _tests_yml()
@@ -207,8 +204,6 @@ def test_the_speed_gate_depends_on_the_exact_aggregate_job(tmp):
     assert complete_job_mapping(workflow, 'aggregate')['name'] == (
         'Aggregate workflow checks')
     assert 'aggregate' in _job_needs(workflow, 'timed')
-    # No job polls the Checks API for the ordering any more: that poll was
-    # the whole work of the job this dependency replaces.
     for job in _job_names(workflow):
         assert 'check-runs' not in '\n'.join(_job_section(workflow, job)), job
 
@@ -218,8 +213,7 @@ def test_the_speed_cells_start_only_after_the_aggregate(tmp):
 
     `timed` names the aggregate in `needs` and conditions itself on it, so a
     red or cancelled aggregate leaves every cell skipped and no runner is
-    spent measuring a tree nobody can ship — the outcome the deleted wait
-    produced by failing, without the runner it held to produce it.
+    spent measuring a tree nobody can ship.
     """
     del tmp
     workflow = _tests_yml()
@@ -368,9 +362,13 @@ def test_the_speed_verdict_is_one_aggregate_over_the_cells(tmp):
     assert 'name' not in final, final.get('name')
     assert final['needs'] == ['changes', 'aggregate', 'timed'], (
         final.get('needs'))
-    assert final['if'] == (
-        "${{ always() && github.event_name != 'workflow_dispatch' }}"), (
-        final.get('if'))
+    # Terms, not spelling: folding the whitespace reads the condition for both
+    # required terms without pinning their order, which a pure conjunct
+    # reorder is free to change. The truth table below is what proves the
+    # dispatch term actually excludes a dispatch.
+    condition = ' '.join(final['if'].split())
+    assert "github.event_name != 'workflow_dispatch'" in condition, condition
+    assert 'always()' in condition, condition
     # The verdict is reported whatever the cells concluded, so a skipped
     # matrix is explained rather than left as a missing check.
     for event, status, docs_only, expected in (
@@ -518,7 +516,10 @@ def test_the_speed_verdict_fails_unless_the_matrix_succeeded(tmp):
     for timed in ('success', 'failure', 'skipped'):
         result, text = run(timed, docs_only='true')
         assert result.returncode == 0, (timed, result.stdout, result.stderr)
-        assert 'documentation only' in text, (timed, text)
+        assert 'no code here to benchmark' in text, (timed, text)
+        assert 'Every speed cell passed' not in text, (timed, text)
+        assert '| cell |' not in text, (timed, text)
+        assert text.count('verdict') == 1, (timed, text)
 
 
 def test_the_timing_step_reports_what_it_measured(tmp):
