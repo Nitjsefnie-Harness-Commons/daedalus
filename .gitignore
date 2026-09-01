@@ -194,6 +194,7 @@
 !/scripts/check_versions.py
 !/scripts/gen_gitignore.py
 !/scripts/mcp_probe.py
+!/scripts/version_html_context.py
 !/scripts/version_regions.py
 
 # ─── scripts/ci ───

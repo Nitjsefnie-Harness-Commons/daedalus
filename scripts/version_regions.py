@@ -14,6 +14,14 @@ import re
 import string
 import tokenize
 
+try:
+    import version_html_context as _html_context
+except ModuleNotFoundError:
+    from scripts import version_html_context as _html_context
+
+_html_tag = _html_context.html_tag
+_html_tag_context = _html_context.html_tag_context
+
 
 def regions_for(path, text):
     """(start, end, kind) regions for one file's text, chosen by extension."""
@@ -281,12 +289,17 @@ def _html_regions(text):
             i = _html_tag(text, tag_start, regions)
             tag_name, html_context, _opened_html = _html_tag_context(
                 text, tag_start, i, contexts)
-            if tag_name == 'script':
+            if html_context and tag_name == 'script':
                 script_end = _html_script_end(text, i)
                 for start, stop, kind in _javascript_regions(
                         text[i:script_end], html_comments=True):
                     regions.append((i + start, i + stop, kind))
                 i = script_end
+            elif (html_context
+                  and tag_name in ('style', 'title', 'textarea')):
+                text_end = _html_text_end(text, i, tag_name)
+                regions.append((i - 1, text_end, 'inert'))
+                i = text_end
             elif html_context and tag_name == 'template':
                 template_end = _html_template_end(text, i)
                 regions.append((i - 1, template_end, 'inert'))
@@ -294,17 +307,6 @@ def _html_regions(text):
             continue
         i += 1
     return regions
-
-
-def _html_tag_name(text, start, end):
-    """The lowercase name of an opening tag, or an empty string."""
-    i = start + 1
-    if i >= end or not text[i].isalpha():
-        return ''
-    name_start = i
-    while i < end and (text[i].isalnum() or text[i] in '-:'):
-        i += 1
-    return text[name_start:i].lower()
 
 
 def _html_template_end(text, start):
@@ -321,7 +323,7 @@ def _html_template_end(text, start):
                 and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
             tag_start = i
             i = _html_tag(text, tag_start, [])
-            tag_name, html_context, opened_html = _html_tag_context(
+            tag_name, html_context, _opened_html = _html_tag_context(
                 text, tag_start, i, contexts)
             if html_context and tag_name == 'template':
                 depth += 1
@@ -330,14 +332,11 @@ def _html_template_end(text, start):
                 depth -= 1
                 if depth == 0:
                     return tag_start
-            elif tag_name == 'script':
+            elif html_context and tag_name == 'script':
                 i = _html_script_end(text, i)
-            elif (tag_name in ('style', 'title', 'textarea')
-                  and not opened_html):
-                closer = '</' + tag_name
-                while (i < len(text)
-                       and _html_tag_token_end(text, i, closer) is None):
-                    i += 1
+            elif (html_context
+                  and tag_name in ('style', 'title', 'textarea')):
+                i = _html_text_end(text, i, tag_name)
             continue
         i += 1
     return len(text)
@@ -398,77 +397,12 @@ def _html_tag_token_end(text, start, token):
     return None
 
 
-def _html_tag_context(text, start, end, contexts):
-    tag_name = _html_tag_name(text, start, end)
-    current = contexts[-1][2] if contexts else 'html'
-    html_context = current == 'html'
-    closing = (_html_tag_name(text, start + 1, end)
-               if text[start:start + 2] == '</' else '')
-    if closing:
-        for index in range(len(contexts) - 1, -1, -1):
-            if contexts[index][0] == closing:
-                del contexts[index:]
-                break
-        return tag_name, html_context, False
-    if not tag_name or text[start:end].endswith('/>'):
-        return tag_name, html_context, False
-    opened_html = False
-    if html_context and tag_name in ('svg', 'math'):
-        contexts.append((tag_name, tag_name, tag_name))
-    elif not html_context:
-        child_context = current
-        if (current == 'svg'
-                and tag_name in ('foreignobject', 'desc', 'title')):
-            child_context = 'html'
-        elif (current == 'math'
-              and tag_name in ('mi', 'mo', 'mn', 'ms', 'mtext')):
-            child_context = 'html'
-        elif (current == 'math' and tag_name == 'annotation-xml'
-              and (_html_attribute_value(
-                  text, start, end, 'encoding') or '').lower()
-              in ('text/html', 'application/xhtml+xml')):
-            child_context = 'html'
-        opened_html = child_context == 'html'
-        contexts.append((tag_name, current, child_context))
-    return tag_name, html_context, opened_html
-
-
-def _html_attribute_value(text, start, end, wanted):
-    quoted = []
-    _html_tag(text, start, quoted)
-    pattern = re.compile(
-        r'(?i)[\t\n\f\r ]' + re.escape(wanted)
-        + r'[\t\n\f\r ]*=[\t\n\f\r ]*'
-        + r'(?:"([^"]*)"|\'([^\']*)\'|([^\t\n\f\r >]+))')
-    for match in pattern.finditer(text, start, end):
-        if not any(begin < match.start() < stop
-                   for begin, stop, _kind in quoted):
-            return next(value for value in match.groups()
-                        if value is not None)
-    return None
-
-
-def _html_tag(text, start, regions):
-    """Record the quoted attribute values of one tag; a value ends at the
-    first matching quote, and a quote left open runs the tag past `>`.
-    """
-    end = len(text)
-    quote = None
-    opening = 0
-    i = start + 1
-    while i < end:
-        ch = text[i]
-        if quote is not None:
-            if ch == quote:
-                regions.append((opening, i + 1, 'string'))
-                quote = None
-        elif ch in '"\'':
-            quote = ch
-            opening = i
-        elif ch == '>':
-            return i + 1
-        i += 1
-    return end
+def _html_text_end(text, start, tag_name):
+    closer = '</' + tag_name
+    while (start < len(text)
+           and _html_tag_token_end(text, start, closer) is None):
+        start += 1
+    return start
 
 
 def _python_regions(text, path):
