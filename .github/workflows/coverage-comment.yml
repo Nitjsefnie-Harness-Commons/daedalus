@@ -15,7 +15,7 @@ name: coverage comment
 # with it — a disagreement fails the step loudly rather than being corrected
 # quietly, because it is the signal that somebody tried.
 #
-# `pull_request_target` is not the answer. As `speed.yml` explains, that
+# `pull_request_target` is not the answer. As `tests.yml` explains, that
 # trigger would give a run of proposed code the base repository's token and
 # secrets. The workflow_run split keeps the write-capable job on this trusted
 # file while the untrusted job stays read-only.

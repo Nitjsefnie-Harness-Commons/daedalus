@@ -113,8 +113,8 @@ jobs:
         # only for the first few minutes, because a branch push and its tag
         # can arrive together and the branch's runs take a moment to register.
         #
-        # No individual workflow is named as required. `speed`, `version` and
-        # `actionlint` all carry path filters, so a name that legitimately did
+        # No individual workflow is named as required. `version` and
+        # `actionlint` carry path filters, so a name that legitimately did
         # not run would deadlock this wait — and the suite is not the thing at
         # risk here anyway, since the job runs it again below against the
         # tree it is about to build.
