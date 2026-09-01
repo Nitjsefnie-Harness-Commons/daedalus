@@ -2,7 +2,7 @@
 """The change classifier: which shape a tests.yml run gets.
 
 scripts/ci/classify_changes.py decides whether a run changed only
-documentation — the same set speed.yml and version.yml ignore — and so pays
+documentation — the same set version.yml ignores — and so pays
 for one suite leg and no coverage instead of the full matrix. These tests pin
 the pattern matcher, the event-to-API mapping, the over-run fallbacks and the
 two contracts that keep the module's constants honest against the workflows.
@@ -337,10 +337,10 @@ def test_event_from_environment_maps_the_documented_variables(tmp):
 
 
 def test_documentation_patterns_match_the_workflow_path_filters(tmp):
-    """The set speed.yml and version.yml ignore is the set we classify."""
+    """The set version.yml ignores is the set we classify."""
     del tmp
     mod = _classifier()
-    for name in ('speed.yml', 'version.yml'):
+    for name in ('version.yml',):
         text = (ROOT / '.github' / 'workflows' / name).read_text(
             encoding='utf-8')
         triggers = _workflow_triggers(text, name)

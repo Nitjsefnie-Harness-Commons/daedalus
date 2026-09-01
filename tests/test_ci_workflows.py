@@ -304,8 +304,7 @@ def test_the_speed_venvs_install_the_test_requirements(tmp):
     failing them -- the shape the comparator's zero-suite guard exists for.
     """
     del tmp
-    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
-        encoding='utf-8')
+    workflow = _tests_yml()
     _, marker, after = workflow.partition(
         '- name: Build one virtualenv per side\n')
     assert marker, 'the venv step is not named the way this test finds it'
