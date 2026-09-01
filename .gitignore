@@ -384,6 +384,7 @@
 !/tests/test_version_contract_empty_rev.py
 !/tests/test_version_contract_quote_duplicates.py
 !/tests/test_version_contract_scanners.py
+!/tests/test_version_contract_template_scanners.py
 !/tests/test_version_empty_values.py
 !/tests/test_version_set_atomic.py
 !/tests/test_vm_file_load_guard.py

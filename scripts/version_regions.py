@@ -320,7 +320,8 @@ def _html_template_end(text, start):
             tag_name = _html_tag_name(text, tag_start, i)
             if tag_name == 'template':
                 depth += 1
-            elif _html_script_name(text, tag_start, '</template') is not None:
+            elif _html_tag_token_end(
+                    text, tag_start, '</template') is not None:
                 depth -= 1
                 if depth == 0:
                     return tag_start
@@ -329,7 +330,7 @@ def _html_template_end(text, start):
             elif tag_name in ('style', 'title', 'textarea'):
                 closer = '</' + tag_name
                 while (i < len(text)
-                       and _html_script_name(text, i, closer) is None):
+                       and _html_tag_token_end(text, i, closer) is None):
                     i += 1
             continue
         i += 1
@@ -347,12 +348,12 @@ def _html_script_end(text, start):
                 state = 'escaped-dash-dash'
                 i += 4
                 continue
-            if _html_script_name(text, i, '</script') is not None:
+            if _html_tag_token_end(text, i, '</script') is not None:
                 return i
         elif state.startswith('escaped'):
-            if _html_script_name(text, i, '</script') is not None:
+            if _html_tag_token_end(text, i, '</script') is not None:
                 return i
-            if _html_script_name(text, i, '<script') is not None:
+            if _html_tag_token_end(text, i, '<script') is not None:
                 state = 'double-escaped'
             elif ch == '<':
                 state = 'escaped'
@@ -365,7 +366,7 @@ def _html_script_end(text, start):
                 state = 'data'
             elif ch != '-':
                 state = 'escaped'
-        elif _html_script_name(text, i, '</script') is not None:
+        elif _html_tag_token_end(text, i, '</script') is not None:
             state = 'escaped'
         elif ch == '<':
             state = 'double-escaped'
@@ -382,8 +383,8 @@ def _html_script_end(text, start):
     return len(text)
 
 
-def _html_script_name(text, start, token):
-    """The index after a script token's name when HTML recognizes it."""
+def _html_tag_token_end(text, start, token):
+    """The end of an HTML tag token with a recognized name boundary."""
     after = start + len(token)
     if (text[start:after].lower() == token
             and after < len(text) and text[after] in '\t\n\f />'):

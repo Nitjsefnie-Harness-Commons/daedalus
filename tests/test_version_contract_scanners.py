@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
-"""The region scanners behind the version checker's decoy filter (#316).
+"""The version checker's decoy-region scanner contracts (#316).
 
-A version pattern inside a comment, a string or a regex literal is not a
-binding, and an executable binding must not be swallowed by one. These tests
-drive every host scanner over the adversarial cases review reproduced, then
-pin the reproduced routes end to end through check, --print and --set.
-
-test_version_contract.py holds the checker's other contracts; these were
-split out so neither file crosses its size ceiling.
+HTML text-mode cases live in test_version_contract_template_scanners.py.
 """
 import re
 import sys
@@ -381,28 +375,6 @@ def test_html_template_closer_in_a_quoted_attribute_is_inert(tmp):
     regions = _checker()
     assert _surviving(regions, _DASHBOARD, source, site) == 0
     assert _surviving(regions, _DASHBOARD, source, _SITE) == 1
-
-
-_HTML_TEXT_MODE_TAGS = ('script', 'style', 'title', 'textarea')
-
-
-def test_html_text_modes_ignore_a_false_template_closer(tmp):
-    del tmp
-    site = _HTML_TEMPLATE_SITES[0]
-    regions = _checker()
-    for tag in _HTML_TEXT_MODE_TAGS:
-        source = (f'<template><{tag}>const x = "</template>";'
-                  f'</{tag}>{site}</template>')
-        assert _surviving(regions, _DASHBOARD, source, site) == 0, tag
-
-
-def test_html_text_modes_ignore_a_false_template_opener(tmp):
-    del tmp
-    regions = _checker()
-    for tag in _HTML_TEXT_MODE_TAGS:
-        source = (f'<template><{tag}>const x = "<template>";'
-                  f'</{tag}></template><div {_SITE}</div>')
-        assert _surviving(regions, _DASHBOARD, source, _SITE) == 1, tag
 
 
 def test_html_template_comment_tags_do_not_change_depth(tmp):
