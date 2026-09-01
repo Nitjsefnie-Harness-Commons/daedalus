@@ -4,13 +4,8 @@
 record is measured against as a `JobQuotas`, so the route reads no
 configuration itself.
 
-`seg_dir_root` is only half a parameter, the way it is in
-`segment_routes`: `segment_store` imports `SEG_DIR` from
-`daedalus_bridge.config` and resolves `record_path` and `new_record`'s
-quotas from configuration, so a root passed here that configuration does
-not name would place a job's directory and its record apart. The bridge
-passes the configured root; moving that resolution into the store's
-callers is not this module's to do.
+`seg_dir_root` is only half a parameter here too; `segment_routes`'
+module docstring carries the one statement of why.
 """
 import json
 from typing import NamedTuple

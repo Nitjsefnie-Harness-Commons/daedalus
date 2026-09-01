@@ -124,7 +124,12 @@ def test_admit_refuses_an_index_past_the_records_quota(_tmp):
     assert admitted.job == 'range-job'
     assert admitted.segment_index == QUOTAS[0]
     assert admitted.quota == QUOTAS
-    assert admitted.seg_dir == SEG_DIR / 'range-job'
+    # `path_safety.under` returns the resolved path, so the expected
+    # value is resolved too: a temp root reached through a symlink
+    # (macOS `/var/folders`) makes the unresolved join a different
+    # string for the same directory.
+    assert admitted.seg_dir == (SEG_DIR / 'range-job').resolve(), (
+        admitted.seg_dir)
 
 
 def test_store_writes_the_zero_padded_segment_and_its_totals(_tmp):
@@ -270,7 +275,8 @@ def test_the_modules_need_no_configuration_of_their_own(_tmp):
     refused = subprocess.run(
         [sys.executable, '-c', 'import daedalus_bridge.segment_store'],
         env=env, capture_output=True, text=True, check=False)
-    assert refused.returncode != 0, refused.stdout
+    assert refused.returncode != 0, refused.stderr
+    assert 'DAEDALUS_DIR' in refused.stderr, refused.stderr
     stubbed = subprocess.run(
         [sys.executable, '-c', _STUBBED_IMPORT],
         env=env, capture_output=True, text=True, check=False)
@@ -281,10 +287,6 @@ _STUBBED_IMPORT = """
 import sys, types
 import daedalus_bridge
 stub = types.ModuleType('daedalus_bridge.segment_store')
-stub.seg_lock = __import__('threading').Lock()
-class SegmentRecordError(Exception):
-    pass
-stub.SegmentRecordError = SegmentRecordError
 sys.modules['daedalus_bridge.segment_store'] = stub
 daedalus_bridge.segment_store = stub
 import daedalus_bridge.segment_routes
