@@ -81,28 +81,32 @@ def test_state_neutral_short_circuits_scale_linearly(tmp):
     assert wide <= narrow * 2, (narrow, wide)
 
 
-def _js_scan_seconds(tmp, count):
-    source = Path(tmp) / f'js_calls_{count}.js'
+def _js_member_scan_seconds(tmp, count):
+    source = Path(tmp) / f'js_member_calls_{count}.js'
     lines = ["const ordinary = () => undefined;\n"]
     for index in range(count):
         lines.append(f"const sender{index} = extCmd;\n")
         lines.append(
-            f"sender{index}('focus-tab', {{ tab: 'extension' }});\n")
+            f"const run{index} = () => sender{index}('focus-tab', "
+            "{ tab: chromeTab });\n")
+        lines.append(f"const box{index} = {{ run: run{index} }};\n")
+        lines.append(f"box{index}.run();\n")
     source.write_text(''.join(lines), encoding='utf-8')
     started = time.perf_counter()
-    assert not js_tab_routing_violations(source, source.name)
+    violations = js_tab_routing_violations(source, source.name)
+    assert len(violations) == count, (count, len(violations))
     return time.perf_counter() - started
 
 
 def test_javascript_call_replay_scales_without_global_rescans(tmp):
     samples = [
-        (count, median(_js_scan_seconds(tmp, count) for _ in range(3)))
-        for count in range(10, 81, 10)
+        (count, median(
+            _js_member_scan_seconds(tmp, count) for _ in range(3)))
+        for count in (200, 400, 800, 1600)
     ]
-    narrow = samples[0][1]
-    wide = samples[-1][1]
-    assert wide < 1.5, samples
-    assert wide <= narrow * 12, samples
+    assert samples[-1][1] < 3.0, samples
+    for (_, smaller), (_, larger) in zip(samples, samples[1:]):
+        assert larger <= smaller * 2.7, samples
 
 
 def main():
