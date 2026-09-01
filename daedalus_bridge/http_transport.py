@@ -7,11 +7,11 @@ stay free of the socket: each returns an answer — a `(status, payload)`
 pair, a `FileAnswer` or a `BytesAnswer` — and the handler writes it with
 `answer`.
 
-This is the one bridge module that reads `daedalus_bridge.config` directly,
-because it is transport rather than a route: a route takes its directories
-and limits as parameters. That is also why the answer types are defined in
-`daedalus_bridge.route_answer` and only re-exported here: a route module that
-imported them from this one would inherit the configuration requirement.
+Besides `result_store` and `segment_store`, this is the only bridge module
+that reads `daedalus_bridge.config`, because it is transport rather than a
+route: a route takes its directories and limits as parameters. That is also
+why the answer types are defined in `route_answer` and only re-exported here
+— a route importing them from this one would inherit that requirement.
 """
 import ctypes, ctypes.util
 import hmac, json, shutil
