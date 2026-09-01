@@ -240,7 +240,9 @@ def test_a_slow_result_post_cannot_preempt_the_consume_wait(tmp):
         failure = _harness_failure(
             _worker(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
-            wait_between=True, inner_wait=1)
+            wait_between=True, inner_wait=1,
+            # outer_slack restores the 14s backstop at zero wall-clock cost.
+            outer_slack=7)
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure

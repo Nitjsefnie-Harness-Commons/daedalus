@@ -435,6 +435,25 @@ def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
             'result POST can still reach the child backstop')
 
 
+def test_the_overlap_harness_backstop_takes_outer_slack(tmp):
+    """Outer slack widens the child backstop without moving an inner bound.
+
+    A caller that shrinks its inner waits keeps its outer backstop: slack is
+    added once, after every bounded wait, so the parameter moves only the
+    insurance against an unbounded result POST and costs no wall time when
+    the child ends on its own schedule.
+    """
+    del tmp
+    bound = _overlap.overlap_child_timeout(['a'], False, 1, outer_slack=7)
+    assert bound == 12, (
+        'outer_slack lands after every bounded wait: '
+        f'1 * (3 + 1 + 0 + 1) + 7 == 12, not {bound}')
+    default = _overlap.overlap_child_timeout(['a'], False, 1)
+    assert default == 5, (
+        'the no-slack backstop over one result is unchanged: '
+        f'1 * (3 + 1 + 0 + 1) + 0 == 5, not {default}')
+
+
 def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
     """A failure the console cannot spell must still be reported.
 
