@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _noglibc  # noqa: E402
 import _util  # noqa: E402
 
 # The module reads only the byte limits out of daedalus_bridge.config, which
@@ -194,25 +195,6 @@ def test_the_answer_types_import_without_daedalus_configuration(_tmp):
     assert done.returncode == 0, done.stderr
 
 
-def _no_glibc_path(tmp):
-    """A PYTHONPATH directory whose sitecustomize hides libc from ctypes.
-
-    `find_library('c')` is what the tuning setup resolves, so pointing it at
-    a name no loader can open drives the unavailable branch on a glibc host
-    as well — deterministically, and without touching any other library.
-    """
-    directory = Path(tmp) / 'noglibc'
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / 'sitecustomize.py').write_text(
-        'import ctypes.util\n'
-        '_real = ctypes.util.find_library\n'
-        'ctypes.util.find_library = (\n'
-        "    lambda name: 'daedalus-absent-libc.so'\n"
-        "    if name == 'c' else _real(name))\n",
-        encoding='utf-8')
-    return str(directory)
-
-
 def test_importing_the_transport_prints_nothing(tmp):
     """The tuning diagnostic is startup output, not import output.
 
@@ -223,12 +205,12 @@ def test_importing_the_transport_prints_nothing(tmp):
     """
     env = dict(os.environ)
     env['PYTHONPATH'] = os.pathsep.join(
-        [_no_glibc_path(tmp), str(_util.ROOT)])
+        [_noglibc.no_glibc_pythonpath(tmp), str(_util.ROOT)])
+    program = ('import daedalus_bridge.http_transport as t\n'
+               'import sys\n'
+               'sys.stderr.write(repr(t.malloc_tuning_note()))\n')
     done = subprocess.run(
-        [sys.executable, '-c',
-         'import daedalus_bridge.http_transport as t\n'
-         'import sys\n'
-         'sys.stderr.write(repr(t.malloc_tuning_note()))\n'],
+        [sys.executable, '-c', program],
         env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     assert done.stdout == '', done.stdout
