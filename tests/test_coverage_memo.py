@@ -157,22 +157,31 @@ def test_the_materialised_nodes_match_a_fresh_walk(tmp):
 
 
 def test_a_different_analyser_is_not_served_the_earlier_answer(tmp):
-    """The analyser is part of the key, so a swap is a miss."""
+    """The analyser is part of the key, so a swap is a miss.
+
+    The replacement wears the name of the analyser that filled the memo,
+    because a patched `_analyze` is what a caller actually installs. A
+    key recording `__name__` or `__qualname__` rather than the object
+    would serve it the earlier answer, and only identity separates them.
+    """
     root = _tree(tmp, {
         'probe_analyser.py': _SAFE.format(note='memo analyser probe')})
-    _, before = _recorded_analyses(root, 1)
     real = _coverage_guard._analyze
+    scan = _coverage_guard._coverage_environment_violations
+    before = scan(root)
 
     def stricter(relative, source, keeps):
         return real(relative, source, keeps) + [f'{relative}: stricter']
 
+    stricter.__name__ = real.__name__
+    stricter.__qualname__ = real.__qualname__
     _coverage_guard._analyze = stricter
     try:
-        after = _coverage_guard._coverage_environment_violations(root)
+        after = scan(root)
     finally:
         _coverage_guard._analyze = real
     marker = 'tests/probe_analyser.py: stricter'
-    assert marker not in before[0], before
+    assert marker not in before, before
     assert marker in after, after
 
 
@@ -193,6 +202,8 @@ def test_the_node_cache_does_not_outlive_the_trees_it_walked(tmp):
         'probe_weak.py': _BOUND.format(note='memo weak key probe')})
     _recorded_analyses(root, 1)
     gc.collect()
+    # Process-global state: a later control here that parks a module tree
+    # at module scope would leave an entry and fail this spuriously.
     assert len(_coverage_memo._BELOW) == 0, list(_coverage_memo._BELOW)
 
 
