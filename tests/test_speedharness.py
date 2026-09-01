@@ -16,7 +16,6 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _speedharness  # noqa: E402
 import _util  # noqa: E402
-from _speedharness import run_workflow_script  # noqa: E402
 
 
 def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
@@ -34,7 +33,7 @@ def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
         'wait')
 
     try:
-        run_workflow_script(tmp, script, {}, timeout=2)
+        _speedharness.run_workflow_script(tmp, script, {}, timeout=2)
     except subprocess.TimeoutExpired as failure:
         output_files = getattr(failure, 'output_files', {})
         assert isinstance(output_files, dict) and output_files, failure
@@ -90,7 +89,8 @@ def test_the_harness_bounds_cleanup_when_tree_kill_fails(tmp):
             mock.patch.object(_speedharness, '_kill_process_tree',
                               return_value='simulated tree-kill failure'):
         try:
-            run_workflow_script(tmp, 'printf started', {}, timeout=0.01)
+            _speedharness.run_workflow_script(
+                tmp, 'printf started', {}, timeout=0.01)
         except subprocess.TimeoutExpired as failure:
             assert failure.timeout == 0.01, failure
             cleanup = getattr(failure, 'cleanup_diagnostic', None)
