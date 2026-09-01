@@ -21,6 +21,7 @@ BRIDGE_PACKAGE = (
     'config.py',
     'delivery_stripes.py',
     'env_config.py',
+    'http_transport.py',
     'log_safe.py',
     'mcp_bootstrap.py',
     'parent_watch.py',
