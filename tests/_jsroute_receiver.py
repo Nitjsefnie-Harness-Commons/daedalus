@@ -6,9 +6,10 @@ from _jsroute_calls import parameter_sources
 from _jsroute_source import BUILTIN_CHAINS, record_work
 
 
-def target(status, binding=None, body=None, member=None, name=None):
+def target(status, binding=None, body=None, member=None, name=None,
+           source=None):
     return {'status': status, 'binding': binding, 'body': body,
-            'member': member, 'name': name}
+            'member': member, 'name': name, 'source': source}
 
 
 def _trim(mask, left, right):
@@ -34,6 +35,32 @@ def _segments(mask, start, end):
             left = position + 1
     found.append((left, end))
     return found
+
+
+class _History:
+    """A sorted history whose real entry reads are charged."""
+
+    def __init__(self, work):
+        self.items = []
+        self.work = work
+
+    def append(self, item):
+        self.items.append(item)
+
+    def sort(self):
+        self.items.sort()
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, index):
+        record_work(self.work, 'receiver_history_entries')
+        return self.items[index]
+
+    def __iter__(self):
+        for item in self.items:
+            record_work(self.work, 'receiver_history_entries')
+            yield item
 
 
 class ReceiverIndex:
@@ -65,6 +92,11 @@ class ReceiverIndex:
         self._index_functions()
         self._index_member_writes()
 
+    def _history(self, index, key):
+        if key not in index:
+            index[key] = _History(self.work)
+        return index[key]
+
     def computed_key(self, key):
         record_work(self.work, 'receiver_computed_queries')
         if not isinstance(key, tuple):
@@ -92,20 +124,40 @@ class ReceiverIndex:
             binding, key, position, seen, env or {})
 
     def returned_member(self, name, opening, close, key, position):
-        binding = self.visible_binding(name, position)
-        body = self._callable_body(binding, position)
+        body, env = self._call_environment(
+            name, opening, close, position)
         if body is None:
             return target('unprovable')
-        scope = self._scope_for(body)
-        if scope is None:
-            return target('unprovable')
-        args = self.split(self.mask, self.text, opening + 1, close - 1)
-        env = self._argument_environment(scope, args)
         expression = self._returned_expression(body)
         if expression is None:
             return target('unprovable')
         return self._member_from_span(
             expression, key, expression[0], frozenset(), env)
+
+    def constructed_member(self, name, opening, close, key, position):
+        body, env = self._call_environment(
+            name, opening, close, position)
+        if body is None:
+            return target('unprovable')
+        pattern = re.compile(
+            r'\bthis\s*\.\s*' + re.escape(key) + r'\s*=(?!=|>)')
+        found = list(pattern.finditer(self.mask, body[1], body[2]))
+        if len(found) != 1:
+            return target('unprovable')
+        start = found[0].end()
+        end = min(self.expression_end(self.mask, start), body[2])
+        return self.callable_value((start, end), env)
+
+    def _call_environment(self, name, opening, close, position):
+        binding = self.visible_binding(name, position)
+        body = self._callable_body(binding, position)
+        if body is None:
+            return None, None
+        scope = self._scope_for(body)
+        if scope is None:
+            return None, None
+        args = self.split(self.mask, self.text, opening + 1, close - 1)
+        return body, self._argument_environment(scope, args)
 
     def known_array(self, name, position, seen=frozenset()):
         binding = self.visible_binding(name, position)
@@ -123,7 +175,7 @@ class ReceiverIndex:
         return bool(alias and self.known_array(
             alias.group(), left, seen | {binding}))
 
-    def callable_value(self, span):
+    def callable_value(self, span, env=None):
         left, right = self._unwrap(span)
         body = self.body_at(self.mask, left)
         if body is not None:
@@ -143,7 +195,9 @@ class ReceiverIndex:
         if re.fullmatch(r'[\w$]+', name):
             binding = self.visible_binding(name, left)
             if binding is not None:
-                return target('known', binding=binding)
+                source = env.get(binding) if env is not None else None
+                return target(
+                    'known', binding=binding, source=source)
         return target('unprovable')
 
     def _member_binding(self, binding, key, position, seen, env):
@@ -196,11 +250,17 @@ class ReceiverIndex:
         if call is not None:
             return self.returned_member(
                 call[0], call[1], call[2], key, left)
+        constructor = self._constructor_call(left, right)
+        if constructor is not None:
+            if self.visible_binding(constructor[0], left) is None:
+                return target('irrelevant')
+            return self.constructed_member(
+                constructor[0], constructor[1], constructor[2], key, left)
         status, value = self._property_span(
             span, key, position, seen, env)
         if status != 'known':
             return target(status)
-        return self.callable_value(value)
+        return self.callable_value(value, env)
 
     def _property_span(self, span, key, position, seen, env):
         left, right = self._unwrap(span)
@@ -318,6 +378,14 @@ class ReceiverIndex:
         return ((found.group(1), opening, self.pair_end[opening])
                 if self.pair_end.get(opening) == right else None)
 
+    def _constructor_call(self, left, right):
+        found = re.match(r'new\s+([\w$]+)\s*\(', self.mask[left:right])
+        if found is None:
+            return None
+        opening = left + found.end() - 1
+        return ((found.group(1), opening, self.pair_end[opening])
+                if self.pair_end.get(opening) == right else None)
+
     def _unwrap(self, span):
         left, right = _trim(self.mask, *span)
         while (self.mask[left:left + 1] == '('
@@ -361,7 +429,7 @@ class ReceiverIndex:
         for match in bindings:
             binding = self.visible_binding(match.group(1), match.start())
             if binding is not None:
-                self.values.setdefault(binding, []).append(
+                self._history(self.values, binding).append(
                     (match.start(), self._expression_span(match.end())))
 
     def _index_functions(self):
@@ -371,7 +439,7 @@ class ReceiverIndex:
             binding = self.visible_binding(match.group(1), match.start())
             body = self.body_at(self.mask, match.start())
             if binding is not None and body is not None:
-                self.values.setdefault(binding, []).append(
+                self._history(self.values, binding).append(
                     (binding[1], (match.start(), body[2])))
         for entries in self.values.values():
             entries.sort()
@@ -392,12 +460,12 @@ class ReceiverIndex:
                 key = match.group(2) if source is self.mask else match.group(3)
                 span = self._expression_span(match.end())
                 if owner in ('globalThis', 'window'):
-                    self.globals.setdefault(key, []).append(
+                    self._history(self.globals, key).append(
                         (match.start(), span))
                     continue
                 binding = self.visible_binding(owner, match.start())
                 if binding is not None:
-                    self.members.setdefault((binding, key), []).append(
+                    self._history(self.members, (binding, key)).append(
                         (match.start(), span))
         for entries in (*self.members.values(), *self.globals.values()):
             entries.sort()
@@ -409,5 +477,5 @@ class ReceiverIndex:
             r'(["\'])([^"\']+)\2')
         for match in pattern.finditer(self.text):
             if self.mask[match.start()] == self.text[match.start()]:
-                self.computed.setdefault(match.group(1), []).append(
+                self._history(self.computed, match.group(1)).append(
                     (match.start(), match.group(3)))
