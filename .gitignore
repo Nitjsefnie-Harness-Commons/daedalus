@@ -97,6 +97,7 @@
 !/daedalus_bridge/parent_watch.py
 !/daedalus_bridge/path_safety.py
 !/daedalus_bridge/result_store.py
+!/daedalus_bridge/route_answer.py
 !/daedalus_bridge/segment_store.py
 !/daedalus_bridge/static_routes.py
 !/daedalus_bridge/stream_route.py

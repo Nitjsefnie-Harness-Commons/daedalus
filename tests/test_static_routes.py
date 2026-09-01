@@ -8,17 +8,10 @@ as a parameter rather than importing `config`.
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
-
-# The answer types live in the transport module, which still refuses to import
-# without these two. Nothing is written under the root, so the system temp
-# directory serves and no fixture tree is left behind.
-os.environ.setdefault('DAEDALUS_DIR', tempfile.gettempdir())
-os.environ.setdefault('DAEDALUS_PORT', '0')
 
 
 def _load(name):
@@ -92,26 +85,15 @@ def test_dashboard_asset_refuses_a_directory_as_not_found(tmp):
         404, {'error': 'not found'})
 
 
-def test_the_module_imports_without_the_bridge_server(tmp):
-    """A route module stands alone: no `server.py`, no config of its own.
-
-    It reaches `daedalus_bridge.config` only through the transport module the
-    answer types live in, so the subprocess gets the two variables that
-    module's import chain requires and nothing else.
-    """
+def test_the_module_imports_without_daedalus_configuration(_tmp):
+    """A route module never imports config, so it needs no environment."""
     env = {k: v for k, v in os.environ.items()
            if not k.startswith('DAEDALUS_')}
     env['PYTHONPATH'] = str(_util.ROOT)
-    env['DAEDALUS_DIR'] = str(tmp)
-    env['DAEDALUS_PORT'] = '0'
     done = subprocess.run(
         [sys.executable, '-c', 'import daedalus_bridge.static_routes'],
         env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
-    source = (_util.ROOT / 'daedalus_bridge' / 'static_routes.py').read_text(
-        encoding='utf-8')
-    assert 'daedalus_bridge.config' not in source, source
-    assert 'import server' not in source, source
 
 
 def main():

@@ -9,16 +9,19 @@ pair, a `FileAnswer` or a `BytesAnswer` — and the handler writes it with
 
 This is the one bridge module that reads `daedalus_bridge.config` directly,
 because it is transport rather than a route: a route takes its directories
-and limits as parameters.
+and limits as parameters. That is also why the answer types are defined in
+`daedalus_bridge.route_answer` and only re-exported here: a route module that
+imported them from this one would inherit the configuration requirement.
 """
 import ctypes, ctypes.util
-import hmac, json, pathlib, shutil, typing
+import hmac, json, shutil
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.transport import token as _configured_token
 from daedalus_bridge import path_safety
+from daedalus_bridge.route_answer import BytesAnswer, FileAnswer
 from daedalus_bridge.config import (
     MAX_BODY_SIZE, MAX_JSON_DEPTH, MAX_UNAUTHENTICATED_BODY,
 )
@@ -92,19 +95,6 @@ def json_nests_deeper_than(raw, limit):
 
 
 UNDECLARED_BODY_DRAIN_SECONDS = 0.25
-
-
-class FileAnswer(typing.NamedTuple):
-    """A stored file to stream back, and the type to serve it as."""
-    path: pathlib.Path
-    mime: str
-
-
-class BytesAnswer(typing.NamedTuple):
-    """A body already in memory, its type, and extra response headers."""
-    data: bytes
-    mime: str
-    headers: tuple
 
 
 class JSONObject(dict):

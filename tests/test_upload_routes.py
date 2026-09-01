@@ -11,18 +11,11 @@ import base64
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
-
-# The answer types live in the transport module, which still refuses to import
-# without these two. Nothing is written under the root, so the system temp
-# directory serves and no fixture tree is left behind.
-os.environ.setdefault('DAEDALUS_DIR', tempfile.gettempdir())
-os.environ.setdefault('DAEDALUS_PORT', '0')
 
 
 def _load(name):
@@ -229,6 +222,24 @@ def test_named_upload_refuses_a_non_screenshot_suffix(tmp):
         404, {'error': 'no screenshot'})
 
 
+def test_an_uppercase_suffix_is_typed_differently_by_each_route(tmp):
+    """The two routes derive the format differently, and always have.
+
+    `named_upload` lowercases the suffix before typing it, so `.PNG` serves
+    as an image. `latest_screenshot` lowercases only to DISCOVER the file and
+    then types the raw suffix, so the same file serves as a byte stream. Both
+    derivations moved verbatim; this pins the wire behaviour so a later edit
+    that harmonises them is a visible decision rather than a silent one.
+    """
+    routes = _load('fixture_upload_routes_uppercase')
+    _store(tmp, 'tok', 'id1', 'SHOT.PNG', b'IMG')
+    named = routes.named_upload(Path(tmp), 'tok', 'tok/id1/SHOT.PNG')
+    assert named.mime == 'image/png', named
+    latest = routes.latest_screenshot(Path(tmp), 'tok', {})
+    assert latest.path.name == 'SHOT.PNG', latest
+    assert latest.mime == 'application/octet-stream', latest
+
+
 def test_screenshot_mime_maps_every_served_format(_tmp):
     routes = _load('fixture_upload_routes_mime')
     assert routes.screenshot_mime('png') == 'image/png'
@@ -252,26 +263,15 @@ def test_stored_uploads_orders_newest_id_first_and_names_within(tmp):
     assert listed == [('new', 'c.png'), ('old', 'a.png'), ('old', 'b.png')]
 
 
-def test_the_module_imports_without_the_bridge_server(tmp):
-    """A route module stands alone: no `server.py`, no config of its own.
-
-    It reaches `daedalus_bridge.config` only through the transport module the
-    answer types live in, so the subprocess gets the two variables that
-    module's import chain requires and nothing else.
-    """
+def test_the_module_imports_without_daedalus_configuration(_tmp):
+    """A route module never imports config, so it needs no environment."""
     env = {k: v for k, v in os.environ.items()
            if not k.startswith('DAEDALUS_')}
     env['PYTHONPATH'] = str(_util.ROOT)
-    env['DAEDALUS_DIR'] = str(tmp)
-    env['DAEDALUS_PORT'] = '0'
     done = subprocess.run(
         [sys.executable, '-c', 'import daedalus_bridge.upload_routes'],
         env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
-    source = (_util.ROOT / 'daedalus_bridge' / 'upload_routes.py').read_text(
-        encoding='utf-8')
-    assert 'daedalus_bridge.config' not in source, source
-    assert 'import server' not in source, source
 
 
 def main():

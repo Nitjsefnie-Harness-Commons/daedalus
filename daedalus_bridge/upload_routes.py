@@ -10,7 +10,7 @@ import pathlib
 import shutil
 import time
 
-from daedalus_bridge.http_transport import FileAnswer
+from daedalus_bridge.route_answer import FileAnswer
 from daedalus_bridge import path_safety
 
 

@@ -27,6 +27,7 @@ BRIDGE_PACKAGE = (
     'parent_watch.py',
     'path_safety.py',
     'result_store.py',
+    'route_answer.py',
     'segment_store.py',
     'static_routes.py',
     'stream_route.py',
