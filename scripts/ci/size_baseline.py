@@ -48,6 +48,7 @@ BASELINE = {
     'tests/test_mcp_server.py': 1718,
     'tests/test_cli.py': 1254,
     'tests/test_bridge_results.py': 1343,
+    'tests/test_speed_gate.py': 742,
 }
 
 _ENTRY = re.compile(r"^(?P<indent>\s*)'(?P<path>[^']+)': (?P<size>\d+),\s*$")
