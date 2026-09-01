@@ -1072,7 +1072,9 @@ jobs:
               test_worker_route_guard.py
           - group: dashboard
             suites: >-
-              test_dashboard_*.py test_overlap_harness.py test_js_lines.py
+              test_dashboard_*.py test_js_lines.py
+          - group: overlap
+            suites: test_overlap_harness.py
           - group: tab-routing
             suites: test_tab_routing.py
           - group: catchall
