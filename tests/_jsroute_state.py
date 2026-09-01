@@ -64,7 +64,9 @@ def sender_query_index(requests, scopes, events, invocations, replay,
                 states[target] = (
                     context['merged_sender'](states.get(target), value)
                     if optional else value)
-            if request['kind'] == 'binding':
+            if request['kind'] == 'literal':
+                value = request['value']
+            elif request['kind'] == 'binding':
                 value = states.get(request['value'])
             else:
                 start, end = request['value']
@@ -88,8 +90,17 @@ def build_sender_queries(candidate_bindings, reached_calls, scopes, events,
     for call in invocations:
         if (call['binding'] in candidate_bindings
                 and call['start'] not in reached_calls):
+            source = call['source']
+            if source is None:
+                kind, value = 'binding', call['binding']
+            elif source['status'] == 'known' and source['span'] is not None:
+                kind, value = 'span', source['span']
+            elif source['status'] == 'empty':
+                kind, value = 'literal', None
+            else:
+                kind, value = 'literal', context['unprovable']
             call_queries[id(call)] = request_sender(
-                call['start'], 'binding', call['binding'])
+                call['start'], kind, value)
     record_senders = {}
     for records in reached_calls.values():
         for record in records:

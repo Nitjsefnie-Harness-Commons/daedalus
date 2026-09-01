@@ -280,9 +280,10 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
     return candidates
 
 
-def _target(status, binding=None, body=None, member=None, name=None):
+def _target(status, binding=None, body=None, member=None, name=None,
+            source=None):
     return {'status': status, 'binding': binding, 'body': body,
-            'member': member, 'name': name}
+            'member': member, 'name': name, 'source': source}
 
 
 def _identifier_before(mask, pos):
@@ -362,6 +363,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         body = None
         member = None
         name = None
+        source = None
         call_mode = None
         start = opening
         if before >= 1 and mask[before - 1:before + 1] == '?.':
@@ -379,6 +381,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 body = target['body']
                 member = target['member']
                 name = target['name']
+                source = target['source']
                 start = owner_start
             else:
                 binding = visible_binding(name, start)
@@ -433,6 +436,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 member = target['member']
                 start = owner_start
                 name = target['name']
+                source = target['source']
             else:
                 binding = visible_binding(name, start)
                 status = ('known' if binding is not None
@@ -471,6 +475,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             body = target['body']
             member = target['member']
             name = target['name']
+            source = target['source']
             start = owner_start
         elif before >= 0 and mask[before] == ')':
             wrapper = pair_start.get(before)
@@ -505,6 +510,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 body = applied['body']
                 member = applied['member']
                 name = applied['name']
+                source = applied['source']
                 call_mode = 'reflect_apply'
         if call_mode == 'call':
             args = args[1:] if args else []
@@ -526,7 +532,8 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             'start': start, 'order': close - 1,
             'binding': binding, 'args': args, 'body': body,
             'status': status, 'scope': scope_at(start), 'name': name,
-            'member': member, 'parent': False, 'argument_calls': []})
+            'member': member, 'source': source, 'parent': False,
+            'argument_calls': []})
     calls.sort(key=lambda call: (call['order'], call['start']))
     nesting = []
     for parent in calls:

@@ -21,7 +21,7 @@ from _jsroute_timeline import (  # noqa: E402
     function_reference, lexical_limits)
 from _jsroute_state import build_sender_queries  # noqa: E402
 from _jsroute_source import (SourceIndex, function_body_at,  # noqa: E402
-                             statement_end)
+                             record_work, statement_end)
 from _jsroute_receiver import ReceiverIndex  # noqa: E402
 
 
@@ -530,7 +530,6 @@ def js_tab_routing_violations(path, rel, work=None):
                 record[0]['start'], []).append(record)
         reached_unknowns.extend(result.unknowns)
         previous_call = call['order']
-
     candidate_bindings = sender_candidate_bindings(
         scopes, bindings, mask, visible_binding, js_expression_end,
         senders, invocation_resolution['receivers'].callable_value)
@@ -558,17 +557,19 @@ def js_tab_routing_violations(path, rel, work=None):
         kind, value = record_senders[id(record)]
         return sender_answers[value] if kind == 'query' else value
 
-    def names_before(limit, depth, floor=0):
-        """Tracked state of named objects from the assignments before `limit`.
+    name_progress = {}
 
-        Judging every call against end-of-file state let a later, unrelated
-        `const f = {...}` erase an earlier violation, so the walk stops at
-        the call. `floor` restricts the walk to one function body.
-        """
-        named = {}
-        for start, kind, m in events:
+    def names_before(limit, depth, floor=0):
+        previous, cursor, named = name_progress.get(
+            (depth, floor), (-1, 0, {}))
+        if limit < previous:
+            cursor, named = 0, {}
+        while cursor < len(events):
+            record_work(work, 'named_event_visits')
+            start, kind, m = events[cursor]
             if start >= limit:
                 break
+            cursor += 1
             if start < floor:
                 continue
             if kind == 'init':
@@ -624,6 +625,7 @@ def js_tab_routing_violations(path, rel, work=None):
                     state = {}
                 state['tab'] = (line_of(m.start()), text[eq + 1:semi].strip())
                 named[name] = state
+        name_progress[(depth, floor)] = (limit, cursor, named)
         return named
 
     def argument_state(span, named):
