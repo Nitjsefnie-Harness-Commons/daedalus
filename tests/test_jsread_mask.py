@@ -44,6 +44,14 @@ _TEMPLATE_CASES = [
      "let send = extCmd;\n"
      "const obj = { hook: `t${(send = ordinary, 1)}t` };\n"
      "send('focus-tab', { tab: chromeTab });\n"),
+    ('object-before-write', True,
+     "let send = ordinary;\n"
+     "const o = { h: `${ {a: 1} && (send = extCmd, 1)}` };\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('object-before-demotion', False,
+     "let send = extCmd;\n"
+     "const o = { h: `${ {a: 1} && (send = ordinary, 1)}` };\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
     ('promotion-then-demotion', False,
      "let send = ordinary;\n"
      "const obj = { hook: `t${(send = extCmd, 1)}t` };\n"
@@ -123,6 +131,7 @@ def test_template_mask_reveals_interpolations_only(tmp):
     mask = js_mask(literal)
     assert len(mask) == len(literal), mask
     assert 'send = extCmd' in mask, mask
+    assert '${' in mask, mask
     assert '`' not in mask, mask
     escaped = "`a\\${(send = extCmd, 1)}b`"
     assert js_mask(escaped) == ' ' * len(escaped), escaped
@@ -134,6 +143,10 @@ def test_template_mask_reveals_interpolations_only(tmp):
     multiline = "`a${x\ny}b`\nlet after;\n"
     assert js_mask(multiline).count('\n') == multiline.count('\n'), (
         js_mask(multiline))
+    raw_newline = "`chunk\nnext`"
+    line_continuation = "`chunk\\\nnext`"
+    newline_masks = (js_mask(raw_newline), js_mask(line_continuation))
+    assert newline_masks == ("      \n     ", "       \n     "), newline_masks
 
 
 def main():

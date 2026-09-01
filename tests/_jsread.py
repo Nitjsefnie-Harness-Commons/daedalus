@@ -64,7 +64,8 @@ def js_mask(text):
     from literal text. A template literal is walked with a nesting stack: its
     literal chunks blank like any string, while an interpolation is code, so
     it stays visible with its `${` and closing `}` intact and the brackets,
-    commas and colons inside it count for depth."""
+    commas and colons inside it count for depth. A regex literal containing
+    `}` inside an interpolation remains a documented blind spot."""
     out = []
     i, n = 0, len(text)
     templates = []
@@ -79,7 +80,8 @@ def js_mask(text):
                 i += 2
                 continue
             elif char == '\\' and i + 1 < n:
-                out.append('  ')
+                out.append(' ')
+                out.append(text[i + 1] if text[i + 1] == '\n' else ' ')
                 i += 2
                 continue
             out.append(char if char == '\n' else ' ')
