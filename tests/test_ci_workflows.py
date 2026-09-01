@@ -296,6 +296,23 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
         assert 'coverage==' not in job, f'{name} duplicated the version pin'
 
 
+def test_the_speed_venvs_install_the_test_requirements(tmp):
+    """The timed cells' virtualenvs can run every suite the cell selects.
+
+    The coverage suites import `coverage`, which only requirements-test.txt
+    carries, and a venv built without it empties those suites rather than
+    failing them -- the shape the comparator's zero-suite guard exists for.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'speed.yml').read_text(
+        encoding='utf-8')
+    _, marker, after = workflow.partition(
+        '- name: Build one virtualenv per side\n')
+    assert marker, 'the venv step is not named the way this test finds it'
+    step, _, _ = after.partition('- name:')
+    assert '-r "./${side}/requirements-test.txt"' in step, step
+
+
 def test_permission_whitespace_mutation_is_refused(tmp):
     del tmp
     workflow = _tests_yml()
