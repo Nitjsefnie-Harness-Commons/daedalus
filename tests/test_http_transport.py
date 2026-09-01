@@ -108,19 +108,27 @@ def test_answer_writes_a_bytes_answer_with_extra_headers(_tmp):
     assert stub.status == 200, stub.status
     assert stub.headers_sent['Content-Type'] == 'text/html; charset=utf-8'
     assert stub.headers_sent['Content-Length'] == '6', stub.headers_sent
+    assert stub.headers_sent['Cache-Control'] == 'no-cache'
     assert stub.headers_sent['X-Frame-Options'] == 'DENY'
     assert stub.wfile.getvalue() == b'<html>'
 
 
-def test_answer_refuses_none(_tmp):
-    """A route that forgot to answer is a programming error, not a 200."""
-    stub = _Stub()
-    try:
-        stub.answer(None)
-    except TypeError:
-        assert stub.status is None, stub.status
-        return
-    raise AssertionError('answer(None) was accepted')
+def test_answer_refuses_a_value_that_is_not_an_answer(_tmp):
+    """A route that forgot to answer is a programming error, not a 200.
+
+    A bare payload is the shape a route is likeliest to return by mistake,
+    so it is refused for the same reason None is: neither says a status,
+    and inventing 200 for one would serve an error body as a success.
+    """
+    for wrong in (None, {'error': 'teapot'}):
+        stub = _Stub()
+        try:
+            stub.answer(wrong)
+        except TypeError:
+            assert stub.status is None, (wrong, stub.status)
+            assert stub.wfile.getvalue() == b'', (wrong, stub.wfile.getvalue())
+            continue
+        raise AssertionError(f'answer({wrong!r}) was accepted')
 
 
 def test_declared_body_length_rules_survive_the_move(_tmp):
