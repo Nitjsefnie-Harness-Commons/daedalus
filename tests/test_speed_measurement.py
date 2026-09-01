@@ -6,11 +6,9 @@ rounds rather than per-test minima, and takes the median of the paired ratios.
 Each of those is a decision about what a number is allowed to describe, so
 these tests drive the comparison with rounds that disagree.
 """
-import io
 import json
 import subprocess
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -612,72 +610,67 @@ def _run_timing(tmp, tree, extra=(), expected=0):
     return out
 
 
-def test_timing_ignores_results_relayed_by_a_nested_instrument(tmp):
-    """Results inside a relayed timing span are not this suite's tests."""
+def _report_names(tmp, extra=(), expected=0):
+    out = _run_timing(tmp, _selection_tree(tmp), extra, expected)
+    return sorted(path.name for path in out.glob('*.json'))
+
+
+def test_timing_does_not_record_a_relayed_fixture_result(tmp):
     tree = _selection_tree(tmp)
     (tree / 'tests' / 'test_bridge_one.py').write_text(
-        'import sys; print("  PASS  own_before"); '
-        'print("=== fixture.py ==="); print("  PASS  test_a"); '
+        'print("  PASS  own_before"); print("=== fixture.py ==="); '
+        'print("  PASS  test_a"); '
         'print("--- timed 1 passing tests in fixture.py"); '
-        'print("  PASS  own_after"); print("2/2 passed"); '
-        'sys.exit(0)\n', encoding='utf-8')
+        'print("  PASS  own_after")', encoding='utf-8')
     out = _run_timing(tmp, tree, ('--only', 'test_bridge_one.py'))
-    durations = json.loads(
-        (out / 'test_bridge_one.json').read_text(encoding='utf-8'))['tests']
-    assert set(durations) == {'own_before', 'own_after'}
-
-
-def test_timing_does_not_suppress_results_after_an_unmatched_closer(tmp):
-    """An end marker without an open span leaves later results visible."""
-    tree = _selection_tree(tmp)
-    (tree / 'tests' / 'test_bridge_one.py').write_text(
-        'import sys; print("--- timed 1 passing tests in fixture.py"); '
-        'print("  PASS  x"); print("1/1 passed"); sys.exit(0)\n',
-        encoding='utf-8')
-    with redirect_stdout(io.StringIO()):
-        durations = _time_tests().time_suite(
-            sys.executable, tree / 'tests' / 'test_bridge_one.py', tree)
-    assert set(durations) == {'x'}
+    report = out / 'test_bridge_one.json'
+    names = json.loads(report.read_text(encoding='utf-8'))['tests']
+    assert set(names) == {'own_before', 'own_after'}
 
 
 def test_timing_runs_the_whole_tree_without_a_selection(tmp):
     """No selection flags, every suite timed — the callers' existing shape."""
-    tree = _selection_tree(tmp)
-    out = _run_timing(tmp, tree)
-    assert sorted(path.name for path in out.glob('*.json')) == [
+    assert _report_names(tmp) == [
         'test_bridge_one.json', 'test_bridge_two.json', 'test_cli.json']
 
 
 def test_timing_selects_only_the_suites_a_glob_names(tmp):
-    """`--only` narrows a run to suites named by its globs."""
-    tree = _selection_tree(tmp)
-    out = _run_timing(
-        tmp, tree, ('--only', 'test_bridge_*.py', 'test_cli*.py'))
-    assert sorted(path.name for path in out.glob('*.json')) == [
+    """`--only` narrows a run to the suites its globs match.
+
+    Match semantics are the pathlib ones over the suite file NAME, so a group
+    is spelled as globs such as `test_cli*.py` without repeating `tests/`.
+    """
+    assert _report_names(
+        tmp, ('--only', 'test_bridge_*.py', 'test_cli*.py')) == [
         'test_bridge_one.json', 'test_bridge_two.json', 'test_cli.json']
 
 
 def test_timing_selects_one_area_of_a_partition(tmp):
     """A cell takes a disjoint slice, and the other suites never run."""
-    tree = _selection_tree(tmp)
-    out = _run_timing(
-        tmp, tree, ('--only', 'test_cli*.py'))
-    assert [path.name for path in out.glob('*.json')] == ['test_cli.json']
+    assert _report_names(tmp, ('--only', 'test_cli*.py')) == [
+        'test_cli.json']
 
 
 def test_timing_selection_excludes_the_suites_an_except_names(tmp):
-    """`--except` drops matching suites before `--only` is applied."""
-    tree = _selection_tree(tmp)
-    out = _run_timing(
-        tmp, tree, ('--only', '*', '--except', 'test_cli*.py'))
-    assert sorted(path.name for path in out.glob('*.json')) == [
+    """`--except` drops what its globs match, before `--only` is applied.
+
+    The complement of the named groups is how the catch-all cell takes
+    everything the named groups do not match: `--only '*'` minus every named
+    glob is exactly that complement, on whatever tree the cell lands on.
+    """
+    assert _report_names(
+        tmp, ('--only', '*', '--except', 'test_cli*.py')) == [
         'test_bridge_one.json', 'test_bridge_two.json']
 
 
 def test_timing_selection_matching_nothing_is_a_failure(tmp):
-    """A selection matching no suite is a setup failure, not a fast one."""
-    tree = _selection_tree(tmp)
-    _run_timing(tmp, tree, ('--only', 'test_missing_*.py'), expected=1)
+    """A selection that matches no suite is a setup failure, not a fast one.
+
+    The unfiltered shape already refuses a tree with no suites at all; a
+    filtered shape that filtered everything out is the same measurement that
+    did not happen, so it refuses the same way.
+    """
+    _report_names(tmp, ('--only', 'test_missing_*.py'), expected=1)
 
 
 def test_timing_a_tree_that_yields_nothing_is_a_failure(tmp):

@@ -376,6 +376,7 @@
 !/tests/test_tab_routing_unprovable.py
 !/tests/test_tab_routing_yielded_sender.py
 !/tests/test_teardown_retry.py
+!/tests/test_time_tests.py
 !/tests/test_unresolved_routes.py
 !/tests/test_version_contract.py
 !/tests/test_version_contract_dashboard_duplicates.py
