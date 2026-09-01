@@ -12,6 +12,7 @@ never ran it and it only ever executed when somebody remembered it existed.
 """
 import http.client
 import importlib.util
+import json
 import os
 import socket
 import subprocess
@@ -36,6 +37,20 @@ def _open_stream(base, tab):
     response = conn.getresponse()
     assert response.status == 200, f'/stream returned {response.status}'
     return conn, response
+
+
+def _first_stream_data(response):
+    """Read an open SSE response up to its first data frame.
+
+    The connection's own socket timeout bounds the wait; keepalives arrive
+    less often than that, so a command that never reaches the stream fails
+    here rather than hanging.
+    """
+    while True:
+        line = response.readline()
+        assert line, 'the stream closed before delivering a command'
+        if line.startswith(b'data: '):
+            return json.loads(line[len(b'data: '):])
 
 
 def _wait_for_stream_count(base, expected):
@@ -505,6 +520,44 @@ def test_non_finite_command_ttl_cannot_disable_the_collector(tmp):
                 f'DAEDALUS_CMD_TTL={value!r}: exit={proc.returncode}, '
                 f'output={output!r}, retained={queued.exists()}')
     assert not failures, '\n'.join(failures)
+
+
+def test_the_stream_expires_a_command_by_the_ttl_not_the_max_age(tmp):
+    """`/stream` must forward the command TTL, not the stream's max age.
+
+    Both bounds reach `stream_route.serve_stream` as keyword floats from the
+    same call, so a swapped argument is a live hazard that no type catches.
+    Distinct values are what make the swap visible: with the max age
+    forwarded as the TTL, the stale entry is inside the bound and arrives
+    first.
+    """
+    env = {
+        'TOKEN': '',
+        'DAEDALUS_TOKEN': 'lifecycle-test',
+        'DAEDALUS_CMD_TTL': '60',
+        'DAEDALUS_STREAM_MAX_AGE': '3600',
+    }
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        qdir = Path(docroot) / 'commands' / 'lifecycle-test_extension'
+        qdir.mkdir(parents=True)
+        stale = qdir / '0000000000001_000001.json'
+        fresh = qdir / '0000000000002_000002.json'
+        stale.write_text('{"id":"older-than-the-ttl"}', encoding='utf-8')
+        fresh.write_text('{"id":"inside-the-ttl"}', encoding='utf-8')
+        now = time.time()
+        # Past the 60s TTL, far inside the 3600s max age.
+        os.utime(stale, (now - 300, now - 300))
+        os.utime(fresh, (now, now))
+
+        conn, response = _open_stream(base, 'extension')
+        try:
+            delivered = _first_stream_data(response)
+        finally:
+            response.close()
+            conn.close()
+
+        assert delivered['id'] == 'inside-the-ttl', delivered
+        assert not stale.exists(), stale
 
 
 def main():
