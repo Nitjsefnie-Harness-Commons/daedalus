@@ -333,6 +333,7 @@
 !/tests/test_js_coverage.py
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
+!/tests/test_jsread_mask.py
 !/tests/test_mcp_auth.py
 !/tests/test_mcp_entry_point.py
 !/tests/test_mcp_refusal_drain.py

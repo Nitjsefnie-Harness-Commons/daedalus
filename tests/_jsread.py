@@ -61,10 +61,30 @@ def blank_js_comments(source):
 def js_mask(text):
     """Blank string and comment contents, preserving positions and newlines,
     so structure (brackets, commas, colons) can be read without false hits
-    from literal text."""
+    from literal text. A template literal is walked with a nesting stack: its
+    literal chunks blank like any string, while an interpolation is code, so
+    it stays visible with its `${` and closing `}` intact and the brackets,
+    commas and colons inside it count for depth."""
     out = []
     i, n = 0, len(text)
+    templates = []
     while i < n:
+        char = text[i]
+        if templates and templates[-1] == 0:
+            if char == '`':
+                templates.pop()
+            elif char == '$' and text[i + 1:i + 2] == '{':
+                templates[-1] = 1
+                out.append('${')
+                i += 2
+                continue
+            elif char == '\\' and i + 1 < n:
+                out.append('  ')
+                i += 2
+                continue
+            out.append(char if char == '\n' else ' ')
+            i += 1
+            continue
         two = text[i:i + 2]
         if two == '//':
             j = text.find('\n', i)
@@ -76,20 +96,32 @@ def js_mask(text):
             j = n if j == -1 else j + 2
             out.append(re.sub(r'[^\n]', ' ', text[i:j]))
             i = j
-        elif text[i] in '\'"`':
+        elif char in '\'"':
             j = i + 1
             while j < n:
                 if text[j] == '\\':
                     j += 2
-                elif text[j] == text[i]:
+                elif text[j] == char:
                     j += 1
                     break
                 else:
                     j += 1
             out.append(re.sub(r'[^\n]', ' ', text[i:j]))
             i = j
+        elif char == '`':
+            templates.append(0)
+            out.append(' ')
+            i += 1
         else:
-            out.append(text[i])
+            if templates:
+                if char in '([{':
+                    templates[-1] += 1
+                elif char in ')]}':
+                    if char == '}' and templates[-1] == 1:
+                        templates[-1] = 0
+                    else:
+                        templates[-1] -= 1
+            out.append(char)
             i += 1
     return ''.join(out)
 
