@@ -1,6 +1,8 @@
 """Callable parameters and invocation targets for the JavaScript guard."""
 import re
 
+from _jsroute_source import BUILTIN_CHAINS
+
 
 _NON_CALL_WORDS = {
     'catch', 'for', 'function', 'if', 'instanceof', 'return', 'switch',
@@ -47,17 +49,6 @@ def _key(text, left, right):
     return value if re.fullmatch(r'[\w$]+', value) else None
 
 
-def _computed_key(text, key):
-    if not isinstance(key, tuple):
-        return key
-    name = re.escape(key[1])
-    pattern = re.compile(
-        r'\b(?:const|let|var)\s+' + name
-        + r'\s*=\s*(["\'])([^"\']+)\1')
-    matches = list(pattern.finditer(text, 0, key[2]))
-    return matches[-1].group(2) if matches else None
-
-
 def parameter_bindings(mask, text, start, end, pair_end, top_level,
                        _split_top_level):
     """Return lexical names and fixed-shape structured parameter bindings."""
@@ -69,6 +60,7 @@ def parameter_bindings(mask, text, start, end, pair_end, top_level,
                 left + 3, right, path, default, rest, excluded)
         if re.fullmatch(r'[\w$]+', mask[left:right]):
             return [{'name': mask[left:right], 'path': path,
+                     'position': left,
                      'default': default, 'rest': rest,
                      'excluded': excluded}]
         if left >= right or mask[left] not in '({[':
@@ -144,11 +136,11 @@ def parameter_bindings(mask, text, start, end, pair_end, top_level,
     return names, order
 
 
-def _object_value(mask, text, span, key, top_level):
+def _object_value(mask, text, span, key, top_level, computed_key):
     left, right = _trim(mask, *span)
     if left >= right or mask[left] != '{':
         return 'unprovable', None
-    key = _computed_key(text, key)
+    key = computed_key(key)
     if key is None:
         return 'unprovable', None
     for item_left, item_right in _segments(mask, left + 1, right - 1):
@@ -177,16 +169,18 @@ def _array_value(mask, span, index):
     return ('known', value) if value[0] < value[1] else ('missing', None)
 
 
-def member_source(mask, text, span, key, top_level, excluded=()):
+def member_source(mask, text, span, key, top_level, computed_key,
+                  excluded=()):
     """Return one property source from a call-site object value."""
     resolved_excluded = {
-        _computed_key(text, item) for item in excluded}
+        computed_key(item) for item in excluded}
     if key in resolved_excluded:
         return 'missing', None
-    return _object_value(mask, text, span, key, top_level)
+    return _object_value(
+        mask, text, span, key, top_level, computed_key)
 
 
-def parameter_sources(specs, args, mask, text, top_level):
+def parameter_sources(specs, args, mask, text, top_level, computed_key):
     """Map each structured binding to its call-site or default source."""
     found = []
     for index, spec in enumerate(specs):
@@ -219,7 +213,8 @@ def parameter_sources(specs, args, mask, text, top_level):
                     status, value = _array_value(mask, value, part)
                 else:
                     status, value = _object_value(
-                        mask, text, value, part, top_level)
+                        mask, text, value, part, top_level,
+                        computed_key)
             if status in ('missing', 'empty'):
                 value = binding['default']
                 status = 'known' if value is not None else 'empty'
@@ -235,7 +230,8 @@ def parameter_sources(specs, args, mask, text, top_level):
 
 
 def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
-                              statement_end, senders):
+                              statement_end, senders,
+                              callable_value=None):
     """Find lexical bindings that an invocation may use as a sender."""
     candidates = set()
     for scope in scopes[1:]:
@@ -256,11 +252,23 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
             expr = mask[match.end():end].strip()
             source = (visible_binding(expr, match.start())
                       if re.fullmatch(r'[\w$]+', expr) else None)
+            bound = re.fullmatch(
+                r'([\w$]+)\s*\.\s*bind\s*\(.*\)', expr,
+                re.DOTALL)
+            if bound:
+                source = visible_binding(bound.group(1), match.start())
             direct = (re.search(sender_pattern, expr)
                       and '=>' not in expr
                       and not re.match(
                           r'(?:async\s+)?function\b', expr))
-            if direct or source in candidates:
+            resolved = (callable_value((match.end(), end))
+                        if callable_value is not None else None)
+            bound_sender = bound and bound.group(1) in senders
+            resolved_sender = resolved is not None and (
+                resolved['name'] in senders
+                or resolved['binding'] in candidates)
+            if (direct or source in candidates
+                    or bound_sender or resolved_sender):
                 if target is not None and target not in candidates:
                     candidates.add(target)
                     changed = True
@@ -272,161 +280,9 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
     return candidates
 
 
-def _target(status, binding=None, body=None, member=None):
+def _target(status, binding=None, body=None, member=None, name=None):
     return {'status': status, 'binding': binding, 'body': body,
-            'member': member}
-
-
-def _callable_value(span, mask, visible_binding, body_at):
-    left, right = _trim(mask, *span)
-    body = body_at(mask, left)
-    if body is not None:
-        return _target('known', body=body)
-    found = re.match(r'[\w$]+', mask[left:right])
-    tail = mask[left + found.end():right].lstrip() if found else ''
-    if found and (not tail or tail[0] in ',;)]}\n'):
-        binding = visible_binding(found.group(), left)
-        if binding is not None:
-            return _target('known', binding=binding)
-    return _target('unprovable')
-
-
-def _member_assignments(owner_name, key, call_start, mask, text,
-                        visible_binding):
-    patterns = [re.compile(
-        r'\b' + re.escape(owner_name) + r'\s*\.\s*'
-        + re.escape(key) + r'\s*=(?!=|>)')]
-    raw_pattern = re.compile(
-        r'\b' + re.escape(owner_name)
-        + r'\s*\[\s*(["\'])' + re.escape(key)
-        + r'\1\s*\]\s*=(?!=|>)')
-    found = [(match.start(), match.end())
-             for pattern in patterns for match in pattern.finditer(
-                 mask, 0, call_start)]
-    found.extend(
-        (match.start(), match.end()) for match in raw_pattern.finditer(
-            text, 0, call_start)
-        if mask[match.start()] == text[match.start()])
-    owner = visible_binding(owner_name, call_start)
-    return [item for item in found
-            if visible_binding(owner_name, item[0]) == owner]
-
-
-def _member_value(owner_name, key, call_start, context, seen=frozenset()):
-    mask = context['mask']
-    text = context['text']
-    bindings = context['bindings']
-    pair_end = context['pair_end']
-    resolution = context['resolution']
-    top_level = context['top_level']
-    body_at = context['body_at']
-    visible_binding = resolution['binding']
-    owner = visible_binding(owner_name, call_start)
-    if owner is None:
-        return _target('irrelevant')
-    key = _computed_key(text, key)
-    if key is None:
-        return _target('unprovable')
-    if owner in seen:
-        return _target('unprovable')
-    rest = resolution['member_bindings'].get(owner)
-    if rest is not None:
-        return _target('known', binding=owner, member=key)
-    assigned = _member_assignments(
-        owner_name, key, call_start, mask, text, visible_binding)
-    if assigned:
-        return _callable_value(
-            (max(assigned)[1], call_start), mask,
-            visible_binding, body_at)
-    for assignment in reversed(bindings):
-        if assignment.start() >= call_start:
-            continue
-        if visible_binding(
-                assignment.group(1), assignment.start()) != owner:
-            continue
-        value_start, _ = _trim(
-            mask, assignment.end(), len(mask))
-        alias = re.match(r'[\w$]+', mask[value_start:])
-        if alias:
-            return _member_value(
-                alias.group(), key, value_start, context, seen | {owner})
-        if mask[value_start:value_start + 1] != '{':
-            if (mask[value_start:value_start + 1] == '['
-                    or body_at(mask, value_start) is not None
-                    or re.match(
-                        r'(?:null|undefined|true|false|[0-9])\b',
-                        mask[value_start:])):
-                return _target('irrelevant')
-            return _target('unprovable')
-        value_end = pair_end.get(value_start, value_start + 1)
-        status, span = _object_value(
-            mask, text, (value_start, value_end), key, top_level)
-        if status == 'missing':
-            return _target('irrelevant')
-        if status != 'known':
-            return _target('unprovable')
-        return _callable_value(span, mask, visible_binding, body_at)
-    return _target('irrelevant')
-
-
-def _returned_member(name, start, key, context):
-    mask = context['mask']
-    text = context['text']
-    bindings = context['bindings']
-    resolution = context['resolution']
-    top_level = context['top_level']
-    body_at = context['body_at']
-    binding = resolution['binding'](name, start)
-    for assignment in reversed(bindings):
-        if assignment.start() >= start:
-            continue
-        if resolution['binding'](
-                assignment.group(1), assignment.start()) != binding:
-            continue
-        body = body_at(mask, assignment.end())
-        if body is None:
-            return _target('unprovable')
-        _, body_start, body_end = body
-        if body[0] == 'block':
-            returned = re.search(r'\breturn\b', mask[body_start:body_end])
-            if returned is None:
-                return _target('unprovable')
-            body_start += returned.end()
-        left, right = _trim(mask, body_start, body_end)
-        if mask[left:left + 1] == '{':
-            status, span = _object_value(
-                mask, text, (left, right), key, top_level)
-            return (_callable_value(span, mask, resolution['binding'], body_at)
-                    if status == 'known' else _target(status))
-        owner = mask[left:right]
-        if re.fullmatch(r'[\w$]+', owner):
-            return _member_value(
-                owner, key, left, context)
-        return _target('unprovable')
-    return _target('unprovable')
-
-
-def _known_array(name, start, mask, bindings, visible_binding,
-                 seen=frozenset()):
-    binding = visible_binding(name, start)
-    if binding is None or binding in seen:
-        return False
-    for assignment in reversed(bindings):
-        if assignment.start() >= start:
-            continue
-        if visible_binding(
-                assignment.group(1), assignment.start()) != binding:
-            continue
-        value_start, _ = _trim(mask, assignment.end(), len(mask))
-        if mask[value_start:value_start + 1] == '[':
-            return True
-        if re.match(r'Array\s*\.\s*from\s*\(', mask[value_start:]):
-            return True
-        alias = re.match(r'[\w$]+', mask[value_start:])
-        return bool(alias and _known_array(
-            alias.group(), value_start, mask, bindings,
-            visible_binding, seen | {binding}))
-    return False
+            'member': member, 'name': name}
 
 
 def _identifier_before(mask, pos):
@@ -439,6 +295,13 @@ def _identifier_before(mask, pos):
     return mask[pos + 1:end], pos + 1, pos
 
 
+def _previous_nonspace(mask, position):
+    position -= 1
+    while position >= 0 and mask[position].isspace():
+        position -= 1
+    return position
+
+
 def _chained_member(owner_end, key, pair_start, context):
     mask = context['mask']
     receiver_close = owner_end - 1
@@ -449,45 +312,41 @@ def _chained_member(owner_end, key, pair_start, context):
         return _target('unprovable'), owner_end
     receiver, receiver_start, receiver_before = _identifier_before(
         mask, receiver_open)
-    receiver_prefix = mask[:receiver_start].rstrip()
+    prefix_end = _previous_nonspace(mask, receiver_start)
     array_chain = False
-    if (receiver_prefix.endswith('.')
+    if (prefix_end >= 0 and mask[prefix_end] == '.'
             and receiver in {
                 'concat', 'filter', 'flat', 'flatMap', 'map', 'slice'}):
         array_owner, array_start, _ = _identifier_before(
             mask, receiver_before)
-        array_chain = _known_array(
-            array_owner, array_start, mask, context['bindings'],
-            context['resolution']['binding'])
+        array_chain = context['receivers'].known_array(
+            array_owner, array_start)
     string_chain = (
         receiver == 'getAttribute'
-        and key in {
-            'endsWith', 'includes', 'slice', 'startsWith', 'substring',
-            'trim'})
+        and key in BUILTIN_CHAINS['string'])
     if array_chain or string_chain:
         target = _target('irrelevant')
     elif receiver:
-        target = _returned_member(receiver, receiver_start, key, context)
+        target = context['receivers'].returned_member(
+            receiver, receiver_open, receiver_close + 1,
+            key, receiver_start)
     else:
         target = _target('unprovable')
     start = receiver_start if receiver else owner_end
     return target, start
 
 
-def discover_invocations(mask, text, pairs, bindings, resolution,
-                         method_positions, reader, senders):
+def discover_invocations(mask, text, pairs, resolution, method_positions,
+                         reader, senders):
     """Classify every syntactic invocation through one target resolver."""
     pair_end = pairs['end']
     pair_start = pairs['start']
     visible_binding = resolution['binding']
     scope_at = resolution['scope']
-    top_level = reader['top_level']
     split_top_level = reader['split']
     body_at = reader['body']
     target_context = {
-        'mask': mask, 'text': text, 'bindings': bindings,
-        'pair_end': pair_end, 'resolution': resolution,
-        'top_level': top_level, 'body_at': body_at}
+        'mask': mask, 'receivers': resolution['receivers']}
     calls = []
     for opening in sorted(pair_end):
         if mask[opening:opening + 1] != '(':
@@ -503,47 +362,77 @@ def discover_invocations(mask, text, pairs, bindings, resolution,
         body = None
         member = None
         name = None
-        drop_this = False
+        call_mode = None
         start = opening
         if before >= 1 and mask[before - 1:before + 1] == '?.':
             name, start, _ = _identifier_before(mask, before - 1)
             if not name:
                 continue
-            binding = visible_binding(name, start)
-            status = 'known' if binding is not None else 'irrelevant'
+            prefix_end = _previous_nonspace(mask, start)
+            if prefix_end >= 0 and mask[prefix_end] == '.':
+                owner, owner_start, _ = _identifier_before(
+                    mask, prefix_end)
+                target = resolution['receivers'].member(
+                    owner, name, start)
+                status = target['status']
+                binding = target['binding']
+                body = target['body']
+                member = target['member']
+                name = target['name']
+                start = owner_start
+            else:
+                binding = visible_binding(name, start)
+                status = 'known' if binding is not None else 'irrelevant'
         elif before >= 0 and (
                 mask[before].isalnum() or mask[before] in '_$'):
             name, start, _ = _identifier_before(mask, opening)
-            prefix = mask[:start].rstrip()
-            if (name in _NON_CALL_WORDS or prefix.endswith('function')
+            prefix_end = _previous_nonspace(mask, start)
+            before_word, _, _ = _identifier_before(mask, start)
+            if (name in _NON_CALL_WORDS or before_word == 'function'
                     or start in method_positions):
                 continue
-            if prefix.endswith('.'):
-                owner_end = (
-                    len(prefix) - 2 if prefix.endswith('?.')
-                    else len(prefix) - 1)
+            if prefix_end >= 0 and mask[prefix_end] == '.':
+                owner_end = prefix_end
+                if prefix_end > 0 and mask[prefix_end - 1] == '?':
+                    owner_end -= 1
                 owner, owner_start, _ = _identifier_before(
                     mask, owner_end)
                 if not owner:
                     target, owner_start = _chained_member(
                         owner_end, name, pair_start, target_context)
-                elif name == 'call':
-                    owner_binding = visible_binding(owner, owner_start)
-                    target = _target(
-                        'known' if owner_binding is not None else 'irrelevant',
-                        binding=owner_binding)
-                    drop_this = owner_binding is not None
-                elif name == 'apply':
-                    target = _target('unprovable')
+                elif name in BUILTIN_CHAINS['function']:
+                    target = _target('irrelevant')
+                elif name in ('call', 'apply'):
+                    owner_prefix = _previous_nonspace(mask, owner_start)
+                    if owner == 'Reflect' and name == 'apply':
+                        target = _target('unprovable')
+                        call_mode = 'reflect_apply'
+                    elif (owner_prefix >= 0
+                          and mask[owner_prefix] == '.'):
+                        receiver, receiver_start, _ = _identifier_before(
+                            mask, owner_prefix)
+                        target = resolution['receivers'].member(
+                            receiver, owner, owner_start)
+                        owner_start = receiver_start
+                    else:
+                        owner_binding = visible_binding(owner, owner_start)
+                        known_owner = (
+                            owner_binding is not None or owner in senders)
+                        target = _target(
+                            'known' if known_owner else 'irrelevant',
+                            binding=owner_binding,
+                            name=owner if owner in senders else None)
+                    if call_mode is None:
+                        call_mode = name
                 else:
-                    target = _member_value(
-                        owner, name, start, target_context)
+                    target = resolution['receivers'].member(
+                        owner, name, start)
                 status = target['status']
                 binding = target['binding']
                 body = target['body']
                 member = target['member']
                 start = owner_start
-                name = None
+                name = target['name']
             else:
                 binding = visible_binding(name, start)
                 status = ('known' if binding is not None
@@ -553,10 +442,12 @@ def discover_invocations(mask, text, pairs, bindings, resolution,
             if bracket is None:
                 continue
             owner_at = bracket
-            prefix = mask[:bracket].rstrip()
-            optional_computed = prefix.endswith('?.')
+            prefix_end = _previous_nonspace(mask, bracket)
+            optional_computed = (
+                prefix_end > 0 and mask[prefix_end] == '.'
+                and mask[prefix_end - 1] == '?')
             if optional_computed:
-                owner_at = len(prefix) - 2
+                owner_at = prefix_end - 1
             owner, owner_start, _ = _identifier_before(mask, owner_at)
             if not owner:
                 status = 'unprovable'
@@ -573,18 +464,22 @@ def discover_invocations(mask, text, pairs, bindings, resolution,
                     key = ('computed', raw_key, bracket)
                 else:
                     key = None
-                target = _member_value(
-                    owner, key, owner_start, target_context)
+                target = resolution['receivers'].member(
+                    owner, key, owner_start)
             status = target['status']
             binding = target['binding']
             body = target['body']
             member = target['member']
+            name = target['name']
             start = owner_start
         elif before >= 0 and mask[before] == ')':
             wrapper = pair_start.get(before)
             if wrapper is None:
                 continue
             inner, inner_end = _trim(mask, wrapper + 1, before)
+            while (mask[inner:inner + 1] == '('
+                   and pair_end.get(inner) == inner_end):
+                inner, inner_end = _trim(mask, inner + 1, inner_end - 1)
             body = body_at(mask, inner)
             inner_name = mask[inner:inner_end]
             if body is not None:
@@ -600,8 +495,33 @@ def discover_invocations(mask, text, pairs, bindings, resolution,
             continue
         args = split_top_level(
             mask, text, opening + 1, close - 1)
-        if drop_this:
+        if call_mode == 'reflect_apply':
+            if len(args) != 3:
+                status = 'unprovable'
+            else:
+                applied = resolution['receivers'].callable_value(args[0])
+                status = applied['status']
+                binding = applied['binding']
+                body = applied['body']
+                member = applied['member']
+                name = applied['name']
+                call_mode = 'reflect_apply'
+        if call_mode == 'call':
             args = args[1:] if args else []
+        elif call_mode in ('apply', 'reflect_apply'):
+            array_index = 1 if call_mode == 'apply' else 2
+            if len(args) <= array_index:
+                status = 'unprovable'
+                args = []
+            else:
+                left, right = _trim(mask, *args[array_index])
+                if (mask[left:left + 1] != '['
+                        or pair_end.get(left) != right):
+                    status = 'unprovable'
+                    args = []
+                else:
+                    args = split_top_level(
+                        mask, text, left + 1, right - 1)
         calls.append({
             'start': start, 'order': close - 1,
             'binding': binding, 'args': args, 'body': body,

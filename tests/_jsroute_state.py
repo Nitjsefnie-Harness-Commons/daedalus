@@ -32,11 +32,11 @@ def sender_query_index(requests, scopes, events, invocations, replay,
                 continue
             replay.clear_between(
                 runtime_values, previous_call, call['order'], owners)
-            writes, _, _ = replay.run(call, runtime_values)
+            result = replay.run(call, runtime_values)
             scheduled.extend(
                 (call['order'], order, start, call, path_optional, match)
                 for order, (start, match, path_optional)
-                in enumerate(writes, 1))
+                in enumerate(result.writes, 1))
             previous_call = call['order']
         scheduled.sort(key=lambda item: item[:3])
         states = {}
@@ -86,7 +86,8 @@ def build_sender_queries(candidate_bindings, reached_calls, scopes, events,
 
     call_queries = {}
     for call in invocations:
-        if call['binding'] in candidate_bindings:
+        if (call['binding'] in candidate_bindings
+                and call['start'] not in reached_calls):
             call_queries[id(call)] = request_sender(
                 call['start'], 'binding', call['binding'])
     record_senders = {}
@@ -112,6 +113,7 @@ def build_sender_queries(candidate_bindings, reached_calls, scopes, events,
                 status, source = member_source(
                     context['mask'], context['text'], source,
                     call['member'], context['top_level'],
+                    context['computed_key'],
                     source_record['excluded'])
                 if status != 'known':
                     value = (context['unprovable']
@@ -122,7 +124,7 @@ def build_sender_queries(candidate_bindings, reached_calls, scopes, events,
             record_senders[id(record)] = ('query', query)
     escape_queries = {}
     for start, kind, match in events:
-        if kind != 'escape':
+        if kind != 'escape' or start in reached_calls:
             continue
         binding = context['visible_binding'](match.group(1), start)
         if binding is not None:
