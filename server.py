@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Daedalus debug server — SSE command bridge + tab registry."""
 import json, os, pathlib, shutil, threading, time, uuid
-from functools import partial
 from http.server import HTTPServer
 from socketserver import TCPServer, ThreadingMixIn
 
@@ -12,6 +11,7 @@ from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import mcp_bootstrap
 from daedalus_bridge import result_store
 from daedalus_bridge import segment_store
+from daedalus_bridge import stream_route
 from daedalus_bridge import stream_service
 from daedalus_bridge import tab_registry
 from daedalus_bridge.config import (
@@ -232,27 +232,13 @@ class Handler(RequestMixin):
         if tab and path_safety.unsafe_component(tab):
             print(f'[STREAM] REJECTED unsafe tab: {tab!r}', flush=True)
             return self._json(400, {'error': 'invalid path component'})
-        # Resolved once, here, rather than per tick: the loop below runs
-        # for the life of the connection, and the namespace a stream reads
-        # from is decided when it is admitted, not re-decided every second.
-        try:
-            target_queue_name, legacy_name = (
-                command_queue.command_target_names(token, tab))
-            broadcast_queue_name, broadcast_legacy_name = (
-                command_queue.command_target_names(token))
-            target_queue = path_safety.under(CMD_DIR, target_queue_name)
-            target_legacy = path_safety.under(CMD_DIR, legacy_name)
-            broadcast_queue = path_safety.under(CMD_DIR, broadcast_queue_name)
-            broadcast_legacy = path_safety.under(
-                CMD_DIR, broadcast_legacy_name)
-        except ValueError:
-            print('[STREAM] REJECTED unsafe derived target', flush=True)
+        targets = stream_route.resolve_targets(CMD_DIR, token, tab)
+        if targets is None:
             return self._json(400, {'error': 'invalid path component'})
         # Kill old stream for the same tab, register this one. Every stream is
         # registered, tabless ones included: one that is not is a worker and a
         # command consumer that /health cannot see.
         stream_id, killed_event = stream_service.register(token, tab)
-        print(f'[STREAM] CONNECT token={token[:8]} tab={tab[:8] if tab else "none"} from={self.client_address[0]}', flush=True)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
@@ -266,80 +252,13 @@ class Handler(RequestMixin):
         self.send_header('Connection', 'close')
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
-        writer = partial(stream_service.write_frame, self.wfile)
-        last_ka = time.time()
-        stream_start = time.time()
         try:
-            while True:
-                if killed_event and killed_event.is_set():
-                    print(f'[STREAM] KILLED-BY-RECONNECT tab={tab[:8] if tab else "none"}', flush=True)
-                    break
-                if time.time() - stream_start > STREAM_MAX_AGE:
-                    print(f'[STREAM] MAX-AGE tab={tab[:8] if tab else "none"}', flush=True)
-                    break
-                # Clear the wake event before scanning: event.set is sticky, so a
-                # signal that lands during/after the scan is observed on the next wait.
-                ev = command_queue.event(token)
-                ev.clear()
-                delivered = 0
-                if tab == 'dashboard':
-                    delivered += stream_service.drain_queue(
-                        target_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=writer)
-                elif tab == 'extension':
-                    # Typed commands addressed to the extension itself
-                    delivered += stream_service.drain_queue(
-                        target_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=writer)
-                    delivered += stream_service.drain_legacy_file(
-                        target_legacy, None, command_ttl=CMD_TTL,
-                        frame_writer=writer)
-                    # Per-tab eval queues for every other tab (tag chromeTab so bg can route)
-                    prefix = f'{token}_'
-                    for entry in sorted(CMD_DIR.iterdir()):
-                        if not entry.is_dir() or not entry.name.startswith(prefix):
-                            continue
-                        sub = entry.name[len(prefix):]
-                        if sub in ('extension', 'dashboard'):
-                            continue
-                        delivered += stream_service.drain_queue(
-                            entry, sub, killed_event, command_ttl=CMD_TTL,
-                            frame_writer=writer)
-                    # Broadcast queue + legacy per-tab raw-file drops
-                    delivered += stream_service.drain_queue(
-                        broadcast_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=writer)
-                    delivered += stream_service.drain_legacy_ext(
-                        CMD_DIR, token, killed_event, frame_writer=writer,
-                        extension_legacy_name=legacy_name, command_ttl=CMD_TTL)
-                else:  # specific-tab stream (rare — normal clients use tab=extension)
-                    delivered += stream_service.drain_queue(
-                        target_queue, None, killed_event,
-                        command_ttl=CMD_TTL, frame_writer=writer)
-                    if tab:
-                        delivered += stream_service.drain_queue(
-                            broadcast_queue, None, killed_event,
-                            command_ttl=CMD_TTL, frame_writer=writer)
-                        delivered += stream_service.drain_legacy_file(
-                            target_legacy, None, command_ttl=CMD_TTL,
-                            frame_writer=writer)
-                # Broadcast legacy raw-file — skip for dashboard so it doesn't steal commands
-                if tab != 'dashboard':
-                    delivered += stream_service.drain_legacy_file(
-                        broadcast_legacy, None, command_ttl=CMD_TTL,
-                        frame_writer=writer)
-
-                now = time.time()
-                if now - last_ka >= STREAM_KEEPALIVE:
-                    self.wfile.write(b': keepalive\n\n')
-                    self.wfile.flush()
-                    last_ka = now
-                if not delivered:
-                    # Wake immediately when a command is enqueued; 1s fallback keeps
-                    # the max-age / keepalive / kill checks live during idle.
-                    ev.wait(timeout=1.0)
-        except (BrokenPipeError, ConnectionError, OSError) as e:
-            print(f'[STREAM] DISCONNECT tab={tab[:8] if tab else "none"} err={type(e).__name__}', flush=True)
+            stream_route.serve_stream(
+                self.wfile, cmd_dir=CMD_DIR, token=token, tab=tab,
+                targets=targets, killed_event=killed_event,
+                command_ttl=CMD_TTL, keepalive=STREAM_KEEPALIVE,
+                max_age=STREAM_MAX_AGE,
+                client_label=self.client_address[0])
         finally:
             stream_service.unregister(stream_id, killed_event)
         return None
