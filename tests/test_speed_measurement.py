@@ -198,14 +198,22 @@ def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
     assert 'produced no per-test durations' in summary.read_text(encoding='utf-8')
 
 
+def _round_tree(tmp, side, rounds):
+    """Per-suite reports for several rounds, as time_tests.py names them."""
+    dirs = []
+    for index, suites in enumerate(rounds, start=1):
+        directory = Path(tmp) / f'{side}-{index}'
+        directory.mkdir(parents=True)
+        for suite, tests in suites.items():
+            (directory / f'{suite}.json').write_text(
+                json.dumps({'tests': tests}), encoding='utf-8')
+        dirs.append(str(directory))
+    return dirs
+
+
 def _suite_tree(tmp, side, suites):
     """One round of per-suite reports, named as time_tests.py names them."""
-    directory = Path(tmp) / f'{side}-1'
-    directory.mkdir(parents=True)
-    for suite, tests in suites.items():
-        (directory / f'{suite}.json').write_text(
-            json.dumps({'tests': tests}), encoding='utf-8')
-    return [str(directory)]
+    return _round_tree(tmp, side, [suites])
 
 
 def test_speed_comparison_fails_when_a_suite_times_zero_on_both_sides(tmp):
@@ -227,7 +235,7 @@ def test_speed_comparison_fails_when_a_suite_times_zero_on_both_sides(tmp):
     assert compare.main(argv) == 1
     text = summary.read_text(encoding='utf-8')
     assert '`test_broken.py`' in text, text
-    assert 'zero tests' in text, text
+    assert 'no timed tests' in text, text
 
 
 def test_speed_comparison_allows_a_suite_that_times_zero_on_one_side(tmp):
@@ -280,6 +288,89 @@ def test_speed_comparison_zero_counts_every_round_of_a_side(tmp):
                          '--head', *head]) == 0
 
 
+def test_speed_comparison_fails_when_a_suite_is_empty_in_a_round_on_both(tmp):
+    """A suite empty in the same round on both sides is lost from every total.
+
+    The comparison intersects on test name across every round, so one round
+    that recorded nothing for a suite drops its tests from the covered set
+    however much that suite's other rounds recorded.
+    """
+    compare = _compare_durations()
+    rounds = [{'test_suite': {'shared': 1.0}, 'test_partial': {}},
+              {'test_suite': {'shared': 1.0}, 'test_partial': {'later': 2.0}}]
+    base = _round_tree(tmp, 'base', rounds)
+    head = _round_tree(tmp, 'head', rounds)
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', *base, '--head', *head,
+            '--summary-file', str(summary)]
+    assert compare.main(argv) == 1
+    assert '`test_partial.py`' in summary.read_text(encoding='utf-8')
+
+
+def test_speed_comparison_fails_when_a_report_is_corrupt_on_both_sides(tmp):
+    """A report neither side could read records nothing the comparison keeps.
+
+    time_tests.py writes each report with a plain non-atomic write, so a
+    mid-write truncation leaves a file the completeness check still counts
+    and the comparison silently reads as nothing.
+    """
+    compare = _compare_durations()
+    base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
+                                     'test_corrupt': {}})
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
+                                     'test_corrupt': {}})
+    for side in (base[0], head[0]):
+        (Path(side) / 'test_corrupt.json').write_text(
+            '{"tests": {"lost": ', encoding='utf-8')
+    assert compare.main(['--base', *base, '--head', *head]) == 1
+
+
+def test_speed_comparison_fails_when_a_report_holds_no_test_map(tmp):
+    """A report that parses but records no test map is empty, not absent."""
+    compare = _compare_durations()
+    base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
+                                     'test_shapeless': {}})
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
+                                     'test_shapeless': {}})
+    for side in (base[0], head[0]):
+        (Path(side) / 'test_shapeless.json').write_text(
+            '{"tests": [1, 2, 3]}', encoding='utf-8')
+    assert compare.main(['--base', *base, '--head', *head]) == 1
+
+
+def test_speed_comparison_fails_when_a_report_is_not_an_object(tmp):
+    """A report whose body is not an object records no tests at all.
+
+    JSON that parses to a list or a scalar is neither a report nor an error:
+    the comparison would accept nothing from it, so it is emptiness in that
+    round and the guard has to be able to say so.
+    """
+    compare = _compare_durations()
+    base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
+                                     'test_flat': {}})
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
+                                     'test_flat': {}})
+    for side in (base[0], head[0]):
+        (Path(side) / 'test_flat.json').write_text('[]', encoding='utf-8')
+    assert compare.main(['--base', *base, '--head', *head]) == 1
+
+
+def test_speed_comparison_counts_only_tests_the_comparison_accepts(tmp):
+    """A duration the comparison would reject leaves the suite with nothing.
+
+    The guard's emptiness has to be the comparison's own: a suite whose every
+    duration is a value the covered set would refuse is a suite that
+    contributes nothing to it.
+    """
+    compare = _compare_durations()
+    tests = {'lost_a': 'oops', 'lost_b': None, 'lost_c': True}
+    base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
+                                     'test_unread': tests})
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
+                                     'test_unread': tests})
+    assert compare.main(['--base', *base, '--head', *head]) == 1
+
+
 def test_shared_speed_modules_import_by_package(tmp):
     """Shared workflow modules must import without a sys.path test shim.
 
@@ -290,7 +381,7 @@ def test_shared_speed_modules_import_by_package(tmp):
     del tmp
     imported = subprocess.run(
         [sys.executable, '-c', 'import scripts.ci.zeroed_suites; '
-         'import scripts.ci.compare_durations'],
+         + 'import scripts.ci.compare_durations'],
         cwd=str(ROOT), capture_output=True, text=True, timeout=60)
     assert imported.returncode == 0, (imported.stdout, imported.stderr)
 

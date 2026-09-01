@@ -1,39 +1,43 @@
 #!/usr/bin/env python3
-"""Suites that produced zero timed tests on both sides of a comparison.
-
-The speed comparison intersects on test name, so a suite that produced
-nothing on both sides drops out of every total without anything reporting
-it, and the verdict describes a narrower measurement than the cell selected
--- the shape a missing dependency in the timed virtualenvs produces. Zero on
-one side alone is not that: a suite testing a feature the other side lacks
-fails there legitimately, and a report only one side has is a suite that
-side does not ship.
+"""Suites the comparison loses: zero accepted tests in a paired round, so
+the intersection drops them from every total without anything reporting it.
 """
 import json
 from pathlib import Path
 
 
-def counts_by_suite(directories):
-    """Timed-test count per suite report, keyed by the suite's name."""
-    counts = {}
+def _accepted(summary):
+    if not isinstance(summary, dict):
+        return 0
+    tests = summary.get('tests')
+    if not isinstance(tests, dict):
+        return 0
+    return sum(1 for value in tests.values()
+               if isinstance(value, (int, float))
+               and not isinstance(value, bool))
+
+
+def _round_counts(path):
+    try:
+        return _accepted(json.loads(path.read_text(encoding='utf-8')))
+    except (OSError, ValueError):
+        return 0
+
+
+def _rounds(directories):
+    counts = []
     for directory in directories:
+        found = {}
         for path in sorted(Path(directory).glob('*.json')):
-            try:
-                summary = json.loads(path.read_text(encoding='utf-8'))
-            except (OSError, ValueError):
-                continue
-            if not isinstance(summary, dict):
-                continue
-            tests = summary.get('tests')
-            if not isinstance(tests, dict):
-                continue
-            counts[path.stem] = max(counts.get(path.stem, 0), len(tests))
+            found[path.stem] = _round_counts(path)
+        counts.append(found)
     return counts
 
 
 def zeroed_on_both_sides(base_dirs, head_dirs):
-    """Suites whose every report, on both sides, timed zero tests."""
-    base = counts_by_suite(base_dirs)
-    head = counts_by_suite(head_dirs)
-    return sorted(name for name in set(base) & set(head)
-                  if base[name] == 0 and head[name] == 0)
+    lost = set()
+    for base, head in zip(_rounds(base_dirs), _rounds(head_dirs)):
+        for suite in set(base) & set(head):
+            if base[suite] == 0 and head[suite] == 0:
+                lost.add(suite)
+    return sorted(lost)
