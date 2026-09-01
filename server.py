@@ -318,29 +318,8 @@ class Handler(RequestMixin):
             return self.answer(tab_registry.remove(CMD_DIR, token, body))
 
         elif self.path == '/poll':
-            # Both of these raise ValueError on a name that cannot be a safe
-            # component or a path that leaves the queue root, and this route
-            # had no guard for the first of them either.
-            try:
-                _, legacy_name = command_queue.command_target_names(token)
-                cmd_file = path_safety.under(CMD_DIR, legacy_name)
-            except ValueError:
-                return self._json(400, {'error': 'invalid path component'})
-            data = {}
-            with command_queue.command_fs_lock:
-                if cmd_file.exists():
-                    try:
-                        candidate = json.loads(cmd_file.read_text(encoding='utf-8'))
-                        if isinstance(candidate, dict):
-                            data = candidate
-                            cmd_file.unlink()
-                    except (OSError, json.JSONDecodeError,
-                            RecursionError, ValueError):
-                        # A legacy drop that cannot be read is not a command.
-                        # The empty answer below is the same one an absent
-                        # file gives, and the file is left to the TTL sweep.
-                        pass
-            return self._json(200, data)
+            return self.answer(
+                stream_service.poll_legacy(CMD_DIR, token))
 
         elif self.path == '/upload':
             return self._handle_upload(body)

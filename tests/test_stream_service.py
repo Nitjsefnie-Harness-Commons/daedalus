@@ -382,5 +382,75 @@ def test_delivery_clock_records_each_delivery(_tmp):
     assert clock.calls == 2
 
 
+def test_poll_declines_while_the_drain_holds_the_legacy_claim(tmp):
+    svc = _load_service('stream_service_poll_claim')
+    cq = svc.command_queue
+    _, legacy = cq.command_target_names('tok')
+    path = Path(tmp) / legacy
+    path.write_text('{"id": "poll-overlap", "code": "1"}', encoding='utf-8')
+    assert cq.claim(svc.legacy_claim_key(legacy))
+
+    try:
+        assert svc.poll_legacy(Path(tmp), 'tok') == (200, {})
+        assert path.exists(), path
+    finally:
+        cq.release(svc.legacy_claim_key(legacy))
+
+
+def test_the_drain_declines_while_poll_holds_the_legacy_claim(tmp):
+    svc = _load_service('stream_service_drain_claim')
+    cq = svc.command_queue
+    _, legacy = cq.command_target_names('tok')
+    path = Path(tmp) / legacy
+    path.write_text('{"id": "drain-overlap"}', encoding='utf-8')
+    frames = []
+    assert cq.claim(svc.legacy_claim_key(legacy))
+
+    try:
+        delivered = svc.drain_legacy_file(
+            path, None, command_ttl=100, frame_writer=frames.append)
+    finally:
+        cq.release(svc.legacy_claim_key(legacy))
+
+    assert delivered == 0, delivered
+    assert frames == [], frames
+    assert path.exists(), path
+
+
+def test_poll_consumes_an_object_and_answers_it(tmp):
+    svc = _load_service('stream_service_poll_consume')
+    cq = svc.command_queue
+    _, legacy = cq.command_target_names('tok')
+    path = Path(tmp) / legacy
+    path.write_text('{"id": "poll-1", "code": "1"}', encoding='utf-8')
+
+    answer = svc.poll_legacy(Path(tmp), 'tok')
+
+    assert answer == (200, {'id': 'poll-1', 'code': '1'}), answer
+    assert not path.exists(), path
+
+
+def test_poll_answers_empty_for_a_missing_or_malformed_file(tmp):
+    svc = _load_service('stream_service_poll_empty')
+    cq = svc.command_queue
+    _, legacy = cq.command_target_names('tok')
+    path = Path(tmp) / legacy
+
+    assert svc.poll_legacy(Path(tmp), 'tok') == (200, {})
+
+    path.write_text('{"id": "half', encoding='utf-8')
+
+    assert svc.poll_legacy(Path(tmp), 'tok') == (200, {})
+    assert path.exists(), path
+
+
+def test_poll_refuses_an_unsafe_token_name(tmp):
+    svc = _load_service('stream_service_poll_unsafe')
+
+    answer = svc.poll_legacy(Path(tmp), 'ba..d')
+
+    assert answer == (400, {'error': 'invalid path component'}), answer
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(globals())))
