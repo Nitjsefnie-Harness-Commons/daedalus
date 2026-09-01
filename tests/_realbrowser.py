@@ -284,8 +284,9 @@ def real_extension_page(tmp, bridge_url, token, page_url,
     and page.js under Node, which does not need a browser and fails outright
     if that source is broken.
 
-    The two ready waits keep their production deadlines by default; a test
-    that pins a classification rather than patience passes smaller values.
+    The two ready waits keep their production deadlines by default
+    (`worker_ready_patience=30.0`, `page_ready_timeout=15.0`); a test that
+    pins a classification rather than patience passes smaller values.
     """
     node, browser = browser_requirements()
     extension = (extension_root or EXTENSION_ROOT).resolve()
