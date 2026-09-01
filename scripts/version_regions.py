@@ -279,7 +279,7 @@ def _html_regions(text):
                 and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
             tag_start = i
             i = _html_tag(text, tag_start, regions)
-            tag_name, html_context = _html_tag_context(
+            tag_name, html_context, _opened_html = _html_tag_context(
                 text, tag_start, i, contexts)
             if tag_name == 'script':
                 script_end = _html_script_end(text, i)
@@ -321,10 +321,8 @@ def _html_template_end(text, start):
                 and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
             tag_start = i
             i = _html_tag(text, tag_start, [])
-            tag_name, html_context = _html_tag_context(
+            tag_name, html_context, opened_html = _html_tag_context(
                 text, tag_start, i, contexts)
-            html_integration = (not html_context and contexts
-                                and contexts[-1] == (tag_name, 'html'))
             if html_context and tag_name == 'template':
                 depth += 1
             elif (html_context and _html_tag_token_end(
@@ -335,7 +333,7 @@ def _html_template_end(text, start):
             elif tag_name == 'script':
                 i = _html_script_end(text, i)
             elif (tag_name in ('style', 'title', 'textarea')
-                  and not html_integration):
+                  and not opened_html):
                 closer = '</' + tag_name
                 while (i < len(text)
                        and _html_tag_token_end(text, i, closer) is None):
@@ -401,19 +399,53 @@ def _html_tag_token_end(text, start, token):
 
 
 def _html_tag_context(text, start, end, contexts):
-    """Return this tag's name and context, updating following context."""
     tag_name = _html_tag_name(text, start, end)
-    html_context = not contexts or contexts[-1][1] == 'html'
-    if (contexts and _html_tag_token_end(
-            text, start, '</' + contexts[-1][0]) is not None):
-        contexts.pop()
-    elif tag_name and not text[start:end].endswith('/>'):
-        if tag_name in ('svg', 'math'):
-            contexts.append((tag_name, tag_name))
-        elif (contexts and contexts[-1][1] == 'svg'
-              and tag_name in ('foreignobject', 'desc', 'title')):
-            contexts.append((tag_name, 'html'))
-    return tag_name, html_context
+    current = contexts[-1][2] if contexts else 'html'
+    html_context = current == 'html'
+    closing = (_html_tag_name(text, start + 1, end)
+               if text[start:start + 2] == '</' else '')
+    if closing:
+        for index in range(len(contexts) - 1, -1, -1):
+            if contexts[index][0] == closing:
+                del contexts[index:]
+                break
+        return tag_name, html_context, False
+    if not tag_name or text[start:end].endswith('/>'):
+        return tag_name, html_context, False
+    opened_html = False
+    if html_context and tag_name in ('svg', 'math'):
+        contexts.append((tag_name, tag_name, tag_name))
+    elif not html_context:
+        child_context = current
+        if (current == 'svg'
+                and tag_name in ('foreignobject', 'desc', 'title')):
+            child_context = 'html'
+        elif (current == 'math'
+              and tag_name in ('mi', 'mo', 'mn', 'ms', 'mtext')):
+            child_context = 'html'
+        elif (current == 'math' and tag_name == 'annotation-xml'
+              and (_html_attribute_value(
+                  text, start, end, 'encoding') or '').lower()
+              in ('text/html', 'application/xhtml+xml')):
+            child_context = 'html'
+        opened_html = child_context == 'html'
+        contexts.append((tag_name, current, child_context))
+    return tag_name, html_context, opened_html
+
+
+def _html_attribute_value(text, start, end, wanted):
+    quoted = []
+    _html_tag(text, start, quoted)
+    pattern = re.compile(
+        r'(?i)[\t\n\f\r ]' + re.escape(wanted)
+        + r'[\t\n\f\r ]*=[\t\n\f\r ]*'
+        + r'(?:"([^"]*)"|\'([^\']*)\'|([^\t\n\f\r >]+))')
+    for match in pattern.finditer(text, start, end):
+        if not any(begin < match.start() < stop
+                   for begin, stop, _kind in quoted):
+            return next(value for value in match.groups()
+                        if value is not None)
+    return None
 
 
 def _html_tag(text, start, regions):
