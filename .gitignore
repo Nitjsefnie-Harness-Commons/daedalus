@@ -238,6 +238,11 @@
 !/tests/_ghexpr.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
+!/tests/_jsroute_calls.py
+!/tests/_jsroute_factory_cases.py
+!/tests/_jsroute_receiver.py
+!/tests/_jsroute_source.py
+!/tests/_jsroute_state.py
 !/tests/_jsroute_timeline.py
 !/tests/_overlap.py
 !/tests/_owned_writes.py
