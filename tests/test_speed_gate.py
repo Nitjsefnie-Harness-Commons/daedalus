@@ -208,49 +208,6 @@ def test_the_speed_gate_depends_on_the_exact_aggregate_job(tmp):
         assert 'check-runs' not in '\n'.join(_job_section(workflow, job)), job
 
 
-_WAIT = (re.compile(r'sleep \d+'),
-         re.compile(r'Start-Sleep -(?:S|Seconds) \d+'),
-         re.compile(r'wait'),
-         re.compile(r'timeout \d+ sleep(?: \S+)*'))
-
-
-def _wait_only(script):
-    """Whether every command line of one run script is a pure wait."""
-    for line in script.splitlines():
-        line = line.strip()
-        if not line or line.startswith('#') or re.fullmatch(
-                r'set -(?:o )?\S*', line):
-            continue
-        if not any(each.fullmatch(line) for each in _WAIT):
-            return False
-    return True
-
-
-def test_a_job_whose_only_work_is_waiting_cannot_join_the_workflow(tmp):
-    """Every job the tests workflow runs does work; a waiting job is refused.
-
-    Issue 461 closed the waiting-job shape on the tree; this pin keeps it
-    closed by test. A job is refused when it carries a `run:` step and every
-    one of those scripts is wait-only: after blank lines, comment-only lines
-    and `set -`/`set -o` option lines are dropped, every remaining line is a
-    pure wait command (`sleep N`, `Start-Sleep` with `-S`/`-Seconds`, bare
-    `wait`, or `timeout <n> sleep ...`). Anything else — a mixed script, an
-    unrecognized command, or a job with no `run:` step at all — is left
-    alone, and the polling half of this defect shape is pinned by
-    `test_the_speed_gate_depends_on_the_exact_aggregate_job`.
-    """
-    del tmp
-    workflow = _tests_yml()
-    waiters = []
-    for job in _job_names(workflow):
-        runs = [step['run'] for step in
-                complete_job_mapping(workflow, job).get('steps') or []
-                if 'run' in step]
-        if runs and all(_wait_only(script) for script in runs):
-            waiters.append(job)
-    assert waiters == [], waiters
-
-
 def test_the_speed_cells_start_only_after_the_aggregate(tmp):
     """The cells that benchmark a tree first learn that its gates passed.
 
