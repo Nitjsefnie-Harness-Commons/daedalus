@@ -185,13 +185,13 @@ def test_a_callers_waits_reach_both_ready_waits(tmp):
     with _recovery_runtime(
             tmp, [_ready_targets(), _ready_targets()], verdict,
             worker_waits=[first_absence, 'ws://worker'],
-            worker_ready_patience=2.0, page_ready_timeout=2.0) as runtime:
+            worker_ready_patience=2.0, page_ready_timeout=3.0) as runtime:
         processes, launches, wait_calls = runtime
         with _realbrowser.real_extension_page(
                 tmp, 'http://127.0.0.1:1', 'controltoken',
                 'http://127.0.0.1:2/plain.html',
                 worker_ready_patience=2.0,
-                page_ready_timeout=2.0) as fixture:
+                page_ready_timeout=3.0) as fixture:
             yielded.append(fixture)
 
     assert yielded == [
