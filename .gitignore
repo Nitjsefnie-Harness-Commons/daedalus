@@ -352,6 +352,7 @@
 !/tests/test_real_browser_classification.py
 !/tests/test_real_browser_environment.py
 !/tests/test_real_browser_eval.py
+!/tests/test_real_browser_fixture_waits.py
 !/tests/test_real_browser_harness.py
 !/tests/test_real_browser_harness_recovery.py
 !/tests/test_release_scan.py

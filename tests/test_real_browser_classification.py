@@ -181,7 +181,10 @@ def _worker_timeout_failure(tmp, reached, verdict=None):
             mock.patch.object(
                 _realbrowser, '_worker_absence_verdict', recording), \
             mock.patch.object(
-                _realbrowser.time, 'time', side_effect=(0, 0, 31)), \
+                _realbrowser.time, 'time',
+                # The wait reads the clock to start it, once per loop check,
+                # and once more when an answered worker starts its own.
+                side_effect=((0, 0, 0, 31) if reached else (0, 0, 31))), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         return _fixture_failure(tmp), attempts
 
