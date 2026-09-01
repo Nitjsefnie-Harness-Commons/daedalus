@@ -7,7 +7,7 @@ cheap run happens inside the workflow instead: this script reads the paths a
 run changed and emits the matrix the suites job should execute, whether the
 run was documentation-only and whether it touched a workflow.
 
-Documentation is the same set speed.yml and version.yml ignore. Every
+Documentation is the same set version.yml ignores. Every
 fallback runs the FULL matrix: an event this script cannot identify, a file
 list it cannot read, or a list that may be truncated all over-run: an API
 failure that under-runs would merge untested code while one that over-runs
