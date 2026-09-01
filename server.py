@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Daedalus debug server — SSE command bridge + tab registry."""
-import json, threading, time
+import threading, time
 from http.server import HTTPServer
 from socketserver import TCPServer, ThreadingMixIn
 
 from daedalus_cli.output import configure_stdio
-from daedalus_bridge import atomic_file
 from daedalus_bridge import command_queue, parent_watch
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import mcp_bootstrap
 from daedalus_bridge import result_routes
-from daedalus_bridge import segment_store
+from daedalus_bridge import segment_jobs
+from daedalus_bridge import segment_routes
 from daedalus_bridge import static_routes
 from daedalus_bridge import stream_route
 from daedalus_bridge import stream_service
@@ -34,9 +34,6 @@ from daedalus_bridge import path_safety
 # ran it as an import side effect — so it is called here, where a reader can
 # see the bridge depends on it.
 configure_stdio()
-
-
-_SEGMENT_DECIMAL_MAX_DIGITS = 20
 
 # ─── Health / observability ───
 
@@ -178,10 +175,18 @@ class Handler(RequestMixin):
             return self.answer(tab_registry.list_tabs(token))
 
         if parsed.path == '/segment-job':
-            return self._handle_segment_job_lookup(params)
+            token = self._bridge_token(params)
+            if token is None:
+                return None
+            return self.answer(
+                segment_routes.lookup_job(SEG_DIR, token, params))
 
         if parsed.path == '/segment-status':
-            return self._handle_segment_status(params)
+            sig = self._segment_capability(params)
+            if sig is None:
+                return None
+            return self.answer(
+                segment_routes.segment_status(SEG_DIR, params, sig))
 
         if parsed.path == '/health':
             return self._handle_health()
@@ -256,16 +261,23 @@ class Handler(RequestMixin):
             # first is what keeps a refusal cheap: reading the body and then
             # answering 403 charged the process for a request it was always
             # going to reject.
-            admitted = self._segment_admission(parsed)
-            if admitted is None:
-                # The refusal is written; the body is drained rather than
+            params = self._parse_query(parsed.query)
+            if params is None:
+                # A refusal is written; the body is drained rather than
                 # read, because closing on unread bytes sends RST and the
                 # answer would be discarded with them.
+                return self._drain_refused_body(clen)
+            sig = self._segment_capability(params)
+            if sig is None:
+                return self._drain_refused_body(clen)
+            admitted = segment_routes.admit_segment(SEG_DIR, params, sig)
+            if not isinstance(admitted, segment_routes.Admission):
+                self.answer(admitted)
                 return self._drain_refused_body(clen)
             raw = self._read_body(clen)
             if raw is None:
                 return None
-            return self._handle_segment(raw, *admitted)
+            return self.answer(segment_routes.store_segment(raw, admitted))
         authenticated = self._authenticate_before_body(clen)
         if authenticated is None:
             return self._drain_refused_body(clen)
@@ -294,7 +306,11 @@ class Handler(RequestMixin):
                 upload_routes.store_upload(UPLOAD_DIR, body))
 
         elif self.path == '/segment-job':
-            return self._handle_segment_job(body)
+            return self.answer(segment_jobs.mint_job(
+                SEG_DIR, token, body,
+                segment_jobs.JobQuotas(
+                    MAX_SEGMENT_INDEX, MAX_SEGMENTS_PER_JOB,
+                    MAX_SEGMENT_JOB_SIZE)))
 
         elif self.path == '/result':
             return self.answer(result_routes.accept_result(
@@ -378,172 +394,6 @@ class Handler(RequestMixin):
             flush=True)
         return self._json(200, {'ok': True, 'target': target, 'did': did})
 
-    def _segment_admission(self, parsed):
-        """Settle POST /segment?job=X&seg=N&total=T&sig=S before its body.
-
-        The documented poster is page JavaScript running in a hostile page's
-        MAIN world, so it must never hold the bridge token. It carries the
-        job-scoped capability minted by POST /segment-job instead. A stolen
-        sig authorizes status reads and segment writes only for that job. The
-        finalized .ts set stays inside the record's index, count, and byte
-        quotas; stale temp writes are removed before the next admission.
-
-        Returns (job, segment index, quota, directory) for a request that may
-        proceed,        or None once the refusal has been written. The quota travels with the
-        admission rather than being read again under the write lock: a
-        record's recorded limits are fixed at mint and never rewritten, so
-        re-reading them would cost a second file read per segment and settle
-        nothing the first read did not.
-        """
-        params = self._parse_query(parsed.query)
-        if params is None:
-            return None
-        job = params.get('job', [''])[0]
-        seg = params.get('seg', [''])[0]
-        total = params.get('total', [''])[0]
-        sig = self._segment_capability(params)
-        if sig is None:
-            return None
-        if not job or not seg:
-            self._json(400, {'error': 'missing job or seg'})
-            return None
-        if (seg.isascii() and seg.isdecimal()
-                and len(seg) > _SEGMENT_DECIMAL_MAX_DIGITS):
-            self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
-            return None
-        for val in (job, seg, total):
-            if path_safety.unsafe_component(val):
-                self._json(400, {'error': 'invalid param'})
-                return None
-        if not seg.isascii() or not seg.isdecimal():
-            self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
-            return None
-        try:
-            segment_index = int(seg)
-        except (ValueError, OverflowError):
-            self._json(400, {'error': 'seg must be a bounded ASCII decimal'})
-            return None
-
-        # `total` is untrusted progress metadata supplied by the page on every
-        # request. Only the server-minted record controls storage.
-        try:
-            seg_dir = path_safety.under(SEG_DIR, job)
-            with segment_store.seg_lock:
-                record = segment_store.record_for_sig(job, sig)
-                quota = (segment_store.quota(record)
-                         if record is not None else None)
-        except ValueError:
-            self._json(400, {'error': 'invalid param'})
-            return None
-        if quota is None:
-            self._json(403, {'error': 'bad sig'})
-            return None
-        if segment_index > quota[0]:
-            self._json(400, {'error': 'seg out of range'})
-            return None
-        # The directory travels with the admission so the namespace is decided
-        # once, here, where the refusal is a 400 about the request rather than
-        # a storage error raised under the write lock.
-        return job, segment_index, quota, seg_dir
-
-    def _handle_segment(self, raw, job, segment_index, quota, seg_dir):
-        """Store one admitted segment body under the job's remaining budget.
-
-        The capability, the parameter shapes and the quota were settled by
-        _segment_admission. What is left has to be atomic: the file listing,
-        the byte sum and the write happen under one hold of
-        segment_store.seg_lock, so two
-        segments arriving together cannot both spend the same remaining bytes.
-        """
-        _, max_count, max_bytes = quota
-        marks = segment_store.timing_marks()
-        with segment_store.seg_lock:
-            if marks is not None:
-                marks.append(('acquire', time.perf_counter()))
-            filename = f'{segment_index:06d}.ts'
-            tmp = seg_dir / f'.{filename}.tmp'
-            final = seg_dir / filename
-            try:
-                seg_dir.mkdir(parents=True, exist_ok=True)
-                # The totals are read here rather than carried from admission,
-                # and this is the difference between them and the quota: a
-                # quota is fixed at mint, while these change with every write,
-                # so a value read outside this lock could be spent twice.
-                try:
-                    record = segment_store.load_record(job)
-                except segment_store.SegmentRecordError:
-                    record = None
-                usage = (segment_store.usage(record)
-                         if record is not None
-                         and not segment_store.needs_recount(job) else None)
-                if usage is None:
-                    # A job minted before totals were kept, or one whose
-                    # last write_usage never confirmed landing. Either way
-                    # the record can't be trusted, and this is the only
-                    # scan on this path, so nothing after it pays for it
-                    # again.
-                    usage = segment_store.recount(seg_dir)
-                    if usage is None:
-                        return self._json(
-                            500, {'error': 'segment storage failure'})
-                    # Persisted now, whether or not this request's own
-                    # write goes on to be accepted: a rejected write never
-                    # reaches the write_usage call below, so without this
-                    # every later rejection on this job would pay for the
-                    # same full scan again and never clear the mark.
-                    segment_store.write_usage(job, *usage)
-                stored_count, stored_bytes = usage
-                if marks is not None:
-                    marks.append(('usage', time.perf_counter()))
-                # One stat, for the one file this request may be replacing.
-                try:
-                    replaced_bytes = final.stat().st_size
-                    replacing = True
-                except FileNotFoundError:
-                    replaced_bytes = 0
-                    replacing = False
-                if marks is not None:
-                    marks.append(('replaced', time.perf_counter()))
-                if not replacing and stored_count >= max_count:
-                    return self._json(
-                        413, {'error': 'segment count limit exceeded'})
-                if stored_bytes - replaced_bytes + len(raw) > max_bytes:
-                    return self._json(413, {'error': 'job byte limit exceeded'})
-                # Marked before the segment is published, not after: once
-                # the .ts file lands, this job's true storage can already
-                # disagree with its record, and a crash between here and
-                # the write_usage call below must not be the one window
-                # where that disagreement leaves no trace at all. Refusing
-                # the write outright when even this cannot be established
-                # is the alternative #203 asks for to a mark that fails
-                # silently and lets the write through unaccounted.
-                if not segment_store.mark_dirty(job):
-                    return self._json(
-                        500, {'error': 'segment storage failure'})
-                try:
-                    atomic_file.write_bytes_retrying(tmp, raw)
-                    atomic_file.replace_atomically(tmp, final)
-                finally:
-                    try:
-                        tmp.unlink()
-                    except FileNotFoundError:
-                        # os.replace consumed it, which is the success path.
-                        pass
-                if marks is not None:
-                    marks.append(('write', time.perf_counter()))
-                segment_store.write_usage(
-                    job,
-                    stored_count + (0 if replacing else 1),
-                    stored_bytes - replaced_bytes + len(raw))
-                if marks is not None:
-                    marks.append(('record', time.perf_counter()))
-                    segment_store.log_timing(
-                        log_safe(job), stored_count, marks)
-            except OSError:
-                return self._json(500, {'error': 'segment storage failure'})
-        print(f'[SEGMENT] {job}/{filename} ({len(raw)} bytes)', flush=True)
-        return self._json(200, {'ok': True})
-
     def _handle_health(self):
         """GET /health — bridge liveness for detecting a silently-dead stream."""
         now = time.time()
@@ -562,216 +412,6 @@ class Handler(RequestMixin):
             'cmd_ttl_s': CMD_TTL,
             'stream_max_age_s': STREAM_MAX_AGE,
         })
-
-    def _handle_segment_status(self, params):
-        """GET /segment-status?job=X&sig=S — list received segments."""
-        job = params.get('job', [''])[0]
-        sig = self._segment_capability(params)
-        if sig is None:
-            return None
-        if not job or path_safety.unsafe_component(job):
-            return self._json(400, {'error': 'bad job'})
-        # Both path uses inside one guard: the directory and the record the
-        # sig is checked against are separate joins, and either can be the one
-        # that leaves the namespace.
-        try:
-            seg_dir = path_safety.under(SEG_DIR, job)
-            authorized = segment_store.sig_ok(job, sig)
-        except ValueError:
-            return self._json(400, {'error': 'bad job'})
-        if not authorized:
-            # Unknown job and wrong sig get the same answer: no existence oracle.
-            return self._json(403, {'error': 'bad sig'})
-        try:
-            done = sorted(int(f.stem) for f in seg_dir.iterdir()
-                          if f.suffix == '.ts' and f.stem.isascii()
-                          and f.stem.isdecimal()) if seg_dir.is_dir() else []
-        except OSError:
-            return self._json(500, {'error': 'segment storage failure'})
-        return self._json(200, {'done': done, 'count': len(done)})
-
-    def _handle_segment_job_lookup(self, params):
-        """GET /segment-job?token=X&job=Y — the capability, without minting.
-
-        POST mints a job that does not exist yet, which is what a producer
-        wants and the opposite of what a status query wants: asking about a
-        name that was never used created it, so a typo left a permanent
-        record behind and answered as though the job were real.
-
-        Unlike GET /segment-status this route takes the bridge token, so an
-        absent job can be reported as absent — the capability route has to
-        conflate "no such job" with "wrong sig" to avoid being an existence
-        oracle, and a caller holding the bridge token is owed neither.
-        """
-        token = self._bridge_token(params)
-        job = params.get('job', [''])[0]
-        if token is None:
-            return None
-        if not job or path_safety.unsafe_component(job):
-            return self._json(400, {'error': 'bad job'})
-        with segment_store.seg_lock:
-            try:
-                record = segment_store.load_record(job)
-            except ValueError:
-                return self._json(400, {'error': 'bad job'})
-            except segment_store.SegmentRecordError:
-                return self._json(500, {'error': 'segment storage failure'})
-            if record is None:
-                return self._json(404, {'error': 'no such job'})
-            if record.get('token') != token:
-                return self._json(
-                    409, {'error': 'job owned by a different token'})
-            sig = record.get('sig', '')
-            if not isinstance(sig, str) or not sig or not sig.isascii():
-                return self._json(409, {'error': 'job record cannot resume'})
-        return self._json(200, {'ok': True, 'sig': sig})
-
-    def _handle_segment_job(self, body):
-        """POST /segment-job — mint (or re-fetch) the capability for an HLS job.
-
-        Idempotent for the owning token: the relay is documented as resumable,
-        so re-minting returns the same sig and a resume keeps working. A job
-        already owned by a different token answers 409. The record lives beside
-        the job's directory so both survive together.
-        """
-        token = body['token']
-        job = body.get('job', '')
-        if not job or path_safety.unsafe_component(job):
-            return self._json(400, {'error': 'bad job'})
-        with segment_store.seg_lock:
-            try:
-                record = segment_store.load_record(job)
-                job_dir = path_safety.under(SEG_DIR, job)
-                tmp = path_safety.under(SEG_DIR, f'.{job}.json.tmp')
-                record_path = segment_store.record_path(job)
-            except ValueError:
-                return self._json(400, {'error': 'bad job'})
-            except segment_store.SegmentRecordError:
-                return self._json(
-                    500, {'error': 'segment storage failure'})
-            if record is not None:
-                if record.get('token') != token:
-                    return self._json(
-                        409, {'error': 'job owned by a different token'})
-                sig = record.get('sig', '')
-                if not isinstance(sig, str) or not sig or not sig.isascii():
-                    return self._json(409, {'error': 'job record cannot resume'})
-                quota = segment_store.quota(record)
-                if quota is not None:
-                    # A resume is the right moment to reconcile: this counts
-                    # the directory, refreshes the totals, and sweeps temps a
-                    # crashed write left behind. It is O(files), which is why
-                    # it lives here and not on the per-segment path -- a job
-                    # is minted once per resume, not once per segment.
-                    #
-                    # It also heals the one drift the write path can leave: a
-                    # crash between publishing a segment and recording it.
-                    reconciled = segment_store.recount(job_dir)
-                    if reconciled is not None and (
-                            record.get('stored_count'),
-                            record.get('stored_bytes')) != reconciled:
-                        segment_store.mark_dirty(job)
-                        segment_store.write_usage(job, *reconciled)
-                    return self._json(200, {'ok': True, 'sig': sig})
-
-                quota_fields = (
-                    'max_segment_index', 'max_segment_count', 'max_bytes')
-                if any(field in record for field in quota_fields):
-                    return self._json(409, {'error': 'job record cannot resume'})
-                if any(value < 0 for value in (
-                        MAX_SEGMENT_INDEX, MAX_SEGMENTS_PER_JOB,
-                        MAX_SEGMENT_JOB_SIZE)):
-                    return self._json(409, {'error': 'job record cannot resume'})
-
-                try:
-                    if not job_dir.is_dir():
-                        return self._json(
-                            409, {'error': 'job record cannot resume'})
-                    segment_files = [
-                        path for path in job_dir.iterdir()
-                        if path.is_file() and path.suffix == '.ts'
-                    ]
-                    stored_bytes = sum(
-                        path.stat().st_size for path in segment_files)
-                except OSError:
-                    return self._json(
-                        500, {'error': 'segment storage failure'})
-                stored_indices = [
-                    int(path.stem) for path in segment_files
-                    if path.stem.isascii() and path.stem.isdecimal()
-                ]
-                if (len(segment_files) > MAX_SEGMENTS_PER_JOB
-                        or stored_bytes > MAX_SEGMENT_JOB_SIZE
-                        or any(index > MAX_SEGMENT_INDEX
-                               for index in stored_indices)):
-                    return self._json(
-                        409, {'error': 'legacy job exceeds current quotas'})
-
-                record = {
-                    **record,
-                    'max_segment_index': MAX_SEGMENT_INDEX,
-                    'max_segment_count': MAX_SEGMENTS_PER_JOB,
-                    'max_bytes': MAX_SEGMENT_JOB_SIZE,
-                    # This branch has already counted and measured the job to
-                    # decide whether it fits current quotas, so seeding the
-                    # totals here costs nothing and spares the first segment
-                    # write a recount.
-                    'stored_count': len(segment_files),
-                    'stored_bytes': stored_bytes,
-                }
-                try:
-                    atomic_file.write_text_retrying(tmp, json.dumps(record))
-                    atomic_file.replace_atomically(tmp, record_path)
-                except OSError:
-                    try:
-                        tmp.unlink()
-                    except OSError:
-                        # The record write already failed and the 500 below is
-                        # the answer; a leftover temp is overwritten by the
-                        # next write to this job's name.
-                        pass
-                    return self._json(
-                        500, {'error': 'segment storage failure'})
-                return self._json(200, {'ok': True, 'sig': sig})
-            # Counted, not assumed empty: a record can be deleted while its
-            # directory survives, and seeding zero there would hand the job a
-            # budget it has already spent. This is also where a temp left by a
-            # crashed write is swept, which is off the per-segment path.
-            seeded = segment_store.recount(job_dir)
-            seeded_count, seeded_bytes = seeded if seeded is not None else (0, 0)
-            record = segment_store.new_record(
-                token, seeded_count, seeded_bytes)
-            sig = record['sig']
-            made_dir = not job_dir.exists()
-            try:
-                job_dir.mkdir(parents=True, exist_ok=True)
-                atomic_file.write_text_retrying(tmp, json.dumps(record))
-                atomic_file.replace_atomically(tmp, record_path)  # publish
-            except OSError:
-                # Job names may contain dots, so the flat namespace collides
-                # in EITHER minting order: with job 'a' taken, this mkdir for
-                # job 'a.json' hits the existing 'a.json' record file; with
-                # job 'a.json' taken, this os.replace for job 'a' targets the
-                # existing 'a.json' directory. Both raise OSError and both
-                # mean the name is unavailable. A refused mint must write
-                # nothing, so the half-publish is rolled back: the tmp record,
-                # and the job directory when this call created it.
-                try:
-                    tmp.unlink()
-                except OSError:
-                    # Best effort: the 409 below is the answer either way, and
-                    # the next mint on this name overwrites the temp.
-                    pass
-                if made_dir:
-                    try:
-                        job_dir.rmdir()
-                    except OSError:
-                        # Only this call's own directory is removed, and only
-                        # while empty. One that is not empty belongs to
-                        # whatever filled it.
-                        pass
-                return self._json(409, {'error': 'job name unavailable'})
-        return self._json(200, {'ok': True, 'sig': sig})
 
     def do_OPTIONS(self):
         self.send_response(204)
