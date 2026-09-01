@@ -96,6 +96,7 @@
 !/daedalus_bridge/mcp_bootstrap.py
 !/daedalus_bridge/parent_watch.py
 !/daedalus_bridge/path_safety.py
+!/daedalus_bridge/result_routes.py
 !/daedalus_bridge/result_store.py
 !/daedalus_bridge/route_answer.py
 !/daedalus_bridge/segment_store.py
@@ -366,6 +367,7 @@
 !/tests/test_release_scan.py
 !/tests/test_repo_layout.py
 !/tests/test_result_command_write_retry.py
+!/tests/test_result_routes.py
 !/tests/test_result_store.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
