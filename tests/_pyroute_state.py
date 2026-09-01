@@ -419,9 +419,7 @@ def bind_alias_target(target, value, state, bindings):
         if isinstance(resolved, DeferredGenerator):
             bindings[1][target.id] = resolved
         elif is_deferred_value(resolved):
-            bindings[2][target.id] = resolved
-            # Recover sender evidence for an alias target when no deferred
-            # callable was resolved, allowing a plain string into bindings.
+            bindings[2][target.id] = resolved  # Alias sender: string, no func.
             sender = (resolve_sender_name(value, state.aliases)
                       or sender_value(resolved))
             if sender is not None: bindings[0][target.id] = sender
