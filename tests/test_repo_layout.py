@@ -29,6 +29,8 @@ BRIDGE_PACKAGE = (
     'result_routes.py',
     'result_store.py',
     'route_answer.py',
+    'segment_jobs.py',
+    'segment_routes.py',
     'segment_store.py',
     'static_routes.py',
     'stream_route.py',

@@ -99,6 +99,8 @@
 !/daedalus_bridge/result_routes.py
 !/daedalus_bridge/result_store.py
 !/daedalus_bridge/route_answer.py
+!/daedalus_bridge/segment_jobs.py
+!/daedalus_bridge/segment_routes.py
 !/daedalus_bridge/segment_store.py
 !/daedalus_bridge/static_routes.py
 !/daedalus_bridge/stream_route.py
@@ -371,6 +373,7 @@
 !/tests/test_result_store.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
+!/tests/test_segment_routes.py
 !/tests/test_segment_storage.py
 !/tests/test_segment_store.py
 !/tests/test_segment_write_retry.py
