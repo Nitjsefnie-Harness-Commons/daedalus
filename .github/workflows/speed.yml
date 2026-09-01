@@ -492,13 +492,15 @@ jobs:
         if: steps.baseline.outputs.point != ''
         # Separate environments because the two sides pin different versions,
         # and a shared one would silently benchmark whichever resolved last
-        # against both trees.
+        # against both trees. Each side installs its OWN requirements-test.txt
+        # beside the package: the coverage suites one cell selects import
+        # `coverage`, which only the test requirements carry.
         run: |
           for side in base head; do
             python -m venv "venv-$side"
             "venv-$side/bin/python" -m pip install --quiet --upgrade pip
             "venv-$side/bin/python" -m pip install --quiet \
-              "./${side}" "./${side}[mcp]"
+              "./${side}" "./${side}[mcp]" -r "./${side}/requirements-test.txt"
           done
           # grep rather than `head -2`: head closes the pipe after two lines,
           # pip takes the broken pipe, prints "ERROR: Pipe to stdout was
