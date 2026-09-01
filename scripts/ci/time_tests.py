@@ -20,6 +20,10 @@ present with however long it took to give up.
 The first test of a suite carries that suite's interpreter startup and
 imports, because there is no earlier line to measure from. That cost lands on
 both sides of the comparison, which is what matters.
+
+Nested invocations of `main()` relay their marker lines through the suite's
+stdout. Those markers are this instrument's exact output format, so their
+spans can be recognized without guessing from result content.
 """
 import argparse
 import json
@@ -32,6 +36,8 @@ from pathlib import Path
 # `  PASS  name`, as _util.runner prints it. FAIL and SKIP lines are read too:
 # they end a test's interval even though that test is not recorded.
 _RESULT = re.compile(r'^\s+(PASS|FAIL|SKIP|ERROR)\s+(\S+)')
+_RELAY_START = re.compile(r'^=== .+ ===$')
+_RELAY_END = re.compile(r'^--- timed [0-9]+ passing tests in .+$')
 
 
 def selected(name, only, except_globs):
@@ -53,6 +59,7 @@ def time_suite(python, suite, cwd):
     """Every passing test in one suite, with the seconds it took."""
     durations = {}
     started = time.monotonic()
+    relay_depth = 0
     with subprocess.Popen(
             [python, '-u', str(suite)], cwd=str(cwd),
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -61,7 +68,16 @@ def time_suite(python, suite, cwd):
         for line in child.stdout:
             sys.stdout.write(line)
             now = time.monotonic()
-            match = _RESULT.match(line.rstrip('\n'))
+            line = line.rstrip('\n')
+            if _RELAY_START.fullmatch(line):
+                relay_depth += 1
+                continue
+            if _RELAY_END.fullmatch(line):
+                relay_depth = max(relay_depth - 1, 0)
+                continue
+            if relay_depth:
+                continue
+            match = _RESULT.match(line)
             if match:
                 outcome, name = match.group(1), match.group(2).rstrip(':')
                 if outcome == 'PASS':
