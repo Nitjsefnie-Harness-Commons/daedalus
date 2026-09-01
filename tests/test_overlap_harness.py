@@ -216,7 +216,7 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
         failure = _harness_failure(
             _worker(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
-            wait_between=True, inner_wait=5)
+            wait_between=True, inner_wait=2)
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure
@@ -236,11 +236,11 @@ def test_a_slow_result_post_cannot_preempt_the_consume_wait(tmp):
         {'id': '_cookies', 'domain': 'owner-a'},
         {'id': '_cookies', 'domain': 'owner-b'},
     ]
-    with _slow_result_server(post_delay=4) as base:
+    with _slow_result_server(post_delay=2) as base:
         failure = _harness_failure(
             _worker(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
-            wait_between=True, inner_wait=2)
+            wait_between=True, inner_wait=1)
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure
@@ -489,7 +489,7 @@ def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
         'print("slow-pipe-marker", flush=True)\n'
         'print("slow-pipe-error", file=sys.stderr, flush=True)\n'
         'grandchild = subprocess.Popen('
-        '[sys.executable, "-c", "import time; time.sleep(3)"])\n'
+        '[sys.executable, "-c", "import time; time.sleep(1)"])\n'
         'target = Path(sys.argv[1])\n'
         'pending = target.with_suffix(".tmp")\n'
         'pending.write_text("ready", encoding="ascii")\n'
