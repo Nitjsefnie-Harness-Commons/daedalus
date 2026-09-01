@@ -22,7 +22,7 @@ capture.
 """
 import ast
 
-from _coverage_memo import analysed, nodes
+from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
     _is_root_spelling, _scope_shadows, _shadowed_names, root_owner_names)
 
@@ -72,7 +72,8 @@ class _ModuleFacts:
         self._collect(tree)
 
     def _collect(self, tree):
-        for node in nodes(tree):
+        walked = memo_nodes(tree)
+        for node in walked:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'subprocess':
@@ -93,7 +94,7 @@ class _ModuleFacts:
                     if alias.name in _CHDIR:
                         self.chdir_callables.add(bound)
         self._propagate_aliases(tree)
-        for node in nodes(tree):
+        for node in walked:
             if isinstance(node, ast.Call):
                 function = node.func
                 is_chdir = (isinstance(function, ast.Attribute)
@@ -112,7 +113,7 @@ class _ModuleFacts:
     def _propagate_aliases(self, tree):
         """Follow plain-name aliases of a launcher, _util or chdir."""
         aliases = []
-        for node in nodes(tree):
+        for node in memo_nodes(tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name)):
                 aliases.append((node.targets[0].id, node.value))
@@ -259,7 +260,7 @@ def _unresolved_cwd(node, facts, shadowed, launcher):
 def _assignment_target_lines(tree, name):
     """Every line where `name` itself is an assignment target."""
     lines = []
-    for node in nodes(tree):
+    for node in memo_nodes(tree):
         if isinstance(node, ast.Assign):
             targets = node.targets
         elif isinstance(node, ast.AnnAssign):
@@ -279,7 +280,7 @@ def _assignment_target_lines(tree, name):
 def _mutation_lines(tree, name):
     """Every line where `name` is mutated rather than plainly rebound."""
     lines = []
-    for node in nodes(tree):
+    for node in memo_nodes(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = (node.targets if isinstance(node, ast.Assign)
                        else [node.target])
@@ -438,7 +439,7 @@ def _declaration_names(facts):
 def _env_keyword_values(tree):
     """The Name nodes appearing directly as an env= keyword's value."""
     values = set()
-    for node in nodes(tree):
+    for node in memo_nodes(tree):
         if (isinstance(node, ast.keyword) and node.arg == 'env'
                 and isinstance(node.value, ast.Name)):
             values.add(id(node.value))
@@ -447,7 +448,7 @@ def _env_keyword_values(tree):
 
 def _namespace_lookups(tree):
     """globals()/vars() subscripts, with the literal key where there is one."""
-    for node in nodes(tree):
+    for node in memo_nodes(tree):
         if not isinstance(node, ast.Subscript):
             continue
         namespace = node.value
@@ -476,7 +477,7 @@ def _declaration_name_violations(tree, facts, relative):
                 f'declaration name {key or "computed at runtime"}')
     for name in sorted(names):
         binding_line = facts.module_bindings[name][0][0]
-        for node in nodes(tree):
+        for node in memo_nodes(tree):
             if not isinstance(node, ast.Name) or node.id != name:
                 continue
             if id(node) in env_values:
@@ -576,7 +577,7 @@ def _helper_rebind_violations(tree, facts, relative):
     exactly like one. Assignment targets only: syntax, not control flow.
     """
     violations = []
-    for node in nodes(tree):
+    for node in memo_nodes(tree):
         if (isinstance(node, ast.Call)
                 and (_setattr_rebinds_declaration(node, facts)
                      or _mutates_module_namespace(node, facts))):
@@ -639,7 +640,7 @@ def _carried_parts(value):
 def _unfollowable_launcher_bindings(tree, facts, relative):
     """A launcher bound where the alias walk cannot see is refused there."""
     violations = []
-    for node in nodes(tree):
+    for node in memo_nodes(tree):
         for line, value in _bound_values(node):
             if any(_names_one_of(part, facts.subprocess_modules)
                    or _is_launch_value(part, facts)
