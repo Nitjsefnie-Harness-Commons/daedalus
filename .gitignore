@@ -214,6 +214,7 @@
 !/scripts/ci/time_tests.py
 !/scripts/ci/workflow_yaml.py
 !/scripts/ci/yamlscalar.py
+!/scripts/ci/zeroed_suites.py
 
 # ─── tests ───
 !/tests/

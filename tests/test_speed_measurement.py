@@ -7,12 +7,15 @@ Each of those is a decision about what a number is allowed to describe, so
 these tests drive the comparison with rounds that disagree.
 """
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 
 def _durations_tree(tmp, side, rounds):
@@ -193,6 +196,103 @@ def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
     assert compare.main(['--base', str(old), '--head', *head,
                          '--summary-file', str(summary)]) == 0
     assert 'produced no per-test durations' in summary.read_text(encoding='utf-8')
+
+
+def _suite_tree(tmp, side, suites):
+    """One round of per-suite reports, named as time_tests.py names them."""
+    directory = Path(tmp) / f'{side}-1'
+    directory.mkdir(parents=True)
+    for suite, tests in suites.items():
+        (directory / f'{suite}.json').write_text(
+            json.dumps({'tests': tests}), encoding='utf-8')
+    return [str(directory)]
+
+
+def test_speed_comparison_fails_when_a_suite_times_zero_on_both_sides(tmp):
+    """A suite that produced nothing on both sides is a shrunken covered set.
+
+    The comparison intersects on test name, so a suite that timed zero tests
+    on both sides drops out of every total without anything reporting it --
+    that is exactly how a cell whose virtualenv was missing a dependency
+    still reported a verdict over 131 tests while 41 more sat unmeasured.
+    """
+    compare = _compare_durations()
+    base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
+                                     'test_broken': {}})
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
+                                     'test_broken': {}})
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', *base, '--head', *head,
+            '--summary-file', str(summary)]
+    assert compare.main(argv) == 1
+    text = summary.read_text(encoding='utf-8')
+    assert '`test_broken.py`' in text, text
+    assert 'zero tests' in text, text
+
+
+def test_speed_comparison_allows_a_suite_that_times_zero_on_one_side(tmp):
+    """Zero on one side alone is a legitimate feature gap, not a lost suite."""
+    compare = _compare_durations()
+    base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
+                                     'test_feature': {}})
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
+                                     'test_feature': {'covered': 1.0}})
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', *base, '--head', *head,
+            '--summary-file', str(summary)]
+    assert compare.main(argv) == 0
+    assert 'is within the 1.30 budget' in summary.read_text(encoding='utf-8')
+
+
+def test_speed_comparison_allows_a_suite_absent_from_one_side(tmp):
+    """A report only one side has is not a suite the covered set loses.
+
+    test_nothing.py is the live shape: it exists on the baseline alone, so
+    the head side has no report for it and nothing is silently dropped.
+    """
+    compare = _compare_durations()
+    base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
+                                     'test_nothing': {}})
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0}})
+    assert compare.main(['--base', *base, '--head', *head]) == 0
+
+
+def test_speed_comparison_zero_counts_every_round_of_a_side(tmp):
+    """A suite is zero on a side only when every round of it was zero.
+
+    One round that did record tests is the suite working, so a single empty
+    report beside it must not fail the cell.
+    """
+    compare = _compare_durations()
+    empty = Path(tmp) / 'base-1'
+    empty.mkdir()
+    (empty / 'test_suite.json').write_text(
+        json.dumps({'tests': {'shared': 1.0}}), encoding='utf-8')
+    (empty / 'test_flaky.json').write_text(
+        json.dumps({'tests': {}}), encoding='utf-8')
+    recovery = Path(tmp) / 'base-2'
+    recovery.mkdir()
+    (recovery / 'test_flaky.json').write_text(
+        json.dumps({'tests': {'recovered': 1.0}}), encoding='utf-8')
+    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
+                                     'test_flaky': {'recovered': 1.0}})
+    assert compare.main(['--base', str(empty), str(recovery),
+                         '--head', *head]) == 0
+
+
+def test_shared_speed_modules_import_by_package(tmp):
+    """Shared workflow modules must import without a sys.path test shim.
+
+    compare_durations imports the zero-suite guard from a sibling module, so
+    both spellings have to work: the one CI runs the comparator with, and the
+    package import a promoted module is otherwise reachable through.
+    """
+    del tmp
+    imported = subprocess.run(
+        [sys.executable, '-c', 'import scripts.ci.zeroed_suites; '
+         'import scripts.ci.compare_durations'],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+    assert imported.returncode == 0, (imported.stdout, imported.stderr)
 
 
 def test_speed_summary_longest_table_orders_head_medians_and_applies_limit(
