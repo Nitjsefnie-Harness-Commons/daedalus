@@ -13,8 +13,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _jsread import (js_bracket_end, js_expression_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
-from _jsroute_calls import (known_member_binding,  # noqa: E402
-                            parameter_bindings)
+from _jsroute_calls import (discover_invocations,  # noqa: E402
+                            parameter_bindings,
+                            sender_candidate_bindings)
 from _jsroute_timeline import (  # noqa: E402
     FunctionTimeline, InvocationReplay, declaration_bindings,
     function_reference, lexical_limits)
@@ -269,7 +270,7 @@ def js_tab_routing_violations(path, rel):
     method_positions = set()
 
     def add_scope(open_paren, body_open, params=None, param_start=None,
-                  body=None):
+                  body=None, param_order=None):
         if body is None:
             body = ('block', body_open,
                     pair_end.get(body_open, len(mask)))
@@ -283,8 +284,6 @@ def js_tab_routing_violations(path, rel):
                 mask, text, open_paren + 1, pair_end[open_paren] - 1,
                 pair_end, _js_top_level, js_split_top_level)
             param_start = open_paren + 1
-        else:
-            param_order = list(params)
         scopes.append({'start': key[0], 'end': key[1],
                        'params': params, 'param_start': param_start,
                        'param_order': param_order,
@@ -314,7 +313,11 @@ def js_tab_routing_violations(path, rel):
         body = _js_function_body_at(mask, match.start())
         if body is not None:
             body_open = body[1] if body[0] == 'block' else None
-            add_scope(None, body_open, {match.group(1)}, match.start(), body)
+            params, param_order = parameter_bindings(
+                mask, text, match.start(1), match.end(1), pair_end,
+                _js_top_level, js_split_top_level)
+            add_scope(
+                None, body_open, params, match.start(), body, param_order)
     for match in re.finditer(r'\b([\w$]+)\s*\(', mask):
         if match.group(1) in ('if', 'for', 'while', 'switch', 'catch'):
             continue
@@ -469,49 +472,38 @@ def js_tab_routing_violations(path, rel):
             if source is not None:
                 value = function_reference(source, match.start(), owner)
             timeline.add(binding, owner, match.start(), match.start(), value)
-    invocations = []
-    for match in re.finditer(r'\b([\w$]+)\s*\(', mask):
-        binding = (visible_binding(match.group(1), match.start())
-                   if bare_call(match) else known_member_binding(
-                       match, mask, text, bindings, pair_end,
-                       visible_binding, js_split_top_level))
-        if binding is None:
-            continue
-        open_paren = mask.index('(', match.start())
-        args = js_split_top_level(mask, text, open_paren + 1,
-                                  pair_end[open_paren] - 1)
-        invocations.append((match.start(), binding, args))
-    for function_name, definition, body in function_occurrences:
-        call_open = after_space(body[2])
-        if mask[call_open:call_open + 1] != ')':
-            continue
-        call_open = after_space(call_open + 1)
-        if mask[call_open:call_open + 1] != '(':
-            continue
-        binding = visible_binding(function_name, definition)
-        if binding is None:
-            continue
-        args = js_split_top_level(mask, text, call_open + 1,
-                                  pair_end[call_open] - 1)
-        invocations.append((definition, binding, args))
-    invocations.sort(key=lambda call: call[0])
+    invocations = discover_invocations(
+        mask, text, {'end': pair_end, 'start': pair_start}, bindings,
+        {'binding': visible_binding, 'scope': scope_at}, method_positions,
+        {'top_level': _js_top_level, 'split': js_split_top_level,
+         'body': _js_function_body_at}, senders)
     replay = InvocationReplay(
-        timeline, scopes, events, invocations, mask, scope_at,
-        visible_binding, _js_function_body_at, optional_write)
+        timeline, scopes, events, invocations,
+        {'mask': mask, 'text': text, 'body': _js_function_body_at,
+         'top_level': _js_top_level},
+        scope_at, visible_binding, optional_write)
 
     reached_calls = {}
+    reached_unknowns = []
     runtime_values = {}
     previous_call = -1
     for call in invocations:
-        if scope_at(call[0]) != 0:
+        if call['scope'] != 0:
             continue
-        replay.clear_between(runtime_values, previous_call, call[0], {0})
-        _, reached = replay.run(call, runtime_values)
+        replay.clear_between(
+            runtime_values, previous_call, call['order'], {0})
+        _, reached, unknowns = replay.run(call, runtime_values)
         for record in reached:
-            reached_calls.setdefault(record[0][0], []).append(record)
-        previous_call = call[0]
+            reached_calls.setdefault(
+                record[0]['start'], []).append(record)
+        reached_unknowns.extend(unknowns)
+        previous_call = call['order']
+
+    sender_state_cache = {}
 
     def sender_states_before(limit):
+        if limit in sender_state_cache:
+            return sender_state_cache[limit]
         states = {}
         call_scope = scope_at(limit)
         ancestors = set()
@@ -527,17 +519,18 @@ def js_tab_routing_violations(path, rel):
         runtime_values = {}
         previous_call = -1
         for call in invocations:
-            call_start = call[0]
-            if call_start >= limit or scope_at(call_start) not in ancestors:
+            call_start = call['start']
+            call_order = call['order']
+            if call_order >= limit or call['scope'] not in ancestors:
                 continue
             replay.clear_between(
-                runtime_values, previous_call, call_start, ancestors)
-            writes, _ = replay.run(call, runtime_values)
-            scheduled.extend((call_start, order, start, call_start,
+                runtime_values, previous_call, call_order, ancestors)
+            writes, _, _ = replay.run(call, runtime_values)
+            scheduled.extend((call_order, order, start, call_order,
                               path_optional, match)
                              for order, (start, match, path_optional)
                              in enumerate(writes, 1))
-            previous_call = call_start
+            previous_call = call_order
         for _, _, start, call_start, path_optional, match in sorted(scheduled):
             target = visible_binding(match.group(1), start)
             if target is None:
@@ -550,6 +543,7 @@ def js_tab_routing_violations(path, rel):
                 optional = optional or optional_write(call_start, limit)
             states[target] = (merged_sender(states.get(target), value)
                               if optional else value)
+        sender_state_cache[limit] = states
         return states
 
     def sender_before(name, limit):
@@ -558,10 +552,15 @@ def js_tab_routing_violations(path, rel):
     def reached_sender(record):
         call, execution, sources = record
         states = sender_states_before(execution)
-        source = sources.get(call[1])
-        if source is not None:
+        binding = call['binding']
+        if binding in sources:
+            status, source = sources[binding]
+            if status == 'unprovable':
+                return _JS_UNPROVABLE
+            if status == 'empty':
+                return None
             return sender_state(source[0], source[1], states)
-        return states.get(call[1])
+        return states.get(binding)
 
     def names_before(limit, depth, floor=0):
         """Tracked state of named objects from the assignments before `limit`.
@@ -635,26 +634,25 @@ def js_tab_routing_violations(path, rel):
         start, end = span
         return resolve(start, end, named, 0)
 
-    candidate_names = set(senders)
-    candidate_names.update(name for name, _, _ in alias_bindings)
-    call_pattern = (r'(?<![\w$.])(?:' + '|'.join(map(
-        re.escape, sorted(candidate_names, key=len, reverse=True)))
-        + r')\s*\(')
-    for m in re.finditer(call_pattern, mask):
-        # `function extCmd(type, fields = {}, opts = {})` is where a sender is
-        # declared, not where one is called; its parameter list is not a
-        # payload and resolving it would report the definition of every
-        # sender as unprovable.
-        if not bare_call(m):
+    for call in reached_unknowns:
+        violations.append(
+            f'{rel}:{line_of(call["start"])}: an invocation target this '
+            'guard cannot resolve')
+
+    candidate_bindings = sender_candidate_bindings(
+        scopes, bindings, mask, visible_binding, _js_statement_end,
+        senders)
+
+    for call in invocations:
+        call_name = call['name']
+        if (call_name not in senders
+                and call['binding'] not in candidate_bindings):
             continue
-        call_name = re.match(r'[\w$]+', mask[m.start():]).group(0)
-        open_paren = mask.index('(', m.start())
-        call_end = js_bracket_end(mask, open_paren)
-        args = js_split_top_level(mask, text, open_paren + 1, call_end - 1)
+        runtime_records = reached_calls.get(call['start'])
+        args = call['args']
         tab_entries = []
         unprovable = []
-        named = names_before(m.start(), 0)
-        runtime_records = reached_calls.get(m.start())
+        named = names_before(call['start'], 0)
         if call_name in senders:
             sender = call_name
         elif runtime_records:
@@ -664,26 +662,27 @@ def js_tab_routing_violations(path, rel):
             for value in runtime_senders[1:]:
                 sender = merged_sender(sender, value)
         else:
-            sender = sender_before(call_name, m.start())
+            sender = sender_states_before(
+                call['start']).get(call['binding'])
         if sender is None:
             continue
         if sender in ('runCommand', _JS_UNPROVABLE) and args:
             keys = argument_state(args[0], named)
             if keys is _JS_UNPROVABLE:
-                unprovable.append(line_of(m.start()))
+                unprovable.append(line_of(call['start']))
             # A `type` key makes this a typed send; eval sends carry `code`.
             elif keys and 'type' in keys and 'tab' in keys:
                 tab_entries.append(keys['tab'])
         if sender in ('extCmd', 'extcmd', _JS_UNPROVABLE) and len(args) >= 2:
             fields = argument_state(args[1], named)
             if fields is _JS_UNPROVABLE:
-                unprovable.append(line_of(m.start()))
+                unprovable.append(line_of(call['start']))
             elif fields and 'tab' in fields:
                 tab_entries.append(fields['tab'])
             if len(args) >= 3:
                 opts = argument_state(args[2], named)
                 if opts is _JS_UNPROVABLE:
-                    unprovable.append(line_of(m.start()))
+                    unprovable.append(line_of(call['start']))
                 elif opts and 'tab' in opts:
                     tab_entries.append(opts['tab'])
         for lineno, value in tab_entries:
