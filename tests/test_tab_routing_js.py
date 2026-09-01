@@ -294,6 +294,63 @@ def test_function_value_timelines_match_runtime(tmp):
          "const deferred = () =>\n"
          "  (function demote() { send = ordinary; })();\n"
          "deferred();\nsend('focus-tab', { tab: chromeTab });\n", False),
+        ('iife-argument-promotes-body-demotes', "let send = ordinary;\n"
+         "const promote = () => { send = extCmd; };\n"
+         "(function demote(value) {\n"
+         "  send = ordinary;\n})(promote());\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
+        ('iife-argument-demotes-body-promotes', "let send = extCmd;\n"
+         "const demote = () => { send = ordinary; };\n"
+         "(function promote(value) {\n"
+         "  send = extCmd;\n})(demote());\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('optional-call-promotion', "let send = ordinary;\n"
+         "const deferred = () => send('focus-tab', "
+         "{ tab: chromeTab });\nsend = extCmd;\ndeferred?.();\n", True),
+        ('optional-call-demotion', "let send = extCmd;\n"
+         "const deferred = () => send('focus-tab', "
+         "{ tab: chromeTab });\nsend = ordinary;\ndeferred?.();\n", False),
+        ('computed-member-promotion', "let send = ordinary;\n"
+         "const deferred = () => send('focus-tab', "
+         "{ tab: chromeTab });\nconst box = { run: deferred };\n"
+         "send = extCmd;\nbox['run']();\n", True),
+        ('computed-member-demotion', "let send = extCmd;\n"
+         "const deferred = () => send('focus-tab', "
+         "{ tab: chromeTab });\nconst box = { run: deferred };\n"
+         "send = ordinary;\nbox['run']();\n", False),
+        ('inline-member-promotion', "let send = ordinary;\n"
+         "const box = { run: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nsend = extCmd;\nbox.run();\n", True),
+        ('inline-member-demotion', "let send = extCmd;\n"
+         "const box = { run: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nsend = ordinary;\nbox.run();\n", False),
+        ('anonymous-iife-promotion', "let send = ordinary;\n"
+         "const deferred = () => (function () { send = extCmd; })();\n"
+         "deferred();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('anonymous-iife-demotion', "let send = extCmd;\n"
+         "const deferred = () => (function () { send = ordinary; })();\n"
+         "deferred();\nsend('focus-tab', { tab: chromeTab });\n", False),
+        ('arrow-iife-promotion', "let send = ordinary;\n"
+         "const deferred = () => (() => { send = extCmd; })();\n"
+         "deferred();\nsend('focus-tab', { tab: chromeTab });\n", True),
+        ('arrow-iife-demotion', "let send = extCmd;\n"
+         "const deferred = () => (() => { send = ordinary; })();\n"
+         "deferred();\nsend('focus-tab', { tab: chromeTab });\n", False),
+        ('renamed-destructuring-demotion', "let send = extCmd;\n"
+         "const deferred = ({ send: invoke }) => invoke('focus-tab', "
+         "{ tab: chromeTab });\ndeferred({ send: ordinary });\n", False),
+        ('omitted-default-promotion',
+         "const deferred = (send = extCmd) => send('focus-tab', "
+         "{ tab: chromeTab });\ndeferred();\n", True),
+        ('omitted-default-clean',
+         "const deferred = (send = ordinary) => send('focus-tab', "
+         "{ tab: chromeTab });\ndeferred();\n", False),
+        ('missing-property-default-promotion',
+         "const deferred = ({ send = extCmd } = {}) => "
+         "send('focus-tab', { tab: chromeTab });\ndeferred({});\n", True),
+        ('missing-property-default-clean',
+         "const deferred = ({ send = ordinary } = {}) => "
+         "send('focus-tab', { tab: chromeTab });\ndeferred({});\n", False),
         ('semicolon-terminated-concise-body', "let send = ordinary;\n"
          "const deferred = () => send('focus-tab', "
          "{ tab: chromeTab });\nsend = extCmd;\ndeferred();\n", True),
@@ -359,6 +416,18 @@ def test_function_value_timelines_match_runtime(tmp):
                 for label, source, _ in cases]
     expected = [(label, value, value) for label, _, value in cases]
     assert observed == expected, observed
+
+
+def test_unmodelled_invocation_fails_closed(tmp):
+    source = "let send = ordinary;\nconst deferred = () => " \
+             "send('focus-tab', { tab: chromeTab });\n" \
+             "const key = 'run';\nconst box = { run: deferred };\n" \
+             "box[key]();\n"
+    path = Path(tmp) / 'dynamic-call.js'
+    runtime, guard = _runtime_and_guard(source, path)
+    violations = js_tab_routing_violations(path, path.name)
+    assert (runtime, guard) == (False, True), (runtime, violations)
+    assert any('cannot resolve' in item for item in violations), violations
 
 
 def main():
