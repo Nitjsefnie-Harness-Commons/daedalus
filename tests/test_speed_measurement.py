@@ -265,11 +265,13 @@ def test_speed_comparison_allows_a_suite_absent_from_one_side(tmp):
     assert compare.main(['--base', *base, '--head', *head]) == 0
 
 
-def test_speed_comparison_zero_counts_every_round_of_a_side(tmp):
-    """A suite is zero on a side only when every round of it was zero.
+def test_speed_comparison_zero_on_one_side_alone_is_not_a_loss(tmp):
+    """Zero on one side alone is not a loss.
 
-    One round that did record tests is the suite working, so a single empty
-    report beside it must not fail the cell.
+    The baseline's report for the suite is empty in one round and recorded
+    tests in the next, while this commit recorded the test throughout: a
+    feature gap on one side, which the comparison excludes by design rather
+    than something it silently lost.
     """
     compare = _compare_durations()
     empty = Path(tmp) / 'base-1'
@@ -286,6 +288,48 @@ def test_speed_comparison_zero_counts_every_round_of_a_side(tmp):
                                      'test_flaky': {'recovered': 1.0}})
     assert compare.main(['--base', str(empty), str(recovery),
                          '--head', *head]) == 0
+
+
+def test_speed_comparison_fails_when_a_report_is_absent_from_one_round(tmp):
+    """A shipped suite's missing report is emptiness, not non-shipping.
+
+    The comparison needs a suite's tests in every round of both sides, so a
+    round whose report is missing drops the suite from every total -- the
+    shape a timing run that died mid-round leaves behind, which the
+    workflow reports and carries on from. The suite is present in this
+    side's other round, so the side ships it and the absence is emptiness.
+    """
+    compare = _compare_durations()
+    tests = {'lost_a': 1.0, 'lost_b': 2.0}
+    base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0},
+                                      'test_gap': tests},
+                                     {'test_suite': {'shared': 1.0},
+                                      'test_gap': tests}])
+    head = _round_tree(tmp, 'head', [{'test_suite': {'shared': 1.0},
+                                      'test_gap': tests},
+                                     {'test_suite': {'shared': 1.0}}])
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', *base, '--head', *head,
+            '--summary-file', str(summary)]
+    assert compare.main(argv) == 1
+    assert '`test_gap.py`' in summary.read_text(encoding='utf-8')
+
+
+def test_speed_comparison_allows_a_suite_absent_from_a_whole_side(tmp):
+    """Absence from every round of a side is a suite that side does not ship.
+
+    The multi-round form of the test_nothing shape: the baseline has the
+    suite in both rounds and this commit has it in neither, so nothing the
+    comparison could have measured is silently dropped.
+    """
+    compare = _compare_durations()
+    base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0},
+                                      'test_nothing': {}},
+                                     {'test_suite': {'shared': 1.0},
+                                      'test_nothing': {}}])
+    head = _round_tree(tmp, 'head', [{'test_suite': {'shared': 1.0}},
+                                     {'test_suite': {'shared': 1.0}}])
+    assert compare.main(['--base', *base, '--head', *head]) == 0
 
 
 def test_speed_comparison_fails_when_a_suite_is_empty_in_a_round_on_both(tmp):

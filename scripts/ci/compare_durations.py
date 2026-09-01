@@ -54,9 +54,9 @@ from pathlib import Path
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level
-    from .zeroed_suites import zeroed_on_both_sides
+    from .zeroed_suites import accepted_duration, zeroed_on_both_sides
 else:
-    from zeroed_suites import zeroed_on_both_sides
+    from zeroed_suites import accepted_duration, zeroed_on_both_sides
 
 
 def round_durations(directory):
@@ -73,7 +73,7 @@ def round_durations(directory):
         if not isinstance(tests, dict):
             continue
         for name, seconds in tests.items():
-            if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
+            if accepted_duration(seconds):
                 merged[name] = float(seconds)
     return merged
 
