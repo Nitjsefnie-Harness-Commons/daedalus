@@ -36,8 +36,8 @@ from pathlib import Path
 # `  PASS  name`, as _util.runner prints it. FAIL and SKIP lines are read too:
 # they end a test's interval even though that test is not recorded.
 _RESULT = re.compile(r'^\s+(PASS|FAIL|SKIP|ERROR)\s+(\S+)')
-_RELAY_START = re.compile(r'^=== .+ ===$')
-_RELAY_END = re.compile(r'^--- timed [0-9]+ passing tests in .+$')
+_RELAY_START = re.compile(r'^=== (.+) ===$')
+_RELAY_END = re.compile(r'^--- timed ([0-9]+) passing tests in (.+)$')
 
 
 def selected(name, only, except_globs):
@@ -59,7 +59,7 @@ def time_suite(python, suite, cwd):
     """Every passing test in one suite, with the seconds it took."""
     durations = {}
     started = time.monotonic()
-    relay_depth = 0
+    lines = []
     with subprocess.Popen(
             [python, '-u', str(suite)], cwd=str(cwd),
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -67,23 +67,41 @@ def time_suite(python, suite, cwd):
         assert child.stdout is not None
         for line in child.stdout:
             sys.stdout.write(line)
-            now = time.monotonic()
-            line = line.rstrip('\n')
-            if _RELAY_START.fullmatch(line):
-                relay_depth += 1
-                continue
-            if _RELAY_END.fullmatch(line):
-                relay_depth = max(relay_depth - 1, 0)
-                continue
-            if relay_depth:
-                continue
-            match = _RESULT.match(line)
-            if match:
-                outcome, name = match.group(1), match.group(2).rstrip(':')
-                if outcome == 'PASS':
-                    durations[name] = now - started
-                started = now
+            lines.append((line.rstrip('\n'), time.monotonic()))
         child.wait()
+
+    stack = []
+    suppressed = []
+    for index, (line, _now) in enumerate(lines):
+        start = _RELAY_START.fullmatch(line)
+        if start:
+            stack.append([start.group(1), index, 0])
+            continue
+        match = _RESULT.match(line)
+        if match and stack:
+            if match.group(1) == 'PASS':
+                stack[-1][2] += 1
+            continue
+        end = _RELAY_END.fullmatch(line)
+        if end and stack:
+            count, name = end.groups()
+            candidate = stack[-1]
+            if name == candidate[0] and int(count) == candidate[2]:
+                suppressed.append((candidate[1], index))
+                stack.pop()
+
+    def is_suppressed(index):
+        return any(start <= index <= end for start, end in suppressed)
+
+    for index, (line, now) in enumerate(lines):
+        if is_suppressed(index):
+            continue
+        match = _RESULT.match(line)
+        if match:
+            outcome, name = match.group(1), match.group(2).rstrip(':')
+            if outcome == 'PASS':
+                durations[name] = now - started
+            started = now
     return durations
 
 
