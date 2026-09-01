@@ -3,6 +3,7 @@
 import sys
 import time
 from pathlib import Path
+from statistics import median
 from types import ModuleType, SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -84,8 +85,9 @@ def _js_scan_seconds(tmp, count):
     source = Path(tmp) / f'js_calls_{count}.js'
     lines = ["const ordinary = () => undefined;\n"]
     for index in range(count):
-        lines.append(f"const callable{index} = () => ordinary();\n")
-        lines.append(f"callable{index}();\n")
+        lines.append(f"const sender{index} = extCmd;\n")
+        lines.append(
+            f"sender{index}('focus-tab', {{ tab: 'extension' }});\n")
     source.write_text(''.join(lines), encoding='utf-8')
     started = time.perf_counter()
     assert not js_tab_routing_violations(source, source.name)
@@ -93,10 +95,14 @@ def _js_scan_seconds(tmp, count):
 
 
 def test_javascript_call_replay_scales_without_global_rescans(tmp):
-    narrow = _js_scan_seconds(tmp, 20)
-    wide = _js_scan_seconds(tmp, 40)
-    assert wide < 1.5, (narrow, wide)
-    assert wide <= narrow * 6, (narrow, wide)
+    samples = [
+        (count, median(_js_scan_seconds(tmp, count) for _ in range(3)))
+        for count in range(10, 81, 10)
+    ]
+    narrow = samples[0][1]
+    wide = samples[-1][1]
+    assert wide < 1.5, samples
+    assert wide <= narrow * 12, samples
 
 
 def main():

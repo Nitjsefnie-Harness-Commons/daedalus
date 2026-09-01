@@ -1,4 +1,5 @@
 """Source-ordered function values for JavaScript lexical bindings."""
+from bisect import bisect_left, bisect_right
 import re
 
 from _jsroute_calls import parameter_sources
@@ -108,6 +109,7 @@ class InvocationReplay:
         self.scope_at = scope_at
         self.visible_binding = visible_binding
         self.body_at = source['body']
+        self.expression_end = source['expression_end']
         self.optional_write = optional_write
         self.top_level = source['top_level']
         self.bind_events = {}
@@ -121,27 +123,29 @@ class InvocationReplay:
             self.operations.setdefault(owner, []).append(
                 (start, 'bind', match))
         for call in invocations:
-            if call['status'] == 'irrelevant':
+            if call['status'] == 'irrelevant' or call['parent']:
                 continue
             self.operations.setdefault(call['scope'], []).append(
                 (call['order'], 'call', call))
         for operations in self.operations.values():
             operations.sort(key=lambda item: item[0])
+        self.bind_starts = {
+            owner: [item[0] for item in values]
+            for owner, values in self.bind_events.items()}
 
     def clear_between(self, values, lower, upper, owners):
         for owner in owners:
-            for start, match in self.bind_events.get(owner, ()):
-                if lower < start < upper:
-                    values.pop(
-                        self.visible_binding(match.group(1), start), None)
+            starts = self.bind_starts.get(owner, ())
+            lower_index = bisect_right(starts, lower)
+            upper_index = bisect_left(starts, upper)
+            for start, match in self.bind_events.get(
+                    owner, ())[lower_index:upper_index]:
+                values.pop(
+                    self.visible_binding(match.group(1), start), None)
 
     def run(self, call, inherited, seen=frozenset(),
             inherited_optional=False, limits=None, sender_sources=None,
             execution=None):
-        if call['status'] == 'unprovable':
-            return [], [], [call]
-        if call['status'] == 'irrelevant':
-            return [], [], []
         call_start = call['start']
         if limits is None:
             limits = lexical_limits(
@@ -151,6 +155,22 @@ class InvocationReplay:
         writes = []
         calls = []
         unknowns = []
+        active_sources = (sender_sources if sender_sources is not None
+                          else {})
+        for argument_call in call['argument_calls']:
+            calls.append((argument_call, execution,
+                          dict(active_sources)))
+            nested_writes, nested_calls, nested_unknowns = self.run(
+                argument_call, inherited, seen, inherited_optional,
+                limits, active_sources, execution)
+            writes.extend(nested_writes)
+            calls.extend(nested_calls)
+            unknowns.extend(nested_unknowns)
+        if call['status'] == 'unprovable':
+            unknowns.append(call)
+            return writes, calls, unknowns
+        if call['status'] == 'irrelevant':
+            return writes, calls, unknowns
         if call['body'] is not None:
             bodies = (call['body'],)
         else:
@@ -163,7 +183,7 @@ class InvocationReplay:
             if function_scope is None or function_scope in seen:
                 continue
             overrides = dict(inherited)
-            sources = dict(sender_sources or {})
+            sources = dict(active_sources)
             self._override_parameters(
                 overrides, inherited, function_scope, call_start,
                 call['args'], limits, sources)
@@ -175,9 +195,12 @@ class InvocationReplay:
                         item, start, function_scope, path_optional,
                         overrides, inherited, limits)
                     if applied:
-                        sources.pop(
-                            self.visible_binding(
-                                item.group(1), start), None)
+                        target = applied['target']
+                        source = self._assignment_source(
+                            item, applied['optional'])
+                        sources[target] = source
+                        if applied['captured']:
+                            active_sources[target] = source
                         writes.append((start, item, path_optional))
                     continue
                 nested_optional = (
@@ -215,7 +238,10 @@ class InvocationReplay:
             span = source['span']
             if status != 'known':
                 overrides[target] = ()
-                sender_sources[target] = (status, span)
+                sender_sources[target] = {
+                    'status': status, 'span': span,
+                    'rest': source['rest'],
+                    'excluded': source['excluded']}
                 continue
             raw_expr = self.mask[span[0]:span[1]]
             expr = raw_expr.strip()
@@ -230,16 +256,19 @@ class InvocationReplay:
                 value = (direct,) if direct is not None else ()
             overrides[target] = value
             sender_sources[target] = sender_sources.get(
-                source_binding, (status, span))
+                source_binding, {
+                    'status': status, 'span': span,
+                    'rest': source['rest'],
+                    'excluded': source['excluded']})
 
     def _apply_assignment(self, match, start, function_scope,
                           path_optional, overrides, inherited, limits):
         target = self.visible_binding(match.group(1), start)
         if target is None:
-            return False
+            return None
         before_body = start < self.scopes[function_scope]['start']
         if before_body and target in overrides:
-            return False
+            return None
         execution = limits + ((function_scope, start),)
         value = self.timeline.assignment_value(
             target, start, overrides, execution)
@@ -253,6 +282,18 @@ class InvocationReplay:
         overrides[target] = value
         owner = self.scopes[function_scope]
         local = owner['param_start'] <= target[1]
-        if not local or target[2] > owner['end']:
+        captured = not local or target[2] > owner['end']
+        if captured:
             inherited[target] = value
-        return True
+        return {'target': target, 'optional': optional,
+                'captured': captured}
+
+    def _assignment_source(self, match, optional):
+        if optional:
+            return {'status': 'unprovable', 'span': None,
+                    'rest': None, 'excluded': ()}
+        return {
+            'status': 'known',
+            'span': (match.end(), self.expression_end(
+                self.mask, match.end())),
+            'rest': None, 'excluded': ()}
