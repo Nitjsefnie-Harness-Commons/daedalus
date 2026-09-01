@@ -28,6 +28,7 @@ BRIDGE_PACKAGE = (
     'path_safety.py',
     'result_store.py',
     'segment_store.py',
+    'stream_route.py',
     'stream_service.py',
     'tab_registry.py',
 )
