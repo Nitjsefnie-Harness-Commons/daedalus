@@ -317,12 +317,20 @@ def _html_template_end(text, start):
                 and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
             tag_start = i
             i = _html_tag(text, tag_start, [])
-            if _html_tag_name(text, tag_start, i) == 'template':
+            tag_name = _html_tag_name(text, tag_start, i)
+            if tag_name == 'template':
                 depth += 1
             elif _html_script_name(text, tag_start, '</template') is not None:
                 depth -= 1
                 if depth == 0:
                     return tag_start
+            elif tag_name == 'script':
+                i = _html_script_end(text, i)
+            elif tag_name in ('style', 'title', 'textarea'):
+                closer = '</' + tag_name
+                while (i < len(text)
+                       and _html_script_name(text, i, closer) is None):
+                    i += 1
             continue
         i += 1
     return len(text)
