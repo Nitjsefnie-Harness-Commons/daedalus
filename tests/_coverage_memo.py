@@ -19,8 +19,6 @@ allowlist reconciliation at the end of a scan reads that list. Storing
 only the return value therefore drops every keep site a later scan would
 have declared, and the reconciliation then reports allowlisted sites as
 having no launch — so a hit replays the appends as well.
-
-Within one analysis, pass after pass wants every node of the module.
 """
 import ast
 import weakref
