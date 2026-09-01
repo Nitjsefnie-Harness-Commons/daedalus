@@ -517,7 +517,7 @@ def test_dashboard_refuses_traversal(tmp):
         # simply absent, but never served.
         status, raw = _util.get(base + '/dashboard/%2e%2e/server.py')
         assert status in (400, 404), status
-        assert b'BaseHTTPRequestHandler' not in raw
+        assert raw != server_py and b'BaseHTTPRequestHandler' not in raw
 
 
 def main():

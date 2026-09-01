@@ -28,9 +28,11 @@ BRIDGE_PACKAGE = (
     'path_safety.py',
     'result_store.py',
     'segment_store.py',
+    'static_routes.py',
     'stream_route.py',
     'stream_service.py',
     'tab_registry.py',
+    'upload_routes.py',
 )
 
 MCP_PACKAGE = (

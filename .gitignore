@@ -98,9 +98,11 @@
 !/daedalus_bridge/path_safety.py
 !/daedalus_bridge/result_store.py
 !/daedalus_bridge/segment_store.py
+!/daedalus_bridge/static_routes.py
 !/daedalus_bridge/stream_route.py
 !/daedalus_bridge/stream_service.py
 !/daedalus_bridge/tab_registry.py
+!/daedalus_bridge/upload_routes.py
 
 # ─── daedalus_cli ───
 !/daedalus_cli/
@@ -374,6 +376,7 @@
 !/tests/test_speed_gate_jobs.py
 !/tests/test_speed_measurement.py
 !/tests/test_speedharness.py
+!/tests/test_static_routes.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_stream_route.py
 !/tests/test_stream_service.py
@@ -387,6 +390,7 @@
 !/tests/test_teardown_retry.py
 !/tests/test_time_tests.py
 !/tests/test_unresolved_routes.py
+!/tests/test_upload_routes.py
 !/tests/test_version_contract.py
 !/tests/test_version_contract_dashboard_duplicates.py
 !/tests/test_version_contract_empty_rev.py
