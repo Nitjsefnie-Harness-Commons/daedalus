@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Suites the comparison loses: zero accepted tests in a paired round, so
-the intersection drops them from every total without anything reporting it.
+"""Suites the comparison loses: zero accepted tests in a paired round, or a
+round whose report a shipped suite is missing from. Either way the
+intersection drops the suite from every total without anything reporting it.
 """
 import json
 from pathlib import Path
+
+
+def accepted_duration(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _accepted(summary):
@@ -12,9 +17,7 @@ def _accepted(summary):
     tests = summary.get('tests')
     if not isinstance(tests, dict):
         return 0
-    return sum(1 for value in tests.values()
-               if isinstance(value, (int, float))
-               and not isinstance(value, bool))
+    return sum(1 for value in tests.values() if accepted_duration(value))
 
 
 def _round_counts(path):
@@ -34,10 +37,20 @@ def _rounds(directories):
     return counts
 
 
+def _ships(rounds, suite):
+    return any(counts.get(suite, 0) for counts in rounds)
+
+
 def zeroed_on_both_sides(base_dirs, head_dirs):
+    base_rounds = _rounds(base_dirs)
+    head_rounds = _rounds(head_dirs)
     lost = set()
-    for base, head in zip(_rounds(base_dirs), _rounds(head_dirs)):
-        for suite in set(base) & set(head):
-            if base[suite] == 0 and head[suite] == 0:
+    for base, head in zip(base_rounds, head_rounds):
+        for suite in set(base) | set(head):
+            if suite in base and suite in head:
+                if base[suite] == 0 and head[suite] == 0:
+                    lost.add(suite)
+                continue
+            if _ships(base_rounds, suite) and _ships(head_rounds, suite):
                 lost.add(suite)
     return sorted(lost)

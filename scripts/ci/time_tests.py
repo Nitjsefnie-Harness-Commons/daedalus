@@ -114,7 +114,9 @@ def main(argv=None):
     # to be written out as an empty map and reported as success, which the
     # comparison then read as "nothing to compare" and also called success.
     # One suite contributing nothing is allowed: a suite can skip entirely on
-    # a platform. All of them contributing nothing cannot be.
+    # a platform. All of them contributing nothing cannot be. That leniency is
+    # this instrument's alone -- the speed comparison is the stricter consumer
+    # and judges a suite that recorded nothing as lost.
     if timed == 0:
         print(f'timed no passing tests across {len(suites)} suites; '
               'refusing to report a measurement that did not happen',
