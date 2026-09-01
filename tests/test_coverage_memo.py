@@ -10,6 +10,7 @@ content under one path is a different key, and one analysis walks the
 module tree once.
 """
 import ast
+import gc
 import sys
 from pathlib import Path
 
@@ -33,6 +34,20 @@ import _util
 subprocess.run(['python3', 'child.py'], cwd=tmp,
                env=_util.child_coverage('keep', cwd=tmp))
 """
+# Byte-identical on purpose: two paths carrying one content is what a
+# memo keyed on content alone reports twice under the first path.
+_TWIN = """import subprocess
+subprocess.run(['python3', 'child.py'], cwd=tmp)
+"""
+# A launch whose env= is a name bound once at module level reaches the
+# passes that read assignment targets, mutations and declaration-name
+# appearances — three converted call sites a direct keep never reaches.
+_BOUND = """# {note}
+import subprocess
+import _util
+ENV = _util.child_coverage('keep', cwd=tmp)
+subprocess.run(['python3', 'child.py'], cwd=tmp, env=ENV)
+"""
 
 
 def _tree(tmp, modules):
@@ -44,8 +59,14 @@ def _tree(tmp, modules):
     return root
 
 
-def _recorded_analyses(root, scans):
-    """Scan `root` `scans` times; return the analyses and the results."""
+def _recorded_analyses(root, scans, between=None):
+    """Scan `root` `scans` times; return the analyses and the results.
+
+    One recorder serves every scan, so a `between` edit is seen by the
+    memo as new content under an unchanged analyser rather than as a
+    second analyser, which is the only way the content half of the key
+    is the thing being tested.
+    """
     calls = []
     real = _coverage_guard._analyze
 
@@ -56,7 +77,11 @@ def _recorded_analyses(root, scans):
     _coverage_guard._analyze = recorder
     try:
         scan = _coverage_guard._coverage_environment_violations
-        results = [scan(root) for _ in range(scans)]
+        results = []
+        for index in range(scans):
+            if index and between is not None:
+                between()
+            results.append(scan(root))
     finally:
         _coverage_guard._analyze = real
     return calls, results
@@ -85,16 +110,17 @@ def test_a_reused_analysis_still_declares_its_keep_sites(tmp):
 
 
 def test_changed_content_under_one_path_is_analysed_again(tmp):
-    """The memo is keyed on content, so an edited file cannot hit."""
+    """The content is part of the key, so an edited file cannot hit."""
     root = _tree(tmp, {
         'probe_edit.py': _SAFE.format(note='memo edit probe before')})
-    before_calls, before = _recorded_analyses(root, 1)
-    (root / 'tests' / 'probe_edit.py').write_text(
-        _KEEP.format(note='memo edit probe after'), encoding='utf-8')
-    after_calls, after = _recorded_analyses(root, 1)
-    assert len(before_calls) == 1, before_calls
-    assert len(after_calls) == 1, after_calls
-    assert before != after, (before, after)
+
+    def edit():
+        (root / 'tests' / 'probe_edit.py').write_text(
+            _KEEP.format(note='memo edit probe after'), encoding='utf-8')
+
+    calls, results = _recorded_analyses(root, 2, between=edit)
+    assert len(calls) == 2, calls
+    assert results[0] != results[1], results
 
 
 def _module_tree_walks(source):
@@ -117,7 +143,9 @@ def _module_tree_walks(source):
 def test_a_module_tree_is_walked_once_per_analysis(tmp):
     """Every pass reads one materialised node list, not its own walk."""
     del tmp
-    walks = _module_tree_walks(_KEEP.format(note='memo walk count probe'))
+    walks = _module_tree_walks(
+        _KEEP.format(note='memo walk count probe')
+        + _BOUND.format(note='memo walk count bound probe'))
     assert walks == 1, walks
 
 
@@ -146,6 +174,26 @@ def test_a_different_analyser_is_not_served_the_earlier_answer(tmp):
     marker = 'tests/probe_analyser.py: stricter'
     assert marker not in before[0], before
     assert marker in after, after
+
+
+def test_identical_content_at_two_paths_is_named_at_both(tmp):
+    """The path is part of the key, so a twin is not the first file."""
+    root = _tree(tmp, {'probe_twin_a.py': _TWIN,
+                       'probe_twin_b.py': _TWIN})
+    _, results = _recorded_analyses(root, 1)
+    named = sorted(line.split(':')[0] for line in results[0]
+                   if 'probe_twin' in line)
+    assert named == ['tests/probe_twin_a.py',
+                     'tests/probe_twin_b.py'], results[0]
+
+
+def test_the_node_cache_does_not_outlive_the_trees_it_walked(tmp):
+    """Nothing the walk stores keeps its own weak key alive."""
+    root = _tree(tmp, {
+        'probe_weak.py': _BOUND.format(note='memo weak key probe')})
+    _recorded_analyses(root, 1)
+    gc.collect()
+    assert len(_coverage_memo._BELOW) == 0, list(_coverage_memo._BELOW)
 
 
 if __name__ == '__main__':
