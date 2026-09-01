@@ -18,8 +18,10 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
 
-_ENV_ROOT = tempfile.mkdtemp(prefix='httptransportenv_')
-os.environ.setdefault('DAEDALUS_DIR', _ENV_ROOT)
+# The module reads only the byte limits out of daedalus_bridge.config, which
+# still refuses to import without these two. Nothing is written under the
+# root, so the system temp directory serves and no fixture tree is left behind.
+os.environ.setdefault('DAEDALUS_DIR', tempfile.gettempdir())
 os.environ.setdefault('DAEDALUS_PORT', '0')
 
 transport = _util.load(
