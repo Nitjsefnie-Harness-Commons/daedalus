@@ -518,11 +518,12 @@ def test_checkout_reader_refuses_invalid_plain_scalar_syntax(tmp):
 def test_checkout_reader_decodes_an_escaped_top_level_jobs_key(tmp):
     """A quoted escape is decoded before selecting the jobs mapping."""
     del tmp
-    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    path = ROOT / '.github' / 'workflows' / 'tests.yml'
     workflow = path.read_text(encoding='utf-8')
     mutated = workflow.replace('jobs:\n', '"jo\\x62s":\n', 1)
     assert mutated != workflow
-    assert _wfcheckout.checkout_refs(mutated) == [
+    assert [entry for entry in _wfcheckout.checkout_refs(mutated)
+            if entry[0] == 'timed'] == [
         ('timed', '${{ github.event.pull_request.head.sha || github.sha }}'),
         ('timed', '${{ steps.baseline.outputs.point }}'),
     ]

@@ -525,7 +525,7 @@ def test_checkout_pin_refuses_schema_equivalent_job_keys_before_refs(tmp):
 def test_checkout_reader_refuses_a_hex_escaped_duplicate_jobs_key(tmp):
     """A hex-escaped jobs sibling cannot hide the real mapping."""
     del tmp
-    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    path = ROOT / '.github' / 'workflows' / 'tests.yml'
     workflow = path.read_text(encoding='utf-8')
     decoy = ('jobs:\n  decoy:\n    runs-on: ubuntu-latest\n'
              '    steps:\n      - run: echo decoy\n')
@@ -537,7 +537,7 @@ def test_checkout_reader_refuses_a_hex_escaped_duplicate_jobs_key(tmp):
 def test_checkout_reader_refuses_a_unicode_escaped_duplicate_jobs_key(tmp):
     """A Unicode-escaped jobs sibling cannot hide the real mapping."""
     del tmp
-    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    path = ROOT / '.github' / 'workflows' / 'tests.yml'
     workflow = path.read_text(encoding='utf-8')
     decoy = ('jobs:\n  decoy:\n    runs-on: ubuntu-latest\n'
              '    steps:\n      - run: echo decoy\n')
@@ -549,7 +549,7 @@ def test_checkout_reader_refuses_a_unicode_escaped_duplicate_jobs_key(tmp):
 def test_checkout_reader_refuses_an_explicit_top_level_jobs_key(tmp):
     """An explicit top-level jobs key cannot silently hide checkout steps."""
     del tmp
-    path = ROOT / '.github' / 'workflows' / 'speed.yml'
+    path = ROOT / '.github' / 'workflows' / 'tests.yml'
     workflow = path.read_text(encoding='utf-8')
     mutated = workflow.replace('jobs:\n', '? jobs\n:\n', 1)
     assert mutated != workflow
