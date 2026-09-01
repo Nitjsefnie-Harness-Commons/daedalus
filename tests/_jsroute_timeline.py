@@ -1,6 +1,8 @@
 """Source-ordered function values for JavaScript lexical bindings."""
 import re
 
+from _jsroute_calls import parameter_sources
+
 
 def declaration_bindings(mask, text, split_top_level):
     """Yield each simple binding in a const, let, or var declaration."""
@@ -19,7 +21,8 @@ def declaration_bindings(mask, text, split_top_level):
             elif char in ';\n' and depth == 0:
                 end = pos
                 break
-        for left, right in split_top_level(mask, text, head.end(), end):
+        for left, right in split_top_level(
+                mask, text, head.end(), end):
             found = re.match(r'\s*([\w$]+)', mask[left:right])
             if found:
                 yield (head.group(1), found.group(1),
@@ -49,7 +52,8 @@ class FunctionTimeline:
         self._entries.setdefault(binding, []).append(
             (owner, effective, definition, value))
 
-    def values_at(self, binding, overrides=None, limits=(), seen=frozenset()):
+    def values_at(self, binding, overrides=None, limits=(),
+                  seen=frozenset()):
         if overrides is not None and binding in overrides:
             return overrides[binding]
         if binding is None or binding in seen:
@@ -57,16 +61,17 @@ class FunctionTimeline:
         active = []
         entries = self._entries.get(binding, ())
         for owner, cutoff in limits:
-            owned = sorted((entry for entry in entries if entry[0] == owner),
-                           key=lambda entry: entry[1:3])
+            owned = sorted(
+                (entry for entry in entries if entry[0] == owner),
+                key=lambda entry: entry[1:3])
             for _, effective, definition, value in owned:
                 if effective > cutoff:
                     continue
                 resolved = self._resolve(
                     value, overrides, seen | {binding}, limits)
                 if self._is_optional(definition, cutoff):
-                    active.extend(item for item in resolved
-                                  if item not in active)
+                    active.extend(
+                        item for item in resolved if item not in active)
                 else:
                     active = list(resolved)
         return tuple(active)
@@ -75,8 +80,8 @@ class FunctionTimeline:
         if isinstance(value, tuple) and value[:1] == ('reference',):
             clipped = []
             for owner, cutoff in limits:
-                clipped.append((owner, value[2] - 1 if owner == value[3]
-                                else cutoff))
+                clipped.append((
+                    owner, value[2] - 1 if owner == value[3] else cutoff))
                 if owner == value[3]:
                     break
             return self.values_at(
@@ -86,43 +91,71 @@ class FunctionTimeline:
     def assignment_value(self, binding, definition, overrides, limits):
         for _, _, found, value in self._entries.get(binding, ()):
             if found == definition:
-                return self._resolve(value, overrides, {binding}, limits)
+                return self._resolve(
+                    value, overrides, {binding}, limits)
         return ()
 
 
 class InvocationReplay:
     """Replay callable-binding writes in the order known calls execute."""
 
-    def __init__(self, timeline, scopes, events, invocations, mask,
-                 scope_at, visible_binding, body_at, optional_write):
+    def __init__(self, timeline, scopes, events, invocations, source,
+                 scope_at, visible_binding, optional_write):
         self.timeline = timeline
         self.scopes = scopes
-        self.events = events
-        self.invocations = invocations
-        self.mask = mask
+        self.mask = source['mask']
+        self.text = source['text']
         self.scope_at = scope_at
         self.visible_binding = visible_binding
-        self.body_at = body_at
+        self.body_at = source['body']
         self.optional_write = optional_write
+        self.top_level = source['top_level']
+        self.bind_events = {}
+        self.operations = {}
+        for start, kind, match in events:
+            if kind != 'bind':
+                continue
+            owner = scope_at(start)
+            self.bind_events.setdefault(owner, []).append(
+                (start, match))
+            self.operations.setdefault(owner, []).append(
+                (start, 'bind', match))
+        for call in invocations:
+            if call['status'] == 'irrelevant':
+                continue
+            self.operations.setdefault(call['scope'], []).append(
+                (call['order'], 'call', call))
+        for operations in self.operations.values():
+            operations.sort(key=lambda item: item[0])
 
     def clear_between(self, values, lower, upper, owners):
-        for start, kind, match in self.events:
-            if (kind == 'bind' and lower < start < upper
-                    and self.scope_at(start) in owners):
-                values.pop(self.visible_binding(match.group(1), start), None)
+        for owner in owners:
+            for start, match in self.bind_events.get(owner, ()):
+                if lower < start < upper:
+                    values.pop(
+                        self.visible_binding(match.group(1), start), None)
 
     def run(self, call, inherited, seen=frozenset(),
             inherited_optional=False, limits=None, sender_sources=None,
             execution=None):
-        call_start, binding, args = call
+        if call['status'] == 'unprovable':
+            return [], [], [call]
+        if call['status'] == 'irrelevant':
+            return [], [], []
+        call_start = call['start']
         if limits is None:
             limits = lexical_limits(
                 self.scopes, self.scope_at(call_start), call_start)
         if execution is None:
-            execution = call_start
+            execution = call['order']
         writes = []
         calls = []
-        bodies = self.timeline.values_at(binding, inherited, limits)
+        unknowns = []
+        if call['body'] is not None:
+            bodies = (call['body'],)
+        else:
+            bodies = self.timeline.values_at(
+                call['binding'], inherited, limits)
         for body in bodies:
             if body is None:
                 continue
@@ -132,80 +165,75 @@ class InvocationReplay:
             overrides = dict(inherited)
             sources = dict(sender_sources or {})
             self._override_parameters(
-                overrides, inherited, function_scope, call_start, args,
-                limits, sources)
-            operations = [(start, 'bind', match)
-                          for start, kind, match in self.events
-                          if kind == 'bind'
-                          and self.scope_at(start) == function_scope]
-            operations.extend((nested[0], 'call', nested)
-                              for nested in self.invocations
-                              if self.scope_at(nested[0]) == function_scope)
+                overrides, inherited, function_scope, call_start,
+                call['args'], limits, sources)
             path_optional = inherited_optional or len(bodies) > 1
-            for start, kind, item in sorted(operations):
+            for start, kind, item in self.operations.get(
+                    function_scope, ()):
                 if kind == 'bind':
                     applied = self._apply_assignment(
                         item, start, function_scope, path_optional,
                         overrides, inherited, limits)
                     if applied:
-                        sources.pop(self.visible_binding(
-                            item.group(1), start), None)
+                        sources.pop(
+                            self.visible_binding(
+                                item.group(1), start), None)
                         writes.append((start, item, path_optional))
                     continue
-                nested_optional = (path_optional or self.optional_write(
-                    start, self.scopes[function_scope]['end']))
+                nested_optional = (
+                    path_optional or self.optional_write(
+                        start, self.scopes[function_scope]['end']))
                 nested_limits = limits + ((function_scope, start),)
                 calls.append((item, execution, dict(sources)))
-                nested_writes, nested_calls = self.run(
+                nested_writes, nested_calls, nested_unknowns = self.run(
                     item, overrides, seen | {function_scope},
                     nested_optional, nested_limits, sources, execution)
                 writes.extend(nested_writes)
                 calls.extend(nested_calls)
-        return writes, calls
+                unknowns.extend(nested_unknowns)
+        return writes, calls, unknowns
 
     def _scope_for(self, body):
         inset = body[0] == 'block'
-        start, end = body[1] + inset, body[2] - inset
-        return next((index for index, scope in enumerate(self.scopes)
-                     if scope['start'] == start and scope['end'] == end),
-                    None)
+        start = body[1] + inset
+        end = body[2] - inset
+        return next((
+            index for index, scope in enumerate(self.scopes)
+            if scope['start'] == start and scope['end'] == end), None)
 
     def _override_parameters(self, overrides, inherited, function_scope,
                              call_start, args, limits, sender_sources):
         scope = self.scopes[function_scope]
-        for names, span in zip(scope['param_order'], args):
-            if isinstance(names, str):
-                names = (names,)
+        for source in parameter_sources(
+                scope['param_order'], args, self.mask, self.text,
+                self.top_level):
+            target = self.visible_binding(
+                source['name'], scope['start'])
+            if target is None:
+                continue
+            status = source['status']
+            span = source['span']
+            if status != 'known':
+                overrides[target] = ()
+                sender_sources[target] = (status, span)
+                continue
             raw_expr = self.mask[span[0]:span[1]]
             expr = raw_expr.strip()
-            expr_start = span[0] + len(raw_expr) - len(raw_expr.lstrip())
-            if expr == 'undefined':
-                continue
-            for name in names:
-                source_span = span
-                source_expr = expr
-                if expr.startswith('{'):
-                    member = re.search(
-                        r'\b' + re.escape(name)
-                        + r'\s*:\s*([\w$]+)', expr)
-                    if member:
-                        source_span = (
-                            expr_start + member.start(1),
-                            expr_start + member.end(1))
-                        source_expr = member.group(1)
-                source = (self.visible_binding(source_expr, call_start)
-                          if re.fullmatch(r'[\w$]+', source_expr) else None)
-                direct = self.body_at(self.mask, source_span[0])
-                value = (
-                    self.timeline.values_at(source, inherited, limits)
-                    if source is not None else (direct,))
-                target = self.visible_binding(name, scope['start'])
-                overrides[target] = value
-                sender_sources[target] = sender_sources.get(
-                    source, source_span)
+            source_binding = (
+                self.visible_binding(expr, call_start)
+                if re.fullmatch(r'[\w$]+', expr) else None)
+            direct = self.body_at(self.mask, span[0])
+            if source_binding is not None:
+                value = self.timeline.values_at(
+                    source_binding, inherited, limits)
+            else:
+                value = (direct,) if direct is not None else ()
+            overrides[target] = value
+            sender_sources[target] = sender_sources.get(
+                source_binding, (status, span))
 
-    def _apply_assignment(self, match, start, function_scope, path_optional,
-                          overrides, inherited, limits):
+    def _apply_assignment(self, match, start, function_scope,
+                          path_optional, overrides, inherited, limits):
         target = self.visible_binding(match.group(1), start)
         if target is None:
             return False
@@ -219,7 +247,8 @@ class InvocationReplay:
             start, self.scopes[function_scope]['end'])
         if optional:
             before = self.timeline.values_at(
-                target, overrides, limits + ((function_scope, start - 1),))
+                target, overrides,
+                limits + ((function_scope, start - 1),))
             value = tuple(dict.fromkeys((*before, *value)))
         overrides[target] = value
         owner = self.scopes[function_scope]
