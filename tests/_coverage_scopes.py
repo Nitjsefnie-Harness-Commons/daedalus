@@ -8,6 +8,8 @@ mean here", which is a different question from "is this launch safe".
 import ast
 from pathlib import PurePosixPath, PureWindowsPath
 
+from _coverage_memo import nodes
+
 
 _ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
 
@@ -43,7 +45,7 @@ def _reads_attribute(call):
 
 def _parents(tree):
     parents = {}
-    for node in ast.walk(tree):
+    for node in nodes(tree):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
     return parents
@@ -69,14 +71,14 @@ def _escapes(node, parents):
 def root_owner_names(tree):
     """Import-bound names of a root module reached only by attribute reads."""
     modules = {}
-    for node in ast.walk(tree):
+    for node in nodes(tree):
         if isinstance(node, ast.Import):
             modules.update((alias.asname or alias.name, alias.name)
                            for alias in node.names
                            if alias.name in _ROOT_MODULES)
     parents = _parents(tree)
     retired = set()
-    for node in ast.walk(tree):
+    for node in nodes(tree):
         if isinstance(node, (ast.Attribute, ast.Subscript)):
             parts, base = _chain(node)
             stored = isinstance(node.ctx, (ast.Store, ast.Del))
@@ -155,18 +157,18 @@ def _is_repository_root_binding(value):
 
 def _shadowed_names(tree):
     """Names whose source value is replaced somewhere in the module."""
-    names = {node.id for node in ast.walk(tree)
+    names = {node.id for node in nodes(tree)
              if isinstance(node, ast.Name)
              and isinstance(node.ctx, (ast.Store, ast.Del))}
-    names.update(node.arg for node in ast.walk(tree)
+    names.update(node.arg for node in nodes(tree)
                  if isinstance(node, ast.arg))
-    names.update(node.name for node in ast.walk(tree)
+    names.update(node.name for node in nodes(tree)
                  if isinstance(node, (ast.FunctionDef,
                                       ast.AsyncFunctionDef, ast.ClassDef)))
-    names.update(node.name for node in ast.walk(tree)
+    names.update(node.name for node in nodes(tree)
                  if isinstance(node, ast.ExceptHandler) and node.name)
     root_values = []
-    for node in ast.walk(tree):
+    for node in nodes(tree):
         if isinstance(node, ast.Assign):
             targets, value = node.targets, node.value
         elif isinstance(node, ast.AnnAssign) and node.value is not None:

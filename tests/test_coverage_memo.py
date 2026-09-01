@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""One file's content is analysed once per run, not once per scan.
+"""One file's content is analysed once per run and walked once per analysis.
 
 tests/test_coverage_environment.py scans the whole test tree once per
 control, so a run analyses the same `(relative, source)` pair many times
-over. These pin the memo that removes the repetition: a repeated scan
-reuses the earlier analysis, a reused analysis still declares the keep
-sites it appended, and different content under one path is a different
-key.
+over, and each analysis used to walk the module tree once per pass.
+These pin both caches: a repeated scan reuses the earlier analysis, a
+reused analysis still declares the keep sites it appended, different
+content under one path is a different key, and one analysis walks the
+module tree once.
 """
+import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _coverage_guard  # noqa: E402
+import _coverage_memo  # noqa: E402
 import _util  # noqa: E402
 from _coverage_guard import _coverage_environment_violations  # noqa: E402
 
@@ -93,6 +96,37 @@ def test_changed_content_under_one_path_is_analysed_again(tmp):
     assert len(before_calls) == 1, before_calls
     assert len(after_calls) == 1, after_calls
     assert before != after, (before, after)
+
+
+def _module_tree_walks(source):
+    """How many times one analysis hands ast.walk a whole module."""
+    walked = []
+    real = ast.walk
+
+    def counter(node):
+        walked.append(node)
+        return real(node)
+
+    ast.walk = counter
+    try:
+        _coverage_guard._analyze('tests/probe_walk.py', source, [])
+    finally:
+        ast.walk = real
+    return len([node for node in walked if isinstance(node, ast.Module)])
+
+
+def test_a_module_tree_is_walked_once_per_analysis(tmp):
+    """Every pass reads one materialised node list, not its own walk."""
+    del tmp
+    walks = _module_tree_walks(_KEEP.format(note='memo walk count probe'))
+    assert walks == 1, walks
+
+
+def test_the_materialised_nodes_match_a_fresh_walk(tmp):
+    """Same nodes in the same breadth-first order ast.walk yields."""
+    del tmp
+    tree = ast.parse(_KEEP.format(note='memo walk order probe'))
+    assert _coverage_memo.nodes(tree) == list(ast.walk(tree))
 
 
 if __name__ == '__main__':

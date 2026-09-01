@@ -1,4 +1,4 @@
-"""A per-process memo for the coverage guard's per-file analysis.
+"""What the coverage guard computes once and reads many times.
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
@@ -12,8 +12,27 @@ allowlist reconciliation at the end of a scan reads that list. Storing
 only the return value therefore drops every keep site a later scan would
 have declared, and the reconciliation then reports allowlisted sites as
 having no launch — so a hit replays the appends as well.
+
+Within one analysis, fifteen passes each want every node of the module.
+`nodes` walks it once and hands the same list to all of them.
 """
+import ast
+import weakref
+
 _ANALYSES = {}
+# Weak keys, so a module's nodes go when the tree does. The stored list
+# leaves the root out because a value holding a strong reference to its
+# own weak key keeps that entry alive for the life of the process.
+_BELOW = weakref.WeakKeyDictionary()
+
+
+def nodes(tree):
+    """Every node of `tree`, in the order `ast.walk` yields them."""
+    below = _BELOW.get(tree)
+    if below is None:
+        below = list(ast.walk(tree))[1:]
+        _BELOW[tree] = below
+    return [tree] + below
 
 
 def analysed(analyze, relative, source, keeps):
