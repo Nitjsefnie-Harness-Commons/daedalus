@@ -604,6 +604,15 @@ def test_require_all_refuses_one_failing_suite(tmp):
         result.stderr), result.stderr
 
 
+def test_unknown_argument_exits_with_usage(tmp):
+    result, invocations = _coverage_tree(tmp, {}, args=('--bogus',))
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stdout == '', result.stdout
+    assert result.stderr == (
+        'usage: coverage_suites.py [--require-all]\n'), result.stderr
+    assert not invocations, invocations
+
+
 def test_every_suite_failing_fails_the_run(tmp):
     """A coverage number is refused when no suite completed successfully."""
     suites = {'test_failing_a.py': 'raise SystemExit(1)\n',
