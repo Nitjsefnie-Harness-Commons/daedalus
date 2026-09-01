@@ -3,7 +3,7 @@ from bisect import bisect_right
 import re
 
 from _jsroute_calls import parameter_sources
-from _jsroute_source import BUILTIN_CHAINS
+from _jsroute_source import BUILTIN_CHAINS, record_work
 
 
 def target(status, binding=None, body=None, member=None, name=None):
@@ -40,7 +40,7 @@ class ReceiverIndex:
     """Resolve member values from one source-ordered assignment index."""
 
     def __init__(self, mask, text, pairs, bindings, resolution, reader,
-                 senders):
+                 senders, work=None):
         self.mask = mask
         self.text = text
         self.pair_end = pairs['end']
@@ -55,6 +55,7 @@ class ReceiverIndex:
         self.top_level = reader['top_level']
         self.split = reader['split']
         self.senders = senders
+        self.work = work
         self.values = {}
         self.members = {}
         self.globals = {}
@@ -65,6 +66,7 @@ class ReceiverIndex:
         self._index_member_writes()
 
     def computed_key(self, key):
+        record_work(self.work, 'receiver_computed_queries')
         if not isinstance(key, tuple):
             return key
         entries = self.computed.get(key[1], ())
@@ -72,6 +74,7 @@ class ReceiverIndex:
         return entries[index][1] if index >= 0 else None
 
     def member(self, owner_name, key, position, seen=frozenset(), env=None):
+        record_work(self.work, 'receiver_member_queries')
         key = self.computed_key(key)
         if key is None:
             return target('unprovable')
@@ -346,14 +349,15 @@ class ReceiverIndex:
             return self.computed_key(('computed', dynamic.group(1), left))
         return raw if re.fullmatch(r'[\w$]+', raw) else None
 
-    @staticmethod
-    def _latest(entries, position):
+    def _latest(self, entries, position):
+        record_work(self.work, 'receiver_history_queries')
         if not entries:
             return None
         index = bisect_right(entries, (position, ())) - 1
         return entries[index][1] if index >= 0 else None
 
     def _index_values(self, bindings):
+        record_work(self.work, 'receiver_binding_entries', len(bindings))
         for match in bindings:
             binding = self.visible_binding(match.group(1), match.start())
             if binding is not None:
@@ -361,6 +365,7 @@ class ReceiverIndex:
                     (match.start(), self._expression_span(match.end())))
 
     def _index_functions(self):
+        record_work(self.work, 'receiver_source_characters', len(self.mask))
         for match in re.finditer(
                 r'\bfunction\s+([\w$]+)\s*\(', self.mask):
             binding = self.visible_binding(match.group(1), match.start())
@@ -372,6 +377,8 @@ class ReceiverIndex:
             entries.sort()
 
     def _index_member_writes(self):
+        record_work(
+            self.work, 'receiver_source_characters', len(self.mask) * 2)
         patterns = [(re.compile(
             r'\b([\w$]+)\s*\.\s*([\w$]+)\s*=(?!=|>)'), self.mask)]
         patterns.append((re.compile(
@@ -396,6 +403,7 @@ class ReceiverIndex:
             entries.sort()
 
     def _index_computed_keys(self):
+        record_work(self.work, 'receiver_source_characters', len(self.mask))
         pattern = re.compile(
             r'\b(?:const|let|var)\s+([\w$]+)\s*=\s*'
             r'(["\'])([^"\']+)\2')
