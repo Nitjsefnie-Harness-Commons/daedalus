@@ -88,6 +88,20 @@ _TEMPLATE_CASES = [
      "const obj = { hook: `plain` };\n"
      "send = extCmd;\n"
      "send('focus-tab', { tab: chromeTab });\n"),
+    ('regex-quote-demotion', False,
+     "let send = extCmd;\n"
+     "const obj = { hook: /[\"]/ };\n"
+     "send = ordinary;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('regex-quote-promotion', True,
+     "let send = ordinary;\n"
+     "const obj = { hook: /[\"]/ };\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('regex-brace-write', True,
+     "let send = ordinary;\n"
+     "const o = { h: `${/}/.test('}') && (send = extCmd, 1)}` };\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
     ('grouped-write', True,
      "let send = ordinary;\n"
      "const obj = { hook: ((send = extCmd)) };\n"
@@ -147,6 +161,65 @@ def test_template_mask_reveals_interpolations_only(tmp):
     line_continuation = "`chunk\\\nnext`"
     newline_masks = (js_mask(raw_newline), js_mask(line_continuation))
     assert newline_masks == ("      \n     ", "       \n     "), newline_masks
+
+
+def test_regex_body_quote_and_comment_opener_stay_literal(tmp):
+    """A `\"` and a `/*` inside a regex body are body text, not state: the
+    walk over the code after the regex is exactly the walk it would be
+    without the regex, so a demotion there stays visible."""
+    del tmp
+    quote = 'const obj = { hook: /["]/ };\nlet after;\n'
+    quote_mask = js_mask(quote)
+    assert len(quote_mask) == len(quote), quote_mask
+    assert quote_mask == js_mask('const obj = { hook: /   / };\n'
+                                 'let after;\n'), quote_mask
+    assert 'let after;' in quote_mask, quote_mask
+    starred = 'const obj = { hook: /[/*]/ };\nlet after;\n'
+    starred_mask = js_mask(starred)
+    assert len(starred_mask) == len(starred), starred_mask
+    assert starred_mask == js_mask('const obj = { hook: /    / };\n'
+                                   'let after;\n'), starred_mask
+    assert 'let after;' in starred_mask, starred_mask
+
+
+def test_regex_body_brace_stays_out_of_interpolation_state(tmp):
+    """A `}` inside a regex body does not close the interpolation holding
+    it; the construction-time write after the regex stays visible."""
+    del tmp
+    source = ("const o = { h: `${/}/.test('}') && (send = extCmd, 1)}` };\n"
+              'let after;\n')
+    mask = js_mask(source)
+    assert 'send = extCmd' in mask, mask
+    assert 'let after;' in mask, mask
+
+
+def test_regex_literal_body_is_masked_not_code(tmp):
+    """The body and the flags are blanked in place; the delimiters stay so
+    an expression continuation still sees a `/` at the line head."""
+    del tmp
+    source = 'const re = /ab+c/gi;\nlet after = 1;\n'
+    assert js_mask(source) == 'const re = /    /  ;\nlet after = 1;\n'
+
+
+def test_division_slashes_stay_code_in_the_mask(tmp):
+    """A slash with a value on its left is division and passes through
+    untouched, whatever follows it on the line."""
+    del tmp
+    source = 'let half = a / b / c;\nlet after;\n'
+    assert js_mask(source) == source, js_mask(source)
+
+
+def test_regex_opening_follows_the_previous_token(tmp):
+    """A statement head reopens regex position after a keyword's `)` or a
+    closing block brace, and an escaped slash does not close a body
+    early; division after a plain value still passes through."""
+    del tmp
+    head = 'if (x) /["]/.test(s);\nlet after;\n'
+    assert 'let after;' in js_mask(head), js_mask(head)
+    block = 'function g() {}\n/["]/.test(x);\nlet after;\n'
+    assert 'let after;' in js_mask(block), js_mask(block)
+    escaped = 'const r = /a\\/b/;\nlet after;\n'
+    assert js_mask(escaped) == 'const r = /    /;\nlet after;\n'
 
 
 def main():
