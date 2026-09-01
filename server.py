@@ -13,6 +13,7 @@ from daedalus_bridge import mcp_bootstrap
 from daedalus_bridge import result_store
 from daedalus_bridge import segment_store
 from daedalus_bridge import stream_service
+from daedalus_bridge import tab_registry
 from daedalus_bridge.config import (
     BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR,
     MAX_REQUEST_WORKERS, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
@@ -62,13 +63,6 @@ def _stored_uploads(token_dir, upload_id):
         for entry in files:
             yield id_dir.name, entry
 
-
-# ─── Tab registry ───
-# Authoritative source: /sync-tabs (replaces all). /register only updates existing.
-
-
-_tab_registry = {}  # {token: {tabId: {url, title, ts}}}
-_tab_lock = threading.Lock()
 
 _COMPAT_CONSUME_RETRY_ATTEMPTS = 8
 _SEGMENT_DECIMAL_MAX_DIGITS = 20
@@ -167,15 +161,6 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         self.server_port = port
 
 
-def _normalized_tab_id(value):
-    """Normalize string or integer tab-id JSON values; return None otherwise."""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, int) and not isinstance(value, bool):
-        return str(value)
-    return None
-
-
 # One table for every place a screenshot format is decided: what /upload
 # accepts, what /screenshot will discover on disk, and what content type it is
 # served with. They were three separate lists, and `webp` was in the first
@@ -223,13 +208,7 @@ class Handler(RequestMixin):
             token = self._bridge_token(params)
             if token is None:
                 return None
-            with _tab_lock:
-                tabs = _tab_registry.get(token, {})
-                result = [
-                    {'tabId': tid, 'url': info.get('url', ''), 'title': info.get('title', ''), 'age': round(time.time() - info.get('ts', 0))}
-                    for tid, info in tabs.items()
-                ]
-            return self._json(200, result)
+            return self.answer(tab_registry.list_tabs(token))
 
         if parsed.path == '/segment-job':
             return self._handle_segment_job_lookup(params)
@@ -411,71 +390,13 @@ class Handler(RequestMixin):
             return None
 
         if self.path == '/register':
-            raw_tab_id = body.get('tabId', '')
-            tab_id = _normalized_tab_id(raw_tab_id)
-            url = body.get('url', '')
-            title = body.get('title', '')
-            if tab_id == '':
-                return self._json(400, {'error': 'missing tabId'})
-            if tab_id is None:
-                return self._json(400, {'error': 'invalid tabId'})
-            updated = False
-            with _tab_lock:
-                tabs = _tab_registry.get(token, {})
-                if tab_id in tabs:
-                    # Update-only: refresh existing tab, never create new entries
-                    tabs[tab_id] = {'url': url, 'title': title, 'ts': time.time()}
-                    updated = True
-            if updated:
-                command_queue.notify_dashboard(
-                    CMD_DIR, token,
-                    {'type': 'tab-updated', 'tabId': tab_id,
-                     'url': url, 'title': title})
-            # This route is update-only, so a tab the registry has never seen
-            # is a no-op — and answering it {'ok': True} told the caller its
-            # state had been refreshed when nothing had. `updated` is what
-            # separates the two, so a client whose tab has fallen out of the
-            # registry can notice and re-sync instead of reporting stale
-            # entries forever.
-            return self._json(200, {'ok': True, 'updated': updated})
+            return self.answer(tab_registry.refresh(CMD_DIR, token, body))
 
         elif self.path == '/sync-tabs':
-            # Replace entire tab registry for this token with provided list
-            tabs_list = body.get('tabs', [])
-            if (not isinstance(tabs_list, list)
-                    or any(not isinstance(tab, dict) for tab in tabs_list)):
-                return self._json(400, {'error': 'invalid tabs'})
-            normalized_tabs = []
-            for tab_info in tabs_list:
-                tab_id = _normalized_tab_id(tab_info.get('tabId', ''))
-                if tab_id is None:
-                    return self._json(400, {'error': 'invalid tabs'})
-                if tab_id:
-                    normalized_tabs.append((tab_id, tab_info))
-            with _tab_lock:
-                _tab_registry[token] = {}
-                for tab_id, tab_info in normalized_tabs:
-                    _tab_registry[token][tab_id] = {
-                        'url': tab_info.get('url', ''),
-                        'title': tab_info.get('title', ''),
-                        'ts': time.time(),
-                    }
-            count = len(_tab_registry.get(token, {}))
-            command_queue.notify_dashboard(
-                CMD_DIR, token, {'type': 'tabs-synced', 'count': count})
-            return self._json(200, {'ok': True, 'count': count})
+            return self.answer(tab_registry.replace(CMD_DIR, token, body))
 
         elif self.path == '/unregister':
-            tab_id = body.get('tabId', '')
-            if not tab_id:
-                return self._json(400, {'error': 'missing tabId'})
-            with _tab_lock:
-                tabs = _tab_registry.get(token, {})
-                removed = tabs.pop(str(tab_id), None)
-            command_queue.notify_dashboard(
-                CMD_DIR, token,
-                {'type': 'tab-unregistered', 'tabId': str(tab_id)})
-            return self._json(200, {'ok': True, 'removed': removed is not None})
+            return self.answer(tab_registry.remove(CMD_DIR, token, body))
 
         elif self.path == '/poll':
             # Both of these raise ValueError on a name that cannot be a safe
@@ -1123,9 +1044,7 @@ class Handler(RequestMixin):
         """GET /health — bridge liveness for detecting a silently-dead stream."""
         now = time.time()
         live_streams, stream_tabs = stream_service.snapshot()
-        with _tab_lock:
-            tokens = len(_tab_registry)
-            tabs = sum(len(v) for v in _tab_registry.values())
+        tokens, tabs = tab_registry.counts()
         last_delivery_at = stream_service.last_delivery_at()
         return self._json(200, {
             'ok': True,

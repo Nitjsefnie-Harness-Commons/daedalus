@@ -99,6 +99,7 @@
 !/daedalus_bridge/result_store.py
 !/daedalus_bridge/segment_store.py
 !/daedalus_bridge/stream_service.py
+!/daedalus_bridge/tab_registry.py
 
 # ─── daedalus_cli ───
 !/daedalus_cli/
@@ -375,6 +376,7 @@
 !/tests/test_stream_lifecycle.py
 !/tests/test_stream_service.py
 !/tests/test_suite_runner.py
+!/tests/test_tab_registry.py
 !/tests/test_tab_routing.py
 !/tests/test_tab_routing_js.py
 !/tests/test_tab_routing_performance.py
