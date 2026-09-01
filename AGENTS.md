@@ -37,6 +37,19 @@ Single delivery mode: Chrome extension (MV3); the legacy Tampermonkey userscript
 - Restart the bridge process after editing `server.py`.
 - `DAEDALUS_DIR` (command/result/upload root) and `DAEDALUS_PORT` are both required; the bridge refuses to start without either.
 - Reverse proxy: the vhost fronting the bridge (update + reload when endpoints change).
+- `server.py` keeps the process entry point, `ThreadingHTTPServer`, `Handler(RequestMixin)` with its `do_*` verbs and their `parsed.path == '/x'` dispatch, `GET /health` and `PUT /command`. Every other route body lives in a `daedalus_bridge` module:
+  - `http_transport` — the `RequestMixin` a Handler derives from: request-target and query parsing, bearer/query/body credential resolution, the body-length refusal rules, the refusal drains, `answer` and `send_file`. The one bridge module that reads `config`, because it is transport rather than a route.
+  - `route_answer` — `FileAnswer` and `BytesAnswer`, stdlib-only and re-exported by `http_transport`, so a route importing an answer type does not inherit that configuration requirement.
+  - `tab_registry` — the registry dictionary and its lock, behind `GET /tabs`, `POST /register`, `POST /sync-tabs` and `POST /unregister`.
+  - `stream_route` — `resolve_targets` and the `GET /stream` SSE loop.
+  - `stream_service` — stream registration and replacement, the queue and legacy drains, and `POST /poll`; that one route body lives in a service module because it takes the same legacy claim the drain takes.
+  - `upload_routes` — `POST`/`GET`/`DELETE /upload`, `GET /screenshot` by `id` and by `path`, and the single screenshot-format table all three consult.
+  - `static_routes` — `GET /dashboard[/<asset>]` and the frame-refusing headers every dashboard response carries.
+  - `result_routes` — `POST /result` and `GET /result`.
+  - `segment_routes` — `POST /segment`, `GET /segment-status`, `GET /segment-job`; `segment_jobs` — the `POST /segment-job` mint.
+  - State and helpers the routes call, unchanged by the split: `command_queue` (queue-file lifecycle), `result_store` (result slots and delivery files), `segment_store` (job records and usage accounting), `delivery_stripes` (delivery-lock striping), `path_safety` (component and containment checks), `atomic_file` (atomic replacement), `config` (startup paths and settings), `env_config` (environment-free HTTP constants), `log_safe` (rendering untrusted values), `parent_watch` (exit with the launcher), `mcp_bootstrap` (the optional MCP front end).
+- Answer convention: a route function returns `(status, payload)` or a `FileAnswer`/`BytesAnswer`, never `None`, and never writes to the socket — the Handler writes it with `self.answer(...)`.
+- Every route module imports with no `DAEDALUS_*` variable set. Two are configuration-bound only through stores that are not parameterised yet: `result_routes` via `result_store`, and `segment_routes` / `segment_jobs` via `segment_store` (issue 484). Their own directory arguments stay parameters, so they must name the configured roots until those stores take theirs.
 </architecture>
 
 <endpoints>
