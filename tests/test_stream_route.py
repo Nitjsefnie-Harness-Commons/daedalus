@@ -16,13 +16,21 @@ def _load_route(name):
 
 
 class _FrameSink:
-    """A wfile stand-in that records frames and keepalive comments."""
+    """A wfile stand-in that records frames and keepalive comments.
 
-    def __init__(self, fail_at=None):
+    `log` receives one entry per write, so a control can assert the order the
+    loop did things in. `on_first_frame` runs inside the first command write,
+    which is how a single-threaded control publishes work mid-scan.
+    """
+
+    def __init__(self, fail_at=None, log=None, on_first_frame=None):
         self.fail_at = fail_at
+        self.log = log
+        self.on_first_frame = on_first_frame
         self.chunks = []
         self.frames = []
         self.keepalives = 0
+        self._ended = False
         self._cond = threading.Condition()
 
     def write(self, data):
@@ -33,18 +41,41 @@ class _FrameSink:
             self.chunks.append(data)
             if text.startswith('event: command\n'):
                 self.frames.append(text.split('\ndata: ', 1)[1].strip())
+                self._record('frame')
+                first = len(self.frames) == 1
             elif text == ': keepalive\n\n':
                 self.keepalives += 1
+                self._record('keepalive')
+                first = False
+            else:
+                first = False
             self._cond.notify_all()
+        if first and self.on_first_frame is not None:
+            self.on_first_frame()
+
+    def _record(self, entry):
+        if self.log is not None:
+            self.log.append(entry)
 
     def flush(self):
         if self.fail_at == 'flush':
             raise BrokenPipeError('flush failed')
 
-    def await_frames(self, count):
-        """Block until `count` frames have arrived. Deliberately unbounded."""
+    def mark_ended(self):
+        """Say the producer stopped, so a waiter cannot outlive it."""
         with self._cond:
-            while len(self.frames) < count:
+            self._ended = True
+            self._cond.notify_all()
+
+    def await_frames(self, count):
+        """Block until `count` frames arrive or the producer stops.
+
+        Unbounded on purpose: the only thing it does not survive is a loop
+        that neither delivers nor ends, which is a hung job rather than an
+        assertion that fails on a slow machine.
+        """
+        with self._cond:
+            while len(self.frames) < count and not self._ended:
                 self._cond.wait()
 
     def ids(self):
@@ -96,6 +127,7 @@ def test_the_loop_waits_on_the_registry_event_publication_sets(tmp):
     route = _load_route('stream_route_wake')
     cq = route.command_queue
     root = Path(tmp)
+    waited = threading.Event()
 
     class Recording(threading.Event):
         def __init__(self):
@@ -104,21 +136,42 @@ def test_the_loop_waits_on_the_registry_event_publication_sets(tmp):
 
         def wait(self, timeout=None):
             self.waits += 1
+            waited.set()
             return super().wait(timeout)
 
     ev = Recording()
     with cq._cmd_events_lock:
         cq._cmd_events['waketok'] = ev
+    # Frozen the moment the loop proves it waits on the registry event, so
+    # the passing path has no clock budget it could run out of. A loop that
+    # never touches that event instead ages out after a couple of ticks and
+    # fails the assertion below rather than hanging on a wake that is never
+    # coming.
+    steps = iter((0.0,) * 6)
+    route._now = lambda: 0.0 if ev.waits else next(steps, 5000.0)
     sink = _FrameSink()
     killed = threading.Event()
     targets = route.resolve_targets(root, 'waketok', 'extension')
-    worker = threading.Thread(
-        target=route.serve_stream, args=(sink,), kwargs={
-            'cmd_dir': root, 'token': 'waketok', 'tab': 'extension',
-            'targets': targets, 'killed_event': killed, 'command_ttl': 90,
-            'keepalive': 15, 'max_age': 3600, 'client_label': 'test'})
+
+    def serve():
+        try:
+            route.serve_stream(
+                sink, cmd_dir=root, token='waketok', tab='extension',
+                targets=targets, killed_event=killed, command_ttl=90,
+                keepalive=15, max_age=3600, client_label='test')
+        finally:
+            # A loop that exited without ever waiting still has to release
+            # both waiters, or its failure would read as a hang.
+            waited.set()
+            sink.mark_ended()
+
+    worker = threading.Thread(target=serve)
     worker.start()
     try:
+        # Nothing is queued yet, so the first scan finds nothing and the loop
+        # must reach its wait. Publishing only after that is what makes the
+        # recorded wait a fact rather than a race with the first scan.
+        waited.wait()
         cq.enqueue(root, 'waketok', 'extension', {'id': 'x', 'code': '1'})
         sink.await_frames(1)
     finally:
@@ -130,6 +183,52 @@ def test_the_loop_waits_on_the_registry_event_publication_sets(tmp):
 
     assert ev.waits >= 1, 'the loop never waited on the registry event'
     assert sink.ids() == ['x'], sink.frames
+
+
+def test_each_scan_is_preceded_by_its_own_clear_and_idle_waits(tmp):
+    """Pin the second iteration: clear, scan, and the idle wait, in order.
+
+    Single-threaded. The sink publishes the next command from inside the
+    first frame write, so the run covers two delivering iterations and one
+    idle one, and the ordered log says what the loop did in each.
+    """
+    route = _load_route('stream_route_second_tick')
+    cq = route.command_queue
+    root = Path(tmp)
+    log = []
+
+    class Recording(threading.Event):
+        def clear(self):
+            log.append('clear')
+            super().clear()
+
+        def wait(self, timeout=None):
+            log.append('wait')
+            return super().wait(timeout)
+
+    ev = Recording()
+    with cq._cmd_events_lock:
+        cq._cmd_events['seqtok'] = ev
+    cq.enqueue(root, 'seqtok', 'extension', {'id': 'first'})
+    sink = _FrameSink(
+        log=log,
+        on_first_frame=lambda: cq.enqueue(
+            root, 'seqtok', 'extension', {'id': 'second'}))
+    steps = iter((0.0,) * 7)
+    route._now = lambda: next(steps, 5000.0)
+    targets = route.resolve_targets(root, 'seqtok', 'extension')
+
+    try:
+        route.serve_stream(
+            sink, cmd_dir=root, token='seqtok', tab='extension',
+            targets=targets, killed_event=threading.Event(), command_ttl=90,
+            keepalive=100000, max_age=3600, client_label='test')
+    finally:
+        with cq._cmd_events_lock:
+            cq._cmd_events.pop('seqtok', None)
+
+    assert sink.ids() == ['first', 'second'], sink.ids()
+    assert log == ['clear', 'frame', 'clear', 'frame', 'clear', 'wait'], log
 
 
 def test_the_extension_stream_delivers_every_queue_it_owns(tmp):
