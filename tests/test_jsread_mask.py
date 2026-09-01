@@ -88,6 +88,10 @@ _TEMPLATE_CASES = [
      "const obj = { hook: `plain` };\n"
      "send = extCmd;\n"
      "send('focus-tab', { tab: chromeTab });\n"),
+    # Pins Node-agreement only, not the fix: under a mask that never read
+    # regex literals the phantom string swallowed the demotion and the send
+    # alike, so the two verdicts agreed either way. The mask-level pin for
+    # this direction is test_regex_body_quote_and_comment_opener_stay_literal.
     ('regex-quote-demotion', False,
      "let send = extCmd;\n"
      "const obj = { hook: /[\"]/ };\n"
@@ -101,6 +105,20 @@ _TEMPLATE_CASES = [
     ('regex-brace-write', True,
      "let send = ordinary;\n"
      "const o = { h: `${/}/.test('}') && (send = extCmd, 1)}` };\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('regex-equals-brace-write', True,
+     "let send = ordinary;\n"
+     "const o = { h: `${/=}/.test('x=}') && (send = extCmd, 1)}` };\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('division-after-template', True,
+     "let send = ordinary;\n"
+     "const half = `t` / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('division-after-object', True,
+     "let send = ordinary;\n"
+     "const half = {a: 1} / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
      "send('focus-tab', { tab: chromeTab });\n"),
     ('grouped-write', True,
      "let send = ordinary;\n"
@@ -220,6 +238,77 @@ def test_regex_opening_follows_the_previous_token(tmp):
     assert 'let after;' in js_mask(block), js_mask(block)
     escaped = 'const r = /a\\/b/;\nlet after;\n'
     assert js_mask(escaped) == 'const r = /    /;\nlet after;\n'
+
+
+def test_regex_body_starting_with_slash_equals_stays_literal(tmp):
+    """`/=` opens a regex body wherever a regex may open, and a quote it
+    opens with stays body text: the previous token decides, not the two
+    characters at the slash."""
+    del tmp
+    source = 'const obj = { hook: /="/ };\nlet after;\n'
+    mask = js_mask(source)
+    assert len(mask) == len(source), mask
+    assert mask == js_mask('const obj = { hook: /  / };\nlet after;\n'), mask
+    assert 'let after;' in mask, mask
+
+
+def test_regex_body_brace_with_equals_stays_out_of_interpolation_state(tmp):
+    """A body opening `=}` is body text too: the `}` does not close the
+    interpolation holding the regex, so the write behind it stays
+    visible."""
+    del tmp
+    source = ("const o = { h: `${/=}/.test('x=}')"
+              ' && (send = extCmd, 1)}` };\nlet after;\n')
+    mask = js_mask(source)
+    assert len(mask) == len(source), mask
+    assert mask.count('\n') == source.count('\n'), mask
+    assert 'send = extCmd' in mask, mask
+    assert 'let after;' in mask, mask
+
+
+def test_division_after_a_blanked_literal_reads_as_division(tmp):
+    """A string or template literal is blanked whole, so it leaves no token
+    for the previous-token test to read: the `/` directly after one is
+    division, the string behind it keeps both quotes, and the line after
+    it stays visible."""
+    del tmp
+    source = 'x = `t` / "a/b" / y;\nif (v) send();\n'
+    mask = js_mask(source)
+    expected = ('x = ' + ' ' * 3 + ' / ' + ' ' * 5 + ' / y;\n'
+                'if (v) send();\n')
+    assert mask == expected, mask
+
+
+def test_division_after_an_object_literal_reads_as_division(tmp):
+    """A `}` that closed an object literal is an operand, so the `/` after
+    it is division and the string behind it keeps both quotes."""
+    del tmp
+    source = 'x = {a:1} / "a/b" / y;\nif (v) send();\n'
+    mask = js_mask(source)
+    expected = 'x = {a:1} / ' + ' ' * 6 + '/ y;\nif (v) send();\n'
+    assert mask == expected, mask
+
+
+def test_division_after_an_object_literal_keeps_a_write_visible(tmp):
+    """The object-literal reading also keeps a bracketed assignment behind
+    the slash in view, where reading it as a regex body would blank the
+    write."""
+    del tmp
+    source = 'const x = {}\n/ [send = extCmd] / 1;\nlet after;\n'
+    mask = js_mask(source)
+    assert len(mask) == len(source), mask
+    assert mask.count('\n') == source.count('\n'), mask
+    assert 'send = extCmd' in mask, mask
+    assert 'let after;' in mask, mask
+
+
+def test_division_after_a_head_named_method_call_stays_division(tmp):
+    """A method named for a head keyword is not a head: the `)` of its call
+    does not reopen regex position, so the division behind it passes
+    through unchanged."""
+    del tmp
+    source = 'const v = obj.if(x) / 2 / y;\nlet after;\n'
+    assert js_mask(source) == source, js_mask(source)
 
 
 def main():

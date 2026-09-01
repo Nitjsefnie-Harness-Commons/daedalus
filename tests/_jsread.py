@@ -62,6 +62,7 @@ _REGEX_KEYWORDS = {
     'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new',
     'of', 'return', 'throw', 'typeof', 'void', 'yield'}
 _HEAD_KEYWORDS = {'if', 'while', 'for', 'with'}
+_BLOCK_HEADS = {'else', 'do'}
 
 
 def _js_regex_span(text, start):
@@ -90,14 +91,68 @@ def _js_regex_span(text, start):
     return None
 
 
+def _js_word_before(out, index):
+    """The identifier ending just before mask index `index`."""
+    start = index
+    while start > 0 and (out[start - 1].isalnum() or out[start - 1] in '_$'):
+        start -= 1
+    return ''.join(out[start:index])
+
+
+def _js_matching_open(out, close):
+    """Mask index of the bracket matching the closer at `close`, or -1."""
+    depth = 0
+    for j in range(close, -1, -1):
+        if out[j] in ')]}':
+            depth += 1
+        elif out[j] in '([{':
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _js_object_brace(out, brace):
+    """Whether the `{` at `brace` opens an object literal rather than a
+    block. An `{` in operand position is a literal, and the tokens that
+    put one there are the regex-allowing ones; a head keyword's `)` opens
+    a body block instead, and so do the statement heads in `_BLOCK_HEADS`,
+    the arrow `=>`, and a nested block. `$` counts because it is the `$`
+    of an interpolation's `${`."""
+    k = brace
+    while k > 0 and out[k - 1].isspace():
+        k -= 1
+    if k == 0:
+        return False
+    char = out[k - 1]
+    if char == ')' or (char == '>' and k > 1 and out[k - 2] == '='):
+        return False
+    if char in '_$' or char.isalnum():
+        word = _js_word_before(out, k)
+        return word not in _BLOCK_HEADS and (
+            word in _REGEX_KEYWORDS or word == '$')
+    if char in '([':
+        return True
+    if char == '{':
+        return _js_object_brace(out, k - 1)
+    return char in '=:,?+-*/%<>&|^~!'
+
+
 def _js_regex_opening(out):
     """Whether the `/` at `len(out)` opens a regex literal, read from the
     last token in the mask built so far. Comments and blanked spans are
     not tokens, so skipping blanked space reaches the real previous
-    token; after `)` the matching `(` decides, because a regex may open
-    an if/while/for/with head's body. `}` stays regex-allowed: statement
-    heads follow blocks, and a wrong guess self-heals at the next line
-    end because a body cannot contain one."""
+    token; a string or template literal leaves none at all, which is why
+    js_mask reports one separately. After `)` the matching `(` decides,
+    because a regex may open an if/while/for/with head's body, and a `.`
+    before the keyword means a method named for a head keyword instead.
+    `}` stays regex-allowed after a block, which statement heads follow,
+    and reads as division after an object literal, whose `{` sat in
+    operand position. A body guessed wrong cannot cross a raw line
+    ending, but one that swallows a string's opening quote leaves the
+    mask's string state open past it, so a wrong guess does not self-
+    heal at the line end; the object-literal test refuses the `}` route
+    a wrong guess actually reaches."""
     j = len(out) - 1
     while j >= 0 and out[j].isspace():
         j -= 1
@@ -105,33 +160,26 @@ def _js_regex_opening(out):
         return True
     char = out[j]
     if char == ')':
-        depth = 0
-        while j >= 0:
-            if out[j] == ')':
-                depth += 1
-            elif out[j] == '(':
-                depth -= 1
-                if depth == 0:
-                    break
-            j -= 1
-        if j < 0:
+        head = _js_matching_open(out, j)
+        if head < 0:
             return False
-        k = j
-        while k > 0 and out[k - 1].isspace():
-            k -= 1
-        word_end = k
-        while k > 0 and (out[k - 1].isalnum() or out[k - 1] in '_$'):
-            k -= 1
-        return ''.join(out[k:word_end]) in _HEAD_KEYWORDS
+        while head > 0 and out[head - 1].isspace():
+            head -= 1
+        word = _js_word_before(out, head)
+        if head - len(word) > 0 and out[head - len(word) - 1] == '.':
+            return False
+        return word in _HEAD_KEYWORDS
     if char in ']"\'':
         return False
     if char in '+-' and j > 0 and out[j - 1] == char:
         return False
     if char in '_$' or char.isalnum():
-        k = j
-        while k > 0 and (out[k - 1].isalnum() or out[k - 1] in '_$'):
-            k -= 1
-        return ''.join(out[k:j + 1]) in _REGEX_KEYWORDS
+        return _js_word_before(out, j + 1) in _REGEX_KEYWORDS
+    if char == '}':
+        brace = _js_matching_open(out, j)
+        if brace < 0:
+            return True
+        return not _js_object_brace(out, brace)
     return True
 
 
@@ -144,17 +192,24 @@ def js_mask(text):
     commas and colons inside it count for depth. A regex literal is blanked
     like a string (delimiters kept, flags with it), read from the previous
     token, so its body never reaches the string, comment or interpolation
-    states."""
+    states. A `/` directly after a string or template literal is division,
+    because a blanked literal leaves no previous token to read. `out` holds
+    exactly one character per element, which the regex reader indexes
+    backwards, so every multi-character insert is appended one character at
+    a time."""
     out = []
     i, n = 0, len(text)
     templates = []
+    blanked_operand = False
     while i < n:
         char = text[i]
         if templates and templates[-1] == 0:
             if char == '`':
                 templates.pop()
+                blanked_operand = True
             elif char == '$' and text[i + 1:i + 2] == '{':
                 templates[-1] = 1
+                blanked_operand = False
                 out.append('$')
                 out.append('{')
                 i += 2
@@ -178,16 +233,19 @@ def js_mask(text):
             j = n if j == -1 else j + 2
             out.extend(re.sub(r'[^\n]', ' ', text[i:j]))
             i = j
-        elif char == '/' and two != '/=':
+        elif char == '/':
             end = (_js_regex_span(text, i)
-                   if _js_regex_opening(out) else None)
+                   if not blanked_operand and _js_regex_opening(out)
+                   else None)
             if end is None:
                 out.append('/')
+                blanked_operand = False
                 i += 1
                 continue
             out.append('/')
             out.extend(re.sub(r'[^\n]', ' ', text[i + 1:end]))
             out.append('/')
+            blanked_operand = False
             i = end + 1
             while i < n and (text[i].isalnum() or text[i] in '_$'):
                 out.append(' ')
@@ -203,6 +261,7 @@ def js_mask(text):
                 else:
                     j += 1
             out.extend(re.sub(r'[^\n]', ' ', text[i:j]))
+            blanked_operand = True
             i = j
         elif char == '`':
             templates.append(0)
@@ -217,6 +276,8 @@ def js_mask(text):
                         templates[-1] = 0
                     else:
                         templates[-1] -= 1
+            if not char.isspace():
+                blanked_operand = False
             out.append(char)
             i += 1
     return ''.join(out)

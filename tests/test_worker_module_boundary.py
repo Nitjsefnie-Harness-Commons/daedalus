@@ -449,9 +449,9 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
     probe are the primary guarantee. Command types remain probe input rather
     than an exhaustive dispatch inventory. This secondary graph catches
     ordinary typos cheaply. Usage remains a best-effort text check: an object
-    method key can look like a consumer, and `js_mask` does not parse regex
-    literals (issue 198). The platform allowlist is trusted input, not proof
-    of a platform global.
+    method key can look like a consumer, and a regex body is blanked rather
+    than read. The platform allowlist is trusted input, not proof of a
+    platform global.
     """
     del tmp
     worker_sources = _worker_sources()
