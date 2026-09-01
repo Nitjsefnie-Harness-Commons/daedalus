@@ -17,6 +17,7 @@ _NODE_PREFIX = """const calls = [];
 const extCmd = (...args) => calls.push(args);
 const ordinary = () => undefined;
 const chromeTab = 41;
+const target = { if: (v) => 1, do: (v) => 2 };
 """
 
 
@@ -118,6 +119,76 @@ _TEMPLATE_CASES = [
     ('division-after-object', True,
      "let send = ordinary;\n"
      "const half = {a: 1} / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('division-after-nested-object', True,
+     "let send = ordinary;\n"
+     "const half = {a: {b:1} / \"a/b\" / 2};\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('division-after-ternary-object', True,
+     "let send = ordinary;\n"
+     "const half = 1 ? {a:1} : {b:2} / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('case-keyed-nested-write', True,
+     "let send = ordinary;\n"
+     "const half = {case: {b:1} / \"a/b\" / 2};\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('case-named-member-write', True,
+     "let send = ordinary;\n"
+     "const half = target.case ? {a:1} : {b:2} / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('labelled-block-write', True,
+     "let send = ordinary;\n"
+     "lbl: {}\n"
+     "/['\"]/.test('q');\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('same-line-label-write', True,
+     "let send = ordinary;\n"
+     "lbl: {} /\"/.test(1); send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('case-clause-write', True,
+     "let send = ordinary;\n"
+     "switch (1) { case 1: {} /\"/.test(1); }\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('default-clause-write', True,
+     "let send = ordinary;\n"
+     "switch (1) { default: {} /\"/.test(1); }\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('case-ternary-clause-write', True,
+     "let send = ordinary;\n"
+     "switch (1) { case 1 ? 2 : 3: {} /\"/.test(1); }\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('division-after-regex', True,
+     "let send = ordinary;\n"
+     "const half = /x/ / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('division-then-regex', True,
+     "let send = ordinary;\n"
+     "const half = 4 / /[\"]/.source;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('spaced-method-division', True,
+     "let send = ordinary;\n"
+     "const half = target . if (1) / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('optional-method-division', True,
+     "let send = ordinary;\n"
+     "const half = target?.if(1) / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('newline-method-division', True,
+     "let send = ordinary;\n"
+     "const half = target\n  .if(1) / \"a/b\" / 2;\n"
      "send = extCmd;\n"
      "send('focus-tab', { tab: chromeTab });\n"),
     ('grouped-write', True,
@@ -289,6 +360,17 @@ def test_division_after_an_object_literal_reads_as_division(tmp):
     assert mask == expected, mask
 
 
+def test_division_after_a_case_keyed_literal_stays_division(tmp):
+    """`case` naming an object-literal key is not a clause head: the
+    literal it keys stays an operand, so the division behind it passes
+    through and the line after stays visible."""
+    del tmp
+    source = 'const half = {case: {b:1} / "a/b" / 2};\nlet after;\n'
+    mask = js_mask(source)
+    assert mask == 'const half = {case: {b:1} /       / 2};\nlet after;\n'
+    assert 'let after;' in mask, mask
+
+
 def test_division_after_an_object_literal_keeps_a_write_visible(tmp):
     """The object-literal reading also keeps a bracketed assignment behind
     the slash in view, where reading it as a regex body would blank the
@@ -309,6 +391,79 @@ def test_division_after_a_head_named_method_call_stays_division(tmp):
     del tmp
     source = 'const v = obj.if(x) / 2 / y;\nlet after;\n'
     assert js_mask(source) == source, js_mask(source)
+
+
+def test_regex_after_a_labelled_block_stays_a_regex(tmp):
+    """A `:` in front of a `{` also spells a statement label and a
+    case/default clause, whose block Node follows with a regex literal:
+    the body is blanked and the line behind it stays visible."""
+    del tmp
+    shapes = (
+        'lbl: {} /["]/.test(s);',
+        'a: b: {} /["]/.test(s);',
+        'switch (1) { case 1: {} /["]/.test(1); }',
+        'switch (1) { default: {} /["]/.test(1); }',
+        'switch (1) { case 1 ? 2 : 3: {} /["]/.test(1); }',
+        'switch (1) { case 0: 1; default: {} /["]/.test(1); }',
+    )
+    for shape in shapes:
+        source = shape + '\nlet after;\n'
+        mask = js_mask(source)
+        assert len(mask) == len(source), mask
+        assert mask == js_mask(shape.replace('/["]/', '/   /')
+                               + '\nlet after;\n'), mask
+        assert 'let after;' in mask, mask
+
+
+def test_division_after_a_regex_literal_reads_as_division(tmp):
+    """The `/` after a closed regex literal is division however the
+    literal is spelled. A regex body is blanked whole, so the closing
+    slash leaves no previous token to read and js_mask has to remember
+    it; reading the slash as a regex opener instead swallows the string
+    behind it and the line after."""
+    del tmp
+    plain = 'const half = /x/ / "a/b" / y;\nlet after;\n'
+    assert js_mask(plain) == 'const half = / / /       / y;\nlet after;\n'
+    flagged = 'const half = /x/gi / "a/b" / y;\nlet after;\n'
+    assert js_mask(flagged) == ('const half = / /   /       / y;\n'
+                                'let after;\n')
+    commented = 'const half = /x/ /*c*/ / "a/b" / y;\nlet after;\n'
+    assert js_mask(commented) == ('const half = / /       /       / y;\n'
+                                  'let after;\n')
+    wrapped = 'const half = /x/\n/ "a/b" / y;\nlet after;\n'
+    assert js_mask(wrapped) == 'const half = / /\n/       / y;\nlet after;\n'
+    for source in (plain, flagged, commented, wrapped):
+        assert 'let after;' in js_mask(source), source
+
+
+def test_regex_after_a_division_slash_still_opens(tmp):
+    """A division operator still reopens regex position, so the literal
+    behind one is blanked rather than read as code."""
+    del tmp
+    source = 'const half = 4 / /["]/.test(2);\nlet after;\n'
+    mask = js_mask(source)
+    assert mask == js_mask('const half = 4 / /   /.test(2);\nlet after;\n')
+    assert 'let after;' in mask, mask
+
+
+def test_a_spaced_head_named_method_call_stays_division(tmp):
+    """Whitespace around the member access does not make the keyword a
+    head: the `.` is read past the space, so the division behind the call
+    passes through unchanged, as it already does when the access is
+    tight, optional-chained or continued on the next line."""
+    del tmp
+    sources = (
+        'const v = obj . if (x) / "p/q" / 2;\nlet after;\n',
+        'const v = obj?.if(x) / "p/q" / 2;\nlet after;\n',
+        'const v = obj\n  .if(x) / "p/q" / 2;\nlet after;\n',
+        'const v = obj.if(x) / "p/q" / 2;\nlet after;\n',
+    )
+    expected = 'const v = obj . if (x) /       / 2;\nlet after;\n'
+    assert js_mask(sources[0]) == expected, js_mask(sources[0])
+    for source in sources[1:]:
+        mask = js_mask(source)
+        assert mask == js_mask(source.replace('"p/q"', ' ' * 5)), mask
+        assert 'let after;' in mask, mask
 
 
 def main():
