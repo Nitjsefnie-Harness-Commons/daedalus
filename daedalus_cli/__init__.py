@@ -13,7 +13,7 @@ format is the thing being versioned, and both ends have to claim the same one.
 
 from collections.abc import Iterable
 
-__version__ = "0.24.0"
+__version__ = "0.24.1"
 
 # The non-URL carrier for an HLS job capability. Its own header rather than
 # Authorization, because a segment route never sees the bridge token and must
