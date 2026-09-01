@@ -17,9 +17,12 @@ from _jsroute_calls import (discover_invocations,  # noqa: E402
                             parameter_bindings,
                             sender_candidate_bindings)
 from _jsroute_timeline import (  # noqa: E402
-    FunctionTimeline, InvocationReplay, declaration_bindings,
+    FunctionTimeline, InvocationReplay, declaration_records,
     function_reference, lexical_limits)
 from _jsroute_state import build_sender_queries  # noqa: E402
+from _jsroute_source import (SourceIndex, function_body_at,  # noqa: E402
+                             statement_end)
+from _jsroute_receiver import ReceiverIndex  # noqa: E402
 
 
 # A name whose object exists but whose contents this scanner cannot prove.
@@ -44,56 +47,21 @@ def _js_top_level(mask, start, end, char):
     return None
 
 
-def _js_statement_end(mask, pos):
-    """Offset of the `;` ending the statement that starts at `pos`.
-
-    Falls back to the end of the line at depth 0, for the rare unterminated
-    statement, and to the end of the file when neither is found.
-    """
-    depth = 0
-    for i in range(pos, len(mask)):
-        c = mask[i]
-        if c in '([{':
-            depth += 1
-        elif c in ')]}':
-            depth -= 1
-        elif c == ';' and depth == 0:
-            return i
-        elif c == '\n' and depth == 0 and mask[pos:i].strip():
-            return i
-    return len(mask)
+def _js_previous_nonspace(mask, position):
+    position -= 1
+    while position >= 0 and mask[position].isspace():
+        position -= 1
+    return position
 
 
-def _js_function_body_at(mask, start):
-    """Body beginning at a concrete function value occurrence, or None."""
-    start += len(mask[start:]) - len(mask[start:].lstrip())
-    async_prefix = re.match(r'async\b\s*', mask[start:])
-    if async_prefix:
-        start += async_prefix.end()
-    function = re.match(r'function(?:\s+[\w$]+)?\s*\(', mask[start:])
-    if function:
-        paren = start + function.end() - 1
-        after = js_bracket_end(mask, paren)
-        brace = mask.find('{', after)
-        if brace != -1:
-            return ('block', brace, js_bracket_end(mask, brace))
-        return None
-    if mask[start:start + 1] == '(':
-        after = js_bracket_end(mask, start)
-        arrow = re.match(r'\s*=>\s*', mask[after:])
-        if not arrow:
-            return None
-        body = after + arrow.end()
-    else:
-        parameter = re.match(r'[\w$]+\s*=>\s*', mask[start:])
-        if not parameter:
-            return None
-        body = start + parameter.end()
-    if mask[body:body + 1] == '{':
-        return ('block', body, js_bracket_end(mask, body))
-    if mask[body:body + 1] == '(':
-        return ('expr', body + 1, js_bracket_end(mask, body) - 1)
-    return ('expr', body, js_expression_end(mask, body))
+def _js_word_before(mask, position):
+    position = _js_previous_nonspace(mask, position) + 1
+    end = position
+    while (position > 0
+           and (mask[position - 1].isalnum()
+                or mask[position - 1] in '_$')):
+        position -= 1
+    return mask[position:end]
 
 
 def js_tab_routing_violations(path, rel):
@@ -116,11 +84,12 @@ def js_tab_routing_violations(path, rel):
     """
     text = path.read_text(encoding='utf-8')
     mask = js_mask(text)
+    source_index = SourceIndex(text, mask, function_body_at)
+    body_at = source_index.body_at
     violations = []
     senders = ('extCmd', 'extcmd', 'runCommand')
 
-    def line_of(pos):
-        return text.count('\n', 0, pos) + 1
+    line_of = source_index.line_of
 
     def is_extension_literal(value):
         return value is not None and re.fullmatch(r'["\']extension["\']', value)
@@ -211,7 +180,8 @@ def js_tab_routing_violations(path, rel):
         r'\b(const|let|var)\s+([\w$]+)\s*=', mask))
     bindings = []
     for m in re.finditer(r'\b([\w$]+)\s*=(?!=|>)', mask):
-        if not mask[:m.start()].rstrip().endswith('.'):
+        before = _js_previous_nonspace(mask, m.start())
+        if before < 0 or mask[before] != '.':
             bindings.append(m)
     events = []  # (pos, kind, match)
     for m in declarations:
@@ -240,7 +210,9 @@ def js_tab_routing_violations(path, rel):
             continue
         # Object.assign's target is modelled above, so it is not an escape;
         # every other call taking the object is one, member calls included.
-        if re.search(r'Object\s*\.\s*$', mask[:m.start()]):
+        dot = _js_previous_nonspace(mask, m.start())
+        if (dot >= 0 and mask[dot] == '.'
+                and _js_word_before(mask, dot) == 'Object'):
             continue
         events.append((m.start(), 'escape', m))
     events.sort(key=lambda e: e[0])
@@ -300,18 +272,18 @@ def js_tab_routing_violations(path, rel):
                 function_names.append((match.group(1), match.start()))
                 function_occurrences.append(
                     (match.group(1), match.start(),
-                     _js_function_body_at(mask, match.start())))
+                     body_at(mask, match.start())))
     for open_paren, close in list(pair_end.items()):
         if mask[open_paren:open_paren + 1] != '(':
             continue
         arrow = re.match(r'\s*=>\s*', mask[close:])
         if arrow:
-            body = _js_function_body_at(mask, open_paren)
+            body = body_at(mask, open_paren)
             if body is not None:
                 body_open = body[1] if body[0] == 'block' else None
                 add_scope(open_paren, body_open, body=body)
     for match in re.finditer(r'\b([\w$]+)\s*=>', mask):
-        body = _js_function_body_at(mask, match.start())
+        body = body_at(mask, match.start())
         if body is not None:
             body_open = body[1] if body[0] == 'block' else None
             params, param_order = parameter_bindings(
@@ -325,40 +297,34 @@ def js_tab_routing_violations(path, rel):
         open_paren = mask.index('(', match.start())
         close = pair_end.get(open_paren, len(mask))
         body_open = after_space(close)
-        prefix = mask[:match.start()].rstrip()
-        previous = prefix[-1:] if prefix else ''
+        previous_at = _js_previous_nonspace(mask, match.start())
+        previous = mask[previous_at:previous_at + 1]
         if (mask[body_open:body_open + 1] == '{'
-                and not prefix.endswith('function')
+                and _js_word_before(mask, match.start()) != 'function'
                 and previous in '{,;}'):
             method_positions.add(match.start())
             add_scope(open_paren, body_open)
 
-    for index in range(1, len(scopes)):
+    nested = [0]
+    for index in sorted(
+            range(1, len(scopes)),
+            key=lambda item: (
+                scopes[item]['param_start'], -scopes[item]['end'])):
         scope = scopes[index]
-        parents = [(candidate['end'] - candidate['start'], parent)
-                   for parent, candidate in enumerate(scopes)
-                   if parent != index
-                   and candidate['param_start'] <= scope['param_start']
-                   and scope['end'] <= candidate['end']]
-        scope['parent'] = min(parents)[1] if parents else 0
-
-    def scope_at(pos):
-        found = [(scope['end'] - scope['param_start'], index)
-                 for index, scope in enumerate(scopes)
-                 if scope['param_start'] <= pos < scope['end']]
-        return min(found)[1] if found else 0
+        while nested and not (
+                scopes[nested[-1]]['param_start']
+                <= scope['param_start'] < scopes[nested[-1]]['end']
+                and scope['end'] <= scopes[nested[-1]]['end']):
+            nested.pop()
+        scope['parent'] = nested[-1] if nested else 0
+        nested.append(index)
 
     brace_ranges = [(opening + 1, end - 1)
                     for opening, end in pair_end.items()
                     if mask[opening:opening + 1] == '{']
-
-    def lexical_range(pos, function_only=False):
-        scope = scopes[scope_at(pos)]
-        if function_only:
-            return scope['start'], scope['end']
-        found = [(end - start, start, end) for start, end in brace_ranges
-                 if start <= pos < end]
-        return min(found)[1:] if found else (0, len(mask))
+    source_index.configure_ranges(scopes, brace_ranges)
+    scope_at = source_index.scope_at
+    lexical_range = source_index.lexical_range
 
     alias_bindings = {}
 
@@ -371,9 +337,13 @@ def js_tab_routing_violations(path, rel):
     for scope in scopes[1:]:
         for name in scope['params']:
             add_binding(name, (scope['param_start'], scope['end']))
-    for kind, name, pos in declaration_bindings(
-            mask, text, js_split_top_level):
-        add_binding(name, lexical_range(pos, function_only=kind == 'var'))
+    declaration_items = declaration_records(
+        mask, text, pair_end, _js_top_level, js_split_top_level)
+    for item in declaration_items:
+        add_binding(
+            item['name'], lexical_range(
+                item['declaration_position'],
+                function_only=item['kind'] == 'var'))
     for name, pos in function_names:
         add_binding(name, lexical_range(pos))
 
@@ -392,15 +362,6 @@ def js_tab_routing_violations(path, rel):
     optional_ranges = []
     controls = {'if', 'for', 'while', 'switch', 'catch', 'else', 'try', 'do'}
 
-    def word_before(pos):
-        while pos > 0 and mask[pos - 1].isspace():
-            pos -= 1
-        end = pos
-        while (pos > 0
-               and (mask[pos - 1].isalnum() or mask[pos - 1] in '_$')):
-            pos -= 1
-        return mask[pos:end]
-
     for opening, end in pair_end.items():
         if mask[opening:opening + 1] != '{' or opening in function_opens:
             continue
@@ -411,9 +372,9 @@ def js_tab_routing_violations(path, rel):
         if before >= 0 and mask[before] == ')':
             open_paren = pair_start.get(before)
             if open_paren is not None:
-                word = word_before(open_paren)
+                word = _js_word_before(mask, open_paren)
         else:
-            word = word_before(opening)
+            word = _js_word_before(mask, opening)
         if word in controls:
             optional_ranges.append(
                 (opening + 1, end - 1, scope_at(opening)))
@@ -431,6 +392,18 @@ def js_tab_routing_violations(path, rel):
             if expr in senders:
                 return expr
             return alias_value(expr, span_start, states)
+        bound = re.fullmatch(
+            r'([\w$]+)\s*\.\s*bind\s*\(.*\)', expr, re.DOTALL)
+        if bound:
+            if bound.group(1) in senders:
+                return bound.group(1)
+            return alias_value(bound.group(1), span_start, states)
+        resolved = invocation_resolution['receivers'].callable_value(
+            (span_start, span_end))
+        if resolved['name'] in senders:
+            return resolved['name']
+        if resolved['binding'] is not None:
+            return states.get(resolved['binding'])
         for name in re.findall(r'\b[\w$]+\b', expr):
             if (name in senders
                     or alias_value(name, span_start, states)
@@ -457,12 +430,13 @@ def js_tab_routing_violations(path, rel):
         if before >= 0 and mask[before] == ')':
             open_paren = pair_start.get(before)
             if open_paren is not None:
-                return word_before(open_paren) in controls
-        return word_before(before + 1) in ('else', 'do')
+                return _js_word_before(mask, open_paren) in controls
+        return _js_word_before(mask, before + 1) in ('else', 'do')
 
     def bare_call(match):
-        prefix = mask[:match.start()].rstrip()
-        if prefix.endswith('.') or prefix.endswith('function'):
+        before = _js_previous_nonspace(mask, match.start())
+        if ((before >= 0 and mask[before] == '.')
+                or _js_word_before(mask, match.start()) == 'function'):
             return False
         open_paren = mask.index('(', match.start())
         after = after_space(pair_end.get(open_paren, len(mask)))
@@ -478,7 +452,7 @@ def js_tab_routing_violations(path, rel):
     for match in bindings:
         binding = visible_binding(match.group(1), match.start())
         if binding is not None:
-            value = _js_function_body_at(mask, match.end())
+            value = body_at(mask, match.end())
             alias = re.match(r'\s*([\w$]+)\s*(?=[,;)\n])',
                              mask[match.end():])
             source = (visible_binding(alias.group(1), match.start())
@@ -496,16 +470,48 @@ def js_tab_routing_violations(path, rel):
                 binding = visible_binding(item['name'], scope['start'])
                 if binding is not None:
                     member_bindings[binding] = item
-    invocations = discover_invocations(
+    for item in declaration_items:
+        if item['rest'] != 'object':
+            continue
+        binding = visible_binding(item['name'], item['position'])
+        if binding is not None:
+            member_bindings[binding] = item
+    invocation_resolution = {
+        'binding': visible_binding, 'scope': scope_at,
+        'member_bindings': member_bindings, 'scopes': scopes}
+    invocation_reader = {
+        'top_level': _js_top_level, 'split': js_split_top_level,
+        'body': body_at, 'expression_end': js_expression_end}
+    invocation_resolution['receivers'] = ReceiverIndex(
         mask, text, {'end': pair_end, 'start': pair_start}, bindings,
-        {'binding': visible_binding, 'scope': scope_at,
-         'member_bindings': member_bindings}, method_positions,
-        {'top_level': _js_top_level, 'split': js_split_top_level,
-         'body': _js_function_body_at}, senders)
+        invocation_resolution, invocation_reader, senders)
+    for match in bindings:
+        expression_end = js_expression_end(mask, match.end())
+        expression = mask[match.end():expression_end].strip()
+        if not re.fullmatch(
+                r'[\w$]+\s*(?:\.\s*[\w$]+'
+                r'|\[\s*[^]]+\s*\])', expression):
+            continue
+        target = invocation_resolution['receivers'].callable_value(
+            (match.end(), expression_end))
+        value = target['body']
+        if value is None and target['binding'] is not None:
+            value = function_reference(
+                target['binding'], match.start(), scope_at(match.start()))
+        if value is not None:
+            timeline.add(
+                visible_binding(match.group(1), match.start()),
+                scope_at(match.start()), match.start(), match.start(), value)
+    invocations = discover_invocations(
+        mask, text, {'end': pair_end, 'start': pair_start},
+        invocation_resolution, method_positions,
+        invocation_reader, senders)
     replay = InvocationReplay(
         timeline, scopes, events, invocations,
-        {'mask': mask, 'text': text, 'body': _js_function_body_at,
+        {'mask': mask, 'text': text, 'body': body_at,
          'top_level': _js_top_level,
+         'computed_key': invocation_resolution[
+             'receivers'].computed_key,
          'expression_end': js_expression_end},
         scope_at, visible_binding, optional_write)
 
@@ -518,16 +524,16 @@ def js_tab_routing_violations(path, rel):
             continue
         replay.clear_between(
             runtime_values, previous_call, call['order'], {0})
-        _, reached, unknowns = replay.run(call, runtime_values)
-        for record in reached:
+        result = replay.run(call, runtime_values)
+        for record in result.calls:
             reached_calls.setdefault(
                 record[0]['start'], []).append(record)
-        reached_unknowns.extend(unknowns)
+        reached_unknowns.extend(result.unknowns)
         previous_call = call['order']
 
     candidate_bindings = sender_candidate_bindings(
         scopes, bindings, mask, visible_binding, js_expression_end,
-        senders)
+        senders, invocation_resolution['receivers'].callable_value)
     sender_queries = build_sender_queries(
         candidate_bindings, reached_calls, scopes, events,
         invocations, replay,
@@ -535,7 +541,10 @@ def js_tab_routing_violations(path, rel):
          'expression_end': js_expression_end, 'mask': mask,
          'sender_state': sender_state, 'optional_write': optional_write,
          'merged_sender': merged_sender, 'text': text,
-         'top_level': _js_top_level, 'unprovable': _JS_UNPROVABLE})
+         'top_level': _js_top_level,
+         'computed_key': invocation_resolution[
+             'receivers'].computed_key,
+         'unprovable': _JS_UNPROVABLE})
     sender_answers = sender_queries['answers']
     call_queries = sender_queries['calls']
     record_senders = sender_queries['records']
@@ -564,7 +573,7 @@ def js_tab_routing_violations(path, rel):
                 continue
             if kind == 'init':
                 name = m.group(2)
-                stmt_end = _js_statement_end(mask, m.end())
+                stmt_end = statement_end(mask, m.end())
                 named[name] = resolve(m.end(), stmt_end, named, depth)
             elif kind == 'bind':
                 continue

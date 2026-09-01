@@ -1,12 +1,20 @@
 """Source-ordered function values for JavaScript lexical bindings."""
 from bisect import bisect_left, bisect_right
 import re
+from typing import NamedTuple
 
-from _jsroute_calls import parameter_sources
+from _jsroute_calls import parameter_bindings, parameter_sources
 
 
-def declaration_bindings(mask, text, split_top_level):
-    """Yield each simple binding in a const, let, or var declaration."""
+class ReplayResult(NamedTuple):
+    writes: list
+    calls: list
+    unknowns: list
+
+
+def declaration_records(mask, text, pair_end, top_level, split_top_level):
+    """Return structured bindings and initializer spans for declarations."""
+    found = []
     for head in re.finditer(r'\b(const|let|var)\b', mask):
         depth = 0
         end = len(mask)
@@ -24,10 +32,20 @@ def declaration_bindings(mask, text, split_top_level):
                 break
         for left, right in split_top_level(
                 mask, text, head.end(), end):
-            found = re.match(r'\s*([\w$]+)', mask[left:right])
-            if found:
-                yield (head.group(1), found.group(1),
-                       left + found.start(1))
+            equals = top_level(mask, left, right, '=')
+            pattern_end = equals if equals is not None else right
+            _, specs = parameter_bindings(
+                mask, text, left, pattern_end, pair_end,
+                top_level, split_top_level)
+            source = ((equals + 1, right)
+                      if equals is not None else None)
+            for spec in specs:
+                for binding in spec['bindings']:
+                    found.append({
+                        **binding, 'kind': head.group(1),
+                        'declaration_position': head.start(),
+                        'source': source})
+    return found
 
 
 def function_reference(binding, position, owner):
@@ -112,6 +130,10 @@ class InvocationReplay:
         self.expression_end = source['expression_end']
         self.optional_write = optional_write
         self.top_level = source['top_level']
+        self.computed_key = source['computed_key']
+        self.body_scopes = {
+            (scope['start'], scope['end']): index
+            for index, scope in enumerate(scopes)}
         self.bind_events = {}
         self.operations = {}
         for start, kind, match in events:
@@ -160,17 +182,17 @@ class InvocationReplay:
         for argument_call in call['argument_calls']:
             calls.append((argument_call, execution,
                           dict(active_sources)))
-            nested_writes, nested_calls, nested_unknowns = self.run(
+            nested = self.run(
                 argument_call, inherited, seen, inherited_optional,
                 limits, active_sources, execution)
-            writes.extend(nested_writes)
-            calls.extend(nested_calls)
-            unknowns.extend(nested_unknowns)
+            writes.extend(nested.writes)
+            calls.extend(nested.calls)
+            unknowns.extend(nested.unknowns)
         if call['status'] == 'unprovable':
             unknowns.append(call)
-            return writes, calls, unknowns
+            return ReplayResult(writes, calls, unknowns)
         if call['status'] == 'irrelevant':
-            return writes, calls, unknowns
+            return ReplayResult(writes, calls, unknowns)
         if call['body'] is not None:
             bodies = (call['body'],)
         else:
@@ -208,28 +230,26 @@ class InvocationReplay:
                         start, self.scopes[function_scope]['end']))
                 nested_limits = limits + ((function_scope, start),)
                 calls.append((item, execution, dict(sources)))
-                nested_writes, nested_calls, nested_unknowns = self.run(
+                nested = self.run(
                     item, overrides, seen | {function_scope},
                     nested_optional, nested_limits, sources, execution)
-                writes.extend(nested_writes)
-                calls.extend(nested_calls)
-                unknowns.extend(nested_unknowns)
-        return writes, calls, unknowns
+                writes.extend(nested.writes)
+                calls.extend(nested.calls)
+                unknowns.extend(nested.unknowns)
+        return ReplayResult(writes, calls, unknowns)
 
     def _scope_for(self, body):
         inset = body[0] == 'block'
         start = body[1] + inset
         end = body[2] - inset
-        return next((
-            index for index, scope in enumerate(self.scopes)
-            if scope['start'] == start and scope['end'] == end), None)
+        return self.body_scopes.get((start, end))
 
     def _override_parameters(self, overrides, inherited, function_scope,
                              call_start, args, limits, sender_sources):
         scope = self.scopes[function_scope]
         for source in parameter_sources(
                 scope['param_order'], args, self.mask, self.text,
-                self.top_level):
+                self.top_level, self.computed_key):
             target = self.visible_binding(
                 source['name'], scope['start'])
             if target is None:

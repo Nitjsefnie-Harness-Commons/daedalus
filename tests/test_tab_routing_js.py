@@ -507,6 +507,120 @@ def test_function_value_timelines_match_runtime(tmp):
     assert observed == expected, observed
 
 
+def test_object_copy_and_receiver_forms_match_runtime(tmp):
+    cases = [
+        ('declaration-rest-closure-promotion', "let send = ordinary;\n"
+         "const rest = { send: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nconst { ...bag } = rest;\n"
+         "send = extCmd;\nbag.send();\n", True),
+        ('declaration-rest-closure-demotion', "let send = extCmd;\n"
+         "const rest = { send: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nconst { ...bag } = rest;\n"
+         "send = ordinary;\nbag.send();\n", False),
+        ('declaration-rest-direct-promotion',
+         "const rest = { send: extCmd };\nconst { ...bag } = rest;\n"
+         "bag.send('focus-tab', { tab: chromeTab });\n", True),
+        ('declaration-rest-direct-demotion',
+         "const rest = { send: ordinary };\nconst { ...bag } = rest;\n"
+         "bag.send('focus-tab', { tab: chromeTab });\n", False),
+        ('nested-declaration-rest-promotion', "let send = ordinary;\n"
+         "const source = { inner: { send: () => send('focus-tab', "
+         "{ tab: chromeTab }) } };\n"
+         "const { inner: { ...bag } } = source;\n"
+         "send = extCmd;\nbag.send();\n", True),
+        ('nested-declaration-rest-demotion', "let send = extCmd;\n"
+         "const source = { inner: { send: () => send('focus-tab', "
+         "{ tab: chromeTab }) } };\n"
+         "const { inner: { ...bag } } = source;\n"
+         "send = ordinary;\nbag.send();\n", False),
+        ('object-spread-promotion', "const source = { send: extCmd };\n"
+         "const bag = { ...source };\n"
+         "bag.send('focus-tab', { tab: chromeTab });\n", True),
+        ('object-spread-demotion', "const source = { send: ordinary };\n"
+         "const bag = { ...source };\n"
+         "bag.send('focus-tab', { tab: chromeTab });\n", False),
+        ('member-extraction-promotion',
+         "const box = { run: extCmd };\nconst invoke = box.run;\n"
+         "invoke('focus-tab', { tab: chromeTab });\n", True),
+        ('member-extraction-demotion',
+         "const box = { run: ordinary };\nconst invoke = box.run;\n"
+         "invoke('focus-tab', { tab: chromeTab });\n", False),
+        ('returned-rest-chain-promotion',
+         "const getBag = ({ ...bag }) => bag;\n"
+         "getBag({ send: extCmd }).send('focus-tab', "
+         "{ tab: chromeTab });\n", True),
+        ('returned-rest-chain-demotion',
+         "const getBag = ({ ...bag }) => bag;\n"
+         "getBag({ send: ordinary }).send('focus-tab', "
+         "{ tab: chromeTab });\n", False),
+        ('returned-rest-binding-promotion',
+         "const getBag = ({ ...bag }) => bag;\n"
+         "const bag = getBag({ send: extCmd });\n"
+         "bag.send('focus-tab', { tab: chromeTab });\n", True),
+        ('returned-rest-binding-demotion',
+         "const getBag = ({ ...bag }) => bag;\n"
+         "const bag = getBag({ send: ordinary });\n"
+         "bag.send('focus-tab', { tab: chromeTab });\n", False),
+        ('block-returned-rest-promotion',
+         "function getBag(source) {\n  const { ...bag } = source;\n"
+         "  return bag;\n}\ngetBag({ send: extCmd }).send('focus-tab', "
+         "{ tab: chromeTab });\n", True),
+        ('block-returned-rest-demotion',
+         "function getBag(source) {\n  const { ...bag } = source;\n"
+         "  return bag;\n}\ngetBag({ send: ordinary }).send('focus-tab', "
+         "{ tab: chromeTab });\n", False),
+        ('rest-member-optional-promotion',
+         "const invoke = ({ ...bag }) => bag.send?.('focus-tab', "
+         "{ tab: chromeTab });\ninvoke({ send: extCmd });\n", True),
+        ('rest-member-optional-demotion',
+         "const invoke = ({ ...bag }) => bag.send?.('focus-tab', "
+         "{ tab: chromeTab });\ninvoke({ send: ordinary });\n", False),
+        ('rest-member-call-promotion',
+         "const invoke = ({ ...bag }) => bag.send.call(null, 'focus-tab', "
+         "{ tab: chromeTab });\ninvoke({ send: extCmd });\n", True),
+        ('rest-member-call-demotion',
+         "const invoke = ({ ...bag }) => bag.send.call(null, 'focus-tab', "
+         "{ tab: chromeTab });\ninvoke({ send: ordinary });\n", False),
+        ('direct-apply-promotion', "const send = extCmd;\n"
+         "send.apply(null, ['focus-tab', { tab: chromeTab }]);\n", True),
+        ('direct-apply-demotion', "const send = ordinary;\n"
+         "send.apply(null, ['focus-tab', { tab: chromeTab }]);\n", False),
+        ('nested-group-promotion', "const send = extCmd;\n"
+         "((send))('focus-tab', { tab: chromeTab });\n", True),
+        ('nested-group-demotion', "const send = ordinary;\n"
+         "((send))('focus-tab', { tab: chromeTab });\n", False),
+        ('reflect-apply-promotion', "const send = extCmd;\n"
+         "Reflect.apply(send, null, ['focus-tab', "
+         "{ tab: chromeTab }]);\n", True),
+        ('reflect-apply-demotion', "const send = ordinary;\n"
+         "Reflect.apply(send, null, ['focus-tab', "
+         "{ tab: chromeTab }]);\n", False),
+        ('bound-sender-promotion', "const send = extCmd;\n"
+         "const bound = send.bind(null);\n"
+         "bound('focus-tab', { tab: chromeTab });\n", True),
+        ('bound-sender-demotion', "const send = ordinary;\n"
+         "const bound = send.bind(null);\n"
+         "bound('focus-tab', { tab: chromeTab });\n", False),
+        ('global-member-promotion', "let send = ordinary;\n"
+         "globalThis.box = { run: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nsend = extCmd;\nbox.run();\n", True),
+        ('global-member-demotion', "let send = extCmd;\n"
+         "globalThis.box = { run: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nsend = ordinary;\nbox.run();\n", False),
+        ('global-computed-member-promotion', "let send = ordinary;\n"
+         "globalThis.box = { run: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nsend = extCmd;\nbox['run']();\n", True),
+        ('global-computed-member-demotion', "let send = extCmd;\n"
+         "globalThis.box = { run: () => send('focus-tab', "
+         "{ tab: chromeTab }) };\nsend = ordinary;\nbox['run']();\n", False),
+    ]
+    path = Path(tmp) / 'receiver.js'
+    observed = [(label, *_runtime_and_guard(source, path))
+                for label, source, _ in cases]
+    expected = [(label, value, value) for label, _, value in cases]
+    assert observed == expected, observed
+
+
 def test_unmodelled_invocation_fails_closed(tmp):
     # Dynamic targets deliberately use the issue's fail-closed allowance:
     # runtime-clean still produces one unprovable guard finding.
@@ -532,6 +646,27 @@ def test_parenthesized_callee_uses_sender_diagnostic(tmp):
     assert len(violations) == 1, violations
     assert '`tab` in a typed command send' in violations[0], violations
     assert 'cannot resolve' not in violations[0], violations
+
+
+def test_resolved_callee_forms_use_sender_diagnostic(tmp):
+    cases = [
+        "const send = extCmd;\n"
+        "send.apply(null, ['focus-tab', { tab: chromeTab }]);\n",
+        "const send = extCmd;\n"
+        "((send))('focus-tab', { tab: chromeTab });\n",
+        "const send = extCmd;\n"
+        "Reflect.apply(send, null, ['focus-tab', "
+        "{ tab: chromeTab }]);\n",
+        "const send = extCmd;\nconst bound = send.bind(null);\n"
+        "bound('focus-tab', { tab: chromeTab });\n",
+    ]
+    path = Path(tmp) / 'resolved-call.js'
+    for source in cases:
+        path.write_text(source, encoding='utf-8')
+        violations = js_tab_routing_violations(path, path.name)
+        assert len(violations) == 1, (source, violations)
+        assert '`tab` in a typed command send' in violations[0], violations
+        assert 'cannot resolve' not in violations[0], violations
 
 
 def main():
