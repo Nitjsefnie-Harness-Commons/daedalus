@@ -11,6 +11,7 @@ in-process rather than only end to end through a bridge child.
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -175,6 +176,29 @@ def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
     assert once.duplicate_carrier is None, once.duplicate_carrier
     assert twice.duplicate_carrier == 'token', twice.duplicate_carrier
     assert once != twice
+
+
+def test_the_answer_types_import_without_daedalus_configuration(_tmp):
+    """The answer types are stdlib-only so a route module stays config-free.
+
+    `http_transport` re-exports them and does read config; a route module
+    imports them from `route_answer` and must not inherit that requirement.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith('DAEDALUS_')}
+    env['PYTHONPATH'] = str(_util.ROOT)
+    done = subprocess.run(
+        [sys.executable, '-c',
+         'from daedalus_bridge.route_answer import BytesAnswer, FileAnswer'],
+        env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+
+
+def test_the_transport_re_exports_the_answer_types(_tmp):
+    """`server.py` and Task 1's controls import them from here."""
+    from daedalus_bridge import route_answer  # noqa: PLC0415
+    assert transport.FileAnswer is route_answer.FileAnswer
+    assert transport.BytesAnswer is route_answer.BytesAnswer
 
 
 def main():

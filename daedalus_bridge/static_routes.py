@@ -3,7 +3,7 @@
 The route returns a `BytesAnswer` carrying the framing headers, and takes the
 dashboard directory as a parameter rather than importing `config`.
 """
-from daedalus_bridge.http_transport import BytesAnswer
+from daedalus_bridge.route_answer import BytesAnswer
 from daedalus_bridge import path_safety
 
 
