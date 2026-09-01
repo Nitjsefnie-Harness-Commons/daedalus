@@ -91,6 +91,7 @@
 !/daedalus_bridge/config.py
 !/daedalus_bridge/delivery_stripes.py
 !/daedalus_bridge/env_config.py
+!/daedalus_bridge/http_transport.py
 !/daedalus_bridge/log_safe.py
 !/daedalus_bridge/mcp_bootstrap.py
 !/daedalus_bridge/parent_watch.py
@@ -330,6 +331,7 @@
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
+!/tests/test_http_transport.py
 !/tests/test_js_coverage.py
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
