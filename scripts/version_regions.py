@@ -259,7 +259,7 @@ def _js_regex(text, start, regions):
 
 
 def _html_regions(text):
-    """Regions for HTML comments, attributes and JavaScript in script tags.
+    """Regions for comments, attributes, scripts and inert template content.
 
     Quotes delimit only inside a tag, so an apostrophe in ordinary text
     opens nothing, and no backslash escapes anything.
@@ -284,6 +284,10 @@ def _html_regions(text):
                         text[i:script_end], html_comments=True):
                     regions.append((i + start, i + stop, kind))
                 i = script_end
+            elif _html_tag_name(text, tag_start, i) == 'template':
+                template_end = _html_template_end(text, i)
+                regions.append((i - 1, template_end, 'inert'))
+                i = template_end
             continue
         i += 1
     return regions
@@ -298,6 +302,30 @@ def _html_tag_name(text, start, end):
     while i < end and (text[i].isalnum() or text[i] in '-:'):
         i += 1
     return text[name_start:i].lower()
+
+
+def _html_template_end(text, start):
+    """The closing tag of the template body after `start`, or text end."""
+    depth = 1
+    i = start
+    while i < len(text):
+        if text.startswith('<!--', i):
+            close = text.find('-->', i + 4)
+            i = len(text) if close == -1 else close + 3
+            continue
+        if (text[i] == '<' and i + 1 < len(text)
+                and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
+            tag_start = i
+            i = _html_tag(text, tag_start, [])
+            if _html_tag_name(text, tag_start, i) == 'template':
+                depth += 1
+            elif _html_script_name(text, tag_start, '</template') is not None:
+                depth -= 1
+                if depth == 0:
+                    return tag_start
+            continue
+        i += 1
+    return len(text)
 
 
 def _html_script_end(text, start):
