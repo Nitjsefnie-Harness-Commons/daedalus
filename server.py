@@ -2,7 +2,7 @@
 """Daedalus debug server — SSE command bridge + tab registry."""
 import json, os, pathlib, shutil, threading, time, uuid
 from functools import partial
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer
 from socketserver import TCPServer, ThreadingMixIn
 
 from daedalus_cli.output import configure_stdio
@@ -196,7 +196,7 @@ def _file_mime(fmt):
     return mime_map.get(fmt, 'application/octet-stream')
 
 
-class Handler(RequestMixin, BaseHTTPRequestHandler):
+class Handler(RequestMixin):
     # socketserver applies this to the connection, so it bounds the request
     # line, the headers and the body alike. It is per socket operation: a
     # transfer that keeps making progress renews it and is never cut short.
