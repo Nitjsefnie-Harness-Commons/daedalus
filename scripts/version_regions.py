@@ -265,6 +265,7 @@ def _html_regions(text):
     opens nothing, and no backslash escapes anything.
     """
     regions = []
+    contexts = []
     end = len(text)
     i = 0
     while i < end:
@@ -278,13 +279,15 @@ def _html_regions(text):
                 and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
             tag_start = i
             i = _html_tag(text, tag_start, regions)
-            if _html_tag_name(text, tag_start, i) == 'script':
+            tag_name, html_context = _html_tag_context(
+                text, tag_start, i, contexts)
+            if tag_name == 'script':
                 script_end = _html_script_end(text, i)
                 for start, stop, kind in _javascript_regions(
                         text[i:script_end], html_comments=True):
                     regions.append((i + start, i + stop, kind))
                 i = script_end
-            elif _html_tag_name(text, tag_start, i) == 'template':
+            elif html_context and tag_name == 'template':
                 template_end = _html_template_end(text, i)
                 regions.append((i - 1, template_end, 'inert'))
                 i = template_end
@@ -307,6 +310,7 @@ def _html_tag_name(text, start, end):
 def _html_template_end(text, start):
     """The closing tag of the template body after `start`, or text end."""
     depth = 1
+    contexts = []
     i = start
     while i < len(text):
         if text.startswith('<!--', i):
@@ -317,17 +321,21 @@ def _html_template_end(text, start):
                 and (text[i + 1].isalpha() or text[i + 1] in '!/?')):
             tag_start = i
             i = _html_tag(text, tag_start, [])
-            tag_name = _html_tag_name(text, tag_start, i)
-            if tag_name == 'template':
+            tag_name, html_context = _html_tag_context(
+                text, tag_start, i, contexts)
+            html_integration = (not html_context and contexts
+                                and contexts[-1] == (tag_name, 'html'))
+            if html_context and tag_name == 'template':
                 depth += 1
-            elif _html_tag_token_end(
-                    text, tag_start, '</template') is not None:
+            elif (html_context and _html_tag_token_end(
+                    text, tag_start, '</template') is not None):
                 depth -= 1
                 if depth == 0:
                     return tag_start
             elif tag_name == 'script':
                 i = _html_script_end(text, i)
-            elif tag_name in ('style', 'title', 'textarea'):
+            elif (tag_name in ('style', 'title', 'textarea')
+                  and not html_integration):
                 closer = '</' + tag_name
                 while (i < len(text)
                        and _html_tag_token_end(text, i, closer) is None):
@@ -390,6 +398,22 @@ def _html_tag_token_end(text, start, token):
             and after < len(text) and text[after] in '\t\n\f />'):
         return after
     return None
+
+
+def _html_tag_context(text, start, end, contexts):
+    """Return this tag's name and context, updating following context."""
+    tag_name = _html_tag_name(text, start, end)
+    html_context = not contexts or contexts[-1][1] == 'html'
+    if (contexts and _html_tag_token_end(
+            text, start, '</' + contexts[-1][0]) is not None):
+        contexts.pop()
+    elif tag_name and not text[start:end].endswith('/>'):
+        if tag_name in ('svg', 'math'):
+            contexts.append((tag_name, tag_name))
+        elif (contexts and contexts[-1][1] == 'svg'
+              and tag_name in ('foreignobject', 'desc', 'title')):
+            contexts.append((tag_name, 'html'))
+    return tag_name, html_context
 
 
 def _html_tag(text, start, regions):
