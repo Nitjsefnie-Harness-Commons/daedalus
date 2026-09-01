@@ -386,7 +386,7 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
     workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     coverage = _job_section(workflow, 'coverage', 'diff-coverage')
-    diff = _job_section(workflow, 'diff-coverage', 'aggregate')
+    diff = _job_section(workflow, 'diff-coverage', 'timed')
     checkouts = re.findall(
         r'actions/checkout@.*?\n(?P<body>.*?)(?=\n      - |\Z)',
         coverage, re.DOTALL)
