@@ -271,23 +271,65 @@ def test_speed_comparison_zero_on_one_side_alone_is_not_a_loss(tmp):
     The baseline's report for the suite is empty in one round and recorded
     tests in the next, while this commit recorded the test throughout: a
     feature gap on one side, which the comparison excludes by design rather
-    than something it silently lost.
+    than something it silently lost. Both sides ran both rounds, so the
+    verdict comes from this shape and not from an unpaired round.
     """
     compare = _compare_durations()
-    empty = Path(tmp) / 'base-1'
-    empty.mkdir()
-    (empty / 'test_suite.json').write_text(
-        json.dumps({'tests': {'shared': 1.0}}), encoding='utf-8')
-    (empty / 'test_flaky.json').write_text(
-        json.dumps({'tests': {}}), encoding='utf-8')
-    recovery = Path(tmp) / 'base-2'
-    recovery.mkdir()
-    (recovery / 'test_flaky.json').write_text(
-        json.dumps({'tests': {'recovered': 1.0}}), encoding='utf-8')
-    head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
-                                     'test_flaky': {'recovered': 1.0}})
-    assert compare.main(['--base', str(empty), str(recovery),
-                         '--head', *head]) == 0
+    rounds = [{'test_suite': {'shared': 1.0}, 'test_flaky': {}},
+              {'test_suite': {'shared': 1.0},
+               'test_flaky': {'recovered': 1.0}}]
+    base = _round_tree(tmp, 'base', rounds)
+    head = _round_tree(tmp, 'head', [
+        {'test_suite': {'shared': 1.0}, 'test_flaky': {'recovered': 1.0}},
+        {'test_suite': {'shared': 1.0}, 'test_flaky': {'recovered': 1.0}}])
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', *base, '--head', *head,
+            '--summary-file', str(summary)]
+    assert compare.main(argv) == 0
+    assert ('over 1 tests present and passing'
+            in summary.read_text(encoding='utf-8'))
+
+
+def test_speed_comparison_fails_when_a_report_is_absent_from_both_rounds(tmp):
+    """A shipped suite missing from the same round on both sides is lost.
+
+    The suite ran in the second round of both sides and left no report in
+    the first, so the intersection drops its tests from every total even
+    though a run that recorded them happened on both sides.
+    """
+    compare = _compare_durations()
+    base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0}},
+                                     {'test_suite': {'shared': 1.0},
+                                      'test_gap': {'lost_a': 1.0,
+                                                   'lost_b': 2.0}}])
+    head = _round_tree(tmp, 'head', [{'test_suite': {'shared': 1.0}},
+                                     {'test_suite': {'shared': 1.0},
+                                      'test_gap': {'lost_a': 1.0,
+                                                   'lost_b': 2.0}}])
+    summary = Path(tmp) / 'summary.md'
+    argv = ['--base', *base, '--head', *head,
+            '--summary-file', str(summary)]
+    assert compare.main(argv) == 1
+    assert '`test_gap.py`' in summary.read_text(encoding='utf-8')
+
+
+def test_speed_comparison_a_report_that_records_nothing_does_not_ship(tmp):
+    """A report that exists but records nothing does not ship the suite.
+
+    The head side wrote an empty report in its first round and no report at
+    all in its second: no round of that side ever recorded a test, so the
+    absence is the feature-gap carve-out rather than a lost round. This is
+    the shape that pins _ships against counting reports instead of tests.
+    """
+    compare = _compare_durations()
+    base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0},
+                                      'test_gap': {'lost': 1.0}},
+                                     {'test_suite': {'shared': 1.0},
+                                      'test_gap': {'lost': 1.0}}])
+    head = _round_tree(tmp, 'head', [{'test_suite': {'shared': 1.0},
+                                      'test_gap': {}},
+                                     {'test_suite': {'shared': 1.0}}])
+    assert compare.main(['--base', *base, '--head', *head]) == 0
 
 
 def test_speed_comparison_fails_when_a_report_is_absent_from_one_round(tmp):
