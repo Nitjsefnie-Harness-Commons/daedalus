@@ -6,6 +6,7 @@ import time
 
 from daedalus_bridge import command_queue
 from daedalus_bridge.log_safe import log_safe
+from daedalus_bridge import path_safety
 
 
 # {stream id: {'key', 'tab', 'killed'}}. The registry is keyed by a
@@ -165,6 +166,46 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
     return count
 
 
+def legacy_claim_key(name):
+    """The logical claim key one legacy command file is consumed under."""
+    return f'legacy:{name}'
+
+
+def poll_legacy(cmd_dir, token):
+    """POST /poll — consume the token's legacy broadcast command file.
+
+    Takes the claim `drain_legacy_file` takes, so a poll arriving while an
+    SSE stream is draining the same file is answered empty instead of
+    handing the one command to a second consumer.
+    """
+    try:
+        # Both of these raise ValueError on a name that cannot be a safe
+        # component or a path that leaves the queue root.
+        _, legacy_name = command_queue.command_target_names(token)
+        cmd_file = path_safety.under(cmd_dir, legacy_name)
+    except ValueError:
+        return 400, {'error': 'invalid path component'}
+    with command_queue.claimed(legacy_claim_key(legacy_name)) as owned:
+        if not owned:
+            return 200, {}
+        data = {}
+        with command_queue.command_fs_lock:
+            if cmd_file.exists():
+                try:
+                    candidate = json.loads(
+                        cmd_file.read_text(encoding='utf-8'))
+                    if isinstance(candidate, dict):
+                        data = candidate
+                        cmd_file.unlink()
+                except (OSError, json.JSONDecodeError,
+                        RecursionError, ValueError):
+                    # A legacy drop that cannot be read is not a command. The
+                    # empty answer is the one an absent file gives, and the
+                    # file is left to the TTL sweep.
+                    pass
+        return 200, data
+
+
 def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
     """Deliver one atomically published legacy command file.
 
@@ -174,7 +215,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
     """
     # Use the logical filename: path spellings can differ between routes;
     # result_store.delivery_lock_for documents its logical target key.
-    with command_queue.claimed(f'legacy:{path.name}') as owned:
+    with command_queue.claimed(legacy_claim_key(path.name)) as owned:
         if not owned:
             return 0
         if not path.exists():
