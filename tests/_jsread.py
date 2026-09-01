@@ -58,14 +58,93 @@ def blank_js_comments(source):
     return ''.join(out)
 
 
+_REGEX_KEYWORDS = {
+    'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new',
+    'of', 'return', 'throw', 'typeof', 'void', 'yield'}
+_HEAD_KEYWORDS = {'if', 'while', 'for', 'with'}
+
+
+def _js_regex_span(text, start):
+    """Offset of the slash closing the regex literal opening at `start`,
+    or None when no same-line body closes it: a raw line ending cannot
+    occur in a regex body, so a slash reaching one is division."""
+    in_class = False
+    j = start + 1
+    n = len(text)
+    while j < n:
+        char = text[j]
+        if char == '\\':
+            if text[j + 1:j + 2] in ('', '\n', '\r'):
+                return None
+            j += 2
+            continue
+        if char in '\n\r':
+            return None
+        if in_class:
+            in_class = char != ']'
+        elif char == '[':
+            in_class = True
+        elif char == '/':
+            return j
+        j += 1
+    return None
+
+
+def _js_regex_opening(out):
+    """Whether the `/` at `len(out)` opens a regex literal, read from the
+    last token in the mask built so far. Comments and blanked spans are
+    not tokens, so skipping blanked space reaches the real previous
+    token; after `)` the matching `(` decides, because a regex may open
+    an if/while/for/with head's body. `}` stays regex-allowed: statement
+    heads follow blocks, and a wrong guess self-heals at the next line
+    end because a body cannot contain one."""
+    j = len(out) - 1
+    while j >= 0 and out[j].isspace():
+        j -= 1
+    if j < 0:
+        return True
+    char = out[j]
+    if char == ')':
+        depth = 0
+        while j >= 0:
+            if out[j] == ')':
+                depth += 1
+            elif out[j] == '(':
+                depth -= 1
+                if depth == 0:
+                    break
+            j -= 1
+        if j < 0:
+            return False
+        k = j
+        while k > 0 and out[k - 1].isspace():
+            k -= 1
+        word_end = k
+        while k > 0 and (out[k - 1].isalnum() or out[k - 1] in '_$'):
+            k -= 1
+        return ''.join(out[k:word_end]) in _HEAD_KEYWORDS
+    if char in ']"\'':
+        return False
+    if char in '+-' and j > 0 and out[j - 1] == char:
+        return False
+    if char in '_$' or char.isalnum():
+        k = j
+        while k > 0 and (out[k - 1].isalnum() or out[k - 1] in '_$'):
+            k -= 1
+        return ''.join(out[k:j + 1]) in _REGEX_KEYWORDS
+    return True
+
+
 def js_mask(text):
     """Blank string and comment contents, preserving positions and newlines,
     so structure (brackets, commas, colons) can be read without false hits
     from literal text. A template literal is walked with a nesting stack: its
     literal chunks blank like any string, while an interpolation is code, so
     it stays visible with its `${` and closing `}` intact and the brackets,
-    commas and colons inside it count for depth. A regex literal containing
-    `}` inside an interpolation remains a documented blind spot."""
+    commas and colons inside it count for depth. A regex literal is blanked
+    like a string (delimiters kept, flags with it), read from the previous
+    token, so its body never reaches the string, comment or interpolation
+    states."""
     out = []
     i, n = 0, len(text)
     templates = []
@@ -76,7 +155,8 @@ def js_mask(text):
                 templates.pop()
             elif char == '$' and text[i + 1:i + 2] == '{':
                 templates[-1] = 1
-                out.append('${')
+                out.append('$')
+                out.append('{')
                 i += 2
                 continue
             elif char == '\\' and i + 1 < n:
@@ -91,13 +171,27 @@ def js_mask(text):
         if two == '//':
             j = text.find('\n', i)
             j = n if j == -1 else j
-            out.append(' ' * (j - i))
+            out.extend(' ' * (j - i))
             i = j
         elif two == '/*':
             j = text.find('*/', i + 2)
             j = n if j == -1 else j + 2
-            out.append(re.sub(r'[^\n]', ' ', text[i:j]))
+            out.extend(re.sub(r'[^\n]', ' ', text[i:j]))
             i = j
+        elif char == '/' and two != '/=':
+            end = (_js_regex_span(text, i)
+                   if _js_regex_opening(out) else None)
+            if end is None:
+                out.append('/')
+                i += 1
+                continue
+            out.append('/')
+            out.extend(re.sub(r'[^\n]', ' ', text[i + 1:end]))
+            out.append('/')
+            i = end + 1
+            while i < n and (text[i].isalnum() or text[i] in '_$'):
+                out.append(' ')
+                i += 1
         elif char in '\'"':
             j = i + 1
             while j < n:
@@ -108,7 +202,7 @@ def js_mask(text):
                     break
                 else:
                     j += 1
-            out.append(re.sub(r'[^\n]', ' ', text[i:j]))
+            out.extend(re.sub(r'[^\n]', ' ', text[i:j]))
             i = j
         elif char == '`':
             templates.append(0)
