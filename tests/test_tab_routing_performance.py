@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _pyroute  # noqa: E402
 import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
+from _jsroute_receiver import ReceiverIndex  # noqa: E402
+from _jsroute_source import record_work  # noqa: E402
 
 
 def _scanner_copies(tmp, width):
@@ -98,6 +100,43 @@ def _js_member_scan_operations(tmp, count):
     return sum(work.values())
 
 
+def _js_named_scan_operations(tmp, count):
+    source = Path(tmp) / f'js_named_calls_{count}.js'
+    lines = []
+    for index in range(count):
+        lines.append(f'const fields{index} = {{ tab: chromeTab }};\n')
+        lines.append(f"extCmd('focus-tab', fields{index});\n")
+    source.write_text(''.join(lines), encoding='utf-8')
+    work = Counter()
+    violations = js_tab_routing_violations(
+        source, source.name, work=work)
+    assert len(violations) == count, (count, len(violations))
+    return work
+
+
+def _js_history_scan_operations(tmp, count):
+    source = Path(tmp) / f'js_history_calls_{count}.js'
+    lines = ['const box = { run: ordinary };\n']
+    for _ in range(count):
+        lines.append('box.run = extCmd;\n')
+        lines.append("box.run('focus-tab', { tab: chromeTab });\n")
+    source.write_text(''.join(lines), encoding='utf-8')
+    work = Counter()
+    violations = js_tab_routing_violations(
+        source, source.name, work=work)
+    assert len(violations) == count, (count, len(violations))
+    return work
+
+
+def _history_samples(tmp):
+    found = [(count, _js_history_scan_operations(tmp, count))
+             for count in (100, 200, 400)]
+    return [
+        (count, work.get(
+            'receiver_history_entries', sum(work.values())))
+        for count, work in found]
+
+
 def _subquadratic_growth(samples):
     return all(
         larger < smaller * 3.5
@@ -111,6 +150,41 @@ def test_javascript_call_replay_scales_without_global_rescans(tmp):
     ]
     assert _subquadratic_growth(samples), samples
     assert _js_member_scan_operations(tmp, 400) == samples[1][1]
+
+
+def test_javascript_named_fields_scale_without_prefix_rescans(tmp):
+    found = [(count, _js_named_scan_operations(tmp, count))
+             for count in (100, 200, 400)]
+    assert all('named_event_visits' in work for _, work in found), found
+    samples = [(count, work['named_event_visits'])
+               for count, work in found]
+    assert _subquadratic_growth(samples), samples
+
+
+def test_javascript_receiver_history_scales_by_indexed_lookups(tmp):
+    samples = _history_samples(tmp)
+    assert _subquadratic_growth(samples), samples
+
+
+def test_javascript_growth_gate_rejects_linear_history_mutant(tmp):
+    original = ReceiverIndex._latest
+
+    def linear_latest(self, entries, position):
+        record_work(self.work, 'receiver_history_queries')
+        chosen = None
+        needle = (position, ())
+        for entry in entries or ():
+            if entry > needle:
+                break
+            chosen = entry[1]
+        return chosen
+
+    ReceiverIndex._latest = linear_latest
+    try:
+        samples = _history_samples(tmp)
+    finally:
+        ReceiverIndex._latest = original
+    assert not _subquadratic_growth(samples), samples
 
 
 def test_javascript_growth_gate_rejects_quadratic_work(tmp):

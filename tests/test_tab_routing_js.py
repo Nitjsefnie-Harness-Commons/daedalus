@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
+from _jsroute_factory_cases import FACTORY_CASES  # noqa: E402
 
 
 _RUNTIME_PREFIX = """const calls = [];
@@ -618,6 +619,15 @@ def test_object_copy_and_receiver_forms_match_runtime(tmp):
     observed = [(label, *_runtime_and_guard(source, path))
                 for label, source, _ in cases]
     expected = [(label, value, value) for label, _, value in cases]
+    assert observed == expected, observed
+
+
+def test_factory_carried_senders_match_runtime(tmp):
+    path = Path(tmp) / 'factory.js'
+    observed = [(label, *_runtime_and_guard(source, path))
+                for label, source, _ in FACTORY_CASES]
+    expected = [(label, value, value)
+                for label, _, value in FACTORY_CASES]
     assert observed == expected, observed
 
 
