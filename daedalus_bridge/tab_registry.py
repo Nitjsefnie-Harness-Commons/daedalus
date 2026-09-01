@@ -51,7 +51,6 @@ def refresh(cmd_dir, token, body):
     with _lock:
         tabs = _registry.get(token, {})
         if tab_id in tabs:
-            # Update-only: refresh existing tab, never create new entries
             tabs[tab_id] = {'url': url, 'title': title, 'ts': time.time()}
             updated = True
     if updated:

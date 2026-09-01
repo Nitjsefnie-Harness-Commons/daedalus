@@ -10,8 +10,9 @@ directory under. It is only half a parameter: `segment_store` imports
 `SEG_DIR` from `daedalus_bridge.config` and resolves every record path
 from it, so a root passed here that configuration does not name would
 place the directories and the records apart. The bridge passes the
-configured root, and moving that resolution into the store's callers is
-not this module's to do.
+configured root; parameterising the store is issue 484. This is the one
+statement of that constraint — `segment_jobs` and `lookup_job` point
+here rather than repeating it.
 """
 import pathlib
 import time
@@ -224,9 +225,8 @@ def lookup_job(seg_dir_root, token, params):
     conflate "no such job" with "wrong sig" to avoid being an existence
     oracle, and a caller holding the bridge token is owed neither.
 
-    `seg_dir_root` is accepted for one signature across the module; the
-    record this reads is resolved by `segment_store` from configuration,
-    as the module docstring records.
+    `seg_dir_root` is accepted for one signature across the module; see
+    the module docstring for why it is only half a parameter.
     """
     del seg_dir_root
     job = params.get('job', [''])[0]

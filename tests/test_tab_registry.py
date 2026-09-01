@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -48,26 +49,46 @@ def test_normalized_tab_id_accepts_strings_and_integers(_tmp):
 
 def test_refresh_updates_only_a_known_tab(tmp):
     reg = _load('fixture_tab_registry_refresh')
-    assert reg.refresh(
-        tmp, 'tok', {'tabId': '7', 'url': 'u', 'title': 't'}) == (
-            200, {'ok': True, 'updated': False})
+    unknown = reg.refresh(
+        tmp, 'tok', {'tabId': '7', 'url': 'u', 'title': 't'})
+    assert unknown == (200, {'ok': True, 'updated': False}), unknown
     reg.replace(tmp, 'tok', {'tabs': [{'tabId': 7, 'url': 'a',
                                        'title': 'b'}]})
-    assert reg.refresh(
-        tmp, 'tok', {'tabId': '7', 'url': 'u', 'title': 't'}) == (
-            200, {'ok': True, 'updated': True})
+    known = reg.refresh(
+        tmp, 'tok', {'tabId': '7', 'url': 'u', 'title': 't'})
+    assert known == (200, {'ok': True, 'updated': True}), known
     status, tabs = reg.list_tabs('tok')
     assert status == 200 and tabs[0]['url'] == 'u', tabs
 
 
+def test_refresh_rewrites_the_registration_timestamp(tmp):
+    """A refreshed tab reads as young again on /tabs.
+
+    The stored timestamp is the only thing separating a tab that just
+    checked in from one silent for hours, so a refresh that answered
+    `updated` without rewriting it would leave the age climbing and a
+    reader pruning by age would drop a live tab.
+    """
+    reg = _load('fixture_tab_registry_refresh_ts')
+    reg.time = types.SimpleNamespace(time=lambda: 1000.0)
+    reg.replace(tmp, 'tok', {'tabs': [{'tabId': 7}]})
+    stale = reg.list_tabs('tok', now=2000.0)
+    assert stale[1][0]['age'] == 1000, stale
+    reg.time = types.SimpleNamespace(time=lambda: 2000.0)
+    refreshed = reg.refresh(tmp, 'tok', {'tabId': 7})
+    assert refreshed == (200, {'ok': True, 'updated': True}), refreshed
+    fresh = reg.list_tabs('tok', now=2000.0)
+    assert fresh[1][0]['age'] == 0, fresh
+
+
 def test_refresh_refuses_a_missing_or_unusable_tab_id(tmp):
     reg = _load('fixture_tab_registry_refresh_bad_id')
-    assert reg.refresh(tmp, 'tok', {}) == (
-        400, {'error': 'missing tabId'})
-    assert reg.refresh(tmp, 'tok', {'tabId': ''}) == (
-        400, {'error': 'missing tabId'})
-    assert reg.refresh(tmp, 'tok', {'tabId': []}) == (
-        400, {'error': 'invalid tabId'})
+    missing = reg.refresh(tmp, 'tok', {})
+    assert missing == (400, {'error': 'missing tabId'}), missing
+    blank = reg.refresh(tmp, 'tok', {'tabId': ''})
+    assert blank == (400, {'error': 'missing tabId'}), blank
+    unusable = reg.refresh(tmp, 'tok', {'tabId': []})
+    assert unusable == (400, {'error': 'invalid tabId'}), unusable
     assert _events(tmp, 'tok') == []
 
 
@@ -90,9 +111,9 @@ def test_refresh_of_an_unknown_tab_publishes_nothing(tmp):
 
 def test_replace_publishes_one_synced_event_into_cmd_dir(tmp):
     reg = _load('fixture_tab_registry_replace_event')
-    assert reg.replace(tmp, 'tok', {'tabs': [{'tabId': '7'},
-                                             {'tabId': '8'}]}) == (
-        200, {'ok': True, 'count': 2})
+    synced = reg.replace(tmp, 'tok', {'tabs': [{'tabId': '7'},
+                                               {'tabId': '8'}]})
+    assert synced == (200, {'ok': True, 'count': 2}), synced
     events = _events(tmp, 'tok')
     assert len(events) == 1, events
     assert events[0]['type'] == 'tabs-synced', events[0]
@@ -101,12 +122,13 @@ def test_replace_publishes_one_synced_event_into_cmd_dir(tmp):
 
 def test_replace_refuses_a_tab_list_that_is_not_a_list_of_objects(tmp):
     reg = _load('fixture_tab_registry_replace_bad')
-    assert reg.replace(tmp, 'tok', {'tabs': 'x'}) == (
-        400, {'error': 'invalid tabs'})
-    assert reg.replace(tmp, 'tok', {'tabs': [1]}) == (
-        400, {'error': 'invalid tabs'})
-    assert reg.replace(tmp, 'tok', {'tabs': [{'tabId': 1.5}]}) == (
-        400, {'error': 'invalid tabs'})
+    invalid = (400, {'error': 'invalid tabs'})
+    not_a_list = reg.replace(tmp, 'tok', {'tabs': 'x'})
+    assert not_a_list == invalid, not_a_list
+    not_objects = reg.replace(tmp, 'tok', {'tabs': [1]})
+    assert not_objects == invalid, not_objects
+    bad_tab_id = reg.replace(tmp, 'tok', {'tabs': [{'tabId': 1.5}]})
+    assert bad_tab_id == invalid, bad_tab_id
     assert _events(tmp, 'tok') == []
     assert reg.counts() == (0, 0)
 
@@ -115,21 +137,22 @@ def test_replace_drops_a_blank_tab_id_and_replaces_the_registry(tmp):
     reg = _load('fixture_tab_registry_replace_blank')
     reg.replace(tmp, 'tok', {'tabs': [{'tabId': '7', 'url': 'a',
                                        'title': 'b'}]})
-    assert reg.replace(tmp, 'tok', {'tabs': [{'tabId': 9},
-                                             {'tabId': ''}]}) == (
-        200, {'ok': True, 'count': 1})
+    replaced = reg.replace(tmp, 'tok', {'tabs': [{'tabId': 9},
+                                                 {'tabId': ''}]})
+    assert replaced == (200, {'ok': True, 'count': 1}), replaced
     status, tabs = reg.list_tabs('tok')
     assert status == 200 and [t['tabId'] for t in tabs] == ['9'], tabs
 
 
 def test_remove_reports_whether_anything_was_removed(tmp):
     reg = _load('fixture_tab_registry_remove')
-    assert reg.remove(tmp, 'tok', {}) == (400, {'error': 'missing tabId'})
-    assert reg.remove(tmp, 'tok', {'tabId': '7'}) == (
-        200, {'ok': True, 'removed': False})
+    missing = reg.remove(tmp, 'tok', {})
+    assert missing == (400, {'error': 'missing tabId'}), missing
+    unknown = reg.remove(tmp, 'tok', {'tabId': '7'})
+    assert unknown == (200, {'ok': True, 'removed': False}), unknown
     reg.replace(tmp, 'tok', {'tabs': [{'tabId': 7}]})
-    assert reg.remove(tmp, 'tok', {'tabId': 7}) == (
-        200, {'ok': True, 'removed': True})
+    removed = reg.remove(tmp, 'tok', {'tabId': 7})
+    assert removed == (200, {'ok': True, 'removed': True}), removed
     assert reg.list_tabs('tok') == (200, [])
 
 
