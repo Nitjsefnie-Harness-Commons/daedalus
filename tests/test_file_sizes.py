@@ -17,36 +17,28 @@ import _util  # noqa: E402
 ROOT = _util.ROOT
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
 
-# Wordings that offer a bigger number as the way past a refusal, each a
-# claim no correct statement of the rule can make.
-GROWTH_SANCTIONING_CLAIMS = (
-    # Growth presented as a supported move rather than a refusal.
+# Claims this file must never make. Each carries its licence inside the
+# phrase, so a sentence refusing the claim does not contain it and no
+# reading of negation is needed to tell the two apart. Naming the bare acts
+# instead - "add a baseline entry", "record the new size" - pins wording
+# that every prohibition of those acts also uses, and no vocabulary of
+# negators rescues that: the way out is a shorter list, not a longer one.
+# The cost is three correct sentences of one shape, "growing a listed file
+# is allowed" asserted and then withdrawn by a trailing qualifier ("by
+# nobody", "nowhere in this policy"). The rule reads positively here, so
+# that assertion has no reason to be in the file at all.
+FORBIDDEN_CLAIMS = (
+    # The licence this file carried, verbatim, which misled seven sessions.
     'growing a listed file is allowed',
-    # Raising the recorded number offered as how that growth is done.
-    'editing its recorded number',
-    # The refusal message's old second option, beside splitting the file.
-    'record the new size',
-    # A first crossing excused by a fresh entry instead of being split;
-    # both spellings, because either sentence reads as a licence.
-    'add a baseline entry',
-    'adding a baseline entry',
+    # A first crossing excused by a fresh entry instead of being split.
+    'may add a baseline entry',
+    # Untrue: an entry naming a file that is gone is deleted by hand.
+    'is the only writer of this table',
 )
 
 # Deleted rather than spaced out, so a claim spanning one - a backtick, or
 # a string literal broken across two lines - stays one phrase to the pin.
 MARKERS = ('#', "'", '"', '`', '*', '(', ')')
-
-# The unit a negation governs. Finer than a sentence, so that "growing a
-# listed file is allowed, but only by shrinking it" is refused on its first
-# clause rather than excused by the second.
-CLAUSE_BREAK = re.compile(r'[.;,:]')
-
-# Every claim above is about what a person may do by hand, so a clause is
-# not offering one where a negator falls anywhere in it, or where the tool
-# that does the writing is its subject.
-NOT_BY_HAND = re.compile(
-    r'\b(?:never|not|no|none|nothing|nobody|dont|cannot|rather than'
-    r'|instead)\b|--tighten')
 
 # The rule stated positively, so deleting it is as visible as contradicting
 # it. An alternation because the claim is a family, and a pin that refuses a
@@ -59,6 +51,20 @@ STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
 RULE_HELP = ('a negated raising verb ("is never raised by hand", "is not '
              'edited upward by hand"), or "only ever go down"')
 
+# Texts the spelling regex must tell apart, so a regex that stopped
+# discriminating - one that matches everything, or nothing - is visible
+# here rather than in the file it is supposed to guard.
+RULE_STATED = (
+    'a recorded number is never raised by hand',
+    'the number is not edited upward by hand',
+    'the numbers in this table only ever go down',
+)
+RULE_NOT_STATED = (
+    'growing a listed file is allowed by editing its recorded number',
+    'the ratchet keeps the numbers in this table honest',
+    '',
+)
+
 # The move each kind's remedy has to name, as (--tighten clears it, the
 # phrase the printed advice must carry, the phrase it must not). Written
 # out here rather than read from REMEDY_FOR, which is the thing being pinned.
@@ -68,6 +74,59 @@ REMEDY_NAMES_THE_MOVE = {
     'missing': (False, 'deleted by hand', 'relocate the code'),
     'graduated': (True, '--tighten', 'relocate the code'),
 }
+
+# Correct statements of the policy, which the claim check must accept. This
+# is the battery that matters most: a guard refusing correct prose is one
+# the next author weakens or deletes rather than works around. Most of these
+# come from a review that wrote them without reading the pin.
+STATES_THE_POLICY = (
+    'Never add a BASELINE entry to excuse growth.',
+    'Adding a BASELINE entry is forbidden.',
+    'Do not add a BASELINE entry; split the file.',
+    'Editing its recorded number is off the table.',
+    'You may not record the new size by hand.',
+    'Recording the new size is prohibited.',
+    'Refuse to add a BASELINE entry.',
+    'A refused session must resist editing its recorded number.',
+    'The wrong fix is editing its recorded number.',
+    'Nobody should add a BASELINE entry by hand.',
+    'There is no reason to add a BASELINE entry.',
+    'Split the file rather than editing its recorded number.',
+    'Splitting, not editing its recorded number, is the fix.',
+    'Avoid editing its recorded number.',
+    'It is an error to add a BASELINE entry by hand.',
+    'Whoever tries to record the new size will be refused.',
+    'A reviewer who sees you add a BASELINE entry will reject the change.',
+    'Neither raising the number nor adding a BASELINE entry is a fix.',
+    'Reject any change that would record the new size.',
+    'Stop before you add a BASELINE entry.',
+    'The old advice, record the new size, was withdrawn.',
+    "You shouldn't add a BASELINE entry.",
+    "You can't record the new size by hand.",
+    "Growing a listed file isn't allowed.",
+    'A recorded number is never raised by hand.',
+    'The numbers in this table only ever go down.',
+    'Relocate the code into a new module instead of growing the file.',
+    'A file crossing its ceiling for the first time is split rather '
+    'than excused.',
+    'Shrink the file; the table is not where growth is negotiated.',
+)
+
+# Statements that offer growth by hand, which it must refuse. The first is
+# the sentence this file carried until the branch that removed it.
+SANCTIONS_GROWTH = (
+    'Growing a listed file is allowed, because some fixes genuinely belong '
+    'in it, but only by editing its recorded number in the same commit.',
+    'A first crossing may add a BASELINE entry.',
+    'Growing a listed file is allowed (edit the number).',
+    'Growing a listed file is allowed, no questions asked.',
+    'Growing a listed file is allowed and nobody minds.',
+    'Growing a listed file is allowed - the not-so-secret fix.',
+    'Growing a listed file is allowed: record the new size.',
+    'Growing a listed file is allowed - editing its recorded number does it.',
+    'You may add a BASELINE entry when the file has to grow.',
+    '`--tighten` is the only writer of this table.',
+)
 
 
 def _policy():
@@ -80,6 +139,13 @@ def _normalised(text):
     for marker in MARKERS:
         text = text.replace(marker, '')
     return ' '.join(text.split())
+
+
+def _offered(text):
+    """Every forbidden claim `text` makes, in the order they are listed."""
+    prose = _normalised(text)
+    return [claim for claim in FORBIDDEN_CLAIMS
+            if _normalised(claim) in prose]
 
 
 def _policy_prose():
@@ -199,12 +265,23 @@ def test_tightening_leaves_a_file_it_has_no_entry_for(tmp):
 def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
     """A refused session must not read a bigger number as the fix."""
     del tmp
-    offered = [(claim, clause)
-               for clause in CLAUSE_BREAK.split(_policy_prose())
-               for claim in GROWTH_SANCTIONING_CLAIMS
-               if _normalised(claim) in clause
-               and not NOT_BY_HAND.search(clause)]
+    offered = _offered(POLICY_SOURCE.read_text(encoding='utf-8'))
     assert not offered, f'the size policy offers growth by hand: {offered}'
+
+
+def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
+    """Tolerance is the side a future rule-writer collides with."""
+    del tmp
+    refused = [(text, _offered(text)) for text in STATES_THE_POLICY
+               if _offered(text)]
+    assert not refused, f'the pin refuses correct prose: {refused}'
+
+
+def test_the_claim_check_refuses_a_licence_to_grow(tmp):
+    """And the side this file's own history collided with."""
+    del tmp
+    missed = [text for text in SANCTIONS_GROWTH if not _offered(text)]
+    assert not missed, f'the pin passes a licence to grow: {missed}'
 
 
 def test_the_policy_prose_still_states_the_rule(tmp):
@@ -213,6 +290,17 @@ def test_the_policy_prose_still_states_the_rule(tmp):
     assert STATES_THE_RULE.search(_policy_prose()), (
         f'the size policy no longer states the rule; write one of: '
         f'{RULE_HELP}')
+
+
+def test_the_rule_spellings_tell_a_statement_from_its_absence(tmp):
+    """A regex matching anything would pin the rule against nothing."""
+    del tmp
+    missed = [text for text in RULE_STATED
+              if not STATES_THE_RULE.search(text)]
+    assert not missed, f'the rule is stated here and not seen: {missed}'
+    matched = [text for text in RULE_NOT_STATED
+               if STATES_THE_RULE.search(text)]
+    assert not matched, f'the rule is read into prose lacking it: {matched}'
 
 
 def test_the_docstring_carries_every_printed_remedy(tmp):
