@@ -9,6 +9,11 @@ the probe bridge, in order.
 A parameter no case exercises is named in UNPINNED_PARAMETERS with the reason
 it is safe to leave unwitnessed. The guard every refusal case must witness is
 _mcp_guard_floor's, which reads the tool modules rather than this table.
+
+That floor witnesses raises only. A refusal written as `return {'error': ...}`
+— the repo's own convention at daedalus_mcp/tools_css.py `unblock_requests` —
+never raises, so no case here can be asked to witness it, and rewriting a
+raise into such a return with its pins deleted ships green.
 """
 MARKER = 'pinned'
 
