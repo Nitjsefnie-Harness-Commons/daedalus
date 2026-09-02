@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Executable contracts for the workflow block-scalar reader.
+
+Every expected value is what PyYAML 6.0.3 decodes for the same document, so
+these tables record the YAML specification rather than this reader.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
+from _repo import ROOT  # noqa: E402
+
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+
+from workflow_yaml import (  # noqa: E402
+    YAMLReadError, workflow_step_items,
+)
+from yamlblock import (  # noqa: E402
+    BLOCK_HEADER, block_end, decode_block, parse_block_header, text_indent,
+)
+
+
+def _decode(header, body, parent_indent=0):
+    """Decode `body` under `header`, from the header text on."""
+    pairs = [(line.rstrip('\n'), line.endswith('\n'))
+             for line in body.splitlines(keepends=True)]
+    style, chomp, explicit = parse_block_header(header, 'step name')
+    return decode_block(
+        pairs, parent_indent, style, chomp, explicit, 'step name')
+
+
+def _table(cases):
+    """Require every `(header, body, decoded)` case to decode exactly."""
+    for header, body, decoded in cases:
+        assert _decode(header, body) == decoded, (header, body)
+
+
+def _refused(call, detail):
+    """Require `call` to raise a read error naming `detail`."""
+    try:
+        call()
+    except YAMLReadError as error:
+        assert detail in str(error), str(error)
+        return
+    raise AssertionError(f'a shape {detail!r} must refuse was accepted')
+
+
+def _step(field, body='', tail='     if: z\n'):
+    """A one-step workflow whose step carries `field` over `body`."""
+    return f'jobs:\n sample:\n  steps:\n   - {field}\n{body}{tail}'
+
+
+def _fields(source):
+    """The decoded name and id of every step in the sample job."""
+    items = workflow_step_items(source, 'sample')
+    assert items is not None, source
+    return [(item.name, item.identity) for item in items]
+
+
+def test_the_style_joins_the_lines_and_chomping_ends_them(tmp):
+    """A literal keeps each break, a folded joins with a space, and the
+    three chomping modes keep every trailing break, one, or none."""
+    del tmp
+    _table([
+        ('|', '  one\n  two\n', 'one\ntwo\n'),
+        ('>', '  one\n  two\n', 'one two\n'),
+        ('|', '  one\n\n\n', 'one\n'),
+        ('|-', '  one\n\n\n', 'one'),
+        ('|+', '  one\n\n\n', 'one\n\n\n'),
+        ('>', '  one\n\n\n', 'one\n'),
+        ('>-', '  one\n\n\n', 'one'),
+        ('>+', '  one\n\n\n', 'one\n\n\n'),
+        ('|', '  one\n  two', 'one\ntwo'),
+        ('|+', '  one\n  two', 'one\ntwo'),
+        ('>', '  one\n  two', 'one two'),
+    ])
+
+
+def test_the_content_indent_comes_from_the_header_or_the_first_line(tmp):
+    """An explicit indicator on either side of the chomping indicator, or
+    else the indentation of the first non-blank line."""
+    del tmp
+    _table([
+        ('|2', '  one\n   two\n', 'one\n two\n'),
+        ('|2-', '  one\n   two\n', 'one\n two'),
+        ('|-2', '  one\n   two\n', 'one\n two'),
+        ('>2', '  one\n  two\n', 'one two\n'),
+        ('>-2', '  one\n  two\n', 'one two'),
+        ('|4', '    one\n     two\n', 'one\n two\n'),
+        ('|', '    one\n     two\n', 'one\n two\n'),
+        ('|', '\n  one\n', '\none\n'),
+        ('>', '\n\n  one\n', '\n\none\n'),
+    ])
+
+
+def test_blank_and_space_only_lines_decode_by_their_width(tmp):
+    """A line of spaces is content past the content indent and a break
+    within it, wherever in the body it sits."""
+    del tmp
+    _table([
+        ('|', '  one\n\n  two\n', 'one\n\ntwo\n'),
+        ('|+', '\n  one\n\n', '\none\n\n'),
+        ('|', '  one\n    \n  two\n', 'one\n  \ntwo\n'),
+        ('|', '  one\n  \n  two\n', 'one\n\ntwo\n'),
+        ('>', '  one\n    \n  two\n', 'one\n  \ntwo\n'),
+        ('>', '  one\n  \n  two\n', 'one\ntwo\n'),
+    ])
+
+
+def test_an_empty_or_blank_only_body_keeps_only_what_chomping_keeps(tmp):
+    """Blank-only content is the empty scalar unless the breaks are kept."""
+    del tmp
+    _table([
+        ('|', '', ''),
+        ('|+', '', ''),
+        ('>-', '', ''),
+        ('|', '\n\n', ''),
+        ('|-', '\n\n', ''),
+        ('|+', '\n\n', '\n\n'),
+        ('>+', '\n\n', '\n\n'),
+    ])
+
+
+def test_a_folded_block_keeps_the_breaks_it_may_not_fold(tmp):
+    """A more-indented line joins with a break, and a run of n blank lines
+    between content folds to n breaks rather than a space."""
+    del tmp
+    _table([
+        ('>', '  one\n    deep\n  two\n', 'one\n  deep\ntwo\n'),
+        ('>', '  one\n    d1\n    d2\n  two\n', 'one\n  d1\n  d2\ntwo\n'),
+        ('>2', '   deep\n  one\n', ' deep\none\n'),
+        ('>', '  one\n\n  two\n', 'one\ntwo\n'),
+        ('>', '  one\n\n\n  two\n', 'one\n\ntwo\n'),
+        ('>', '  one\n\n\n\n  two\n', 'one\n\n\ntwo\n'),
+        ('>', '  one\n    deep\n\n  two\n', 'one\n  deep\n\ntwo\n'),
+        ('>', '  one\n\n    deep\n  two\n', 'one\n\n  deep\ntwo\n'),
+    ])
+
+
+def test_a_header_outside_the_grammar_is_refused(tmp):
+    """A header names its indentation once or not at all, in the one
+    spelling the reader admits."""
+    del tmp
+    for header in ('|0', '|x', '||', '>-+', 'one', '|2 ', ''):
+        _refused(lambda h=header: parse_block_header(h, 'step name'),
+                 'step name has an unsupported block header')
+    _refused(lambda: parse_block_header('|2-3', 'step name'),
+             'step name has two indentation indicators')
+    _refused(lambda: block_end(['k: |2-3', '   one'], 1, 2, 0,
+                               BLOCK_HEADER.fullmatch('|2-3')),
+             'workflow block has two indentation indicators')
+
+
+def test_a_body_short_of_the_content_indent_is_refused(tmp):
+    """No body line, and no blank line leading the body, may sit below the
+    content indent the first non-blank line sets."""
+    del tmp
+    _refused(lambda: _decode('|', '    \n  one\n'),
+             'step name block indentation is incomplete')
+    _refused(lambda: _decode('|', '  one\n one\n'),
+             'step name block indentation is incomplete')
+    assert text_indent('   one') == 3
+    _refused(lambda: text_indent('\tone'),
+             'tabs in YAML indentation are unsupported')
+
+
+def test_a_block_ends_at_the_first_line_it_no_longer_covers(tmp):
+    """The extent runs past every blank and content line the block owns."""
+    del tmp
+    texts = ['key: |', '  one', '', '  two', 'next: 1']
+    assert block_end(texts, 1, 5, 0, BLOCK_HEADER.fullmatch('|')) == 4
+    assert block_end(texts, 1, 5, 0, BLOCK_HEADER.fullmatch('|3')) == 1
+    assert block_end(texts[:4], 1, 4, 0, BLOCK_HEADER.fullmatch('|')) == 4
+    assert block_end(['key: |', '', ''], 1, 3, 0,
+                     BLOCK_HEADER.fullmatch('|')) == 3
+    assert block_end(['key: |', 'next: 1'], 1, 2, 0,
+                     BLOCK_HEADER.fullmatch('|')) == 1
+    assert block_end(['key: |', '', 'next: 1'], 1, 3, 0,
+                     BLOCK_HEADER.fullmatch('|')) == 2
+
+
+def test_a_step_name_and_id_may_be_written_as_a_block_scalar(tmp):
+    """Both fields decode a block body the way the direct reader does."""
+    del tmp
+    assert _fields(_step('name: |', '      one\n      two\n')) == [
+        ('one\ntwo\n', None)]
+    assert _fields(_step('id: >-', '      one\n      two\n')) == [
+        (None, 'one two')]
+
+
+def test_a_block_scalar_step_field_does_not_swallow_the_next_field(tmp):
+    """A block on a dash line is indented from the mapping, not the dash."""
+    del tmp
+    assert _fields(_step('name: |2', '       one\n', '     id: gate\n')) == [
+        ('one\n', 'gate')]
+    assert _fields(_step('name: |', '\n', '     id: gate\n')) == [
+        ('', 'gate')]
+
+
+def test_a_kept_blank_body_before_another_field_keeps_its_breaks(tmp):
+    """Keep chomping retains a blank-only body the next field follows."""
+    del tmp
+    assert _fields(_step('name: |+', '\n\n')) == [('\n\n', None)]
+
+
+def test_a_step_line_short_of_its_own_indentation_is_refused(tmp):
+    """A field below the step mapping, or a line below the sequence."""
+    del tmp
+    _refused(lambda: workflow_step_items(
+        _step('name: one', '', '    bad: 1\n'), 'sample'),
+        'step mapping has inconsistent indentation')
+    _refused(lambda: workflow_step_items(
+        'jobs:\n sample:\n  steps:\n       - name: one\n    bad: 1\n',
+        'sample'),
+        'step sequence has inconsistent indentation')
+
+
+if __name__ == '__main__':
+    sys.exit(_util.runner(_util.collect(dict(locals()))))
