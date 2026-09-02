@@ -243,8 +243,7 @@ def test_cdp_call_derives_both_deadline_carriers_from_constant(tmp):
     del tmp
     recorded = []
     run = _successful_run_recorder(recorded)
-    original_deadline = getattr(
-        _WORKERS, 'CDP_RESPONSE_DEADLINE_MS', None)
+    original_deadline = getattr(_WORKERS, 'CDP_RESPONSE_DEADLINE_MS', None)
     assert original_deadline == 10000, original_deadline
     with mock.patch.object(_WORKERS, 'CDP_RESPONSE_DEADLINE_MS', 4321), \
             mock.patch.object(_WORKERS.subprocess, 'run', run):
@@ -326,6 +325,8 @@ def test_cdp_response_timeout_has_distinct_assertion_subtype(tmp):
     assert 'CDP response timed out' in str(failure), failure
 
 
+# Above the harness child's outer bound (deadline/1000 + 5) and level with
+# the production probe budget; the join waits two quanta plus slack.
 PEER_PATIENCE = 10
 
 
@@ -397,6 +398,7 @@ def test_real_cdp_harness_timeout_is_classified_by_exit_code(tmp):
             except AssertionError as why:
                 failure = why
         if record['served']:
+            assert not record['errors'], record
             break
     else:
         raise AssertionError(
