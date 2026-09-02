@@ -221,6 +221,27 @@ def test_an_alias_to_a_sequence_is_refused(tmp):
     _refused(source, 'unsupported alias to a nested sequence')
 
 
+def test_a_dash_without_a_space_names_a_scalar(tmp):
+    """`-5` is the plain scalar `-5`, so the dash-width limb names it."""
+    del tmp
+    source = _document('name: *a', 'anchors:\n gate: &a\n  -5\n')
+    _refused(source, 'unsupported alias to a nested scalar')
+
+
+def test_a_tab_widened_dash_still_names_a_sequence(tmp):
+    del tmp
+    source = _document('name: *a', 'anchors:\n gate: &a\n  -\t5\n')
+    _refused(source, 'unsupported alias to a nested sequence')
+
+
+def test_an_alias_to_a_flow_collection_names_the_collection(tmp):
+    """A flow child is neither a block mapping nor a plain scalar."""
+    del tmp
+    for child in ('[x]', '{k: v}', '{a}'):
+        source = _document('name: *a', f'anchors:\n gate: &a\n  {child}\n')
+        _refused(source, 'unsupported alias to a nested flow collection')
+
+
 def test_a_non_string_tag_is_refused(tmp):
     del tmp
     _refused(_document('name: !!int 5'), 'unsupported YAML tag !!int')
@@ -235,6 +256,19 @@ def test_a_malformed_alias_is_refused(tmp):
     del tmp
     for field in ('name: *', 'name: *[bad]'):
         _refused(_document(field), 'malformed YAML alias')
+
+
+def test_an_alias_carrying_an_anchor_is_refused(tmp):
+    """An alias is a complete node; PyYAML refuses properties on one."""
+    del tmp
+    _refused(_document('name: &x *b'),
+             'alias carrying node properties: &x *b')
+
+
+def test_an_alias_carrying_a_tag_is_refused(tmp):
+    del tmp
+    _refused(_document('id: !!str *t'),
+             'alias carrying node properties: !!str *t')
 
 
 def test_a_tag_with_no_value_is_refused(tmp):

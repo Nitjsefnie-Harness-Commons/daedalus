@@ -257,6 +257,8 @@ def _alias_value(lines, scalar, alias_index, name, owner):
                 body = lines[first].text[_indent(lines[first]):]
                 if body.startswith('-') and body[1:2] in (' ', '\t'):
                     shape = 'sequence'
+                elif body.startswith(('[', '{')):
+                    shape = 'flow collection'
                 elif _line_field(body) is not None:
                     shape = 'mapping'
             raise YAMLReadError(
@@ -268,6 +270,11 @@ def _alias_value(lines, scalar, alias_index, name, owner):
 
 
 def _step_value(lines, scalar, start, end, indent, raw_value, owner):
+    tokens, content = _prepared_value(raw_value)
+    if tokens and content.startswith('*'):
+        raise YAMLReadError(
+            f'{owner} has an alias carrying node properties: '
+            f'{" ".join(tokens)} {content}')
     value = strip_node_properties(raw_value.strip(' \t'), owner)
     if value.startswith('*'):
         alias = ALIAS.fullmatch(value)
