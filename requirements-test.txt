@@ -1,4 +1,4 @@
 # Coverage toolchain, kept apart from requirements-dev.txt so the lint and
 # type pins are not dragged into a job that only measures. Pinned for the same
 # reason they are: a tool release must not turn CI red on an unchanged commit.
-coverage==7.15.4
+coverage==7.16.0
