@@ -1,9 +1,8 @@
 """A bounded post-kill drain for the child processes the suites start.
 
 A drain after ``kill()`` returns when the pipes close, not when the process
-dies: a grandchild that inherited them keeps them open, so an unbounded drain
-blocks forever and the suite holding it stops producing output rather than
-failing.
+dies: a grandchild that inherited them keeps them open, so an unbounded
+drain blocks forever.
 """
 
 import subprocess

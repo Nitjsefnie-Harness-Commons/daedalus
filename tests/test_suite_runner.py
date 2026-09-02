@@ -6,7 +6,9 @@ pass is the one thing the aggregate line must never do — it is what a reader
 and CI both key on. These tests run the runner over trees built to produce
 each verdict.
 """
+import contextlib
 import importlib.util
+import io
 import os
 import shutil
 import subprocess
@@ -408,6 +410,50 @@ def test_output_close_failure_reaps_the_spawned_suite(tmp):
 
     assert error is not None, 'the injected close failure was not raised'
     assert reaped, 'spawned suite survived the output close failure'
+
+
+class _SurvivesEverySignal:
+    """A suite process no signal takes, and that never reports a status."""
+
+    def __init__(self):
+        self.pid = 4714
+        self.returncode = None
+        self.signalled = []
+
+    def terminate(self):
+        self.signalled.append('terminate')
+
+    def kill(self):
+        self.signalled.append('kill')
+
+    def wait(self, timeout=None):
+        assert timeout is not None, 'the reap was called without a bound'
+        raise subprocess.TimeoutExpired(cmd='run_tests.py', timeout=timeout)
+
+
+def test_a_suite_surviving_sigkill_is_reported_not_raised(tmp):
+    """A child no signal reaps is written off in a note, never re-raised.
+
+    Raising from the last-resort reap would replace the failure that
+    reached the helper, and waiting longer would hold the suite worker
+    forever, so the only outcome left is the note naming the child.
+    """
+    del tmp
+    spec = importlib.util.spec_from_file_location(
+        'runner_surviving_sigkill', ROOT / 'run_tests.py')
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+
+    process = _SurvivesEverySignal()
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        runner._terminate_and_reap(process)
+    note = captured.getvalue()
+    assert process.signalled == ['terminate', 'kill'], process.signalled
+    assert 'survived SIGKILL' in note, note
+    assert '4714' in note, note
+    assert process.returncode is None, process.returncode
 
 
 def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
