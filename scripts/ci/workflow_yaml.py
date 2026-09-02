@@ -1,8 +1,15 @@
 """Decode scalars and locate actual step mappings in workflow YAML."""
 from dataclasses import dataclass
-import re
 
 if __package__:
+    # pylint: disable-next=relative-beyond-top-level
+    from .yamlblock import (
+        BLOCK_HEADER,
+        block_end,
+        decode_block,
+        parse_block_header,
+        text_indent,
+    )
     # pylint: disable-next=relative-beyond-top-level
     from .yamlscalar import (
         YAMLReadError,
@@ -11,17 +18,19 @@ if __package__:
         split_mapping_field,
     )
 else:
+    from yamlblock import (
+        BLOCK_HEADER,
+        block_end,
+        decode_block,
+        parse_block_header,
+        text_indent,
+    )
     from yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
         decode_inline_scalar,
         split_mapping_field,
     )
-
-
-_BLOCK_HEADER = re.compile(
-    r'^(?P<style>[>|])(?P<first>[1-9]?)(?P<chomp>[+-]?)'
-    r'(?P<second>[1-9]?)$')
 
 
 @dataclass(frozen=True)
@@ -63,10 +72,7 @@ def _lines(workflow):
 
 
 def _indent(line):
-    count = len(line.text) - len(line.text.lstrip(' '))
-    if line.text[:1] == '\t':
-        raise YAMLReadError('tabs in YAML indentation are unsupported')
-    return count
+    return text_indent(line.text)
 
 
 def _meaningful(line):
@@ -130,29 +136,8 @@ def _continued_quote_end(lines, start, end, quote):
     raise YAMLReadError('workflow has an incomplete quoted scalar')
 
 
-def _block_end(lines, start, end, header_indent, match):
-    explicit = int(match.group('first') or match.group('second') or 0)
-    if match.group('first') and match.group('second'):
-        raise YAMLReadError('workflow block has two indentation indicators')
-    content_indent = header_indent + explicit
-    if not explicit:
-        for index in range(start, end):
-            if not lines[index].text.strip(' '):
-                continue
-            content_indent = _indent(lines[index])
-            if content_indent <= header_indent:
-                return start
-            break
-        else:
-            return end
-    for index in range(start, end):
-        if lines[index].text.strip(' ') \
-                and _indent(lines[index]) < content_indent:
-            return index
-    return end
-
-
 def _scalar_lines(lines):
+    texts = [line.text for line in lines]
     scalar = set()
     index = 0
     while index < len(lines):
@@ -165,10 +150,10 @@ def _scalar_lines(lines):
             continue
         _key, raw_value = field
         value = _strip_inline_comment(raw_value.strip(' \t'))
-        match = _BLOCK_HEADER.fullmatch(value)
+        match = BLOCK_HEADER.fullmatch(value)
         if match is not None:
-            stop = _block_end(
-                lines, index + 1, len(lines), _indent(lines[index]), match)
+            stop = block_end(
+                texts, index + 1, len(texts), _indent(lines[index]), match)
             scalar.update(range(index + 1, stop))
             index = stop
             continue
@@ -243,15 +228,16 @@ def _step_value(lines, start, end, indent, raw_value, owner):
     value = _strip_inline_comment(raw_value.strip(' \t'))
     if not value:
         raise YAMLReadError(f'{owner} has no scalar value')
-    match = _BLOCK_HEADER.fullmatch(value)
+    match = BLOCK_HEADER.fullmatch(value)
     if match is not None:
-        stop = _block_end(lines, start + 1, end, indent, match)
+        texts = [line.text for line in lines]
+        stop = block_end(texts, start + 1, end, indent, match)
         body = [
             (line.text, line.end > line.start + len(line.text))
             for line in lines[start + 1:stop]
         ]
-        style, chomp, explicit = _parse_header(value, owner)
-        return _decode_block(
+        style, chomp, explicit = parse_block_header(value, owner)
+        return decode_block(
             body, indent, style, chomp, explicit, owner)
     if value.startswith(("'", '"')):
         return decode_inline_scalar(value, owner)
@@ -264,80 +250,6 @@ def _step_value(lines, start, end, indent, raw_value, owner):
     if any(_meaningful(lines[index]) and _indent(lines[index]) > indent
            for index in range(start + 1, end)):
         raise YAMLReadError(f'{owner} has an unsupported multiline scalar')
-    return value
-
-
-def _parse_header(value, owner):
-    match = _BLOCK_HEADER.fullmatch(value)
-    if match is None:
-        raise YAMLReadError(f'{owner} has an unsupported block header')
-    first = match.group('first')
-    second = match.group('second')
-    if first and second:
-        raise YAMLReadError(f'{owner} has two indentation indicators')
-    explicit = int(first or second or 0)
-    return match.group('style'), match.group('chomp') or '', explicit
-
-
-def _decode_block(lines, parent_indent, style, chomp, explicit, owner):
-    if not lines:
-        return ''
-    if explicit:
-        content_indent = parent_indent + explicit
-    else:
-        content_indent = parent_indent + 1
-        for text, _ended in lines:
-            if text.strip(' '):
-                content_indent = max(
-                    content_indent, len(text) - len(text.lstrip(' ')))
-                break
-            content_indent = max(content_indent, len(text))
-    parts = []
-    more_indented = []
-    for text, _ended in lines:
-        if not text.strip(' ') and len(text) <= content_indent:
-            parts.append('')
-            more_indented.append(False)
-            continue
-        indent = len(text) - len(text.lstrip(' '))
-        if indent < content_indent:
-            raise YAMLReadError(f'{owner} block indentation is incomplete')
-        parts.append(text[content_indent:])
-        more_indented.append(indent > content_indent)
-    if style == '|':
-        value = '\n'.join(parts)
-    else:
-        value = _fold_block(parts, more_indented)
-    if lines[-1][1]:
-        value += '\n'
-    if chomp == '-':
-        return value.rstrip('\n')
-    if chomp == '+':
-        return value
-    return value.rstrip('\n') + (
-        '\n' if value.endswith('\n') and any(parts) else '')
-
-
-def _fold_block(parts, more_indented):
-    value = parts[0]
-    seen_content = bool(parts[0])
-    last_content_more = more_indented[0] if parts[0] else False
-    for index in range(1, len(parts)):
-        previous = parts[index - 1]
-        current = parts[index]
-        if not previous:
-            separator = '\n' if (
-                not current or not seen_content or last_content_more
-                or more_indented[index]) else ''
-        elif (not current or more_indented[index - 1]
-              or more_indented[index]):
-            separator = '\n'
-        else:
-            separator = ' '
-        value += separator + current
-        if current:
-            seen_content = True
-            last_content_more = more_indented[index]
     return value
 
 
