@@ -288,6 +288,24 @@ def test_a_brace_inside_a_json_string_opens_nothing(tmp):
             status, raw)
 
 
+def test_a_wide_but_shallow_body_is_accepted(tmp):
+    """The bound is simultaneous depth, not cumulative openers.
+
+    A body of many small containers nests no deeper than one of them: its
+    openers close again as the scan walks, and a check that counted every
+    `[` it had ever seen would refuse ordinary large documents. The closing
+    arm of the scan is what keeps those apart, so this body must clear the
+    bound the way any small one does.
+    """
+    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '4'}) as (base, _d):
+        wide = b'{"token":"wrongtoken","value":[' + b'[0],' * 60 + b'[0]]}'
+        status, raw = _util.request(
+            base + '/result', 'POST', body=wide,
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (
+            401, 'unauthorized'), (status, raw)
+
+
 def test_recursive_json_is_refused_on_every_body_verb_before_authentication(tmp):
     """A deeply nested body is refused, before the token is looked at.
 

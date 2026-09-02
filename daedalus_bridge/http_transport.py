@@ -107,8 +107,8 @@ class RequestMixin(BaseHTTPRequestHandler):
         return params
 
     def _query_bridge_token(self, params):
-        """Return the query token — always a str, '' when absent — after
-        the request-wide ambiguity check."""
+        """Return the query token — always a str, '' when absent — after the
+        request-wide ambiguity check."""
         credentials = params.get('token', [])
         return credentials[0] if credentials else ''
 
