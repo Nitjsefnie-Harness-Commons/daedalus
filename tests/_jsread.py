@@ -141,14 +141,14 @@ def _js_object_brace(out, brace):
 
 
 def _js_clause_head_word(out, start):
-    """Whether the word starting at `start` heads a case/default clause
+    """Whether the word starting at `start` heads a `case` clause
     rather than naming a member or an object-literal key."""
     k = start
     while k > 0 and out[k - 1].isspace():
         k -= 1
     if k == 0:
         return True
-    if out[k - 1] == '.':
+    if out[k - 1] in '.,':
         return False
     return not (out[k - 1] == '{' and _js_object_brace(out, k - 1))
 
@@ -157,35 +157,51 @@ def _js_colon_brace(out, colon):
     """Whether the `{` behind the `:` at `colon` opens an object literal.
     A colon also spells a statement label and a case/default clause,
     whose `{` opens a block Node follows with a regex. Reading back from
-    the colon at bracket depth zero, a `case`/`default` head marks the
-    clause, a `?` marks a ternary, and the bracket reached first is the
-    literal the colon sits in, whose own kind decides."""
-    depth, ternary, clause = 0, False, False
-    j = colon
+    the colon at bracket depth zero, the first `?` carrying no other
+    colon on its side of the colon is a ternary alternate, a `case`
+    clause head marks the clause, a `;` or the start of the mask
+    leaves a statement-head colon (a label, or a `default` clause,
+    which the boundary and the enclosing switch brace decide), and the
+    bracket reached first is the literal the colon sits in, whose own
+    kind decides. The `;` also bounds the walk: a previous statement's
+    brackets are all closed pairs, so it classifies nothing, but letting
+    a label read back through every statement before it makes the mask
+    quadratic on label-heavy files."""
+    depth, crossed = 0, 0
+    j = colon - 1
     while j >= 0:
         char = out[j]
         if char in ')]}':
             depth += 1
         elif char in '([{':
             if depth == 0:
-                if clause:
-                    return False
-                return ternary or (char == '{'
-                                   and _js_object_brace(out, j))
+                if char != '{':
+                    return True
+                return _js_object_brace(out, j)
             depth -= 1
         elif depth == 0:
-            if char == '?':
-                ternary = True
+            if char == ';':
+                return False
+            if char == ':':
+                crossed += 1
+            elif char == '?':
+                after = out[j + 1]
+                if after in ('.', '?') or (j and out[j - 1] == '?'):
+                    j -= 1
+                    continue
+                if crossed == 0:
+                    return True
+                crossed -= 1
             elif char in '_$' or char.isalnum():
                 word = _js_word_before(out, j + 1)
                 start = j + 1 - len(word)
-                if word in ('case', 'default') and _js_clause_head_word(
+                if word == 'case' and _js_clause_head_word(
                         out, start):
-                    clause = True
+                    return False
                 j -= len(word)
                 continue
         j -= 1
-    return not clause and ternary
+    return False
 
 
 def _js_regex_opening(out, regex_closed):
@@ -269,11 +285,9 @@ def js_mask(text):
             if char == '`':
                 templates.pop()
                 blanked_operand = True
-                regex_closed = False
             elif char == '$' and text[i + 1:i + 2] == '{':
                 templates[-1] = 1
                 blanked_operand = False
-                regex_closed = False
                 out.append('$')
                 out.append('{')
                 i += 2
@@ -328,7 +342,6 @@ def js_mask(text):
                     j += 1
             out.extend(re.sub(r'[^\n]', ' ', text[i:j]))
             blanked_operand = True
-            regex_closed = False
             i = j
         elif char == '`':
             templates.append(0)
@@ -345,7 +358,6 @@ def js_mask(text):
                         templates[-1] -= 1
             if not char.isspace():
                 blanked_operand = False
-                regex_closed = False
             out.append(char)
             i += 1
     return ''.join(out)
