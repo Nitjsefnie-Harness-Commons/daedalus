@@ -178,6 +178,28 @@ def test_a_synchronous_stall_reports_the_outer_backstop_and_last_step(tmp):
     ])
 
 
+def test_a_drain_with_nothing_unread_still_names_the_backstop(tmp):
+    """A timed-out drain hands back None for a pipe with nothing unread.
+
+    Those Nones must reach the diagnostic message, not the trace reader:
+    a TypeError raised out of the backstop would replace the one report
+    that names what the harness was doing when it stalled.
+    """
+    with mock.patch.object(_overlap.subprocess, 'Popen') as popen:
+        popen.return_value.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd='node', timeout=1.0, output=None, stderr=None)
+        message = ''
+        try:
+            _overlap.run_background_overlap('background', [], [])
+        except TypeError as broken:
+            raise AssertionError(
+                f'the trace reader was handed None: {broken}') from broken
+        except AssertionError as failure:
+            message = str(failure)
+    assert 'outer backstop' in message, message
+    assert 'last step: none recorded' in message, message
+
+
 def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
     """A blocked dispatch call is not blamed on completed config loading."""
     failure = _harness_failure(
