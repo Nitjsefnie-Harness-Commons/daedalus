@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cmdqueue  # noqa: E402
+import _drain  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -334,8 +335,14 @@ def run_background_overlap(background, commands, order, result_base='',
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
-        process.kill()
-        stdout, stderr = process.communicate()
+        _, stdout, stderr = _drain.kill_and_drain(process)
+        # A timed-out drain hands back the unread bytes; the message below
+        # embeds them in a str, and the step-trace reader recovers labels
+        # from that rendering, so decode without stripping.
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode('utf-8', 'replace')
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode('utf-8', 'replace')
         steps = re.findall(r'^\[step\] (.+)$', stderr, re.MULTILINE)
         last_step = steps[-1] if steps else 'none recorded'
         raise AssertionError(
@@ -620,8 +627,7 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
             commands = [by_owner[owner] for owner in owners]
             if stop_clients_after_enqueue:
                 for process in processes.values():
-                    process.kill()
-                    process.communicate()
+                    _drain.kill_and_drain(process)
                 alive = [owner for owner, process in processes.items()
                          if process.poll() is None]
                 assert not alive, f'clients survived their stop: {alive}'
@@ -660,6 +666,4 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
             return results
         finally:
             for process in processes.values():
-                if process.poll() is None:
-                    process.kill()
-                    process.communicate()
+                _drain.kill_and_drain(process)
