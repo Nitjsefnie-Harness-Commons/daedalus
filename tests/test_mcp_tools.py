@@ -483,6 +483,33 @@ def test_every_registered_tool_command_is_pinned(_tmp):
                 f'{name} {overrides}: refused after a bridge call')
 
 
+def test_the_parameter_floor_refuses_a_stranded_parameter(_tmp):
+    """unpinned_parameter_gaps detects, not merely passes a healthy table.
+
+    Called directly with synthetic tools, so the floor's detection limb is
+    banked even though every entry in TOOL_COMMANDS is clean and the
+    registration-driven pass therefore sees no gaps.
+    """
+    assert _mcp_tool_commands.unpinned_parameter_gaps(
+        't', {'a', 'b'}, {'a'}) == ["no case witnesses 'b'"]
+    with mock.patch.dict(
+            _mcp_tool_commands.UNPINNED_PARAMETERS, {'t': {'b'}}):
+        assert _mcp_tool_commands.unpinned_parameter_gaps(
+            't', {'a', 'b'}, {'a'}) == []
+        assert _mcp_tool_commands.unpinned_parameter_gaps(
+            't', {'a', 'b'}, {'b'}) == [
+                "UNPINNED_PARAMETERS names 'b', which a case already "
+                'witnesses',
+                "no case witnesses 'a'"]
+    with mock.patch.dict(
+            _mcp_tool_commands.UNPINNED_PARAMETERS, {'t': {'c'}}):
+        assert _mcp_tool_commands.unpinned_parameter_gaps(
+            't', {'a', 'b'}, {'a'}) == [
+                "UNPINNED_PARAMETERS names 'c', which the signature does not "
+                'have',
+                "no case witnesses 'b'"]
+
+
 def test_result_reports_an_absent_result_without_a_value(_tmp):
     composition = _load_composition('result-absent')
     composition.bridge.get_bodies['/result'] = {'pending': True}
