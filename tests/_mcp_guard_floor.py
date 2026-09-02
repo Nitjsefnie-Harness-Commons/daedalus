@@ -137,6 +137,12 @@ def _enclosing_function(node, parents):
     return ''
 
 
+def _contains_or(test):
+    """True when `ast.Or` appears anywhere in the test expression."""
+    return any(isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or)
+               for node in ast.walk(test))
+
+
 def _module_guard_sites(path):
     tree = ast.parse(path.read_text(encoding='utf-8'))
     parents = {}
@@ -151,15 +157,18 @@ def _module_guard_sites(path):
         if isinstance(guard, ast.If) and node in guard.body:
             operands = [(ast.unparse(operand), operand)
                         for operand in _guard_operands(guard.test)]
+            or_guard = _contains_or(guard.test)
         else:
             operands = [(_unguarded_text(node), None)]
+            or_guard = False
         key = (str(path.resolve()), node.lineno)
         if key in sites:
             # Two raises on one line cannot be told apart by a traceback, so
             # neither can be witnessed; say so instead of letting one witness
             # answer for both.
             operands = [(f'two raises share line {node.lineno}', None)]
-        sites[key] = (path.stem, _enclosing_function(node, parents), operands)
+        sites[key] = (path.stem, _enclosing_function(node, parents), operands,
+                      or_guard)
     return sites
 
 
@@ -206,7 +215,10 @@ def tool_guards(paths):
 
 def reachable_guards(sites, codes):
     """The raise sites a tool's own reachable code objects can raise from; a
-    bridge method or a globals lookup is accounted for off the tool surface."""
+    bridge method or a globals lookup is accounted for off the tool surface.
+    A reached site refusing on an `or` test is refused by the floor: split it
+    into one raise per condition, because one witness cannot answer for two
+    conditions on one line."""
     reached = {}
     for code in codes:
         filename = str(Path(code.co_filename).resolve())
@@ -215,15 +227,22 @@ def reachable_guards(sites, codes):
             if instruction.opname != 'RAISE_VARARGS' or positions is None:
                 continue
             site = sites.get((filename, positions.lineno))
-            if site is not None:
-                reached[(filename, positions.lineno)] = site
+            if site is None:
+                continue
+            if site[3]:
+                raise AssertionError(
+                    f'{site[0]}.{site[1]} refuses on an `or` test '
+                    f'({site[2]}); split it into one raise per condition, '
+                    'because one witness cannot answer for two conditions '
+                    'on one line')
+            reached[(filename, positions.lineno)] = site
     return reached
 
 
 def guard_keys(sites):
     """The (module, function, condition) triples a site mapping spells."""
     return [(module, function, text)
-            for module, function, operands in sites.values()
+            for module, function, operands, _or in sites.values()
             for text, _node in operands]
 
 
@@ -246,7 +265,7 @@ def witnessed_guard(sites, raised):
         trace = trace.tb_next
     if fired is None:
         return None
-    (module, function, operands), frame = fired
+    (module, function, operands, _or), frame = fired
     if len(operands) == 1:
         return (module, function, operands[0][0])
     for text, node in operands:
