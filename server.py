@@ -411,6 +411,7 @@ class Handler(RequestMixin):
                 if last_delivery_at else None),
             'cmd_ttl_s': CMD_TTL,
             'stream_max_age_s': STREAM_MAX_AGE,
+            'mcp': mcp_bootstrap.state(),
         })
 
     def do_OPTIONS(self):
