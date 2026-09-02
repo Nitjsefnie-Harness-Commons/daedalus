@@ -919,13 +919,13 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
             result_store = _util.load(repo / 'daedalus_bridge' / 'result_store.py', name='rs')
         finally:
             sys.path.pop(0)
-        result_store.DELIVERY_DIR.parent.mkdir(parents=True)
+        (docroot / 'results').mkdir(parents=True)
         original_locks = tuple(result_store.delivery_locks)
         initial = len(original_locks)
         returned_locks = []
         for index in range(10_000):
             _dir, delivery_file, tab = result_store.find_delivery_result(
-                TOK, f'absent-{index}', 'missing-did')
+                docroot / 'results', TOK, f'absent-{index}', 'missing-did')
             assert not delivery_file.exists()
             returned_locks.append(result_store.delivery_lock_for(
                 result_store.result_key(TOK, tab)))
