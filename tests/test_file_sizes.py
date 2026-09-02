@@ -59,6 +59,16 @@ STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
 RULE_HELP = ('a negated raising verb ("is never raised by hand", "is not '
              'edited upward by hand"), or "only ever go down"')
 
+# The move each kind's remedy has to name, as (--tighten clears it, the
+# phrase the printed advice must carry, the phrase it must not). Written
+# out here rather than read from REMEDY_FOR, which is the thing being pinned.
+REMEDY_NAMES_THE_MOVE = {
+    'grown': (False, 'relocate the code into a new module', '--tighten'),
+    'over': (False, 'relocate the code into a new module', '--tighten'),
+    'missing': (False, 'deleted by hand', 'relocate the code'),
+    'graduated': (True, '--tighten', 'relocate the code'),
+}
+
 
 def _policy():
     return _util.load(POLICY_SOURCE, 'size_baseline')
@@ -79,6 +89,13 @@ def _policy_prose():
     string carries the advice to a reader just as the docstring does.
     """
     return _normalised(POLICY_SOURCE.read_text(encoding='utf-8'))
+
+
+def _baseline_text(baseline):
+    """`baseline` written out the way the module carries its own table."""
+    entries = ''.join(
+        f"    '{rel}': {size},\n" for rel, size in baseline.items())
+    return f'BASELINE = {{\n{entries}}}\n'
 
 
 def _drive_main(policy, baseline, sizes):
@@ -209,7 +226,13 @@ def test_the_docstring_carries_every_printed_remedy(tmp):
 
 
 def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
-    """Each kind gets the remedy that is true for it, and no other."""
+    """Each kind's remedy names the move that clears it, and not the other.
+
+    Whether `--tighten` clears the kind is established by running it, and
+    the printed advice is read for the words a refused author acts on. An
+    expectation taken from REMEDY_FOR instead moves with the mapping it is
+    supposed to pin, and a swapped mapping stays green.
+    """
     del tmp
     policy = _policy()
     over, under = policy.TEST_CEILING + 1, policy.TEST_CEILING
@@ -222,12 +245,16 @@ def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
     for kind, (baseline, sizes) in sorted(fabricated.items()):
         found = policy.violations(sizes, baseline)
         assert [k for k, v in found.items() if v] == [kind], (kind, found)
+        clears, names, never = REMEDY_NAMES_THE_MOVE[kind]
+        rewritten = policy.tightened(
+            _baseline_text(baseline), sizes, baseline)
+        cleared = rewritten is not None and not any(
+            rel in rewritten for rel in baseline)
+        assert cleared == clears, (kind, rewritten)
         status, printed = _drive_main(policy, baseline, sizes)
         assert status == 1, (kind, status)
-        assert policy.REMEDY_FOR[kind] in printed, (kind, printed)
-        wrong = [other for other in set(policy.REMEDY_FOR.values())
-                 if other != policy.REMEDY_FOR[kind] and other in printed]
-        assert not wrong, (kind, printed)
+        assert names in printed, (kind, names, printed)
+        assert never not in printed, (kind, never, printed)
 
 
 if __name__ == '__main__':
