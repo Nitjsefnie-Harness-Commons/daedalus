@@ -39,6 +39,7 @@ Single delivery mode: Chrome extension (MV3); the legacy Tampermonkey userscript
 - Reverse proxy: the vhost fronting the bridge (update + reload when endpoints change).
 - `server.py` keeps the process entry point, `ThreadingHTTPServer`, `Handler(RequestMixin)` with its `do_*` verbs and the request-path comparisons that dispatch them (`parsed.path == '/x'` where the query matters, `self.path == '/x'` on the body verbs), `GET /health` and `PUT /command`. Every other route body lives in a `daedalus_bridge` module:
   - `http_transport` — the `RequestMixin` a Handler derives from: request-target and query parsing, bearer/query/body credential resolution, the body-length refusal rules, the refusal drains, `answer` and `send_file`. The only bridge module that reads `config`, because it is transport rather than a route.
+  - `json_body` — `json_nests_deeper_than` and `JSONObject`, body parsing rather than transport, so it binds no configuration of its own.
   - `route_answer` — `FileAnswer` and `BytesAnswer`, stdlib-only and re-exported by `http_transport`, so a route importing an answer type does not inherit that configuration requirement.
   - `tab_registry` — the registry dictionary and its lock, behind `GET /tabs`, `POST /register`, `POST /sync-tabs` and `POST /unregister`.
   - `stream_route` — `resolve_targets` and the `GET /stream` SSE loop.
