@@ -21,7 +21,7 @@ def pinned_action(workflow, action):
     pattern = re.compile(
         r'(?<![0-9A-Za-z._/-])'
         + re.escape(action)
-        + r'@[0-9a-f]{40}(?![0-9A-Za-z])')
+        + r'@[0-9a-f]{40}(?![0-9A-Za-z._/-])')
     pins = sorted(set(pattern.findall(workflow)))
     if not pins:
         raise WorkflowPinError(f'no pin for {action!r} in workflow text')

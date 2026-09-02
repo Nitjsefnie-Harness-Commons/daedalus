@@ -7,11 +7,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _yamlsteps  # noqa: E402
+from _wfpins import pinned_action  # noqa: E402
 from _yamlread import (  # noqa: E402
     YAMLReadError, _comment, job_mapping, job_scalar, step_scalar,
     step_scalars,
 )
-from _wfpins import pinned_action  # noqa: E402
 from _yamlscalar import decode_inline_scalar  # noqa: E402
 from workflow_yaml import workflow_step_items  # noqa: E402
 

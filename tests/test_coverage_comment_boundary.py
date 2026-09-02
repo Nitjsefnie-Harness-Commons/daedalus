@@ -525,7 +525,7 @@ def _pin_refused(workflow, action, detail):
 
 
 def test_pinned_action_reads_the_real_workflow_pin(tmp):
-    """The privileged workflow's own pin is what the anchors mutate."""
+    """The real workflow yields one pin for the anchors to splice."""
     del tmp
     workflow = _workflow()
     pin = pinned_action(workflow, _DOWNLOAD_ACTION)
@@ -550,14 +550,34 @@ def test_pinned_action_refuses_conflicting_pins(tmp):
         _DOWNLOAD_ACTION, 'conflicting pins')
 
 
+def test_pinned_action_folds_a_pin_repeated_across_a_file(tmp):
+    """One action pinned at several sites is one pin, not a conflict."""
+    del tmp
+    text = (ROOT / '.github/workflows/tests.yml').read_text(encoding='utf-8')
+    pin = pinned_action(text, _DOWNLOAD_ACTION)
+    assert pin.startswith(_DOWNLOAD_ACTION + '@'), pin
+    assert text.count(pin) > 1, 'tests.yml no longer repeats the pin'
+
+
 def test_pinned_action_refuses_a_partial_identity(tmp):
-    """Only a whole action name pinned to a whole SHA counts as a pin."""
+    """Only a whole action name, not a longer one ending in it, is a pin."""
     del tmp
     _pin_refused(
         f'  uses: other-{_DOWNLOAD_ACTION}@' + 'c' * 40 + '\n',
         _DOWNLOAD_ACTION, 'no pin')
+
+
+def test_pinned_action_refuses_a_malformed_sha(tmp):
+    """Exactly forty lowercase hex digits, standing alone, or no pin."""
+    del tmp
     _pin_refused(
         f'  uses: {_DOWNLOAD_ACTION}@' + 'd' * 41 + '\n',
+        _DOWNLOAD_ACTION, 'no pin')
+    _pin_refused(
+        f'  uses: {_DOWNLOAD_ACTION}@' + 'e' * 40 + '-rc1\n',
+        _DOWNLOAD_ACTION, 'no pin')
+    _pin_refused(
+        f'  uses: {_DOWNLOAD_ACTION}@' + 'A' * 40 + '\n',
         _DOWNLOAD_ACTION, 'no pin')
 
 
