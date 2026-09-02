@@ -72,6 +72,19 @@ def test_an_anchor_and_a_tag_decode_in_either_order(tmp):
         assert _names(_document(field)) == ['target'], field
 
 
+def test_a_quoted_name_after_properties_keeps_hash_sign_text(tmp):
+    del tmp
+    for field in ('name: &a "one # two"', 'name: !!str "one # two"'):
+        assert _names(_document(field)) == ['one # two'], field
+
+
+def test_a_quoted_name_continued_past_a_property_is_a_boundary(tmp):
+    """A multiline quoted scalar is an unsupported boundary, not invalid."""
+    del tmp
+    _refused(_document('name: &a "one\n          two"'),
+             'unsupported multiline scalar')
+
+
 def test_aliased_step_name_decodes_to_the_anchored_value(tmp):
     """An alias reads as the value its anchor was attached to."""
     del tmp

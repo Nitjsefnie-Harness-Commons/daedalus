@@ -6,9 +6,9 @@ import re
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level
-    from .yamlscalar import YAMLReadError
+    from .yamlscalar import YAMLReadError, _strip_inline_comment
 else:
-    from yamlscalar import YAMLReadError
+    from yamlscalar import YAMLReadError, _strip_inline_comment
 
 
 ALIAS = re.compile(r'\*(?P<name>[^\s\[\]{},]+)')
@@ -33,8 +33,13 @@ def node_properties(value):
 
 
 def strip_node_properties(value, owner):
-    """Return `value` without the properties it carries, validating them."""
+    """The content of `value` after its properties and one inline comment.
+
+    The properties come off before the comment is read, so a quote that
+    opens after an anchor or a tag keeps its `#` text.
+    """
     tokens, content = node_properties(value)
+    content = _strip_inline_comment(content.strip(' \t'))
     anchor = tag = None
     for token in tokens:
         if token.startswith('&'):
