@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run every suite; exit non-zero if any suite fails or ran no coverage."""
 import json
+import math
 import os
 import subprocess
 import sys
@@ -71,8 +72,10 @@ def _suite_timeout():
     except ValueError:
         raise SystemExit(
             f"DAEDALUS_SUITE_TIMEOUT: not a number: {raw!r}") from None
-    if timeout <= 0:
-        raise SystemExit(f"DAEDALUS_SUITE_TIMEOUT: must be positive: {raw!r}")
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise SystemExit(
+            "DAEDALUS_SUITE_TIMEOUT: must be a finite positive number; "
+            f"got {raw!r}")
     return timeout
 
 
@@ -95,7 +98,8 @@ def _run_suite(suite, summaries, timeout):
             returncode = process.returncode
             with output_path.open("ab") as output:
                 output.write(
-                    f"SUITE TIMED OUT after {timeout} s and was killed; "
+                    f"SUITE TIMED OUT after {timeout} s "
+                    f"(returncode {process.returncode!r}); "
                     "its last lines are above\n".encode())
     except BaseException:
         if process is not None:
