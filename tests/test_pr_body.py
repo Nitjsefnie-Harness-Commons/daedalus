@@ -509,6 +509,11 @@ def test_closing_issues_includes_keyword_list_continuation(tmp):
          [101]),
         (f'Fixes: {_issue_html(101)}', [101]),
         (f'resolved {_issue_html(101)}', [101]),
+        (f'Closes {_issue_html(101)}', [101]),
+        (f'closed {_issue_html(101)}', [101]),
+        (f'fix {_issue_html(101)}', [101]),
+        (f'fixed {_issue_html(101)}', [101]),
+        (f'Resolve {_issue_html(101)}', [101]),
         (f'References {_issue_html(101)}, Fixes {_issue_html(102)}, '
          f'{_issue_html(103)}', [102, 103]),
         (f'Fixes #{101}', []),
@@ -533,8 +538,46 @@ def test_closing_issues_checks_every_section(tmp):
 def test_closing_keyword_does_not_cross_a_section_boundary(tmp):
     del tmp
     rendered = _valid_html(
-        references=f'References {_issue_html(101)}').replace(
+        references=_issue_html(101)).replace(
             _text_html('One sentence.'), _text_html('One sentence. Fixes'))
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    assert PR_BODY.closing_issues(sections) == []
+
+
+def test_closing_list_does_not_cross_a_section_boundary(tmp):
+    del tmp
+    summary = f'<p dir="auto">Fixes {_issue_html(101)}.</p>'
+    rendered = _valid_html(
+        references=_issue_html(104)).replace(
+            _text_html('One sentence.'), summary)
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    assert PR_BODY.closing_issues(sections) == [101]
+
+
+def test_block_boundary_ends_a_closing_keyword_list(tmp):
+    del tmp
+    anchor = _issue_html(102)
+    cases = (
+        (f'<ul dir="auto">\n<li>Fixes {_issue_html(101)}</li>\n'
+         f'<li>{anchor}</li>\n</ul>', [101]),
+        (f'<p dir="auto">Fixes {_issue_html(101)}</p>\n'
+         f'<p dir="auto">{anchor}</p>', [101]),
+        (f'<p dir="auto">Fixes {_issue_html(101)}</p>\n<hr>\n'
+         f'<p dir="auto">{anchor}</p>', [101]),
+        (f'<p dir="auto">Fixes {_issue_html(101)}, {anchor}</p>', [101, 102]),
+    )
+    for references, closing in cases:
+        rendered = _valid_html(references=references)
+        sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+        assert PR_BODY.closing_issues(sections) == closing, references
+
+
+def test_keyword_inside_fenced_code_governs_no_anchor(tmp):
+    del tmp
+    rendered = _valid_html(references=(
+        '<pre class="notranslate"><code class="notranslate">Fixes\n'
+        '</code></pre>\n'
+        f'<p dir="auto">{_issue_html(102)}</p>'))
     sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
     assert PR_BODY.closing_issues(sections) == []
 

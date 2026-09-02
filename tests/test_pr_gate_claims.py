@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Pull-request gate claim checking: every closing reference assigned."""
+import re
 import sys
 from pathlib import Path
 
@@ -7,10 +8,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _prgate import (  # noqa: E402
     CLOSED_FIRST, GITHUB_HTML, OPEN_FIRST, _api, _assert_gate_message,
     _assert_no_writes, _execute, _issue, _issue_gets,
-    _issue_html, _html_body, _layout_body, _text_html, _valid_body,
-    _valid_html, _write_sequence,
+    _issue_html, _html_body, _layout_body, _markdown_code_spans, _text_html,
+    _comment_body, _valid_body, _valid_html, _write_sequence,
 )
 import _util  # noqa: E402
+
+
+def _assert_numbers_code_spanned(comment):
+    """No bare issue reference may survive in a reason the gate posts."""
+    spans = _markdown_code_spans(comment)
+    for match in re.finditer(r'#\d+', comment):
+        assert any(start <= match.start() < end for start, end in spans), (
+            match.start(), spans, comment)
 
 
 def test_first_claimed_second_unassigned_names_the_second(tmp):
@@ -27,7 +36,8 @@ def test_first_claimed_second_unassigned_names_the_second(tmp):
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
     _assert_gate_message(
-        writes[0], OPEN_FIRST, ['Issue #104 is not assigned to you.'])
+        writes[0], OPEN_FIRST, ['Issue `#104` is not assigned to you.'])
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
 
 
 def test_two_unassigned_closing_issues_are_named_together(tmp):
@@ -48,7 +58,8 @@ def test_two_unassigned_closing_issues_are_named_together(tmp):
         ('POST', 'repos/owner/repo/issues/99/comments')]
     _assert_gate_message(
         writes[0], OPEN_FIRST,
-        ['Issues #104 and #105 are not assigned to you.'])
+        ['Issues `#104` and `#105` are not assigned to you.'])
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
 
 
 def test_unassigned_mention_without_keyword_passes(tmp):
@@ -77,7 +88,28 @@ def test_closing_keyword_outside_related_is_checked(tmp):
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
     _assert_gate_message(
-        writes[0], OPEN_FIRST, ['Issue #104 is not assigned to you.'])
+        writes[0], OPEN_FIRST, ['Issue `#104` is not assigned to you.'])
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
+
+
+def test_duplicate_closing_reference_is_looked_up_once(tmp):
+    del tmp
+    summary = (
+        f'<p dir="auto">Fixes {_issue_html(104)}. Again '
+        f'fixes {_issue_html(104)}.</p>')
+    rendered = _valid_html(references=(
+        f'Fixes {_issue_html(101)}')).replace(
+            _text_html('One sentence.'), summary)
+    api = _api(
+        issues={'101': _issue('alice'), '104': _issue('bob')},
+        rendered=rendered)
+    body = _valid_body('Fixes #101').replace(
+        'One sentence.', 'Fixes #104. Again fixes #104.')
+    code, writes, _output, _error = _execute(api, body)
+    assert code == 0
+    assert len(_issue_gets(api)) == 2
+    _assert_gate_message(
+        writes[0], OPEN_FIRST, ['Issue `#104` is not assigned to you.'])
 
 
 def test_keyword_overflow_reports_overflow_only(tmp):
@@ -96,6 +128,16 @@ def test_keyword_overflow_reports_overflow_only(tmp):
     comment = _assert_gate_message(writes[0], OPEN_FIRST, [reason])
     assert 'not assigned to you' not in comment
 
+    numbers = numbers[:20]
+    body = _valid_body(' '.join(f'Fixes #{number}' for number in numbers))
+    rendered = _valid_html(references=' '.join(
+        f'Fixes {_issue_html(number)}' for number in numbers))
+    api = _api(issues=issues, rendered=rendered)
+    code, writes, _output, _error = _execute(api, body)
+    assert code == 0
+    assert len(_issue_gets(api)) == 20
+    assert reason not in _comment_body(writes[0])
+
 
 def test_unclaimed_issue_comments_naming_the_issue(tmp):
     del tmp
@@ -105,7 +147,30 @@ def test_unclaimed_issue_comments_naming_the_issue(tmp):
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments')]
     _assert_gate_message(
-        writes[0], OPEN_FIRST, ['Issue #101 is not assigned to you.'])
+        writes[0], OPEN_FIRST, ['Issue `#101` is not assigned to you.'])
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
+
+
+def test_three_unassigned_closing_issues_are_named_together(tmp):
+    del tmp
+    rendered = _valid_html(references='\n'.join(
+        f'Fixes {_issue_html(number)}'
+        for number in (101, 104, 105, 106)))
+    api = _api(
+        issues={
+            '101': _issue('alice'), '104': _issue('bob'),
+            '105': _issue('carol'), '106': _issue('dave')},
+        rendered=rendered)
+    body = _valid_body(
+        'Fixes #101\nFixes #104\nFixes #105\nFixes #106')
+    code, writes, _output, _error = _execute(api, body)
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments')]
+    _assert_gate_message(
+        writes[0], OPEN_FIRST,
+        ['Issues `#104`, `#105` and `#106` are not assigned to you.'])
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
 
 
 def test_missing_issue_comments_without_closing(tmp):

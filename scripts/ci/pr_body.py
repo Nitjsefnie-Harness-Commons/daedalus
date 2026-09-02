@@ -32,6 +32,10 @@ _CLOSING_KEYWORDS = frozenset((
     'close', 'closes', 'closed', 'fix', 'fixes', 'fixed',
     'resolve', 'resolves', 'resolved'))
 _LIST_SEPARATOR = re.compile(r'[\s,&]*(?:and[\s,&]*)*', re.IGNORECASE)
+_BLOCK_TAGS = frozenset((
+    'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
+    'fieldset', 'figcaption', 'figure', 'footer', 'form', 'header', 'li',
+    'ol', 'p', 'pre', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul'))
 _INVISIBLE_CHARACTERS = frozenset((
     '\u034f', '\u115f', '\u1160', '\u180b', '\u180c', '\u180d',
     '\u180f', '\u2800', '\u3164', '\uffa0',
@@ -126,6 +130,7 @@ class _RenderedBodyParser(HTMLParser):
         self._closing = []
         self._pending = []
         self._anchor_depth = 0
+        self._code_depth = 0
         self._previous_closing = False
         self._footnote_depth = 0
 
@@ -160,6 +165,10 @@ class _RenderedBodyParser(HTMLParser):
                     and attributes.get('src') and not zero_size):
                 self._text.append('\ufffc')
             return
+        if tag in _BLOCK_TAGS:
+            self._record_block()
+        if tag in ('pre', 'code'):
+            self._code_depth += 1
         if tag == 'a':
             self._anchor_depth += 1
         if tag != 'a' or self._heading_tag is not None or self._key is None:
@@ -197,6 +206,10 @@ class _RenderedBodyParser(HTMLParser):
         if self._footnote_depth:
             self._footnote_depth -= 1
             return
+        if tag in _BLOCK_TAGS:
+            self._record_block()
+        if tag in ('pre', 'code'):
+            self._code_depth -= 1
         if tag != self._heading_tag:
             return
         name = _heading_text(''.join(self._heading_parts))
@@ -235,9 +248,21 @@ class _RenderedBodyParser(HTMLParser):
 
     def _record_pending(self, data):
         if (self._footnote_depth or self._heading_tag is not None
-                or self._key is None or self._anchor_depth):
+                or self._key is None or self._anchor_depth
+                or self._code_depth):
             return
         self._pending.append(data)
+
+    def _record_block(self):
+        # A block boundary breaks a closing-keyword list: a keyword on one
+        # side of a paragraph, list-item or table-cell break governs no
+        # anchor on the other, so the gap text and the running list state
+        # both restart inside each block.
+        if (self._footnote_depth or self._heading_tag is not None
+                or self._key is None):
+            return
+        self._pending = []
+        self._previous_closing = False
 
     def finish(self):
         if not self.saw_element:
@@ -304,7 +329,7 @@ def referenced_issues(sections):
 def _gap_closing(gap, previous_closing):
     tail = gap.rstrip().split()
     if tail:
-        keyword = tail[-1].casefold().rstrip(':')
+        keyword = tail[-1].casefold().removesuffix(':')
         if keyword in _CLOSING_KEYWORDS:
             return True
     return (bool(previous_closing)
