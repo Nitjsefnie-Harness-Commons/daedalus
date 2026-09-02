@@ -20,6 +20,8 @@ from _jsroute_timeline import (  # noqa: E402
     FunctionTimeline, InvocationReplay, body_death_index,
     declaration_records, function_reference, lexical_limits)
 from _jsroute_state import build_sender_queries  # noqa: E402
+from _jsroute_net import (  # noqa: E402
+    record_uncovered_mentions)
 from _jsroute_source import (SourceIndex, function_body_at,  # noqa: E402
                              method_scope_openings,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
@@ -27,7 +29,8 @@ from _jsroute_source import (SourceIndex, function_body_at,  # noqa: E402
                              top_level as _js_top_level,
                              word_before as _js_word_before)
 from _jsroute_operations import (discover_operations,  # noqa: E402
-                                 mark_generator_consumption)
+                                 mark_generator_consumption,
+                                 unwrap_parens)
 from _jsroute_receiver import ReceiverIndex  # noqa: E402
 
 
@@ -419,7 +422,10 @@ def js_tab_routing_violations(path, rel, work=None):
     carries = set()
     for match in bindings:
         expression_end = js_expression_end(mask, match.end())
-        expression = mask[match.end():expression_end].strip()
+        # A parenthesized member is the same value as a bare one, and
+        # the shape below is what decides whether to follow it.
+        expression = unwrap_parens(
+            mask, (match.end(), expression_end), pair_end)
         bound_member = re.match(
             r'([\w$]+)\s*\.\s*([\w$]+)\s*\.\s*bind\s*\(', expression)
         if bound_member:
@@ -448,10 +454,20 @@ def js_tab_routing_violations(path, rel, work=None):
         mask, text, {'end': pair_end, 'start': pair_start},
         invocation_resolution, method_positions,
         invocation_reader, senders)
+    operation_proofs = {'inert': {}, 'value': {}, 'span': {}}
     discover_operations(
         mask, text, {'end': pair_end, 'start': pair_start},
-        invocation_resolution, invocation_reader, invocations)
+        invocation_resolution, invocation_reader, invocations,
+        operation_proofs, work)
     mark_generator_consumption(mask, invocations)
+    candidate_bindings = sender_candidate_bindings(
+        scopes, bindings, mask, visible_binding, js_expression_end,
+        senders, invocation_resolution['receivers'].callable_value,
+        [match for _, kind, match in events if kind == 'opaque'])
+    record_uncovered_mentions(
+        mask, invocation_resolution['receivers'], invocations,
+        scope_at, operation_proofs, work, method_positions,
+        candidate_bindings)
     replay = InvocationReplay(
         timeline, scopes, events, invocations,
         {'mask': mask, 'text': text, 'body': body_at,
@@ -480,10 +496,6 @@ def js_tab_routing_violations(path, rel, work=None):
                 record[0]['start'], []).append(record)
         reached_unknowns.extend(result.unknowns)
         previous_call = call['order']
-    candidate_bindings = sender_candidate_bindings(
-        scopes, bindings, mask, visible_binding, js_expression_end,
-        senders, invocation_resolution['receivers'].callable_value,
-        [match for _, kind, match in events if kind == 'opaque'])
     sender_queries = build_sender_queries(
         candidate_bindings, reached_calls, scopes, events,
         invocations, replay,

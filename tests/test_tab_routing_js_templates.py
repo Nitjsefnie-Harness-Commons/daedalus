@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Template interpolations are read as the code the mask exposes.
 
-An interpolation is ordinary code to every walk, so an accessor reached
-through one resolves exactly and a template that never opens one runs
-nothing. A write whose value the walk cannot follow taints its binding
-by the operator that wrote it, inside a template or not.
-"""
+An accessor reached through one resolves exactly; a write whose value the
+walk cannot follow taints by its operator, inside a template or not."""
 import sys
 from pathlib import Path
 
@@ -100,9 +97,8 @@ def test_unresolvable_writes_taint_inside_and_outside_templates(tmp):
 
 
 def test_unterminated_template_still_answers(tmp):
-    """Backslashes with no closing backtick is what a backtracking
-    template regex never finishes on, so answering at all is the
-    assertion - a hung scan has no verdict to compare."""
+    """Backslashes with no closing backtick is what a backtracking regex
+    never finishes on, so answering at all is the assertion."""
     path = Path(tmp) / 'unterminated.js'
     path.write_text(
         "let send = extCmd;\n" + _SEND + "const s = `" + '\\' * 5000 + ";\n",

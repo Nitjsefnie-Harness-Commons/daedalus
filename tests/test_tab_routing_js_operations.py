@@ -106,7 +106,7 @@ def test_operation_discovery_matches_runtime(tmp):
          "  set hook(v) { send = ordinary; } };\n"
          "function sibling() { const box = { set hook(v) {\n"
          "  send = extCmd; } }; void box; }\nvoid sibling;\n"
-         "box['hook'] += 1;\n" + _SEND, False, False),
+         "box['hook'] += 1;\n" + _SEND, False, True),
         ('logical-write-setter', _SETTER + "obj.hook ||= 1;\n" + _SEND,
          True, True),
         ('prefix-update-setter', _SETTER + "++obj.hook;\n" + _SEND,
@@ -159,6 +159,12 @@ def test_operation_discovery_matches_runtime(tmp):
          "const obj = { set hook(value) { f = value; } };\n"
          "obj.hook = extCmd;\n"
          "f('focus-tab', { tab: chromeTab });\n", True, True),
+        ('and-assign-may-leave-the-setter-unrun', "let send = extCmd;\n"
+         "const m = { set hook(v) { send = ordinary; } };\n"
+         "m.hook &&= 1;\n" + _SEND, True, True),
+        ('and-assign-may-leave-a-promoter-unrun', "let send = ordinary;\n"
+         "const m = { set hook(v) { send = extCmd; } };\n"
+         "m.hook &&= 1;\n" + _SEND, False, False),
         ('setter-parameter-carries-ordinary', "let f = extCmd;\n"
          "const obj = { set hook(value) { f = value; } };\n"
          "obj.hook = ordinary;\n"
@@ -236,6 +242,12 @@ def test_operation_inertness_matches_runtime(tmp):
     cases = [
         ('delete-getter-inert', _GETTER + "delete obj.hook;\n" + _SEND,
          False, False),
+        ('tagged-template-runs-the-member', "let send = ordinary;\n"
+         "const obj = { hook() { send = extCmd; } };\n"
+         "obj.hook`x`;\n" + _SEND, True, True),
+        ('tagged-template-runs-a-numeric-member', "let send = ordinary;\n"
+         "const obj = { 0() { send = extCmd; } };\n"
+         "obj[0]`x`;\n" + _SEND, True, True),
         ('delete-data-property-inert', "let send = ordinary;\n"
          "const obj = { hook: 1 };\ndelete obj.hook;\nvoid obj;\n" + _SEND,
          False, False),
@@ -409,7 +421,7 @@ def test_round7_boundaries_match_runtime(tmp):
          "if (typeof send === 'function') " + send, False, True),
         ('function-data-capture-inert', "let send = ordinary;\n"
          "const obj = { hook: function () { send = extCmd; } };\n"
-         "const value = obj.hook;\nvoid value;\n" + send, False, False),
+         "const value = obj.hook;\nvoid value;\n" + send, False, True),
         ('function-data-call-still-routes', "let send = ordinary;\n"
          "const obj = { hook: function () { send = extCmd; } };\n"
          "obj.hook();\n" + send, True, True),
@@ -534,7 +546,7 @@ def test_callable_return_provenance_matches_runtime(tmp):
          "const inner = { get send() { return ordinary; } };\n"
          "const outer = { get value() { return inner; } };\n"
          "let send = extCmd;\nconst f = outer.value.send;\n"
-         "f('focus-tab', { tab: chromeTab });\n", False, False),
+         "f('focus-tab', { tab: chromeTab });\n", False, True),
         ('staged-getter-extraction-sender',
          "const inner = { get send() { return extCmd; } };\n"
          "const outer = { get value() { return inner; } };\n"

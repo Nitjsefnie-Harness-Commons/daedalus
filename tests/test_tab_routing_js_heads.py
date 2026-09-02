@@ -152,7 +152,12 @@ _INHERIT_BASE = (
 
 
 def _inherit_rows(label_prefix, member, query):
-    """Promoter/demoter rows resolving through a same-file base class."""
+    """Promoter/demoter rows resolving through a same-file base class.
+
+    The demoting direction is a contract taint: the base body is what
+    carries the sender, and no span the walks recorded on the derived
+    receiver accounts for the handle the base name is.
+    """
     rows = []
     for kind, value, seed in (('promoter', 'extCmd', 'ordinary'),
                               ('demoter', 'ordinary', 'extCmd')):
@@ -161,7 +166,7 @@ def _inherit_rows(label_prefix, member, query):
             "let send = " + seed + ";\n"
             + _INHERIT_BASE.replace('%M', member.replace('%V', value))
             + query + _SEND,
-            value == 'extCmd', False))
+            value == 'extCmd', kind == 'demoter'))
     return rows
 
 
@@ -390,6 +395,27 @@ def test_computed_key_initializers_match_runtime(tmp):
     _assert_rows(tmp, 'computed.js', rows)
 
 
+def test_inline_computed_key_heads_match_runtime(tmp):
+    """A key spelled as a concatenation names no member the reader can
+    enumerate, so every operation on that receiver stays unprovable."""
+    rows = []
+    for label, member, query in (
+            ('getter', "const m = { get ['h' + 'ook']() "
+             "{ send = %V; return 1; } };\n", "void m['hook'];\n"),
+            ('setter', "const m = { set ['h' + 'ook'](v) "
+             "{ send = %V; } };\n", 'm.hook = 1;\n'),
+            ('method', "const m = { ['g' + 'o']() { send = %V; } };\n",
+             'm.go();\n')):
+        for kind, value, seed in (('promoter', 'extCmd', 'ordinary'),
+                                  ('demoter', 'ordinary', 'extCmd')):
+            rows.append((
+                'inline-concat-' + label + '-' + kind,
+                "let send = " + seed + ";\n"
+                + member.replace('%V', value) + query + _SEND,
+                value == 'extCmd', True))
+    _assert_rows(tmp, 'inline-computed.js', rows)
+
+
 def test_later_declared_class_statics_match_runtime(tmp):
     """A static call inside a function resolves a class declared later."""
     rows = []
@@ -593,6 +619,29 @@ def test_constructor_members_seal_opaque(tmp):
             + "k.go();\n" + _SEND,
             value == 'extCmd', kind == 'demoter'))
     _assert_rows(tmp, 'ctor.js', rows)
+
+
+def test_top_level_block_is_not_a_method_head(tmp):
+    """A call and a block on the next line is two statements.
+
+    A method shorthand only ever stands inside an object literal or a
+    class body, so reading one at the top level loses the call."""
+    rows = []
+    for kind, value, seed in (('promoter', 'extCmd', 'ordinary'),
+                              ('demoter', 'ordinary', 'extCmd')):
+        rows.append((
+            'asi-block-after-declaration-' + kind,
+            "let send = " + seed + ";\n"
+            "function run0() { send = " + value + "; }\n"
+            "run0()\n{ void 0; }\n" + _SEND,
+            value == 'extCmd', False))
+        rows.append((
+            'asi-block-after-member-call-' + kind,
+            "let send = " + seed + ";\n"
+            "const m = { go() { send = " + value + "; } };\n"
+            "m.go()\n{ void 0; }\n" + _SEND,
+            value == 'extCmd', False))
+    _assert_rows(tmp, 'asi-block.js', rows)
 
 
 def test_asi_bare_field_is_recorded(tmp):

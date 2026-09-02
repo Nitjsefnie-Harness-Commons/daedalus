@@ -143,6 +143,34 @@ def _subquadratic_growth(samples):
         for (_, smaller), (_, larger) in zip(samples, samples[1:]))
 
 
+def _js_net_scan_operations(tmp, count):
+    source = Path(tmp) / f'js_net_mentions_{count}.js'
+    lines = ["let send = ordinary;\n", "const use = (f) => f;\n"]
+    for index in range(count):
+        lines.append(
+            f"const box{index} = {{ go() {{ send = extCmd; }} }};\n")
+        lines.append(f"use(box{index}.go);\n")
+    source.write_text(''.join(lines), encoding='utf-8')
+    work = Counter()
+    js_tab_routing_violations(source, source.name, work=work)
+    return work
+
+
+def test_javascript_net_mentions_scale_without_rescans(tmp):
+    """The closing net indexes once; a rescan turns a counter quadratic."""
+    found = [(count, _js_net_scan_operations(tmp, count))
+             for count in (100, 200, 400)]
+    assert all('net_mentions' in work for _, work in found), found
+    assert all('net_promotion_tokens' in work for _, work in found), found
+    assert all('operation_prefix_bytes' in work
+               for _, work in found), found
+    for name in ('net_mentions', 'net_span_lookups',
+                 'net_container_queries', 'net_promotion_tokens',
+                 'operation_prefix_bytes'):
+        samples = [(count, work[name]) for count, work in found]
+        assert _subquadratic_growth(samples), (name, samples)
+
+
 def test_javascript_call_replay_scales_without_global_rescans(tmp):
     samples = [
         (count, _js_member_scan_operations(tmp, count))

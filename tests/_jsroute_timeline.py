@@ -113,11 +113,16 @@ class FunctionTimeline:
         return self._entries.items()
 
     def assignment_value(self, binding, definition, overrides, limits):
-        for _, _, found, value in self._entries.get(binding, ()):
-            if found == definition:
-                return self._resolve(
-                    value, overrides, {binding}, limits)
-        return ()
+        # The LAST value recorded at a definition, which is the one
+        # `values_at` settles on: an earlier walk records the shape it
+        # could read, a later one the member behind it, and taking the
+        # first here left a body replay holding None for a name an
+        # invocation resolves.
+        held = [value for _, _, found, value
+                in self._entries.get(binding, ()) if found == definition]
+        if not held:
+            return ()
+        return self._resolve(held[-1], overrides, {binding}, limits)
 
 
 class InvocationReplay:
