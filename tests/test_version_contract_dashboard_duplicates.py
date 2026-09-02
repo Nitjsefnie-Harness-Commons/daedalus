@@ -435,14 +435,7 @@ def test_vertical_tab_does_not_separate_a_rail_attribute(tmp_path):
     checker = _copy_versioned_tree(copy_root)
     _insert_before_body(
         copy_root, "<div\vclass='rail-foot'>v9.9.9</div>")
-    result = _run_checker(copy_root)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    dashboard = (copy_root / 'dashboard' / 'index.html').read_text(
-        encoding='utf-8')
-    _path, _desc, pattern = _dashboard_site(
-        checker, 'dashboard rail footer')
-    assert len(list(re.finditer(pattern, dashboard))) == 1
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
 
 
 def test_uppercase_script_tag_filters_its_decoy(tmp_path):
