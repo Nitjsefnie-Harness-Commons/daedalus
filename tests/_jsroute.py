@@ -483,7 +483,7 @@ def js_tab_routing_violations(path, rel, work=None):
     candidate_bindings = sender_candidate_bindings(
         scopes, bindings, mask, visible_binding, js_expression_end,
         senders, invocation_resolution['receivers'].callable_value,
-        [match for _, kind, match in events if kind == 'interp'])
+        [match for _, kind, match in events if kind == 'opaque'])
     sender_queries = build_sender_queries(
         candidate_bindings, reached_calls, scopes, events,
         invocations, replay,
@@ -527,7 +527,7 @@ def js_tab_routing_violations(path, rel, work=None):
                 name = m.group(2)
                 stmt_end = statement_end(mask, m.end())
                 named[name] = resolve(m.end(), stmt_end, named, depth)
-            elif kind in ('bind', 'interp'):
+            elif kind in ('bind', 'opaque'):
                 continue
             elif kind == 'assign':
                 open_paren = mask.index('(', m.start())

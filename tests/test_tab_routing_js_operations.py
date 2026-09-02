@@ -382,7 +382,7 @@ def test_round7_boundaries_match_runtime(tmp):
          True, True),
         ('template-interpolation-demotes', "let send = extCmd;\n"
          "const obj = { hook: `a${send = ordinary}b` };\nvoid obj;\n" + send,
-         False, True),
+         False, False),
         ('template-shadow-promotes-locally', "let send = ordinary;\n"
          "function run() {\n  let send = ordinary;\n"
          "  const obj = { hook: `${send = extCmd}` };\n  void obj;\n"

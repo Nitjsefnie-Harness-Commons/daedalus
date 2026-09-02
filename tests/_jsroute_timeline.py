@@ -151,7 +151,7 @@ class InvocationReplay:
         self.bind_events = {}
         self.operations = {}
         for start, kind, match in events:
-            if kind not in ('bind', 'interp'):
+            if kind not in ('bind', 'opaque'):
                 continue
             owner = scope_at(start)
             if kind == 'bind':
@@ -246,7 +246,7 @@ class InvocationReplay:
             operations = self.operations.get(function_scope, ())
             record_work(self.work, 'replay_operations', len(operations))
             for start, kind, item in operations:
-                if kind == 'interp':
+                if kind == 'opaque':
                     target = self.visible_binding(item.group(1), start)
                     if target is None:
                         continue

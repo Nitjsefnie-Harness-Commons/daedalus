@@ -22,7 +22,7 @@ def sender_query_index(requests, scopes, events, invocations, replay,
         owners = set(chain)
         scheduled = []
         for start, kind, match in events:
-            if kind in ('bind', 'interp') and (
+            if kind in ('bind', 'opaque') and (
                     context['scope_at'](start) in owners):
                 scheduled.append(
                     (start, 0, start, None, False, match, kind, None))
@@ -53,7 +53,7 @@ def sender_query_index(requests, scopes, events, invocations, replay,
                     match.group(1), start)
                 if target is None:
                     continue
-                if kind == 'interp':
+                if kind == 'opaque':
                     states[target] = context['unprovable']
                     continue
                 if delivered is None:
