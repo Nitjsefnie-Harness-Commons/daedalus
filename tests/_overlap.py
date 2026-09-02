@@ -336,13 +336,7 @@ def run_background_overlap(background, commands, order, result_base='',
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
         _, stdout, stderr = _drain.kill_and_drain(process)
-        # A timed-out drain hands back the unread bytes; the message below
-        # embeds them in a str, and the step-trace reader recovers labels
-        # from that rendering, so decode without stripping.
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode('utf-8', 'replace')
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode('utf-8', 'replace')
+        stdout, stderr = _drain_text(stdout), _drain_text(stderr)
         steps = re.findall(r'^\[step\] (.+)$', stderr, re.MULTILINE)
         last_step = steps[-1] if steps else 'none recorded'
         raise AssertionError(
@@ -352,6 +346,21 @@ def run_background_overlap(background, commands, order, result_base='',
     if process.returncode != 0:
         raise AssertionError((process.returncode, stdout, stderr))
     return json.loads(stdout)
+
+
+def _drain_text(value):
+    """A drained pipe's bytes or None, as the str the messages below embed.
+
+    A timed-out drain hands back the still-unread bytes, or None for a pipe
+    with nothing unread; these strings are rendered into failure messages the
+    step-trace reader recovers labels from, so the trailing newline of a
+    captured stream is kept rather than stripped.
+    """
+    if value is None:
+        return ''
+    if isinstance(value, bytes):
+        return value.decode('utf-8', 'replace')
+    return value
 
 
 def _output_text(value):
