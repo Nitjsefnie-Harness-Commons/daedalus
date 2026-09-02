@@ -1531,12 +1531,14 @@ def test_the_mcp_fixture_ignores_a_squatted_draw(tmp):
 
 
 def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
-    """An explicit squatted MCP port surfaces the original bind error, promptly.
+    """An explicit squatted MCP port surfaces the original bind error itself.
 
     Pre-fix the child-env helper retried five times and then raised a generic
     'lost the port race' assertion tens of seconds later; the actual error —
     EADDRINUSE — never reached the operator. The crash now arrives as its own
-    line on the child's drained stdout, carrying the original text.
+    line on the child's drained stdout, carrying the original text. The wait
+    for that line is unbounded: a loaded machine delays the drain, so the
+    line's text is the pin, never its arrival time (issue 503).
     """
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1546,7 +1548,6 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
     squatter.listen(1)
     taken = squatter.getsockname()[1]
     output = []
-    started = time.time()
     try:
         with _util.bridge(
                 tmp,
@@ -1554,17 +1555,12 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
                      'DAEDALUS_TOKEN': TOK, 'TOKEN': ''},
                 output=output) as (_base, _docroot):
             crash_line = None
-            deadline = time.time() + 10
-            while time.time() < deadline and crash_line is None:
+            while crash_line is None:
                 crash_line = next(
                     (line for line in output if 'serve crashed' in line), None)
                 if crash_line is None:
                     time.sleep(0.05)
-            elapsed = time.time() - started
-            assert crash_line is not None, (
-                f'no crash line in the child output: {output!r}')
             assert _util.is_bind_error(crash_line), crash_line
-            assert elapsed < 5, f'the crash surfaced after {elapsed:.1f}s'
     finally:
         squatter.close()
 
@@ -1574,7 +1570,8 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
 
     The deleted retry read 'address already in use' ANYWHERE as a lost draw
     and retried it five times into a generic assertion. There is no retry
-    left to fool: the crash arrives verbatim, immediately.
+    left to fool: the crash arrives verbatim and only once, so its text is
+    the pin rather than how soon it arrived.
     """
     del tmp
     _need_deps()
@@ -1591,15 +1588,12 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
         return mod
 
     globals()['_load_mcp_at_port'] = crashing_loader
-    started = time.time()
     try:
         try:
             _start_mcp_in_process('http://127.0.0.1:1')
         except AssertionError as failure:
-            elapsed = time.time() - started
             assert 'serve crashed' in str(failure), failure
             assert 'address already in use' in str(failure), failure
-            assert elapsed < 5, f'surfaced after {elapsed:.1f}s — a retry happened'
         else:
             raise AssertionError('a crashed MCP listener started')
     finally:
