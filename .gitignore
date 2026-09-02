@@ -398,6 +398,7 @@
 !/tests/test_speed_gate.py
 !/tests/test_speed_gate_jobs.py
 !/tests/test_speed_measurement.py
+!/tests/test_speed_summary.py
 !/tests/test_speedharness.py
 !/tests/test_static_routes.py
 !/tests/test_stream_lifecycle.py

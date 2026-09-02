@@ -44,10 +44,11 @@ def _speed_summary():
     return _util.load(ROOT / 'scripts' / 'ci' / 'speed_summary.py')
 
 
-def _render_speed_summary(speed_summary, shared, pairs, movements, limit=10):
+def _render_speed_summary(speed_summary, shared, pairs, movements, total=None,
+                          limit=10):
     lines = []
     speed_summary.render(lines, 'baseline', shared, pairs, movements,
-                         limit=limit)
+                         len(shared) if total is None else total, limit)
     return lines
 
 
@@ -291,7 +292,7 @@ def test_speed_comparison_zero_on_one_side_alone_is_not_a_loss(tmp):
     argv = ['--base', *base, '--head', *head,
             '--summary-file', str(summary)]
     assert compare.main(argv) == 0
-    assert ('over 1 tests present and passing'
+    assert ('over 1 of 2 tests present and passing'
             in summary.read_text(encoding='utf-8'))
 
 
@@ -465,9 +466,9 @@ def test_speed_comparison_counts_only_tests_the_comparison_accepts(tmp):
 def test_shared_speed_modules_import_by_package(tmp):
     """Shared workflow modules must import without a sys.path test shim.
 
-    compare_durations imports the zero-suite guard from a sibling module, so
-    both spellings have to work: the one CI runs the comparator with, and the
-    package import a promoted module is otherwise reachable through.
+    compare_durations imports from two siblings — the zero-suite guard from
+    zeroed_suites and this renderer from speed_summary — so both spellings,
+    the one CI runs and the package import, have to work.
     """
     del tmp
     imported = subprocess.run(
@@ -555,11 +556,11 @@ def test_speed_summary_longest_table_preserves_empty_shared_early_return(tmp):
     populated = []
     assert _speed_summary().render(populated, 'baseline', ['test'],
                                    [(1.0, 2.0, 2.0)],
-                                   [('test', 1.0, 2.0, 1.0)]) == 2.0
+                                   [('test', 1.0, 2.0, 1.0)], 1) == 2.0
     assert '| test | head median | share of covered set |' in populated
 
     empty = []
-    assert _speed_summary().render(empty, 'baseline', [], [], []) is None
+    assert _speed_summary().render(empty, 'baseline', [], [], [], 0) is None
     assert not any('Longest-running tests' in line for line in empty), empty
 
 
