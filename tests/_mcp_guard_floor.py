@@ -187,10 +187,11 @@ def _dynamic_callees(tree):
     """The names one module's imports bind to the import-by-name operation.
 
     `import importlib [as x]` and `import builtins [as x]` bind their module
-    aliases, `from importlib import import_module [as y]` and `from importlib
-    import __import__ [as z]` bind their function names, and the builtin
-    `__import__` is bound before anything runs. Classification then resolves
-    a call's callee through this map instead of matching spellings.
+    aliases, `from importlib import import_module [as y]`, `from importlib
+    import __import__ [as z]` and `from builtins import __import__ [as z]`
+    bind their function names, and the builtin `__import__` is bound before
+    anything runs. Classification then resolves a call's callee through
+    this map instead of matching spellings.
     """
     bound = {'__import__': 'by name'}
     for node in ast.walk(tree):
@@ -199,9 +200,11 @@ def _dynamic_callees(tree):
                 if alias.name in ('importlib', 'builtins'):
                     bound[alias.asname or alias.name] = alias.name
         elif isinstance(node, ast.ImportFrom):
-            if node.module == 'importlib' and not node.level:
+            if not node.level:
+                names = {'importlib': ('import_module', '__import__'),
+                         'builtins': ('__import__',)}.get(node.module, ())
                 for alias in node.names:
-                    if alias.name in ('import_module', '__import__'):
+                    if alias.name in names:
                         bound[alias.asname or alias.name] = 'by name'
     return bound
 
@@ -444,18 +447,22 @@ def guards_off_the_tool_surface(sites, reached):
 
 
 def missing_citations(table, root):
-    """The cited tests a table names that are absent from the tree.
+    """The citation and stated-gap defects a table spells.
 
     A citation is data: its suite is parsed with `ast` and the named test
-    function must be defined there. A suite path that names no file is
-    absent the same way. Rows citing None are stated gaps, not citations,
-    and are never reported.
+    function must be defined there; a suite path that names no file is
+    absent the same way. A None citation is a stated gap, and the class is
+    data too: a None row whose key no STATED_GAPS entry covers reports,
+    and a STATED_GAPS entry whose row cites a test or is gone is stale and
+    reports, so an unreasoned retirement cannot ship green.
     """
     missing = []
+    stated = set()
     for entry in table:
-        cited = entry[3]
-        if cited is None:
+        if entry[3] is None:
+            stated.add(entry[:3])
             continue
+        cited = entry[3]
         suite, _, name = cited.partition('::')
         path = Path(root) / suite
         try:
@@ -468,6 +475,12 @@ def missing_citations(table, root):
                                         ast.AsyncFunctionDef))}
         if name not in defined:
             missing.append(cited)
+    for key in sorted(stated - set(STATED_GAPS)):
+        missing.append(f'no STATED_GAPS entry covers {key!r}, which cites '
+                       'nothing')
+    for key in sorted(set(STATED_GAPS) - stated):
+        missing.append(f'STATED_GAPS names {key!r}, which the table cites '
+                       'or has dropped')
     return missing
 
 
@@ -523,15 +536,35 @@ UNWITNESSED_GUARDS = {
     },
 }
 
+# The site keys whose table row cites None, each to the issue that tracks
+# the gap. missing_citations holds the mapping both ways: a None row with
+# no entry here reports, and an entry whose row cites a test or is gone
+# reports as stale.
+STATED_GAPS = {
+    ('daedalus_mcp.transport', 'close_current_loop_clients',
+     'isinstance(outcome, BaseException)'): 545,
+    ('daedalus_bridge.env_config', 'env_positive_float',
+     "raise SystemExit(f'{name} must be a finite positive number; "
+     'got {raw!r}\') from None'): 545,
+    ('daedalus_cli.transport', 'capture_limit',
+     "raise argparse.ArgumentTypeError(f'--max must be an integer from 1 "
+     'to {NET_CAPTURE_MAX}; got {value!r}\') from None'): 545,
+    ('daedalus_cli.transport', 'capture_limit',
+     'limit < 1 or limit > NET_CAPTURE_MAX'): 545,
+    ('daedalus_cli.transport', 'positive_timeout',
+     "raise argparse.ArgumentTypeError(f'timeout must be a whole number of "
+     "seconds; got {value!r}') from None"): 545,
+}
+
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own
     # code reaches, compared both ways: an undeclared raise and a stale
     # declaration both fail. The fourth field names the test that pins the
     # guard - verified by planting the guard's failure and watching that
-    # test go red - or None for a stated gap, all of them issue 545.
+    # test go red - or None for a stated gap; STATED_GAPS names the issue
+    # each gap is tracked under.
     ('daedalus_mcp.server', 'start_in_thread', "_start_state['started']",
      'tests/test_mcp_server.py::test_start_in_thread_rejects_a_second_start'),
-    # nothing pins this: no test makes a client aclose raise
     ('daedalus_mcp.transport', 'close_current_loop_clients',
      'isinstance(outcome, BaseException)', None),
     ('daedalus_mcp.transport', 'token', 'not t',
@@ -558,8 +591,6 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'value < minimum or (maximum is not None and value > maximum)',
      'tests/test_mcp_server.py::'
      'test_mcp_and_bridge_config_use_one_env_parser'),
-    # nothing pins this: no test feeds a positive-float setting an
-    # unparseable value
     ('daedalus_bridge.env_config', 'env_positive_float',
      "raise SystemExit(f'{name} must be a finite positive number; "
      'got {raw!r}\') from None', None),
@@ -569,14 +600,11 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'test_numeric_environment_settings_fail_cleanly_at_startup'),
     ('daedalus_cli.transport', 'required', 'not v',
      'tests/test_cli.py::test_missing_token_is_an_error'),
-    # nothing pins these: no CLI test drives --max at all; only
-    # test_extension_policy pins the ceiling constant, not the refusal
     ('daedalus_cli.transport', 'capture_limit',
      "raise argparse.ArgumentTypeError(f'--max must be an integer from 1 "
      'to {NET_CAPTURE_MAX}; got {value!r}\') from None', None),
     ('daedalus_cli.transport', 'capture_limit',
      'limit < 1 or limit > NET_CAPTURE_MAX', None),
-    # nothing pins this: no CLI test passes --timeout a non-integer
     ('daedalus_cli.transport', 'positive_timeout',
      "raise argparse.ArgumentTypeError(f'timeout must be a whole number of "
      "seconds; got {value!r}') from None", None),

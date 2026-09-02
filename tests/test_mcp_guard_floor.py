@@ -262,10 +262,45 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     absent_function = (
         'tests/test_mcp_tools.py::test_this_test_does_not_exist_anywhere')
     absent_suite = 'tests/test_no_such_suite.py::test_absent'
+    # The real table rides along so the real STATED_GAPS entries have their
+    # None rows present; the expected report names only the synthetic rows.
     assert _mcp_guard_floor.missing_citations([
+        *_mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE,
         ('m', 'f', 'c', absent_function),
         ('m', 'f', 'c', absent_suite),
     ], _util.ROOT) == [absent_function, absent_suite]
+
+
+def test_a_stated_gap_is_data_the_suite_holds_true(_tmp):
+    """The stated-gap class is data, and the data is held both ways.
+
+    Retiring a citation to None is the polite deletion, so None is not
+    free: a None row no STATED_GAPS entry covers reports, and a
+    STATED_GAPS entry whose row cites a test or is gone reports as stale.
+    """
+    del _tmp
+    unaccounted = ('m', 'f', 'c', None)
+    with mock.patch.dict(
+            _mcp_guard_floor.STATED_GAPS, {('m', 'f', 'c'): 545}, clear=True):
+        assert _mcp_guard_floor.missing_citations(
+            [unaccounted], _util.ROOT) == []
+    with mock.patch.dict(_mcp_guard_floor.STATED_GAPS, clear=True):
+        assert _mcp_guard_floor.missing_citations(
+            [unaccounted], _util.ROOT) == [
+                "no STATED_GAPS entry covers ('m', 'f', 'c'), which cites "
+                'nothing']
+    cited = ('m', 'f', 'c',
+             'tests/test_mcp_tools.py::'
+             'test_the_parameter_floor_refuses_a_stranded_parameter')
+    with mock.patch.dict(
+            _mcp_guard_floor.STATED_GAPS, {('m', 'f', 'c'): 545}, clear=True):
+        assert _mcp_guard_floor.missing_citations(
+            [cited], _util.ROOT) == [
+                "STATED_GAPS names ('m', 'f', 'c'), which the table cites "
+                'or has dropped']
+        assert _mcp_guard_floor.missing_citations([], _util.ROOT) == [
+            "STATED_GAPS names ('m', 'f', 'c'), which the table cites "
+            'or has dropped']
 
 
 LAZY_COMPOSITION = '''
@@ -412,6 +447,22 @@ import builtins
 
 def load(name):
     return builtins.__import__(name)
+''', 6)
+
+
+def test_a_from_builtins_import_refuses_the_scan(_tmp):
+    """`from builtins import __import__` binds the operation too.
+
+    The alias is the spelling a reader reaches for when the bare builtin
+    is shadowed; recognising only importlib's from-imports walks past the
+    unprovable call silently.
+    """
+    _refuses_the_scan(_tmp, '''
+from builtins import __import__ as bi
+
+
+def load(name):
+    return bi(name)
 ''', 6)
 
 
