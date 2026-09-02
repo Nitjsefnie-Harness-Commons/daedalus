@@ -66,7 +66,8 @@ def test_windows_silent_stall_with_timed_out_drain_declines(tmp):
     assert message == (
         "overlap harness outer backstop timed out after 60s; "
         "last step: none recorded; stdout: ''; stderr: ''\n"
-        'retry declined: the post-kill drain did not complete'), message
+        'retry declined: the post-kill drain did not complete '
+        '(drain outcome: timed out)'), message
     assert popen.call_count == 1, popen.call_args_list
 
 
@@ -84,6 +85,26 @@ def test_windows_silent_stall_twice_names_both_attempts(tmp):
     assert record in message, message
     assert 'retry declined' not in message, message
     assert popen.call_count == 2, popen.call_args_list
+
+
+def test_windows_second_stall_names_the_timed_out_drain(tmp):
+    """A last-attempt drain that did not finish is named, not silent."""
+    del tmp
+    result, message, _, popen = _scripted_stall(
+        'win32',
+        [subprocess.TimeoutExpired('node', 60),
+         subprocess.TimeoutExpired('node', 120)],
+        [(False, '', ''), (True, None, None)])
+    assert result is None, result
+    assert popen.call_count == 2, popen.call_args_list
+    assert message.splitlines()[0] == (
+        'overlap harness outer backstop timed out after 120s; '
+        "last step: none recorded; stdout: ''; stderr: ''"), message
+    assert ('retry declined: the post-kill drain did not complete '
+            '(drain outcome: timed out)' in message), message
+    record = 'attempt 1 (pid 4713): last step: none recorded'
+    assert record in message, message
+    assert 'drain timed out: no' in message, message
 
 
 def test_non_windows_silent_stall_keeps_single_attempt(tmp):
