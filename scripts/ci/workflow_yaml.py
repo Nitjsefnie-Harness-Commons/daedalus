@@ -146,6 +146,16 @@ def _continued_quote_end(lines, start, end, quote):
     raise YAMLReadError('workflow has an incomplete quoted scalar')
 
 
+def _prepared_value(raw_value):
+    """A field value's property tokens and its comment-stripped content.
+
+    The properties come off first: a quote opening after an anchor or a
+    tag is a quote, not plain text, so its `#` is not a comment.
+    """
+    tokens, bare = node_properties(raw_value.lstrip(' \t'))
+    return tokens, _strip_inline_comment(bare.strip(' \t'))
+
+
 def _scalar_lines(lines):
     texts = [line.text for line in lines]
     scalar = set()
@@ -159,8 +169,7 @@ def _scalar_lines(lines):
             index += 1
             continue
         _key, raw_value = field
-        _tokens, bare = node_properties(raw_value.lstrip(' \t'))
-        value = _strip_inline_comment(bare.strip(' \t'))
+        _tokens, value = _prepared_value(raw_value)
         match = BLOCK_HEADER.fullmatch(value)
         if match is not None:
             stop = block_end(
@@ -169,7 +178,7 @@ def _scalar_lines(lines):
             scalar.update(range(index + 1, stop))
             index = stop
             continue
-        quote = _quote_is_open(bare)
+        quote = _quote_is_open(value)
         if quote is not None:
             stop = _continued_quote_end(
                 lines, index + 1, len(lines), quote)
@@ -246,8 +255,7 @@ def _alias_value(lines, scalar, alias_index, name, owner):
         if field is None:
             continue
         raw_value = field[1]
-        tokens, content = node_properties(
-            _strip_inline_comment(raw_value.strip(' \t')))
+        tokens, content = _prepared_value(raw_value)
         if f'&{name}' not in tokens:
             continue
         indent = _field_indent(lines[index])
@@ -267,13 +275,12 @@ def _alias_value(lines, scalar, alias_index, name, owner):
 
 
 def _step_value(lines, scalar, start, end, indent, raw_value, owner):
-    value = _strip_inline_comment(raw_value.strip(' \t'))
+    value = strip_node_properties(raw_value.strip(' \t'), owner)
     if value.startswith('*'):
         alias = ALIAS.fullmatch(value)
         if alias is None:
             raise YAMLReadError(f'{owner} has a malformed YAML alias')
         return _alias_value(lines, scalar, start, alias.group('name'), owner)
-    value = strip_node_properties(value, owner)
     if not value:
         raise YAMLReadError(f'{owner} has no scalar value')
     match = BLOCK_HEADER.fullmatch(value)
@@ -288,6 +295,8 @@ def _step_value(lines, scalar, start, end, indent, raw_value, owner):
         return decode_block(
             body, indent, style, chomp, explicit, owner)
     if value.startswith(("'", '"')):
+        if _quote_is_open(value) is not None:
+            raise YAMLReadError(f'{owner} has an unsupported multiline scalar')
         return decode_inline_scalar(value, owner)
     if value.startswith(('*', '[', '{', '@', '`')):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
