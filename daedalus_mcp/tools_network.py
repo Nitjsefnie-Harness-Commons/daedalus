@@ -12,17 +12,16 @@ def register(mcp, bridge):
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
-        if max_requests:
-            # Same range the extension enforces on arrival (NET_CAPTURE_MAX): the
-            # buffer is a service-worker memory budget, so a nonpositive value
-            # evicts its only event and an enormous one bounds nothing.
-            if not isinstance(max_requests, int) or isinstance(max_requests, bool):
-                raise ValueError('max_requests must be an integer')
-            if max_requests < 1 or max_requests > NET_CAPTURE_MAX:
-                raise ValueError(
-                    f'max_requests must be an integer from 1 to {NET_CAPTURE_MAX}; '
-                    f'got {max_requests}')
-            fields['maxRequests'] = int(max_requests)
+        # Same range the extension enforces on arrival (NET_CAPTURE_MAX): the
+        # buffer is a service-worker memory budget, so a nonpositive value
+        # evicts its only event and an enormous one bounds nothing.
+        if not isinstance(max_requests, int) or isinstance(max_requests, bool):
+            raise ValueError('max_requests must be an integer')
+        if max_requests < 1 or max_requests > NET_CAPTURE_MAX:
+            raise ValueError(
+                f'max_requests must be an integer from 1 '
+                f'to {NET_CAPTURE_MAX}; got {max_requests}')
+        fields['maxRequests'] = int(max_requests)
         return await bridge.ext_cmd(
             '_net_cap', 'net-capture', timeout=15, **fields)
 
