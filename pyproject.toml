@@ -44,7 +44,7 @@ dependencies = []
 # rejection the MCP suite asserts.
 mcp = [
     "httpx==0.28.1",
-    "mcp==2.0.0",
+    "mcp==2.1.1",
     "starlette==1.6.0",
     "httptools==0.8.0",
 ]
