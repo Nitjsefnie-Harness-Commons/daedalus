@@ -614,6 +614,18 @@ def test_object_copy_and_receiver_forms_match_runtime(tmp):
         ('global-computed-member-demotion', "let send = extCmd;\n"
          "globalThis.box = { run: () => send('focus-tab', "
          "{ tab: chromeTab }) };\nsend = ordinary;\nbox['run']();\n", False),
+        ('global-member-ignores-sibling-demoter', "let send = ordinary;\n"
+         "globalThis.box = { run() { send = extCmd; } };\n"
+         "function sibling() {\n"
+         "  const box = { run() { send = ordinary; } };\n  void box;\n}\n"
+         "void sibling;\nbox.run();\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('global-member-ignores-sibling-promoter', "let send = ordinary;\n"
+         "globalThis.box = { run() { send = ordinary; } };\n"
+         "function sibling() {\n"
+         "  const box = { run() { send = extCmd; } };\n  void box;\n}\n"
+         "void sibling;\nbox.run();\n"
+         "send('focus-tab', { tab: chromeTab });\n", False),
     ]
     path = Path(tmp) / 'receiver.js'
     observed = [(label, *_runtime_and_guard(source, path))

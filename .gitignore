@@ -252,8 +252,10 @@
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
 !/tests/_jsroute_factory_cases.py
+!/tests/_jsroute_keys.py
 !/tests/_jsroute_operations.py
 !/tests/_jsroute_receiver.py
+!/tests/_jsroute_returns.py
 !/tests/_jsroute_source.py
 !/tests/_jsroute_state.py
 !/tests/_jsroute_timeline.py

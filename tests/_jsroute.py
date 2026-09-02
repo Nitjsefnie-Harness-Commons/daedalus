@@ -21,7 +21,7 @@ from _jsroute_timeline import (  # noqa: E402
     declaration_records, function_reference, lexical_limits)
 from _jsroute_state import build_sender_queries  # noqa: E402
 from _jsroute_source import (SourceIndex, function_body_at,  # noqa: E402
-                             method_head_start,  # noqa: E402
+                             method_scope_openings,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              record_work, statement_end,
                              top_level as _js_top_level,
@@ -225,34 +225,9 @@ def js_tab_routing_violations(path, rel, work=None):
                 _js_top_level, js_split_top_level)
             add_scope(
                 None, body_open, params, match.start(), body, param_order)
-    for match in re.finditer(r'(?<![\w$])([\w$]+)\s*\(', mask):
-        if match.group(1) in ('if', 'for', 'while', 'switch', 'catch'):
-            continue
-        open_paren = mask.index('(', match.start())
-        close = pair_end.get(open_paren, len(mask))
-        body_open = after_space(close)
-        previous_at = method_head_start(mask, match.start(), pair_start)
-        previous = mask[previous_at:previous_at + 1]
-        if (mask[body_open:body_open + 1] == '{'
-                and _js_word_before(mask, match.start()) != 'function'
-                and previous in '{,;}'):
-            method_positions.add(match.start())
-            add_scope(open_paren, body_open)
-    # A computed key names the method instead of an identifier: the head is
-    # the bracket pair, and the body is a scope like any other method's.
-    for match in re.finditer(r'(?<![\w$])\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*\(',
-                             mask):
-        if mask[match.start()] != text[match.start()]:
-            continue
-        head = _js_previous_nonspace(mask, match.start())
-        if head < 0 or mask[head] not in '{,':
-            continue
-        open_paren = after_space(pair_end.get(match.start(), match.start()))
-        close = pair_end.get(open_paren, len(mask))
-        body_open = after_space(close)
-        if mask[body_open:body_open + 1] != '{':
-            continue
-        method_positions.add(open_paren)
+    for open_paren, body_open, marker in method_scope_openings(
+            mask, text, pair_end, pair_start):
+        method_positions.add(marker)
         add_scope(open_paren, body_open)
 
     nested = [0]
@@ -354,9 +329,10 @@ def js_tab_routing_violations(path, rel, work=None):
             return resolved['name']
         if resolved['binding'] is not None:
             return states.get(resolved['binding'])
-        if resolved['form'] in ('get', 'set', 'generator'):
-            # A property the model cannot follow reads as an unknown value:
-            # whatever the transfer hands on, its later uses stay unprovable.
+        if resolved['form'] in (
+                'get', 'set', 'generator', 'callable-return'):
+            # A carried value the model cannot follow stays unprovable at
+            # every later use rather than losing its sender provenance.
             return _JS_UNPROVABLE
         for name in re.findall(r'\b[\w$]+\b', expr):
             if (name in senders
@@ -457,7 +433,8 @@ def js_tab_routing_violations(path, rel, work=None):
                 continue
             target = invocation_resolution['receivers'].callable_value(
                 (match.end(), expression_end))
-        if target['form'] in ('get', 'set', 'generator'):
+        if target['form'] in (
+                'get', 'set', 'generator', 'callable-return'):
             carries.add(visible_binding(match.group(1), match.start()))
         value = target['body']
         if value is None and target['binding'] is not None:

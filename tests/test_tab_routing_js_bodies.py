@@ -128,6 +128,26 @@ def test_round3_boundaries_match_runtime(tmp):
          "const method = { ['promote']() { send = extCmd; } };\n"
          "void method;\n"
          "send('focus-tab', { tab: chromeTab });\n", False),
+        ('uninvoked-quoted-demoter', "let send = extCmd;\n"
+         "const method = { 'demote'() { send = ordinary; } };\n"
+         "void method;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('uninvoked-private-demoter', "let send = extCmd;\n"
+         "class Method { #demote() { send = ordinary; } }\n"
+         "const method = new Method();\nvoid method;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('uninvoked-static-demoter', "let send = extCmd;\n"
+         "class Method { static demote() { send = ordinary; } }\n"
+         "void Method;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('uninvoked-decimal-key-demoter', "let send = extCmd;\n"
+         "const method = { 1.5() { send = ordinary; } };\n"
+         "void method;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
+        ('uninvoked-escaped-name-demoter', "let send = extCmd;\n"
+         "const method = { \\u0064emote() { send = ordinary; } };\n"
+         "void method;\n"
+         "send('focus-tab', { tab: chromeTab });\n", True),
         ('unproved-spread-promoter', "let send = ordinary;\n"
          "const base = { promote() { send = extCmd; } };\n"
          "const method = { ...base };\nmethod.promote();\n"
