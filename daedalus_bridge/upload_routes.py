@@ -279,5 +279,5 @@ def latest_screenshot(upload_dir, token, params):
                     latest = f
     if not latest:
         return 404, {'error': 'no screenshot'}
-    fmt = latest.suffix.lstrip('.')
+    fmt = latest.suffix.lstrip('.').lower()
     return FileAnswer(latest, screenshot_mime(fmt))

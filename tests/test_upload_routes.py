@@ -222,14 +222,14 @@ def test_named_upload_refuses_a_non_screenshot_suffix(tmp):
         404, {'error': 'no screenshot'})
 
 
-def test_an_uppercase_suffix_is_typed_differently_by_each_route(tmp):
-    """The two routes derive the format differently, and always have.
+def test_an_uppercase_suffix_is_typed_the_same_by_each_route(tmp):
+    """A suffix admitted by a case-insensitive comparison is typed
+    case-insensitively, by both screenshot selections.
 
-    `named_upload` lowercases the suffix before typing it, so `.PNG` serves
-    as an image. `latest_screenshot` lowercases only to DISCOVER the file and
-    then types the raw suffix, so the same file serves as a byte stream. Both
-    derivations moved verbatim; this pins the wire behaviour so a later edit
-    that harmonises them is a visible decision rather than a silent one.
+    Both routes discover `SHOT.PNG` through a lowercased membership test,
+    so both must also lowercase the suffix before mapping it to a MIME
+    type; otherwise the same stored file serves as `image/png` on the
+    `path=` selection and as a byte stream on the latest-by-id selection.
     """
     routes = _load('fixture_upload_routes_uppercase')
     _store(tmp, 'tok', 'id1', 'SHOT.PNG', b'IMG')
@@ -237,7 +237,7 @@ def test_an_uppercase_suffix_is_typed_differently_by_each_route(tmp):
     assert named.mime == 'image/png', named
     latest = routes.latest_screenshot(Path(tmp), 'tok', {})
     assert latest.path.name == 'SHOT.PNG', latest
-    assert latest.mime == 'application/octet-stream', latest
+    assert latest.mime == 'image/png', latest
 
 
 def test_screenshot_mime_maps_every_served_format(_tmp):
