@@ -7,7 +7,7 @@ expected calls are the exact (surface, details) pairs the call must record on
 the probe bridge, in order.
 
 A parameter no case exercises is named in UNPINNED_PARAMETERS, with the reason
-it is still witnessed.
+it is safe to leave unwitnessed.
 """
 MARKER = 'pinned'
 
@@ -286,8 +286,9 @@ TOOL_COMMANDS = {
 
 UNPINNED_PARAMETERS = {
     # Per tool: parameters deliberately exercised by no TOOL_COMMANDS override,
-    # each carrying the reason it is still witnessed. A stale entry - one the
-    # signature does not have, or one a case already witnesses - is refused.
+    # each carrying the reason it is safe to leave unwitnessed. A stale entry,
+    # one the signature does not have or one a case already witnesses, is
+    # refused.
     'exec': {
         # every waited case pins checked_timeout at the default
         'timeout',
