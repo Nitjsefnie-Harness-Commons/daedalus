@@ -1,8 +1,6 @@
 """Read the node properties a workflow scalar may carry before its value.
 
-An anchor, a tag, or both in either order may precede the content. Only a tag
-guaranteed to resolve to a string is admitted, because what a parser makes of
-`!!int` or a local tag is the schema's business.
+An anchor, a tag, or both in either order may precede the content.
 """
 import re
 
