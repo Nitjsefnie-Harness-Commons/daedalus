@@ -27,6 +27,10 @@ MAX_AGE = 3.0
 # EOF has to follow the stream's end promptly. Generous against the ~0s
 # expected, tight against the 30s watchdog the bug fell through to.
 EOF_DEADLINE = MAX_AGE + 3.0
+# The `mcp` health state lands in about the time the front end's import
+# takes, so the bound is generous: it asserts nothing about how fast
+# correct code is, and its only expiry is a lost signal reported below.
+MCP_STATE_TIMEOUT = 60.0
 
 
 def _open_stream(base, tab):
@@ -158,7 +162,69 @@ def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
             lambda: [line for line in output
                      if 'MCP bootstrap failed' in line],
             'the bridge died without reporting the failed MCP bootstrap')
+        status, health = _util.get_json(base + '/health')
+        assert health['mcp'] == 'down', health
     assert any('.[mcp]' in line for line in reported), reported
+
+
+def _await_mcp_state(base, drained, wanted):
+    """Poll /health until its `mcp` field reaches `wanted`.
+
+    A generous deadline rather than a margin: it asserts nothing about how
+    fast correct code is — the state lands in about the time the front
+    end's import takes — and its only expiry is the signal this control
+    pins, reported with the child's output attached instead of one that
+    timeout-minutes kills unnamed.
+    """
+    started = time.time()
+    while time.time() - started < MCP_STATE_TIMEOUT:
+        status, health = _util.get_json(base + '/health')
+        assert status == 200, (status, health)
+        if health.get('mcp') == wanted:
+            return health
+        time.sleep(0.05)
+    raise AssertionError(
+        f'/health never reported mcp {wanted!r}:\n' + ''.join(drained))
+
+
+def test_an_mcp_bind_crash_surfaces_in_the_health_payload(tmp):
+    """A crashed MCP listener reaches the payload, not only one stderr line.
+
+    The serve thread's caught crash ends the thread and nothing else: the
+    bridge keeps answering /health with 200, so a consumer that misses the
+    line has no structured way to tell this child from a healthy one. The
+    squatted port is the issue's own repro — the listener genuinely cannot
+    come up — and the payload must say so while the child still answers.
+    """
+    squatter = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    squatter.bind(('127.0.0.1', 0))
+    squatter.listen(1)
+    output = []
+    try:
+        with _util.bridge(tmp,
+                          env={'DAEDALUS_MCP_PORT':
+                               str(squatter.getsockname()[1])},
+                          output=output) as (base, _docroot):
+            health = _await_mcp_state(base, output, 'down')
+            assert health['ok'] is True and health['mcp'] == 'down', health
+        assert any('serve crashed' in line for line in output), output
+    finally:
+        squatter.close()
+
+
+def test_a_healthy_child_reports_the_mcp_front_end_up(tmp):
+    """The healthy case must read as healthy, not merely not-down.
+
+    A signal that said 'down' when nothing crashed would be worse than the
+    silence it replaced, and one that stayed 'starting' forever would never
+    confirm anything: a child whose listener bound and kept serving must
+    reach 'up'.
+    """
+    output = []
+    with _util.bridge(tmp, output=output) as (base, _docroot):
+        health = _await_mcp_state(base, output, 'up')
+        assert health['ok'] is True and health['mcp'] == 'up', health
 
 
 def _held_mcp_import(tmp, entered, release, left):
@@ -211,7 +277,8 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
 
     The import is held open rather than timed: the announcement arriving
     while the finder is still blocked is what says the bootstrap is off the
-    main thread, and no wall-clock margin could say it.
+    main thread, and no wall-clock margin could say it. While the front
+    end's import is still held open, /health reports it `starting`.
     """
     entered = Path(tmp) / 'mcp-import-entered'
     release = Path(tmp) / 'mcp-import-released'
@@ -241,6 +308,7 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
         assert not left.exists(), 'the import was let go before readiness'
         status, health = _util.get_json(f'http://127.0.0.1:{port}/health')
         assert status == 200 and health['ok'] is True, (status, health)
+        assert health['mcp'] == 'starting', health
     finally:
         release.write_text('go', encoding='utf-8')
         proc.terminate()
