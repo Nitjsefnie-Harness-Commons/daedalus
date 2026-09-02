@@ -166,7 +166,8 @@ def _scalar_lines(lines):
         match = BLOCK_HEADER.fullmatch(value)
         if match is not None:
             stop = block_end(
-                texts, index + 1, len(texts), _indent(lines[index]), match)
+                texts, index + 1, len(texts),
+                _field_indent(lines[index]), match)
             scalar.update(range(index + 1, stop))
             index = stop
             continue
