@@ -195,12 +195,15 @@ def test_an_mcp_bind_crash_surfaces_in_the_health_payload(tmp):
     line has no structured way to tell this child from a healthy one. The
     squatted port is the issue's own repro — the listener genuinely cannot
     come up — and the payload must say so while the child still answers.
+    The squatter carries no SO_REUSEADDR: on Windows that flag would let the
+    child's own SO_REUSEADDR bind coexist with it, and the crash this control
+    exists to inject never happens — the shape the collision test in
+    tests/test_mcp_server.py pins.
     """
     if not all(importlib.util.find_spec(name) is not None
                for name in ('httpx', 'mcp', 'starlette')):
         _util.skip('the MCP front end\'s dependencies are not installed')
     squatter = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     squatter.bind(('127.0.0.1', 0))
     squatter.listen(1)
     output = []
