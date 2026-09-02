@@ -1534,11 +1534,13 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
     """An explicit squatted MCP port surfaces the original bind error itself.
 
     Pre-fix the child-env helper retried five times and then raised a generic
-    'lost the port race' assertion tens of seconds later; the actual error —
-    EADDRINUSE — never reached the operator. The crash now arrives as its own
-    line on the child's drained stdout, carrying the original text. The wait
-    for that line is unbounded: a loaded machine delays the drain, so the
-    line's text is the pin, never its arrival time (issue 503).
+    'lost the port race' assertion; EADDRINUSE never reached the operator.
+    What is pinned is the OS bind text surfacing in the child's drained
+    output, never how soon it arrives (issue 503).
+
+    The deadline is a reporting bound, not a margin: the child outlives its
+    crashed MCP serve, so a lost crash line would wait forever — expiry
+    turns that into a failure naming the line and attaching the output.
     """
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1555,11 +1557,15 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
                      'DAEDALUS_TOKEN': TOK, 'TOKEN': ''},
                 output=output) as (_base, _docroot):
             crash_line = None
-            while crash_line is None:
+            deadline = time.time() + 300
+            while time.time() < deadline and crash_line is None:
                 crash_line = next(
                     (line for line in output if 'serve crashed' in line), None)
                 if crash_line is None:
                     time.sleep(0.05)
+            assert crash_line is not None, (
+                f"no '[MCP] serve crashed' line in the drained output: "
+                f'{output!r}')
             assert _util.is_bind_error(crash_line), crash_line
     finally:
         squatter.close()
