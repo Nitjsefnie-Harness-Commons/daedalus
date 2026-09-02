@@ -1,8 +1,8 @@
 """`POST /segment-job` — minting and resuming an HLS relay job.
 
-`mint_job` returns `(status, payload)` and takes the quotas a legacy
-record is measured against as a `JobQuotas`, so the route reads no
-configuration itself.
+`mint_job` returns `(status, payload)` and takes the quotas as a
+`JobQuotas`, so the route reads no configuration itself: they are fixed
+into a fresh record and are what a legacy record is measured against.
 
 `seg_dir_root` is the segments root the job's directory and its record
 both live under; `segment_routes`' module docstring carries the one
@@ -17,7 +17,7 @@ from daedalus_bridge import segment_store
 
 
 class JobQuotas(NamedTuple):
-    """The limits a legacy record without quotas is converted against."""
+    """The limits a mint fixes into a record, new or converted."""
 
     max_index: int
     max_count: int
@@ -67,8 +67,7 @@ def mint_job(seg_dir_root, token, body, quotas):
                         record.get('stored_count'),
                         record.get('stored_bytes')) != reconciled:
                     segment_store.mark_dirty(seg_dir_root, job)
-                    segment_store.write_usage(
-                        seg_dir_root, job, *reconciled)
+                    segment_store.write_usage(seg_dir_root, job, *reconciled)
                 return 200, {'ok': True, 'sig': sig}
 
             quota_fields = (

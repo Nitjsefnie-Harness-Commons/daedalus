@@ -73,8 +73,7 @@ def admit_segment(seg_dir_root, params, sig):
     try:
         seg_dir = path_safety.under(seg_dir_root, job)
         with segment_store.seg_lock:
-            record = segment_store.record_for_sig(
-                seg_dir_root, job, sig)
+            record = segment_store.record_for_sig(seg_dir_root, job, sig)
             quota = (segment_store.quota(record)
                      if record is not None else None)
     except ValueError:
@@ -117,10 +116,9 @@ def store_segment(raw, admission):
                 record = segment_store.load_record(seg_dir_root, job)
             except segment_store.SegmentRecordError:
                 record = None
-            usage = (segment_store.usage(record)
-                     if record is not None
-                     and not segment_store.needs_recount(
-                         seg_dir_root, job) else None)
+            trusted = (record is not None
+                       and not segment_store.needs_recount(seg_dir_root, job))
+            usage = segment_store.usage(record) if trusted else None
             if usage is None:
                 # A job minted before totals were kept, or one whose
                 # last write_usage never confirmed landing. Either way
