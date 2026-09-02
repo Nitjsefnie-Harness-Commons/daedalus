@@ -59,6 +59,34 @@ def test_drain_returns_the_clean_result_when_the_pipes_close(tmp):
     assert (out, err) == ('clean-out', 'clean-err')
 
 
+class _DrainedNothing:
+    """A killed child whose timed-out drain had nothing unread to return."""
+
+    def __init__(self):
+        self.pid = 4713
+        self.stdout = None
+        self.stderr = None
+        self.returncode = None
+
+    def kill(self):
+        self.returncode = -9
+
+    def communicate(self, timeout=None):
+        assert timeout is not None, 'the drain was called without a bound'
+        raise subprocess.TimeoutExpired(
+            cmd='stub', timeout=timeout, output=None, stderr=None)
+
+    def wait(self, timeout=None):
+        assert timeout is not None, 'the reap was called without a bound'
+        return -9
+
+
+def test_a_drain_with_nothing_unread_forwards_none(tmp):
+    """None goes out verbatim; the caller decides what empty means."""
+    assert _drain.kill_and_drain(_DrainedNothing(), drain_timeout=0.05) == (
+        True, None, None)
+
+
 def test_a_grandchild_holding_pipes_cannot_hang_the_drain(tmp):
     """The real failure: a killed child whose grandchild holds the pipes.
 
