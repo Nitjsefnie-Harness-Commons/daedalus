@@ -73,8 +73,8 @@ def render(lines, base_label, shared, pairs, movements, total, limit=10):
         lines.append('Largest relative changes '
                      '(median across rounds, indicative only):')
         lines.append('')
-        lines.append('Rows within the 0.10s noise floor are omitted, so a '
-                     'shown ratio is a shown movement.')
+        lines.append('Rows that moved less than the 0.10s noise floor are '
+                     'omitted, so a shown ratio is a shown movement.')
         lines.append('')
         lines.append('| test | baseline | head | delta | ratio |')
         lines.append('|---|---:|---:|---:|---:|')

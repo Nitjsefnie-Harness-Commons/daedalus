@@ -188,6 +188,8 @@ def test_the_noise_floor_omits_sub_floor_movements(tmp):
         '--base', *base, '--head', *head, '--summary-file', str(summary)])
     assert code == 0, output
     text = summary.read_text(encoding='utf-8')
+    assert ('Rows that moved less than the 0.10s noise floor are omitted, '
+            'so a shown ratio is a shown movement.') in text, text
     relative = _table(text, 'Largest relative changes',
                       'Longest-running tests')
     assert len(relative) == 3, relative
