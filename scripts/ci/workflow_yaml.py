@@ -252,10 +252,13 @@ def _alias_value(lines, scalar, alias_index, name, owner):
         _body, end = _section(lines, scalar, index, indent)
         if not content:
             first = _first_child(lines, scalar, index + 1, end, indent)
-            shape = 'mapping'
-            if first is not None and lines[first].text[
-                    _indent(lines[first]):].startswith('-'):
-                shape = 'sequence'
+            shape = 'scalar'
+            if first is not None:
+                body = lines[first].text[_indent(lines[first]):]
+                if body.startswith('-') and body[1:2] in (' ', '\t'):
+                    shape = 'sequence'
+                elif _line_field(body) is not None:
+                    shape = 'mapping'
             raise YAMLReadError(
                 f'{owner} has an unsupported alias to a nested '
                 f'{shape}: &{name}')
