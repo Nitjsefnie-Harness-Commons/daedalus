@@ -92,10 +92,22 @@ SITES = [
      r'''(?P<kq>['"]?)script(?P=kq)\s*:\s*\{\s*'''
      r'''(?P<vq>['"]?)version(?P=vq)\s*:\s*'''
      r'''(?P<q>['"`])(?P<v>(?:(?!(?P=q))[\s\S])*)(?P=q)'''),
+    # Both dashboard sites anchor to the element's opening tag, so prose
+    # spelling `class="rail-foot">v…` is not a version site (#446), and the
+    # attribute region stays bounded inside the tag. The class value admits a
+    # whole-token list and whitespace around `=` (#439).
     ('dashboard/index.html', 'dashboard rail footer',
-     r'''(?<![^\t\n\f\r ])class=(?P<q>['"])rail-foot(?P=q)>v(?P<v>[^ <]*)'''),
+     r'''<div[\t\n\f\r ]+(?:[^>]*?[\t\n\f\r ])?'''
+     r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
+     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r >]+[\t\n\f\r ]+)*rail-foot'''
+     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r >]+)*[\t\n\f\r ]*(?P=q)>v'''
+     r'''(?P<v>[^ <]*)'''),
     ('dashboard/index.html', 'dashboard status line',
-     r'''<span class=(?P<q>['"])sl-v(?P=q)>(?P<v>[^<]*)</span>'''),
+     r'''<span[\t\n\f\r ]+(?:[^>]*?[\t\n\f\r ])?'''
+     r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
+     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r >]+[\t\n\f\r ]+)*sl-v'''
+     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r >]+)*[\t\n\f\r ]*(?P=q)>'''
+     r'''(?P<v>[^<]*)</span>'''),
     # The published wheel is a version claim about the wire format, so it is
     # checked like any other site. pyproject reads this same attribute, so
     # there is nothing separate to keep in step.

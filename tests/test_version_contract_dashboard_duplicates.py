@@ -70,6 +70,16 @@ def _canonical_dashboard_value(copy_root, checker, desc):
     return re.search(pattern, text).group('v')
 
 
+def _assert_one_dashboard_match(copy_root, checker, desc):
+    """Markup the matcher must ignore leaves the real site counted once."""
+    result = _run_checker(copy_root)
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr)
+    path, _site_desc, pattern = _dashboard_site(checker, desc)
+    dashboard = (copy_root / path).read_text(encoding='utf-8')
+    assert len(list(re.finditer(pattern, dashboard))) == 1, desc
+
+
 def _assert_duplicate_refused(result, desc, canonical, second_value):
     assert result.returncode != 0, (result.returncode, result.stdout,
                                     result.stderr)
@@ -269,6 +279,30 @@ def test_closed_tag_text_is_not_a_rail_attribute_position(tmp_path):
     assert len(list(re.finditer(pattern, dashboard))) == 1
 
 
+def test_ordinary_text_is_not_a_rail_footer_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(
+        copy_root, '<p>ordinary class="rail-foot">v9.9.9</p>')
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
+def test_single_quoted_text_is_not_a_rail_footer_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(
+        copy_root, "<p>ordinary class='rail-foot'>v9.9.9</p>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
+def test_text_spaced_equals_is_not_a_rail_footer_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(
+        copy_root, '<p>ordinary class = "rail-foot">v9.9.9</p>')
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
 def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp_path):
     separators = (
         ('TAB', '\t'),
@@ -288,6 +322,82 @@ def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp_path):
         _insert_before_body(copy_root, duplicate)
         result = _run_checker(copy_root)
         _assert_duplicate_refused(result, desc, canonical, '9.9.9')
+
+
+def test_spaced_equals_rail_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard rail footer'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(copy_root, '<div class = "rail-foot">v9.9.9</div>')
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '9.9.9')
+
+
+def test_trailing_class_rail_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard rail footer'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(copy_root,
+                        '<div class="rail-foot wider">v9.9.9</div>')
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '9.9.9')
+
+
+def test_leading_class_rail_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard rail footer'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, '<div class="wider rail-foot">v9.9.9</div>')
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '9.9.9')
+
+
+def test_attributes_before_class_rail_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard rail footer'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, "<div id=\"x\" class = 'rail-foot'>v9.9.9</div>")
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '9.9.9')
+
+
+def test_spaced_equals_status_line_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, "<span class = 'sl-v'>8.8.8</span>")
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '8.8.8')
+
+
+def test_trailing_class_status_line_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, "<span class='sl-v wider'>8.8.8</span>")
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '8.8.8')
+
+
+def test_leading_class_status_line_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, "<span class='wider sl-v'>8.8.8</span>")
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '8.8.8')
 
 
 def test_vertical_tab_does_not_separate_a_rail_attribute(tmp_path):
