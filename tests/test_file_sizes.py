@@ -5,6 +5,9 @@ The policy itself lives in scripts/ci/size_baseline.py, because CI rewrites it
 when a file shrinks. What is tested here is that the tree satisfies it, and
 that the rewriting only ever moves a number down.
 """
+import contextlib
+import io
+import re
 import sys
 from pathlib import Path
 
@@ -12,11 +15,50 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
 ROOT = _util.ROOT
+POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
+
+# Wordings that offer a bigger number as the way past a refusal. Each is a
+# claim no correct statement of the rule can make, so an innocent rewording
+# passes while the old policy coming back does not.
+SANCTIONS_GROWTH = (
+    # Growth presented as a supported move rather than a refusal.
+    'growing a listed file is allowed',
+    # Raising the recorded number offered as how that growth is done.
+    'editing its recorded number',
+    # The refusal message's old second option, beside splitting the file.
+    'record the new size',
+    # A file crossing its ceiling for the first time excused by a fresh
+    # entry instead of being split.
+    'add a baseline entry',
+    'adding a baseline entry',
+)
+
+# The rule stated positively, so deleting it is as visible as contradicting
+# it. Both spellings of the negation count; the claim is what is pinned.
+STATES_THE_RULE = re.compile(r'n(?:ever|ot) raised by hand')
+
+# A claim only counts where nothing negates it: the rule states itself in the
+# same words, so the pin has to read the permission and let the prohibition
+# through.
+UNNEGATED = r'(?<!never )(?<!not )(?<!no )'
 
 
 def _policy():
-    return _util.load(ROOT / 'scripts' / 'ci' / 'size_baseline.py',
-                      'size_baseline')
+    return _util.load(POLICY_SOURCE, 'size_baseline')
+
+
+def _policy_prose():
+    """The whole policy source as one lowercased line of prose.
+
+    Whole source rather than the docstring alone: a comment or a printed
+    string carries the advice to a reader just as the docstring does.
+    Comment markers, string quotes and line breaks become spaces, so a claim
+    cannot evade the pin by landing either side of one.
+    """
+    text = POLICY_SOURCE.read_text(encoding='utf-8').lower()
+    for marker in ('#', "'", '"'):
+        text = text.replace(marker, ' ')
+    return ' '.join(text.split())
 
 
 def test_every_tracked_module_satisfies_the_size_policy(tmp):
@@ -25,11 +67,11 @@ def test_every_tracked_module_satisfies_the_size_policy(tmp):
     policy = _policy()
     found = policy.violations(policy.tracked_sizes())
     assert not found['grown'], (
-        'these files grew past their recorded size; split them, or record the '
-        f"new size in scripts/ci/size_baseline.py: {found['grown']}")
+        f"these files grew past their recorded size: {found['grown']}\n"
+        f'{policy.REMEDIATION}')
     assert not found['over'], (
         'these files are over the ceiling with no BASELINE entry: '
-        f"{found['over']}")
+        f"{found['over']}\n{policy.REMEDIATION}")
 
 
 def test_the_baseline_names_only_files_that_still_need_it(tmp):
@@ -99,6 +141,35 @@ def test_tightening_leaves_a_file_it_has_no_entry_for(tmp):
     rewritten = policy.tightened(
         text, {'server.py': 2624, 'tests/_util.py': 10}, {'server.py': 2624})
     assert rewritten is None, rewritten
+
+
+def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
+    """A refused session must not read a bigger number as the fix."""
+    del tmp
+    prose = _policy_prose()
+    for claim in SANCTIONS_GROWTH:
+        assert not re.search(UNNEGATED + re.escape(claim), prose), (
+            f'the size policy offers growth by hand: {claim!r}')
+    assert STATES_THE_RULE.search(prose), (
+        'the size policy no longer says a recorded number is never raised '
+        'by hand')
+
+
+def test_a_refused_run_prints_the_remedy(tmp):
+    """The guidance a refused session actually reads is the current rule."""
+    del tmp
+    policy = _policy()
+    policy.tracked_sizes = lambda: {'huge.py': policy.PRODUCTION_CEILING + 1}
+    captured = io.StringIO()
+    argv = sys.argv
+    sys.argv = ['size_baseline.py']
+    try:
+        with contextlib.redirect_stderr(captured):
+            status = policy.main()
+    finally:
+        sys.argv = argv
+    assert status == 1, status
+    assert policy.REMEDIATION in captured.getvalue(), captured.getvalue()
 
 
 if __name__ == '__main__':
