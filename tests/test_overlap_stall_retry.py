@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The overlap harness's one-retry-on-a-silent-Windows-stall pins."""
+"""The overlap harness's one-retry-on-a-silent-stall pins."""
 import contextlib
 import io
 import subprocess
@@ -107,18 +107,35 @@ def test_windows_second_stall_names_the_timed_out_drain(tmp):
     assert 'drain timed out: no' in message, message
 
 
-def test_non_windows_silent_stall_keeps_single_attempt(tmp):
-    """Linux keeps its single attempt and today's verdict verbatim."""
+def test_non_windows_silent_stall_recovers_on_second_attempt(tmp):
+    """A silent non-Windows stall is retried once with doubled bounds."""
     del tmp
     result, message, note, popen = _scripted_stall(
+        'linux',
+        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
+        [(False, '', '')])
+    assert result == [], result
+    assert message is None, message
+    assert popen.call_count == 2, popen.call_args_list
+    second_argv = popen.call_args_list[1].args[0]
+    assert second_argv[-1] == '30000', second_argv
+    assert ('overlap harness recovered after outer timeout: '
+            'attempt 1 (pid ' in note), note
+
+
+def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
+    """A non-Windows drain that did not finish declines the retry."""
+    del tmp
+    result, message, _, popen = _scripted_stall(
         'linux', [subprocess.TimeoutExpired('node', 60)],
-        [(False, None, None)])
+        [(True, None, None)])
     assert result is None, result
     assert message == (
         "overlap harness outer backstop timed out after 60s; "
-        "last step: none recorded; stdout: ''; stderr: ''"), message
+        "last step: none recorded; stdout: ''; stderr: ''\n"
+        'retry declined: the post-kill drain did not complete '
+        '(drain outcome: timed out)'), message
     assert popen.call_count == 1, popen.call_args_list
-    assert note == '', note
 
 
 def test_windows_stall_with_output_does_not_retry(tmp):
