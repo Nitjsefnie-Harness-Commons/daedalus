@@ -19,8 +19,8 @@ def register(mcp, bridge):
             raise ValueError('max_requests must be an integer')
         if max_requests < 1 or max_requests > NET_CAPTURE_MAX:
             raise ValueError(
-                f'max_requests must be an integer from 1 '
-                f'to {NET_CAPTURE_MAX}; got {max_requests}')
+                f'max_requests must be an integer from 1 to '
+                f'{NET_CAPTURE_MAX}; got {max_requests}')
         fields['maxRequests'] = int(max_requests)
         return await bridge.ext_cmd(
             '_net_cap', 'net-capture', timeout=15, **fields)
