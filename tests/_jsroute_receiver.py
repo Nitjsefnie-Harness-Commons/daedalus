@@ -3,6 +3,9 @@ from bisect import bisect_right
 import re
 
 from _jsroute_calls import parameter_sources
+from _jsroute_keys import class_accessor, decode_string_literal, source_key
+from _jsroute_returns import (callable_body, callable_return,
+                              constructed_value, member_value)
 from _jsroute_source import BUILTIN_CHAINS, record_work
 
 
@@ -104,11 +107,10 @@ class ReceiverIndex:
         self.senders = senders
         self.work = work
         self.values = {}
-        self.names = {}
         self.members = {}
         self.globals = {}
         self.computed = {}
-        self._index_computed_keys()
+        self._index_computed_keys(bindings)
         self._index_values(bindings)
         self._index_functions()
         self._index_member_writes()
@@ -122,25 +124,28 @@ class ReceiverIndex:
         record_work(self.work, 'receiver_computed_queries')
         if not isinstance(key, tuple):
             return key
-        entries = self.computed.get(key[1], ())
+        binding = self.visible_binding(key[1], key[2])
+        if binding is None:
+            return None
+        entries = self.computed.get(binding, ())
         index = bisect_right(entries, (key[2], chr(0x10ffff))) - 1
         return entries[index][1] if index >= 0 else None
 
     def member(self, owner_name, key, position, seen=frozenset(),
                env=None, wanted=None):
         record_work(self.work, 'receiver_member_queries')
-        key = self.computed_key(key)
-        if key is None:
-            return target('unprovable')
-        if (key in BUILTIN_CHAINS['array']
-                and self.known_array(owner_name, position)):
-            return target('irrelevant')
-        binding = (self.visible_binding(owner_name, position)
-                   or self._later_binding(owner_name))
+        binding = self.visible_binding(owner_name, position)
         if binding is None:
             span = self._latest(self.globals.get(owner_name), position)
             if span is None:
                 return target('irrelevant')
+        key = self.computed_key(key)
+        if key is None and wanted is None:
+            return target('unprovable')
+        if (key in BUILTIN_CHAINS['array']
+                and self.known_array(owner_name, position)):
+            return target('irrelevant')
+        if binding is None:
             return self._member_from_span(
                 span, key, position, seen, env or {}, wanted)
         return self._member_binding(
@@ -157,23 +162,14 @@ class ReceiverIndex:
         return self._member_from_span(
             expression, key, expression[0], frozenset(), env)
 
-    def constructed_member(self, name, opening, close, key, position):
-        body, env = self._call_environment(
-            name, opening, close, position)
-        if body is None:
-            return target('unprovable')
-        pattern = re.compile(
-            r'\bthis\s*\.\s*' + re.escape(key) + r'\s*=(?!=|>)')
-        found = list(pattern.finditer(self.mask, body[1], body[2]))
-        if len(found) != 1:
-            return target('unprovable')
-        start = found[0].end()
-        end = min(self.expression_end(self.mask, start), body[2])
-        return self.callable_value((start, end), env)
+    def constructed_member(self, name, opening, close, key, position,
+                           wanted=None):
+        return constructed_value(
+            self, name, opening, close, key, position, wanted)
 
     def _call_environment(self, name, opening, close, position):
         binding = self.visible_binding(name, position)
-        body = self._callable_body(binding, position)
+        body = callable_body(self, binding, position)
         if body is None:
             return None, None
         scope = self._scope_for(body)
@@ -185,7 +181,7 @@ class ReceiverIndex:
     def callable_body(self, name, position):
         """Body of the function `name` names at `position`, or None."""
         binding = self.visible_binding(name, position)
-        return self._callable_body(binding, position) if binding else None
+        return callable_body(self, binding, position) if binding else None
 
     def scope_for(self, body):
         """Index of the scope a function body belongs to, or None."""
@@ -233,6 +229,9 @@ class ReceiverIndex:
                 if found is not None and found[2] in ('get', 'set',
                                                       'generator'):
                     return False
+                if ('(' in self.mask[item_left:item_right]
+                        and found is None):
+                    return False
                 continue
             if colon is not None:
                 key = self._source_key(item_left, colon)
@@ -263,38 +262,28 @@ class ReceiverIndex:
         body = self.body_at(self.mask, left)
         if body is not None:
             return target('known', body=body, form=form)
+        returned = callable_return(self, left, right)
+        if returned is not None:
+            return returned
+        member = member_value(self, left, right, env)
+        if member is not None:
+            return member
         name = self.mask[left:right].strip()
-        member = re.fullmatch(
-            r'([\w$]+)\s*\.\s*([\w$]+)', name)
-        if member:
-            return self.member(member.group(1), member.group(2), left)
-        computed = re.fullmatch(
-            r'([\w$]+)\s*\[\s*(["\'])([^"\']+)\2\s*\]',
-            self.text[left:right].strip())
-        if computed:
-            return self.member(computed.group(1), computed.group(3), left)
         if name in self.senders:
             return target('known', name=name)
         if re.fullmatch(r'[\w$]+', name):
             binding = self.visible_binding(name, left)
             if binding is not None:
                 source = env.get(binding) if env is not None else None
+                if source is not None:
+                    if (source['status'] != 'known'
+                            or source['span'] is None):
+                        return target('unprovable')
+                    return self.callable_value(
+                        source['span'], env, form, wanted)
                 return target(
                     'known', binding=binding, source=source)
         return target('unprovable')
-
-    def _later_binding(self, name):
-        """Binding for a name the call site's text position precedes.
-
-        A call inside a body runs when that body is invoked, which is after
-        the whole scope's declarations have executed, so the receiver the
-        call sees is the one the declaration built.
-        """
-        found = self.names.get(name)
-        if not found:
-            return None
-        return max((item for item in found if item is not None),
-                   key=lambda item: item[1], default=None)
 
     def _member_binding(self, binding, key, position, seen, env,
                         wanted=None):
@@ -361,10 +350,14 @@ class ReceiverIndex:
                 call[0], call[1], call[2], key, left)
         constructor = self._constructor_call(left, right)
         if constructor is not None:
-            if self.visible_binding(constructor[0], left) is None:
+            is_class, _ = class_accessor(
+                self, constructor[0], key, wanted, left)
+            if (self.visible_binding(constructor[0], left) is None
+                    and not is_class):
                 return target('irrelevant')
             return self.constructed_member(
-                constructor[0], constructor[1], constructor[2], key, left)
+                constructor[0], constructor[1], constructor[2], key, left,
+                wanted)
         status, value, form = self._property_span(
             span, key, position, seen, env, wanted)
         if status != 'known':
@@ -405,6 +398,11 @@ class ReceiverIndex:
         cursor = left
         form = 'method'
         while cursor < right:
+            quoted = re.match(
+                r'\s*(["\'])(?:\\[\s\S]|(?!\1)[^\\])*\1',
+                self.text[cursor:right])
+            if quoted is not None:
+                break
             cursor = next_offset(self.mask, cursor)
             char = self.mask[cursor:cursor + 1]
             if char == '*':
@@ -413,9 +411,11 @@ class ReceiverIndex:
                 continue
             word, word_end = word_at(self.mask, cursor)
             if (word in _METHOD_HEADS
-                    and self.mask[next_offset(self.mask, word_end):
-                                  next_offset(self.mask, word_end) + 1]
-                    != '('):
+                    and (re.match(
+                        r'\s*["\']', self.text[word_end:right])
+                        or self.mask[next_offset(self.mask, word_end):
+                                     next_offset(self.mask, word_end) + 1]
+                        != '(')):
                 if word in ('get', 'set'):
                     form = word
                 cursor = word_end
@@ -423,15 +423,23 @@ class ReceiverIndex:
             break
         if cursor >= right or self.mask[cursor] == '*':
             return None
-        if self.mask[cursor] == '[':
+        quoted = re.match(
+            r'\s*(["\'])(?:\\[\s\S]|(?!\1)[^\\])*\1',
+            self.text[cursor:right])
+        if quoted is not None:
+            name_start = cursor + quoted.start(1)
+            name_end = cursor + quoted.end()
+        elif self.mask[cursor] == '[':
+            name_start = cursor
             name_end = self.pair_end.get(cursor)
             if name_end is None:
                 return None
         else:
+            name_start = cursor
             name, name_end = word_at(self.mask, cursor)
             if not name:
                 return None
-        key = self._source_key(cursor, name_end)
+        key = self._source_key(name_start, name_end)
         open_paren = next_offset(self.mask, name_end)
         if key is None or self.mask[open_paren:open_paren + 1] != '(':
             return None
@@ -447,6 +455,12 @@ class ReceiverIndex:
     def _property_span(self, span, key, position, seen, env, wanted=None):
         left, right = self._unwrap(span)
         expression = self.mask[left:right].strip()
+        if (self.mask[left:left + 1] == '['
+                or self.body_at(self.mask, left) is not None
+                or re.match(
+                    r'(?:new\b|null|undefined|true|false|[0-9]|["\'])',
+                    self.text[left:right])):
+            return 'irrelevant', None, None
         if re.fullmatch(r'[\w$]+', expression):
             binding = self.visible_binding(expression, left)
             if binding is None or binding in seen:
@@ -483,12 +497,6 @@ class ReceiverIndex:
                 return 'unprovable', None, None
             return self._property_span(
                 nested, key, position, seen | {binding}, env, wanted)
-        if (self.mask[left:left + 1] == '['
-                or self.body_at(self.mask, left) is not None
-                or re.match(
-                    r'(?:new\b|null|undefined|true|false|[0-9]|["\'])',
-                    self.text[left:right])):
-            return 'irrelevant', None, None
         if self.mask[left:left + 1] != '{':
             return 'unprovable', None, None
         unknown = False
@@ -511,6 +519,10 @@ class ReceiverIndex:
             if colon is None and equals is None:
                 found = self._method_entry(item_left, item_right)
                 if found is not None:
+                    if key is None:
+                        if found[2] == wanted:
+                            return 'unprovable', None, None
+                        continue
                     if found[0] != key:
                         continue
                     if wanted is not None and found[2] != wanted:
@@ -560,10 +572,6 @@ class ReceiverIndex:
         end = body[2] - inset
         return self.body_scopes.get((start, end))
 
-    def _callable_body(self, binding, position):
-        span = self._latest(self.values.get(binding), position)
-        return self.body_at(self.mask, span[0]) if span is not None else None
-
     def _simple_call(self, left, right):
         found = re.match(r'([\w$]+)\s*\(', self.mask[left:right])
         if found is None:
@@ -599,17 +607,7 @@ class ReceiverIndex:
         return left, self.expression_end(self.mask, left)
 
     def _source_key(self, left, right):
-        raw = self.text[left:right].strip()
-        quoted = re.fullmatch(r'["\']([^"\']+)["\']', raw)
-        if quoted:
-            return quoted.group(1)
-        computed = re.fullmatch(r'\[\s*(["\'])([^"\']+)\1\s*\]', raw)
-        if computed:
-            return computed.group(2)
-        dynamic = re.fullmatch(r'\[\s*([\w$]+)\s*\]', raw)
-        if dynamic:
-            return self.computed_key(('computed', dynamic.group(1), left))
-        return raw if re.fullmatch(r'[\w$]+', raw) else None
+        return source_key(self.text, left, right, self.computed_key)
 
     def _latest_value(self, entries, position):
         """Latest value for `entries` at `position`, with its assignment."""
@@ -636,7 +634,6 @@ class ReceiverIndex:
             if binding is not None:
                 self._history(self.values, binding).append(
                     (match.start(), self._expression_span(match.end())))
-            self.names.setdefault(match.group(1), set()).add(binding)
 
     def _index_functions(self):
         record_work(self.work, 'receiver_source_characters', len(self.mask))
@@ -656,14 +653,18 @@ class ReceiverIndex:
         patterns = [(re.compile(
             r'\b([\w$]+)\s*\.\s*([\w$]+)\s*=(?!=|>)'), self.mask)]
         patterns.append((re.compile(
-            r'\b([\w$]+)\s*\[\s*(["\'])([^"\']+)\2\s*\]'
+            r'\b([\w$]+)\s*\[\s*(["\'])'
+            r'((?:\\[\s\S]|(?!\2)[^\\])*)\2\s*\]'
             r'\s*=(?!=|>)'), self.text))
         for pattern, source in patterns:
             for match in pattern.finditer(source):
                 if self.mask[match.start()] != self.text[match.start()]:
                     continue
                 owner = match.group(1)
-                key = match.group(2) if source is self.mask else match.group(3)
+                key = (match.group(2) if source is self.mask else
+                       decode_string_literal(
+                           match.group(2) + match.group(3)
+                           + match.group(2)))
                 span = self._expression_span(match.end())
                 if owner in ('globalThis', 'window'):
                     self._history(self.globals, key).append(
@@ -676,12 +677,13 @@ class ReceiverIndex:
         for entries in (*self.members.values(), *self.globals.values()):
             entries.sort()
 
-    def _index_computed_keys(self):
+    def _index_computed_keys(self, bindings):
         record_work(self.work, 'receiver_source_characters', len(self.mask))
-        pattern = re.compile(
-            r'\b(?:const|let|var)\s+([\w$]+)\s*=\s*'
-            r'(["\'])([^"\']+)\2')
-        for match in pattern.finditer(self.text):
-            if self.mask[match.start()] == self.text[match.start()]:
-                self._history(self.computed, match.group(1)).append(
-                    (match.start(), match.group(3)))
+        for match in bindings:
+            binding = self.visible_binding(match.group(1), match.start())
+            quoted = re.match(
+                r'\s*(["\'])(?:\\[\s\S]|(?!\1)[^\\])*\1',
+                self.text[match.end():])
+            if binding is not None and quoted is not None:
+                self._history(self.computed, binding).append(
+                    (match.start(), decode_string_literal(quoted.group(0))))

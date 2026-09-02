@@ -1,6 +1,7 @@
 """Callable parameters and invocation targets for the JavaScript guard."""
 import re
 
+from _jsroute_keys import decode_string_literal, source_key
 from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
@@ -37,18 +38,9 @@ def _segments(mask, start, end):
 
 
 def _key(text, left, right):
-    value = text[left:right].strip()
-    quoted = re.fullmatch(r'["\']([^"\']+)["\']', value)
-    computed = re.fullmatch(
-        r'\[\s*(["\'])([^"\']+)\1\s*\]', value)
-    if quoted:
-        return quoted.group(1)
-    if computed:
-        return computed.group(2)
-    dynamic = re.fullmatch(r'\[\s*([\w$]+)\s*\]', value)
-    if dynamic:
-        return ('computed', dynamic.group(1), left)
-    return value if re.fullmatch(r'[\w$]+', value) else None
+    return source_key(
+        text, left, right,
+        lambda key: key)
 
 
 def parameter_bindings(mask, text, start, end, pair_end, top_level,
@@ -270,7 +262,7 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
             resolved = (callable_value((match.end(), end))
                         if callable_value is not None else None)
             carried = resolved is not None and resolved['form'] in (
-                'get', 'set', 'generator')
+                'get', 'set', 'generator', 'callable-return')
             bound_sender = bound and bound.group(1) in senders
             resolved_sender = resolved is not None and (
                 resolved['name'] in senders
@@ -473,10 +465,9 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 target = _target(status)
             else:
                 raw_key = text[bracket + 1:before].strip()
-                quoted = re.fullmatch(
-                    r'(["\'])([^"\']+)\1', raw_key)
-                if quoted:
-                    key = quoted.group(2)
+                quoted = decode_string_literal(raw_key)
+                if quoted is not None:
+                    key = quoted
                 elif (optional_computed
                       and re.fullmatch(r'[\w$]+', raw_key)):
                     key = ('computed', raw_key, bracket)
@@ -581,7 +572,12 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
 
 _TEMPLATE = re.compile(r'`(?:\\.|[^`])*`', re.DOTALL)
 _INTERPOLATION = re.compile(r'\$\{')
-_INTERP_ASSIGN = re.compile(r'(?<![\w$])([\w$]+)\s*=(?!=|>)')
+_INTERP_WRITE = re.compile(
+    r'(?<![\w$.])([\w$]+)\s*'
+    r'(?:=(?!=|>)|\*\*=|>>>=|<<=|>>=|&&=|\|\|=|\?\?='
+    r'|[-+*/%&|^]=|\+\+|--)')
+_INTERP_PREFIX_UPDATE = re.compile(
+    r'(?<![\w$.])(?:\+\+|--)\s*([\w$]+)')
 
 
 def _interpolation_spans(template):
@@ -625,11 +621,12 @@ def interpolation_events(mask, text):
     found = []
     for template in _TEMPLATE.finditer(text):
         for left, right in _interpolation_spans(template):
-            for assignment in _INTERP_ASSIGN.finditer(
-                    template.group(0)[left:right]):
-                found.append((
-                    template.start() + left + assignment.start(),
-                    'interp', assignment))
+            expression = template.group(0)[left:right]
+            for pattern in (_INTERP_WRITE, _INTERP_PREFIX_UPDATE):
+                for write in pattern.finditer(expression):
+                    position = template.start() + left + write.start()
+                    found.append((position, 'interp',
+                                  pattern.match(text, position)))
     return found
 
 

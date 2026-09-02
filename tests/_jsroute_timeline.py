@@ -151,13 +151,14 @@ class InvocationReplay:
         self.bind_events = {}
         self.operations = {}
         for start, kind, match in events:
-            if kind != 'bind':
+            if kind not in ('bind', 'interp'):
                 continue
             owner = scope_at(start)
-            self.bind_events.setdefault(owner, []).append(
-                (start, match))
+            if kind == 'bind':
+                self.bind_events.setdefault(owner, []).append(
+                    (start, match))
             self.operations.setdefault(owner, []).append(
-                (start, 'bind', match))
+                (start, kind, match))
         for call in invocations:
             if call['status'] == 'irrelevant' or call['parent']:
                 continue
@@ -239,11 +240,30 @@ class InvocationReplay:
             sources = dict(active_sources)
             self._override_parameters(
                 overrides, inherited, function_scope, call_start,
-                call['args'], limits, sources)
+                call['args'], limits, sources,
+                call.get('argument_status'))
             path_optional = inherited_optional or len(bodies) > 1
             operations = self.operations.get(function_scope, ())
             record_work(self.work, 'replay_operations', len(operations))
             for start, kind, item in operations:
+                if kind == 'interp':
+                    target = self.visible_binding(item.group(1), start)
+                    if target is None:
+                        continue
+                    source = {'status': 'unprovable', 'span': None,
+                              'rest': None, 'excluded': ()}
+                    overrides[target] = ()
+                    sources[target] = source
+                    owner = self.scopes[function_scope]
+                    local = (owner['start'] <= target[1]
+                             and target[2] <= owner['end'])
+                    if not local:
+                        inherited[target] = ()
+                        active_sources[target] = source
+                        if self.root_state is not None:
+                            self.root_state[target] = ()
+                    writes.append((start, item, path_optional, kind, source))
+                    continue
                 if kind == 'bind':
                     applied = self._apply_assignment(
                         item, start, function_scope, path_optional,
@@ -252,10 +272,19 @@ class InvocationReplay:
                         target = applied['target']
                         source = self._assignment_source(
                             item, applied['optional'])
+                        value_span = source['span']
+                        value_name = (
+                            self.mask[value_span[0]:value_span[1]].strip()
+                            if value_span is not None else '')
+                        value_binding = (
+                            self.visible_binding(value_name, start)
+                            if re.fullmatch(r'[\w$]+', value_name) else None)
+                        delivered = sources.get(value_binding)
                         sources[target] = source
                         if applied['captured']:
                             active_sources[target] = source
-                        writes.append((start, item, path_optional))
+                        writes.append((start, item, path_optional, kind,
+                                       delivered))
                     continue
                 nested_optional = (
                     path_optional or self.optional_write(
@@ -284,11 +313,17 @@ class InvocationReplay:
         return self.body_scopes.get((start, end))
 
     def _override_parameters(self, overrides, inherited, function_scope,
-                             call_start, args, limits, sender_sources):
+                             call_start, args, limits, sender_sources,
+                             argument_status=None):
         scope = self.scopes[function_scope]
-        for source in parameter_sources(
-                scope['param_order'], args, self.mask, self.text,
-                self.top_level, self.computed_key):
+        sources = parameter_sources(
+            scope['param_order'], args, self.mask, self.text,
+            self.top_level, self.computed_key)
+        if argument_status is not None:
+            for source in sources:
+                source['status'] = argument_status
+                source['span'] = None
+        for source in sources:
             target = self.visible_binding(
                 source['name'], scope['start'])
             if target is None:
