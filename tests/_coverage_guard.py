@@ -44,6 +44,8 @@ _KEEP_ALLOWLIST = frozenset({
     'test_subprocess_startup_program_starts_coverage',
     # run_tests.py is measured where it stands in the copied tree.
     'tests/test_suite_runner.py::_runner_tree',
+    # The runner-bound suite runs the copied runner so its lines are recorded.
+    'tests/test_run_tests.py::_run_sandbox',
     # The copied checker runs from the mapped copy so its lines count.
     'tests/test_version_contract.py::_run_checker',
     'tests/test_version_contract.py::test_check_versions_detects_drift',
