@@ -19,11 +19,14 @@ _PASSING_SUITE = (
     "print('stub pass')\n"
 )
 
-_STALLING_SUITE = 'import time\nprint("stalling", flush=True)\ntime.sleep(60)\n'
+_STALLING_SUITE = (
+    'import time\nprint("stalling", flush=True)\n'
+    'time.sleep(60)\n'
+)
 
 
 def _sandbox(tmp, suites):
-    root = Path(tmp) / 'sandbox'
+    root = Path(tmp) / 'tree'
     (root / 'tests').mkdir(parents=True)
     shutil.copy(ROOT / 'run_tests.py', root / 'run_tests.py')
     for name, source in suites.items():
@@ -44,6 +47,7 @@ def test_a_suite_that_overruns_is_named_and_the_run_completes(tmp):
     result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': '2'})
     assert result.returncode == 1, (result.returncode, result.stdout)
     assert 'SUITE TIMED OUT' in result.stdout, result.stdout
+    assert 'returncode' in result.stdout, result.stdout
     assert 'FAILED: test_staller.py' in result.stdout, result.stdout
     # The other suite's block still lands: the run did not go silent.
     assert '=== test_passer.py ===' in result.stdout, result.stdout
@@ -59,9 +63,12 @@ def test_a_suite_within_its_budget_still_passes(tmp):
 
 def test_an_invalid_timeout_stops_startup_naming_the_setting(tmp):
     root = _sandbox(tmp, {'test_passer.py': _PASSING_SUITE})
-    result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': 'soon'})
-    assert result.returncode != 0, (result.returncode, result.stdout)
-    assert 'DAEDALUS_SUITE_TIMEOUT' in result.stdout + result.stderr
+    for value in ('soon', 'inf', 'INF', '1e400', 'nan'):
+        result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': value})
+        assert result.returncode != 0, (value, result.returncode,
+                                        result.stdout)
+        assert 'DAEDALUS_SUITE_TIMEOUT' in result.stdout + result.stderr, (
+            value)
 
 
 if __name__ == '__main__':
