@@ -1278,11 +1278,12 @@ jobs:
           # neither, and the instrument then times every suite.
           SUITES_ONLY: ${{ matrix.suites }}
           SUITES_EXCEPT: ${{ matrix.except }}
-        # A failing test does NOT fail this job: tests.yml owns that verdict,
-        # and a non-passing test is simply absent from the side's durations and
-        # drops out of the intersection. What this step must guarantee is that
-        # every round produced usable reports on BOTH sides, so it checks for
-        # them explicitly rather than trusting an exit code it ignores.
+        # A failing test does NOT fail this job: tests.yml owns that verdict.
+        # A non-passing test is absent from the side's durations, so it drops
+        # out of the intersection, and is recorded as an outcome beside them.
+        # What this step must guarantee is that every round produced usable
+        # reports on BOTH sides, so it checks for them explicitly rather than
+        # trusting an exit code it ignores.
         run: |
           # set -f keeps the glob metacharacters away from the shell's own
           # pathname expansion — they have to reach the instrument as
