@@ -538,9 +538,9 @@ def test_the_modules_need_no_configuration_of_their_own(_tmp):
     """Neither route module nor anything either imports reads `config`.
 
     `daedalus_bridge.config` still exits without `DAEDALUS_DIR`, which is
-    the control proving the environment really is stripped. In that same
-    environment both route modules import for real — no stub — so nothing
-    on their import graph, `segment_store` included, binds configuration.
+    what proves the environment is stripped. Both route modules then import
+    for real, so nothing on their graph — `segment_store` included — binds
+    configuration.
     """
     env = {k: v for k, v in os.environ.items()
            if not k.startswith('DAEDALUS_')}
@@ -560,11 +560,9 @@ def test_the_modules_need_no_configuration_of_their_own(_tmp):
 def test_the_segments_root_governs_the_whole_write_path(tmp):
     """Admission and storage both write under the root they were handed.
 
-    The negative half is the control: the `.ts` file always followed the
-    passed root, while the record it is accounted in followed configuration.
-    It is scoped to the whole configured tree rather than to the two names
-    this job would take there, because a wrong root leaks under whatever
-    name the misrouted call happens to build.
+    The negative half is the control, and it is scoped to the whole
+    configured tree: a wrong root leaks under whatever name the misrouted
+    call builds, not only under this job's own two.
     """
     routes = _routes('fixture_segment_routes_altroot')
     jobs = _jobs('fixture_segment_jobs_altroot')
@@ -578,8 +576,7 @@ def test_the_segments_root_governs_the_whole_write_path(tmp):
     admitted = routes.admit_segment(
         root, {'job': [job], 'seg': ['0']}, payload['sig'])
     assert isinstance(admitted, routes.Admission), admitted
-    # Both sides resolved: this suite's root is an unresolved mkdtemp and
-    # `under` hands back the path it checked, resolved.
+    # Both sides resolved: `under` hands back the path it checked.
     assert os.path.realpath(admitted.seg_dir_root) == os.path.realpath(root)
     assert routes.store_segment(b'abcd', admitted) == (200, {'ok': True})
     assert (root / job / '000000.ts').read_bytes() == b'abcd'
@@ -592,10 +589,9 @@ def test_the_segments_root_governs_the_whole_write_path(tmp):
 def test_a_failed_write_leaves_its_recount_mark_under_the_passed_root(tmp):
     """A refused write keeps its mark, and the mark follows the root.
 
-    The mark is the one file the write path puts beside the record under
-    a name the job does not spell, and a successful write clears it. So a
-    refused write is where a misrouted mark stays visible, and only a
-    listing of the whole configured tree sees it arrive there.
+    A successful write clears the mark, so a refused one is where a
+    misrouted mark stays visible — and it is named for the record rather
+    than the job, so only the whole listing sees it arrive.
     """
     routes = _routes('fixture_segment_routes_markroot')
     jobs = _jobs('fixture_segment_jobs_markroot')
@@ -621,9 +617,8 @@ def test_a_failed_write_leaves_its_recount_mark_under_the_passed_root(tmp):
 def test_the_passed_quota_is_the_one_the_write_path_enforces(tmp):
     """A count limit of 1 refuses the second segment.
 
-    Storing the passed quota is not enough on its own: this drives the
-    limit through admission and storage, where the suite's configured
-    ceiling of 3 would let both segments through.
+    This drives the limit through admission and storage, where the
+    suite's configured ceiling of 3 would let both segments through.
     """
     routes = _routes('fixture_segment_routes_altquota')
     jobs = _jobs('fixture_segment_jobs_altquota')

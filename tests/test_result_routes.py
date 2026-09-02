@@ -29,9 +29,8 @@ atexit.register(shutil.rmtree, _BASE, ignore_errors=True)
 os.environ['DAEDALUS_DIR'] = _BASE
 os.environ['DAEDALUS_PORT'] = '0'
 RES_DIR = Path(_BASE) / 'results'
-# What the tests below hand the route as its retention cap. 8 is above any
-# delivery count they store, so eviction never fires in them; the cap's own
-# behaviour has its own controls.
+# Above any delivery count these tests store, so eviction never fires in
+# them; the cap has its own controls.
 DELIVERY_CAP = 8
 
 
@@ -64,7 +63,6 @@ def _events(cmd_dir, token):
 
 
 def _configured_delivery_dir():
-    """The delivery root `daedalus_bridge.config` names for this process."""
     config = _util.load(
         _util.ROOT / 'daedalus_bridge' / 'config.py',
         'fixture_result_routes_config')
@@ -224,9 +222,9 @@ def test_the_module_needs_no_configuration_of_its_own(_tmp):
     """Neither the route module nor anything it imports reads `config`.
 
     `daedalus_bridge.config` still exits without `DAEDALUS_DIR`, which is
-    the control proving the environment really is stripped. In that same
-    environment the route module imports for real — no stub — so nothing on
-    its import graph, `result_store` included, binds configuration.
+    what proves the environment is stripped. The route module then imports
+    for real, so nothing on its graph — `result_store` included — binds
+    configuration.
     """
     env = {k: v for k, v in os.environ.items()
            if not k.startswith('DAEDALUS_')}
@@ -260,7 +258,6 @@ def test_the_results_root_governs_where_a_delivery_lands(tmp):
 
 
 def test_the_results_root_governs_the_delivery_read(tmp):
-    """`fetch_result` reads the delivery from the root it was handed."""
     routes = _load('fixture_result_routes_readroot')
     root = Path(tmp) / 'read-results'
     empty = Path(tmp) / 'empty-results'
@@ -293,10 +290,9 @@ def test_the_passed_delivery_cap_is_the_one_enforced(tmp):
 def test_a_zero_delivery_cap_evicts_nothing(tmp):
     """A cap of 0 evicts nothing.
 
-    That is all it pins. It is not evidence for the guard's falsy clause:
-    with `max_results` 0 the length comparison selects nothing anyway,
-    because `ordered[-0]` is `ordered[0]`, so the boundary is the oldest
-    stamp and no entry is below it.
+    Not evidence for the guard's falsy clause: `ordered[-0]` is
+    `ordered[0]`, so with 0 the boundary is the oldest stamp anyway and
+    nothing is below it.
     """
     routes = _load('fixture_result_routes_nocap')
     root = Path(tmp) / 'nocap-results'

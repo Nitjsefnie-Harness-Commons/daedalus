@@ -8,8 +8,7 @@ too and would otherwise be written as a response.
 `seg_dir_root` is the segments directory these routes join a job's own
 directory under, and it governs the record beside that directory too:
 every `segment_store` call here is given the same root, so one root names
-one tree and a caller can redirect a whole request's storage by passing a
-different one.
+one tree.
 """
 import pathlib
 import time

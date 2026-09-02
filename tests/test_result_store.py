@@ -241,9 +241,8 @@ def test_delivery_paths_use_the_retrying_parent_comparison(tmp):
 def test_the_store_needs_no_bridge_configuration(tmp):
     """A results root is a parameter, so no `DAEDALUS_*` value is needed.
 
-    The environment is stripped of every `DAEDALUS_*` variable, which the
-    probe reports back: importing `daedalus_bridge.config` there raises
-    `SystemExit`, so a store that still read it could not run at all.
+    Importing `daedalus_bridge.config` with those stripped raises
+    `SystemExit`, so a store that still read it could not run here at all.
     """
     root = Path(tmp) / 'unconfigured' / 'results'
     root.mkdir(parents=True)
@@ -263,8 +262,6 @@ def test_the_store_needs_no_bridge_configuration(tmp):
     answer = json.loads(marked[0][len('UNCONFIGURED '):])
     assert answer['daedalus_env'] == [], answer
     # Resolved on both sides: `under` returns the path it checked, resolved.
-    # The runner happens to resolve the temp root it hands over, so this does
-    # not depend on that staying true.
     expected_dir = os.path.realpath(root / 'deliveries' / 'tok_extension')
     assert answer['dir'] == expected_dir, (answer, expected_dir)
     expected_file = os.path.realpath(

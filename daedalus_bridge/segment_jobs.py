@@ -6,7 +6,7 @@ into a fresh record and are what a legacy record is measured against.
 
 `seg_dir_root` is the segments root the job's directory and its record
 both live under; `segment_routes`' module docstring carries the one
-statement of what that root governs.
+statement of what it governs.
 """
 import json
 from typing import NamedTuple
