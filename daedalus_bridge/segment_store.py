@@ -227,8 +227,7 @@ def mark_dirty(seg_dir_root, job):
     that then also fails leaves neither a marker nor a correct record.
     """
     try:
-        atomic_file.write_text_retrying(
-            _dirty_path(seg_dir_root, job), '')
+        atomic_file.write_text_retrying(_dirty_path(seg_dir_root, job), '')
     except OSError:
         return False
     return True
