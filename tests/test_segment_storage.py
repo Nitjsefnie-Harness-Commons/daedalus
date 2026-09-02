@@ -523,6 +523,21 @@ def test_a_recount_reconciles_and_clears_the_mark_before_a_rejection(tmp):
         assert not dirty_path.exists(), 'mark should have cleared on reconcile'
 
 
+def _await_lines(proc, drained, probe, what):
+    """Poll `probe` with no deadline, giving up only when the child dies.
+
+    What is being waited for is an ordering: the line travels on the child's
+    drained stdout, so a deadline would turn a loaded machine into a failure
+    while proving nothing extra on a fast one. A regression surfaces as a
+    hung job instead, which is the trade this repository takes deliberately.
+    """
+    while True:
+        value = probe()
+        if value:
+            return value
+        assert proc.poll() is None, f'{what}:\n' + ''.join(drained)
+
+
 def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
     """`DAEDALUS_DEBUG_TIMING=1` attributes the write path per phase.
 
@@ -532,26 +547,33 @@ def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
     runner. Unset, the instrumentation prints nothing at all, which the
     unit contract for `log_timing` pins.
     """
-    lines = []
+    lines, child = [], []
     env = {'DAEDALUS_DEBUG_TIMING': '1'}
     with _util.bridge(
-            tmp, env=env, output=lines) as (base, _docroot):
+            tmp, env=env, output=lines, proc_out=child) as (base, _docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
         sig = minted['sig']
-        for index in ('0', '1'):
+        indices = ('0', '1')
+        for index in indices:
             status, body = post_segment(
                 base, job, sig, index, payload=b'abc')
             assert status == 200, (index, status, body)
 
+        def timing_lines():
+            matches = [match for match in
+                       (TIMING_LINE.fullmatch(line.strip()) for line in lines)
+                       if match]
+            return matches if len(matches) == len(indices) else []
+
+        matches = _await_lines(
+            child[0], lines, timing_lines,
+            'the bridge printed no segment timing line')
+
     shape = ('prefix', 'job', 'stored count',
              'acquire', 'usage', 'replaced', 'write', 'record',
              'parts', 'total')
-    observed = []
-    for line in lines:
-        match = TIMING_LINE.fullmatch(line.strip())
-        if match:
-            observed.append(match.groupdict())
+    observed = [match.groupdict() for match in matches]
     assert len(observed) == 2, (shape, lines)
     for row in observed:
         assert row['job'] == job, row

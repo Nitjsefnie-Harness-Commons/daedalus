@@ -454,8 +454,6 @@ def test_a_legacy_job_that_exceeds_current_quotas_is_not_resumed(_tmp):
     assert _record(job) == {
         'token': 'legtok', 'sig': 'legacy-capability'}
 
-    for index in range(QUOTAS[1]):
-        (seg_dir / f'{index:06d}.ts').unlink()
     for path in seg_dir.glob('*.ts'):
         path.unlink()
     (seg_dir / '000000.ts').write_bytes(b'x' * (QUOTAS[2] + 1))
