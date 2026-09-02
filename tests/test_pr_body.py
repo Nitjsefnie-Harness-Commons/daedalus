@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """Rendered pull-request body analysis."""
-import ast
 import re
 import sys
-from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _parser_guard import (  # noqa: E402
+    assigned_state_names, base_state_names)
 from _prgate import (  # noqa: E402
     GITHUB_FOOTNOTE_HTML, GITHUB_HTML, PR_BODY, TEMPLATE, _html_body,
     _issue_html, _layout_body, _text_html, _valid_body, _valid_html,
 )
-from _repo import ROOT  # noqa: E402
 
 
 REPOSITORY = 'Nitjsefnie-Harness-Commons/daedalus'
@@ -164,33 +163,9 @@ def test_bare_section_text_is_not_duplicated_at_close(tmp):
     assert sections[0].text == '\nhello world', repr(sections[0].text)
 
 
-def _assigned_state_names():
-    source = (ROOT / 'scripts' / 'ci' / 'pr_body.py').read_text(
-        encoding='utf-8')
-    parser_class = next(
-        node for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.ClassDef)
-        and node.name == '_RenderedBodyParser')
-    return {
-        node.attr for node in ast.walk(parser_class)
-        if isinstance(node, ast.Attribute)
-        and isinstance(node.ctx, ast.Store)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == 'self'}
-
-
-def _base_state_names():
-    owned = set(vars(HTMLParser(convert_charrefs=False)))
-    for ancestor in HTMLParser.__mro__:
-        owned.update(
-            name for name in ancestor.__dict__
-            if not (name.startswith('__') and name.endswith('__')))
-    return owned
-
-
 def test_parser_state_names_do_not_collide_with_the_base(tmp):
     del tmp
-    collisions = _assigned_state_names() & _base_state_names()
+    collisions = assigned_state_names() & base_state_names()
     assert not collisions, (
         '_RenderedBodyParser assigns state the parser base owns: '
         f'{sorted(collisions)}')
