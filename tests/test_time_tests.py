@@ -170,7 +170,7 @@ def test_timing_keeps_the_interval_across_a_relayed_span(tmp):
     original_time = timing.time
     timing.time = type('Clock', (), {'monotonic': lambda: next(ticks)})
     try:
-        durations = timing.time_suite(
+        durations, _outcomes = timing.time_suite(
             sys.executable, tree / 'tests' / 'test_bridge_one.py', tree)
     finally:
         timing.time = original_time
@@ -186,7 +186,7 @@ def test_timing_keeps_interval_across_suppressed_failures(tmp):
     original_time = timing.time
     timing.time = type('Clock', (), {'monotonic': lambda: next(ticks)})
     try:
-        durations = timing.time_suite(
+        durations, _outcomes = timing.time_suite(
             sys.executable, tree / 'tests' / 'test_bridge_one.py', tree)
     finally:
         timing.time = original_time
@@ -198,6 +198,33 @@ def test_timing_does_not_suppress_results_after_an_unmatched_closer(tmp):
     names = _timed_names(tmp, _script(
         '--- timed 1 passing tests in fixture.py', '  PASS  x', '1/1 passed'))
     assert set(names) == {'x'}
+
+
+def test_timing_records_non_passing_outcomes(tmp):
+    tree = _selection_tree(tmp, _script(
+        '  PASS  test_ok', '  FAIL  test_bad', '  SKIP  test_skipped',
+        '  ERROR  test_boom', '1/4 passed'))
+    out = Path(tmp) / 'out'
+    assert _time_tests().main(
+        ['--tree', str(tree), '--python', sys.executable,
+         '--out', str(out)]) == 0
+    report = json.loads((out / 'test_bridge_one.json').read_text('utf-8'))
+    assert report['outcomes'] == {
+        'test_bad': 'FAIL', 'test_skipped': 'SKIP', 'test_boom': 'ERROR'}
+    assert set(report['tests']) == {'test_ok'}
+
+
+def test_outcomes_stay_outside_suppressed_relay_spans(tmp):
+    tree = _selection_tree(tmp, _script(
+        '=== fixture.py ===', '  FAIL  test_hidden', '  SKIP  test_too',
+        '--- timed 0 passing tests in fixture.py', '  PASS  test_visible'))
+    out = Path(tmp) / 'out'
+    assert _time_tests().main(
+        ['--tree', str(tree), '--python', sys.executable,
+         '--out', str(out)]) == 0
+    report = json.loads((out / 'test_bridge_one.json').read_text('utf-8'))
+    assert report['outcomes'] == {}
+    assert set(report['tests']) == {'test_visible'}
 
 
 def main():

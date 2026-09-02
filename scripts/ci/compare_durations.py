@@ -66,8 +66,9 @@ else:
 
 
 def round_durations(directory):
-    """Every test duration from one round, merged across its suites."""
+    """Every test duration from one round, plus every name that round kept."""
     merged = {}
+    names = set()
     for path in sorted(Path(directory).glob('*.json')):
         try:
             summary = json.loads(path.read_text(encoding='utf-8'))
@@ -78,15 +79,27 @@ def round_durations(directory):
         tests = summary.get('tests')
         if not isinstance(tests, dict):
             continue
+        names.update(tests)
         for name, seconds in tests.items():
             if accepted_duration(seconds):
                 merged[name] = float(seconds)
-    return merged
+        outcomes = summary.get('outcomes')
+        if isinstance(outcomes, dict):
+            names.update(outcomes)
+    return merged, names
 
 
 def side_rounds(directories):
-    """One dict of durations per round, in the order the rounds are given."""
+    """One (durations, recorded names) pair per round, in the order given."""
     return [round_durations(directory) for directory in directories]
+
+
+def total_tests(rounds):
+    """How many distinct names any round recorded, on either side."""
+    seen = set()
+    for _durations, names in rounds:
+        seen |= names
+    return len(seen)
 
 
 def shared_tests(rounds):
@@ -98,7 +111,7 @@ def shared_tests(rounds):
     that the two totals it divides cover the same work.
     """
     everywhere = None
-    for durations in rounds:
+    for durations, _names in rounds:
         names = set(durations)
         everywhere = names if everywhere is None else everywhere & names
     return sorted(everywhere or ())
@@ -111,14 +124,14 @@ def compare(base_rounds, head_rounds, excluded=()):
               if name not in excluded]
     pairs = []
     for base, head in zip(base_rounds, head_rounds):
-        base_total = sum(base[name] for name in shared)
-        head_total = sum(head[name] for name in shared)
+        base_total = sum(base[0][name] for name in shared)
+        head_total = sum(head[0][name] for name in shared)
         pairs.append((base_total, head_total,
                       head_total / base_total if base_total else 1.0))
     movements = []
     for name in shared:
-        was = statistics.median([durations[name] for durations in base_rounds])
-        now = statistics.median([durations[name] for durations in head_rounds])
+        was = statistics.median([round_[0][name] for round_ in base_rounds])
+        now = statistics.median([round_[0][name] for round_ in head_rounds])
         movements.append((name, was, now, now - was))
     # Ordering by |delta| lets the limit's cut tail hide a large mover of
     # the minority sign -- a table of speedups can drop the one regression.
@@ -232,14 +245,14 @@ def _acceptance_checks(acceptances, shared, base_rounds, head_rounds,
             rows.append((name, None, None, None, bound,
                          status))
             continue
-        was = statistics.median([round_[name] for round_ in base_rounds])
-        now = statistics.median([round_[name] for round_ in head_rounds])
+        was = statistics.median([round_[0][name] for round_ in base_rounds])
+        now = statistics.median([round_[0][name] for round_ in head_rounds])
         paired_ratios = []
         for base, head in zip(base_rounds, head_rounds):
-            if base[name] == 0.0:
-                pair_ratio = 1.0 if head[name] == 0.0 else math.inf
+            if base[0][name] == 0.0:
+                pair_ratio = 1.0 if head[0][name] == 0.0 else math.inf
             else:
-                pair_ratio = head[name] / base[name]
+                pair_ratio = head[0][name] / base[0][name]
             paired_ratios.append(pair_ratio)
         ratio = statistics.median(paired_ratios)
         if not active:
@@ -311,7 +324,7 @@ def main(argv=None):
     # asks nothing of the tree it measures, so an empty side means the timing
     # step failed rather than that the release was too old -- say so instead of
     # dividing by it.
-    if not any(base_rounds):
+    if not any(durations for durations, _names in base_rounds):
         lines.append('### Test speed')
         lines.append('')
         lines.append(f'Skipped: the baseline `{args.base_label}` produced no '
@@ -353,7 +366,8 @@ def main(argv=None):
         base_rounds, head_rounds, excluded=accepted_names)
     acceptance_rows, acceptances_ok = _acceptance_checks(
         acceptances, all_shared, base_rounds, head_rounds, args.base_label)
-    ratio = render(lines, args.base_label, shared, pairs, movements)
+    total = total_tests([*base_rounds, *head_rounds])
+    ratio = render(lines, args.base_label, shared, pairs, movements, total)
     _render_acceptances(lines, acceptance_rows)
     budget = 1.0 + args.max_regression
     budget_ok = ratio is None or ratio <= budget

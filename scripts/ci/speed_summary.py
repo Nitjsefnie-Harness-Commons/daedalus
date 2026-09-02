@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""The speed comparison's step summary: the paired-round table, the
-longest-running tests of the covered set, and the accepted-speed bounds,
-rendered into the lines the workflow attaches to a run.
-"""
+"""The speed summary the workflow attaches to a run."""
 import math
 import statistics
 
@@ -27,12 +24,12 @@ def _render_acceptances(lines, rows):
                      f'{shown_ratio} | {bound:.3f} | {status} |')
 
 
-def render(lines, base_label, shared, pairs, movements, limit=10):
+def render(lines, base_label, shared, pairs, movements, total, limit=10):
     """The step summary: the verdict first, then what moved most."""
     lines.append('### Test speed')
     lines.append('')
-    lines.append(f'Baseline `{base_label}`, over {len(shared)} tests present '
-                 'and passing in every round on both sides.')
+    lines.append(f'Baseline `{base_label}`, over {len(shared)} of {total} '
+                 'tests present and passing in every round on both sides.')
     lines.append('')
     if not shared:
         lines.append('No non-accepted shared tests; only acceptance bounds '
