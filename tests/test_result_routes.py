@@ -29,8 +29,9 @@ atexit.register(shutil.rmtree, _BASE, ignore_errors=True)
 os.environ['DAEDALUS_DIR'] = _BASE
 os.environ['DAEDALUS_PORT'] = '0'
 RES_DIR = Path(_BASE) / 'results'
-# What the tests below hand the route as its retention cap; the cap's
-# own behaviour has its own controls.
+# What the tests below hand the route as its retention cap. 8 is above any
+# delivery count they store, so eviction never fires in them; the cap's own
+# behaviour has its own controls.
 DELIVERY_CAP = 8
 
 
@@ -290,7 +291,13 @@ def test_the_passed_delivery_cap_is_the_one_enforced(tmp):
 
 
 def test_a_zero_delivery_cap_evicts_nothing(tmp):
-    """0 disables the cap, which is what the guard's falsy test means."""
+    """A cap of 0 evicts nothing.
+
+    That is all it pins. It is not evidence for the guard's falsy clause:
+    with `max_results` 0 the length comparison selects nothing anyway,
+    because `ordered[-0]` is `ordered[0]`, so the boundary is the oldest
+    stamp and no entry is below it.
+    """
     routes = _load('fixture_result_routes_nocap')
     root = Path(tmp) / 'nocap-results'
     root.mkdir(parents=True)
