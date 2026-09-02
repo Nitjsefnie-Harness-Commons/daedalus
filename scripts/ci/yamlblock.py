@@ -10,8 +10,6 @@ else:
 
 
 class BlockHeader(NamedTuple):
-    """The decoded indicators of one block scalar header."""
-
     style: str
     chomp: str
     explicit: int

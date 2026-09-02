@@ -48,13 +48,11 @@ def _refused(source, detail):
 
 
 def test_anchored_step_name_decodes_like_the_plain_spelling(tmp):
-    """An anchor in front of a name is a property, not part of the value."""
     del tmp
     assert _names(_document('name: &a target')) == ['target']
 
 
 def test_string_tagged_step_name_decodes_like_the_plain_spelling(tmp):
-    """`!!str` resolves to the string the plain spelling already gives."""
     del tmp
     assert _names(_document('name: !!str target')) == ['target']
 
@@ -88,7 +86,6 @@ def test_a_string_tagged_number_and_bool_decode_to_strings(tmp):
 
 
 def test_an_anchor_and_a_tag_decode_in_either_order(tmp):
-    """Both properties may precede one value, in whichever order."""
     del tmp
     for field in ('name: &a !!str target', 'name: !!str &a target'):
         assert _names(_document(field)) == ['target'], field
@@ -108,14 +105,12 @@ def test_a_quoted_name_continued_past_a_property_is_a_boundary(tmp):
 
 
 def test_aliased_step_name_decodes_to_the_anchored_value(tmp):
-    """An alias reads as the value its anchor was attached to."""
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a target\n')
     assert _names(source) == ['target']
 
 
 def test_step_id_accepts_every_property_spelling(tmp):
-    """The id field takes the properties and aliases a name takes."""
     del tmp
     prefix = 'anchors:\n gate: &a target\n'
     for field in ('id: &b target', 'id: !!str target',
@@ -142,14 +137,12 @@ def test_anchored_block_scalar_name_decodes_like_the_plain_block(tmp):
 
 
 def test_an_alias_resolves_to_the_last_anchor_defined_before_it(tmp):
-    """A redefined anchor name resolves to its most recent definition."""
     del tmp
     prefix = 'anchors:\n first: &a wrong\n second: &a target\n'
     assert _names(_document('name: *a', prefix)) == ['target']
 
 
 def test_an_alias_reads_an_anchor_defined_on_an_earlier_step_field(tmp):
-    """A field written after a sequence dash still anchors its own value."""
     del tmp
     source = ('jobs:\n sample:\n  steps:\n'
               '   - id: &a target\n     if: z\n'
@@ -158,13 +151,11 @@ def test_an_alias_reads_an_anchor_defined_on_an_earlier_step_field(tmp):
 
 
 def test_an_alias_with_no_earlier_anchor_is_refused(tmp):
-    """An undefined alias is a refusal, never the empty string."""
     del tmp
     _refused(_document('name: *missing'), 'unknown YAML alias: &missing')
 
 
 def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
-    """An `&a` inside a block body, a quoted scalar or a comment is text."""
     del tmp
     for prefix in ('anchors:\n gate: |\n  &a hidden\n',
                    'anchors:\n gate: "&a hidden"\n',
@@ -173,14 +164,12 @@ def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
 
 
 def test_a_colon_bearing_decoy_in_a_block_body_defines_no_target(tmp):
-    """A mapping field spelled inside block content anchors nothing."""
     del tmp
     _refused(_document('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
              'unknown YAML alias: &a')
 
 
 def test_a_colon_bearing_decoy_in_a_quoted_scalar_defines_no_target(tmp):
-    """A mapping field on a quoted scalar's continuation anchors nothing."""
     del tmp
     _refused(_document(
         'name: *a',
@@ -215,34 +204,29 @@ def test_an_alias_to_a_multiline_quoted_scalar_is_a_boundary(tmp):
 
 
 def test_an_alias_to_a_nested_mapping_is_refused(tmp):
-    """An anchor on a mapping resolves to no scalar this reader can give."""
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  key: value\n')
     _refused(source, 'unsupported alias to a nested mapping')
 
 
 def test_an_alias_to_a_nested_scalar_names_the_scalar(tmp):
-    """An anchor on a wrapped plain scalar is no nested mapping."""
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  hidden\n')
     _refused(source, 'unsupported alias to a nested scalar')
 
 
 def test_an_alias_to_a_sequence_is_refused(tmp):
-    """An anchor on a sequence resolves to no scalar either."""
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  - one\n')
     _refused(source, 'unsupported alias to a nested sequence')
 
 
 def test_a_non_string_tag_is_refused(tmp):
-    """Only a tag guaranteed to resolve to a string may be decoded."""
     del tmp
     _refused(_document('name: !!int 5'), 'unsupported YAML tag !!int')
 
 
 def test_a_malformed_anchor_is_refused(tmp):
-    """An anchor name carrying a flow indicator is refused, not guessed."""
     del tmp
     _refused(_document('name: &[bad] target'), 'malformed YAML anchor')
 
@@ -265,13 +249,11 @@ def test_a_tag_with_no_value_is_refused(tmp):
 
 
 def test_two_anchors_on_one_node_are_refused(tmp):
-    """One node carries at most one anchor."""
     del tmp
     _refused(_document('name: &a &b target'), 'two YAML anchors')
 
 
 def test_two_tags_on_one_node_are_refused(tmp):
-    """One node carries at most one tag."""
     del tmp
     _refused(_document('name: !!str !!str target'), 'two YAML tags')
 
