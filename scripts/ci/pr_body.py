@@ -35,7 +35,8 @@ _LIST_SEPARATOR = re.compile(r'[\s,&]*(?:and[\s,&]*)*', re.IGNORECASE)
 _BLOCK_TAGS = frozenset((
     'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
     'fieldset', 'figcaption', 'figure', 'footer', 'form', 'header', 'li',
-    'ol', 'p', 'pre', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul'))
+    'ol', 'p', 'pre', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
+    'hr'))
 _INVISIBLE_CHARACTERS = frozenset((
     '\u034f', '\u115f', '\u1160', '\u180b', '\u180c', '\u180d',
     '\u180f', '\u2800', '\u3164', '\uffa0',
@@ -130,7 +131,6 @@ class _RenderedBodyParser(HTMLParser):
         self._closing = []
         self._pending = []
         self._anchor_depth = 0
-        self._code_depth = 0
         self._previous_closing = False
         self._footnote_depth = 0
 
@@ -165,10 +165,8 @@ class _RenderedBodyParser(HTMLParser):
                     and attributes.get('src') and not zero_size):
                 self._text.append('\ufffc')
             return
-        if tag in _BLOCK_TAGS:
+        if tag in _BLOCK_TAGS and tag in _VOID_TAGS:
             self._record_block()
-        if tag in ('pre', 'code'):
-            self._code_depth += 1
         if tag == 'a':
             self._anchor_depth += 1
         if tag != 'a' or self._heading_tag is not None or self._key is None:
@@ -208,8 +206,6 @@ class _RenderedBodyParser(HTMLParser):
             return
         if tag in _BLOCK_TAGS:
             self._record_block()
-        if tag in ('pre', 'code'):
-            self._code_depth -= 1
         if tag != self._heading_tag:
             return
         name = _heading_text(''.join(self._heading_parts))
@@ -218,9 +214,6 @@ class _RenderedBodyParser(HTMLParser):
         self._text = []
         self._links = []
         self._issues = []
-        self._closing = []
-        self._pending = []
-        self._previous_closing = False
         self._heading_tag = None
         self._heading_parts = []
 
@@ -248,8 +241,7 @@ class _RenderedBodyParser(HTMLParser):
 
     def _record_pending(self, data):
         if (self._footnote_depth or self._heading_tag is not None
-                or self._key is None or self._anchor_depth
-                or self._code_depth):
+                or self._key is None or self._anchor_depth):
             return
         self._pending.append(data)
 

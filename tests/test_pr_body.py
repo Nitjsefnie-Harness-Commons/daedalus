@@ -517,11 +517,29 @@ def test_closing_issues_includes_keyword_list_continuation(tmp):
         (f'References {_issue_html(101)}, Fixes {_issue_html(102)}, '
          f'{_issue_html(103)}', [102, 103]),
         (f'Fixes #{101}', []),
+        (f'Fixes::: {_issue_html(101)}', []),
+        ('<table dir="auto"><tbody><tr><td>Fixes '
+         f'{_issue_html(101)}</td><td>'
+         f'{_issue_html(102)}</td></tr></tbody></table>', [101]),
+        ('<p dir="auto">Fixes <code class="notranslate">x</code>'
+         f'{_issue_html(101)}</p>', []),
     )
     for references, closing in cases:
         rendered = _valid_html(references=references)
         sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
         assert PR_BODY.closing_issues(sections) == closing, references
+
+
+def test_every_closing_keyword_spelling_closes(tmp):
+    del tmp
+    spellings = (
+        'close', 'closes', 'closed', 'fix', 'fixes', 'fixed',
+        'resolve', 'resolves', 'resolved')
+    assert PR_BODY._CLOSING_KEYWORDS == frozenset(spellings)
+    for keyword in spellings:
+        rendered = _valid_html(references=f'{keyword} {_issue_html(101)}')
+        sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+        assert PR_BODY.closing_issues(sections) == [101], keyword
 
 
 def test_closing_issues_checks_every_section(tmp):
@@ -546,7 +564,7 @@ def test_closing_keyword_does_not_cross_a_section_boundary(tmp):
 
 def test_closing_list_does_not_cross_a_section_boundary(tmp):
     del tmp
-    summary = f'<p dir="auto">Fixes {_issue_html(101)}.</p>'
+    summary = f'<p dir="auto">Fixes {_issue_html(101)}</p>'
     rendered = _valid_html(
         references=_issue_html(104)).replace(
             _text_html('One sentence.'), summary)
@@ -554,17 +572,30 @@ def test_closing_list_does_not_cross_a_section_boundary(tmp):
     assert PR_BODY.closing_issues(sections) == [101]
 
 
+def test_section_boundary_resets_without_block_tags(tmp):
+    del tmp
+    rendered = (
+        '<h2 dir="auto">Summary</h2>\n'
+        f'Fixes {_issue_html(101)}\n'
+        '<h2 dir="auto">Related Issues and Pull Requests</h2>\n'
+        f'{_issue_html(104)}\n')
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    assert PR_BODY.closing_issues(sections) == [101]
+
+
 def test_block_boundary_ends_a_closing_keyword_list(tmp):
     del tmp
-    anchor = _issue_html(102)
     cases = (
         (f'<ul dir="auto">\n<li>Fixes {_issue_html(101)}</li>\n'
-         f'<li>{anchor}</li>\n</ul>', [101]),
+         f'<li>{_issue_html(102)}</li>\n</ul>', [101]),
         (f'<p dir="auto">Fixes {_issue_html(101)}</p>\n'
-         f'<p dir="auto">{anchor}</p>', [101]),
+         f'<p dir="auto">{_issue_html(102)}</p>', [101]),
         (f'<p dir="auto">Fixes {_issue_html(101)}</p>\n<hr>\n'
-         f'<p dir="auto">{anchor}</p>', [101]),
-        (f'<p dir="auto">Fixes {_issue_html(101)}, {anchor}</p>', [101, 102]),
+         f'<p dir="auto">{_issue_html(102)}</p>', [101]),
+        (f'<p dir="auto">Fixes</p>\n<p dir="auto">{_issue_html(101)}</p>',
+         []),
+        (f'<p dir="auto">Fixes {_issue_html(101)}, '
+         f'{_issue_html(102)}</p>', [101, 102]),
     )
     for references, closing in cases:
         rendered = _valid_html(references=references)
