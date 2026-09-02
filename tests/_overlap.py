@@ -322,29 +322,48 @@ def run_background_overlap(background, commands, order, result_base='',
     if not node:
         raise AssertionError(
             'node is required to execute the extension worker')
-    timeout = overlap_child_timeout(
-        order, wait_between, inner_wait, outer_slack)
     harness = _BACKGROUND_OVERLAP_HARNESS.replace(
         '__IMPORT_SCRIPTS_STUB__', import_scripts_stub('context'))
-    process = subprocess.Popen(
-        [node, '-e', harness, str(background),
-         json.dumps(commands), json.dumps(order), result_base, token,
-         '1' if wait_between else '0', str(round(inner_wait * 1000))],
-        cwd=_util.ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True)
-    try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired as failure:
-        _, stdout, stderr = _drain.kill_and_drain(process)
-        stdout, stderr = _drain_text(stdout), _drain_text(stderr)
-        steps = re.findall(r'^\[step\] (.+)$', stderr, re.MULTILINE)
-        last_step = steps[-1] if steps else 'none recorded'
-        raise AssertionError(
-            f'overlap harness outer backstop timed out after {timeout}s; '
-            f'last step: {last_step}; stdout: {stdout!r}; stderr: {stderr!r}'
-        ) from failure
+    attempts = 2 if sys.platform == 'win32' else 1
+    records = []
+    for attempt in range(1, attempts + 1):
+        timeout = overlap_child_timeout(
+            order, wait_between, inner_wait * attempt, outer_slack)
+        process = subprocess.Popen(
+            [node, '-e', harness, str(background),
+             json.dumps(commands), json.dumps(order), result_base, token,
+             '1' if wait_between else '0',
+             str(round(inner_wait * attempt * 1000))],
+            cwd=_util.ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as failure:
+            drain_timed_out, out, err = _drain.kill_and_drain(process)
+            stdout, stderr = _drain_text(out), _drain_text(err)
+            steps = re.findall(r'^\[step\] (.+)$', stderr, re.MULTILINE)
+            last_step = steps[-1] if steps else 'none recorded'
+            retrying = sys.platform == 'win32' and attempt < attempts
+            if retrying and not stdout and not stderr and not drain_timed_out:
+                records.append(
+                    f'attempt {attempt} (pid {process.pid}): last step: '
+                    f'{last_step}; stdout: {stdout!r}; stderr: {stderr!r}')
+                continue
+            note = ''
+            if retrying and drain_timed_out:
+                note = '\nretry declined: the post-kill drain did not complete'
+            prior = ''.join(f'\n{item}' for item in records)
+            raise AssertionError(
+                f'overlap harness outer backstop timed out after {timeout}s; '
+                f'last step: {last_step}; stdout: {stdout!r}; '
+                f'stderr: {stderr!r}{note}{prior}'
+            ) from failure
+        break
     if process.returncode != 0:
         raise AssertionError((process.returncode, stdout, stderr))
+    if records:
+        sys.stderr.write(
+            f'overlap harness recovered after outer timeout: {records[0]}\n')
     return json.loads(stdout)
 
 

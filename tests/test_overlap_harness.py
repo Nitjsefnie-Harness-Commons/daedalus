@@ -227,6 +227,109 @@ def test_a_drained_non_ascii_stream_survives_the_backstop_message(tmp):
     assert 'café-step' in message, message
 
 
+def _scripted_stall(platform, communicates, drains):
+    """Drive the harness with every attempt's outcome scripted.
+
+    Returns the result, the verdict, the stderr the harness wrote and the
+    Popen stub, so a pin asserts on the record the harness actually kept.
+    """
+    process = mock.Mock(pid=4713, returncode=0, stdout=None, stderr=None)
+    process.communicate.side_effect = communicates
+    popen = mock.Mock(return_value=process)
+    captured = io.StringIO()
+    with (
+            mock.patch.object(_overlap.shutil, 'which',
+                              return_value='node.exe'),
+            mock.patch.object(_overlap.subprocess, 'Popen', popen),
+            mock.patch.object(_overlap.sys, 'platform', platform),
+            mock.patch.object(
+                _overlap._drain, 'kill_and_drain', side_effect=drains),
+            contextlib.redirect_stderr(captured),
+    ):
+        result = message = None
+        try:
+            result = _overlap.run_background_overlap('background', [], [])
+        except AssertionError as failure:
+            message = str(failure)
+    return result, message, captured.getvalue(), popen
+
+
+def test_windows_silent_stall_recovers_on_second_attempt(tmp):
+    """A silent Windows stall is retried once with doubled bounds."""
+    del tmp
+    result, message, note, popen = _scripted_stall(
+        'win32',
+        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
+        [(False, '', '')])
+    assert result == [], result
+    assert message is None, message
+    assert popen.call_count == 2, popen.call_args_list
+    second_argv = popen.call_args_list[1].args[0]
+    assert second_argv[-1] == '30000', second_argv
+    assert ('overlap harness recovered after outer timeout: '
+            'attempt 1 (pid ' in note), note
+
+
+def test_windows_silent_stall_with_timed_out_drain_declines(tmp):
+    """A drain that did not finish declines the retry and is named."""
+    del tmp
+    result, message, _, popen = _scripted_stall(
+        'win32',
+        [subprocess.TimeoutExpired('node', 60)],
+        [(True, None, None)])
+    assert result is None, result
+    assert message == (
+        "overlap harness outer backstop timed out after 60s; "
+        "last step: none recorded; stdout: ''; stderr: ''\n"
+        'retry declined: the post-kill drain did not complete'), message
+    assert popen.call_count == 1, popen.call_args_list
+
+
+def test_windows_silent_stall_twice_names_both_attempts(tmp):
+    """A second silent stall keeps the first attempt's evidence."""
+    del tmp
+    result, message, _, popen = _scripted_stall(
+        'win32',
+        [subprocess.TimeoutExpired('node', 60),
+         subprocess.TimeoutExpired('node', 120)],
+        [(False, '', ''), (False, '', '')])
+    assert result is None, result
+    assert 'after 120s' in message, message
+    record = 'attempt 1 (pid 4713): last step: none recorded'
+    assert record in message, message
+    assert 'retry declined' not in message, message
+    assert popen.call_count == 2, popen.call_args_list
+
+
+def test_non_windows_silent_stall_keeps_single_attempt(tmp):
+    """Linux keeps its single attempt and today's verdict verbatim."""
+    del tmp
+    result, message, note, popen = _scripted_stall(
+        'linux', [subprocess.TimeoutExpired('node', 60)],
+        [(False, None, None)])
+    assert result is None, result
+    assert message == (
+        "overlap harness outer backstop timed out after 60s; "
+        "last step: none recorded; stdout: ''; stderr: ''"), message
+    assert popen.call_count == 1, popen.call_args_list
+    assert note == '', note
+
+
+def test_windows_stall_with_output_does_not_retry(tmp):
+    """Recorded output is the diagnosis; a retry would only spend a child."""
+    del tmp
+    result, message, note, popen = _scripted_stall(
+        'win32', [subprocess.TimeoutExpired('node', 60)],
+        [(False, 'partial stdout', '[step] something')])
+    assert result is None, result
+    assert message == (
+        'overlap harness outer backstop timed out after 60s; '
+        "last step: something; stdout: 'partial stdout'; "
+        "stderr: '[step] something'"), message
+    assert popen.call_count == 1, popen.call_args_list
+    assert note == '', note
+
+
 def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
     """A blocked dispatch call is not blamed on completed config loading."""
     failure = _harness_failure(
