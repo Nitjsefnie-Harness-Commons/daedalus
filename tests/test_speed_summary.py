@@ -71,6 +71,58 @@ def test_report_without_outcomes_still_states_the_total(tmp):
     assert '**OK**' in text, text
 
 
+def test_the_all_drop_skip_line_names_the_total(tmp):
+    compare = _comparator()
+    base = _summary_tree(tmp, 'base', [
+        {'tests': {'a': 1.0}, 'outcomes': {'b': 'FAIL'}}])
+    head = _summary_tree(tmp, 'head', [
+        {'tests': {'c': 2.0}, 'outcomes': {'d': 'SKIP'}}])
+    summary = Path(tmp) / 'summary.md'
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--summary-file', str(summary)])
+    assert code == 0, output
+    text = summary.read_text(encoding='utf-8')
+    assert ('Skipped: no test passed in every round on both sides among the '
+            '4 tests the suites recorded, so the comparison has no shared '
+            'set to sum.') in text, text
+
+
+def test_the_measured_comparison_exports_its_ratio(tmp):
+    compare = _comparator()
+    base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0, 'b': 1.0}}])
+    head = _summary_tree(tmp, 'head', [{'tests': {'a': 1.042, 'b': 1.0}}])
+    ratio_file = Path(tmp) / 'ratio.txt'
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head,
+        '--ratio-file', str(ratio_file)])
+    assert code == 0, output
+    assert ratio_file.read_text(encoding='utf-8') == '1.021\n', output
+
+
+def test_a_comparison_with_no_shared_set_writes_no_ratio_file(tmp):
+    compare = _comparator()
+    base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0}}])
+    head = _summary_tree(tmp, 'head', [{'tests': {'b': 1.0}}])
+    ratio_file = Path(tmp) / 'ratio.txt'
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--ratio-file', str(ratio_file)])
+    assert code == 0, output
+    assert not ratio_file.exists(), output
+
+
+def test_an_unwritable_ratio_file_leaves_the_verdict_alone(tmp):
+    compare = _comparator()
+    block = Path(tmp) / 'block'
+    block.write_text('a regular file, not a directory', encoding='utf-8')
+    base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0}}])
+    head = _summary_tree(tmp, 'head', [{'tests': {'a': 1.0}}])
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head,
+        '--ratio-file', str(block / 'ratio.txt')])
+    assert code == 0, output
+    assert '**OK**' in output, output
+
+
 def test_an_unwritable_summary_file_leaves_the_verdict_alone(tmp):
     compare = _comparator()
     block = Path(tmp) / 'block'

@@ -1371,6 +1371,7 @@ jobs:
             --max-regression "$MAX_REGRESSION" \
             --base-label "$BASE_LABEL" \
             --require-measurements \
+            --ratio-file reports/ratio.txt \
             --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Record the cell verdict
@@ -1389,8 +1390,17 @@ jobs:
             success) verdict=pass ;;
             *) verdict=fail ;;
           esac
-          printf '{"group": "%s", "verdict": "%s"}\n' "$GROUP" "$verdict" \
-            > reports/verdict.json
+          ratio=""
+          if [ -f reports/ratio.txt ]; then
+            ratio="$(cat reports/ratio.txt)"
+          fi
+          if [ -n "$ratio" ]; then
+            printf '{"group": "%s", "verdict": "%s", "ratio": %s}\n' \
+              "$GROUP" "$verdict" "$ratio" > reports/verdict.json
+          else
+            printf '{"group": "%s", "verdict": "%s", "ratio": null}\n' \
+              "$GROUP" "$verdict" > reports/verdict.json
+          fi
 
       - name: Upload the duration summaries
         if: ${{ !cancelled() && steps.baseline.outputs.point != '' }}
@@ -1498,9 +1508,12 @@ jobs:
             fi
             group="${group%%\"*}"
             verdict="${verdict%%\"*}"
+            ratio="${line#*', "ratio": '}"
+            ratio="${ratio%%\}*}"
+            [ "$ratio" = "null" ] && ratio='—'
             # shellcheck disable=SC2016  # the backticks are markdown
-            printf '| %s | %s | `speed-durations-%s` |\n' \
-              "$group" "$verdict" "$group"
+            printf '| %s | %s | %s | `speed-durations-%s` |\n' \
+              "$group" "$verdict" "$ratio" "$group"
           done)"
 
           {
@@ -1511,8 +1524,8 @@ jobs:
                  "interleaved. No number crosses runners, and the verdict is" \
                  "per cell."
             echo
-            echo "| cell | verdict | durations artifact |"
-            echo "|---|---|---|"
+            echo "| cell | verdict | ratio | durations artifact |"
+            echo "|---|---|---|---|"
             printf '%s\n' "$table"
             if [ -z "$table" ]; then
               echo
