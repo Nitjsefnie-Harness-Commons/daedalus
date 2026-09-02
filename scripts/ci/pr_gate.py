@@ -13,13 +13,15 @@ from typing import NamedTuple
 if __package__:
     # pylint: disable-next=relative-beyond-top-level
     from .pr_body import (
-        closing_issues, layout_errors, parse_rendered, referenced_issues,
-        related_may_reference, retains_instruction_comment,
+        closing_issues, code_span, layout_errors, parse_rendered,
+        referenced_issues, related_may_reference,
+        retains_instruction_comment,
     )
 else:
     from pr_body import (
-        closing_issues, layout_errors, parse_rendered, referenced_issues,
-        related_may_reference, retains_instruction_comment,
+        closing_issues, code_span, layout_errors, parse_rendered,
+        referenced_issues, related_may_reference,
+        retains_instruction_comment,
     )
 
 
@@ -220,7 +222,10 @@ def _claim(api, repo, issues, closing, actor):
 
 
 def _unassigned_reason(numbers):
-    quoted = [f'#{number}' for number in numbers]
+    # The numbers are code-spanned: a bare #N in a posted comment is a live
+    # issue reference, and the gate must not cross-reference the very issues
+    # it is refusing on behalf of.
+    quoted = [code_span(f'#{number}') for number in numbers]
     if len(quoted) == 1:
         names = quoted[0]
     else:
@@ -330,8 +335,11 @@ def _run(api, repo, pr, actor, template):
         layout.append(INSTRUCTION_REASON)
     references = referenced_issues(sections)
     closing = closing_issues(sections)
-    references += [
-        number for number in closing if number not in set(references)]
+    known = set(references)
+    for number in closing:
+        if number not in known:
+            known.add(number)
+            references.append(number)
     claimed, unassigned = _claim(
         api, repo, references, set(closing), actor)
     reasons = list(layout)
