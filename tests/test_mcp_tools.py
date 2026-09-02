@@ -182,9 +182,11 @@ def _composition_module_names(composition):
 
 def _assert_complete_inventory(composition):
     module_names = set(_composition_module_names(composition))
+    tool_paths = list((_util.ROOT / 'daedalus_mcp').glob('tools_*.py'))
+    assert tool_paths, 'no daedalus_mcp tools_*.py module found'
     unwired_modules = sorted(
         f'daedalus_mcp.{path.stem}'
-        for path in (_util.ROOT / 'daedalus_mcp').glob('tools_*.py')
+        for path in tool_paths
         if f'daedalus_mcp.{path.stem}' not in module_names)
     assert not unwired_modules, (
         f'MCP tool modules not registered: {unwired_modules}')
@@ -399,6 +401,12 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     """
     composition = _load_composition('composition-origin')
     composition_path = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
+    scanned = {
+        name for name, tool in composition.mcp.registered.items()
+        if any(_tool_code_objects(tool))}
+    assert scanned == set(composition.mcp.registered), (
+        'the origin scan traversed no code for: '
+        f'{sorted(set(composition.mcp.registered) - scanned)}')
     direct_tools = sorted(
         f'{name} via {code.co_name} at {code.co_filename}:'
         f'{code.co_firstlineno}'
@@ -427,14 +435,18 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         assert cases, f'{name}: registered with no pinned case'
         tool = registered[name]
         for overrides, expected in cases:
+            assert expected, f'{name} {overrides}: pins no bridge call'
             composition.bridge.calls.clear()
             asyncio.run(tool(**_tool_arguments(tool, overrides)))
             assert composition.bridge.calls == expected, (
                 f'{name} {overrides}: bridge calls differ: '
                 f'{composition.bridge.calls}')
-    for name, cases in _mcp_tool_commands.TOOL_REFUSALS.items():
+    refusals = _mcp_tool_commands.TOOL_REFUSALS
+    assert refusals, 'no tool has a pinned refusal'
+    for name, cases in refusals.items():
         assert name in registered, (
             f'{name}: refusal pinned for a tool that is not registered')
+        assert cases, f'{name}: registered with no pinned refusal'
         tool = registered[name]
         for overrides, exception, message in cases:
             composition.bridge.calls.clear()
