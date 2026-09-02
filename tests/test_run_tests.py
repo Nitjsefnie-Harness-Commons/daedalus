@@ -35,9 +35,10 @@ def _sandbox(tmp, suites):
 
 
 def _run_sandbox(root, timeout_env):
+    env = dict(os.environ, **timeout_env)
     return subprocess.run(
         [sys.executable, str(root / 'run_tests.py')],
-        cwd=str(root), env=dict(os.environ, **timeout_env),
+        cwd=str(root), env=_util.child_coverage('keep', env, cwd=root),
         capture_output=True, text=True, timeout=120)
 
 
