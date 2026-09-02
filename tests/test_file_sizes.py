@@ -49,9 +49,14 @@ RAISING_VERBS = ('rais', 'increas', 'upward', 'bump', 'rise',
 _RAISING = r'\b(?:' + '|'.join(RAISING_VERBS) + ')'
 # A comma inside the window, because "never, ever raised" is a sentence
 # somebody writes; the span itself is pinned by the far-negator negative.
+# The lookbehind refuses a prohibition that carries its own negation, and
+# `nobody` takes no window because it governs its own verb: "nobody minds
+# if a number is raised" is a licence, not the rule.
 ACCEPTED_RULE_SPELLINGS = (
-    r'(?:never|nobody|not|no)\b[a-z ,-]{0,40}?' + _RAISING,
-    _RAISING + r'[a-z ,-]{0,40}?(?:forbidden|prohibited)',
+    r'(?:never|not|no)\b[a-z ,-]{0,40}?' + _RAISING,
+    r'nobody (?:ever )?' + _RAISING,
+    _RAISING + r'[a-z ,-]{0,40}?(?<!\bnot )(?<!\bnever )'
+    r'(?:forbidden|prohibited)',
     r'only ever go(?:es)? down',
 )
 STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
@@ -61,9 +66,9 @@ RULE_HELP = ('a negated raising verb ("is never raised by hand", "never '
 
 # Texts the spelling regex must tell apart, so a regex that stopped
 # discriminating - one matching everything, nothing, or the rule inverted -
-# is visible here rather than in the file it guards. The first two negatives
-# invert the rule, because negatives that all lack a raising verb leave the
-# negator - the half that makes it this rule - unmeasured.
+# is visible here rather than in the file it guards. The negated
+# prohibitions and the misplaced `nobody` invert the rule; the rest pin
+# the window, the leading boundary and the "grow past" narrowing.
 RULE_STATED = (
     'a recorded number is never raised by hand',
     'no recorded number is ever increased by hand',
@@ -84,6 +89,16 @@ RULE_NOT_STATED = (
     'the numbers in this table go down and up',
     'growing a listed file is allowed by editing its recorded number',
     'the ratchet keeps the numbers in this table honest',
+    'raising a recorded number is not forbidden',
+    'raising a recorded number is never prohibited',
+    'nobody minds if a recorded number is raised by hand',
+    # The leading word boundary: without it the stem inside "surprise" is
+    # a raising verb and this reads as the rule.
+    'a listed file is not a surprise',
+    # The "grow past" narrowing: with a bare stem, "growth" carries the
+    # verb and both sentences read as the rule.
+    'not a line limit, and growth past a ceiling is what an entry excuses',
+    'the rule is not about growth for its own sake',
     # The window: a negator this far from a raising verb negates something
     # else, so widening the span reads this licence as the rule.
     'not a line limit, and a file over its ceiling is listed at the size '
