@@ -255,6 +255,7 @@
 !/tests/_jsroute_source.py
 !/tests/_jsroute_state.py
 !/tests/_jsroute_timeline.py
+!/tests/_mcp_tool_commands.py
 !/tests/_noglibc.py
 !/tests/_overlap.py
 !/tests/_owned_writes.py
