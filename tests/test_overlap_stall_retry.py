@@ -169,6 +169,22 @@ def test_a_stall_with_only_stderr_recorded_does_not_retry(tmp):
     assert note == '', note
 
 
+def test_a_stall_with_only_stdout_recorded_does_not_retry(tmp):
+    """Recorded stdout alone is the diagnosis; a retry would spend a child."""
+    del tmp
+    result, message, note, popen = _scripted_stall(
+        'linux',
+        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
+        [(False, 'partial stdout', '')])
+    assert result is None, result
+    assert message == (
+        'overlap harness outer backstop timed out after 60s; '
+        "last step: none recorded; stdout: 'partial stdout'; "
+        "stderr: ''"), message
+    assert popen.call_count == 1, popen.call_args_list
+    assert note == '', note
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='overlapstallretry_')
