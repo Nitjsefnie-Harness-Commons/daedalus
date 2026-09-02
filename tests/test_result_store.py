@@ -261,7 +261,7 @@ def test_the_store_needs_no_bridge_configuration(tmp):
     assert len(marked) == 1, (proc.stdout, proc.stderr)
     answer = json.loads(marked[0][len('UNCONFIGURED '):])
     assert answer['daedalus_env'] == [], answer
-    # Resolved on both sides: `under` returns the path it checked, resolved.
+    # Resolved on both sides: `under` returns the path it checked.
     expected_dir = os.path.realpath(root / 'deliveries' / 'tok_extension')
     assert answer['dir'] == expected_dir, (answer, expected_dir)
     expected_file = os.path.realpath(
