@@ -472,7 +472,7 @@ def test_real_workflow_trailing_colon_action_is_refused(tmp):
     workflow = _coverage_workflow()
     action = (
         'actions/download-artifact@'
-        '37930b1c2abaa49bbe596cd826c3c89aef350131'
+        '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'
     )
     folded = f'        uses: >-\n          {action}\n'
     mutated = workflow.replace(folded, f'        uses: {action}:\n', 1)
