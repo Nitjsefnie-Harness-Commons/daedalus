@@ -421,7 +421,8 @@ def test_every_registered_tool_command_is_pinned(_tmp):
     refusals = _mcp_tool_commands.TOOL_REFUSALS
     assert refusals, 'no tool has a pinned refusal'
     sites = _mcp_guard_floor.tool_guards(
-        _mcp_guard_floor.composition_scan_set(composition, _util.ROOT),
+        _mcp_guard_floor.composition_scan_set(
+            _util.ROOT / 'daedalus_mcp' / 'server.py', _util.ROOT),
         _util.ROOT)
     assert sites, 'no raise site found in the modules the composition imports'
     reached = {

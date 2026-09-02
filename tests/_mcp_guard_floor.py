@@ -19,7 +19,6 @@ import dis
 import importlib.util
 import inspect
 from pathlib import Path
-import sys
 import types
 
 
@@ -158,26 +157,99 @@ def tool_guards(paths, root):
 
 
 def composition_scan_set(composition, root):
-    """The repo-local modules the composition imports, plus the composition.
+    """The repo-local modules the composition's SOURCE FILE can import.
 
-    sys.modules after the composition loads is what the import graph really
-    reached, so a guard that moves into any module it pulls in stays scanned;
-    a directory or a glob cannot make that promise, which is how the blind
-    spot survived two widenings. The composition itself is added explicitly:
-    the suite loads it by path and nothing registers it, so its raises would
-    otherwise vanish.
+    A static walk, not a runtime snapshot: every `import` and `from` at any
+    depth — function bodies, `try` blocks, dead branches — resolves to files
+    under the repository root or is provably elsewhere (stdlib, site
+    packages), and the walk iterates to a fixed point. A target the walk
+    cannot determine statically is unprovable and fails loudly, naming the
+    module and the import site: a walk that silently omitted what it cannot
+    resolve would be the next blind spot, not a closure.
     """
     root = Path(root).resolve()
-    paths = {Path(composition.__file__).resolve()}
-    for module in list(sys.modules.values()):
-        file = getattr(module, '__file__', None)
-        if file is None:
+    composition = Path(composition).resolve()
+    seen = {composition}
+    pending = [composition]
+    while pending:
+        for target in _import_targets(pending.pop(), root):
+            if target not in seen:
+                seen.add(target)
+                pending.append(target)
+    return sorted(path for path in seen
+                  if 'tests' not in path.relative_to(root).parts)
+
+
+def _is_dynamic_import(func):
+    """A call to importlib.import_module or __import__, however received."""
+    return ((isinstance(func, ast.Attribute) and func.attr == 'import_module')
+            or (isinstance(func, ast.Name) and func.id == '__import__'))
+
+
+def _import_targets(path, root):
+    """The repo-local files one module's source can import.
+
+    Empty when nothing the module names lives under root — stdlib and
+    site-package targets are provably not this repository's. A dynamic
+    import whose argument is not a constant string is unprovable and raises,
+    naming the module and the import site; a constant resolves like an
+    import.
+    """
+    targets = set()
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    package = path.resolve().relative_to(Path(root).resolve()).parent.parts
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                targets |= _resolve_name(alias.name, (), root)
+        elif isinstance(node, ast.ImportFrom):
+            base = package[:max(len(package) + 1 - node.level, 0)] \
+                if node.level else ()
+            if node.module:
+                targets |= _resolve_name(node.module, base, root)
+            for alias in node.names:
+                if alias.name != '*':
+                    name = f'{node.module}.{alias.name}' if node.module \
+                        else alias.name
+                    targets |= _resolve_name(name, base, root)
+        elif isinstance(node, ast.Call) and _is_dynamic_import(node.func):
+            argument = node.args[0] if node.args else None
+            if isinstance(argument, ast.Constant) \
+                    and isinstance(argument.value, str):
+                targets |= _resolve_name(argument.value, (), root)
+            else:
+                raise AssertionError(
+                    f'{_dotted(path, root)}:{node.lineno}: '
+                    'import_module/__import__ is called with a name this '
+                    'scan cannot read statically; import it normally or '
+                    'pass a constant, because an import closure that '
+                    'silently skips a module it cannot resolve is not '
+                    'closed')
+    return targets
+
+
+def _resolve_name(name, base, root):
+    """One import target's repo-local files: the package `__init__` files
+    importing it executes, then the module file itself. Relative imports
+    arrive resolved against the importing module's package in `base`. Empty
+    when no prefix of the dotted name matches the repository, which is what
+    makes stdlib and site packages provably irrelevant."""
+    parts = (*base, *name.split('.'))
+    found = set()
+    probe = Path(root).resolve()
+    for index, part in enumerate(parts):
+        package = probe / part
+        if package.is_dir():
+            probe = package
+            init = package / '__init__.py'
+            if init.is_file():
+                found.add(init.resolve())
             continue
-        path = Path(file).resolve()
-        if root not in path.parents or 'tests' in path.parts:
-            continue
-        paths.add(path)
-    return sorted(paths)
+        module = probe / f'{part}.py'
+        if index == len(parts) - 1 and module.is_file():
+            found.add(module.resolve())
+        break
+    return found
 
 
 def nested_code_objects(code):
