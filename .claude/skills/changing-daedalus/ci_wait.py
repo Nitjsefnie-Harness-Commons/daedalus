@@ -74,7 +74,7 @@ def _gh(path):
             ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
              path],
             capture_output=True, text=True, timeout=GH_TIMEOUT)
-    except (subprocess.SubprocessError, OSError) as exc:
+    except (subprocess.SubprocessError, UnicodeDecodeError, OSError) as exc:
         raise QueryError(f'gh failed: {exc}') from exc
     if proc.returncode != 0:
         raise QueryError(proc.stderr.strip()[:400])
