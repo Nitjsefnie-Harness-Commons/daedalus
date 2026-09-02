@@ -137,8 +137,8 @@ def test_a_grandchild_holding_pipes_cannot_hang_the_drain(tmp):
         _drain.kill_and_drain(process)
     assert timed_out is True
     assert elapsed < 60, elapsed
-    # The default must stay generous: a tight bound makes every stuck
-    # drain kill its bearer mid-diagnosis.
+    # A tight default reports ordinary drains as timed out and discards
+    # output a diagnosis still needed.
     assert _drain.DRAIN_TIMEOUT_S >= 5
 
 
