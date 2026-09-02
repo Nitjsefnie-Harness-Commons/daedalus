@@ -129,7 +129,7 @@ class _RenderedBodyParser(HTMLParser):
         self._links = []
         self._issues = []
         self._closing = []
-        self._pending = []
+        self._gap = []
         self._anchor_depth = 0
         self._previous_closing = False
         self._footnote_depth = 0
@@ -180,11 +180,11 @@ class _RenderedBodyParser(HTMLParser):
             self._links.append(href)
         number = issue_number(href, self.repository)
         if number is not None:
-            gap = ''.join(self._pending)
+            gap = ''.join(self._gap)
             self._issues.append(number)
             self._closing.append(_gap_closing(gap, self._previous_closing))
             self._previous_closing = self._closing[-1]
-            self._pending = []
+            self._gap = []
 
     def handle_startendtag(self, tag, attrs):
         tag = tag.casefold()
@@ -243,7 +243,7 @@ class _RenderedBodyParser(HTMLParser):
         if (self._footnote_depth or self._heading_tag is not None
                 or self._key is None or self._anchor_depth):
             return
-        self._pending.append(data)
+        self._gap.append(data)
 
     def _record_block(self):
         # A block boundary breaks a closing-keyword list: a keyword on one
@@ -253,7 +253,7 @@ class _RenderedBodyParser(HTMLParser):
         if (self._footnote_depth or self._heading_tag is not None
                 or self._key is None):
             return
-        self._pending = []
+        self._gap = []
         self._previous_closing = False
 
     def finish(self):
@@ -281,7 +281,7 @@ class _RenderedBodyParser(HTMLParser):
         self._links = []
         self._issues = []
         self._closing = []
-        self._pending = []
+        self._gap = []
         self._previous_closing = False
 
 
