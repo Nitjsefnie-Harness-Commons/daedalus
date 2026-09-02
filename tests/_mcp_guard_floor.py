@@ -10,7 +10,10 @@ sites that exist in the source; a guard deleted together with its declaration
 is invisible to it, and for a guard nothing else pins, that deletion is
 invisible everywhere. Reach is lexical — closure cells, defaults,
 `__wrapped__`, module globals — so a site reached any other way is refused by
-the pin run, not missed. A refusal written as `return {'error': ...}` — the
+the pin run, not missed. The `or` refusal reads the `if` test a raise sits
+DIRECTLY under: a raise reached through `try`, `while` or `else` bodies, or
+a test spelled `not (a and b)`, is one site like any other. A refusal
+written as `return {'error': ...}` — the
 convention at daedalus_mcp/tools_css.py `unblock_requests` — never raises and
 is off this floor.
 """
@@ -180,10 +183,44 @@ def composition_scan_set(composition, root):
                   if 'tests' not in path.relative_to(root).parts)
 
 
-def _is_dynamic_import(func):
-    """A call to importlib.import_module or __import__, however received."""
-    return ((isinstance(func, ast.Attribute) and func.attr == 'import_module')
-            or (isinstance(func, ast.Name) and func.id == '__import__'))
+def _dynamic_callees(tree):
+    """The names one module's imports bind to the import-by-name operation.
+
+    `import importlib [as x]` and `import builtins [as x]` bind their module
+    aliases, `from importlib import import_module [as y]` and `from importlib
+    import __import__ [as z]` bind their function names, and the builtin
+    `__import__` is bound before anything runs. Classification then resolves
+    a call's callee through this map instead of matching spellings.
+    """
+    bound = {'__import__': 'by name'}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in ('importlib', 'builtins'):
+                    bound[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == 'importlib' and not node.level:
+                for alias in node.names:
+                    if alias.name in ('import_module', '__import__'):
+                        bound[alias.asname or alias.name] = 'by name'
+    return bound
+
+
+def _is_dynamic_import(func, bound):
+    """A call to import_module or __import__, per the module's own bindings.
+
+    Loading a module by PATH — `spec_from_file_location`, `SourceFileLoader`
+    — is a different operation and stays outside this recognition.
+    """
+    if isinstance(func, ast.Name):
+        return bound.get(func.id) == 'by name'
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        source = bound.get(func.value.id)
+        if source == 'importlib':
+            return func.attr in ('import_module', '__import__')
+        if source == 'builtins':
+            return func.attr == '__import__'
+    return False
 
 
 def _import_targets(path, root):
@@ -197,6 +234,7 @@ def _import_targets(path, root):
     """
     targets = set()
     tree = ast.parse(path.read_text(encoding='utf-8'))
+    bound = _dynamic_callees(tree)
     package = path.resolve().relative_to(Path(root).resolve()).parent.parts
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -212,18 +250,20 @@ def _import_targets(path, root):
                     name = f'{node.module}.{alias.name}' if node.module \
                         else alias.name
                     targets |= _resolve_name(name, base, root)
-        elif isinstance(node, ast.Call) and _is_dynamic_import(node.func):
+        elif isinstance(node, ast.Call) and _is_dynamic_import(
+                node.func, bound):
             argument = node.args[0] if node.args else None
             if isinstance(argument, ast.Constant) \
-                    and isinstance(argument.value, str):
+                    and isinstance(argument.value, str) \
+                    and not argument.value.startswith('.'):
                 targets |= _resolve_name(argument.value, (), root)
             else:
                 raise AssertionError(
                     f'{_dotted(path, root)}:{node.lineno}: '
                     'import_module/__import__ is called with a name this '
                     'scan cannot read statically; import it normally or '
-                    'pass a constant, because an import closure that '
-                    'silently skips a module it cannot resolve is not '
+                    'pass an absolute constant, because an import closure '
+                    'that silently skips a module it cannot resolve is not '
                     'closed')
     return targets
 
@@ -330,7 +370,9 @@ def reachable_guards(sites, codes):
     """The raise sites a tool's own code objects can raise from, as their
     keys. A reached site refusing on an `or` test is refused by the floor:
     split it into one raise per condition, because one witness cannot answer
-    for two conditions on one line."""
+    for two conditions on one line. The `or` test read is the one a raise
+    sits DIRECTLY under — a raise reached through `try`, `while` or `else`
+    bodies, or a test spelled `not (a and b)`, is one site like any other."""
     reached = {}
     for code in codes:
         filename = str(Path(code.co_filename).resolve())
