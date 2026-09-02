@@ -102,11 +102,13 @@ def _harness_failure(harness, *arguments, **options):
     try:
         _dashnode._DASHBOARD_STEP_TIMEOUT_S = step_timeout
         _dashnode._DASHBOARD_PROCESS_GRACE_S = process_grace
-        _dashnode.run_dashboard_node(harness)
-    except AssertionError as failure:
-        return str(failure)
+        _dashnode._run_dashboard_node_once(harness, attempt=1)
+    except _dashnode._DashboardOuterTimeout as failure:
+        return _dashnode._format_timeout_attempt(failure.record)
     except subprocess.TimeoutExpired as failure:
         return f'bare TimeoutExpired after {failure.timeout}s'
+    except AssertionError as failure:
+        return str(failure)
     finally:
         _dashnode._DASHBOARD_STEP_TIMEOUT_S = real_step_timeout
         _dashnode._DASHBOARD_PROCESS_GRACE_S = real_process_grace
