@@ -153,3 +153,67 @@ class SourceIndex:
             scope = self._scopes[self.scope_at(position)]
             return scope['start'], scope['end']
         return self._brace.at(position)
+
+
+def top_level(mask, start, end, char):
+    """Offset of the first `char` at bracket depth 0 in the span, or None."""
+    depth = 0
+    for i in range(start, end):
+        c = mask[i]
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+            if depth < 0:
+                return None
+        elif c == char and depth == 0:
+            return i
+    return None
+
+
+def previous_nonspace(mask, position):
+    position -= 1
+    while position >= 0 and mask[position].isspace():
+        position -= 1
+    return position
+
+
+def word_before(mask, position):
+    position = previous_nonspace(mask, position) + 1
+    end = position
+    while (position > 0
+           and (mask[position - 1].isalnum()
+                or mask[position - 1] in '_$')):
+        position -= 1
+    return mask[position:end]
+
+
+def method_head_start(mask, name_start, pair_start):
+    """Offset of the token a method shorthand's head must follow.
+
+    Walks back over `*`, the `get`/`set`/`async` heads and a computed key's
+    bracket pair, so a method body inside a literal is recognised whatever
+    its head spelling is. `name_start` is the offset of the method's name.
+    """
+    position = previous_nonspace(mask, name_start)
+    while position >= 0:
+        char = mask[position:position + 1]
+        if char in ('*', ']', '='):
+            opening = pair_start.get(position)
+            if char == ']' and opening is not None:
+                position = previous_nonspace(mask, opening)
+                continue
+            if char == '=':
+                break
+            position = previous_nonspace(mask, position)
+            continue
+        word_start = position
+        while (word_start > 0
+               and (mask[word_start - 1].isalnum()
+                    or mask[word_start - 1] in '_$')):
+            word_start -= 1
+        if mask[word_start:position + 1] in ('get', 'set', 'async'):
+            position = previous_nonspace(mask, word_start)
+            continue
+        break
+    return position

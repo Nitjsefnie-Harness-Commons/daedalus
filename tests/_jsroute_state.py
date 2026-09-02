@@ -22,9 +22,10 @@ def sender_query_index(requests, scopes, events, invocations, replay,
         owners = set(chain)
         scheduled = []
         for start, kind, match in events:
-            if kind == 'bind' and context['scope_at'](start) in owners:
+            if kind in ('bind', 'interp') and (
+                    context['scope_at'](start) in owners):
                 scheduled.append(
-                    (start, 0, start, None, False, match))
+                    (start, 0, start, None, False, match, kind))
         runtime_values = {}
         previous_call = -1
         for call in invocations:
@@ -34,7 +35,8 @@ def sender_query_index(requests, scopes, events, invocations, replay,
                 runtime_values, previous_call, call['order'], owners)
             result = replay.run(call, runtime_values)
             scheduled.extend(
-                (call['order'], order, start, call, path_optional, match)
+                (call['order'], order, start, call, path_optional, match,
+                 'bind')
                 for order, (start, match, path_optional)
                 in enumerate(result.writes, 1))
             previous_call = call['order']
@@ -44,11 +46,15 @@ def sender_query_index(requests, scopes, events, invocations, replay,
         for request in sorted(queries, key=lambda item: item['limit']):
             limit = request['limit']
             while cursor < len(scheduled) and scheduled[cursor][0] < limit:
-                _, _, start, call, path_optional, match = scheduled[cursor]
+                (_, _, start, call, path_optional, match,
+                 kind) = scheduled[cursor]
                 cursor += 1
                 target = context['visible_binding'](
                     match.group(1), start)
                 if target is None:
+                    continue
+                if kind == 'interp':
+                    states[target] = context['unprovable']
                     continue
                 end = context['expression_end'](
                     context['mask'], match.end())

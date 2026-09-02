@@ -14,14 +14,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _jsread import (js_bracket_end, js_expression_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
 from _jsroute_calls import (discover_invocations,  # noqa: E402
-                            parameter_bindings,
+                            parameter_bindings, routing_events,
                             sender_candidate_bindings)
 from _jsroute_timeline import (  # noqa: E402
-    FunctionTimeline, InvocationReplay, declaration_records,
-    function_reference, lexical_limits)
+    FunctionTimeline, InvocationReplay, body_death_index,
+    declaration_records, function_reference, lexical_limits)
 from _jsroute_state import build_sender_queries  # noqa: E402
 from _jsroute_source import (SourceIndex, function_body_at,  # noqa: E402
-                             record_work, statement_end)
+                             method_head_start,  # noqa: E402
+                             previous_nonspace as _js_previous_nonspace,
+                             record_work, statement_end,
+                             top_level as _js_top_level,
+                             word_before as _js_word_before)
+from _jsroute_operations import (discover_operations,  # noqa: E402
+                                 mark_generator_consumption)
 from _jsroute_receiver import ReceiverIndex  # noqa: E402
 
 
@@ -29,39 +35,6 @@ from _jsroute_receiver import ReceiverIndex  # noqa: E402
 # Distinct from an unknown name (a parameter, an import): unknown is silence,
 # unprovable is a claim that something happened here and was not followed.
 _JS_UNPROVABLE = object()
-
-
-def _js_top_level(mask, start, end, char):
-    """Offset of the first `char` at bracket depth 0 in the span, or None."""
-    depth = 0
-    for i in range(start, end):
-        c = mask[i]
-        if c in '([{':
-            depth += 1
-        elif c in ')]}':
-            depth -= 1
-            if depth < 0:
-                return None
-        elif c == char and depth == 0:
-            return i
-    return None
-
-
-def _js_previous_nonspace(mask, position):
-    position -= 1
-    while position >= 0 and mask[position].isspace():
-        position -= 1
-    return position
-
-
-def _js_word_before(mask, position):
-    position = _js_previous_nonspace(mask, position) + 1
-    end = position
-    while (position > 0
-           and (mask[position - 1].isalnum()
-                or mask[position - 1] in '_$')):
-        position -= 1
-    return mask[position:end]
 
 
 def js_tab_routing_violations(path, rel, work=None):
@@ -176,46 +149,7 @@ def js_tab_routing_violations(path, rel, work=None):
             return helper_state(call.group(1), call_pos, depth)
         return _JS_UNPROVABLE
 
-    declarations = list(re.finditer(
-        r'\b(const|let|var)\s+([\w$]+)\s*=', mask))
-    bindings = []
-    for m in re.finditer(r'\b([\w$]+)\s*=(?!=|>)', mask):
-        before = _js_previous_nonspace(mask, m.start())
-        if before < 0 or mask[before] != '.':
-            bindings.append(m)
-    events = []  # (pos, kind, match)
-    for m in declarations:
-        events.append((m.start(), 'init', m))
-    for m in bindings:
-        events.append((m.start(), 'bind', m))
-    for m in re.finditer(r'\b([\w$]+)\s*\.\s*tab(?![\w$])\s*=', mask):
-        events.append((m.start(), 'prop', m))
-    for m in re.finditer(r'\bObject\s*\.\s*assign\s*\(', mask):
-        events.append((m.start(), 'assign', m))
-    # The bracket form is found in the raw text because the mask blanks
-    # string contents, making `['tab']` unreadable there — but then a match
-    # that begins inside a blanked span is a mention in a string or comment,
-    # not code. The mask preserves positions, so the two diverge at the very
-    # first character of the name exactly when the mention is not real code.
-    for m in re.finditer(r'\b([\w$]+)\s*\[\s*["\']tab["\']\s*\]\s*=', text):
-        if mask[m.start()] == text[m.start()]:
-            events.append((m.start(), 'prop', m))
-    # A tracked object handed to any other call escapes: a helper that writes
-    # through its parameter is invisible from here, so the object stops being
-    # provable at that point rather than being trusted on its literal.
-    for m in re.finditer(r'\b([\w$]+)\s*\(', mask):
-        if m.group(1) in senders or m.group(1) in ('if', 'for', 'while',
-                                                   'switch', 'catch',
-                                                   'function', 'return'):
-            continue
-        # Object.assign's target is modelled above, so it is not an escape;
-        # every other call taking the object is one, member calls included.
-        dot = _js_previous_nonspace(mask, m.start())
-        if (dot >= 0 and mask[dot] == '.'
-                and _js_word_before(mask, dot) == 'Object'):
-            continue
-        events.append((m.start(), 'escape', m))
-    events.sort(key=lambda e: e[0])
+    events, bindings = routing_events(mask, text, senders)
 
     pair_end = {}
     pair_start = {}
@@ -291,19 +225,35 @@ def js_tab_routing_violations(path, rel, work=None):
                 _js_top_level, js_split_top_level)
             add_scope(
                 None, body_open, params, match.start(), body, param_order)
-    for match in re.finditer(r'\b([\w$]+)\s*\(', mask):
+    for match in re.finditer(r'(?<![\w$])([\w$]+)\s*\(', mask):
         if match.group(1) in ('if', 'for', 'while', 'switch', 'catch'):
             continue
         open_paren = mask.index('(', match.start())
         close = pair_end.get(open_paren, len(mask))
         body_open = after_space(close)
-        previous_at = _js_previous_nonspace(mask, match.start())
+        previous_at = method_head_start(mask, match.start(), pair_start)
         previous = mask[previous_at:previous_at + 1]
         if (mask[body_open:body_open + 1] == '{'
                 and _js_word_before(mask, match.start()) != 'function'
                 and previous in '{,;}'):
             method_positions.add(match.start())
             add_scope(open_paren, body_open)
+    # A computed key names the method instead of an identifier: the head is
+    # the bracket pair, and the body is a scope like any other method's.
+    for match in re.finditer(r'(?<![\w$])\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*\(',
+                             mask):
+        if mask[match.start()] != text[match.start()]:
+            continue
+        head = _js_previous_nonspace(mask, match.start())
+        if head < 0 or mask[head] not in '{,':
+            continue
+        open_paren = after_space(pair_end.get(match.start(), match.start()))
+        close = pair_end.get(open_paren, len(mask))
+        body_open = after_space(close)
+        if mask[body_open:body_open + 1] != '{':
+            continue
+        method_positions.add(open_paren)
+        add_scope(open_paren, body_open)
 
     nested = [0]
     for index in sorted(
@@ -404,6 +354,10 @@ def js_tab_routing_violations(path, rel, work=None):
             return resolved['name']
         if resolved['binding'] is not None:
             return states.get(resolved['binding'])
+        if resolved['form'] in ('get', 'set', 'generator'):
+            # A property the model cannot follow reads as an unknown value:
+            # whatever the transfer hands on, its later uses stay unprovable.
+            return _JS_UNPROVABLE
         for name in re.findall(r'\b[\w$]+\b', expr):
             if (name in senders
                     or alias_value(name, span_start, states)
@@ -478,22 +432,33 @@ def js_tab_routing_violations(path, rel, work=None):
             member_bindings[binding] = item
     invocation_resolution = {
         'binding': visible_binding, 'scope': scope_at,
-        'member_bindings': member_bindings, 'scopes': scopes}
+        'member_bindings': member_bindings, 'scopes': scopes,
+        'optional_write': optional_write}
     invocation_reader = {
         'top_level': _js_top_level, 'split': js_split_top_level,
         'body': body_at, 'expression_end': js_expression_end}
     invocation_resolution['receivers'] = ReceiverIndex(
         mask, text, {'end': pair_end, 'start': pair_start}, bindings,
         invocation_resolution, invocation_reader, senders, work)
+    carries = set()
     for match in bindings:
         expression_end = js_expression_end(mask, match.end())
         expression = mask[match.end():expression_end].strip()
-        if not re.fullmatch(
-                r'[\w$]+\s*(?:\.\s*[\w$]+'
-                r'|\[\s*[^]]+\s*\])', expression):
-            continue
-        target = invocation_resolution['receivers'].callable_value(
-            (match.end(), expression_end))
+        bound_member = re.match(
+            r'([\w$]+)\s*\.\s*([\w$]+)\s*\.\s*bind\s*\(', expression)
+        if bound_member:
+            target = invocation_resolution['receivers'].member(
+                bound_member.group(1), bound_member.group(2),
+                match.start())
+        else:
+            if not re.fullmatch(
+                    r'[\w$]+\s*(?:\.\s*[\w$]+'
+                    r'|\[\s*[^]]+\s*\])', expression):
+                continue
+            target = invocation_resolution['receivers'].callable_value(
+                (match.end(), expression_end))
+        if target['form'] in ('get', 'set', 'generator'):
+            carries.add(visible_binding(match.group(1), match.start()))
         value = target['body']
         if value is None and target['binding'] is not None:
             value = function_reference(
@@ -506,6 +471,10 @@ def js_tab_routing_violations(path, rel, work=None):
         mask, text, {'end': pair_end, 'start': pair_start},
         invocation_resolution, method_positions,
         invocation_reader, senders)
+    discover_operations(
+        mask, text, {'end': pair_end, 'start': pair_start},
+        invocation_resolution, invocation_reader, invocations)
+    mark_generator_consumption(mask, invocations)
     replay = InvocationReplay(
         timeline, scopes, events, invocations,
         {'mask': mask, 'text': text, 'body': body_at,
@@ -513,7 +482,9 @@ def js_tab_routing_violations(path, rel, work=None):
          'computed_key': invocation_resolution[
              'receivers'].computed_key,
          'expression_end': js_expression_end},
-        scope_at, visible_binding, optional_write, work)
+        scope_at, visible_binding, optional_write, work, carries)
+    body_is_dead = body_death_index(timeline, replay, invocations,
+                                    bindings, mask, visible_binding)
 
     reached_calls = {}
     reached_unknowns = []
@@ -524,7 +495,9 @@ def js_tab_routing_violations(path, rel, work=None):
             continue
         replay.clear_between(
             runtime_values, previous_call, call['order'], {0})
-        result = replay.run(call, runtime_values)
+        result = replay.run(
+            call, runtime_values,
+            inherited_optional=optional_write(call['start'], len(mask)))
         for record in result.calls:
             reached_calls.setdefault(
                 record[0]['start'], []).append(record)
@@ -532,7 +505,8 @@ def js_tab_routing_violations(path, rel, work=None):
         previous_call = call['order']
     candidate_bindings = sender_candidate_bindings(
         scopes, bindings, mask, visible_binding, js_expression_end,
-        senders, invocation_resolution['receivers'].callable_value)
+        senders, invocation_resolution['receivers'].callable_value,
+        [match for _, kind, match in events if kind == 'interp'])
     sender_queries = build_sender_queries(
         candidate_bindings, reached_calls, scopes, events,
         invocations, replay,
@@ -576,7 +550,7 @@ def js_tab_routing_violations(path, rel, work=None):
                 name = m.group(2)
                 stmt_end = statement_end(mask, m.end())
                 named[name] = resolve(m.end(), stmt_end, named, depth)
-            elif kind == 'bind':
+            elif kind in ('bind', 'interp'):
                 continue
             elif kind == 'assign':
                 open_paren = mask.index('(', m.start())
@@ -643,6 +617,13 @@ def js_tab_routing_violations(path, rel, work=None):
                 and call['binding'] not in candidate_bindings):
             continue
         runtime_records = reached_calls.get(call['start'])
+        if (call_name in senders and call['scope'] != 0
+                and runtime_records is None and body_is_dead(call['scope'])):
+            # The send sits inside a callable body no invocation held, and
+            # nothing the model cannot follow could have taken it: judging
+            # it would report a send that does not happen. A top-level send
+            # is outside every body and always runs.
+            continue
         args = call['args']
         tab_entries = []
         unprovable = []

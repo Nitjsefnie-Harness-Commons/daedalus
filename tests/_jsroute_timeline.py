@@ -108,6 +108,10 @@ class FunctionTimeline:
                 value[1], overrides, tuple(clipped), seen - {value[1]})
         return (value,)
 
+    def entries(self):
+        """Every binding's stored values as (binding, entries) pairs."""
+        return self._entries.items()
+
     def assignment_value(self, binding, definition, overrides, limits):
         for _, _, found, value in self._entries.get(binding, ()):
             if found == definition:
@@ -120,7 +124,8 @@ class InvocationReplay:
     """Replay callable-binding writes in the order known calls execute."""
 
     def __init__(self, timeline, scopes, events, invocations, source,
-                 scope_at, visible_binding, optional_write, work=None):
+                 scope_at, visible_binding, optional_write, work=None,
+                 carries=()):
         self.timeline = timeline
         self.scopes = scopes
         self.mask = source['mask']
@@ -136,6 +141,13 @@ class InvocationReplay:
         self.body_scopes = {
             (scope['start'], scope['end']): index
             for index, scope in enumerate(scopes)}
+        self.carries = set(carries)
+        # Bindings whose invocations provably held a body other than the one
+        # a send sits in: the record a dead-body verdict is read from.
+        self.invoked = {}
+        # The state the top-level walk reads: a write to a binding declared
+        # outside the body that wrote it outlives the body.
+        self.root_state = None
         self.bind_events = {}
         self.operations = {}
         for start, kind, match in events:
@@ -176,6 +188,8 @@ class InvocationReplay:
             inherited_optional=False, limits=None, sender_sources=None,
             execution=None):
         record_work(self.work, 'replay_calls')
+        if self.root_state is None:
+            self.root_state = inherited
         call_start = call['start']
         if limits is None:
             limits = lexical_limits(
@@ -198,7 +212,9 @@ class InvocationReplay:
             writes.extend(nested.writes)
             calls.extend(nested.calls)
             unknowns.extend(nested.unknowns)
-        if call['status'] == 'unprovable':
+        if call['status'] == 'unprovable' or (
+                call['binding'] is not None
+                and call['binding'] in self.carries):
             unknowns.append(call)
             return ReplayResult(writes, calls, unknowns)
         if call['status'] == 'irrelevant':
@@ -209,6 +225,10 @@ class InvocationReplay:
             bodies = self.timeline.values_at(
                 call['binding'], inherited, limits)
         record_work(self.work, 'replay_body_candidates', len(bodies))
+        if call['binding'] is not None and self.root_state is inherited:
+            held = {self.scope_of(body) for body in bodies}
+            held.discard(None)
+            self.invoked.setdefault(call['binding'], set()).update(held)
         for body in bodies:
             if body is None:
                 continue
@@ -249,6 +269,13 @@ class InvocationReplay:
                 calls.extend(nested.calls)
                 unknowns.extend(nested.unknowns)
         return ReplayResult(writes, calls, unknowns)
+
+    def scope_of(self, body):
+        """Scope index a function body belongs to, or None."""
+        if not (isinstance(body, tuple)
+                and body[:1] in (('block',), ('expr',))):
+            return None
+        return self._scope_for(body)
 
     def _scope_for(self, body):
         inset = body[0] == 'block'
@@ -313,10 +340,14 @@ class InvocationReplay:
             value = tuple(dict.fromkeys((*before, *value)))
         overrides[target] = value
         owner = self.scopes[function_scope]
-        local = owner['param_start'] <= target[1]
-        captured = not local or target[2] > owner['end']
+        # A write to a binding declared outside this body outlives the body:
+        # it escapes to the caller's state, so the caller sees the write.
+        local = owner['start'] <= target[1] and target[2] <= owner['end']
+        captured = not local
         if captured:
             inherited[target] = value
+            if self.root_state is not None:
+                self.root_state[target] = value
         return {'target': target, 'optional': optional,
                 'captured': captured}
 
@@ -329,3 +360,53 @@ class InvocationReplay:
             'span': (match.end(), self.expression_end(
                 self.mask, match.end())),
             'rest': None, 'excluded': ()}
+
+
+def body_death_index(timeline, replay, invocations, bindings, mask,
+                     visible_binding):
+    """Answer whether a body is provably dead: no invocation can hold it.
+
+    A body no binding holds, one a holder was never invoked for, or one a
+    handed-away binding could still take, keeps its report: the model
+    proves a send dead, it does not assume it.
+    """
+    body_holders = {}
+    for binding, entries in timeline.entries():
+        for entry in entries:
+            if entry[3] is None:
+                continue
+            scope = replay.scope_of(entry[3])
+            if scope is not None:
+                body_holders.setdefault(scope, set()).add(binding)
+
+    alias_targets = {}
+    for match in bindings:
+        alias = re.match(r'\s*([\w$]+)\s*(?=[,;)\n])',
+                         mask[match.end():])
+        if alias is None:
+            continue
+        source = visible_binding(alias.group(1), match.start())
+        target = visible_binding(match.group(1), match.start())
+        if source is not None and target is not None:
+            alias_targets.setdefault(source, set()).add(target)
+
+    escaped = set()
+    for call in invocations:
+        for span in call['args']:
+            name = mask[span[0]:span[1]].strip()
+            if re.fullmatch(r'[\w$]+', name):
+                binding = visible_binding(name, span[0])
+                if binding is not None:
+                    escaped.add(binding)
+
+    def is_dead(scope):
+        holders = set(body_holders.get(scope, ()))
+        for holder in set(holders):
+            holders |= alias_targets.get(holder, set())
+        if not holders or holders & escaped:
+            return False
+        return all(replay.invoked.get(holder)
+                   and scope not in replay.invoked[holder]
+                   for holder in holders)
+
+    return is_dead
