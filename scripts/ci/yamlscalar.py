@@ -18,7 +18,7 @@ plain scalar instead, so nothing continues one after it.
 Equivalent spellings decode to the same value, so quoting a scalar or
 rewriting a block collection in flow style changes nothing a reader sees.
 Node properties are the one place the entry points diverge: a name or id in
-`workflow_step_items` reads an anchor, the tags `!` and `!!str`, and an
+`workflow_step_items` reads an anchor, the `!!str` tag, and an
 alias resolved to the last definition of its anchor before that line, while
 every other entry point refuses all three.
 
