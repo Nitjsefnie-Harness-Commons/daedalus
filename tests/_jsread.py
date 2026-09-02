@@ -1,26 +1,13 @@
-"""Reading shipped JavaScript without executing it.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
-Several contracts are properties of the source rather than of a run: which
-message types a script sends, whether a value reaches innerHTML, which
-argument a call passes. Answering those needs just enough of a reader to know
-what is a comment, what is a string, and where a bracket closes — not a
-JavaScript parser, and never eval.
-"""
+"""Reading shipped JavaScript without executing it; not a suite itself, and
+never eval."""
 import re
 
 
 def blank_js_comments(source):
-    """Return `source` with comments blanked and string literals intact.
-
-    A single forward walk, because a `//` inside a string literal does not
-    start a comment. Regex literals are NOT modelled: one containing a quote
-    or a comment opener would desynchronise this walk. The dashboard sources
-    contain none, and the scanner below would report a violation rather than
-    stay silent if that changed, which is the direction an unmodelled shape
-    should fail in.
-    """
+    """Return `source` with comments blanked and strings intact. One
+    forward walk, because a `//` inside a string starts no comment;
+    regex literals are unmodelled, and the scanner reports one rather
+    than stay silent."""
     out = []
     index, end = 0, len(source)
     quote = None
@@ -63,12 +50,13 @@ _REGEX_KEYWORDS = {
     'of', 'return', 'throw', 'typeof', 'void', 'yield'}
 _HEAD_KEYWORDS = {'if', 'while', 'for', 'with'}
 _BLOCK_HEADS = {'else', 'do'}
+_DECIMAL_DIGITS = frozenset('0123456789')
 
 
 def _js_regex_span(text, start):
-    """Offset of the slash closing the regex literal opening at `start`,
-    or None when no same-line body closes it: a raw line ending cannot
-    occur in a regex body, so a slash reaching one is division."""
+    """Offset of the slash closing the regex literal opening at `start`, or
+    None when no same-line body closes it: a line ending cannot occur in a
+    regex body, so a slash reaching one is division."""
     in_class = False
     j = start + 1
     n = len(text)
@@ -92,7 +80,6 @@ def _js_regex_span(text, start):
 
 
 def _js_word_before(out, index):
-    """The identifier ending just before mask index `index`."""
     start = index
     while start > 0 and (out[start - 1].isalnum() or out[start - 1] in '_$'):
         start -= 1
@@ -100,7 +87,6 @@ def _js_word_before(out, index):
 
 
 def _js_matching_open(out, close):
-    """Mask index of the bracket matching the closer at `close`, or -1."""
     depth = 0
     for j in range(close, -1, -1):
         if out[j] in ')]}':
@@ -113,12 +99,9 @@ def _js_matching_open(out, close):
 
 
 def _js_object_brace(out, brace):
-    """Whether the `{` at `brace` opens an object literal rather than a
-    block. An `{` in operand position is a literal, and the tokens that
-    put one there are the regex-allowing ones; a head keyword's `)` opens
-    a body block instead, and so do the statement heads in `_BLOCK_HEADS`,
-    the arrow `=>`, and a nested block. `$` counts because it is the `$`
-    of an interpolation's `${`."""
+    """An `{` in operand position is a literal, and the tokens that put one
+    there are the regex-allowing ones; the bracket or colon in front
+    decides the rest."""
     k = brace
     while k > 0 and out[k - 1].isspace():
         k -= 1
@@ -141,8 +124,8 @@ def _js_object_brace(out, brace):
 
 
 def _js_clause_head_word(out, start):
-    """Whether the word starting at `start` heads a `case` clause
-    rather than naming a member or an object-literal key."""
+    """Whether the word at `start` heads a `case` clause or only names a
+    member or key."""
     k = start
     while k > 0 and out[k - 1].isspace():
         k -= 1
@@ -154,19 +137,12 @@ def _js_clause_head_word(out, start):
 
 
 def _js_colon_brace(out, colon):
-    """Whether the `{` behind the `:` at `colon` opens an object literal.
-    A colon also spells a statement label and a case/default clause,
-    whose `{` opens a block Node follows with a regex. Reading back from
-    the colon at bracket depth zero, the first `?` carrying no other
-    colon on its side of the colon is a ternary alternate, a `case`
-    clause head marks the clause, a `;` or the start of the mask
-    leaves a statement-head colon (a label, or a `default` clause,
-    which the boundary and the enclosing switch brace decide), and the
-    bracket reached first is the literal the colon sits in, whose own
-    kind decides. The `;` also bounds the walk: a previous statement's
-    brackets are all closed pairs, so it classifies nothing, but letting
-    a label read back through every statement before it makes the mask
-    quadratic on label-heavy files."""
+    """Whether the `{` behind the `:` at `colon` is an object literal.
+    A colon also spells a label or a case/default clause, whose `{` Node
+    follows with a regex. Reading back at depth zero, the first `?` with
+    no other colon on its side is a ternary — `?.` is a chain only where
+    no decimal digit follows, so `cond?.5:` is a conditional. A `;` bounds
+    the walk, which would otherwise turn quadratic on label-heavy files."""
     depth, crossed = 0, 0
     j = colon - 1
     while j >= 0:
@@ -186,7 +162,10 @@ def _js_colon_brace(out, colon):
                 crossed += 1
             elif char == '?':
                 after = out[j + 1]
-                if after in ('.', '?') or (j and out[j - 1] == '?'):
+                if after == '?' or (j and out[j - 1] == '?'):
+                    j -= 1
+                    continue
+                if after == '.' and out[j + 2] not in _DECIMAL_DIGITS:
                     j -= 1
                     continue
                 if crossed == 0:
@@ -205,23 +184,12 @@ def _js_colon_brace(out, colon):
 
 
 def _js_regex_opening(out, regex_closed):
-    """Whether the `/` at `len(out)` opens a regex literal, read from the
-    last token in the mask built so far. Comments and blanked spans are
-    not tokens, so skipping blanked space reaches the real previous
-    token; a string or template literal leaves none at all, which is why
-    js_mask reports one separately. After `)` the matching `(` decides,
-    because a regex may open an if/while/for/with head's body, and a `.`
-    before the keyword means a method named for a head keyword instead.
-    `}` stays regex-allowed after a block, which statement heads follow,
-    and reads as division after an object literal, whose `{` sat in
-    operand position; the colon in front of such a `{` also spells a
-    statement label and a case/default clause, which `_js_colon_brace`
-    tells apart. A body guessed wrong cannot cross a raw line ending, but
-    one that swallows a string's opening quote leaves the mask's string
-    state open past it, so a wrong guess does not self-heal at the line
-    end. After `/` the two spellings are read apart by `regex_closed`:
-    the slash closing a regex literal is division, while a division
-    operator reopens regex position."""
+    """Whether the `/` at `len(out)` opens a regex literal, from the last
+    mask token. A wrong guess does not self-heal at the line
+    end: a body swallowing a string's opening quote leaves the string
+    state open past it. After `/` `regex_closed` splits the spellings — a
+    closing slash is division, a division operator reopens regex position
+    — and a blanked literal leaves no previous token to read."""
     j = len(out) - 1
     while j >= 0 and out[j].isspace():
         j -= 1
@@ -258,22 +226,10 @@ def _js_regex_opening(out, regex_closed):
 
 
 def js_mask(text):
-    """Blank string and comment contents, preserving positions and newlines,
-    so structure (brackets, commas, colons) can be read without false hits
-    from literal text. A template literal is walked with a nesting stack: its
-    literal chunks blank like any string, while an interpolation is code, so
-    it stays visible with its `${` and closing `}` intact and the brackets,
-    commas and colons inside it count for depth. A regex literal is blanked
-    like a string (delimiters kept, flags with it), read from the previous
-    token, so its body never reaches the string, comment or interpolation
-    states. A `/` directly after a string or template literal is division,
-    because a blanked literal leaves no previous token to read, and the
-    slash after a closed regex literal is division too, which `js_mask`
-    tracks in `regex_closed` because the two kinds of `/` are otherwise
-    indistinguishable in a mask whose regex bodies are all blanks. `out`
-    holds exactly one character per element, which the regex reader
-    indexes backwards, so every multi-character insert is appended one
-    character at a time."""
+    """Blank string and comment contents, preserving positions and newlines.
+    A regex literal is blanked like a string, read from the previous token;
+    `out` holds one character per element, which the readers index
+    backwards."""
     out = []
     i, n = 0, len(text)
     templates = []
@@ -364,7 +320,6 @@ def js_mask(text):
 
 
 def js_bracket_end(mask, open_pos):
-    """Offset just past the bracket matching the one at `open_pos`."""
     depth = 0
     for i in range(open_pos, len(mask)):
         if mask[i] in '([{':
@@ -377,7 +332,6 @@ def js_bracket_end(mask, open_pos):
 
 
 def js_expression_end(mask, start):
-    """End at a depth-zero comma, semicolon, ASI newline, or delimiter."""
     depth = 0
     previous_continues = '+-*/%&|^!?:.=<>~([{'
     next_continues = '.([?*/%&|^!:<>=~'
@@ -419,8 +373,8 @@ def js_expression_end(mask, start):
 
 
 def js_split_top_level(mask, text, start, end):
-    """Split mask[start:end] on depth-0 commas. Emptiness is judged on the
-    ORIGINAL text: a blanked string is a real argument, not a gap."""
+    """Split mask[start:end] on depth-0 commas; emptiness is judged on the
+    original text, where a blanked string is a real argument."""
     spans, depth, seg = [], 0, start
     for i in range(start, end):
         c = mask[i]
@@ -436,10 +390,8 @@ def js_split_top_level(mask, text, start, end):
 
 
 def js_object_entries(mask, text, obj_start):
-    """Top-level entries of the object literal opening at `obj_start`:
-    [(key, value_text_or_None_for_shorthand, key_offset)]. A spread has a
-    None key and its expression as the value. Destructuring defaults
-    (`tab = 'extension'` in a parameter object) are not entries."""
+    """Entries of the object literal at `obj_start`, as (key, value or None
+    for shorthand, key offset); a spread's key is None."""
     obj_end = js_bracket_end(mask, obj_start)
     entries = []
     for s, e in js_split_top_level(mask, text, obj_start + 1, obj_end - 1):

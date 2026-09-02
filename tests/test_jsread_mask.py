@@ -133,6 +133,24 @@ _TEMPLATE_CASES = [
      "const half = 1 ? {a:1} : {b:2} / \"a/b\" / 2;\n"
      "send = extCmd;\n"
      "send('focus-tab', { tab: chromeTab });\n"),
+    ('ternary-decimal-consequent-write', True,
+     "let send = ordinary;\n"
+     "const half = 0?.5: {b:1} / [send = extCmd] / 2;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('ternary-decimal-consequent-arrow-write', True,
+     "let send = ordinary;\n"
+     "const f = () => 0?.5: {b:1} / [send = extCmd] / 2;\n"
+     "f();\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('ternary-decimal-consequent-string-write', True,
+     "let send = ordinary;\n"
+     "const half = 0?.5: {b:1} / \"a/b\" / 2;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('member-case-before-ternary-colon-write', True,
+     "let send = ordinary;\n"
+     "const half = 0 ? x.case : {b:2} / [send = extCmd] / 2;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
     ('case-keyed-nested-write', True,
      "let send = ordinary;\n"
      "const half = {case: {b:1} / \"a/b\" / 2};\n"
@@ -493,6 +511,53 @@ def test_division_behind_a_ternary_alternate_keeps_a_write_visible(tmp):
         'const half = {a:1, case: {b:1} / [send = extCmd] / 2};\n'
         'let after;\n',
         'const half = {a:1, default: {b:1} / [send = extCmd] / 2};\n'
+        'let after;\n',
+    )
+    for source in sources:
+        mask = js_mask(source)
+        assert len(mask) == len(source), mask
+        assert 'send = extCmd' in mask, mask
+        assert 'let after;' in mask, mask
+
+
+def test_ternary_colon_before_a_decimal_consequent_stays_ternary(tmp):
+    """`cond?.5:` is a conditional: `?.` is an optional chain only where no
+    decimal digit follows, so the skip must read one character further.
+    Reading the `?` of `?.5` as a chain answers the alternate's `{` a block,
+    its `}` a regex position, and the division behind that `}` is blanked
+    over the write — or swallows a quote and blanks the rest of the file."""
+    del tmp
+    sources = (
+        'const half = 0?.5: {b:1} / [send = extCmd] / 2;\nlet after;\n',
+        'const f = () => 0?.5: {b:1} / [send = extCmd] / 2;\n'
+        'f();\nlet after;\n',
+        'const half = 0?.5: {b:1} / "a/b" / 2;\nsend = extCmd;\n'
+        'let after;\n',
+    )
+    for source in sources:
+        mask = js_mask(source)
+        assert len(mask) == len(source), mask
+        assert 'send = extCmd' in mask, mask
+        assert 'let after;' in mask, mask
+    spaced = ('const half = 0 ? .5 : {b:1} / [send = extCmd] / 2;\n'
+              'let after;\n')
+    mask = js_mask(spaced)
+    assert len(mask) == len(spaced), mask
+    assert 'send = extCmd' in mask, mask
+    assert 'let after;' in mask, mask
+
+
+def test_member_case_before_a_ternary_colon_is_not_a_clause_head(tmp):
+    """`x.case` between a ternary's `?` and `:` is member access, not a
+    `case` clause: the `.` in front of the word refuses the clause-head
+    reading. Without that refusal the colon is answered a label, the
+    alternate's `{` is read a block and the write behind its `}` is
+    blanked."""
+    del tmp
+    sources = (
+        'const half = 0 ? x.case : {b:2} / [send = extCmd] / 2;\n'
+        'let after;\n',
+        'const half = 0 ? x.default : {b:2} / [send = extCmd] / 2;\n'
         'let after;\n',
     )
     for source in sources:
