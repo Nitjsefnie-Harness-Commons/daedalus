@@ -15,7 +15,9 @@ duration of the test the later line names.
 
 Only passing tests are recorded: the comparison intersects the two sides on
 name, and a test that failed on one of them must be absent rather than
-present with however long it took to give up.
+present with however long it took to give up. A non-passing result is kept
+beside the durations, never in them, so the comparison can say how many
+names the runs recorded.
 
 The first test of a suite carries that suite's interpreter startup and
 imports, because there is no earlier line to measure from. That cost lands on
@@ -33,8 +35,8 @@ import sys
 import time
 from pathlib import Path
 
-# `  PASS  name`, as _util.runner prints it. FAIL and SKIP lines are read too:
-# they end a test's interval even though that test is not recorded.
+# `  PASS  name`, as _util.runner prints it. The other outcomes are read too:
+# they end a test's interval and are recorded as outcomes, never durations.
 _RESULT = re.compile(r'^\s+(PASS|FAIL|SKIP|ERROR)\s+(\S+)')
 _RELAY_START = re.compile(r'^=== (.+) ===$')
 _RELAY_END = re.compile(r'^--- timed ([0-9]+) passing tests in (.+)$')
@@ -56,8 +58,9 @@ def selected(name, only, except_globs):
 
 
 def time_suite(python, suite, cwd):
-    """Every passing test in one suite, with the seconds it took."""
+    """Every passing test with its seconds, and every non-passing outcome."""
     durations = {}
+    outcomes = {}
     started = time.monotonic()
     lines = []
     with subprocess.Popen(
@@ -117,8 +120,11 @@ def time_suite(python, suite, cwd):
             outcome, name = match.group(1), match.group(2).rstrip(':')
             if outcome == 'PASS':
                 durations[name] = now - started
+                outcomes.pop(name, None)
+            else:
+                outcomes[name] = outcome
             started = now
-    return durations
+    return durations, outcomes
 
 
 def main(argv=None):
@@ -153,10 +159,11 @@ def main(argv=None):
     timed = 0
     for suite in suites:
         print(f'=== {suite.name} ===', flush=True)
-        durations = time_suite(args.python, suite, tree)
+        durations, outcomes = time_suite(args.python, suite, tree)
         timed += len(durations)
         (out / f'{suite.stem}.json').write_text(
-            json.dumps({'tests': durations}), encoding='utf-8')
+            json.dumps({'tests': durations, 'outcomes': outcomes}),
+            encoding='utf-8')
         print(f'--- timed {len(durations)} passing tests in {suite.name}',
               flush=True)
     # Every suite running and none of them yielding a single passing test is
