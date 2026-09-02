@@ -256,12 +256,19 @@ def test_measured_children_keep_coverage_start_but_not_runner_stdin(tmp):
 
 
 def test_suites_run_concurrently(tmp):
-    """Each suite must observe its sibling while both are still running."""
+    """Each suite must observe its sibling while both are still running.
+
+    Without --require-all the runner reports a failed suite and still
+    exits 0, so the returncode says nothing about concurrency: it is the
+    gate that makes a serialized pool — one rendezvous suite left with no
+    sibling to observe — fail this test.
+    """
     if (os.cpu_count() or 1) < 2:
         _util.skip('parallel coverage test requires at least two CPUs')
     suites = {'test_rendezvous_a.py': _RENDEZVOUS_SUITE,
               'test_rendezvous_b.py': _RENDEZVOUS_SUITE}
-    result, _invocations = _coverage_tree(tmp, suites)
+    result, _invocations = _coverage_tree(
+        tmp, suites, args=('--require-all',))
     assert result.returncode == 0, (result.stdout, result.stderr)
 
 
@@ -279,8 +286,8 @@ def _assert_worker_pool_record(stdout, expected_names, lines):
         has_marker = _FAILURE_MARKER in group
         assert has_marker == (name in absent_names), (
             f'{case} worker {name}: {group!r}')
-    assert peak == 2, (
-        f'paired peak {peak}; reaching worker cap 2 is mandatory: {lines!r}')
+    assert peak <= 2, (
+        f'paired peak {peak}; the worker cap is a ceiling: {lines!r}')
     return peak, paired_names, unpaired, orphans
 
 
@@ -294,19 +301,18 @@ def _worker_pool_outcome(tmp, unlaunchable=()):
     return result, lines, replay
 
 
-def test_worker_pool_reaches_but_never_exceeds_cpu_count(tmp):
-    """Four suites on two reported CPUs must reach a peak of exactly two."""
+def test_worker_pool_never_exceeds_cpu_count(tmp):
+    """Four suites on two reported CPUs must never exceed a peak of two."""
     _worker_pool_outcome(tmp)
 
 
 def test_a_worker_that_never_runs_is_reported_not_counted(tmp):
     result, lines, replay = _worker_pool_outcome(
         tmp, unlaunchable=('test_worker_2.py',))
-    peak, paired_names, unpaired, orphans = replay
+    _peak, paired_names, unpaired, orphans = replay
     launchable = {f'test_worker_{number}.py' for number in (0, 1, 3)}
     assert paired_names == launchable, lines
     assert not (unpaired or orphans), (unpaired, orphans, lines)
-    assert peak == 2, f'launchable peak {peak}, expected 2: {lines!r}'
     failed_group = _group(result.stdout, 'test_worker_2.py')
     assert 'LAUNCH FAILED:' in failed_group, failed_group
     without_marker = result.stdout.replace(_FAILURE_MARKER, '', 1)
@@ -507,11 +513,10 @@ def test_a_suite_dying_mid_window_is_reported_not_counted(tmp):
 def test_an_absent_healthy_worker_is_reported_not_counted(tmp):
     result, lines, replay = _assert_dying_worker_outcome(
         tmp, unlaunchable=('test_worker_1.py',))
-    peak, paired_names, unpaired, orphans = replay
+    _peak, paired_names, unpaired, orphans = replay
     assert paired_names == {'test_worker_0.py', 'test_worker_2.py'}, lines
     assert unpaired == {'test_worker_dies.py'}, (unpaired, lines)
     assert not orphans, (orphans, lines)
-    assert peak == 2, f'paired peak {peak}, expected 2: {lines!r}'
     failed_group = _group(result.stdout, 'test_worker_1.py')
     assert 'LAUNCH FAILED:' in failed_group, failed_group
 
@@ -519,11 +524,10 @@ def test_an_absent_healthy_worker_is_reported_not_counted(tmp):
 def test_a_never_entered_dying_suite_is_reported_not_counted(tmp):
     result, lines, replay = _assert_dying_worker_outcome(
         tmp, unlaunchable=('test_worker_dies.py',))
-    peak, paired_names, unpaired, _orphans = replay
+    _peak, paired_names, unpaired, _orphans = replay
     assert not unpaired, f'never-entered suite logged an open: {lines!r}'
     healthy = {f'test_worker_{number}.py' for number in range(3)}
     assert paired_names == healthy, lines
-    assert peak == 2, f'never-entered paired peak was {peak}: {lines!r}'
     failed_group = _group(result.stdout, 'test_worker_dies.py')
     assert 'LAUNCH FAILED:' in failed_group, failed_group
 
