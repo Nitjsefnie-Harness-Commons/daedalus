@@ -577,14 +577,14 @@ def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
     assert len(observed) == 2, (shape, lines)
     for row in observed:
         assert row['job'] == job, row
-        # The stored count is the one the write read at its start, so the
-        # first line says 0 and the second 1.
-        assert row['stored'] in ('0', '1'), row
         names = [pair.split('=')[0] for pair in row['phases'].split()]
         assert names == ['acquire', 'usage', 'replaced', 'write',
                          'record'], row
         for name, value in row.items():
             assert value is not None, (name, row)
+    # The stored count is the one each write read at its start, so the two
+    # lines report 0 and then 1 -- in that order, one per write.
+    assert [row['stored'] for row in observed] == ['0', '1'], observed
 
 
 def main():
