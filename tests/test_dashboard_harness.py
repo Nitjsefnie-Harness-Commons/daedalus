@@ -256,6 +256,9 @@ bounded(work, 'work using a timer stub', 100).then(
 def test_successful_bound_clears_its_real_timeout(tmp):
     """A settled step leaves no diagnostic timer holding Node open."""
     del tmp
+    # 120000 ms dwarfs the suite's 5s process backstop, so an uncleared
+    # timer is caught by that backstop as a discrete failure instead of
+    # racing a wall-clock margin.
     source = r"""
 globalThis.clearTimeout = () => {};
 bounded(Promise.resolve('settled'), 'successful work', 120000).then(
