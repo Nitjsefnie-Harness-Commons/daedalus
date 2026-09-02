@@ -2,7 +2,8 @@
 import os
 import pathlib
 
-from daedalus_bridge.env_config import env_int, env_positive_float
+from daedalus_bridge.env_config import (
+    env_flag, env_int, env_positive_float)
 from daedalus_bridge import result_store
 
 
@@ -62,7 +63,7 @@ MAX_UNAUTHENTICATED_BODY = env_int(
 # when off. Committed with the fix rather than removed after measuring it: the
 # next regression on this path needs the same attribution, and rebuilding it by
 # hand in a REPL measures something other than what the bridge runs.
-DEBUG_TIMING = os.environ.get('DAEDALUS_DEBUG_TIMING') == '1'
+DEBUG_TIMING = env_flag('DAEDALUS_DEBUG_TIMING')
 
 
 # Per-operation socket deadline for a request. A peer that declares a body and
