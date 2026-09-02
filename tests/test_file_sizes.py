@@ -45,9 +45,11 @@ MARKERS = ('#', "'", '"', '`', '*', '(', ')')
 
 # The rule stated positively, so deleting it is as visible as contradicting
 # it. An alternation because the claim is a family, and a pin that refuses a
-# synonym of it is a pin the next author deletes.
+# synonym of it is a pin the next author deletes. The verbs are named
+# because the negatives below are floored on the ones this regex accepts.
+RAISING_VERBS = ('raised', 'increased', 'edited upward')
 ACCEPTED_RULE_SPELLINGS = (
-    r'(?:never|not|no)\b[a-z -]{0,40}?(?:raised|increased|edited upward)',
+    r'(?:never|not|no)\b[a-z -]{0,40}?(?:' + '|'.join(RAISING_VERBS) + ')',
     r'only ever go(?:es)? down',
 )
 STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
@@ -55,14 +57,19 @@ RULE_HELP = ('a negated raising verb ("is never raised by hand", "is not '
              'edited upward by hand"), or "only ever go down"')
 
 # Texts the spelling regex must tell apart, so a regex that stopped
-# discriminating - one that matches everything, or nothing - is visible
-# here rather than in the file it is supposed to guard.
+# discriminating - one matching everything, nothing, or the rule inverted
+# - is visible here rather than in the file it guards. The first two
+# negatives are the rule with its polarity flipped, one per accepted
+# spelling: negatives that all lack a raising verb leave the negator, the
+# half that makes it this rule rather than any rule, unmeasured.
 RULE_STATED = (
     'a recorded number is never raised by hand',
     'the number is not edited upward by hand',
     'the numbers in this table only ever go down',
 )
 RULE_NOT_STATED = (
+    'a recorded number is raised by hand when a file grows',
+    'the numbers in this table go down and up',
     'growing a listed file is allowed by editing its recorded number',
     'the ratchet keeps the numbers in this table honest',
     '',
@@ -313,8 +320,14 @@ def test_the_policy_prose_still_states_the_rule(tmp):
 
 
 def test_the_rule_spellings_tell_a_statement_from_its_absence(tmp):
-    """A regex matching anything would pin the rule against nothing."""
+    """Every listed statement of the rule is seen; no listed absence is."""
     del tmp
+    assert RULE_STATED, 'the rule-statement battery is empty'
+    assert RULE_NOT_STATED, 'the rule-absence battery is empty'
+    assert any(verb in text for text in RULE_NOT_STATED
+               for verb in RAISING_VERBS), (
+        'no listed negative states the rule inverted, so a regex that lost '
+        'its negator would pass here')
     missed = [text for text in RULE_STATED
               if not STATES_THE_RULE.search(text)]
     assert not missed, f'the rule is stated here and not seen: {missed}'
