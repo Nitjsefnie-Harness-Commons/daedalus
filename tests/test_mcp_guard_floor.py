@@ -73,6 +73,32 @@ def test_two_sites_spelling_one_condition_are_refused(_tmp):
         raise AssertionError('two identical raises merged into one key')
 
 
+OR_SHAPES = '''
+def armed(first, second):
+    if first or second:
+        raise ValueError('refused')
+'''
+
+
+def test_a_reached_or_guard_is_refused(_tmp):
+    """A raise a tool reaches refuses on one condition only.
+
+    The unit of witnessing is the raise site, so a guard whose test is an
+    `or` of two conditions is refused rather than witnessed: the remedy is
+    one raise per condition, because one witness cannot answer for two
+    conditions on one line.
+    """
+    sites, module = _mcp_guard_floor.guard_shape_probe(
+        _tmp, OR_SHAPES, 'or_shapes')
+    try:
+        _mcp_guard_floor.reachable_guards(sites, [module.armed.__code__])
+    except AssertionError as raised:
+        assert 'or_shapes.armed' in str(raised), raised
+        assert 'split' in str(raised), raised
+    else:
+        raise AssertionError('an or guard was reached instead of refused')
+
+
 TWIN_SHAPES = '''
 def twin(value):
     if value < 0: raise ValueError('neg'); raise ValueError('pos')
@@ -265,6 +291,27 @@ from mcp.server.mcpserver import MCPServer
 def test_a_non_repo_local_import_is_skipped(_tmp):
     """Stdlib and site-package targets are provably not this repository's."""
     _write_tree(Path(_tmp), {'composition.py': FOREIGN_IMPORT_COMPOSITION})
+    scanned = _mcp_guard_floor.composition_scan_set(
+        Path(_tmp) / 'composition.py', _tmp)
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
+TESTS_TREE_COMPOSITION = '''
+from tests import helper
+'''
+
+
+def test_the_scan_set_drops_something_imported_from_tests(_tmp):
+    """The tests/ filter is load-bearing on the closure.
+
+    A repo module can name a module under tests/, and the closure walk
+    would resolve it; the floor scans what the composition can import, and
+    what a suite defines is somebody else's raise to declare.
+    """
+    _write_tree(Path(_tmp), {
+        'composition.py': TESTS_TREE_COMPOSITION,
+        'tests/__init__.py': '',
+        'tests/helper.py': "raise ValueError('a suite raise')\n"})
     scanned = _mcp_guard_floor.composition_scan_set(
         Path(_tmp) / 'composition.py', _tmp)
     assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
