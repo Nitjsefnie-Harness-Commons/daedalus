@@ -223,6 +223,7 @@
 !/scripts/ci/speed_summary.py
 !/scripts/ci/time_tests.py
 !/scripts/ci/workflow_yaml.py
+!/scripts/ci/yamlanchor.py
 !/scripts/ci/yamlblock.py
 !/scripts/ci/yamlscalar.py
 !/scripts/ci/zeroed_suites.py
@@ -444,6 +445,7 @@
 !/tests/test_workflow_spellings.py
 !/tests/test_workflow_triggers.py
 !/tests/test_yamlread.py
+!/tests/test_yamlread_anchors.py
 !/tests/test_yamlread_blocks.py
 !/tests/test_yamlread_mapping_values.py
 !/tests/test_yamlread_steps.py

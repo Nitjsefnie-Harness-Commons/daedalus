@@ -11,6 +11,8 @@ if __package__:
         text_indent,
     )
     # pylint: disable-next=relative-beyond-top-level
+    from .yamlanchor import ALIAS, node_properties, strip_node_properties
+    # pylint: disable-next=relative-beyond-top-level
     from .yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
@@ -25,6 +27,7 @@ else:
         parse_block_header,
         text_indent,
     )
+    from yamlanchor import ALIAS, node_properties, strip_node_properties
     from yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
@@ -82,6 +85,15 @@ def _meaningful(line):
 
 def _split_field(text, owner):
     return split_mapping_field(text, owner, allow_tabs=True)
+
+
+def _field_indent(line):
+    """Where a mapping field starts, past any sequence dash on its line."""
+    indent = _indent(line)
+    after_dash = line.text[indent + 1:]
+    if line.text[indent:indent + 1] == '-' and after_dash[:1] in (' ', '\t'):
+        indent += 1 + len(after_dash) - len(after_dash.lstrip(' \t'))
+    return indent
 
 
 def _line_field(text):
@@ -149,7 +161,8 @@ def _scalar_lines(lines):
             index += 1
             continue
         _key, raw_value = field
-        value = _strip_inline_comment(raw_value.strip(' \t'))
+        _tokens, bare = node_properties(raw_value.lstrip(' \t'))
+        value = _strip_inline_comment(bare.strip(' \t'))
         match = BLOCK_HEADER.fullmatch(value)
         if match is not None:
             stop = block_end(
@@ -157,7 +170,7 @@ def _scalar_lines(lines):
             scalar.update(range(index + 1, stop))
             index = stop
             continue
-        quote = _quote_is_open(raw_value)
+        quote = _quote_is_open(bare)
         if quote is not None:
             stop = _continued_quote_end(
                 lines, index + 1, len(lines), quote)
@@ -224,8 +237,44 @@ def _mapping_body(lines, scalar, entry, owner):
     return body
 
 
-def _step_value(lines, start, end, indent, raw_value, owner):
+def _alias_value(lines, scalar, alias_index, name, owner):
+    """The value of the last `&name` node defined before `alias_index`."""
+    target = f'{owner} alias &{name}'
+    for index in range(alias_index - 1, -1, -1):
+        if index in scalar or not _meaningful(lines[index]):
+            continue
+        field = _line_field(lines[index].text)
+        if field is None:
+            continue
+        raw_value = field[1]
+        tokens, content = node_properties(
+            _strip_inline_comment(raw_value.strip(' \t')))
+        if f'&{name}' not in tokens:
+            continue
+        indent = _field_indent(lines[index])
+        _body, end = _section(lines, scalar, index, indent)
+        if not content:
+            first = _first_child(lines, scalar, index + 1, end, indent)
+            shape = 'mapping'
+            if first is not None and lines[first].text[
+                    _indent(lines[first]):].startswith('-'):
+                shape = 'sequence'
+            raise YAMLReadError(
+                f'{owner} has an unsupported alias to a nested '
+                f'{shape}: &{name}')
+        return _step_value(
+            lines, scalar, index, end, indent, raw_value, target)
+    raise YAMLReadError(f'{owner} has an unknown YAML alias: &{name}')
+
+
+def _step_value(lines, scalar, start, end, indent, raw_value, owner):
     value = _strip_inline_comment(raw_value.strip(' \t'))
+    if value.startswith('*'):
+        alias = ALIAS.fullmatch(value)
+        if alias is None:
+            raise YAMLReadError(f'{owner} has a malformed YAML alias')
+        return _alias_value(lines, scalar, start, alias.group('name'), owner)
+    value = strip_node_properties(value, owner)
     if not value:
         raise YAMLReadError(f'{owner} has no scalar value')
     match = BLOCK_HEADER.fullmatch(value)
@@ -241,7 +290,7 @@ def _step_value(lines, start, end, indent, raw_value, owner):
             body, indent, style, chomp, explicit, owner)
     if value.startswith(("'", '"')):
         return decode_inline_scalar(value, owner)
-    if value.startswith(('&', '*', '!', '[', '{', '@', '`')):
+    if value.startswith(('*', '[', '{', '@', '`')):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
     if '\t' in value or any(
             ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
@@ -257,9 +306,7 @@ def _step_fields(lines, scalar, index, end, item_indent):
     body = lines[index].text[item_indent:]
     if not body.startswith('-') or body[1:2] not in (' ', '\t'):
         raise YAMLReadError('step sequence contains a non-item')
-    after_dash = body[1:]
-    separation = len(after_dash) - len(after_dash.lstrip(' \t'))
-    field_indent = item_indent + 1 + separation
+    field_indent = _field_indent(lines[index])
     fields = [(index, lines[index].text[field_indent:])]
     for following in range(index + 1, end):
         if following in scalar or not _meaningful(lines[following]):
@@ -285,7 +332,7 @@ def _decoded_step_fields(lines, scalar, index, end, item_indent):
             raise YAMLReadError(f'duplicate mapping key: {key}')
         if key in ('name', 'id'):
             values[key] = _step_value(
-                lines, field_index, field_end, field_indent,
+                lines, scalar, field_index, field_end, field_indent,
                 raw_value, f'step {key}')
         else:
             values[key] = None
