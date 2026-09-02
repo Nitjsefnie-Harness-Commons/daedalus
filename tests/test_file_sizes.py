@@ -112,8 +112,11 @@ STATES_THE_POLICY = (
     'Shrink the file; the table is not where growth is negotiated.',
 )
 
-# Statements that offer growth by hand, which it must refuse. The first is
-# the sentence this file carried until the branch that removed it.
+# Licences to grow, which it must refuse. The first is the sentence this
+# file carried until the branch that removed it. This half is a backstop
+# over free prose and does not pretend to catch a paraphrase: a permissive
+# sentence written in none of these wordings is caught only where it
+# displaces the rule paragraph, which the containment pin below holds.
 SANCTIONS_GROWTH = (
     'Growing a listed file is allowed, because some fixes genuinely belong '
     'in it, but only by editing its recorded number in the same commit.',
@@ -272,6 +275,7 @@ def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
 def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
     """Tolerance is the side a future rule-writer collides with."""
     del tmp
+    assert STATES_THE_POLICY, 'the tolerance battery is empty'
     refused = [(text, _offered(text)) for text in STATES_THE_POLICY
                if _offered(text)]
     assert not refused, f'the pin refuses correct prose: {refused}'
@@ -280,6 +284,7 @@ def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
 def test_the_claim_check_refuses_a_licence_to_grow(tmp):
     """And the side this file's own history collided with."""
     del tmp
+    assert SANCTIONS_GROWTH, 'the strictness battery is empty'
     missed = [text for text in SANCTIONS_GROWTH if not _offered(text)]
     assert not missed, f'the pin passes a licence to grow: {missed}'
 
