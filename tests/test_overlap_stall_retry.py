@@ -142,7 +142,8 @@ def test_windows_stall_with_output_does_not_retry(tmp):
     """Recorded output is the diagnosis; a retry would only spend a child."""
     del tmp
     result, message, note, popen = _scripted_stall(
-        'win32', [subprocess.TimeoutExpired('node', 60)],
+        'win32',
+        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
         [(False, 'partial stdout', '[step] something')])
     assert result is None, result
     assert message == (
