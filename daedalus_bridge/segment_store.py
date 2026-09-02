@@ -2,13 +2,13 @@
 import os, json, hmac, secrets, threading, time
 
 from daedalus_bridge import atomic_file
-from daedalus_bridge.env_config import env_flag
+from daedalus_bridge.env_config import debug_timing
 from daedalus_bridge import path_safety
 
 
 # Neither a root nor a limit, so it stays a module-level switch read once
 # at import rather than travelling as a parameter.
-DEBUG_TIMING = env_flag('DAEDALUS_DEBUG_TIMING')
+DEBUG_TIMING = debug_timing()
 
 
 # One flat job namespace under the data root: segments/<job>/ holds the .ts

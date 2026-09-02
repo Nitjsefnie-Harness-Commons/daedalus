@@ -14,9 +14,14 @@ import os
 REFUSED_BODY_DRAIN = 65536
 
 
-def env_flag(name):
-    """Whether an on/off environment switch is set to '1'."""
-    return os.environ.get(name) == '1'
+def debug_timing():
+    """Whether per-phase timing is switched on, for both readers of it.
+
+    Two modules snapshot this switch at import; the variable is named
+    here so neither has to spell it, and only '1' turns it on so that
+    setting it to 0 turns it off rather than on.
+    """
+    return os.environ.get('DAEDALUS_DEBUG_TIMING') == '1'
 
 
 def env_int(name, default, minimum, maximum=None):
