@@ -303,6 +303,14 @@ def test_text_spaced_equals_is_not_a_rail_footer_site(tmp_path):
     _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
 
 
+def test_quoted_gt_pairing_leaves_no_rail_class_attribute(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(
+        copy_root, '<div title="a> ordinary class=\'rail-foot\'>v9.9.9</div>')
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
 def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp_path):
     separators = (
         ('TAB', '\t'),
@@ -367,6 +375,17 @@ def test_attributes_before_class_rail_duplicate_is_refused(tmp_path):
                               '9.9.9')
 
 
+def test_quoted_gt_in_earlier_attribute_rail_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard rail footer'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, '<div title="a > b" class = \'rail-foot\'>v9.9.9</div>')
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '9.9.9')
+
+
 def test_spaced_equals_status_line_duplicate_is_refused(tmp_path):
     copy_root = Path(tmp_path) / 'tree'
     checker = _copy_versioned_tree(copy_root)
@@ -396,6 +415,17 @@ def test_leading_class_status_line_duplicate_is_refused(tmp_path):
     canonical = _canonical_dashboard_value(copy_root, checker, desc)
     _insert_before_body(
         copy_root, "<span class='wider sl-v'>8.8.8</span>")
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '8.8.8')
+
+
+def test_quoted_gt_in_earlier_attribute_sl_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, '<span title="a > b" class=\'sl-v\'>8.8.8</span>')
     _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
                               '8.8.8')
 

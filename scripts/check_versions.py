@@ -94,16 +94,20 @@ SITES = [
      r'''(?P<q>['"`])(?P<v>(?:(?!(?P=q))[\s\S])*)(?P=q)'''),
     # Both dashboard sites anchor to the element's opening tag, so prose
     # spelling `class="rail-foot">v…` is not a version site (#446), and the
-    # attribute region stays bounded inside the tag. The class value admits a
-    # whole-token list and whitespace around `=` (#439).
+    # attribute region stays bounded inside the tag: quoted attribute values
+    # are admitted whole, so a `>` inside a value does not end the tag early.
+    # The class value admits a whole-token list and whitespace around `=`
+    # (#439).
     ('dashboard/index.html', 'dashboard rail footer',
-     r'''<div[\t\n\f\r ]+(?:[^>]*?[\t\n\f\r ])?'''
+     r'''<div[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
+     r'''[\t\n\f\r ])?'''
      r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
      r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r >]+[\t\n\f\r ]+)*rail-foot'''
      r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r >]+)*[\t\n\f\r ]*(?P=q)>v'''
      r'''(?P<v>[^ <]*)'''),
     ('dashboard/index.html', 'dashboard status line',
-     r'''<span[\t\n\f\r ]+(?:[^>]*?[\t\n\f\r ])?'''
+     r'''<span[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
+     r'''[\t\n\f\r ])?'''
      r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
      r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r >]+[\t\n\f\r ]+)*sl-v'''
      r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r >]+)*[\t\n\f\r ]*(?P=q)>'''
