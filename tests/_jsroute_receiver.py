@@ -3,7 +3,8 @@ from bisect import bisect_right
 import re
 
 from _jsroute_calls import parameter_sources
-from _jsroute_keys import class_accessor, decode_string_literal, source_key
+from _jsroute_keys import (class_accessor, decode_string_literal,
+                           entry_head, head_left, source_key)
 from _jsroute_returns import (callable_body, callable_return,
                               constructed_value, member_value)
 from _jsroute_source import BUILTIN_CHAINS, record_work
@@ -13,17 +14,6 @@ def target(status, binding=None, body=None, member=None, name=None,
            source=None, form=None):
     return {'status': status, 'binding': binding, 'body': body,
             'member': member, 'name': name, 'source': source, 'form': form}
-
-
-_METHOD_HEADS = ('get', 'set', 'async')
-
-
-def word_at(mask, start):
-    """Identifier at `start` and the offset just past it."""
-    end = start
-    while end < len(mask) and (mask[end].isalnum() or mask[end] in '_$'):
-        end += 1
-    return mask[start:end], end
 
 
 def next_offset(mask, position):
@@ -122,7 +112,8 @@ class ReceiverIndex:
 
     def computed_key(self, key):
         record_work(self.work, 'receiver_computed_queries')
-        if not isinstance(key, tuple):
+        if not (isinstance(key, tuple) and len(key) == 3
+                and key[0] == 'computed'):
             return key
         binding = self.visible_binding(key[1], key[2])
         if binding is None:
@@ -134,20 +125,25 @@ class ReceiverIndex:
     def member(self, owner_name, key, position, seen=frozenset(),
                env=None, wanted=None):
         record_work(self.work, 'receiver_member_queries')
-        binding = self.visible_binding(owner_name, position)
-        if binding is None:
-            span = self._latest(self.globals.get(owner_name), position)
-            if span is None:
-                return target('irrelevant')
         key = self.computed_key(key)
         if key is None and wanted is None:
             return target('unprovable')
+        binding = self.visible_binding(owner_name, position)
+        if binding is None:
+            status, body, form = class_accessor(
+                self, owner_name, key, wanted, static=True)
+            if status == 'known':
+                return target('known', body=body, form=form)
+            if status == 'opaque':
+                return target('unprovable')
+            span = self._latest(self.globals.get(owner_name), position)
+            if span is None:
+                return target('irrelevant')
+            return self._member_from_span(
+                span, key, position, seen, env or {}, wanted)
         if (key in BUILTIN_CHAINS['array']
                 and self.known_array(owner_name, position)):
             return target('irrelevant')
-        if binding is None:
-            return self._member_from_span(
-                span, key, position, seen, env or {}, wanted)
         return self._member_binding(
             binding, key, position, seen, env or {}, wanted)
 
@@ -226,6 +222,8 @@ class ReceiverIndex:
             equals = self.top_level(self.mask, item_left, item_right, '=')
             if colon is None and equals is None:
                 found = self._method_entry(item_left, item_right)
+                if found is not None and found[0] is None:
+                    return False
                 if found is not None and found[2] in ('get', 'set',
                                                       'generator'):
                     return False
@@ -350,10 +348,10 @@ class ReceiverIndex:
                 call[0], call[1], call[2], key, left)
         constructor = self._constructor_call(left, right)
         if constructor is not None:
-            is_class, _ = class_accessor(
-                self, constructor[0], key, wanted, left)
+            status, _, _ = class_accessor(
+                self, constructor[0], key, wanted)
             if (self.visible_binding(constructor[0], left) is None
-                    and not is_class):
+                    and status == 'none'):
                 return target('irrelevant')
             return self.constructed_member(
                 constructor[0], constructor[1], constructor[2], key, left,
@@ -389,59 +387,20 @@ class ReceiverIndex:
         return self.callable_value(span)
 
     def _method_entry(self, left, right):
-        """Key, body offset and form of a method shorthand entry, or None.
+        """Key, body and form of a method shorthand entry, or None.
 
-        The head tokens `get`, `set`, `async` and `*` precede the name; a
-        quoted name is left unread here, because the mask blanks it along
-        with the string.
+        Head and name reading lives in _jsroute_keys.entry_head, which
+        reads quoted, escaped and computed heads exactly; a recognised
+        computed key that is not statically known returns a None key, so
+        the caller treats the entry as unread rather than skippable.
         """
-        cursor = left
-        form = 'method'
-        while cursor < right:
-            quoted = re.match(
-                r'\s*(["\'])(?:\\[\s\S]|(?!\1)[^\\])*\1',
-                self.text[cursor:right])
-            if quoted is not None:
-                break
-            cursor = next_offset(self.mask, cursor)
-            char = self.mask[cursor:cursor + 1]
-            if char == '*':
-                form = 'generator'
-                cursor += 1
-                continue
-            word, word_end = word_at(self.mask, cursor)
-            if (word in _METHOD_HEADS
-                    and (re.match(
-                        r'\s*["\']', self.text[word_end:right])
-                        or self.mask[next_offset(self.mask, word_end):
-                                     next_offset(self.mask, word_end) + 1]
-                        != '(')):
-                if word in ('get', 'set'):
-                    form = word
-                cursor = word_end
-                continue
-            break
-        if cursor >= right or self.mask[cursor] == '*':
+        found = entry_head(self.mask, self.text, left, right,
+                           self.pair_end, self.computed_key)
+        if found is None:
             return None
-        quoted = re.match(
-            r'\s*(["\'])(?:\\[\s\S]|(?!\1)[^\\])*\1',
-            self.text[cursor:right])
-        if quoted is not None:
-            name_start = cursor + quoted.start(1)
-            name_end = cursor + quoted.end()
-        elif self.mask[cursor] == '[':
-            name_start = cursor
-            name_end = self.pair_end.get(cursor)
-            if name_end is None:
-                return None
-        else:
-            name_start = cursor
-            name, name_end = word_at(self.mask, cursor)
-            if not name:
-                return None
-        key = self._source_key(name_start, name_end)
-        open_paren = next_offset(self.mask, name_end)
-        if key is None or self.mask[open_paren:open_paren + 1] != '(':
+        key, cursor, form, _ = found
+        open_paren = next_offset(self.mask, cursor)
+        if self.mask[open_paren:open_paren + 1] != '(':
             return None
         close = self.pair_end.get(open_paren)
         if close is None:
@@ -504,6 +463,8 @@ class ReceiverIndex:
                 _segments(self.mask, left + 1, right - 1)):
             item_left, item_right = _trim(
                 self.mask, item_left, item_right)
+            if item_left >= item_right:
+                continue
             if self.mask[item_left:item_left + 3] == '...':
                 status, value, form = self._property_span(
                     (item_left + 3, item_right), key,
@@ -519,6 +480,9 @@ class ReceiverIndex:
             if colon is None and equals is None:
                 found = self._method_entry(item_left, item_right)
                 if found is not None:
+                    if found[0] is None:
+                        unknown = True
+                        continue
                     if key is None:
                         if found[2] == wanted:
                             return 'unprovable', None, None
@@ -532,7 +496,12 @@ class ReceiverIndex:
                     return 'known', found[1], found[2]
             key_end = (colon if colon is not None else
                        equals if equals is not None else item_right)
-            if self._source_key(item_left, key_end) != key:
+            entry_key = self._source_key(
+                head_left(self.mask, self.text, item_left), key_end)
+            if entry_key is None:
+                unknown = True
+                continue
+            if entry_key != key:
                 continue
             if wanted is not None and wanted != 'data':
                 break
@@ -684,6 +653,12 @@ class ReceiverIndex:
             quoted = re.match(
                 r'\s*(["\'])(?:\\[\s\S]|(?!\1)[^\\])*\1',
                 self.text[match.end():])
-            if binding is not None and quoted is not None:
-                self._history(self.computed, binding).append(
-                    (match.start(), decode_string_literal(quoted.group(0))))
+            if binding is None or quoted is None:
+                continue
+            # The literal must be the whole initializer: 'g' + 'o' would
+            # otherwise be indexed under its leading fragment alone.
+            expression_end = self.expression_end(self.mask, match.end())
+            if self.mask[match.end() + quoted.end():expression_end].strip():
+                continue
+            self._history(self.computed, binding).append(
+                (match.start(), decode_string_literal(quoted.group(0))))
