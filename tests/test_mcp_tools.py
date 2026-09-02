@@ -465,6 +465,10 @@ def test_every_registered_tool_command_is_pinned(_tmp):
                 f'{composition.bridge.calls}')
     refusals = _mcp_tool_commands.TOOL_REFUSALS
     assert refusals, 'no tool has a pinned refusal'
+    sites = _mcp_tool_commands.tool_guards(
+        sorted((_util.ROOT / 'daedalus_mcp').glob('tools_*.py')))
+    assert sites, 'no raise site found in the MCP tool modules'
+    witnessed = set()
     for name, cases in refusals.items():
         assert name in registered, (
             f'{name}: refusal pinned for a tool that is not registered')
@@ -477,10 +481,24 @@ def test_every_registered_tool_command_is_pinned(_tmp):
                 asyncio.run(tool(**_tool_arguments(tool, overrides)))
             except exception as raised:
                 assert message in str(raised), (name, overrides, raised)
+                fired = _mcp_tool_commands.witnessed_guard(sites, raised)
+                assert fired, (
+                    f'{name} {overrides}: refused from no known guard')
+                witnessed.add(fired)
             else:
                 raise AssertionError(f'{name} {overrides}: nothing refused')
             assert composition.bridge.calls == [], (
                 f'{name} {overrides}: refused after a bridge call')
+    orphans = (set(_mcp_tool_commands.UNWITNESSED_GUARDS)
+               - set(_mcp_tool_commands.guard_conditions(sites)))
+    assert not orphans, (
+        'UNWITNESSED_GUARDS names functions that guard no raise: '
+        f'{sorted(orphans)}')
+    stranded = _mcp_tool_commands.stranded_guards(sites, witnessed)
+    assert not stranded, (
+        'unwitnessed or stale guard pins: '
+        + '; '.join(f'{function}: {"; ".join(gaps)}'
+                    for function, gaps in stranded.items()))
 
 
 def test_the_parameter_floor_refuses_a_stranded_parameter(_tmp):
@@ -508,6 +526,72 @@ def test_the_parameter_floor_refuses_a_stranded_parameter(_tmp):
                 "UNPINNED_PARAMETERS names 'c', which the signature does not "
                 'have',
                 "no case witnesses 'b'"]
+
+
+GUARD_SHAPES = """
+raise ValueError('at module level')
+
+
+def outer():
+    def helper(value):
+        if not value or value < 0:
+            raise ValueError('guarded by two conditions')
+        assert value < 10
+        if value:
+            pass
+        else:
+            raise RuntimeError('in an else')
+        raise RuntimeError('guarded by nothing')
+    return helper
+"""
+
+
+def test_the_guard_scan_reads_every_raise_shape_the_tools_use(_tmp):
+    """Each raise shape the scan can meet resolves to a deliberate condition.
+
+    A raise in a nested helper belongs to that helper; an `or` test gives one
+    condition per operand; a raise no `if` body holds stands for itself, an
+    `else` included, since its guard is a negation rather than an operand of
+    the test; an `assert` is not a raise. A shape resolving to nothing would
+    leave the floor passing vacuously, the defect it exists to close.
+    """
+    path = Path(_tmp) / 'shapes.py'
+    path.write_text(GUARD_SHAPES, encoding='utf-8')
+
+    conditions = _mcp_tool_commands.guard_conditions(
+        _mcp_tool_commands.tool_guards([path]))
+
+    assert {name: sorted(texts) for name, texts in conditions.items()} == {
+        '': ["raise ValueError('at module level')"],
+        'helper': ['not value',
+                   "raise RuntimeError('guarded by nothing')",
+                   "raise RuntimeError('in an else')",
+                   'value < 0'],
+    }, conditions
+
+
+def test_the_refusal_floor_refuses_a_stranded_guard(_tmp):
+    """unwitnessed_guard_gaps detects, not merely passes a healthy table.
+
+    Called directly with synthetic guards, so the floor's detection limb is
+    banked even though every guard in the tool modules is witnessed and the
+    registration-driven pass therefore sees no gaps.
+    """
+    gaps = _mcp_tool_commands.unwitnessed_guard_gaps
+    assert gaps('f', ['a', 'b'], {'a'}) == ["no refusal case witnesses 'b'"]
+    assert gaps('f', ['a', 'a'], {'a'}) == ["'a' spells two of the guards"]
+    with mock.patch.dict(
+            _mcp_tool_commands.UNWITNESSED_GUARDS, {'f': {'b'}}):
+        assert gaps('f', ['a', 'b'], {'a'}) == []
+        assert gaps('f', ['a', 'b'], {'b'}) == [
+            "UNWITNESSED_GUARDS names 'b', which a refusal case already "
+            'witnesses',
+            "no refusal case witnesses 'a'"]
+    with mock.patch.dict(
+            _mcp_tool_commands.UNWITNESSED_GUARDS, {'f': {'c'}}):
+        assert gaps('f', ['a', 'b'], {'a'}) == [
+            "UNWITNESSED_GUARDS names 'c', which is guarded by nothing",
+            "no refusal case witnesses 'b'"]
 
 
 def test_result_reports_an_absent_result_without_a_value(_tmp):
