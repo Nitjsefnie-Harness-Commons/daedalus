@@ -288,6 +288,113 @@ from mcp.server.mcpserver import MCPServer
 '''
 
 
+def _refuses_the_scan(_tmp, source, site):
+    """The scan refuses this composition source, naming the import site."""
+    _write_tree(Path(_tmp), {'composition.py': source})
+    try:
+        _mcp_guard_floor.composition_scan_set(
+            Path(_tmp) / 'composition.py', _tmp)
+    except AssertionError as raised:
+        assert f'composition:{site}' in str(raised), raised
+        assert 'cannot read statically' in str(raised), raised
+    else:
+        raise AssertionError('a computed import was silently skipped')
+
+
+def test_an_import_module_from_import_refuses_the_scan(_tmp):
+    """`from importlib import import_module` binds the operation too.
+
+    A plain name is the spelling a linter would suggest first; recognising
+    only the attribute form walks past the unprovable state silently.
+    """
+    _refuses_the_scan(_tmp, '''
+from importlib import import_module
+
+
+def load(name):
+    return import_module(name)
+''', 6)
+
+
+def test_an_aliased_importlib_module_refuses_the_scan(_tmp):
+    _refuses_the_scan(_tmp, '''
+import importlib as il
+
+
+def load(name):
+    return il.import_module(name)
+''', 6)
+
+
+def test_an_aliased_import_module_refuses_the_scan(_tmp):
+    _refuses_the_scan(_tmp, '''
+from importlib import import_module as im
+
+
+def load(name):
+    return im(name)
+''', 6)
+
+
+def test_a_builtin_import_refuses_the_scan(_tmp):
+    _refuses_the_scan(_tmp, '''
+
+def load(name):
+    return __import__(name)
+''', 4)
+
+
+def test_an_importlib_import_refuses_the_scan(_tmp):
+    _refuses_the_scan(_tmp, '''
+import importlib
+
+
+def load(name):
+    return importlib.__import__(name)
+''', 6)
+
+
+def test_a_builtins_import_refuses_the_scan(_tmp):
+    _refuses_the_scan(_tmp, '''
+import builtins
+
+
+def load(name):
+    return builtins.__import__(name)
+''', 6)
+
+
+RELATIVE_IMPORT_COMPOSITION = '''
+import importlib
+
+
+def load(name):
+    return importlib.import_module('.leaf', 'pkg')
+'''
+
+
+def test_a_relative_constant_import_name_refuses_the_scan(_tmp):
+    """A leading-dot constant needs its package argument read at runtime.
+
+    Resolving it from the repository root instead would name a module
+    nothing asked for, so the form is refused like any other unprovable
+    name.
+    """
+    _write_tree(Path(_tmp), {
+        'composition.py': RELATIVE_IMPORT_COMPOSITION,
+        'pkg/__init__.py': '',
+        'pkg/leaf.py': 'leaf = True\n'})
+    try:
+        _mcp_guard_floor.composition_scan_set(
+            Path(_tmp) / 'composition.py', _tmp)
+    except AssertionError as raised:
+        assert 'composition:6' in str(raised), raised
+        assert 'cannot read statically' in str(raised), raised
+    else:
+        raise AssertionError('a relative constant import name was resolved '
+                             'from the root')
+
+
 def test_a_non_repo_local_import_is_skipped(_tmp):
     """Stdlib and site-package targets are provably not this repository's."""
     _write_tree(Path(_tmp), {'composition.py': FOREIGN_IMPORT_COMPOSITION})
