@@ -221,6 +221,10 @@ def test_the_docstring_carries_every_printed_remedy(tmp):
     policy = _policy()
     doc = _normalised(policy.__doc__)
     for kind, remedy in sorted(policy.REMEDY_FOR.items()):
+        # A blank or one-word remedy is carried by every docstring there
+        # is, so containment on its own would prove nothing about it.
+        assert len(_normalised(remedy)) > 40, (
+            f'the {kind} remedy is too short to advise anyone: {remedy!r}')
         assert _normalised(remedy) in doc, (
             f'the docstring no longer carries the {kind} remedy: {remedy}')
 
@@ -255,6 +259,22 @@ def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
         assert status == 1, (kind, status)
         assert names in printed, (kind, names, printed)
         assert never not in printed, (kind, never, printed)
+
+
+def test_a_mixed_refusal_prints_each_remedy_once(tmp):
+    """Three kinds, two answers: both printed, neither twice."""
+    del tmp
+    policy = _policy()
+    over = policy.TEST_CEILING + 1
+    baseline = {'tests/gone.py': over, 'tests/big.py': over}
+    sizes = {'tests/big.py': over + 1, 'tests/other.py': over}
+    found = policy.violations(sizes, baseline)
+    assert sorted(k for k, v in found.items() if v) == [
+        'grown', 'missing', 'over'], found
+    status, printed = _drive_main(policy, baseline, sizes)
+    assert status == 1, status
+    assert printed.count('relocate the code into a new module') == 1, printed
+    assert printed.count('deleted by hand') == 1, printed
 
 
 if __name__ == '__main__':
