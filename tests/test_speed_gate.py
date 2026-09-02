@@ -123,6 +123,20 @@ def test_the_speed_gate_throws_away_its_first_round(tmp):
     assert ceiling >= 15 * (rounds * 2 + 2), (ceiling, rounds)
 
 
+def test_speed_gate_uses_at_least_three_rounds_for_median(tmp):
+    """The median comparison needs at least three rounds to reject outliers.
+
+    With two rounds the median is the arithmetic mean, so a single spoiled
+    pair cannot be outvoted. Three is the smallest round count that makes
+    the median reject an outlier on its own.
+    """
+    del tmp
+    workflow = _tests_yml()
+    rounds = int(re.search(r'ROUNDS: "(\d+)"', workflow).group(1))
+    assert rounds >= 3, (
+        f'ROUNDS={rounds} but median needs at least 3 to reject outliers')
+
+
 def test_the_speed_gate_measures_a_pull_request_against_its_own_base(tmp):
     """Before merge, and against the merge base rather than the last release.
 
