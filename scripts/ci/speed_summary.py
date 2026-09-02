@@ -3,6 +3,8 @@
 import math
 import statistics
 
+NOISE_FLOOR = 0.10
+
 
 def _render_acceptances(lines, rows):
     """Append the accepted-speed table, including stale entries."""
@@ -63,6 +65,26 @@ def render(lines, base_label, shared, pairs, movements, total, limit=10):
     for name, was, now, delta in movements[:limit]:
         lines.append(f'| `{name}` | {was:.2f}s | {now:.2f}s | {delta:+.2f}s |')
     head_total = sum(now for _name, _was, now, _delta in movements)
+    movers = [row for row in movements if abs(row[3]) >= NOISE_FLOOR]
+    movers.sort(key=lambda row: (row[2] / row[1]) if row[1] else math.inf,
+                reverse=True)
+    lines.append('')
+    if movers:
+        lines.append('Largest relative changes '
+                     '(median across rounds, indicative only):')
+        lines.append('')
+        lines.append('Rows within the 0.10s noise floor are omitted, so a '
+                     'shown ratio is a shown movement.')
+        lines.append('')
+        lines.append('| test | baseline | head | delta | ratio |')
+        lines.append('|---|---:|---:|---:|---:|')
+        for name, was, now, delta in movers[:limit]:
+            test_ratio = now / was if was else math.inf
+            shown = 'inf' if math.isinf(test_ratio) else f'{test_ratio:.3f}'
+            lines.append(f'| `{name}` | {was:.2f}s | {now:.2f}s | '
+                         f'{delta:+.2f}s | {shown} |')
+    else:
+        lines.append('No test moved beyond the 0.10s noise floor.')
     lines.append('')
     lines.append('Longest-running tests (head median, covered-set share):')
     lines.append('')

@@ -85,6 +85,95 @@ def test_an_unwritable_summary_file_leaves_the_verdict_alone(tmp):
             'sides.') in output, output
 
 
+def _table(text, heading, end):
+    """The data rows of one summary table, delimited by two headings."""
+    assert heading in text, text
+    assert end in text, text
+    start = text.index(heading) + len(heading)
+    stop = text.index(end, start)
+    return [line for line in text[start:stop].splitlines()
+            if line.startswith('| `')]
+
+
+def test_the_ratio_table_ranks_a_multiplier_above_ten_drifts(tmp):
+    compare = _comparator()
+    drifts = {f'test_drift_{index:02d}': 40.0 for index in range(10)}
+    base = _summary_tree(tmp, 'base', [
+        {'tests': {**drifts, 'test_multiplier': 0.40}}])
+    grown = {name: 42.0 for name in drifts}
+    head = _summary_tree(tmp, 'head', [
+        {'tests': {**grown, 'test_multiplier': 2.00}}])
+    summary = Path(tmp) / 'summary.md'
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--summary-file', str(summary)])
+    assert code == 0, output
+    text = summary.read_text(encoding='utf-8')
+    absolute = _table(text, 'Largest individual movements',
+                      'Largest relative changes')
+    relative = _table(text, 'Largest relative changes',
+                      'Longest-running tests')
+    assert relative[0].startswith('| `test_multiplier` | 0.40s | 2.00s |')
+    assert relative[0].endswith('| 5.000 |')
+    assert not any('test_multiplier' in row for row in absolute)
+
+
+def test_the_noise_floor_omits_sub_floor_movements(tmp):
+    # The floor is >=, pinned from both sides: 0.20s - 0.10s is exactly the
+    # floor, while 0.15s - 0.05s computes one ulp under it.
+    compare = _comparator()
+    base = _summary_tree(tmp, 'base', [{'tests': {
+        'test_steady': 40.00, 'test_barely_moving': 1.00,
+        'test_at_the_floor': 0.10, 'test_under_the_floor': 0.05,
+        'test_ten_x': 0.04}}])
+    head = _summary_tree(tmp, 'head', [{'tests': {
+        'test_steady': 40.00, 'test_barely_moving': 1.09,
+        'test_at_the_floor': 0.20, 'test_under_the_floor': 0.15,
+        'test_ten_x': 0.40}}])
+    summary = Path(tmp) / 'summary.md'
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--summary-file', str(summary)])
+    assert code == 0, output
+    text = summary.read_text(encoding='utf-8')
+    relative = _table(text, 'Largest relative changes',
+                      'Longest-running tests')
+    assert len(relative) == 2, relative
+    assert relative[0] == ('| `test_ten_x` | 0.04s | 0.40s | +0.36s '
+                           '| 10.000 |')
+    assert relative[1] == ('| `test_at_the_floor` | 0.10s | 0.20s | +0.10s '
+                           '| 2.000 |')
+
+
+def test_a_zero_baseline_renders_inf_and_sorts_first(tmp):
+    compare = _comparator()
+    base = _summary_tree(tmp, 'base', [{'tests': {
+        'test_steady': 20.00, 'test_doubled': 0.10, 'test_from_zero': 0.0}}])
+    head = _summary_tree(tmp, 'head', [{'tests': {
+        'test_steady': 20.00, 'test_doubled': 0.20, 'test_from_zero': 0.50}}])
+    summary = Path(tmp) / 'summary.md'
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--summary-file', str(summary)])
+    assert code == 0, output
+    text = summary.read_text(encoding='utf-8')
+    relative = _table(text, 'Largest relative changes',
+                      'Longest-running tests')
+    assert relative[0].startswith('| `test_from_zero` | 0.00s | 0.50s |')
+    assert relative[0].endswith('| inf |')
+    assert relative[1].endswith('| 2.000 |')
+
+
+def test_an_all_quiet_comparison_names_the_noise_floor(tmp):
+    compare = _comparator()
+    base = _summary_tree(tmp, 'base', [{'tests': {'test_quiet': 1.00}}])
+    head = _summary_tree(tmp, 'head', [{'tests': {'test_quiet': 1.00}}])
+    summary = Path(tmp) / 'summary.md'
+    code, output = _run_comparator(compare, [
+        '--base', *base, '--head', *head, '--summary-file', str(summary)])
+    assert code == 0, output
+    text = summary.read_text(encoding='utf-8')
+    assert 'No test moved beyond the 0.10s noise floor.' in text, text
+    assert 'Largest relative changes' not in text, text
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='speedsummary_')
 
