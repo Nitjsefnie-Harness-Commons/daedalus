@@ -360,7 +360,7 @@ print(json.dumps({
     }
 
     # A set-but-off value: a reader keyed on presence reports the switch
-    # on, and `env_flag` decides the same switch for `segment_store`.
+    # on, and `debug_timing` decides the same switch for `segment_store`.
     off_env = dict(env)
     off_env['DAEDALUS_DEBUG_TIMING'] = '0'
     off = subprocess.run(
