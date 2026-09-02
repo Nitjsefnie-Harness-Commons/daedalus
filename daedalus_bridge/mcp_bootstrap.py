@@ -16,19 +16,16 @@ from daedalus_bridge.log_safe import log_safe
 
 # What startup reached, read by state(): the serve thread and the Event its
 # module sets at bind, recorded once start_in_thread returns, or the import
-# failure. state() computes the string on read so a crash is visible
-# whenever it lands, with nothing watching for it.
+# failure.
 _record = {'thread': None, 'bound': None, 'import_failed': False}
 
 
 def state():
-    """The front end's startup outcome, as the /health payload spells it.
+    """The /health payload's `mcp` value, computed on each read so a crash
+    is visible whenever it lands, with nothing watching for it.
 
-    'starting' until the listener binds, 'up' from bind until the serve
-    thread ends, 'down' once it has — under the bridge the caught crash's
-    return is the only thing that ends that thread — or when the import
-    failed outright. The state is all the payload carries: /health is
-    unauthenticated, so the verbatim bind error stays on stderr.
+    The state is all the payload carries: /health is unauthenticated, so
+    the verbatim bind error stays on stderr.
     """
     if _record['import_failed']:
         return 'down'

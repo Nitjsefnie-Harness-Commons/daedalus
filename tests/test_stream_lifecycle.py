@@ -196,6 +196,9 @@ def test_an_mcp_bind_crash_surfaces_in_the_health_payload(tmp):
     squatted port is the issue's own repro — the listener genuinely cannot
     come up — and the payload must say so while the child still answers.
     """
+    if not all(importlib.util.find_spec(name) is not None
+               for name in ('httpx', 'mcp', 'starlette')):
+        _util.skip('the MCP front end\'s dependencies are not installed')
     squatter = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     squatter.bind(('127.0.0.1', 0))
@@ -221,6 +224,9 @@ def test_a_healthy_child_reports_the_mcp_front_end_up(tmp):
     confirm anything: a child whose listener bound and kept serving must
     reach 'up'.
     """
+    if not all(importlib.util.find_spec(name) is not None
+               for name in ('httpx', 'mcp', 'starlette')):
+        _util.skip('the MCP front end\'s dependencies are not installed')
     output = []
     with _util.bridge(tmp, output=output) as (base, _docroot):
         health = _await_mcp_state(base, output, 'up')
