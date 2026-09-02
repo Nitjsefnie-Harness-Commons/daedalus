@@ -327,8 +327,9 @@ python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha>
 Its exit code is the verdict, so a caller never has to read the loop: 0 every
 run on the SHA concluded `success`, `neutral` or `skipped`; 1 every run
 concluded and one concluded otherwise, offenders named with URLs; 2 the
-`--timeout` bound expired first; 3 a query failed - loud and at once, never
-retried behind a message that reads like waiting. Unlike `ci_watch.py` it
+`--timeout` bound expired first; 3 the invocation was rejected or a query
+failed - loud and at once, never retried behind a message that reads like
+waiting. Unlike `ci_watch.py` it
 PINS the SHA it is given instead of re-resolving the branch head each poll:
 a push landing mid-wait must not turn the answer into one about a commit the
 caller never asked about. Zero runs on the SHA is waiting, not success. Run

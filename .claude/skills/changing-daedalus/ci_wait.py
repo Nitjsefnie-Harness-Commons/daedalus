@@ -11,10 +11,12 @@ the hand-rolled loops this replaces conflate:
   1  every run concluded and at least one conclusion is none of those; the
      offending runs are named on stdout with their URLs
   2  the wait exceeded --timeout without every run concluding
-  3  a query failed. The failure is loud and immediate: the reason goes to
-     stderr and the tool exits on the first failure. Never wrap this tool
-     in a retry - retrying a failed query behind a message that reads like
-     waiting is the exact failure this tool exists to remove
+  3  the invocation was rejected, or a query failed. Both are loud and
+     immediate: a malformed SHA or a refused argument exits 3 before the
+     first poll, a failed query exits 3 on the first failure, and the
+     reason goes to stderr. Never wrap this tool in a retry - retrying a
+     failed query behind a message that reads like waiting is the exact
+     failure this tool exists to remove
 
 Two distinctions the loops got wrong are deliberate here. Zero runs on the
 SHA is a waiting state, never success: "no run has started yet" and "every
@@ -40,6 +42,7 @@ exits 0 when the query itself succeeded; only a failed query exits 3.
 """
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -49,6 +52,15 @@ DEFAULT_INTERVAL = 60
 DEFAULT_TIMEOUT = 5400
 GH_TIMEOUT = 120
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
+SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
+
+
+class RefusingParser(argparse.ArgumentParser):
+    """Exit 3 on usage errors, never argparse's 2 - the timeout verdict."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(3, f'{self.prog}: error: {message}\n')
 
 
 class QueryError(RuntimeError):
@@ -57,9 +69,13 @@ class QueryError(RuntimeError):
 
 def _gh(path):
     """One fresh, fully paginated API read."""
-    proc = subprocess.run(
-        ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate', path],
-        capture_output=True, text=True, timeout=GH_TIMEOUT)
+    try:
+        proc = subprocess.run(
+            ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+             path],
+            capture_output=True, text=True, timeout=GH_TIMEOUT)
+    except (subprocess.SubprocessError, OSError) as exc:
+        raise QueryError(f'gh failed: {exc}') from exc
     if proc.returncode != 0:
         raise QueryError(proc.stderr.strip()[:400])
     return proc.stdout
@@ -74,7 +90,10 @@ def _decode(payload):
     out = []
     index = 0
     while index < len(payload):
-        chunk, index = decoder.raw_decode(payload, index)
+        try:
+            chunk, index = decoder.raw_decode(payload, index)
+        except json.JSONDecodeError as exc:
+            raise QueryError(f'unparseable gh output: {exc}') from exc
         out.append(chunk)
         while index < len(payload) and payload[index].isspace():
             index += 1
@@ -106,12 +125,12 @@ def verdict(runs):
 
 
 def print_matrix(runs, sha, out):
-    print(f'{sha[:12]} {len(runs)} run(s)', file=out)
+    print(f'{sha[:12]} {len(runs)} run(s)', file=out, flush=True)
     for run in runs:
         state = run.get('status')
         conclusion = run.get('conclusion')
         suffix = f'/{conclusion}' if conclusion else ''
-        print(f'  {run.get("name")}: {state}{suffix}', file=out)
+        print(f'  {run.get("name")}: {state}{suffix}', file=out, flush=True)
 
 
 def wait(repo, sha, interval, timeout, out):
@@ -148,7 +167,7 @@ def wait(repo, sha, interval, timeout, out):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = RefusingParser(description=__doc__)
     parser.add_argument('sha')
     parser.add_argument('--repo', default=DEFAULT_REPO)
     parser.add_argument('--interval', type=int, default=DEFAULT_INTERVAL,
@@ -159,6 +178,13 @@ def main(argv=None):
                         help='one trial evaluation: print the matrix to '
                              'stderr, exit 0 unless the query failed')
     args = parser.parse_args(argv)
+    if not SHA_RE.fullmatch(args.sha):
+        print(f'not a 40-character commit SHA: {args.sha!r}', file=sys.stderr)
+        return 3
+    if args.interval <= 0:
+        print(f'--interval must be positive, got {args.interval}',
+              file=sys.stderr)
+        return 3
     try:
         if not args.once:
             return wait(args.repo, args.sha, args.interval, args.timeout,
