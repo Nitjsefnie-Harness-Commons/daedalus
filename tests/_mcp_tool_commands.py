@@ -376,12 +376,11 @@ def _guard_operands(test):
 
 
 def _enclosing_function(node, parents):
-    name = ''
     while node is not None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return node.name
         node = parents.get(node)
-    return name
+    return ''
 
 
 def _module_guard_sites(path):
@@ -420,7 +419,7 @@ def tool_guards(paths):
 
 
 def guard_conditions(sites):
-    """The conditions each raising function guards a raise with."""
+    """Every guard condition, grouped by the function that raises."""
     conditions = {}
     for function, operands in sites.values():
         conditions.setdefault(function, []).extend(
@@ -448,8 +447,10 @@ def witnessed_guard(sites, raised):
     if fired is None:
         return None
     (function, operands), frame = fired
+    if len(operands) == 1:
+        return (function, operands[0][0])
     for text, node in operands:
-        if len(operands) == 1 or eval(  # pylint: disable=eval-used
+        if eval(  # pylint: disable=eval-used
                 compile(ast.Expression(node), '<guard>', 'eval'),
                 frame.f_globals, dict(frame.f_locals)):
             return (function, text)
