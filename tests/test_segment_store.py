@@ -31,35 +31,57 @@ def _probe(tmp, script, extra_env=None):
     return root, json.loads(proc.stdout)
 
 
+def _bare_probe(tmp, script):
+    """Run a probe with every DAEDALUS_* variable stripped from its env.
+
+    `daedalus_bridge.config` exits at import without `DAEDALUS_DIR`, so a
+    store that still resolved anything from it could not run here at all.
+    The throwaway segments root arrives as `THROWAWAY_ROOT`.
+    """
+    root = Path(tmp) / 'bare-segments'
+    root.mkdir(parents=True)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS')}
+    env.update({
+        'PYTHONDONTWRITEBYTECODE': '1',
+        'THROWAWAY_ROOT': str(root),
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', script], cwd=_util.ROOT, env=env,
+        capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith('BARE ')]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    return root, json.loads(marked[0][len('BARE '):])
+
+
 _SEGMENT_STORE_PROBE = r'''
 import json
+import os
 from pathlib import Path
 
 from daedalus_bridge import segment_store
 
+root = Path(os.environ['DAEDALUS_DIR']) / 'segments'
+root.mkdir(parents=True)
 job = 'unit-job'
-record_path = segment_store.record_path(job)
-record_path.parent.mkdir(parents=True)
-record = segment_store.new_record('unit-token')
-record.update({
-    'max_segment_index': 99,
-    'max_segment_count': 7,
-    'max_bytes': 4096,
-})
+record_path = segment_store.record_path(root, job)
+record = segment_store.new_record('unit-token', (99, 7, 4096))
 record.pop('stored_count')
 record.pop('stored_bytes')
 record_path.write_text(json.dumps(record), encoding='utf-8')
-loaded = segment_store.load_record(job)
-matching = segment_store.record_for_sig(job, loaded['sig'])
-wrong = segment_store.record_for_sig(job, 'sig-wrong')
+loaded = segment_store.load_record(root, job)
+matching = segment_store.record_for_sig(root, job, loaded['sig'])
+wrong = segment_store.record_for_sig(root, job, 'sig-wrong')
 quota = segment_store.quota(loaded)
 usage_before = segment_store.usage(loaded)
 job_dir = Path(record_path).with_suffix('')
 job_dir.mkdir()
 (job_dir / '000001.ts').write_bytes(b'abcd')
 recounted = segment_store.recount(job_dir)
-segment_store.write_usage(job, *recounted)
-updated = segment_store.load_record(job)
+segment_store.write_usage(root, job, *recounted)
+updated = segment_store.load_record(root, job)
 print(json.dumps({
     'sig_length': len(loaded['sig']),
     'matching_token': matching['token'],
@@ -87,24 +109,26 @@ def test_segment_store_owns_record_and_quota_accounting(tmp):
 
 _RECORD_PROBE = r'''
 import json
+import os
 from pathlib import Path
 
 from daedalus_bridge import segment_store
 
+root = Path(os.environ['DAEDALUS_DIR']) / 'segments'
+root.mkdir(parents=True, exist_ok=True)
 job = 'probe-record'
-path = segment_store.record_path(job)
-path.parent.mkdir(parents=True, exist_ok=True)
-out = {'absent': segment_store.load_record(job)}
+path = segment_store.record_path(root, job)
+out = {'absent': segment_store.load_record(root, job)}
 
 path.write_text('[]', encoding='utf-8')
 try:
-    segment_store.load_record(job)
+    segment_store.load_record(root, job)
     out['not_an_object'] = 'accepted'
 except segment_store.SegmentRecordError:
     out['not_an_object'] = 'refused'
 
 path.write_text('{"token": "t", "sig": "s"}', encoding='utf-8')
-out['read_back'] = segment_store.load_record(job)
+out['read_back'] = segment_store.load_record(root, job)
 
 _real_read_text = Path.read_text
 
@@ -123,27 +147,27 @@ def _vanished(self, *args, **kwargs):
 
 Path.read_text = _unreadable
 try:
-    segment_store.load_record(job)
+    segment_store.load_record(root, job)
     out['unreadable'] = 'accepted'
 except segment_store.SegmentRecordError:
     out['unreadable'] = 'refused'
 
 Path.read_text = _vanished
-out['vanished'] = segment_store.load_record(job)
+out['vanished'] = segment_store.load_record(root, job)
 Path.read_text = _real_read_text
 
 path.write_text('{', encoding='utf-8')
-out['sig_on_corrupt'] = segment_store.record_for_sig(job, 'any-sig')
-out['sig_ok_on_corrupt'] = segment_store.sig_ok(job, 'any-sig')
+out['sig_on_corrupt'] = segment_store.record_for_sig(root, job, 'any-sig')
+out['sig_ok_on_corrupt'] = segment_store.sig_ok(root, job, 'any-sig')
 
 path.write_text(json.dumps({'token': 't'}), encoding='utf-8')
-out['sig_absent'] = segment_store.record_for_sig(job, 'any-sig')
+out['sig_absent'] = segment_store.record_for_sig(root, job, 'any-sig')
 path.write_text(json.dumps({'token': 't', 'sig': 'sí'}), encoding='utf-8')
-out['sig_not_ascii'] = segment_store.record_for_sig(job, 'any-sig')
+out['sig_not_ascii'] = segment_store.record_for_sig(root, job, 'any-sig')
 path.write_text(json.dumps({'token': 't', 'sig': 'kept'}), encoding='utf-8')
-out['supplied_not_ascii'] = segment_store.record_for_sig(job, 'sí')
-out['supplied_empty'] = segment_store.record_for_sig(job, '')
-out['supplied_matching'] = segment_store.record_for_sig(job, 'kept')
+out['supplied_not_ascii'] = segment_store.record_for_sig(root, job, 'sí')
+out['supplied_empty'] = segment_store.record_for_sig(root, job, '')
+out['supplied_matching'] = segment_store.record_for_sig(root, job, 'kept')
 print(json.dumps(out, sort_keys=True))
 '''
 
@@ -245,12 +269,13 @@ def test_quota_and_usage_refuse_every_untrusted_shape(tmp):
 
 _RECOUNT_PROBE = r'''
 import json
+import os
 from pathlib import Path
 
 from daedalus_bridge import segment_store
 
 job = 'probe-recount'
-root = segment_store.record_path(job).parent
+root = Path(os.environ['DAEDALUS_DIR']) / 'segments'
 root.mkdir(parents=True, exist_ok=True)
 plain = root / 'plain-file'
 plain.write_text('x', encoding='utf-8')
@@ -318,31 +343,32 @@ def test_recount_answers_for_every_shape_a_job_directory_can_take(tmp):
 
 _WRITE_USAGE_PROBE = r'''
 import json
+import os
 from pathlib import Path
 
 from daedalus_bridge import atomic_file
 from daedalus_bridge import segment_store
 
-root = segment_store.record_path('probe-usage').parent
+root = Path(os.environ['DAEDALUS_DIR']) / 'segments'
 root.mkdir(parents=True, exist_ok=True)
 out = {}
 
-segment_store.write_usage('probe-usage', 1, 2)
+segment_store.write_usage(root, 'probe-usage', 1, 2)
 out['absent_record_wrote_nothing'] = not any(root.iterdir())
 
 corrupt = root / 'corrupt.json'
 corrupt.write_text('{', encoding='utf-8')
-segment_store.write_usage('corrupt', 1, 2)
+segment_store.write_usage(root, 'corrupt', 1, 2)
 out['corrupt_left_alone'] = corrupt.read_text(encoding='utf-8')
 
 job = 'probe-usage'
-path = segment_store.record_path(job)
-record = segment_store.new_record('probe-token')
+path = segment_store.record_path(root, job)
+record = segment_store.new_record('probe-token', (99, 7, 4096))
 path.write_text(json.dumps(record), encoding='utf-8')
 dirty = path.with_name(f'.{path.name}.dirty')
-segment_store.mark_dirty(job)
-segment_store.write_usage(job, 3, 9)
-stored = segment_store.load_record(job)
+segment_store.mark_dirty(root, job)
+segment_store.write_usage(root, job, 3, 9)
+stored = segment_store.load_record(root, job)
 out['after_write'] = [stored['stored_count'], stored['stored_bytes']]
 out['mark_cleared'] = not dirty.exists()
 
@@ -364,15 +390,15 @@ def _stuck_temp(self):
 
 # The caller's mark goes down before the write it guards, while the real
 # writer still works; the failure is injected for the write itself.
-segment_store.mark_dirty(job)
+segment_store.mark_dirty(root, job)
 leftover = path.with_name(f'.{path.name}.tmp')
 leftover.write_text('stale', encoding='utf-8')
 atomic_file.write_text_retrying = _failing_write
 Path.unlink = _stuck_temp
-segment_store.write_usage(job, 4, 16)
+segment_store.write_usage(root, job, 4, 16)
 Path.unlink = _real_unlink
 atomic_file.write_text_retrying = _real_write
-after = segment_store.load_record(job)
+after = segment_store.load_record(root, job)
 out['after_failed_write'] = [after['stored_count'], after['stored_bytes']]
 out['mark_still_down'] = dirty.exists()
 out['temp_content'] = leftover.read_text(encoding='utf-8')
@@ -423,14 +449,16 @@ print(json.dumps(out, sort_keys=True))
 
 _MARK_DIRTY_PROBE = r'''
 import json
+import os
 from pathlib import Path
 
 from daedalus_bridge import atomic_file
 from daedalus_bridge import segment_store
 
-path = segment_store.record_path('probe-mark')
-path.parent.mkdir(parents=True, exist_ok=True)
-out = {'mark_written': segment_store.mark_dirty('probe-mark')}
+root = Path(os.environ['DAEDALUS_DIR']) / 'segments'
+root.mkdir(parents=True, exist_ok=True)
+path = segment_store.record_path(root, 'probe-mark')
+out = {'mark_written': segment_store.mark_dirty(root, 'probe-mark')}
 out['mark_exists'] = path.with_name(f'.{path.name}.dirty').is_file()
 
 _real_write = atomic_file.write_text_retrying
@@ -441,7 +469,7 @@ def _failing_write(path_, data):
 
 
 atomic_file.write_text_retrying = _failing_write
-out['mark_refused'] = segment_store.mark_dirty('probe-mark')
+out['mark_refused'] = segment_store.mark_dirty(root, 'probe-mark')
 atomic_file.write_text_retrying = _real_write
 print(json.dumps(out, sort_keys=True))
 '''
@@ -499,6 +527,89 @@ print(json.dumps(out, sort_keys=True))
 '''
     _root, answer = _probe(tmp, script)
     assert answer == {'timing_marks': None, 'printed': ''}, answer
+
+
+_UNCONFIGURED_PROBE = r'''
+import json
+import os
+from pathlib import Path
+
+from daedalus_bridge import segment_store
+
+root = Path(os.environ['THROWAWAY_ROOT'])
+job = 'unconfigured-job'
+path = segment_store.record_path(root, job)
+record = segment_store.new_record('unconfigured-token', (9, 8, 7))
+path.write_text(json.dumps(record), encoding='utf-8')
+segment_store.mark_dirty(root, job)
+segment_store.write_usage(root, job, 2, 5)
+loaded = segment_store.load_record(root, job)
+print('BARE ' + json.dumps({
+    'daedalus_env': sorted(
+        name for name in os.environ if name.startswith('DAEDALUS')),
+    'path': str(path),
+    'quota': segment_store.quota(loaded),
+    'usage': segment_store.usage(loaded),
+    'dirty_cleared': not segment_store.needs_recount(root, job),
+    'sig_ok': segment_store.sig_ok(root, job, record['sig']),
+}, sort_keys=True))
+'''
+
+
+def test_the_store_needs_no_bridge_configuration(tmp):
+    """A segments root is a parameter, so no `DAEDALUS_*` value is needed.
+
+    The probe reports the stripped environment back, then round-trips a
+    record under a throwaway root: mint it, mark the totals stale, write
+    them, and read the whole thing back through the same root.
+    """
+    root, answer = _bare_probe(tmp, _UNCONFIGURED_PROBE)
+    assert answer['daedalus_env'] == [], answer
+    # Resolved on both sides: `under` returns the path it checked, resolved.
+    expected = os.path.realpath(root / 'unconfigured-job.json')
+    assert answer['path'] == expected, (answer, expected)
+    assert answer['quota'] == [9, 8, 7], answer
+    assert answer['usage'] == [2, 5], answer
+    assert answer['dirty_cleared'] is True, answer
+    assert answer['sig_ok'] is True, answer
+
+
+_ROOT_SCOPED_SIG_PROBE = r'''
+import json
+import os
+from pathlib import Path
+
+from daedalus_bridge import segment_store
+
+held = Path(os.environ['THROWAWAY_ROOT'])
+elsewhere = held.parent / 'other-segments'
+elsewhere.mkdir()
+job = 'scoped-job'
+record = segment_store.new_record('scoped-token', (5, 3, 64))
+segment_store.record_path(held, job).write_text(
+    json.dumps(record), encoding='utf-8')
+sig = record['sig']
+print('BARE ' + json.dumps({
+    'held': segment_store.sig_ok(held, job, sig),
+    'elsewhere': segment_store.sig_ok(elsewhere, job, sig),
+    'record_elsewhere': segment_store.record_for_sig(elsewhere, job, sig),
+}, sort_keys=True))
+'''
+
+
+def test_a_capability_authorizes_only_under_the_root_holding_it(tmp):
+    """A sig minted under one root does not authorize another root's job.
+
+    Forwarding the wrong root at a call site is possible now that the root
+    travels as a parameter, and this is what makes that visible: with the
+    record still resolved from configuration both answers would agree.
+    """
+    _root, answer = _bare_probe(tmp, _ROOT_SCOPED_SIG_PROBE)
+    assert answer == {
+        'held': True,
+        'elsewhere': False,
+        'record_elsewhere': None,
+    }, answer
 
 
 def main():

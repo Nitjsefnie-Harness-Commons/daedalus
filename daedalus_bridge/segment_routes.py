@@ -6,13 +6,10 @@ tells the two apart with `isinstance`, because an `Admission` is a tuple
 too and would otherwise be written as a response.
 
 `seg_dir_root` is the segments directory these routes join a job's own
-directory under. It is only half a parameter: `segment_store` imports
-`SEG_DIR` from `daedalus_bridge.config` and resolves every record path
-from it, so a root passed here that configuration does not name would
-place the directories and the records apart. The bridge passes the
-configured root; parameterising the store is issue 484. This is the one
-statement of that constraint — `segment_jobs` and `lookup_job` point
-here rather than repeating it.
+directory under, and it governs the record beside that directory too:
+every `segment_store` call here is given the same root, so one root names
+one tree and a caller can redirect a whole request's storage by passing a
+different one.
 """
 import pathlib
 import time
@@ -33,6 +30,7 @@ class Admission(NamedTuple):
     segment_index: int
     quota: tuple
     seg_dir: pathlib.Path
+    seg_dir_root: pathlib.Path
 
 
 def admit_segment(seg_dir_root, params, sig):
@@ -75,7 +73,8 @@ def admit_segment(seg_dir_root, params, sig):
     try:
         seg_dir = path_safety.under(seg_dir_root, job)
         with segment_store.seg_lock:
-            record = segment_store.record_for_sig(job, sig)
+            record = segment_store.record_for_sig(
+                seg_dir_root, job, sig)
             quota = (segment_store.quota(record)
                      if record is not None else None)
     except ValueError:
@@ -87,7 +86,7 @@ def admit_segment(seg_dir_root, params, sig):
     # The directory travels with the admission so the namespace is decided
     # once, here, where the refusal is a 400 about the request rather than
     # a storage error raised under the write lock.
-    return Admission(job, segment_index, quota, seg_dir)
+    return Admission(job, segment_index, quota, seg_dir, seg_dir_root)
 
 
 def store_segment(raw, admission):
@@ -99,7 +98,7 @@ def store_segment(raw, admission):
     segment_store.seg_lock, so two segments arriving together cannot both
     spend the same remaining bytes.
     """
-    job, segment_index, quota, seg_dir = admission
+    job, segment_index, quota, seg_dir, seg_dir_root = admission
     _, max_count, max_bytes = quota
     marks = segment_store.timing_marks()
     with segment_store.seg_lock:
@@ -115,12 +114,13 @@ def store_segment(raw, admission):
             # quota is fixed at mint, while these change with every write,
             # so a value read outside this lock could be spent twice.
             try:
-                record = segment_store.load_record(job)
+                record = segment_store.load_record(seg_dir_root, job)
             except segment_store.SegmentRecordError:
                 record = None
             usage = (segment_store.usage(record)
                      if record is not None
-                     and not segment_store.needs_recount(job) else None)
+                     and not segment_store.needs_recount(
+                         seg_dir_root, job) else None)
             if usage is None:
                 # A job minted before totals were kept, or one whose
                 # last write_usage never confirmed landing. Either way
@@ -135,7 +135,7 @@ def store_segment(raw, admission):
                 # reaches the write_usage call below, so without this
                 # every later rejection on this job would pay for the
                 # same full scan again and never clear the mark.
-                segment_store.write_usage(job, *usage)
+                segment_store.write_usage(seg_dir_root, job, *usage)
             stored_count, stored_bytes = usage
             if marks is not None:
                 marks.append(('usage', time.perf_counter()))
@@ -160,7 +160,7 @@ def store_segment(raw, admission):
             # the write outright when even this cannot be established
             # is the alternative #203 asks for to a mark that fails
             # silently and lets the write through unaccounted.
-            if not segment_store.mark_dirty(job):
+            if not segment_store.mark_dirty(seg_dir_root, job):
                 return 500, {'error': 'segment storage failure'}
             try:
                 atomic_file.write_bytes_retrying(tmp, raw)
@@ -174,7 +174,7 @@ def store_segment(raw, admission):
             if marks is not None:
                 marks.append(('write', time.perf_counter()))
             segment_store.write_usage(
-                job,
+                seg_dir_root, job,
                 stored_count + (0 if replacing else 1),
                 stored_bytes - replaced_bytes + len(raw))
             if marks is not None:
@@ -197,7 +197,7 @@ def segment_status(seg_dir_root, params, sig):
     # that leaves the namespace.
     try:
         seg_dir = path_safety.under(seg_dir_root, job)
-        authorized = segment_store.sig_ok(job, sig)
+        authorized = segment_store.sig_ok(seg_dir_root, job, sig)
     except ValueError:
         return 400, {'error': 'bad job'}
     if not authorized:
@@ -224,17 +224,13 @@ def lookup_job(seg_dir_root, token, params):
     absent job can be reported as absent — the capability route has to
     conflate "no such job" with "wrong sig" to avoid being an existence
     oracle, and a caller holding the bridge token is owed neither.
-
-    `seg_dir_root` is accepted for one signature across the module; see
-    the module docstring for why it is only half a parameter.
     """
-    del seg_dir_root
     job = params.get('job', [''])[0]
     if not job or path_safety.unsafe_component(job):
         return 400, {'error': 'bad job'}
     with segment_store.seg_lock:
         try:
-            record = segment_store.load_record(job)
+            record = segment_store.load_record(seg_dir_root, job)
         except ValueError:
             return 400, {'error': 'bad job'}
         except segment_store.SegmentRecordError:

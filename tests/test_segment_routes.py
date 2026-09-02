@@ -9,11 +9,11 @@ returns `(status, payload)`; `admit_segment` returns an `Admission`
 instead when the request may proceed, which is how the request handler
 tells an admission from a refusal.
 
-`segment_store` imports `daedalus_bridge.config` for `SEG_DIR` and the
-quota defaults, so `DAEDALUS_DIR`, `DAEDALUS_PORT` and the three segment
-quota variables are set here before the first load, and the segments
-directory these tests pass in is the one that configuration names. Each
-test uses its own job name, because that directory is process-wide.
+`DAEDALUS_DIR`, `DAEDALUS_PORT` and the three segment quota variables
+are set here so the segments directory most of these tests pass in is the
+one configuration names; the controls for the root parameter deliberately
+pass a different one. Each test uses its own job name, because the
+configured directory is process-wide.
 """
 import atexit
 import contextlib
@@ -114,10 +114,10 @@ def _symlink_or_skip(link, target):
         _util.skip(f'this filesystem will not hold a symlink: {why}')
 
 
-def _store(routes, sig, job, index, raw):
+def _store(routes, sig, job, index, raw, root=SEG_DIR):
     """Admit and store one segment, returning the store answer."""
     admitted = routes.admit_segment(
-        SEG_DIR, {'job': [job], 'seg': [str(index)]}, sig)
+        root, {'job': [job], 'seg': [str(index)]}, sig)
     assert isinstance(admitted, routes.Admission), admitted
     return routes.store_segment(raw, admitted)
 
@@ -535,37 +535,75 @@ def test_a_refused_mint_that_cannot_remove_its_directory_still_answers(_tmp):
 
 
 def test_the_modules_need_no_configuration_of_their_own(_tmp):
-    """Their only configuration-bound import is `segment_store`.
+    """Neither route module nor anything either imports reads `config`.
 
-    `segment_store` reads `SEG_DIR` from `daedalus_bridge.config`, so with
-    no `DAEDALUS_*` variable set importing it fails — that is the control
-    proving the environment really is stripped. With `segment_store`
-    standing in, both route modules still import, which is what says they
-    bind no configuration of their own.
+    `daedalus_bridge.config` still exits without `DAEDALUS_DIR`, which is
+    the control proving the environment really is stripped. In that same
+    environment both route modules import for real — no stub — so nothing
+    on their import graph, `segment_store` included, binds configuration.
     """
     env = {k: v for k, v in os.environ.items()
            if not k.startswith('DAEDALUS_')}
     env['PYTHONPATH'] = str(_util.ROOT)
     refused = subprocess.run(
-        [sys.executable, '-c', 'import daedalus_bridge.segment_store'],
+        [sys.executable, '-c', 'import daedalus_bridge.config'],
         env=env, capture_output=True, text=True, check=False)
     assert refused.returncode != 0, refused.stderr
     assert 'DAEDALUS_DIR' in refused.stderr, refused.stderr
-    stubbed = subprocess.run(
-        [sys.executable, '-c', _STUBBED_IMPORT],
+    imported = subprocess.run(
+        [sys.executable, '-c', 'import daedalus_bridge.segment_routes\n'
+                               'import daedalus_bridge.segment_jobs'],
         env=env, capture_output=True, text=True, check=False)
-    assert stubbed.returncode == 0, stubbed.stderr
+    assert imported.returncode == 0, imported.stderr
 
 
-_STUBBED_IMPORT = """
-import sys, types
-import daedalus_bridge
-stub = types.ModuleType('daedalus_bridge.segment_store')
-sys.modules['daedalus_bridge.segment_store'] = stub
-daedalus_bridge.segment_store = stub
-import daedalus_bridge.segment_routes
-import daedalus_bridge.segment_jobs
-"""
+def test_the_segments_root_governs_the_whole_write_path(tmp):
+    """Admission and storage both write under the root they were handed.
+
+    The negative half is the control: the `.ts` file always followed the
+    passed root, while the record it is accounted in followed configuration.
+    """
+    routes = _routes('fixture_segment_routes_altroot')
+    jobs = _jobs('fixture_segment_jobs_altroot')
+    root = Path(tmp) / 'alt-segments'
+    root.mkdir(parents=True)
+    job = 'altroot-job'
+    status, payload = jobs.mint_job(
+        root, 'altroottok', {'job': job}, jobs.JobQuotas(*QUOTAS))
+    assert status == 200, (status, payload)
+    admitted = routes.admit_segment(
+        root, {'job': [job], 'seg': ['0']}, payload['sig'])
+    assert isinstance(admitted, routes.Admission), admitted
+    # Both sides resolved: this suite's root is an unresolved mkdtemp and
+    # `under` hands back the path it checked, resolved.
+    assert os.path.realpath(admitted.seg_dir_root) == os.path.realpath(root)
+    assert routes.store_segment(b'abcd', admitted) == (200, {'ok': True})
+    assert (root / job / '000000.ts').read_bytes() == b'abcd'
+    record = json.loads((root / f'{job}.json').read_text(encoding='utf-8'))
+    assert (record['stored_count'], record['stored_bytes']) == (1, 4), record
+    assert not (SEG_DIR / f'{job}.json').exists()
+    assert not (SEG_DIR / job).exists()
+
+
+def test_the_passed_quota_is_the_one_the_write_path_enforces(tmp):
+    """A count limit of 1 refuses the second segment.
+
+    Storing the passed quota is not enough on its own: this drives the
+    limit through admission and storage, where the suite's configured
+    ceiling of 3 would let both segments through.
+    """
+    routes = _routes('fixture_segment_routes_altquota')
+    jobs = _jobs('fixture_segment_jobs_altquota')
+    root = Path(tmp) / 'quota-segments'
+    root.mkdir(parents=True)
+    job = 'altquota-job'
+    status, payload = jobs.mint_job(
+        root, 'altquotatok', {'job': job}, jobs.JobQuotas(5, 1, 64))
+    assert status == 200, (status, payload)
+    assert _store(routes, payload['sig'], job, 0, b'ab', root) == (
+        200, {'ok': True})
+    assert _store(routes, payload['sig'], job, 1, b'cd', root) == (
+        413, {'error': 'segment count limit exceeded'})
 
 
 def main():
