@@ -428,6 +428,7 @@
 !/tests/test_upload_routes.py
 !/tests/test_version_contract.py
 !/tests/test_version_contract_dashboard_duplicates.py
+!/tests/test_version_contract_dashboard_spellings.py
 !/tests/test_version_contract_empty_rev.py
 !/tests/test_version_contract_quote_duplicates.py
 !/tests/test_version_contract_scanners.py
