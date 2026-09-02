@@ -324,7 +324,7 @@ def run_background_overlap(background, commands, order, result_base='',
             'node is required to execute the extension worker')
     harness = _BACKGROUND_OVERLAP_HARNESS.replace(
         '__IMPORT_SCRIPTS_STUB__', import_scripts_stub('context'))
-    attempts = 2 if sys.platform == 'win32' else 1
+    attempts = 2
     records = []
     for attempt in range(1, attempts + 1):
         timeout = overlap_child_timeout(
@@ -352,7 +352,7 @@ def run_background_overlap(background, commands, order, result_base='',
                     f'drain timed out: {drain_field}')
                 continue
             note = ''
-            if attempts > 1 and drain_timed_out:
+            if drain_timed_out:
                 note = ('\nretry declined: the post-kill drain did not '
                         'complete (drain outcome: timed out)')
             prior = ''.join(f'\n{item}' for item in records)
