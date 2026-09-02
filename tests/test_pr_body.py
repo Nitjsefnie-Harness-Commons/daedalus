@@ -489,6 +489,56 @@ def test_related_may_reference_accepts_rendered_link_alone(tmp):
     assert PR_BODY.related_may_reference('nothing', sections, TEMPLATE)
 
 
+def test_closing_issues_reads_the_governing_keyword(tmp):
+    del tmp
+    rendered = _valid_html(references=(
+        f'References {_issue_html(101)}, Fixes {_issue_html(102)}'))
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    assert PR_BODY.referenced_issues(sections) == [101, 102]
+    assert PR_BODY.closing_issues(sections) == [102]
+
+
+def test_closing_issues_includes_keyword_list_continuation(tmp):
+    del tmp
+    cases = (
+        (f'Fixes {_issue_html(101)}, {_issue_html(102)}', [101, 102]),
+        (f'Fixes {_issue_html(101)} and {_issue_html(102)}', [101, 102]),
+        (f'Fixes {_issue_html(101)}, {_issue_html(102)}, and '
+         f'{_issue_html(103)}', [101, 102, 103]),
+        (f'Fixes {_issue_html(101)}. References {_issue_html(102)}',
+         [101]),
+        (f'Fixes: {_issue_html(101)}', [101]),
+        (f'resolved {_issue_html(101)}', [101]),
+        (f'References {_issue_html(101)}, Fixes {_issue_html(102)}, '
+         f'{_issue_html(103)}', [102, 103]),
+        (f'Fixes #{101}', []),
+    )
+    for references, closing in cases:
+        rendered = _valid_html(references=references)
+        sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+        assert PR_BODY.closing_issues(sections) == closing, references
+
+
+def test_closing_issues_checks_every_section(tmp):
+    del tmp
+    summary = f'<p dir="auto">Also fixes {_issue_html(104)}.</p>'
+    rendered = _valid_html(
+        references=f'References {_issue_html(101)}').replace(
+            _text_html('One sentence.'), summary)
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    assert PR_BODY.referenced_issues(sections) == [101]
+    assert PR_BODY.closing_issues(sections) == [104]
+
+
+def test_closing_keyword_does_not_cross_a_section_boundary(tmp):
+    del tmp
+    rendered = _valid_html(
+        references=f'References {_issue_html(101)}').replace(
+            _text_html('One sentence.'), _text_html('One sentence. Fixes'))
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    assert PR_BODY.closing_issues(sections) == []
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='prbody_')

@@ -10,16 +10,15 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSED_FIRST, GITHUB_HTML, MARKER, OPEN_FIRST, REOPEN_FIRST,
-    RESOLVED_FIRST, TEMPLATE,
+    BOT, CLOSED_FIRST, MARKER, REOPEN_FIRST, RESOLVED_FIRST, TEMPLATE,
     _api, _assert_gate_message, _assert_no_writes, _assert_script_error,
     _assert_script_runs_through_gh_on_path,
-    _capture, _closed_event, _comment_body, _comment_page_fields, _execute,
-    _execute_without_runtime_escape, _gate_comment, _gate_module, _html_body,
-    _inline_marker_comment, _issue, _issue_gets, _issue_html, _layout_body,
-    _markdown_code_spans, _PaginationApi, _recorded_writes, _run_script,
-    _runtime_error, _script_fixtures, _text_html, _valid_body, _valid_html,
-    _write_gh_stub, _write_sequence,
+    _capture, _closed_event, _comment_page_fields, _execute,
+    _execute_without_runtime_escape, _gate_comment, _gate_module,
+    _html_body, _inline_marker_comment, _issue, _markdown_code_spans,
+    _PaginationApi,
+    _recorded_writes, _run_script, _runtime_error, _script_fixtures,
+    _text_html, _valid_body, _valid_html, _write_gh_stub, _write_sequence,
 )
 from _prgate_race import (  # noqa: E402
     _assert_closed_admissible_reclose_aborts_state,
@@ -110,94 +109,6 @@ def test_earliest_bot_marker_comment_is_selected(tmp):
         ('PATCH', 'repos/owner/repo/issues/comments/7')]
 
 
-def test_unclaimed_issue_comments_without_closing(tmp):
-    del tmp
-    api = _api(issues={'101': _issue('bob')})
-    code, writes, _output, _error = _execute(api, _valid_body())
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments')]
-    _assert_gate_message(
-        writes[0], OPEN_FIRST, ['No checked issue is assigned to you.'])
-
-
-def test_missing_issue_comments_without_closing(tmp):
-    del tmp
-    code, writes, _output, _error = _execute(
-        _api(issues={}), _valid_body())
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments')]
-    _assert_gate_message(
-        writes[0], OPEN_FIRST, ['No checked issue is assigned to you.'])
-
-
-def test_pull_request_reference_comments_without_closing(tmp):
-    del tmp
-    api = _api(issues={'101': _issue(pull_request=True)})
-    code, writes, _output, _error = _execute(api, _valid_body())
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments')]
-    _assert_gate_message(
-        writes[0], OPEN_FIRST, ['No checked issue is assigned to you.'])
-
-
-def test_layout_failure_with_reference_comments_then_closes(tmp):
-    del tmp
-    body = _layout_body(
-        ('Related Issues and Pull Requests', 'Fixes #101'),
-        ('Changes', '- One change'),
-        ('Testing', 'Ran the suite.'))
-    rendered = _html_body(
-        ('Related Issues and Pull Requests', f'Fixes {_issue_html(101)}'),
-        ('Changes', _text_html('One change')),
-        ('Testing', _text_html('Ran the suite.')))
-    code, writes, _output, _error = _execute(
-        _api(rendered=rendered), body)
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments'),
-        ('PATCH', 'repos/owner/repo/pulls/99')]
-    _assert_gate_message(
-        writes[0], CLOSED_FIRST,
-        ['Required section "Summary" is missing.'], closed=True)
-    assert writes[1][2] == {'state': 'closed'}
-
-
-def test_related_without_reference_comments_then_closes(tmp):
-    del tmp
-    body = _valid_body('see the tracker')
-    rendered = _valid_html(references=_text_html('see the tracker'))
-    code, writes, _output, _error = _execute(
-        _api(issues={}, rendered=rendered), body)
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments'),
-        ('PATCH', 'repos/owner/repo/pulls/99')]
-    _assert_gate_message(
-        writes[0], CLOSED_FIRST,
-        ['No checked issue is assigned to you.'], closed=True)
-
-
-def test_reference_outside_related_does_not_protect_from_close(tmp):
-    del tmp
-    body = _valid_body('none').replace(
-        'One sentence.', 'Summary references #101.')
-    summary = f'<p dir="auto">Summary references {_issue_html(101)}.</p>'
-    rendered = _valid_html(references=_text_html('none')).replace(
-        _text_html('One sentence.'), summary)
-    code, writes, _output, _error = _execute(
-        _api(issues={}, rendered=rendered), body)
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments'),
-        ('PATCH', 'repos/owner/repo/pulls/99')]
-    _assert_gate_message(
-        writes[0], CLOSED_FIRST,
-        ['No checked issue is assigned to you.'], closed=True)
-
-
 def test_none_body_reports_all_required_sections_and_closes(tmp):
     del tmp
     code, writes, _output, _error = _execute(
@@ -228,20 +139,6 @@ def test_retained_instruction_comment_closes(tmp):
     _assert_gate_message(
         writes[0], CLOSED_FIRST,
         ['Remove the template instruction comments.'], closed=True)
-
-
-def test_fenced_reference_protects_from_close_without_lookup(tmp):
-    del tmp
-    body = _valid_body('```\nFixes #101\n```')
-    rendered = _valid_html(references=GITHUB_HTML['fenced_code'])
-    api = _api(issues={}, rendered=rendered)
-    code, writes, _output, _error = _execute(api, body)
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments')]
-    _assert_gate_message(
-        writes[0], OPEN_FIRST, ['No checked issue is assigned to you.'])
-    assert _issue_gets(api) == []
 
 
 def test_gate_closed_admissible_pull_is_commented_then_reopened(tmp):
@@ -365,44 +262,6 @@ def test_unusable_render_fails_without_writes(tmp):
         assert code == 1
         _assert_no_writes(writes)
         assert error == expected
-
-
-def test_issue_lookup_failure_fails_without_writes(tmp):
-    del tmp
-    api = _api(fail={'issues/101'})
-    code, writes, _output, error = _execute(api, _valid_body())
-    assert code == 1
-    _assert_no_writes(writes)
-    assert error == (
-        'pr gate failed: GitHub returned 500 for '
-        'repos/owner/repo/issues/101\n')
-
-
-def test_reference_limit_checks_only_twenty_and_reports_overflow(tmp):
-    del tmp
-    numbers = list(range(1, 22))
-    body = _valid_body(' '.join(f'#{number}' for number in numbers))
-    rendered = _valid_html(references=' '.join(
-        _issue_html(number) for number in numbers))
-    issues = {str(number): _issue('bob') for number in numbers}
-    api = _api(issues=issues, rendered=rendered)
-    code, writes, _output, _error = _execute(api, body)
-    assert code == 0
-    assert len(_issue_gets(api)) == 20
-    reason = ('This body names more than 20 issue references, so only the '
-              'first 20 were checked.')
-    comment = _assert_gate_message(writes[0], OPEN_FIRST, [reason])
-    assert 'No checked issue is assigned to you.' not in comment
-
-    numbers = numbers[:20]
-    body = _valid_body(' '.join(f'#{number}' for number in numbers))
-    rendered = _valid_html(references=' '.join(
-        _issue_html(number) for number in numbers))
-    api = _api(issues=issues, rendered=rendered)
-    code, writes, _output, _error = _execute(api, body)
-    assert code == 0
-    assert len(_issue_gets(api)) == 20
-    assert reason not in _comment_body(writes[0])
 
 
 def test_failed_comment_write_prevents_state_change(tmp):

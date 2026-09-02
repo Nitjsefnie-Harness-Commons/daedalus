@@ -376,6 +376,7 @@
 !/tests/test_path_safety.py
 !/tests/test_pr_body.py
 !/tests/test_pr_gate.py
+!/tests/test_pr_gate_claims.py
 !/tests/test_queued_command.py
 !/tests/test_real_browser_boundary.py
 !/tests/test_real_browser_classification.py

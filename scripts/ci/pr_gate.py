@@ -13,12 +13,12 @@ from typing import NamedTuple
 if __package__:
     # pylint: disable-next=relative-beyond-top-level
     from .pr_body import (
-        layout_errors, parse_rendered, referenced_issues,
+        closing_issues, layout_errors, parse_rendered, referenced_issues,
         related_may_reference, retains_instruction_comment,
     )
 else:
     from pr_body import (
-        layout_errors, parse_rendered, referenced_issues,
+        closing_issues, layout_errors, parse_rendered, referenced_issues,
         related_may_reference, retains_instruction_comment,
     )
 
@@ -198,8 +198,9 @@ def _revalidate(api, pull_endpoint, state, timeline_endpoint=None,
     return current_closer
 
 
-def _claim(api, repo, issues, actor):
+def _claim(api, repo, issues, closing, actor):
     claimed = None
+    unassigned = []
     for number in issues[:20]:
         endpoint = f'repos/{repo}/issues/{number}'
         response = _response(api, 'GET', endpoint)
@@ -213,7 +214,20 @@ def _claim(api, repo, issues, actor):
         assignees = response.data.get('assignees') or []
         if any(item.get('login') == actor for item in assignees):
             claimed = claimed or number
-    return claimed
+        elif number in closing:
+            unassigned.append(number)
+    return claimed, unassigned
+
+
+def _unassigned_reason(numbers):
+    quoted = [f'#{number}' for number in numbers]
+    if len(quoted) == 1:
+        names = quoted[0]
+    else:
+        names = ', '.join(quoted[:-1]) + f' and {quoted[-1]}'
+    label = 'Issues' if len(quoted) > 1 else 'Issue'
+    verb = 'are' if len(quoted) > 1 else 'is'
+    return f'{label} {names} {verb} not assigned to you.'
 
 
 def _reasons_block(reasons):
@@ -314,11 +328,17 @@ def _run(api, repo, pr, actor, template):
     layout = layout_errors(sections, template)
     if retains_instruction_comment(body, template):
         layout.append(INSTRUCTION_REASON)
-    issues = referenced_issues(sections)
-    claimed = _claim(api, repo, issues, actor)
+    references = referenced_issues(sections)
+    closing = closing_issues(sections)
+    references += [
+        number for number in closing if number not in set(references)]
+    claimed, unassigned = _claim(
+        api, repo, references, set(closing), actor)
     reasons = list(layout)
-    if len(issues) > 20:
+    if len(references) > 20:
         reasons.append(OVERFLOW_REASON)
+    elif unassigned:
+        reasons.append(_unassigned_reason(unassigned))
     elif claimed is None:
         reasons.append(UNCLAIMED_REASON)
     closable = bool(layout) or not related_may_reference(
