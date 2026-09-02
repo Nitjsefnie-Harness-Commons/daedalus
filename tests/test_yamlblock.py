@@ -17,17 +17,18 @@ from workflow_yaml import (  # noqa: E402
     YAMLReadError, workflow_step_items,
 )
 from yamlblock import (  # noqa: E402
-    BLOCK_HEADER, block_end, decode_block, parse_block_header, text_indent,
+    block_end, decode_block, parse_block_header,
 )
+from yamlscalar import text_indent  # noqa: E402
 
 
 def _decode(header, body, parent_indent=0):
     """Decode `body` under `header`, from the header text on."""
     pairs = [(line.rstrip('\n'), line.endswith('\n'))
              for line in body.splitlines(keepends=True)]
-    style, chomp, explicit = parse_block_header(header, 'step name')
     return decode_block(
-        pairs, parent_indent, style, chomp, explicit, 'step name')
+        pairs, parent_indent, parse_block_header(header, 'step name'),
+        'step name')
 
 
 def _table(cases):
@@ -138,18 +139,15 @@ def test_a_folded_block_keeps_the_breaks_it_may_not_fold(tmp):
     ])
 
 
-def test_a_header_outside_the_grammar_is_refused(tmp):
-    """A header names its indentation once or not at all, in the one
-    spelling the reader admits."""
+def test_a_header_outside_the_grammar_is_not_a_header(tmp):
+    """Text that is no block header hands the value to other scalars."""
     del tmp
-    for header in ('|0', '|x', '||', '>-+', 'one', '|2 ', ''):
-        _refused(lambda h=header: parse_block_header(h, 'step name'),
-                 'step name has an unsupported block header')
+    for header in ('|x', '||', '>-+', 'one', '|2 ', ''):
+        assert parse_block_header(header, 'step name') is None, header
+    _refused(lambda: parse_block_header('|0', 'step name'),
+             'step name has an unsupported block header')
     _refused(lambda: parse_block_header('|2-3', 'step name'),
              'step name has two indentation indicators')
-    _refused(lambda: block_end(['k: |2-3', '   one'], 1, 2, 0,
-                               BLOCK_HEADER.fullmatch('|2-3')),
-             'workflow block has two indentation indicators')
 
 
 def test_a_body_short_of_the_content_indent_is_refused(tmp):
@@ -169,15 +167,16 @@ def test_a_block_ends_at_the_first_line_it_no_longer_covers(tmp):
     """The extent runs past every blank and content line the block owns."""
     del tmp
     texts = ['key: |', '  one', '', '  two', 'next: 1']
-    assert block_end(texts, 1, 5, 0, BLOCK_HEADER.fullmatch('|')) == 4
-    assert block_end(texts, 1, 5, 0, BLOCK_HEADER.fullmatch('|3')) == 1
-    assert block_end(texts[:4], 1, 4, 0, BLOCK_HEADER.fullmatch('|')) == 4
+    assert block_end(texts, 1, 5, 0, parse_block_header('|', 'x')) == 4
+    assert block_end(texts, 1, 5, 0, parse_block_header('|3', 'x')) == 1
+    assert block_end(texts[:4], 1, 4, 0,
+                     parse_block_header('|', 'x')) == 4
     assert block_end(['key: |', '', ''], 1, 3, 0,
-                     BLOCK_HEADER.fullmatch('|')) == 3
+                     parse_block_header('|', 'x')) == 3
     assert block_end(['key: |', 'next: 1'], 1, 2, 0,
-                     BLOCK_HEADER.fullmatch('|')) == 1
+                     parse_block_header('|', 'x')) == 1
     assert block_end(['key: |', '', 'next: 1'], 1, 3, 0,
-                     BLOCK_HEADER.fullmatch('|')) == 2
+                     parse_block_header('|', 'x')) == 2
 
 
 def test_a_step_name_and_id_may_be_written_as_a_block_scalar(tmp):

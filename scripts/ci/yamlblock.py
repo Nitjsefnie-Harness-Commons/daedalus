@@ -1,33 +1,52 @@
 """Decode the block scalars the workflow YAML subset admits."""
 import re
+from typing import NamedTuple
 
 if __package__:
-    # pylint: disable-next=relative-beyond-top-level
-    from .yamlscalar import YAMLReadError
+    # pylint: disable=relative-beyond-top-level
+    from .yamlscalar import YAMLReadError, text_indent
 else:
-    from yamlscalar import YAMLReadError
+    from yamlscalar import YAMLReadError, text_indent
 
 
-BLOCK_HEADER = re.compile(
-    r'^(?P<style>[>|])(?P<first>[1-9]?)(?P<chomp>[+-]?)'
-    r'(?P<second>[1-9]?)$')
+class BlockHeader(NamedTuple):
+    """The decoded indicators of one block scalar header."""
+
+    style: str
+    chomp: str
+    explicit: int
 
 
-def text_indent(text):
-    """The indentation of one line, refusing a tab where spaces belong."""
-    count = len(text) - len(text.lstrip(' '))
-    if text[:1] == '\t':
-        raise YAMLReadError('tabs in YAML indentation are unsupported')
-    return count
+_HEADER = re.compile(
+    r'^(?P<style>[>|])(?P<first>[0-9]?)(?P<chomp>[+-]?)'
+    r'(?P<second>[0-9]?)$')
 
 
-def block_end(texts, start, end, header_indent, match):
-    """The index past the block `match` heads, searching `start` to `end`."""
-    explicit = int(match.group('first') or match.group('second') or 0)
-    if match.group('first') and match.group('second'):
-        raise YAMLReadError('workflow block has two indentation indicators')
-    content_indent = header_indent + explicit
-    if not explicit:
+def parse_block_header(value, owner):
+    """The header record of a block scalar, or None for other scalars.
+
+    `0` is no indentation indicator: a YAML header's indicator must be
+    1-9, so `|0` refuses here rather than passing for a plain scalar and
+    sending its body to the multiline check.
+    """
+    match = _HEADER.fullmatch(value)
+    if match is None:
+        return None
+    first = match.group('first')
+    second = match.group('second')
+    if first and second:
+        raise YAMLReadError(f'{owner} has two indentation indicators')
+    if first == '0' or second == '0':
+        raise YAMLReadError(f'{owner} has an unsupported block header')
+    return BlockHeader(
+        match.group('style'), match.group('chomp') or '',
+        int(first or second or 0))
+
+
+def block_end(texts, start, end, header_indent, header):
+    """The index past the lines one block `header` owns."""
+    content_indent = header_indent + header.explicit
+    if not header.explicit:
         for index in range(start, end):
             if not texts[index].strip(' '):
                 continue
@@ -46,21 +65,9 @@ def block_end(texts, start, end, header_indent, match):
     return end
 
 
-def parse_block_header(value, owner):
-    """The style, chomping indicator and explicit indentation of a header."""
-    match = BLOCK_HEADER.fullmatch(value)
-    if match is None:
-        raise YAMLReadError(f'{owner} has an unsupported block header')
-    first = match.group('first')
-    second = match.group('second')
-    if first and second:
-        raise YAMLReadError(f'{owner} has two indentation indicators')
-    explicit = int(first or second or 0)
-    return match.group('style'), match.group('chomp') or '', explicit
-
-
-def decode_block(lines, parent_indent, style, chomp, explicit, owner):
+def decode_block(lines, parent_indent, header, owner):
     """Decode a block body given as `(text, line ended)` pairs."""
+    style, chomp, explicit = header
     if not lines:
         return ''
     if explicit:
