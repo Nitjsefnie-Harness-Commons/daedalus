@@ -32,7 +32,6 @@ def mint_job(seg_dir_root, token, body, quotas):
     already owned by a different token answers 409. The record lives beside
     the job's directory so both survive together.
     """
-    max_index, max_count, max_bytes = quotas
     job = body.get('job', '')
     if not job or path_safety.unsafe_component(job):
         return 400, {'error': 'bad job'}
@@ -70,6 +69,7 @@ def mint_job(seg_dir_root, token, body, quotas):
                     segment_store.write_usage(seg_dir_root, job, *reconciled)
                 return 200, {'ok': True, 'sig': sig}
 
+            max_index, max_count, max_bytes = quotas
             quota_fields = (
                 'max_segment_index', 'max_segment_count', 'max_bytes')
             if any(field in record for field in quota_fields):
