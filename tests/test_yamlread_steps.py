@@ -11,6 +11,7 @@ from _yamlread import (  # noqa: E402
     YAMLReadError, _comment, job_mapping, job_scalar, step_scalar,
     step_scalars,
 )
+from _wfpins import pinned_action  # noqa: E402
 from _yamlscalar import decode_inline_scalar  # noqa: E402
 from workflow_yaml import workflow_step_items  # noqa: E402
 
@@ -470,10 +471,7 @@ def test_real_workflow_trailing_colon_action_is_refused(tmp):
     """A runtime-invalid action scalar cannot pass trusted step policy."""
     del tmp
     workflow = _coverage_workflow()
-    action = (
-        'actions/download-artifact@'
-        '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'
-    )
+    action = pinned_action(workflow, 'actions/download-artifact')
     folded = f'        uses: >-\n          {action}\n'
     mutated = workflow.replace(folded, f'        uses: {action}:\n', 1)
     assert mutated != workflow, 'real download action was not mutated'
