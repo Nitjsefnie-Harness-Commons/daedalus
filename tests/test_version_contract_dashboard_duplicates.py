@@ -402,6 +402,23 @@ def test_span_with_rail_class_is_not_a_rail_site(tmp_path):
     _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
 
 
+def test_div_with_status_line_class_is_not_a_status_line_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<div class='sl-v'>8.8.8</span>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard status line')
+
+
+def test_worst_case_shape_does_not_flip_the_verdict(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    anchors = 200
+    markup = ('<div class="rail-foot-x">v9.9.9 '
+              + '<div ' * anchors + 'title="' + 'a' * anchors)
+    _insert_before_body(copy_root, markup)
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
 def test_attributes_before_class_rail_duplicate_is_refused(tmp_path):
     copy_root = Path(tmp_path) / 'tree'
     checker = _copy_versioned_tree(copy_root)

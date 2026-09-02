@@ -97,12 +97,13 @@ SITES = [
     # attribute region stays bounded inside the tag: quoted attribute values
     # are admitted whole, so a `>` inside a value does not end the tag early.
     # The class value admits a whole-token list and whitespace around `=`
-    # (#439). On well-formed markup the walk from an anchor to its `class` is
-    # linear; a malformed tag (an unclosed quote) makes every anchor walk to
-    # that quote, so k anchors over a k-character tail cost
-    # O(anchors x tail) — measured 0.4 s at 2000 and 2.6 s at 5000. Bounding
-    # that walk would give up the leftmost `class` candidate, so it is left
-    # quadratic by choice rather than by oversight.
+    # (#439).
+    #
+    # Well-formed markup walks linearly. A malformed tag (an unclosed quote)
+    # makes every anchor walk to that quote, so k anchors over a k-character
+    # tail cost O(anchors x tail) — 0.4 s at 2000, 2.6 s at 5000. A capped
+    # walk bounds that (36-69 ms at 5000, re-review measurement) and was
+    # declined: a cap re-introduces a silent false negative beyond the cap.
     ('dashboard/index.html', 'dashboard rail footer',
      r'''<div[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
      r'''[\t\n\f\r ])?'''
