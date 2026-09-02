@@ -139,7 +139,7 @@ STATES_THE_POLICY = (
 # displaces the rule paragraph, and STATES_THE_RULE is what catches it
 # there - the containment pin below stays satisfied when the constant is
 # reworded in step. "A first crossing may add a BASELINE entry." was
-# listed here until its claim grew a subject, and is what that cost.
+# listed here until its claim grew a subject; it is what that cost.
 SANCTIONS_GROWTH = (
     'Growing a listed file is allowed, because some fixes genuinely belong '
     'in it, but only by editing its recorded number in the same commit.',
