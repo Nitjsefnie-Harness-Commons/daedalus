@@ -7,11 +7,11 @@ stay free of the socket: each returns an answer — a `(status, payload)`
 pair, a `FileAnswer` or a `BytesAnswer` — and the handler writes it with
 `answer`.
 
-Besides `result_store` and `segment_store`, this is the only bridge module
-that reads `daedalus_bridge.config`, because it is transport rather than a
-route: a route takes its directories and limits as parameters. That is also
-why the answer types are defined in `route_answer` and only re-exported here
-— a route importing them from this one would inherit that requirement.
+This is the only bridge module that reads `daedalus_bridge.config`,
+because it is transport rather than a route: a route takes its directories
+and limits as parameters. That is also why the answer types are defined in
+`route_answer` and only re-exported here — a route importing them from this
+one would inherit that requirement.
 """
 import ctypes, ctypes.util
 import hmac, json, shutil
@@ -22,6 +22,7 @@ from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.transport import token as _configured_token
 from daedalus_bridge import path_safety
 from daedalus_bridge.route_answer import BytesAnswer, FileAnswer
+from daedalus_bridge.json_body import JSONObject, json_nests_deeper_than
 from daedalus_bridge.config import (
     MAX_BODY_SIZE, MAX_JSON_DEPTH, MAX_UNAUTHENTICATED_BODY,
 )
@@ -34,10 +35,12 @@ from daedalus_bridge.log_safe import log_safe
 # 8*nproc memory arenas and never returns their freed memory to the OS, which
 # inflates RSS to a high-water-mark (~900MB observed) that never recedes. Cap
 # the arenas and actively trim freed heap after large request bodies/files.
-TRIM_THRESHOLD = 256 * 1024  # only trim after handling payloads larger than this
+# Only trim after handling payloads larger than this.
+TRIM_THRESHOLD = 256 * 1024
 _TUNING_NOTE = None
 try:
-    _LIBC = ctypes.CDLL(ctypes.util.find_library('c') or 'libc.so.6', use_errno=True)
+    _LIBC = ctypes.CDLL(
+        ctypes.util.find_library('c') or 'libc.so.6', use_errno=True)
     _LIBC.mallopt(-8, 2)  # M_ARENA_MAX = -8: cap concurrent arenas at 2
 except Exception as _e:  # non-glibc / unavailable
     _LIBC = None
@@ -65,68 +68,7 @@ def malloc_trim():
             pass
 
 
-def json_nests_deeper_than(raw, limit):
-    """True when `raw` opens more than `limit` unclosed containers at once.
-
-    A scan of the bytes rather than a parse: the answer has to be settled
-    before json.loads builds anything, and before the interpreter's own
-    recursion limit gets to decide it — which it did, differently per version.
-
-    Bytes rather than text, so a hostile body is never decoded to be measured.
-    Only ASCII structure counts, and a UTF-8 continuation byte is never an
-    ASCII byte, so a multi-byte character cannot be mistaken for a brace. The
-    string state matters for the same reason: a `{` inside a string literal
-    opens nothing, and a `\\"` inside one does not close it.
-
-    Malformed input is not this function's problem — a body with more closers
-    than openers drives the count negative and json.loads rejects it on its
-    own terms. This answers one question only.
-    """
-    depth = 0
-    in_string = False
-    escaped = False
-    for byte in raw:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif byte == 0x5C:      # backslash
-                escaped = True
-            elif byte == 0x22:      # quote
-                in_string = False
-        elif byte == 0x22:
-            in_string = True
-        elif byte in (0x7B, 0x5B):  # { [
-            depth += 1
-            if depth > limit:
-                return True
-        elif byte in (0x7D, 0x5D):  # } ]
-            depth -= 1
-    return False
-
-
 UNDECLARED_BODY_DRAIN_SECONDS = 0.25
-
-
-class JSONObject(dict):
-    """A parsed JSON object that remembers whether a key arrived twice.
-
-    Duplicate keys collapse when the pairs become a dict, so the carrier says
-    something the items no longer can. Equality has to include it for the same
-    reason: two bodies with identical items are not the same request when one
-    of them named an authority carrier twice, and inherited dict equality
-    would call them equal. Comparison against a plain dict is unchanged.
-    """
-
-    def __init__(self, pairs):
-        super().__init__(pairs)
-        self.duplicate_carrier = ambiguous_request_carrier(
-            key for key, _value in pairs)
-
-    def __eq__(self, other):
-        if isinstance(other, JSONObject):
-            return (super().__eq__(other)
-                    and self.duplicate_carrier == other.duplicate_carrier)
-        return super().__eq__(other)
 
 
 class RequestMixin(BaseHTTPRequestHandler):
@@ -165,8 +107,8 @@ class RequestMixin(BaseHTTPRequestHandler):
         return params
 
     def _query_bridge_token(self, params):
-        """Return the query token — always a str, '' when absent — after the
-        request-wide ambiguity check."""
+        """Return the query token — always a str, '' when absent — after
+        the request-wide ambiguity check."""
         credentials = params.get('token', [])
         return credentials[0] if credentials else ''
 
@@ -214,10 +156,12 @@ class RequestMixin(BaseHTTPRequestHandler):
         if query and query != header_token:
             self._json(400, {'error': 'conflicting token'})
             return None
-        return header_token if self._require_bridge_token(header_token) else None
+        return (header_token
+                if self._require_bridge_token(header_token) else None)
 
     def _segment_capability(self, params):
-        """The job capability a segment route acts under, or None once answered.
+        """The job capability a segment route acts under, or None once
+        answered.
 
         A sig authorizes every write and status read for its job for as long
         as the job exists, so it is exactly as reusable as the bridge token
@@ -241,7 +185,8 @@ class RequestMixin(BaseHTTPRequestHandler):
         return header
 
     def _require_bridge_token(self, token):
-        """Answer an error unless `token` matches the configured bridge secret."""
+        """Answer an error unless `token` matches the configured bridge
+        secret."""
         if path_safety.bad_token(token):
             self._json(400, {'error': 'bad token'})
             return False

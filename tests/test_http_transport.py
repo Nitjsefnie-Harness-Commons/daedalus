@@ -29,6 +29,9 @@ os.environ.setdefault('DAEDALUS_PORT', '0')
 transport = _util.load(
     _util.ROOT / 'daedalus_bridge' / 'http_transport.py',
     'fixture_http_transport')
+json_body = _util.load(
+    _util.ROOT / 'daedalus_bridge' / 'json_body.py',
+    'fixture_json_body')
 
 
 class _Headers:
@@ -163,17 +166,17 @@ def test_bridge_token_refuses_a_header_and_query_that_disagree(_tmp):
 
 
 def test_json_nests_deeper_than_counts_structure_outside_strings(_tmp):
-    assert transport.json_nests_deeper_than(b'[[[1]]]', 2)
-    assert not transport.json_nests_deeper_than(b'[[1]]', 2)
+    assert json_body.json_nests_deeper_than(b'[[[1]]]', 2)
+    assert not json_body.json_nests_deeper_than(b'[[1]]', 2)
     # A brace inside a string literal opens nothing, and an escaped quote
     # does not end the literal it sits in.
-    assert not transport.json_nests_deeper_than(b'{"a": "[[[[["}', 2)
-    assert not transport.json_nests_deeper_than(b'{"a": "\\"[[[["}', 2)
+    assert not json_body.json_nests_deeper_than(b'{"a": "[[[[["}', 2)
+    assert not json_body.json_nests_deeper_than(b'{"a": "\\"[[[["}', 2)
 
 
 def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
-    once = transport.JSONObject([('token', 'a'), ('id', 'x')])
-    twice = transport.JSONObject([('token', 'a'), ('token', 'a')])
+    once = json_body.JSONObject([('token', 'a'), ('id', 'x')])
+    twice = json_body.JSONObject([('token', 'a'), ('token', 'a')])
     assert once.duplicate_carrier is None, once.duplicate_carrier
     assert twice.duplicate_carrier == 'token', twice.duplicate_carrier
     assert once != twice
@@ -191,6 +194,23 @@ def test_the_answer_types_import_without_daedalus_configuration(_tmp):
     done = subprocess.run(
         [sys.executable, '-c',
          'from daedalus_bridge.route_answer import BytesAnswer, FileAnswer'],
+        env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+
+
+def test_json_body_imports_without_daedalus_configuration(_tmp):
+    """The JSON helpers are body parsing, not transport, so bind no config.
+
+    Importing them must not require DAEDALUS_DIR or DAEDALUS_PORT — the
+    same requirement the answer types' import test pins for `route_answer`.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith('DAEDALUS_')}
+    env['PYTHONPATH'] = str(_util.ROOT)
+    done = subprocess.run(
+        [sys.executable, '-c',
+         'from daedalus_bridge.json_body import JSONObject, '
+         'json_nests_deeper_than'],
         env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
 
