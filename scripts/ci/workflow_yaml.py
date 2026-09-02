@@ -3,34 +3,24 @@ from dataclasses import dataclass
 
 if __package__:
     # pylint: disable=relative-beyond-top-level
-    from .yamlblock import (
-        BLOCK_HEADER,
-        block_end,
-        decode_block,
-        parse_block_header,
-        text_indent,
-    )
+    from .yamlblock import block_end, decode_block, parse_block_header
     from .yamlanchor import ALIAS, node_properties, strip_node_properties
     from .yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
         decode_inline_scalar,
         split_mapping_field,
-    )
-else:
-    from yamlblock import (
-        BLOCK_HEADER,
-        block_end,
-        decode_block,
-        parse_block_header,
         text_indent,
     )
+else:
+    from yamlblock import block_end, decode_block, parse_block_header
     from yamlanchor import ALIAS, node_properties, strip_node_properties
     from yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
         decode_inline_scalar,
         split_mapping_field,
+        text_indent,
     )
 
 
@@ -170,11 +160,11 @@ def _scalar_lines(lines):
             continue
         _key, raw_value = field
         _tokens, value = _prepared_value(raw_value)
-        match = BLOCK_HEADER.fullmatch(value)
-        if match is not None:
+        header = parse_block_header(value, 'workflow')
+        if header is not None:
             stop = block_end(
                 texts, index + 1, len(texts),
-                _field_indent(lines[index]), match)
+                _field_indent(lines[index]), header)
             scalar.update(range(index + 1, stop))
             index = stop
             continue
@@ -283,17 +273,15 @@ def _step_value(lines, scalar, start, end, indent, raw_value, owner):
         return _alias_value(lines, scalar, start, alias.group('name'), owner)
     if not value:
         raise YAMLReadError(f'{owner} has no scalar value')
-    match = BLOCK_HEADER.fullmatch(value)
-    if match is not None:
+    header = parse_block_header(value, owner)
+    if header is not None:
         texts = [line.text for line in lines]
-        stop = block_end(texts, start + 1, end, indent, match)
+        stop = block_end(texts, start + 1, end, indent, header)
         body = [
             (line.text, line.end > line.start + len(line.text))
             for line in lines[start + 1:stop]
         ]
-        style, chomp, explicit = parse_block_header(value, owner)
-        return decode_block(
-            body, indent, style, chomp, explicit, owner)
+        return decode_block(body, indent, header, owner)
     if value.startswith(("'", '"')):
         if _quote_is_open(value) is not None:
             raise YAMLReadError(f'{owner} has an unsupported multiline scalar')
