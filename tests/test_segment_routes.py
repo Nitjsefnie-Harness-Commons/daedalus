@@ -562,9 +562,13 @@ def test_the_segments_root_governs_the_whole_write_path(tmp):
 
     The negative half is the control: the `.ts` file always followed the
     passed root, while the record it is accounted in followed configuration.
+    It is scoped to the whole configured tree rather than to the two names
+    this job would take there, because a wrong root leaks under whatever
+    name the misrouted call happens to build.
     """
     routes = _routes('fixture_segment_routes_altroot')
     jobs = _jobs('fixture_segment_jobs_altroot')
+    before = sorted(path.name for path in SEG_DIR.iterdir())
     root = Path(tmp) / 'alt-segments'
     root.mkdir(parents=True)
     job = 'altroot-job'
@@ -581,8 +585,37 @@ def test_the_segments_root_governs_the_whole_write_path(tmp):
     assert (root / job / '000000.ts').read_bytes() == b'abcd'
     record = json.loads((root / f'{job}.json').read_text(encoding='utf-8'))
     assert (record['stored_count'], record['stored_bytes']) == (1, 4), record
-    assert not (SEG_DIR / f'{job}.json').exists()
-    assert not (SEG_DIR / job).exists()
+    after = sorted(path.name for path in SEG_DIR.iterdir())
+    assert after == before, (after, before)
+
+
+def test_a_failed_write_leaves_its_recount_mark_under_the_passed_root(tmp):
+    """A refused write keeps its mark, and the mark follows the root.
+
+    The mark is the one file the write path puts beside the record under
+    a name the job does not spell, and a successful write clears it. So a
+    refused write is where a misrouted mark stays visible, and only a
+    listing of the whole configured tree sees it arrive there.
+    """
+    routes = _routes('fixture_segment_routes_markroot')
+    jobs = _jobs('fixture_segment_jobs_markroot')
+    before = sorted(path.name for path in SEG_DIR.iterdir())
+    root = Path(tmp) / 'mark-segments'
+    root.mkdir(parents=True)
+    job = 'markroot-job'
+    status, payload = jobs.mint_job(
+        root, 'marktok', {'job': job}, jobs.JobQuotas(*QUOTAS))
+    assert status == 200, (status, payload)
+    admitted = routes.admit_segment(
+        root, {'job': [job], 'seg': ['0']}, payload['sig'])
+    assert isinstance(admitted, routes.Admission), admitted
+    with _refused('write_bytes', '.000000.ts.tmp') as fired:
+        assert routes.store_segment(b'abcd', admitted) == (
+            500, {'error': 'segment storage failure'})
+    assert fired == ['.000000.ts.tmp'], fired
+    after = sorted(path.name for path in SEG_DIR.iterdir())
+    assert after == before, (after, before)
+    assert (root / f'.{job}.json.dirty').exists()
 
 
 def test_the_passed_quota_is_the_one_the_write_path_enforces(tmp):
