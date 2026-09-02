@@ -273,7 +273,7 @@ def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
 
 
 def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
-    """Tolerance is the side a future rule-writer collides with."""
+    """A correct statement of the policy is not read as a licence."""
     del tmp
     assert STATES_THE_POLICY, 'the tolerance battery is empty'
     refused = [(text, _offered(text)) for text in STATES_THE_POLICY
@@ -282,7 +282,7 @@ def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
 
 
 def test_the_claim_check_refuses_a_licence_to_grow(tmp):
-    """And the side this file's own history collided with."""
+    """A sentence licensing growth by hand is read as one."""
     del tmp
     assert SANCTIONS_GROWTH, 'the strictness battery is empty'
     missed = [text for text in SANCTIONS_GROWTH if not _offered(text)]
