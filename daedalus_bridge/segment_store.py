@@ -2,11 +2,13 @@
 import os, json, hmac, secrets, threading, time
 
 from daedalus_bridge import atomic_file
-from daedalus_bridge.config import (
-    DEBUG_TIMING, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
-    MAX_SEGMENTS_PER_JOB, SEG_DIR,
-)
+from daedalus_bridge.env_config import env_flag
 from daedalus_bridge import path_safety
+
+
+# Neither a root nor a limit, so it stays a module-level switch read once
+# at import rather than travelling as a parameter.
+DEBUG_TIMING = env_flag('DAEDALUS_DEBUG_TIMING')
 
 
 # One flat job namespace under the data root: segments/<job>/ holds the .ts
@@ -17,21 +19,24 @@ from daedalus_bridge import path_safety
 seg_lock = threading.Lock()
 
 
-def record_path(job):
+def record_path(seg_dir_root, job):
     """The record beside a job's directory, refused if it lands outside.
+
+    `seg_dir_root` is the segments root the caller is working in, so one
+    root names both a job's directory and the record accounting for it.
 
     Raises ValueError like `under`. Every route reaching here has already
     answered for a bad job name, so a containment failure joins that answer
     rather than becoming a storage error.
     """
-    return path_safety.under(SEG_DIR, f'{job}.json')
+    return path_safety.under(seg_dir_root, f'{job}.json')
 
 
 class SegmentRecordError(Exception):
     """A job record exists but could not be read as one."""
 
 
-def load_record(job):
+def load_record(seg_dir_root, job):
     """Return `job`'s JSON object, or None when there is no record at all.
 
     A record that exists and cannot be read raises instead of arriving as
@@ -40,7 +45,7 @@ def load_record(job):
     turned local corruption into a destroyed resume identity reported as a
     successful mint.
     """
-    path = record_path(job)
+    path = record_path(seg_dir_root, job)
     if not path.is_file():
         # No record file here: nothing at that name, or the dotted-name
         # collision where this job's record path is another job's directory
@@ -66,14 +71,14 @@ def load_record(job):
     return record
 
 
-def record_for_sig(job, sig):
+def record_for_sig(seg_dir_root, job, sig):
     """Return `job` metadata when `sig` matches its minted capability.
 
     compare_digest raises TypeError on non-ASCII str input, and the sig arrives
     as a query string, so both sides are gated before the comparison.
     """
     try:
-        record = load_record(job)
+        record = load_record(seg_dir_root, job)
     except SegmentRecordError:
         # Fail closed: without a readable record nothing can be authorized,
         # and this path never writes one, so the corrupt record survives for
@@ -87,9 +92,9 @@ def record_for_sig(job, sig):
     return record if hmac.compare_digest(expected, sig) else None
 
 
-def sig_ok(job, sig):
+def sig_ok(seg_dir_root, job, sig):
     """Constant-time check of `sig` against the capability minted for `job`."""
-    return record_for_sig(job, sig) is not None
+    return record_for_sig(seg_dir_root, job, sig) is not None
 
 
 def quota(record):
@@ -174,26 +179,32 @@ def recount(seg_dir):
     return count, stored
 
 
-def new_record(token, stored_count=0, stored_bytes=0):
-    """Build a newly minted segment-job record with fixed quotas."""
+def new_record(token, quotas, stored_count=0, stored_bytes=0):
+    """Build a newly minted job record fixing `quotas` into it.
+
+    `quotas` is the caller's (max index, file count, bytes) triple, taken
+    positionally so this module does not import the route module that
+    names it.
+    """
+    max_index, max_count, max_bytes = quotas
     return {
         'token': token,
         'sig': secrets.token_urlsafe(32),
-        'max_segment_index': MAX_SEGMENT_INDEX,
-        'max_segment_count': MAX_SEGMENTS_PER_JOB,
-        'max_bytes': MAX_SEGMENT_JOB_SIZE,
+        'max_segment_index': max_index,
+        'max_segment_count': max_count,
+        'max_bytes': max_bytes,
         'stored_count': stored_count,
         'stored_bytes': stored_bytes,
     }
 
 
-def _dirty_path(job):
+def _dirty_path(seg_dir_root, job):
     """Where write_usage marks that job's totals may not have landed."""
-    path = record_path(job)
+    path = record_path(seg_dir_root, job)
     return path.with_name(f'.{path.name}.dirty')
 
 
-def needs_recount(job):
+def needs_recount(seg_dir_root, job):
     """Whether a previous write_usage for `job` may not have landed.
 
     The mark goes down before the write it guards even starts, so it is
@@ -202,10 +213,10 @@ def needs_recount(job):
     this is what stops the next read from trusting them. write_usage
     clears it itself once the replace it guards has actually landed.
     """
-    return _dirty_path(job).exists()
+    return _dirty_path(seg_dir_root, job).exists()
 
 
-def mark_dirty(job):
+def mark_dirty(seg_dir_root, job):
     """Establish the durable "this job's totals may go stale" marker.
 
     Returns whether it actually landed. A caller about to make this job's
@@ -216,13 +227,14 @@ def mark_dirty(job):
     that then also fails leaves neither a marker nor a correct record.
     """
     try:
-        atomic_file.write_text_retrying(_dirty_path(job), '')
+        atomic_file.write_text_retrying(
+            _dirty_path(seg_dir_root, job), '')
     except OSError:
         return False
     return True
 
 
-def write_usage(job, count, stored):
+def write_usage(seg_dir_root, job, count, stored):
     """Persist a job's totals, leaving every other field of its record alone.
 
     Read-modify-write under the caller's lock. A record that has become
@@ -230,20 +242,20 @@ def write_usage(job, count, stored):
     writer allowed to answer for corruption, and overwriting here would
     destroy the owner and capability a resume depends on.
 
-    Callers are responsible for having called mark_dirty(job) themselves
+    Callers are responsible for having called mark_dirty themselves
     before whatever made this update necessary took effect — a segment
     publish, or a recount — since only they know when that was. This only
     clears the mark, and only once the record write it guards has
     actually landed.
     """
     try:
-        record = load_record(job)
+        record = load_record(seg_dir_root, job)
     except SegmentRecordError:
         return
     if record is None:
         return
-    path = record_path(job)
-    dirty = _dirty_path(job)
+    path = record_path(seg_dir_root, job)
+    dirty = _dirty_path(seg_dir_root, job)
     record['stored_count'] = count
     record['stored_bytes'] = stored
     tmp = path.with_name(f'.{path.name}.tmp')
