@@ -304,13 +304,6 @@ def _target_fields(target):
             target['form'])
 
 
-def _previous_nonspace(mask, position):
-    position -= 1
-    while position >= 0 and mask[position].isspace():
-        position -= 1
-    return position
-
-
 def _chained_member(owner_end, key, pair_start, context):
     mask = context['mask']
     receiver_close = owner_end - 1
@@ -321,7 +314,7 @@ def _chained_member(owner_end, key, pair_start, context):
         return _target('unprovable'), owner_end
     receiver, receiver_start, receiver_before = _identifier_before(
         mask, receiver_open)
-    prefix_end = _previous_nonspace(mask, receiver_start)
+    prefix_end = _js_previous_nonspace(mask, receiver_start)
     array_chain = False
     if (prefix_end >= 0 and mask[prefix_end] == '.'
             and receiver in {
@@ -379,7 +372,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             name, start, _ = _identifier_before(mask, before - 1)
             if not name:
                 continue
-            prefix_end = _previous_nonspace(mask, start)
+            prefix_end = _js_previous_nonspace(mask, start)
             if prefix_end >= 0 and mask[prefix_end] == '.':
                 owner, owner_start, _ = _identifier_before(
                     mask, prefix_end)
@@ -394,7 +387,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         elif before >= 0 and (
                 mask[before].isalnum() or mask[before] in '_$'):
             name, start, _ = _identifier_before(mask, opening)
-            prefix_end = _previous_nonspace(mask, start)
+            prefix_end = _js_previous_nonspace(mask, start)
             before_word, _, _ = _identifier_before(mask, start)
             if (name in _NON_CALL_WORDS or before_word == 'function'
                     or start in method_positions):
@@ -411,7 +404,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 elif name in BUILTIN_CHAINS['function']:
                     target = _target('irrelevant')
                 elif name in ('call', 'apply'):
-                    owner_prefix = _previous_nonspace(mask, owner_start)
+                    owner_prefix = _js_previous_nonspace(mask, owner_start)
                     if owner == 'Reflect' and name == 'apply':
                         target = _target('unprovable')
                         call_mode = 'reflect_apply'
@@ -442,7 +435,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 # A private method call `Owner.#name(`: the owner is the
                 # identifier before the hash.
                 owner, owner_start, _ = _identifier_before(
-                    mask, _previous_nonspace(mask, prefix_end))
+                    mask, _js_previous_nonspace(mask, prefix_end))
                 if not owner:
                     continue
                 target = resolution['receivers'].member(
@@ -461,7 +454,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             if opening in method_positions:
                 continue
             owner_at = bracket
-            prefix_end = _previous_nonspace(mask, bracket)
+            prefix_end = _js_previous_nonspace(mask, bracket)
             optional_computed = (
                 prefix_end > 0 and mask[prefix_end] == '.'
                 and mask[prefix_end - 1] == '?')
@@ -510,6 +503,10 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             continue
         args = split_top_level(
             mask, text, opening + 1, close - 1)
+        # The spans the resolution reads: naming the callee or the
+        # receiver in one is what the call did with it.
+        consumed = list(args[:2]) if call_mode == 'reflect_apply' else (
+            list(args[:1]) if call_mode in ('call', 'apply') else [])
         if call_mode == 'reflect_apply':
             if len(args) != 3:
                 status = 'unprovable'
@@ -543,7 +540,8 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             'binding': binding, 'args': args, 'body': body,
             'status': status, 'scope': scope_at(start), 'name': name,
             'member': member, 'source': source, 'parent': False,
-            'form': form, 'argument_calls': []})
+            'form': form, 'argument_calls': [],
+            'consumed': consumed})
     calls.sort(key=lambda call: (call['order'], call['start']))
     nesting = []
     for parent in calls:
@@ -597,19 +595,7 @@ def opaque_writes(mask):
 
 
 def routing_events(mask, text, senders):
-    """Every source position that carries routing state, in source order.
-
-    Declarations and assignments initialise or retarget tracked names, a
-    `.tab` write retargets the routing field, an `Object.assign` merges into
-    a tracked object, and a tracked object handed to any other call escapes:
-    a helper that writes through its parameter is invisible from here, so
-    the object stops being provable at that point rather than being trusted
-    on its literal. The bracket form is found in the raw text because the
-    mask blanks string contents, making `['tab']` unreadable there — a match
-    that begins inside a blanked span is a mention, not code, and the mask
-    preserves positions, so the two diverge at the very first character of
-    the name exactly when the mention is not real code.
-    """
+    """Every source position that carries routing state, in source order."""
     declarations = list(re.finditer(
         r'\b(const|let|var)\s+([\w$]+)\s*=', mask))
     bindings = []

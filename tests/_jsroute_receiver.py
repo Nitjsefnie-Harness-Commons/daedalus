@@ -138,7 +138,13 @@ class ReceiverIndex:
                 return target('unprovable')
             span = self._latest(self.globals.get(owner_name), position)
             if span is None:
-                return target('irrelevant')
+                # `this` and `super` name a receiver this reader never
+                # resolves, so a read through one proves nothing; a write
+                # reaches no accessor it could have run.
+                return target(
+                    'unprovable'
+                    if wanted != 'set' and owner_name in ('this', 'super')
+                    else 'irrelevant')
             return self._member_from_span(
                 span, key, position, seen, env or {}, wanted)
         if (key in BUILTIN_CHAINS['array']
@@ -147,7 +153,8 @@ class ReceiverIndex:
         return self._member_binding(
             binding, key, position, seen, env or {}, wanted)
 
-    def returned_member(self, name, opening, close, key, position):
+    def returned_member(self, name, opening, close, key, position,
+                        wanted=None):
         body, env = self._call_environment(
             name, opening, close, position)
         if body is None:
@@ -156,7 +163,7 @@ class ReceiverIndex:
         if expression is None:
             return target('unprovable')
         return self._member_from_span(
-            expression, key, expression[0], frozenset(), env)
+            expression, key, expression[0], frozenset(), env, wanted)
 
     def constructed_member(self, name, opening, close, key, position,
                            wanted=None):
@@ -337,7 +344,8 @@ class ReceiverIndex:
                 self.computed_key(item)
                 for item in source.get('excluded', ())}:
             return target('irrelevant')
-        return self._member_from_span(span, key, position, seen, env)
+        return self._member_from_span(
+            span, key, position, seen, env, wanted)
 
     def _member_from_span(self, span, key, position, seen, env,
                           wanted=None, created=None):
@@ -345,7 +353,7 @@ class ReceiverIndex:
         call = self._simple_call(left, right)
         if call is not None:
             return self.returned_member(
-                call[0], call[1], call[2], key, left)
+                call[0], call[1], call[2], key, left, wanted)
         constructor = self._constructor_call(left, right)
         if constructor is not None:
             status, _, _ = class_accessor(
@@ -414,10 +422,14 @@ class ReceiverIndex:
     def _property_span(self, span, key, position, seen, env, wanted=None):
         left, right = self._unwrap(span)
         expression = self.mask[left:right].strip()
+        if re.match(r'new\b', self.text[left:right]):
+            # A construction this reader did not resolve is a receiver it
+            # cannot answer for, not one it proved has no member.
+            return 'unprovable', None, None
         if (self.mask[left:left + 1] == '['
                 or self.body_at(self.mask, left) is not None
                 or re.match(
-                    r'(?:new\b|null|undefined|true|false|[0-9]|["\'])',
+                    r'(?:null|undefined|true|false|[0-9]|["\'])',
                     self.text[left:right])):
             return 'irrelevant', None, None
         if re.fullmatch(r'[\w$]+', expression):

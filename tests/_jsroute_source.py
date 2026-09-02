@@ -219,6 +219,19 @@ def method_head_start(mask, name_start, pair_start):
     return position
 
 
+def _brace_depth(mask):
+    """Whether each offset sits inside a brace pair."""
+    found = bytearray(len(mask) + 1)
+    depth = 0
+    for position, char in enumerate(mask):
+        if char == '}' and depth:
+            depth -= 1
+        found[position] = 1 if depth else 0
+        if char == '{':
+            depth += 1
+    return found
+
+
 def method_scope_openings(mask, text, pair_end, pair_start):
     """Parameter, body and declaration offsets for method shorthand."""
     candidates = []
@@ -252,9 +265,15 @@ def method_scope_openings(mask, text, pair_end, pair_start):
     for match in computed.finditer(mask):
         opening = pair_end.get(match.start(), match.start())
         candidates.append((match.start(), opening, opening))
+    inside = _brace_depth(mask)
     for head, opening, marker in candidates:
         if mask[head:opening].strip() in {
                 'catch', 'for', 'if', 'switch', 'while', 'with'}:
+            continue
+        # A shorthand stands in an object literal or a class body, never
+        # at the top level: there a name, a call and a block are three
+        # statements, and reading them as one head loses the call.
+        if not inside[head]:
             continue
         close = pair_end.get(opening, len(mask))
         body_open = close
