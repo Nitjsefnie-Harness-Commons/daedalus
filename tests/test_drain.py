@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """The bounded post-kill drain every suite cleanup goes through."""
+import contextlib
+import io
 import subprocess
 import sys
 import time
@@ -87,12 +89,32 @@ def test_a_drain_with_nothing_unread_forwards_none(tmp):
         True, None, None)
 
 
+def test_a_timed_out_drain_names_its_process_on_stderr(tmp):
+    """The stderr note is the only record a stuck drain leaves.
+
+    Nothing is raised and nothing comes back but the flag, so the note is
+    what tells a reader which child held the suite up and how long the
+    drain waited before giving up on it.
+    """
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        timed_out, _out, _err = _drain.kill_and_drain(
+            _HoldsPipesPastKill(), drain_timeout=0.05)
+    note = captured.getvalue()
+    assert timed_out is True
+    assert 'kill_and_drain' in note, note
+    assert '4711' in note, note
+    assert '0.05' in note, note
+
+
 def test_a_grandchild_holding_pipes_cannot_hang_the_drain(tmp):
     """The real failure: a killed child whose grandchild holds the pipes.
 
-    Against an unbounded drain this test never returns -- the killed child's
-    ``communicate()`` waits for the sleeping grandchild to exit. The bound
-    turns that into a recorded outcome inside a few seconds.
+    Against an unbounded drain the killed child's ``communicate()`` waits
+    out the sleeping grandchild -- about ten seconds here -- and comes back
+    as a clean drain, so this test fails on its ``timed_out`` assertion.
+    The bound turns the same hang into a recorded outcome within a few
+    seconds.
     """
     client = (
         'import subprocess, sys, time\n'
@@ -115,6 +137,8 @@ def test_a_grandchild_holding_pipes_cannot_hang_the_drain(tmp):
         _drain.kill_and_drain(process)
     assert timed_out is True
     assert elapsed < 60, elapsed
+    # The default must stay generous: a tight bound makes every stuck
+    # drain kill its bearer mid-diagnosis.
     assert _drain.DRAIN_TIMEOUT_S >= 5
 
 

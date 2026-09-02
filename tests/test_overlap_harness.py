@@ -186,6 +186,8 @@ def test_a_drain_with_nothing_unread_still_names_the_backstop(tmp):
     that names what the harness was doing when it stalled.
     """
     with mock.patch.object(_overlap.subprocess, 'Popen') as popen:
+        popen.return_value.pid = 4711
+        popen.return_value.returncode = None
         popen.return_value.communicate.side_effect = subprocess.TimeoutExpired(
             cmd='node', timeout=1.0, output=None, stderr=None)
         message = ''
@@ -198,6 +200,28 @@ def test_a_drain_with_nothing_unread_still_names_the_backstop(tmp):
             message = str(failure)
     assert 'outer backstop' in message, message
     assert 'last step: none recorded' in message, message
+
+
+def test_a_drained_non_ascii_stream_survives_the_backstop_message(tmp):
+    """Bytes a timed-out drain returns reach the message decoded.
+
+    The backstop message is the one report naming what a stalled harness
+    was doing, so the stream it captured must come back as decoded text:
+    non-ASCII content dropped by the normalization is a diagnosis lost.
+    """
+    with mock.patch.object(_overlap.subprocess, 'Popen') as popen:
+        popen.return_value.pid = 4712
+        popen.return_value.returncode = None
+        popen.return_value.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd='node', timeout=1.0, output=b'caf\xc3\xa9-step', stderr=None)
+        try:
+            _overlap.run_background_overlap('background', [], [])
+        except AssertionError as failure:
+            message = str(failure)
+        else:
+            message = ''
+    assert 'outer backstop' in message, message
+    assert 'café-step' in message, message
 
 
 def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
