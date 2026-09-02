@@ -13,8 +13,7 @@ def json_nests_deeper_than(raw, limit):
 
     A scan of the bytes rather than a parse: the answer has to be settled
     before json.loads builds anything, and before the interpreter's own
-    recursion limit gets to decide it — which it did, differently per
-    version.
+    recursion limit gets to decide it — which it did, differently per version.
 
     Bytes rather than text, so a hostile body is never decoded to be measured.
     Only ASCII structure counts, and a UTF-8 continuation byte is never an
@@ -56,6 +55,12 @@ class JSONObject(dict):
     reason: two bodies with identical items are not the same request when one
     of them named an authority carrier twice, and inherited dict equality
     would call them equal. Comparison against a plain dict is unchanged.
+
+    `__ne__` is overridden alongside `__eq__` for the same reason: `dict`
+    defines its own `__ne__`, so without this `!=` reports plain dict
+    inequality and misses the repeated carrier `==` exists to catch.
+    `__eq__` can return `NotImplemented`, which is truthy, so `__ne__`
+    checks for it rather than negating blindly.
     """
 
     def __init__(self, pairs):
@@ -68,3 +73,9 @@ class JSONObject(dict):
             return (super().__eq__(other)
                     and self.duplicate_carrier == other.duplicate_carrier)
         return super().__eq__(other)
+
+    def __ne__(self, other):
+        equal = self.__eq__(other)
+        if equal is NotImplemented:
+            return equal
+        return not equal
