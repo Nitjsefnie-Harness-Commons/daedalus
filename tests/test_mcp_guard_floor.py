@@ -75,6 +75,31 @@ def test_the_refusal_floor_refuses_a_stranded_guard(_tmp):
         f'no refusal case of its own witnesses {b!r}']
     assert gaps('t', [a, a], {a}) == [f'{a!r} spells two of the guards']
     assert gaps('t', [a, c], {a, c}) == []
+    # A same-named function in another module is its own obligation, so one
+    # allowlist entry cannot exempt every module that spells that name.
+    elsewhere = ('n', 'f', 'a')
+    assert gaps('t', [a, elsewhere], {a}) == [
+        f'no refusal case of its own witnesses {elsewhere!r}']
+    # A same-named function in another module is its own obligation, so one
+    # allowlist entry cannot exempt every module that spells that name.
+    elsewhere = ('n', 'f', 'a')
+    assert gaps('t', [a, elsewhere], {a}) == [
+        f'no refusal case of its own witnesses {elsewhere!r}']
+    # A same-named function in another module is its own obligation, so one
+    # allowlist entry cannot exempt every module that spells that name.
+    elsewhere = ('n', 'f', 'a')
+    assert gaps('t', [a, elsewhere], {a}) == [
+        f'no refusal case of its own witnesses {elsewhere!r}']
+    # A same-named function in another module is its own obligation, so one
+    # allowlist entry cannot exempt every module that spells that name.
+    elsewhere = ('n', 'f', 'a')
+    assert gaps('t', [a, elsewhere], {a}) == [
+        f'no refusal case of its own witnesses {elsewhere!r}']
+    # A same-named function in another module is its own obligation, so one
+    # allowlist entry cannot exempt every module that spells that name.
+    elsewhere = ('n', 'f', 'a')
+    assert gaps('t', [a, elsewhere], {a}) == [
+        f'no refusal case of its own witnesses {elsewhere!r}']
     with mock.patch.dict(_mcp_guard_floor.UNWITNESSED_GUARDS, {'t': {b}}):
         assert gaps('t', [a, b], {a}) == []
         assert gaps('t', [a, b], {b}) == [
