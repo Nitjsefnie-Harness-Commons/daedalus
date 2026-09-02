@@ -431,10 +431,16 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         'registered tools and pinned commands differ: '
         f'unpinned={sorted(set(registered) - set(commands))}; '
         f'not registered={sorted(set(commands) - set(registered))}')
+    orphans = set(_mcp_tool_commands.UNPINNED_PARAMETERS) - set(commands)
+    assert not orphans, (
+        'UNPINNED_PARAMETERS names tools that are not registered: '
+        f'{sorted(orphans)}')
     unwitnessed = {}
+    tools = {}
     for name, cases in commands.items():
         assert cases, f'{name}: registered with no pinned case'
         tool = registered[name]
+        tools[name] = tool
         optional = [
             parameter.name
             for parameter in inspect.signature(tool).parameters.values()
@@ -449,7 +455,7 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         + '; '.join(f'{name}: {"; ".join(gaps)}'
                     for name, gaps in unwitnessed.items()))
     for name, cases in commands.items():
-        tool = registered[name]
+        tool = tools[name]
         for overrides, expected in cases:
             assert expected, f'{name} {overrides}: pins no bridge call'
             composition.bridge.calls.clear()
