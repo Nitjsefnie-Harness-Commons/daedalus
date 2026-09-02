@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -118,6 +119,42 @@ def test_replace_publishes_one_synced_event_into_cmd_dir(tmp):
     assert len(events) == 1, events
     assert events[0]['type'] == 'tabs-synced', events[0]
     assert events[0]['count'] == 2, events[0]
+
+
+def test_replace_answers_the_count_of_the_list_it_wrote(tmp):
+    """The count a /sync-tabs caller is answered with, and the count its
+    tabs-synced event carries, are the size of the list that caller sent.
+
+    The count was read from the shared registry after the lock had been
+    released, so a concurrent sync of the same token landing in that
+    window was counted for this caller instead. The lock double below
+    performs that concurrent sync synchronously on first release, so the
+    window is driven deterministically and single-threaded.
+    """
+    reg = _load('fixture_tab_registry_replace_count')
+
+    class InterleavingLock:
+        def __init__(self):
+            self._inner = threading.Lock()
+            self._fired = False
+
+        def __enter__(self):
+            self._inner.acquire()
+            return self
+
+        def __exit__(self, *exc):
+            self._inner.release()
+            if not self._fired:
+                self._fired = True
+                reg.replace(tmp, 'tok', {'tabs': [
+                    {'tabId': '7'}, {'tabId': '8'}, {'tabId': '9'}]})
+
+    reg._lock = InterleavingLock()
+    synced = reg.replace(tmp, 'tok', {'tabs': [{'tabId': '1'}]})
+    assert synced == (200, {'ok': True, 'count': 1}), synced
+    counts = [e['count'] for e in _events(tmp, 'tok')
+              if e['type'] == 'tabs-synced']
+    assert sorted(counts) == [1, 3], counts
 
 
 def test_replace_refuses_a_tab_list_that_is_not_a_list_of_objects(tmp):

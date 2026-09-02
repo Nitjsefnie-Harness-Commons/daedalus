@@ -88,7 +88,7 @@ def replace(cmd_dir, token, body):
                 'title': tab_info.get('title', ''),
                 'ts': time.time(),
             }
-    count = len(_registry.get(token, {}))
+        count = len(normalized_tabs)
     command_queue.notify_dashboard(
         cmd_dir, token, {'type': 'tabs-synced', 'count': count})
     return 200, {'ok': True, 'count': count}
