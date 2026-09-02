@@ -2,5 +2,5 @@
 # release cannot turn CI red on an unchanged commit. The suites are stdlib
 # only; the MCP server's dependencies are the `mcp` extra in pyproject.toml.
 pycodestyle==2.14.0
-pylint==4.0.7
+pylint==4.0.8
 pyright==1.1.411
