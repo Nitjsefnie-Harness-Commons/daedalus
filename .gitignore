@@ -92,6 +92,7 @@
 !/daedalus_bridge/delivery_stripes.py
 !/daedalus_bridge/env_config.py
 !/daedalus_bridge/http_transport.py
+!/daedalus_bridge/json_body.py
 !/daedalus_bridge/log_safe.py
 !/daedalus_bridge/mcp_bootstrap.py
 !/daedalus_bridge/parent_watch.py
