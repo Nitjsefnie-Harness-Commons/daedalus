@@ -252,6 +252,7 @@
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
 !/tests/_jsroute_factory_cases.py
+!/tests/_jsroute_operations.py
 !/tests/_jsroute_receiver.py
 !/tests/_jsroute_source.py
 !/tests/_jsroute_state.py
@@ -395,6 +396,8 @@
 !/tests/test_tab_registry.py
 !/tests/test_tab_routing.py
 !/tests/test_tab_routing_js.py
+!/tests/test_tab_routing_js_bodies.py
+!/tests/test_tab_routing_js_operations.py
 !/tests/test_tab_routing_performance.py
 !/tests/test_tab_routing_unprovable.py
 !/tests/test_tab_routing_yielded_sender.py
