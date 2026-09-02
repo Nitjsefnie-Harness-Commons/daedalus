@@ -384,6 +384,13 @@ def test_health_payload(tmp):
     with _util.bridge(tmp) as (base, _docroot):
         status, body = _util.get_json(base + '/health')
         assert status == 200, status
+        # The key set is exactly the payload AGENTS.md's /health entry
+        # documents, so a new field is one change with that edit and an
+        # undocumented key fails here before it ships.
+        assert set(body) == {
+            'ok', 'uptime_s', 'active_streams', 'stream_tabs', 'registry',
+            'last_delivery_s_ago', 'cmd_ttl_s', 'stream_max_age_s', 'mcp',
+        }, body
         assert body['ok'] is True
         assert isinstance(body['uptime_s'], (int, float)) and body['uptime_s'] >= 0
         assert body['active_streams'] == 0
