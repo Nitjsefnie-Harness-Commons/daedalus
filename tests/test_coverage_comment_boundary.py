@@ -519,9 +519,9 @@ def _pin_refused(workflow, action, detail):
     try:
         pinned_action(workflow, action)
     except WorkflowPinError as error:
-        assert detail in str(error), str(error)
+        assert detail in str(error), (str(error), workflow)
         return
-    raise AssertionError(f'{detail!r} was accepted as a pin')
+    raise AssertionError(f'{detail!r} was accepted as a pin in {workflow!r}')
 
 
 def test_pinned_action_reads_the_real_workflow_pin(tmp):
@@ -548,6 +548,14 @@ def test_pinned_action_refuses_conflicting_pins(tmp):
         f'  uses: {_DOWNLOAD_ACTION}@' + 'a' * 40 + '\n'
         f'  uses: {_DOWNLOAD_ACTION}@' + 'b' * 40 + '\n',
         _DOWNLOAD_ACTION, 'conflicting pins')
+
+
+def test_pinned_action_folds_a_pin_repeated_verbatim(tmp):
+    """The same pin written twice is one pin, whatever text carries it."""
+    del tmp
+    pin = f'{_DOWNLOAD_ACTION}@' + 'f' * 40
+    assert pinned_action(f'  uses: {pin}\n  uses: {pin}\n',
+                         _DOWNLOAD_ACTION) == pin
 
 
 def test_pinned_action_folds_a_pin_repeated_across_a_file(tmp):
