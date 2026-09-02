@@ -225,7 +225,7 @@ def parameter_sources(specs, args, mask, text, top_level, computed_key):
 
 def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
                               statement_end, senders,
-                              callable_value=None, interpolations=()):
+                              callable_value=None, opaque=()):
     """Find lexical bindings that an invocation may use as a sender."""
     candidates = set()
     for scope in scopes[1:]:
@@ -233,7 +233,7 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
             binding = visible_binding(name, scope['start'])
             if binding is not None:
                 candidates.add(binding)
-    for match in interpolations:
+    for match in opaque:
         target = visible_binding(match.group(1), match.start())
         if target is not None:
             candidates.add(target)
@@ -574,63 +574,25 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
     return calls
 
 
-_TEMPLATE = re.compile(r'`(?:\\.|[^`])*`', re.DOTALL)
-_INTERPOLATION = re.compile(r'\$\{')
-_INTERP_WRITE = re.compile(
+_OPAQUE_WRITE = re.compile(
     r'(?<![\w$.])([\w$]+)\s*'
-    r'(?:=(?!=|>)|\*\*=|>>>=|<<=|>>=|&&=|\|\|=|\?\?='
+    r'(?:\*\*=|>>>=|<<=|>>=|&&=|\|\|=|\?\?='
     r'|[-+*/%&|^]=|\+\+|--)')
-_INTERP_PREFIX_UPDATE = re.compile(
+_OPAQUE_PREFIX_UPDATE = re.compile(
     r'(?<![\w$.])(?:\+\+|--)\s*([\w$]+)')
 
 
-def _interpolation_spans(template):
-    """Spans of the `${...}` expressions inside one template's text."""
-    found = []
-    body = template.group(0)
-    for opening in _INTERPOLATION.finditer(body):
-        depth = 0
-        cursor = opening.end()
-        left = cursor
-        while cursor < len(body):
-            char = body[cursor]
-            if char in '\'"`':
-                closing = char
-                cursor += 1
-                while cursor < len(body):
-                    if body[cursor] == '\\':
-                        cursor += 2
-                        continue
-                    if body[cursor] == closing:
-                        break
-                    cursor += 1
-            elif char == '{':
-                depth += 1
-            elif char == '}':
-                if depth == 0:
-                    found.append((left, cursor))
-                    break
-                depth -= 1
-            cursor += 1
-    return found
+def opaque_writes(mask):
+    """Bind records for the writes whose value the walk cannot follow.
 
-
-def interpolation_events(mask, text):
-    """Bind records for the assignments a template's interpolation runs.
-
-    The mask blanks a template whole, so the writes its `${...}` performs
-    are invisible to the assignment walk; they are recorded here from the
-    raw text instead, and the sender walk answers them as unprovable.
+    A compound assignment, an update and a logical assignment all retarget
+    their binding from a value the resolver has no expression to read, so
+    each is recorded here and the sender walk answers it as unprovable.
     """
     found = []
-    for template in _TEMPLATE.finditer(text):
-        for left, right in _interpolation_spans(template):
-            expression = template.group(0)[left:right]
-            for pattern in (_INTERP_WRITE, _INTERP_PREFIX_UPDATE):
-                for write in pattern.finditer(expression):
-                    position = template.start() + left + write.start()
-                    found.append((position, 'interp',
-                                  pattern.match(text, position)))
+    for pattern in (_OPAQUE_WRITE, _OPAQUE_PREFIX_UPDATE):
+        for write in pattern.finditer(mask):
+            found.append((write.start(), 'opaque', write))
     return found
 
 
@@ -655,7 +617,7 @@ def routing_events(mask, text, senders):
         before = _js_previous_nonspace(mask, m.start())
         if before < 0 or mask[before] != '.':
             bindings.append(m)
-    events = interpolation_events(mask, text)
+    events = opaque_writes(mask)
     for m in declarations:
         events.append((m.start(), 'init', m))
     for m in bindings:
