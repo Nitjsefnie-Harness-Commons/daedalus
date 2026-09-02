@@ -72,23 +72,37 @@ def _write_record(job, record):
 
 
 @contextlib.contextmanager
-def _refused(method, matches):
+def _refused(method, name):
     """Refuse one pathlib call inside the block, restoring it afterwards.
 
     This suite runs as root on some machines, where a permission bit is not
     a portable way to make one filesystem call fail, so the call is named
     and refused for exactly the path the test is about.
+
+    The call is matched on the path's final component, not on the whole
+    path. Every path these routes touch comes back resolved from
+    `path_safety.under`, and the temp root this suite builds is spelled
+    differently from its own resolution -- macOS aliases /var to
+    /private/var, a Windows runner hands out RUNNER~1 for the user
+    directory -- so a whole-path comparison held on Linux and nowhere
+    else. The aliases rename ancestors only: both spellings end in the job
+    directory this test chose, and each job name here is unique to the
+    suite. `fired` records the calls that matched, so a test asserts the
+    injection happened rather than discovering its absence through a
+    route that unexpectedly succeeded.
     """
     real = getattr(pathlib.Path, method)
+    fired = []
 
     def refusing(self, *args, **kwargs):
-        if matches(self):
+        if self.name == name:
+            fired.append(self.name)
             raise OSError(f'injected {method} failure')
         return real(self, *args, **kwargs)
 
     setattr(pathlib.Path, method, refusing)
     try:
-        yield
+        yield fired
     finally:
         setattr(pathlib.Path, method, real)
 
@@ -365,9 +379,10 @@ def test_a_write_that_cannot_scan_the_directory_is_answered(_tmp):
         'max_segment_index': QUOTAS[0], 'max_segment_count': QUOTAS[1],
         'max_bytes': QUOTAS[2]})
     seg_dir = SEG_DIR / job
-    with _refused('iterdir', lambda path: path == seg_dir):
+    with _refused('iterdir', job) as fired:
         assert _store(routes, sig, job, 0, b'abc') == (
             500, {'error': 'segment storage failure'})
+    assert fired == [job], fired
     assert not (seg_dir / '000000.ts').exists()
 
 
@@ -509,11 +524,12 @@ def test_a_refused_mint_that_cannot_remove_its_directory_still_answers(_tmp):
     jobs = _jobs('fixture_segment_jobs_rmdir')
     _mint(jobs, 'rmdirtok', 'rmdir-job.json')
     created = SEG_DIR / 'rmdir-job'
-    with _refused('rmdir', lambda path: path == created):
+    with _refused('rmdir', 'rmdir-job') as fired:
         status, payload = jobs.mint_job(
             SEG_DIR, 'rmdirtok', {'job': 'rmdir-job'},
             jobs.JobQuotas(*QUOTAS))
     assert (status, payload) == (409, {'error': 'job name unavailable'})
+    assert fired == ['rmdir-job'], fired
     assert (SEG_DIR / 'rmdir-job.json').is_dir()
     assert created.is_dir() and not any(created.iterdir())
 
