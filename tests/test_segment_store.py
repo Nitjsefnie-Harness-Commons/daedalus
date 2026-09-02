@@ -206,6 +206,11 @@ print(json.dumps({
     'stored_str': segment_store.usage(with_field('stored_bytes', '2')),
     'stored_bool': segment_store.usage(with_field('stored_bytes', True)),
     'stored_negative': segment_store.usage(with_field('stored_bytes', -1)),
+    'stored_count_str': segment_store.usage(with_field('stored_count', '1')),
+    'stored_count_bool': segment_store.usage(
+        with_field('stored_count', True)),
+    'stored_count_negative': segment_store.usage(
+        with_field('stored_count', -1)),
 }, sort_keys=True))
 '''
 
@@ -232,6 +237,9 @@ def test_quota_and_usage_refuse_every_untrusted_shape(tmp):
         'stored_str': None,
         'stored_bool': None,
         'stored_negative': None,
+        'stored_count_str': None,
+        'stored_count_bool': None,
+        'stored_count_negative': None,
     }, answer
 
 
