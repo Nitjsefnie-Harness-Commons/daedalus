@@ -85,7 +85,8 @@ _SLASH_REFUSAL = (
     'hoist the expression out of the harness source or restructure it')
 
 
-def _harness_failure(harness, *arguments, **options):
+def _harness_failure(harness, *arguments, retry=True, **options):
+    """Drive the production retry entry; retry=False drives one attempt."""
     if isinstance(harness, str):
         bounded_steps = options.pop('bounded_steps', 0)
         module = options.pop('module', False)
@@ -102,12 +103,13 @@ def _harness_failure(harness, *arguments, **options):
     try:
         _dashnode._DASHBOARD_STEP_TIMEOUT_S = step_timeout
         _dashnode._DASHBOARD_PROCESS_GRACE_S = process_grace
-        _dashnode._run_dashboard_node_once(harness, attempt=1)
+        if retry:
+            _dashnode.run_dashboard_node(harness)
+        else:
+            _dashnode._run_dashboard_node_once(harness, attempt=1)
     except _dashnode._DashboardOuterTimeout as failure:
         return _dashnode._format_timeout_attempt(failure.record)
-    except subprocess.TimeoutExpired as failure:
-        return f'bare TimeoutExpired after {failure.timeout}s'
-    except AssertionError as failure:
+    except (subprocess.TimeoutExpired, AssertionError) as failure:
         return str(failure)
     finally:
         _dashnode._DASHBOARD_STEP_TIMEOUT_S = real_step_timeout
@@ -285,7 +287,7 @@ setInterval(() => {}, 10);
 """
     failure = _harness_failure(
         source, bounded_steps=0,
-        process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S)
+        process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 4.0, failure
     drain_seconds = _drain_seconds(failure)
     assert drain_seconds < 1.5, (
@@ -305,7 +307,7 @@ def test_process_creation_delay_does_not_inflate_drain_time(tmp):
     try:
         failure = _harness_failure(
             "phase('delayed process started'); setInterval(() => {}, 10);",
-            process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
+            process_grace=_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     finally:
         _dashnode.subprocess.Popen = real_popen
     assert _backstop_seconds(failure) == 1.5, failure
@@ -493,7 +495,7 @@ export function formatEvalWorld(value) {
     failure = _harness_failure(
         behaviour._DASHBOARD_WORLD_HARNESS, module,
         step_timeout=0.5,
-        process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S)
+        process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 4.5, failure
     assert 'last phase: dashboard harness finished' in failure, failure
     assert '"cdp"' in failure, failure
@@ -505,7 +507,7 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
     del tmp
     failure = _harness_failure(
         'for (;;) {}', bounded_steps=0,
-        process_grace=_PROCESS_STARTUP_ALLOWANCE_S)
+        process_grace=_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 1.5, failure
     assert 'last phase: none recorded' in failure, failure
 
@@ -519,7 +521,7 @@ process.stderr.write('ERR\n[phase] selector [update] (2/3) .*');
 setInterval(() => {}, 10);
 """
     failure = _harness_failure(
-        source, process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S)
+        source, process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 4.0, failure
     assert 'last phase: selector [update] (2/3) .*;' in failure, failure
     assert (
