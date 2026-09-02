@@ -5,7 +5,7 @@ Every guard the tools reach is witnessed on a healthy tree, so the
 registration-driven pass in test_mcp_tools.py never sees a gap. These drive
 the floor directly, which is the only way its detection is banked.
 """
-import ast
+import importlib.util
 import sys
 from pathlib import Path
 from unittest import mock
@@ -99,18 +99,44 @@ def test_a_reached_or_guard_is_refused(_tmp):
         raise AssertionError('an or guard was reached instead of refused')
 
 
+NESTED_OR_SHAPES = '''
+def armed(first, second):
+    if bool(first or second):
+        raise ValueError('refused')
+'''
+
+
+def test_an_or_nested_in_the_test_is_refused(_tmp):
+    """The refusal walks the whole test expression, not its top node.
+
+    Wrapping the `or` in a call keeps both conditions in one raise site,
+    so the walk that reads the test finds it wherever it sits.
+    """
+    sites, module = _mcp_guard_floor.guard_shape_probe(
+        _tmp, NESTED_OR_SHAPES, 'nested_or_shapes')
+    try:
+        _mcp_guard_floor.reachable_guards(sites, [module.armed.__code__])
+    except AssertionError as raised:
+        assert 'nested_or_shapes.armed' in str(raised), raised
+        assert 'split' in str(raised), raised
+    else:
+        raise AssertionError('an or nested in the test was reached, not '
+                             'refused')
+
+
 TWIN_SHAPES = '''
 def twin(value):
-    if value < 0: raise ValueError('neg'); raise ValueError('pos')
+    raise ValueError('neg'); raise ValueError('pos')
 '''
 
 
 def test_two_raises_on_one_line_are_refused(_tmp):
     """A traceback names the line, not the statement.
 
-    Two raises sharing one physical line are refused at scan time — one
-    raise per line — rather than collapsed into an unwitnessable key that
-    one witness could answer for both.
+    The two raises are unguarded and spell distinct messages, so no other
+    refusal produces this red: sharing one physical line is the only
+    shape at fault, and the scan refuses it — one raise per line —
+    instead of collapsing the sites.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(_tmp, TWIN_SHAPES, 'twin_shapes')
@@ -148,6 +174,30 @@ def test_a_module_global_helper_site_is_reached(_tmp):
 
     assert ('helper_tree', '_checked', 'value < 1') in reached.values(), (
         reached)
+
+
+def test_a_helper_defined_under_tests_is_not_walked(_tmp):
+    """The reach walk stays out of tests/.
+
+    A function whose file sits under a tests/ directory of the probe root
+    is somebody else's raise: following it would put suite code on the
+    tool's obligation set.
+    """
+    root = Path(_tmp)
+    helper = root / 'tests' / 'helper.py'
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_text(HELPER_TREE, encoding='utf-8')
+    spec = importlib.util.spec_from_file_location('helper', helper)
+    helper_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper_module)
+    sites, module = _mcp_guard_floor.guard_shape_probe(
+        _tmp, HELPER_TREE, 'helper_tree')
+    module._checked = helper_module._checked
+    sites.update(_mcp_guard_floor.tool_guards([helper], root))
+    reached = _mcp_guard_floor.reachable_guards(
+        sites, _mcp_guard_floor.tool_code_objects(module.tool, root))
+
+    assert reached == {}, reached
 
 
 def test_the_refusal_floor_refuses_a_stranded_guard(_tmp):
@@ -199,22 +249,23 @@ def test_a_guard_outside_the_tool_surface_is_not_covered_by_reachability(_tmp):
 
 
 def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
-    """A citation is data, so a renamed or deleted test goes red here."""
+    """A citation is data, so a renamed or deleted test goes red here.
+
+    The assertion on the real table alone would pass vacuously the moment
+    the check behind it broke, so the negative controls feed it tables
+    that must be reported: a function absent from a real suite, and a
+    suite path that does not exist.
+    """
     del _tmp
-    checked = 0
-    for _entry in _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE:
-        _module, _function, _condition, cited = _entry
-        if cited is None:
-            continue
-        suite, _, name = cited.partition('::')
-        tree = ast.parse((_util.ROOT / suite).read_text(encoding='utf-8'))
-        defined = {node.name for node in ast.walk(tree)
-                   if isinstance(node, (ast.FunctionDef,
-                                        ast.AsyncFunctionDef))}
-        assert name in defined, cited
-        checked += 1
-    assert checked >= 10, (
-        'the citation check stopped iterating the table', checked)
+    assert _mcp_guard_floor.missing_citations(
+        _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE, _util.ROOT) == []
+    absent_function = (
+        'tests/test_mcp_tools.py::test_this_test_does_not_exist_anywhere')
+    absent_suite = 'tests/test_no_such_suite.py::test_absent'
+    assert _mcp_guard_floor.missing_citations([
+        ('m', 'f', 'c', absent_function),
+        ('m', 'f', 'c', absent_suite),
+    ], _util.ROOT) == [absent_function, absent_suite]
 
 
 LAZY_COMPOSITION = '''
@@ -422,17 +473,6 @@ def test_the_scan_set_drops_something_imported_from_tests(_tmp):
     scanned = _mcp_guard_floor.composition_scan_set(
         Path(_tmp) / 'composition.py', _tmp)
     assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
-
-
-SELECT_SHAPES = '''
-def inner(value):
-    if value is None:
-        raise ValueError('none refused')
-
-
-def middle(value):
-    inner(value); raise RuntimeError('shares the call line')
-'''
 
 
 RERAISE_SHAPES = '''

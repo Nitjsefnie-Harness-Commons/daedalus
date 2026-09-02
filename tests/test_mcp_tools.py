@@ -350,7 +350,7 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     ``__wrapped__`` links, and module-level functions its code names in its
     own module globals. Functions held inside default containers are outside
     the property, as are composition-authored functions found dynamically at
-    call time through imports, module attributes, ``getattr``, or
+    call time through module attributes, ``getattr``, or
     dictionaries. Code objects with deliberately forged origins are also
     outside the property.
     """
