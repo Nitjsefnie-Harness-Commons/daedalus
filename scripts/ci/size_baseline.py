@@ -8,9 +8,8 @@ with every individual commit looking reasonable.
 The rule is not a line limit. A file over its ceiling is listed in BASELINE at
 the size it was measured and may not exceed it; every other file must stay
 under the ceiling. A recorded number is never raised by hand and no entry is
-ever added by hand: a change that would push a file past either bound
-relocates the code into a new module, and a file crossing its ceiling for the
-first time is split rather than excused.
+ever added by hand: relocate the code into a new module, or shrink the file.
+A file crossing its ceiling for the first time is split rather than excused.
 
 Shrinking is the direction this exists to reward, so it costs the author
 nothing: `--tighten` follows a file down, and CI runs it beside the coverage
@@ -21,8 +20,9 @@ when its recorded measurement went stale.
   python3 scripts/ci/size_baseline.py            # report violations, exit 1 on any
   python3 scripts/ci/size_baseline.py --tighten  # follow shrunk files down
 
-`--tighten` is the only writer of this table, and it only ever moves a number
-down or drops an entry whose file no longer needs one.
+A stale entry goes away rather than being kept: `--tighten` drops one whose
+file is back under its ceiling, and an entry naming a file that is gone is
+deleted by hand.
 """
 import argparse
 import re
@@ -39,18 +39,28 @@ SELF = Path(__file__).resolve()
 PRODUCTION_CEILING = 500
 TEST_CEILING = 700
 
-# Both refusal paths quote this rather than restating it, so there is one
-# sentence saying what to do about a refusal and nothing for it to drift
-# out of step with.
-REMEDIATION = (
+# The four violation kinds have two answers between them, and the docstring
+# above carries both verbatim so a refusal and the reference cannot drift.
+GROWTH_REMEDY = (
     'A recorded number is never raised by hand and no entry is ever added '
-    'by hand: relocate the code into a new module, or shrink the file. '
-    '--tighten is the only writer of this table, and it only ever moves a '
-    'number down or drops an entry.'
+    'by hand: relocate the code into a new module, or shrink the file.'
 )
 
-# An entry leaves this table when its file drops back under the ceiling
-# and --tighten removes it; nothing else writes here.
+STALE_ENTRY_REMEDY = (
+    'A stale entry goes away rather than being kept: --tighten drops one '
+    'whose file is back under its ceiling, and an entry naming a file '
+    'that is gone is deleted by hand.'
+)
+
+REMEDY_FOR = {
+    'grown': GROWTH_REMEDY,
+    'over': GROWTH_REMEDY,
+    'missing': STALE_ENTRY_REMEDY,
+    'graduated': STALE_ENTRY_REMEDY,
+}
+
+# An entry leaves this table when --tighten follows its file back under the
+# ceiling, or by hand when the file it names is gone.
 BASELINE = {
     'tests/_pyroute.py': 738,
     'tests/_pyroute_state.py': 780,
@@ -168,10 +178,14 @@ def main():
     if not any(found.values()):
         print(f'{len(sizes)} tracked modules within the size policy')
         return 0
+    remedies = []
     for kind, detail in found.items():
         if detail:
             print(f'{kind}: {detail}', file=sys.stderr)
-    print(REMEDIATION, file=sys.stderr)
+            if REMEDY_FOR[kind] not in remedies:
+                remedies.append(REMEDY_FOR[kind])
+    for remedy in remedies:
+        print(remedy, file=sys.stderr)
     return 1
 
 
