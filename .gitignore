@@ -375,6 +375,7 @@
 !/tests/test_result_command_write_retry.py
 !/tests/test_result_routes.py
 !/tests/test_result_store.py
+!/tests/test_run_tests.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
 !/tests/test_segment_routes.py
