@@ -17,48 +17,68 @@ import _util  # noqa: E402
 ROOT = _util.ROOT
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
 
-# Wordings that offer a bigger number as the way past a refusal. Each is a
-# claim no correct statement of the rule can make, so an innocent rewording
-# passes while the old policy coming back does not.
-SANCTIONS_GROWTH = (
+# Wordings that offer a bigger number as the way past a refusal, each a
+# claim no correct statement of the rule can make.
+GROWTH_SANCTIONING_CLAIMS = (
     # Growth presented as a supported move rather than a refusal.
     'growing a listed file is allowed',
     # Raising the recorded number offered as how that growth is done.
     'editing its recorded number',
     # The refusal message's old second option, beside splitting the file.
     'record the new size',
-    # A file crossing its ceiling for the first time excused by a fresh
-    # entry instead of being split.
+    # A first crossing excused by a fresh entry instead of being split;
+    # both spellings, because either sentence reads as a licence.
     'add a baseline entry',
     'adding a baseline entry',
 )
 
-# The rule stated positively, so deleting it is as visible as contradicting
-# it. Both spellings of the negation count; the claim is what is pinned.
-STATES_THE_RULE = re.compile(r'n(?:ever|ot) raised by hand')
+# Deleted rather than spaced out, so a claim spanning one - a backtick, or
+# a string literal broken across two lines - stays one phrase to the pin.
+MARKERS = ('#', "'", '"', '`', '*', '(', ')')
 
-# A claim only counts where nothing negates it: the rule states itself in the
-# same words, so the pin has to read the permission and let the prohibition
-# through.
-UNNEGATED = r'(?<!never )(?<!not )(?<!no )'
+# The unit a negation governs. Finer than a sentence, so that "growing a
+# listed file is allowed, but only by shrinking it" is refused on its first
+# clause rather than excused by the second.
+CLAUSE_BREAK = re.compile(r'[.;,:]')
+
+# Every claim above is about what a person may do by hand, so a clause is
+# not offering one where a negator falls anywhere in it, or where the tool
+# that does the writing is its subject.
+NOT_BY_HAND = re.compile(
+    r'\b(?:never|not|no|none|nothing|nobody|dont|cannot|rather than'
+    r'|instead)\b|--tighten')
+
+# The rule stated positively, so deleting it is as visible as contradicting
+# it. An alternation because the claim is a family, and a pin that refuses a
+# synonym of it is a pin the next author deletes.
+ACCEPTED_RULE_SPELLINGS = (
+    r'(?:never|not|no)\b[a-z -]{0,40}?(?:raised|increased|edited upward)',
+    r'only ever go(?:es)? down',
+)
+STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
+RULE_HELP = ('a negated raising verb ("is never raised by hand", "is not '
+             'edited upward by hand"), or "only ever go down"')
 
 
 def _policy():
     return _util.load(POLICY_SOURCE, 'size_baseline')
 
 
+def _normalised(text):
+    """`text` lowercased, as one line, with prose markers removed."""
+    text = text.lower()
+    for marker in MARKERS:
+        text = text.replace(marker, '')
+    return ' '.join(text.split())
+
+
 def _policy_prose():
-    """The whole policy source as one lowercased line of prose.
+    """The whole policy source, normalised.
 
     Whole source rather than the docstring alone: a comment or a printed
     string carries the advice to a reader just as the docstring does.
-    Comment markers, string quotes and line breaks become spaces, so a claim
-    cannot evade the pin by landing either side of one.
     """
-    text = POLICY_SOURCE.read_text(encoding='utf-8').lower()
-    for marker in ('#', "'", '"'):
-        text = text.replace(marker, ' ')
-    return ' '.join(text.split())
+    return _normalised(POLICY_SOURCE.read_text(encoding='utf-8'))
 
 
 def _drive_main(policy, baseline, sizes):
@@ -162,13 +182,30 @@ def test_tightening_leaves_a_file_it_has_no_entry_for(tmp):
 def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
     """A refused session must not read a bigger number as the fix."""
     del tmp
-    prose = _policy_prose()
-    for claim in SANCTIONS_GROWTH:
-        assert not re.search(UNNEGATED + re.escape(claim), prose), (
-            f'the size policy offers growth by hand: {claim!r}')
-    assert STATES_THE_RULE.search(prose), (
-        'the size policy no longer says a recorded number is never raised '
-        'by hand')
+    offered = [(claim, clause)
+               for clause in CLAUSE_BREAK.split(_policy_prose())
+               for claim in GROWTH_SANCTIONING_CLAIMS
+               if _normalised(claim) in clause
+               and not NOT_BY_HAND.search(clause)]
+    assert not offered, f'the size policy offers growth by hand: {offered}'
+
+
+def test_the_policy_prose_still_states_the_rule(tmp):
+    """Deleting the rule has to be as visible as contradicting it."""
+    del tmp
+    assert STATES_THE_RULE.search(_policy_prose()), (
+        f'the size policy no longer states the rule; write one of: '
+        f'{RULE_HELP}')
+
+
+def test_the_docstring_carries_every_printed_remedy(tmp):
+    """One text, so the reference cannot drift from what a refusal prints."""
+    del tmp
+    policy = _policy()
+    doc = _normalised(policy.__doc__)
+    for kind, remedy in sorted(policy.REMEDY_FOR.items()):
+        assert _normalised(remedy) in doc, (
+            f'the docstring no longer carries the {kind} remedy: {remedy}')
 
 
 def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
