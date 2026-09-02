@@ -4,7 +4,6 @@ import pathlib
 
 from daedalus_bridge.env_config import (
     env_flag, env_int, env_positive_float)
-from daedalus_bridge import result_store
 
 
 if 'DAEDALUS_DIR' not in os.environ:
@@ -16,7 +15,6 @@ if 'DAEDALUS_PORT' not in os.environ:
 BASE = pathlib.Path(os.environ['DAEDALUS_DIR'])
 CMD_DIR = BASE / 'commands'
 RES_DIR = BASE / 'results'
-DELIVERY_DIR = result_store.delivery_root(RES_DIR)
 UPLOAD_DIR = BASE / 'uploads'
 SEG_DIR = BASE / 'segments'
 DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent.parent / 'dashboard'
