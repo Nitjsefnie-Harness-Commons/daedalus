@@ -33,6 +33,11 @@ def _get_raw(endpoint, **params):
     return ('get_raw', {'endpoint': endpoint, 'params': params})
 
 
+def _client_get(path, headers, **params):
+    return ('http_client.get',
+            {'path': path, 'params': params, 'headers': headers})
+
+
 def _poll(tab, timeout, cmd_id):
     return ('poll_result', {'args': (tab, timeout),
                             'kwargs': {'expect_id': cmd_id,
@@ -113,6 +118,10 @@ TOOL_COMMANDS = {
         ({}, [_put('/command',
                    {'id': '_nav',
                     'code': 'location.href = "https://example.com"'})]),
+        ({'tab_id': 'tab'},
+         [_put('/command',
+               {'id': '_nav', 'tab': 'tab',
+                'code': 'location.href = "https://example.com"'})]),
     ],
     'reload': [
         ({}, [_put('/command',
@@ -121,8 +130,15 @@ TOOL_COMMANDS = {
          [_put('/command', {'id': '_reload', 'code': 'location.reload()',
                             'tab': 'tab'})]),
     ],
-    'title': [({}, _waited('_title', 'document.title', '', 10))],
-    'url': [({}, _waited('_url', 'location.href', '', 10))],
+    'title': [
+        ({}, _waited('_title', 'document.title', '', 10)),
+        ({'tab_id': 'tab'},
+         _waited('_title', 'document.title', 'tab', 10)),
+    ],
+    'url': [
+        ({}, _waited('_url', 'location.href', '', 10)),
+        ({'tab_id': 'tab'}, _waited('_url', 'location.href', 'tab', 10)),
+    ],
     'ext_self_reload': [({}, [_ext('_ext_reload', 'ext-reload')])],
 
     # tools_media
@@ -139,8 +155,10 @@ TOOL_COMMANDS = {
     'segment_job': [({}, [_post('/segment-job', {'job': 'job'})])],
     'segment_status': [
         ({}, [('http_client', {}), ('auth', {}),
-              ('http_client.get', {'authorization': MARKER}),
-              ('http_client.get', {'authorization': None})]),
+              _client_get('/segment-job', {'Authorization': MARKER},
+                          job='job'),
+              _client_get('/segment-status',
+                          {'X-Daedalus-Segment-Sig': MARKER}, job='job')]),
     ],
     'uploads': [
         ({}, [_get('/upload')]),
