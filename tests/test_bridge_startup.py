@@ -359,6 +359,17 @@ print(json.dumps({
         'cmd_ttl': 90.0,
     }
 
+    # A set-but-off value: a reader keyed on presence rather than on the
+    # value reports the switch on, and `env_flag` decides the same switch
+    # for `segment_store`.
+    off_env = dict(env)
+    off_env['DAEDALUS_DEBUG_TIMING'] = '0'
+    off = subprocess.run(
+        [sys.executable, '-c', code], cwd=str(_util.ROOT), env=off_env,
+        capture_output=True, text=True, check=False)
+    assert off.returncode == 0, off.stderr
+    assert json.loads(off.stdout)['debug_timing'] is False, off.stdout
+
     missing_env = dict(env)
     del missing_env['DAEDALUS_DIR']
     refused = subprocess.run(
