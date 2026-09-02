@@ -5,6 +5,7 @@ Every guard the tools reach is witnessed on a healthy tree, so the
 registration-driven pass in test_mcp_tools.py never sees a gap. These drive
 the floor directly, which is the only way its detection is banked.
 """
+import ast
 import sys
 import types
 from pathlib import Path
@@ -16,54 +17,121 @@ import _util  # noqa: E402
 
 
 def test_the_guard_scan_reads_every_raise_shape_the_tools_use(_tmp):
-    """Each raise shape the scan can meet resolves to a deliberate condition.
+    """Each raise shape the scan can meet resolves to exactly one site key.
 
-    A shape resolving to nothing would leave the floor passing vacuously, the
-    defect it exists to close.
+    A shape resolving to nothing would leave the floor passing vacuously. The
+    fixture carries an `assert` too; the set equality is what holds it
+    spelled at no site.
     """
     sites, _module = _mcp_guard_floor.guard_shape_probe(_tmp)
 
-    spelled = {}
-    for module, function, operands, _or in sites.values():
-        spelled.setdefault((module, function), []).extend(
-            text for text, _node in operands)
-
-    assert {key: sorted(texts) for key, texts in spelled.items()} == (
-        _mcp_guard_floor.GUARD_SHAPE_CONDITIONS), spelled
+    assert set(_mcp_guard_floor.guard_keys(sites)) == (
+        _mcp_guard_floor.GUARD_SHAPE_SITES), sites
 
 
-def test_the_witness_reads_the_condition_that_fired(_tmp):
-    """The traceback names the operand that fired, or says it cannot.
+def test_the_witness_names_the_innermost_raise_site(_tmp):
+    """The innermost scanned raise site on the traceback is the one credited.
 
-    Every case runs the real raise and reads the real traceback; an operand
-    that cannot be re-read hides only itself, and one that fired is None,
-    never a guess.
+    The middle call shares its line with a scanned raise, making that line a
+    site the walk meets: stopping at the first match would credit a raise
+    that never fired.
     """
-    sites, module = _mcp_guard_floor.guard_shape_probe(_tmp)
-    helper, parser = module.outer()
+    sites, module = _mcp_guard_floor.guard_shape_probe(
+        _tmp, _mcp_guard_floor.SELECT_SHAPES, 'select_shapes')
+    witnessed = None
+    try:
+        module.middle(None)
+    except ValueError as raised:
+        witnessed = _mcp_guard_floor.witnessed_guard(sites, raised)
+    assert witnessed == ('select_shapes', 'inner', 'value is None')
 
-    def fired(call, *arguments):
-        try:
-            call(*arguments)
-        except (ValueError, RuntimeError) as raised:
-            return _mcp_guard_floor.witnessed_guard(sites, raised)
-        raise AssertionError(f'{arguments!r}: nothing was refused')
 
-    for argument, condition in _mcp_guard_floor.GUARD_SHAPE_WITNESSES:
-        assert fired(helper, argument) == (
-            'guard_shapes', 'helper', condition), argument
-    assert fired(parser, 'not a number') == (
-        'guard_shapes', 'parser',
-        "raise RuntimeError('re-raised from a handler')")
+SAME_TEXT_SHAPES = '''
+def twin(value):
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError('bad number') from None
+    except TypeError:
+        raise ValueError('bad number') from None
+'''
+
+
+def test_two_sites_spelling_one_condition_are_refused(_tmp):
+    """One witness cannot answer for two sites in one function.
+
+    The two handlers below raise the same message, so their site keys spell
+    one condition text in one (module, function); the scan refuses them
+    instead of silently merging, and the remedy is distinct messages.
+    """
+    try:
+        _mcp_guard_floor.guard_shape_probe(
+            _tmp, SAME_TEXT_SHAPES, 'same_text_shapes')
+    except AssertionError as raised:
+        assert 'same_text_shapes.twin' in str(raised), raised
+        assert 'distinct' in str(raised), raised
+    else:
+        raise AssertionError('two identical raises merged into one key')
+
+
+TWIN_SHAPES = '''
+def twin(value):
+    if value < 0: raise ValueError('neg'); raise ValueError('pos')
+'''
+
+
+def test_two_raises_on_one_line_are_refused(_tmp):
+    """A traceback names the line, not the statement.
+
+    Two raises sharing one physical line are refused at scan time — one
+    raise per line — rather than collapsed into an unwitnessable key that
+    one witness could answer for both.
+    """
+    try:
+        _mcp_guard_floor.guard_shape_probe(_tmp, TWIN_SHAPES, 'twin_shapes')
+    except AssertionError as raised:
+        assert 'twin_shapes:3' in str(raised), raised
+        assert 'one raise per line' in str(raised), raised
+    else:
+        raise AssertionError('two raises on one line were collapsed, not '
+                             'refused')
+
+
+HELPER_TREE = '''
+def _checked(value):
+    if value < 1:
+        raise ValueError('refused')
+
+
+def tool(value):
+    return _checked(value)
+'''
+
+
+def test_a_module_global_helper_site_is_reached(_tmp):
+    """A tool reaches a guard through a module-global function.
+
+    The most ordinary refactor — moving a guard into a helper — used to take
+    the guard off the tool's reach, so declaring it off-surface then let its
+    pins be deleted (round 3's plant D2).
+    """
+    sites, module = _mcp_guard_floor.guard_shape_probe(
+        _tmp, HELPER_TREE, 'helper_tree')
+    reached = _mcp_guard_floor.reachable_guards(
+        sites,
+        _mcp_guard_floor.tool_code_objects(module.tool, Path(_tmp)))
+
+    assert ('helper_tree', '_checked', 'value < 1') in reached.values(), (
+        reached)
 
 
 def test_the_refusal_floor_refuses_a_stranded_guard(_tmp):
     """unwitnessed_guard_gaps detects, not merely passes a healthy table."""
+    del _tmp
     a, b, c = ('m', 'f', 'a'), ('m', 'f', 'b'), ('m', 'g', 'a')
     gaps = _mcp_guard_floor.unwitnessed_guard_gaps
     assert gaps('t', [a, b], {a}) == [
         f'no refusal case of its own witnesses {b!r}']
-    assert gaps('t', [a, a], {a}) == [f'{a!r} spells two of the guards']
     assert gaps('t', [a, c], {a, c}) == []
     # A same-named function in another module is its own obligation, so one
     # allowlist entry cannot exempt every module that spells that name.
@@ -88,25 +156,40 @@ def test_the_refusal_floor_refuses_a_stranded_guard(_tmp):
 
 
 def test_a_guard_outside_the_tool_surface_is_not_covered_by_reachability(_tmp):
-    """A guard no tool reaches is surfaced, wherever its module sits.
-
-    Moving a tool's guards into a module the tools do not lexically reach
-    used to take them out of the scan entirely, so the pins witnessing them
-    could then be deleted and the mutant they killed shipped green.
-    """
+    """A guard no tool reaches is surfaced, wherever its module sits."""
+    del _tmp
     reached_guard = ('tools_network', 'net_capture', 'max_requests < 1')
     moved_guard = ('transport', 'validate', 'max_requests < 1')
-    sites = {('net.py', 19): ('tools_network', 'net_capture',
-                              [('max_requests < 1', None)], False),
-             ('transport.py', 99): ('transport', 'validate',
-                                    [('max_requests < 1', None)], False)}
+    sites = {('net.py', 19): (reached_guard, False),
+             ('transport.py', 99): (moved_guard, False)}
 
     off_surface = _mcp_guard_floor.guards_off_the_tool_surface(
-        sites, {'net_capture': [reached_guard]})
+        sites, {'net_capture': {('net.py', 19): reached_guard}})
 
     assert off_surface == {moved_guard}, off_surface
     assert _mcp_guard_floor.guards_off_the_tool_surface(
-        sites, {'net_capture': [reached_guard, moved_guard]}) == set()
+        sites,
+        {'net_capture': {('net.py', 19): reached_guard,
+                         ('transport.py', 99): moved_guard}}) == set()
+
+
+def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
+    """A citation is data, so a renamed or deleted test goes red here."""
+    del _tmp
+    checked = 0
+    for _entry in _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE:
+        _module, _function, _condition, cited = _entry
+        if cited is None:
+            continue
+        suite, _, name = cited.partition('::')
+        tree = ast.parse((_util.ROOT / suite).read_text(encoding='utf-8'))
+        defined = {node.name for node in ast.walk(tree)
+                   if isinstance(node, (ast.FunctionDef,
+                                        ast.AsyncFunctionDef))}
+        assert name in defined, cited
+        checked += 1
+    assert checked >= 10, (
+        'the citation check stopped iterating the table', checked)
 
 
 def test_the_scan_set_follows_the_imports_not_a_directory(_tmp):
@@ -140,49 +223,15 @@ def test_the_scan_set_follows_the_imports_not_a_directory(_tmp):
     assert (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve() in imported
 
 
-OR_SHAPES = '''
-def armed(first, second):
-    if first or second:
-        raise ValueError('refused')
+SELECT_SHAPES = '''
+def inner(value):
+    if value is None:
+        raise ValueError('none refused')
+
+
+def middle(value):
+    inner(value); raise RuntimeError('shares the call line')
 '''
-
-
-def test_a_reached_or_guard_is_refused(_tmp):
-    """A raise a tool reaches refuses on one condition only.
-
-    The unit of witnessing is the raise site, so a guard whose test is an
-    `or` of two conditions is refused rather than witnessed: the remedy is
-    one raise per condition, because one witness cannot answer for two
-    conditions on one line.
-    """
-    sites, module = _mcp_guard_floor.guard_shape_probe(
-        _tmp, OR_SHAPES, 'or_shapes')
-    try:
-        _mcp_guard_floor.reachable_guards(sites, [module.armed.__code__])
-    except AssertionError as raised:
-        assert 'or_shapes.armed' in str(raised), raised
-        assert 'split' in str(raised), raised
-    else:
-        raise AssertionError('an or guard was reached instead of refused')
-
-
-TWIN_SHAPES = '''
-def twin(value):
-    if value < 0: raise ValueError('neg'); raise ValueError('pos')
-'''
-
-
-def test_two_raises_sharing_a_line_are_collapsed(_tmp):
-    """One witness can never answer for two raises on one line.
-
-    A traceback names the line, not the statement, so neither raise can be
-    told apart; the collapse marks both unwitnessable instead of letting one
-    refusal case discharge the pair.
-    """
-    sites, _module = _mcp_guard_floor.guard_shape_probe(
-        _tmp, TWIN_SHAPES, 'twin_shapes')
-    assert _mcp_guard_floor.guard_keys(sites) == [
-        ('twin_shapes', 'twin', 'two raises share line 3')]
 
 
 RERAISE_SHAPES = '''
@@ -211,72 +260,6 @@ def test_a_bare_reraise_carries_its_own_line(_tmp):
     assert _mcp_guard_floor.guard_keys(sites) == [
         ('reraise_shapes', 'inner', 'value is None'),
         ('reraise_shapes', 'outer', 'bare raise at line 11')]
-
-
-SELECT_SHAPES = '''
-def inner(value):
-    if value is None:
-        raise ValueError('none refused')
-
-
-def middle(value):
-    inner(value); raise RuntimeError('shares the call line')
-'''
-
-
-def test_the_witness_reads_the_innermost_raise_site(_tmp):
-    """The innermost scanned raise site on the traceback is the one credited.
-
-    Frames between the catch and the raise appear on the traceback at their
-    call lines, so `guard` names where the refusal was written even when the
-    exception crosses a re-raising frame. The middle call below shares its
-    line with a scanned raise, which makes that line a site the walk meets:
-    stopping at the first match would credit a raise that never fired.
-    """
-    sites, module = _mcp_guard_floor.guard_shape_probe(
-        _tmp, SELECT_SHAPES, 'select_shapes')
-    witnessed = None
-    try:
-        module.middle(None)
-    except ValueError as raised:
-        witnessed = _mcp_guard_floor.witnessed_guard(sites, raised)
-    assert witnessed == ('select_shapes', 'inner', 'value is None')
-
-
-EXPLODES_SHAPES = '''
-class Explodes:
-    def __init__(self, value):
-        self.reads = 0
-        self.value = value
-
-    def __bool__(self):
-        self.reads += 1
-        if self.reads > 1:
-            raise RuntimeError('a second read explodes')
-        return self.value
-
-
-def armed(first, second):
-    if first or second:
-        raise ValueError('refused')
-'''
-
-
-def test_an_operand_that_explodes_when_reread_stays_contained(_tmp):
-    """Re-reading an operand that raises is reported, not propagated.
-
-    The re-evaluation catch is what turns a hostile operand into a
-    `None` condition; without it the second read's error would escape the
-    floor and abort the pinning run mid-suite.
-    """
-    sites, module = _mcp_guard_floor.guard_shape_probe(
-        _tmp, EXPLODES_SHAPES, 'explodes_shapes')
-    witnessed = None
-    try:
-        module.armed(module.Explodes(False), module.Explodes(True))
-    except ValueError as raised:
-        witnessed = _mcp_guard_floor.witnessed_guard(sites, raised)
-    assert witnessed == ('explodes_shapes', 'armed', None)
 
 
 if __name__ == '__main__':

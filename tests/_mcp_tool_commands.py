@@ -7,8 +7,11 @@ expected calls are the exact (surface, details) pairs the call must record on
 the probe bridge, in order.
 
 A parameter no case exercises is named in UNPINNED_PARAMETERS with the reason
-it is safe to leave unwitnessed. The guard every refusal case must witness is
-_mcp_guard_floor's, which reads the tool modules rather than this table.
+it is safe to leave unwitnessed. The raise site every refusal case must
+witness is _mcp_guard_floor's, which reads the tool modules rather than this
+table: each case here must fire one raise site — one witness per site — and
+every site the tool surface spells is owed a case, an allowlist entry, or an
+off-surface declaration.
 
 That floor witnesses raises only. A refusal written as `return {'error': ...}`
 — the repo's own convention at daedalus_mcp/tools_css.py `unblock_requests` —
