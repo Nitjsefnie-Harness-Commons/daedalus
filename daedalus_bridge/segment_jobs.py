@@ -4,8 +4,9 @@
 record is measured against as a `JobQuotas`, so the route reads no
 configuration itself.
 
-`seg_dir_root` is only half a parameter here too; `segment_routes`'
-module docstring carries the one statement of why.
+`seg_dir_root` is the segments root the job's directory and its record
+both live under; `segment_routes`' module docstring carries the one
+statement of what that root governs.
 """
 import json
 from typing import NamedTuple
@@ -37,10 +38,10 @@ def mint_job(seg_dir_root, token, body, quotas):
         return 400, {'error': 'bad job'}
     with segment_store.seg_lock:
         try:
-            record = segment_store.load_record(job)
+            record = segment_store.load_record(seg_dir_root, job)
             job_dir = path_safety.under(seg_dir_root, job)
             tmp = path_safety.under(seg_dir_root, f'.{job}.json.tmp')
-            record_path = segment_store.record_path(job)
+            record_path = segment_store.record_path(seg_dir_root, job)
         except ValueError:
             return 400, {'error': 'bad job'}
         except segment_store.SegmentRecordError:
@@ -65,8 +66,9 @@ def mint_job(seg_dir_root, token, body, quotas):
                 if reconciled is not None and (
                         record.get('stored_count'),
                         record.get('stored_bytes')) != reconciled:
-                    segment_store.mark_dirty(job)
-                    segment_store.write_usage(job, *reconciled)
+                    segment_store.mark_dirty(seg_dir_root, job)
+                    segment_store.write_usage(
+                        seg_dir_root, job, *reconciled)
                 return 200, {'ok': True, 'sig': sig}
 
             quota_fields = (
@@ -130,7 +132,7 @@ def mint_job(seg_dir_root, token, body, quotas):
         seeded = segment_store.recount(job_dir)
         seeded_count, seeded_bytes = seeded if seeded is not None else (0, 0)
         record = segment_store.new_record(
-            token, seeded_count, seeded_bytes)
+            token, quotas, seeded_count, seeded_bytes)
         sig = record['sig']
         made_dir = not job_dir.exists()
         try:

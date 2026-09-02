@@ -346,13 +346,14 @@ def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
         'import os, server\n'
         'from daedalus_bridge import segment_store\n'
         'os.makedirs(server.SEG_DIR / "collide.json", exist_ok=True)\n'
-        'print("collision:", segment_store.load_record("collide"))\n'
-        '(server.SEG_DIR / "broken.json").write_text("{", encoding="utf-8")\n'
+        'root = server.SEG_DIR\n'
+        'print("collision:", segment_store.load_record(root, "collide"))\n'
+        '(root / "broken.json").write_text("{", encoding="utf-8")\n'
         'try:\n'
-        '    segment_store.load_record("broken")\n'
+        '    segment_store.load_record(root, "broken")\n'
         'except segment_store.SegmentRecordError:\n'
         '    print("corrupt: raised")\n'
-        'print("absent:", segment_store.load_record("nothing"))\n')
+        'print("absent:", segment_store.load_record(root, "nothing"))\n')
     env = dict(os.environ)
     env.update({
         'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
@@ -455,6 +456,82 @@ def test_a_legacy_upgrade_that_cannot_write_its_record_answers_500(tmp):
             record_path.read_text(encoding='utf-8')) == legacy
         assert sorted(path.name for path in seg_root.glob('*.tmp')) == [], \
             sorted(path.name for path in seg_root.glob('*.tmp'))
+
+
+_MINT_ROOT_PROBE = r'''
+import json
+import os
+from pathlib import Path
+
+from daedalus_bridge import config
+from daedalus_bridge import segment_jobs
+
+root = Path(os.environ['ALT_SEG_ROOT'])
+root.mkdir(parents=True)
+config.SEG_DIR.mkdir(parents=True, exist_ok=True)
+job = 'mint-root-job'
+status, payload = segment_jobs.mint_job(
+    root, 'minttok', {'job': job}, segment_jobs.JobQuotas(11, 2, 512))
+record = json.loads((root / f'{job}.json').read_text(encoding='utf-8'))
+print('MINTROOT ' + json.dumps({
+    'status': status,
+    'sig_matches': payload.get('sig') == record.get('sig'),
+    'job_dir_here': (root / job).is_dir(),
+    'quotas': [record['max_segment_index'], record['max_segment_count'],
+               record['max_bytes']],
+    'configured_defaults': [
+        config.MAX_SEGMENT_INDEX, config.MAX_SEGMENTS_PER_JOB,
+        config.MAX_SEGMENT_JOB_SIZE],
+    'configured_root_entries': sorted(
+        path.name for path in config.SEG_DIR.iterdir()),
+}, sort_keys=True))
+'''
+
+
+def _mint_root_probe(tmp):
+    """Mint one job under a root configuration does not name.
+
+    `DAEDALUS_DIR` is set, so `config.SEG_DIR` exists and is a real second
+    tree the probe can report on; `ALT_SEG_ROOT` is the root handed to
+    `mint_job`.
+    """
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
+        'DAEDALUS_PORT': '0',
+        'DAEDALUS_TOKEN': TOK,
+        'PYTHONDONTWRITEBYTECODE': '1',
+        'ALT_SEG_ROOT': str(Path(tmp) / 'alt-segments'),
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', _MINT_ROOT_PROBE], cwd=_util.ROOT, env=env,
+        capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith('MINTROOT ')]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    return json.loads(marked[0][len('MINTROOT '):])
+
+
+def test_the_segments_root_governs_where_a_mint_writes(tmp):
+    """The record follows the passed root, and the configured one stays empty.
+
+    The negative half is the control: while the store resolved record paths
+    from `config.SEG_DIR`, a caller passing any other root got the job
+    directory in one tree and the record in another.
+    """
+    answer = _mint_root_probe(tmp)
+    assert answer['status'] == 200, answer
+    assert answer['sig_matches'] is True, answer
+    assert answer['job_dir_here'] is True, answer
+    assert answer['configured_root_entries'] == [], answer
+
+
+def test_the_passed_quotas_are_the_ones_a_new_record_carries(tmp):
+    """A mint records the quotas it was handed, not the configured ones."""
+    answer = _mint_root_probe(tmp)
+    assert answer['quotas'] == [11, 2, 512], answer
+    assert answer['configured_defaults'] != answer['quotas'], answer
 
 
 def main():
