@@ -112,23 +112,25 @@ def test_the_ratio_table_ranks_a_multiplier_above_ten_drifts(tmp):
                       'Largest relative changes')
     relative = _table(text, 'Largest relative changes',
                       'Longest-running tests')
+    assert len(relative) == 10
     assert relative[0].startswith('| `test_multiplier` | 0.40s | 2.00s |')
     assert relative[0].endswith('| 5.000 |')
     assert not any('test_multiplier' in row for row in absolute)
 
 
 def test_the_noise_floor_omits_sub_floor_movements(tmp):
-    # The floor is >=, pinned from both sides: 0.20s - 0.10s is exactly the
-    # floor, while 0.15s - 0.05s computes one ulp under it.
+    # Pinned from both signs and both sides of the floor: 0.20s - 0.10s is
+    # exactly the floor, 0.15s - 0.05s computes one ulp under it, and a
+    # qualifying speedup appears with its ratio below 1.
     compare = _comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {
         'test_steady': 40.00, 'test_barely_moving': 1.00,
         'test_at_the_floor': 0.10, 'test_under_the_floor': 0.05,
-        'test_ten_x': 0.04}}])
+        'test_ten_x': 0.04, 'test_faster': 2.00}}])
     head = _summary_tree(tmp, 'head', [{'tests': {
         'test_steady': 40.00, 'test_barely_moving': 1.09,
         'test_at_the_floor': 0.20, 'test_under_the_floor': 0.15,
-        'test_ten_x': 0.40}}])
+        'test_ten_x': 0.40, 'test_faster': 1.00}}])
     summary = Path(tmp) / 'summary.md'
     code, output = _run_comparator(compare, [
         '--base', *base, '--head', *head, '--summary-file', str(summary)])
@@ -136,11 +138,13 @@ def test_the_noise_floor_omits_sub_floor_movements(tmp):
     text = summary.read_text(encoding='utf-8')
     relative = _table(text, 'Largest relative changes',
                       'Longest-running tests')
-    assert len(relative) == 2, relative
+    assert len(relative) == 3, relative
     assert relative[0] == ('| `test_ten_x` | 0.04s | 0.40s | +0.36s '
                            '| 10.000 |')
     assert relative[1] == ('| `test_at_the_floor` | 0.10s | 0.20s | +0.10s '
                            '| 2.000 |')
+    assert relative[2] == ('| `test_faster` | 2.00s | 1.00s | -1.00s '
+                           '| 0.500 |')
 
 
 def test_a_zero_baseline_renders_inf_and_sorts_first(tmp):
