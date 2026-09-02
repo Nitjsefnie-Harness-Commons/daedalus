@@ -221,6 +221,13 @@ def test_an_alias_to_a_nested_mapping_is_refused(tmp):
     _refused(source, 'unsupported alias to a nested mapping')
 
 
+def test_an_alias_to_a_nested_scalar_names_the_scalar(tmp):
+    """An anchor on a wrapped plain scalar is no nested mapping."""
+    del tmp
+    source = _document('name: *a', 'anchors:\n gate: &a\n  hidden\n')
+    _refused(source, 'unsupported alias to a nested scalar')
+
+
 def test_an_alias_to_a_sequence_is_refused(tmp):
     """An anchor on a sequence resolves to no scalar either."""
     del tmp
