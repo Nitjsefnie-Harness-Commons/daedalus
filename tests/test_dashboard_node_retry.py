@@ -239,11 +239,13 @@ def test_windows_declined_retry_names_a_drain_that_raised(tmp):
 def test_non_windows_verdict_does_not_name_a_declined_retry(tmp):
     del tmp
     failure, events, _ = behaviour._controlled_run(
-        'linux', (1301, [behaviour._timeout(), behaviour._result(-9)]))
-    assert failure.startswith('dashboard node outer timeout after 1 attempt')
+        'linux', (1301, [behaviour._timeout(), behaviour._result(-9)]),
+        (1302, [behaviour._timeout(), behaviour._result(-9)]))
+    assert failure.startswith(
+        'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'attempt 1:' in failure and 'pid: 1301' in failure, failure
     assert 'retry declined' not in failure, failure
-    assert [event[0] for event in events].count('popen') == 1, events
+    assert [event[0] for event in events].count('popen') == 2, events
 
 
 def test_both_attempts_verdict_does_not_name_a_declined_retry(tmp):
@@ -255,6 +257,34 @@ def test_both_attempts_verdict_does_not_name_a_declined_retry(tmp):
         'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'retry declined' not in failure, failure
     assert [event[0] for event in events].count('popen') == 2, events
+
+
+def test_non_windows_retries_one_silent_stall_then_returns_success(tmp):
+    del tmp
+    result, events, diagnostic = behaviour._controlled_run(
+        'linux', (1501, [behaviour._timeout(),
+                         behaviour._result(-9, 'first', 'error')]),
+        (1502, [behaviour._result(0, 'second success', 'second stderr')]))
+    assert [event[:2] for event in events] == [
+        ('popen', 1501), ('communicate', 1501), ('kill', 1501),
+        ('communicate', 1501), ('popen', 1502), ('communicate', 1502)], events
+    assert result.stdout == 'second success', result
+    assert diagnostic.count('\n') == 1, diagnostic
+    expected = ('recovered', 'attempt 1', 'pid 1501')
+    assert all(part in diagnostic for part in expected), diagnostic
+
+
+def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
+    del tmp
+    failure, events, _ = behaviour._controlled_run(
+        'linux', (1601, [behaviour._timeout(), behaviour._timeout(
+            'partial', 'error')]),
+        (1602, [behaviour._result(0, 'wrong retry')]))
+    assert failure.startswith(
+        'dashboard node outer timeout after 1 attempt\n'
+        'retry declined: the post-kill drain did not complete '
+        '(drain outcome: timed out)\n'), failure
+    assert [event[0] for event in events].count('popen') == 1, events
 
 
 def main():
