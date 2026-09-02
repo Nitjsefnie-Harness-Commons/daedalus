@@ -431,8 +431,24 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         'registered tools and pinned commands differ: '
         f'unpinned={sorted(set(registered) - set(commands))}; '
         f'not registered={sorted(set(commands) - set(registered))}')
+    unwitnessed = {}
     for name, cases in commands.items():
         assert cases, f'{name}: registered with no pinned case'
+        tool = registered[name]
+        optional = [
+            parameter.name
+            for parameter in inspect.signature(tool).parameters.values()
+            if parameter.default is not inspect.Parameter.empty]
+        covered = {key for overrides, _expected in cases for key in overrides}
+        gaps = _mcp_tool_commands.unpinned_parameter_gaps(
+            name, optional, covered)
+        if gaps:
+            unwitnessed[name] = gaps
+    assert not unwitnessed, (
+        'unwitnessed or stale parameter pins: '
+        + '; '.join(f'{name}: {"; ".join(gaps)}'
+                    for name, gaps in unwitnessed.items()))
+    for name, cases in commands.items():
         tool = registered[name]
         for overrides, expected in cases:
             assert expected, f'{name} {overrides}: pins no bridge call'
