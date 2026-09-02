@@ -399,6 +399,7 @@
 !/tests/test_tab_routing.py
 !/tests/test_tab_routing_js.py
 !/tests/test_tab_routing_js_bodies.py
+!/tests/test_tab_routing_js_heads.py
 !/tests/test_tab_routing_js_operations.py
 !/tests/test_tab_routing_performance.py
 !/tests/test_tab_routing_unprovable.py

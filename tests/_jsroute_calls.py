@@ -297,6 +297,13 @@ def _identifier_before(mask, pos):
     return mask[pos + 1:end], pos + 1, pos
 
 
+def _target_fields(target):
+    """The seven resolution fields a call record copies from a target."""
+    return (target['status'], target['binding'], target['body'],
+            target['member'], target['name'], target['source'],
+            target['form'])
+
+
 def _previous_nonspace(mask, position):
     position -= 1
     while position >= 0 and mask[position].isspace():
@@ -378,13 +385,8 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                     mask, prefix_end)
                 target = resolution['receivers'].member(
                     owner, name, start)
-                status = target['status']
-                binding = target['binding']
-                body = target['body']
-                member = target['member']
-                name = target['name']
-                source = target['source']
-                form = target['form']
+                (status, binding, body, member, name, source,
+                 form) = _target_fields(target)
                 start = owner_start
             else:
                 binding = visible_binding(name, start)
@@ -433,14 +435,21 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 else:
                     target = resolution['receivers'].member(
                         owner, name, start)
-                status = target['status']
-                binding = target['binding']
-                body = target['body']
-                member = target['member']
+                (status, binding, body, member, name, source,
+                 form) = _target_fields(target)
                 start = owner_start
-                name = target['name']
-                source = target['source']
-                form = target['form']
+            elif prefix_end >= 0 and mask[prefix_end] == '#':
+                # A private method call `Owner.#name(`: the owner is the
+                # identifier before the hash.
+                owner, owner_start, _ = _identifier_before(
+                    mask, _previous_nonspace(mask, prefix_end))
+                if not owner:
+                    continue
+                target = resolution['receivers'].member(
+                    owner, ('private', name), owner_start)
+                (status, binding, body, member, name, source,
+                 form) = _target_fields(target)
+                start = owner_start
             else:
                 binding = visible_binding(name, start)
                 status = ('known' if binding is not None
@@ -475,13 +484,8 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                     key = None
                 target = resolution['receivers'].member(
                     owner, key, owner_start)
-            status = target['status']
-            binding = target['binding']
-            body = target['body']
-            member = target['member']
-            name = target['name']
-            source = target['source']
-            form = target['form']
+            (status, binding, body, member, name, source,
+             form) = _target_fields(target)
             start = owner_start
         elif before >= 0 and mask[before] == ')':
             wrapper = pair_start.get(before)
