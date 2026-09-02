@@ -1566,12 +1566,12 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
 
 
 def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
-    """A startup crash whose text matches the bind signature surfaces once.
+    """A startup crash naming the bind text surfaces that text itself.
 
     The deleted retry read 'address already in use' ANYWHERE as a lost draw
     and retried it five times into a generic assertion. There is no retry
-    left to fool: the crash arrives verbatim and only once, so its text is
-    the pin rather than how soon it arrived.
+    left to fool: the raised failure carries the crash prefix and the bind
+    text verbatim, so what it says is the pin — not how soon it arrived.
     """
     del tmp
     _need_deps()
