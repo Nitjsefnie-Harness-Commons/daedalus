@@ -576,7 +576,8 @@ def test_the_segments_root_governs_the_whole_write_path(tmp):
     admitted = routes.admit_segment(
         root, {'job': [job], 'seg': ['0']}, payload['sig'])
     assert isinstance(admitted, routes.Admission), admitted
-    # Both sides resolved: `under` hands back the path it checked.
+    # Both sides resolved: `under` hands back the path it checked,
+    # and this suite's root is an unresolved mkdtemp.
     assert os.path.realpath(admitted.seg_dir_root) == os.path.realpath(root)
     assert routes.store_segment(b'abcd', admitted) == (200, {'ok': True})
     assert (root / job / '000000.ts').read_bytes() == b'abcd'
