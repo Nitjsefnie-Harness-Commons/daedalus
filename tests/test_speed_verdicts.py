@@ -38,9 +38,9 @@ def _run_comparator(compare, argv):
     return code, stdout.getvalue() + stderr.getvalue()
 
 
-def _record_cell(tmp):
+def _record_cell(tmp, group='bridge'):
     """One cell directory holding the record the cell's own step wrote."""
-    cells = Path(tmp) / 'cells' / 'speed-durations-bridge'
+    cells = Path(tmp) / 'cells' / f'speed-durations-{group}'
     cells.mkdir(parents=True)
     return cells / 'verdict.json'
 
@@ -138,6 +138,34 @@ def test_a_comparison_that_accepts_every_shared_test_writes_no_ratio(tmp):
         '--ratio-file', str(ratio_file)])
     assert code == 0, output
     assert not ratio_file.exists(), output
+
+
+def test_a_failing_comparison_still_exports_its_ratio(tmp):
+    """A red verdict's deciding number is what issue 488 wants visible."""
+    compare = _comparator()
+    base = _rounds(tmp, 'base', {'tests': {'a': 1.0}})
+    head = _rounds(tmp, 'head', {'tests': {'a': 2.0}})
+    ratio_file = Path(tmp) / 'ratio.txt'
+    code, output = _run_comparator(compare, [
+        '--base', base, '--head', head, '--max-regression', '0.1',
+        '--ratio-file', str(ratio_file)])
+    assert code == 1, output
+    assert ratio_file.read_text(encoding='utf-8') == '2.000\n', output
+
+
+def test_the_table_renders_every_cell_in_order(tmp):
+    """The loop's rows come from the cells' own records, one per cell."""
+    _record_cell(tmp, 'bridge').write_text(
+        '{"group": "bridge", "verdict": "pass", "ratio": 1.042}\n',
+        encoding='utf-8')
+    _record_cell(tmp, 'cli').write_text(
+        '{"group": "cli", "verdict": "fail", "ratio": null}\n',
+        encoding='utf-8')
+    _result, text = _aggregate(tmp)
+    assert '| bridge | pass | 1.042 | `speed-durations-bridge` |' in text, text
+    assert '| cli | fail | — | `speed-durations-cli` |' in text, text
+    assert text.index('| bridge |') < text.index('| cli |'), text
+    assert '| cell | verdict | ratio | durations artifact |' in text, text
 
 
 def main():
