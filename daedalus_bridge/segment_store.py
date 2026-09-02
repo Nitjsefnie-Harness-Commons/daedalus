@@ -22,8 +22,7 @@ seg_lock = threading.Lock()
 def record_path(seg_dir_root, job):
     """The record beside a job's directory, refused if it lands outside.
 
-    `seg_dir_root` is the segments root the caller is working in, so one
-    root names both a job's directory and the record accounting for it.
+    One root names both a job's directory and the record accounting for it.
 
     Raises ValueError like `under`. Every route reaching here has already
     answered for a bad job name, so a containment failure joins that answer
@@ -182,9 +181,8 @@ def recount(seg_dir):
 def new_record(token, quotas, stored_count=0, stored_bytes=0):
     """Build a newly minted job record fixing `quotas` into it.
 
-    `quotas` is the caller's (max index, file count, bytes) triple, taken
-    positionally so this module does not import the route module that
-    names it.
+    `quotas` is taken positionally so this module does not import the
+    route module that names its fields.
     """
     max_index, max_count, max_bytes = quotas
     return {

@@ -6,9 +6,8 @@ from daedalus_bridge.delivery_stripes import stripe_index
 from daedalus_bridge import path_safety
 
 
-# The one spelling of the delivery namespace. Every caller derives it from
-# the results root it was handed, so a root and a delivery directory cannot
-# come to name two different trees.
+# Every caller derives the delivery namespace from the results root it was
+# handed, so a root and a delivery directory cannot name two trees.
 DELIVERY_SUBDIR = 'deliveries'
 
 # Result files are single-value delivery slots. POST replacement and
@@ -21,7 +20,6 @@ delivery_locks = tuple(
 
 
 def delivery_root(res_dir):
-    """The delivery namespace under one results root."""
     return res_dir / DELIVERY_SUBDIR
 
 

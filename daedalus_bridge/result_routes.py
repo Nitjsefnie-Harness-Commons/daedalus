@@ -7,8 +7,7 @@ the request handler used to.
 
 `res_dir` is the results root, and every file either route writes is
 resolved under it: the slot files directly, and the delivery files through
-`result_store.delivery_root`. One root therefore names one tree, so a
-caller can redirect a whole request's storage by passing a different one.
+`result_store.delivery_root`. One root therefore names one tree.
 """
 import json
 import time
