@@ -172,6 +172,48 @@ def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
         _refused(_document('name: *a', prefix), 'unknown YAML alias: &a')
 
 
+def test_a_colon_bearing_decoy_in_a_block_body_defines_no_target(tmp):
+    """A mapping field spelled inside block content anchors nothing."""
+    del tmp
+    _refused(_document('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
+             'unknown YAML alias: &a')
+
+
+def test_a_colon_bearing_decoy_in_a_quoted_scalar_defines_no_target(tmp):
+    """A mapping field on a quoted scalar's continuation anchors nothing."""
+    del tmp
+    _refused(_document(
+        'name: *a',
+        'anchors:\n gate: "k: &a hidden\n  j: &a deeper"\n'),
+        'unknown YAML alias: &a')
+
+
+def test_an_alias_refuses_an_anchor_defined_after_it(tmp):
+    """PyYAML composes aliases against earlier definitions only."""
+    del tmp
+    source = ('jobs:\n sample:\n  steps:\n'
+              '   - name: *a\n     if: z\n'
+              'anchors:\n gate: &a target\n')
+    _refused(source, 'unknown YAML alias: &a')
+
+
+def test_a_quote_opening_after_a_property_may_continue_at_column_zero(tmp):
+    """A quote opening after a property still owns its continuation line,
+    and a line inside the quote never becomes a duplicate mapping key."""
+    del tmp
+    source = ('anchors:\n gate: &a "one\njobs: two"\n'
+              'jobs:\n sample:\n  steps:\n   - name: plain\n     if: z\n')
+    assert _names(source) == ['plain']
+
+
+def test_an_alias_to_a_multiline_quoted_scalar_is_a_boundary(tmp):
+    """Resolving an alias re-reads the anchor's value, which refuses a
+    quote this reader cannot take, exactly as the direct form does."""
+    del tmp
+    source = _document('name: *a', 'anchors:\n gate: &a "one\n  two"\n')
+    _refused(source, 'unsupported multiline scalar')
+
+
 def test_an_alias_to_a_nested_mapping_is_refused(tmp):
     """An anchor on a mapping resolves to no scalar this reader can give."""
     del tmp
