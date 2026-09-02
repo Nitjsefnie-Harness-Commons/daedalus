@@ -97,27 +97,56 @@ SITES = [
     # attribute region stays bounded inside the tag: quoted attribute values
     # are admitted whole, so a `>` inside a value does not end the tag early.
     # The class value admits a whole-token list and whitespace around `=`
-    # (#439).
+    # (#439), and an unquoted one, which HTML limits to a single token
+    # delimited by whitespace or `>`. What has to follow the value at each
+    # site is that boundary, so `class=rail-footer` still matches nothing.
+    #
+    # The `(?i:...)` flags cover the tag and attribute NAMES only. Class
+    # values are case-sensitive in standards mode, so `class='RAIL-FOOT'`
+    # names a different element and is not a site — which a pattern-wide
+    # re.IGNORECASE would lose (#522).
+    #
+    # Only the rail site admits attributes after `class`. The footer renders
+    # four more `sl-v` cells carrying `data-meta`, and a second version span
+    # written `<span class='sl-v' id='x'>` is that same shape, so admitting
+    # either admits all five and refuses the tree the checker must pass.
+    # `rail-foot` names one element, so it takes the whole region; the status
+    # line takes whitespace alone, leaving a status-line duplicate that
+    # carries any attribute as the residual.
     #
     # Well-formed markup walks linearly. A malformed tag (an unclosed quote)
     # makes every anchor walk to that quote, so k anchors over a k-character
-    # tail cost O(anchors x tail) — 0.4 s at 2000, 2.6 s at 5000. A capped
-    # walk bounds that (36-69 ms at 5000, re-review measurement) and was
-    # declined: a cap re-introduces a silent false negative beyond the cap.
+    # tail cost O(anchors x tail) — 0.25 s at 2000, 1.7 s at 5000, where the
+    # widening left it. A capped walk bounds that (36-69 ms at 5000, earlier
+    # measurement) and was declined: a cap re-introduces a silent false
+    # negative beyond the cap.
+    #
+    # The rail lookahead is what holds that line. Its trailing region is a
+    # second unbounded walk, taken once per anchor per `class` candidate,
+    # which is cubic: k anchors over k `class='rail-foot' ` runs with no `>v`
+    # after them cost 23.7 s at k=400 without it and 0.071 s with. It asserts
+    # only what the rest already requires — the tag's first `>` outside a
+    # quoted value carries the `v` — so it prunes without matching less.
     ('dashboard/index.html', 'dashboard rail footer',
-     r'''<div[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
+     r'''<(?i:div)(?=(?:[^>'"]|'[^']*'|"[^"]*")*>v)'''
+     r'''[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
      r'''[\t\n\f\r ])?'''
-     r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
-     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r ]+[\t\n\f\r ]+)*rail-foot'''
-     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r ]+)*[\t\n\f\r ]*(?P=q)>v'''
+     r'''(?i:class)[\t\n\f\r ]*=[\t\n\f\r ]*'''
+     r'''(?:(?P<q>['"])[\t\n\f\r ]*'''
+     r'''(?:[^<>'"\t\n\f\r ]+[\t\n\f\r ]+)*rail-foot'''
+     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r ]+)*[\t\n\f\r ]*(?P=q)'''
+     r'''|rail-foot)'''
+     r'''(?:[\t\n\f\r ](?:[^>'"]|'[^']*'|"[^"]*")*)?>v'''
      r'''(?P<v>[^ <]*)'''),
     ('dashboard/index.html', 'dashboard status line',
-     r'''<span[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
+     r'''<(?i:span)[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
      r'''[\t\n\f\r ])?'''
-     r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
-     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r ]+[\t\n\f\r ]+)*sl-v'''
-     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r ]+)*[\t\n\f\r ]*(?P=q)>'''
-     r'''(?P<v>[^<]*)</span>'''),
+     r'''(?i:class)[\t\n\f\r ]*=[\t\n\f\r ]*'''
+     r'''(?:(?P<q>['"])[\t\n\f\r ]*'''
+     r'''(?:[^<>'"\t\n\f\r ]+[\t\n\f\r ]+)*sl-v'''
+     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r ]+)*[\t\n\f\r ]*(?P=q)'''
+     r'''|sl-v)[\t\n\f\r ]*>'''
+     r'''(?P<v>[^<]*)</(?i:span)>'''),
     # The published wheel is a version claim about the wire format, so it is
     # checked like any other site. pyproject reads this same attribute, so
     # there is nothing separate to keep in step.
