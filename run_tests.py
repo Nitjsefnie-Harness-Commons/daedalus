@@ -50,7 +50,14 @@ def _terminate_and_reap(process):
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         process.kill()
-        process.wait()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            # SIGKILL with nothing left holding a pipe, and still not
+            # reaped: report and give up rather than mask the failure
+            # that reached this helper or hold the suite worker forever.
+            print(f'run_tests: pid {process.pid} survived SIGKILL; '
+                  'leaving it unreaped', file=sys.stderr)
 
 
 def _run_suite(suite, summaries):

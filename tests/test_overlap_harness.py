@@ -12,6 +12,7 @@ from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _drain  # noqa: E402
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _overlap import (  # noqa: E402
@@ -426,9 +427,7 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
         _wait_for_path(ready_path)
         states = _overlap.client_states({'slow-owner': process}, grace=0.1)
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
+        _drain.kill_and_drain(process)
     state = states['slow-owner']
     assert state['stillRunning'] is True, state
     assert state['returncode'] is None, state
@@ -506,9 +505,7 @@ def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
         states = _overlap.client_states(
             {'slow-pipe-owner': process}, grace=0.1)
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
+        _drain.kill_and_drain(process)
     state = states['slow-pipe-owner']
     assert state['stillRunning'] is True, state
     assert state['drainTimedOut'] is False, state
@@ -548,9 +545,7 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
         states = _overlap.client_states(
             {'pipe-owner': process}, grace=0.1, killed_pipe_release=0.1)
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
+        _drain.kill_and_drain(process)
     state = states['pipe-owner']
     assert state['stillRunning'] is True, state
     assert state['returncode'] is None, state

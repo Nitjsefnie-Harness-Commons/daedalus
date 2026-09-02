@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _drain  # noqa: E402
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
@@ -344,9 +345,7 @@ def test_exec_full_round_trip(tmp):
             assert status == 200, status
             out, err = proc.communicate(timeout=30)
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate()
+            _drain.kill_and_drain(proc)
         assert proc.returncode == 0, (proc.returncode, out, err)
         assert any(f'{m} job7' in out for m in IN_MARKS), out
         assert '@channel=page:cdp' in out, out
@@ -381,9 +380,7 @@ def test_waiter_leaves_a_foreign_result_in_place(tmp):
             assert status == 200, status
             out, err = proc.communicate(timeout=30)
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate()
+            _drain.kill_and_drain(proc)
         # Our result never arrived, so the waiter times out ...
         assert proc.returncode != 0, (proc.returncode, out, err)
         assert 'Timeout' in err, (out, err)
@@ -558,9 +555,7 @@ def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
             assert status == 200, status
             out, err = proc.communicate(timeout=30)
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate()
+            _drain.kill_and_drain(proc)
         assert proc.returncode == 0, (proc.returncode, out, err)
         assert '0 cookies' in out, out
         assert 'not yours' not in out, out
@@ -598,9 +593,7 @@ def test_typed_command_does_not_return_a_stale_fixed_id_result(tmp):
                 assert status == 200, status
             out, err = proc.communicate(timeout=30)
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate()
+            _drain.kill_and_drain(proc)
         assert proc.returncode == 0, (proc.returncode, out, err)
         assert 'fresh.invalid' in out, out
         assert 'stale.invalid' not in out, out
@@ -671,8 +664,7 @@ def _queued_extension_command(base, docroot, argv, what):
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
         return queued_command(qdir, what)
     finally:
-        proc.kill()
-        proc.communicate()
+        _drain.kill_and_drain(proc)
 
 
 def test_store_hotfix_refuses_a_file_that_is_not_there(tmp):
@@ -893,9 +885,7 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
             assert status == 200, (status, body)
             stdout, stderr = proc.communicate(timeout=30)
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate()
+            _drain.kill_and_drain(proc)
         assert proc.returncode == 0, (
             proc.returncode, repr(stdout), repr(stderr),
             repr(screenshot_id), ''.join(served))
@@ -944,9 +934,7 @@ def test_a_screenshot_download_ignores_a_later_capture_under_its_id(tmp):
             assert status == 200, (status, body)
             stdout, stderr = proc.communicate(timeout=30)
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate()
+            _drain.kill_and_drain(proc)
     assert proc.returncode == 0, (
         proc.returncode, repr(stdout), repr(stderr), ''.join(served))
     assert output.read_bytes() == b'this-invocation', output.read_bytes()
@@ -988,9 +976,7 @@ def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
             assert status == 200, (status, body)
             _stdout, stderr = proc.communicate(timeout=30)
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate()
+            _drain.kill_and_drain(proc)
     assert proc.returncode != 0, (proc.returncode, ''.join(served))
     assert 'HTTP 404' in stderr, (stderr, ''.join(served))
     assert 'no screenshot' in stderr, (stderr, ''.join(served))
@@ -1172,9 +1158,7 @@ def _answer_one_ext_command(base, docroot, argv, result, env):
         assert status == 200, (argv, status)
         out, err = proc.communicate(timeout=60)
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate()
+        _drain.kill_and_drain(proc)
     return proc.returncode, out, err, queued
 
 
