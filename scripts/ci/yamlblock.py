@@ -33,7 +33,9 @@ def block_end(texts, start, end, header_indent, match):
                 continue
             content_indent = text_indent(texts[index])
             if content_indent <= header_indent:
-                return start
+                # Blank lines already passed are body, and keep
+                # chomping decodes each of them as a break.
+                return index
             break
         else:
             return end
