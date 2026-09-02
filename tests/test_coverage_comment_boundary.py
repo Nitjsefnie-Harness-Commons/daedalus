@@ -17,6 +17,7 @@ from _coverage_comment_steps import (  # noqa: E402
     EXPECTED_WORKFLOW_MAPPING,
 )
 from _repo import ROOT  # noqa: E402
+from _wfpins import WorkflowPinError, pinned_action  # noqa: E402
 from _yamlread import YAMLReadError, top_level_mapping  # noqa: E402
 from _yamlsteps import (  # noqa: E402
     complete_job_mapping,
@@ -26,10 +27,7 @@ from _yamlsteps import (  # noqa: E402
 import test_coverage_comment_workflow as commenter  # noqa: E402
 
 
-_DOWNLOAD = (
-    'actions/download-artifact@'
-    '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'
-)
+_DOWNLOAD_ACTION = 'actions/download-artifact'
 _MARKER = '<!-- daedalus-diff-coverage -->\n'
 _HEAD_SHA = 'B' * 40
 _COMMENT_PREFIX = (
@@ -390,7 +388,9 @@ def test_privileged_steps_are_an_exact_allowlist(tmp):
         workflow.replace(
             '          test -f body.md\n',
             '          bash body.md\n          test -f body.md\n', 1),
-        workflow.replace(_DOWNLOAD, 'owner/other@' + '0' * 40, 1),
+        workflow.replace(
+            pinned_action(workflow, _DOWNLOAD_ACTION),
+            'owner/other@' + '0' * 40, 1),
         workflow.replace(
             '          run-id: ${{ github.event.workflow_run.id }}\n',
             '          run-id: ${{ github.run_id }}\n', 1),
@@ -512,6 +512,53 @@ def test_absent_artifact_output_enables_the_missing_marker(tmp):
     condition = commenter._step_condition(  # pylint: disable=protected-access
         _workflow(), 'Mark missing patch coverage')
     assert evaluate_if(condition, context) is True, (condition, context)
+
+
+def _pin_refused(workflow, action, detail):
+    """Require an unusable pin to raise rather than return a guess."""
+    try:
+        pinned_action(workflow, action)
+    except WorkflowPinError as error:
+        assert detail in str(error), str(error)
+        return
+    raise AssertionError(f'{detail!r} was accepted as a pin')
+
+
+def test_pinned_action_reads_the_real_workflow_pin(tmp):
+    """The privileged workflow's own pin is what the anchors mutate."""
+    del tmp
+    workflow = _workflow()
+    pin = pinned_action(workflow, _DOWNLOAD_ACTION)
+    assert pin.startswith(_DOWNLOAD_ACTION + '@'), pin
+    assert workflow.count(pin) == 1, pin
+
+
+def test_pinned_action_refuses_an_unpinned_action(tmp):
+    """An action the text never pins cannot yield a splice string."""
+    del tmp
+    _pin_refused(
+        '        uses: actions/download-artifact@v8\n',
+        _DOWNLOAD_ACTION, 'no pin')
+
+
+def test_pinned_action_refuses_conflicting_pins(tmp):
+    """Two spellings of one action leave no single anchor to mutate."""
+    del tmp
+    _pin_refused(
+        f'  uses: {_DOWNLOAD_ACTION}@' + 'a' * 40 + '\n'
+        f'  uses: {_DOWNLOAD_ACTION}@' + 'b' * 40 + '\n',
+        _DOWNLOAD_ACTION, 'conflicting pins')
+
+
+def test_pinned_action_refuses_a_partial_identity(tmp):
+    """Only a whole action name pinned to a whole SHA counts as a pin."""
+    del tmp
+    _pin_refused(
+        f'  uses: other-{_DOWNLOAD_ACTION}@' + 'c' * 40 + '\n',
+        _DOWNLOAD_ACTION, 'no pin')
+    _pin_refused(
+        f'  uses: {_DOWNLOAD_ACTION}@' + 'd' * 41 + '\n',
+        _DOWNLOAD_ACTION, 'no pin')
 
 
 if __name__ == '__main__':

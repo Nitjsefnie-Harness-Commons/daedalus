@@ -291,6 +291,7 @@
 !/tests/_util.py
 !/tests/_wfcheckout.py
 !/tests/_wfgraph.py
+!/tests/_wfpins.py
 !/tests/_wfscalars.py
 !/tests/_wfskip.py
 !/tests/_wfskip_cases.py
