@@ -28,6 +28,10 @@ _VOID_TAGS = frozenset((
     'meta', 'param', 'source', 'track', 'wbr',
 ))
 _MAX_ISSUE_DIGITS = 19
+_CLOSING_KEYWORDS = frozenset((
+    'close', 'closes', 'closed', 'fix', 'fixes', 'fixed',
+    'resolve', 'resolves', 'resolved'))
+_LIST_SEPARATOR = re.compile(r'[\s,&]*(?:and[\s,&]*)*', re.IGNORECASE)
 _INVISIBLE_CHARACTERS = frozenset((
     '\u034f', '\u115f', '\u1160', '\u180b', '\u180c', '\u180d',
     '\u180f', '\u2800', '\u3164', '\uffa0',
@@ -40,6 +44,7 @@ class Section(NamedTuple):
     text: str
     links: tuple[str, ...]
     issues: tuple[int, ...]
+    closing: tuple[bool, ...]
 
 
 class Rule(NamedTuple):
@@ -118,6 +123,10 @@ class _RenderedBodyParser(HTMLParser):
         self._text = []
         self._links = []
         self._issues = []
+        self._closing = []
+        self._pending = []
+        self._anchor_depth = 0
+        self._previous_closing = False
         self._footnote_depth = 0
 
     def handle_starttag(self, tag, attrs):
@@ -151,6 +160,8 @@ class _RenderedBodyParser(HTMLParser):
                     and attributes.get('src') and not zero_size):
                 self._text.append('\ufffc')
             return
+        if tag == 'a':
+            self._anchor_depth += 1
         if tag != 'a' or self._heading_tag is not None or self._key is None:
             return
         destinations = [
@@ -162,7 +173,11 @@ class _RenderedBodyParser(HTMLParser):
             self._links.append(href)
         number = issue_number(href, self.repository)
         if number is not None:
+            gap = ''.join(self._pending)
             self._issues.append(number)
+            self._closing.append(_gap_closing(gap, self._previous_closing))
+            self._previous_closing = self._closing[-1]
+            self._pending = []
 
     def handle_startendtag(self, tag, attrs):
         tag = tag.casefold()
@@ -177,6 +192,8 @@ class _RenderedBodyParser(HTMLParser):
             raise ValueError(
                 'rendered HTML contains mismatched element boundaries')
         self._open_tags.pop()
+        if tag == 'a' and self._anchor_depth:
+            self._anchor_depth -= 1
         if self._footnote_depth:
             self._footnote_depth -= 1
             return
@@ -188,17 +205,25 @@ class _RenderedBodyParser(HTMLParser):
         self._text = []
         self._links = []
         self._issues = []
+        self._closing = []
+        self._pending = []
+        self._previous_closing = False
         self._heading_tag = None
         self._heading_parts = []
 
     def handle_data(self, data):
         self._record_text(data)
+        self._record_pending(data)
 
     def handle_entityref(self, name):
-        self._record_text(unescape(f'&{name};'))
+        data = unescape(f'&{name};')
+        self._record_text(data)
+        self._record_pending(data)
 
     def handle_charref(self, name):
-        self._record_text(unescape(f'&#{name};'))
+        data = unescape(f'&#{name};')
+        self._record_text(data)
+        self._record_pending(data)
 
     def _record_text(self, data):
         if self._footnote_depth:
@@ -207,6 +232,12 @@ class _RenderedBodyParser(HTMLParser):
             self._heading_parts.append(data)
         elif self._key is not None:
             self._text.append(data)
+
+    def _record_pending(self, data):
+        if (self._footnote_depth or self._heading_tag is not None
+                or self._key is None or self._anchor_depth):
+            return
+        self._pending.append(data)
 
     def finish(self):
         if not self.saw_element:
@@ -225,12 +256,16 @@ class _RenderedBodyParser(HTMLParser):
             return
         self.sections.append(Section(
             self._name, self._key, ''.join(self._text),
-            tuple(self._links), tuple(self._issues)))
+            tuple(self._links), tuple(self._issues),
+            tuple(self._closing)))
         self._name = None
         self._key = None
         self._text = []
         self._links = []
         self._issues = []
+        self._closing = []
+        self._pending = []
+        self._previous_closing = False
 
 
 def parse_rendered(rendered, repository):
@@ -238,6 +273,18 @@ def parse_rendered(rendered, repository):
     parser.feed(rendered or '')
     parser.finish()
     return parser.sections
+
+
+def closing_issues(sections):
+    """Ordered issue references whose text carries a closing keyword."""
+    found = []
+    seen = set()
+    for section in sections:
+        for number, closing in zip(section.issues, section.closing):
+            if closing and number not in seen:
+                seen.add(number)
+                found.append(number)
+    return found
 
 
 def referenced_issues(sections):
@@ -252,6 +299,16 @@ def referenced_issues(sections):
             seen.add(number)
             found.append(number)
     return found
+
+
+def _gap_closing(gap, previous_closing):
+    tail = gap.rstrip().split()
+    if tail:
+        keyword = tail[-1].casefold().rstrip(':')
+        if keyword in _CLOSING_KEYWORDS:
+            return True
+    return (bool(previous_closing)
+            and _LIST_SEPARATOR.fullmatch(gap) is not None)
 
 
 def code_span(text):
