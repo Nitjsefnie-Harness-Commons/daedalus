@@ -35,7 +35,7 @@ def _bare_probe(tmp, script):
     """Run a probe with every DAEDALUS_* variable stripped from its env.
 
     `daedalus_bridge.config` exits at import without `DAEDALUS_DIR`, so a
-    store that still resolved anything from it could not run here at all.
+    store that still read it could not run here at all.
     """
     root = Path(tmp) / 'bare-segments'
     root.mkdir(parents=True)
@@ -559,7 +559,7 @@ def test_the_store_needs_no_bridge_configuration(tmp):
     """A segments root is a parameter, so no `DAEDALUS_*` value is needed."""
     root, answer = _bare_probe(tmp, _UNCONFIGURED_PROBE)
     assert answer['daedalus_env'] == [], answer
-    # Resolved on both sides: `under` returns the path it checked, resolved.
+    # Resolved on both sides: `under` returns the path it checked.
     expected = os.path.realpath(root / 'unconfigured-job.json')
     assert answer['path'] == expected, (answer, expected)
     assert answer['quota'] == [9, 8, 7], answer
