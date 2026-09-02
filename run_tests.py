@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+DEFAULT_SUITE_TIMEOUT_S = 900
 _SPAWN_LOCK = threading.Lock()
 
 
@@ -60,7 +61,22 @@ def _terminate_and_reap(process):
                   'leaving it unreaped', file=sys.stderr)
 
 
-def _run_suite(suite, summaries):
+def _suite_timeout():
+    """The per-suite wall-clock bound, overridable for slow machines."""
+    raw = os.environ.get("DAEDALUS_SUITE_TIMEOUT")
+    if raw is None:
+        return DEFAULT_SUITE_TIMEOUT_S
+    try:
+        timeout = float(raw)
+    except ValueError:
+        raise SystemExit(
+            f"DAEDALUS_SUITE_TIMEOUT: not a number: {raw!r}") from None
+    if timeout <= 0:
+        raise SystemExit(f"DAEDALUS_SUITE_TIMEOUT: must be positive: {raw!r}")
+    return timeout
+
+
+def _run_suite(suite, summaries, timeout):
     summary_path = Path(summaries) / f"{suite.stem}.json"
     output_path = Path(summaries) / f"{suite.stem}.output"
     env = dict(os.environ, DAEDALUS_TEST_SUMMARY=str(summary_path))
@@ -72,7 +88,15 @@ def _run_suite(suite, summaries):
                     [sys.executable, str(suite)], cwd=ROOT,
                     stdin=subprocess.DEVNULL, stdout=output,
                     stderr=subprocess.STDOUT, env=env)
-        returncode = process.wait()
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _terminate_and_reap(process)
+            returncode = process.returncode
+            with output_path.open("ab") as output:
+                output.write(
+                    f"SUITE TIMED OUT after {timeout} s and was killed; "
+                    "its last lines are above\n".encode())
     except BaseException:
         if process is not None:
             _terminate_and_reap(process)
@@ -82,6 +106,7 @@ def _run_suite(suite, summaries):
 
 def main() -> int:
     _report_safely()
+    timeout = _suite_timeout()
     suites = sorted((ROOT / "tests").glob("test_*.py"))
     if not suites:
         print("no suites found", file=sys.stderr)
@@ -90,7 +115,7 @@ def main() -> int:
         workers = min(len(suites), os.cpu_count() or 1)
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(_run_suite, suite, summaries): suite
+                executor.submit(_run_suite, suite, summaries, timeout): suite
                 for suite in suites
             }
             results = {}
