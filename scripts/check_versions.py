@@ -97,20 +97,25 @@ SITES = [
     # attribute region stays bounded inside the tag: quoted attribute values
     # are admitted whole, so a `>` inside a value does not end the tag early.
     # The class value admits a whole-token list and whitespace around `=`
-    # (#439).
+    # (#439). On well-formed markup the walk from an anchor to its `class` is
+    # linear; a malformed tag (an unclosed quote) makes every anchor walk to
+    # that quote, so k anchors over a k-character tail cost
+    # O(anchors x tail) — measured 0.4 s at 2000 and 2.6 s at 5000. Bounding
+    # that walk would give up the leftmost `class` candidate, so it is left
+    # quadratic by choice rather than by oversight.
     ('dashboard/index.html', 'dashboard rail footer',
      r'''<div[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
      r'''[\t\n\f\r ])?'''
      r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
-     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r >]+[\t\n\f\r ]+)*rail-foot'''
-     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r >]+)*[\t\n\f\r ]*(?P=q)>v'''
+     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r ]+[\t\n\f\r ]+)*rail-foot'''
+     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r ]+)*[\t\n\f\r ]*(?P=q)>v'''
      r'''(?P<v>[^ <]*)'''),
     ('dashboard/index.html', 'dashboard status line',
      r'''<span[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
      r'''[\t\n\f\r ])?'''
      r'''class[\t\n\f\r ]*=[\t\n\f\r ]*(?P<q>['"])'''
-     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r >]+[\t\n\f\r ]+)*sl-v'''
-     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r >]+)*[\t\n\f\r ]*(?P=q)>'''
+     r'''[\t\n\f\r ]*(?:[^<>'"\t\n\f\r ]+[\t\n\f\r ]+)*sl-v'''
+     r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r ]+)*[\t\n\f\r ]*(?P=q)>'''
      r'''(?P<v>[^<]*)</span>'''),
     # The published wheel is a version claim about the wire format, so it is
     # checked like any other site. pyproject reads this same attribute, so
