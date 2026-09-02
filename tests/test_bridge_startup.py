@@ -305,12 +305,12 @@ def test_bridge_configuration_is_resolvable_as_a_unit(tmp):
     env.update({'DAEDALUS_DIR': str(root), 'DAEDALUS_PORT': '0'})
     code = """
 import json
-from daedalus_bridge import config
+from daedalus_bridge import config, result_store
 print(json.dumps({
     'base': str(config.BASE),
     'cmd': str(config.CMD_DIR),
     'results': str(config.RES_DIR),
-    'deliveries': str(config.DELIVERY_DIR),
+    'deliveries': str(result_store.delivery_root(config.RES_DIR)),
     'uploads': str(config.UPLOAD_DIR),
     'segments': str(config.SEG_DIR),
     'dashboard': str(config.DASHBOARD_DIR),

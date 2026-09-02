@@ -62,11 +62,11 @@ def _events(cmd_dir, token):
             for path in sorted(queue.iterdir())]
 
 
-def _configured_delivery_dir():
-    config = _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'config.py',
-        'fixture_result_routes_config')
-    return Path(config.DELIVERY_DIR)
+def _configured_tree():
+    """Every path under the configured results root, relative to it."""
+    RES_DIR.mkdir(parents=True, exist_ok=True)
+    return sorted(str(path.relative_to(RES_DIR))
+                  for path in RES_DIR.rglob('*'))
 
 
 def test_accept_writes_both_slots_and_the_delivery_file(tmp):
@@ -241,8 +241,15 @@ def test_the_module_needs_no_configuration_of_its_own(_tmp):
 
 
 def test_the_results_root_governs_where_a_delivery_lands(tmp):
-    """A root that is not the configured one takes the delivery file too."""
+    """Every file this POST writes lands under the root it was handed.
+
+    All three: the delivery file, the tab slot and the broadcast slot.
+    The negative half lists the whole configured tree rather than the
+    three names this request would build, because a wrongly resolved
+    call leaks under whatever name it chooses.
+    """
     routes = _load('fixture_result_routes_root')
+    before = _configured_tree()
     root = Path(tmp) / 'other-results'
     root.mkdir(parents=True)
     token, did = 'roottok', 'root-1'
@@ -253,8 +260,36 @@ def test_the_results_root_governs_where_a_delivery_lands(tmp):
     moved = root / 'deliveries' / f'{token}_8' / f'{did}.json'
     assert _read(moved)['value'] == 'redirected'
     assert _read(root / f'{token}_8.json')['value'] == 'redirected'
-    assert not (_configured_delivery_dir() / f'{token}_8').exists()
-    assert not _slot(token, '8').exists()
+    assert _read(root / f'{token}.json')['value'] == 'redirected'
+    after = _configured_tree()
+    assert after == before, (after, before)
+
+
+def test_the_results_root_governs_a_slot_read_and_its_cleanup(tmp):
+    """A slot read and its cross-copy cleanup stay inside the passed root.
+
+    Both roots hold a broadcast slot for this token, so a read resolved
+    from configuration answers with the other tree's value and a consume
+    resolved from configuration deletes the other tree's copy.
+    """
+    routes = _load('fixture_result_routes_slotroot')
+    root = Path(tmp) / 'slot-results'
+    root.mkdir(parents=True)
+    token = 'slotroottok'
+    routes.accept_result(
+        RES_DIR, tmp, token,
+        {'value': 'configured', '_did': 'slotroot-cfg'}, DELIVERY_CAP)
+    routes.accept_result(
+        root, tmp, token,
+        {'value': 'redirected', '_did': 'slotroot-alt'}, DELIVERY_CAP)
+    status, payload = routes.fetch_result(root, token, {})
+    assert status == 200, (status, payload)
+    assert payload.get('value') == 'redirected', payload
+    status, payload = routes.fetch_result(
+        root, token, {'delivery': ['slotroot-alt'], 'consume': ['1']})
+    assert status == 200, (status, payload)
+    assert not (root / f'{token}.json').exists()
+    assert _read(_slot(token))['value'] == 'configured'
 
 
 def test_the_results_root_governs_the_delivery_read(tmp):
