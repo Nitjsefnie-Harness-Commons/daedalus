@@ -78,9 +78,10 @@ python3 scripts/gen_gitignore.py .      # regenerate the allow-list
 ```
 
 `tests/test_release_scan.py::test_release_scanner_enumeration_matches_tracked_files`
-pins the tracked-path count, so adding a file also means bumping that number in
-the same commit. That is deliberate: it makes "I added a file and CI never ran
-it" impossible.
+asserts the scanners' input enumeration equals `git ls-files` in both directions,
+so a tracked file the scanners miss, or a non-tracked file they pick up, fails
+the suite. That is deliberate: it makes "I added a file and CI never ran it"
+impossible.
 
 ## Getting it running
 
