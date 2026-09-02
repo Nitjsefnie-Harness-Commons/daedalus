@@ -1,6 +1,8 @@
 """Read the node properties a workflow scalar may carry before its value.
 
-An anchor, a tag, or both in either order may precede the content.
+`!` is refused along with every other non-string tag: PyYAML resolves a
+non-specifically tagged scalar by default resolution, so `! 5` is the
+number 5 and accepting it would return a value no parser calls a string.
 """
 import re
 
@@ -13,7 +15,7 @@ else:
 
 ALIAS = re.compile(r'\*(?P<name>[^\s\[\]{},]+)')
 _ANCHOR_NAME = re.compile(r'[^\s\[\]{},]+')
-_STRING_TAGS = ('!', '!!str')
+_STRING_TAGS = ('!!str',)
 
 
 def node_properties(value):
@@ -55,7 +57,7 @@ def strip_node_properties(value, owner):
             tag = token
             if tag not in _STRING_TAGS:
                 raise YAMLReadError(
-                    f'{owner} has an unsupported YAML tag {tag}: only ! '
-                    'and !!str resolve to a string, and a guess at what a '
-                    'parser makes of any other is worse than a refusal')
+                    f'{owner} has an unsupported YAML tag {tag}: only !!str '
+                    'resolves to a string, and a guess at what a parser '
+                    'makes of any other is worse than a refusal')
     return content
