@@ -40,9 +40,14 @@ def _time_tests():
     return _util.load(ROOT / 'scripts' / 'ci' / 'time_tests.py')
 
 
-def _render_speed_summary(compare, shared, pairs, movements, limit=10):
+def _speed_summary():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'speed_summary.py')
+
+
+def _render_speed_summary(speed_summary, shared, pairs, movements, limit=10):
     lines = []
-    compare.render(lines, 'baseline', shared, pairs, movements, limit=limit)
+    speed_summary.render(lines, 'baseline', shared, pairs, movements,
+                         limit=limit)
     return lines
 
 
@@ -466,8 +471,8 @@ def test_shared_speed_modules_import_by_package(tmp):
     """
     del tmp
     imported = subprocess.run(
-        [sys.executable, '-c', 'import scripts.ci.zeroed_suites; '
-         + 'import scripts.ci.compare_durations'],
+        [sys.executable, '-c', 'import scripts.ci.zeroed_suites, '
+         + 'scripts.ci.compare_durations, scripts.ci.speed_summary'],
         cwd=str(ROOT), capture_output=True, text=True, timeout=60)
     assert imported.returncode == 0, (imported.stdout, imported.stderr)
 
@@ -476,9 +481,8 @@ def test_speed_summary_longest_table_orders_head_medians_and_applies_limit(
         tmp):
     """The expensive table sorts all movements before applying its limit."""
     del tmp
-    compare = _compare_durations()
     lines = _render_speed_summary(
-        compare, ['small', 'middle', 'large'], [(6.0, 12.0, 2.0)], [
+        _speed_summary(), ['small', 'middle', 'large'], [(6.0, 12.0, 2.0)], [
             ('middle', 4.0, 6.0, 2.0),
             ('large', 5.0, 9.0, 4.0),
             ('small', 1.0, 2.0, 1.0),
@@ -496,8 +500,8 @@ def test_speed_summary_longest_table_shows_head_median_column(tmp):
     head = _durations_tree(tmp, 'head', [{'test': 9.0, 'improving': 3.0}])
     shared, pairs, movements = compare.compare(
         compare.side_rounds(base), compare.side_rounds(head))
-    rows = _longest_rows(_render_speed_summary(compare, shared, pairs,
-                                               movements))
+    rows = _longest_rows(_render_speed_summary(_speed_summary(), shared,
+                                               pairs, movements))
     assert rows == [
         '| `test` | 9.00s | 0.750 |',
         '| `improving` | 3.00s | 0.250 |',
@@ -522,7 +526,8 @@ def test_speed_summary_longest_table_shares_only_the_covered_set(tmp):
     shared, pairs, movements = compare.compare(
         compare.side_rounds(base), compare.side_rounds(head))
     assert shared == ['shared_alpha', 'shared_beta', 'shared_gamma'], shared
-    lines = _render_speed_summary(compare, shared, pairs, movements, limit=2)
+    lines = _render_speed_summary(_speed_summary(), shared, pairs, movements,
+                                  limit=2)
     rows = _longest_rows(lines)
     assert rows == [
         '| `shared_alpha` | 6.00s | 0.429 |',
@@ -539,22 +544,22 @@ def test_speed_summary_longest_table_renders_zero_head_share(tmp):
     head = _durations_tree(tmp, 'head', [{'zero': 0.0}])
     shared, pairs, movements = compare.compare(
         compare.side_rounds(base), compare.side_rounds(head))
-    rows = _longest_rows(_render_speed_summary(compare, shared, pairs,
-                                               movements))
+    rows = _longest_rows(_render_speed_summary(_speed_summary(), shared,
+                                               pairs, movements))
     assert rows == ['| `zero` | 0.00s | 0.000 |'], rows
 
 
 def test_speed_summary_longest_table_preserves_empty_shared_early_return(tmp):
     """A shared set gets the table; empty shared stays table-free."""
     del tmp
-    compare = _compare_durations()
     populated = []
-    assert compare.render(populated, 'baseline', ['test'], [(1.0, 2.0, 2.0)],
-                          [('test', 1.0, 2.0, 1.0)]) == 2.0
+    assert _speed_summary().render(populated, 'baseline', ['test'],
+                                   [(1.0, 2.0, 2.0)],
+                                   [('test', 1.0, 2.0, 1.0)]) == 2.0
     assert '| test | head median | share of covered set |' in populated
 
     empty = []
-    assert compare.render(empty, 'baseline', [], [], []) is None
+    assert _speed_summary().render(empty, 'baseline', [], [], []) is None
     assert not any('Longest-running tests' in line for line in empty), empty
 
 
@@ -577,7 +582,7 @@ def test_speed_summary_movement_table_orders_by_absolute_delta(tmp):
     head = _durations_tree(tmp, 'head', [head_tests])
     shared, pairs, movements = compare.compare(
         compare.side_rounds(base), compare.side_rounds(head))
-    lines = _render_speed_summary(compare, shared, pairs, movements)
+    lines = _render_speed_summary(_speed_summary(), shared, pairs, movements)
     rows = _movement_rows(lines)
     assert rows == [
         '| `speedup` | 43.12s | 3.46s | -39.66s |',
