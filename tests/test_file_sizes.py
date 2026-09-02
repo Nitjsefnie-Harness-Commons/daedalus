@@ -17,23 +17,26 @@ import _util  # noqa: E402
 ROOT = _util.ROOT
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
 
-# Claims this file must never make. Each carries its licence inside the
-# phrase, so a sentence refusing the claim does not contain it and no
-# reading of negation is needed to tell the two apart. Naming the bare acts
-# instead - "add a baseline entry", "record the new size" - pins wording
-# that every prohibition of those acts also uses, and no vocabulary of
-# negators rescues that: the way out is a shorter list, not a longer one.
-# The cost is three correct sentences of one shape, "growing a listed file
-# is allowed" asserted and then withdrawn by a trailing qualifier ("by
-# nobody", "nowhere in this policy"). The rule reads positively here, so
-# that assertion has no reason to be in the file at all.
+# Claims this file must never make. Each fills its own subject slot - the
+# act itself in the first, a named actor in the other two - so a sentence
+# refusing the claim does not contain it and no reading of negation is
+# needed to tell the two apart. A bare modal leaves that slot open to a
+# negative quantifier ("Nobody may add a BASELINE entry."), which is then
+# refused as a licence; naming the bare act instead - "add a baseline
+# entry" - pins wording every prohibition of it also uses. No vocabulary
+# of negators rescues either shape: the way out is a shorter list, not a
+# longer one.
+# Two costs: a permission addressed to somebody else ("A first crossing
+# may add a BASELINE entry.") is missed, and a claim quoted to be disowned
+# ("Nowhere does this say growing a listed file is allowed") is refused.
+# The rule reads positively here, so neither belongs in the file anyway.
 FORBIDDEN_CLAIMS = (
     # The licence this file carried, verbatim, which misled seven sessions.
     'growing a listed file is allowed',
     # A first crossing excused by a fresh entry instead of being split.
-    'may add a baseline entry',
+    'you may add a baseline entry',
     # Untrue: an entry naming a file that is gone is deleted by hand.
-    'is the only writer of this table',
+    '--tighten is the only writer of this table',
 )
 
 # Deleted rather than spaced out, so a claim spanning one - a backtick, or
@@ -110,17 +113,29 @@ STATES_THE_POLICY = (
     'A file crossing its ceiling for the first time is split rather '
     'than excused.',
     'Shrink the file; the table is not where growth is negotiated.',
+    # Prohibitions with a negative quantifier for a subject: the shape
+    # that contains a claim built on a bare modal.
+    'Nobody may add a BASELINE entry.',
+    'No change may add a BASELINE entry to excuse a first crossing.',
+    'Neither an author nor a reviewer may add a BASELINE entry.',
+    'No contributor may add a BASELINE entry by hand.',
+    'No tool is the only writer of this table.',
+    'Neither --tighten nor CI is the only writer of this table.',
+    'No change may grow a listed file past its record.',
+    'Under no circumstances may a listed file grow.',
 )
 
 # Licences to grow, which it must refuse. The first is the sentence this
 # file carried until the branch that removed it. This half is a backstop
 # over free prose and does not pretend to catch a paraphrase: a permissive
 # sentence written in none of these wordings is caught only where it
-# displaces the rule paragraph, which the containment pin below holds.
+# displaces the rule paragraph, and STATES_THE_RULE is what catches it
+# there - the containment pin below stays satisfied when the constant is
+# reworded in step. "A first crossing may add a BASELINE entry." was
+# listed here until its claim grew a subject, and is what that cost.
 SANCTIONS_GROWTH = (
     'Growing a listed file is allowed, because some fixes genuinely belong '
     'in it, but only by editing its recorded number in the same commit.',
-    'A first crossing may add a BASELINE entry.',
     'Growing a listed file is allowed (edit the number).',
     'Growing a listed file is allowed, no questions asked.',
     'Growing a listed file is allowed and nobody minds.',
@@ -282,7 +297,7 @@ def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
 
 
 def test_the_claim_check_refuses_a_licence_to_grow(tmp):
-    """A sentence licensing growth by hand is read as one."""
+    """Each listed licence to grow by hand is read as one."""
     del tmp
     assert SANCTIONS_GROWTH, 'the strictness battery is empty'
     missed = [text for text in SANCTIONS_GROWTH if not _offered(text)]
