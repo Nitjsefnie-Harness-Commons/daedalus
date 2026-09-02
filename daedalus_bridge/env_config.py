@@ -14,6 +14,11 @@ import os
 REFUSED_BODY_DRAIN = 65536
 
 
+def env_flag(name):
+    """Whether an on/off environment switch is set to '1'."""
+    return os.environ.get(name) == '1'
+
+
 def env_int(name, default, minimum, maximum=None):
     """Read one integer setting and stop startup with a specific error.
 
