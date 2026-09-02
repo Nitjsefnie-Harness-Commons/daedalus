@@ -569,14 +569,6 @@ def test_two_windows_outer_timeouts_keep_both_attempt_records(_tmp):
     assert [event[0] for event in events].count('popen') == 2, events
 
 
-def test_non_windows_outer_timeout_does_not_retry(_tmp):
-    failure, events, _ = _controlled_run(
-        'linux', (401, [_timeout(), _result(-9)]))
-    assert failure.startswith('dashboard node outer timeout after 1 attempt')
-    assert 'attempt 1:' in failure and 'pid: 401' in failure, failure
-    assert [event[0] for event in events].count('popen') == 1, events
-
-
 def test_cumulative_byte_timeout_output_is_decoded_once(_tmp):
     failure, _, _ = _controlled_run('linux', (402, [
         _timeout(b'A\xe2'), _timeout(b'A\xe2\x82\xacB')]))

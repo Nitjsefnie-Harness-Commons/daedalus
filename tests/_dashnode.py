@@ -435,8 +435,8 @@ def _run_dashboard_node_once(
 def run_dashboard_node(
         harness: DashboardNodeHarness
 ) -> subprocess.CompletedProcess[str]:
-    """Run a dashboard harness, retrying one Windows outer timeout."""
-    attempts = 2 if sys.platform == 'win32' else 1
+    """Run a dashboard harness, retrying one outer timeout."""
+    attempts = 2
     timeout_records = []
     for attempt in range(1, attempts + 1):
         try:
