@@ -24,7 +24,7 @@ def test_the_guard_scan_reads_every_raise_shape_the_tools_use(_tmp):
     sites, _module = _mcp_guard_floor.guard_shape_probe(_tmp)
 
     spelled = {}
-    for module, function, operands in sites.values():
+    for module, function, operands, _or in sites.values():
         spelled.setdefault((module, function), []).extend(
             text for text, _node in operands)
 
@@ -97,9 +97,9 @@ def test_a_guard_outside_the_tool_surface_is_not_covered_by_reachability(_tmp):
     reached_guard = ('tools_network', 'net_capture', 'max_requests < 1')
     moved_guard = ('transport', 'validate', 'max_requests < 1')
     sites = {('net.py', 19): ('tools_network', 'net_capture',
-                              [('max_requests < 1', None)]),
+                              [('max_requests < 1', None)], False),
              ('transport.py', 99): ('transport', 'validate',
-                                    [('max_requests < 1', None)])}
+                                    [('max_requests < 1', None)], False)}
 
     off_surface = _mcp_guard_floor.guards_off_the_tool_surface(
         sites, {'net_capture': [reached_guard]})
@@ -138,6 +138,32 @@ def test_the_scan_set_follows_the_imports_not_a_directory(_tmp):
     assert Path(_tmp, 'foreign.py').resolve() not in imported
     assert Path(__file__).resolve() not in imported
     assert (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve() in imported
+
+
+OR_SHAPES = '''
+def armed(first, second):
+    if first or second:
+        raise ValueError('refused')
+'''
+
+
+def test_a_reached_or_guard_is_refused(_tmp):
+    """A raise a tool reaches refuses on one condition only.
+
+    The unit of witnessing is the raise site, so a guard whose test is an
+    `or` of two conditions is refused rather than witnessed: the remedy is
+    one raise per condition, because one witness cannot answer for two
+    conditions on one line.
+    """
+    sites, module = _mcp_guard_floor.guard_shape_probe(
+        _tmp, OR_SHAPES, 'or_shapes')
+    try:
+        _mcp_guard_floor.reachable_guards(sites, [module.armed.__code__])
+    except AssertionError as raised:
+        assert 'or_shapes.armed' in str(raised), raised
+        assert 'split' in str(raised), raised
+    else:
+        raise AssertionError('an or guard was reached instead of refused')
 
 
 TWIN_SHAPES = '''

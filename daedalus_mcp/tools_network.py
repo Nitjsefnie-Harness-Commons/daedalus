@@ -14,10 +14,17 @@ def register(mcp, bridge):
             fields['tabId'] = int(chrome_tab)
         # Same range the extension enforces on arrival (NET_CAPTURE_MAX): the
         # buffer is a service-worker memory budget, so a nonpositive value
-        # evicts its only event and an enormous one bounds nothing.
-        if not isinstance(max_requests, int) or isinstance(max_requests, bool):
+        # evicts its only event and an enormous one bounds nothing. One raise
+        # per condition: each refusal case witnesses exactly one site.
+        if not isinstance(max_requests, int):
             raise ValueError('max_requests must be an integer')
-        if max_requests < 1 or max_requests > NET_CAPTURE_MAX:
+        if isinstance(max_requests, bool):
+            raise ValueError('max_requests must be an integer')
+        if max_requests < 1:
+            raise ValueError(
+                f'max_requests must be an integer from 1 to '
+                f'{NET_CAPTURE_MAX}; got {max_requests}')
+        if max_requests > NET_CAPTURE_MAX:
             raise ValueError(
                 f'max_requests must be an integer from 1 to '
                 f'{NET_CAPTURE_MAX}; got {max_requests}')
