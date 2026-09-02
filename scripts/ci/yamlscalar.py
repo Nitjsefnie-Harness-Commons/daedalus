@@ -17,19 +17,26 @@ because a comment between entries is content YAML skips; a comment ENDS a
 plain scalar instead, so nothing continues one after it.
 Equivalent spellings decode to the same value, so quoting a scalar or
 rewriting a block collection in flow style changes nothing a reader sees.
+Node properties are the one place the entry points diverge: a name or id in
+`workflow_step_items` reads an anchor, the tags `!` and `!!str`, and an
+alias resolved to the last definition of its anchor before that line, while
+every other entry point refuses all three.
 
 Refused as invalid YAML: an unterminated quote or bracket, an unquoted flow
 scalar carrying any of `,[]{}`, an interior empty flow item, an empty mapping
 key, a duplicate key, a tab in indentation, inconsistent indentation, a
-malformed block-scalar header or escape, and a control or surrogate
+malformed block-scalar header or escape, a malformed or repeated node
+property, an alias naming no earlier anchor, and a control or surrogate
 character.
 
 Refused as a boundary of this subset, which every such message names with
 the word `unsupported`: a tab inside a value, a multiline quoted scalar, a
 blank line or a comment inside a plain one, nested content beside a value
-that already closed, an anchor, an alias or a tag, and a plain scalar
-outside the character set the reader admits. A shape refusal ("... is not a
-mapping") names the shape the reader requires instead.
+that already closed, an anchor, an alias or a tag where the entry point
+reads none, a tag not known to resolve to a string, an alias to a node this
+reader decodes as no scalar, and a plain scalar outside the character set
+the reader admits. A shape refusal ("... is not a mapping") names the shape
+the reader requires instead.
 
 One boundary is spelled as an invalid-YAML refusal and is written down here
 instead. A field is sliced out by indentation before its brackets are read,
