@@ -61,6 +61,21 @@ def _policy_prose():
     return ' '.join(text.split())
 
 
+def _drive_main(policy, baseline, sizes):
+    """`main()` over a fabricated tree, as (status, stderr)."""
+    captured = io.StringIO()
+    argv, table, sizer = sys.argv, policy.BASELINE, policy.tracked_sizes
+    sys.argv = ['size_baseline.py']
+    policy.BASELINE, policy.tracked_sizes = baseline, lambda: sizes
+    try:
+        with contextlib.redirect_stderr(captured):
+            status = policy.main()
+    finally:
+        sys.argv = argv
+        policy.BASELINE, policy.tracked_sizes = table, sizer
+    return status, captured.getvalue()
+
+
 def test_every_tracked_module_satisfies_the_size_policy(tmp):
     """No file grew past its record, and none is over the ceiling unexcused."""
     del tmp
@@ -68,10 +83,10 @@ def test_every_tracked_module_satisfies_the_size_policy(tmp):
     found = policy.violations(policy.tracked_sizes())
     assert not found['grown'], (
         f"these files grew past their recorded size: {found['grown']}\n"
-        f'{policy.REMEDIATION}')
+        f'{policy.GROWTH_REMEDY}')
     assert not found['over'], (
         'these files are over the ceiling with no BASELINE entry: '
-        f"{found['over']}\n{policy.REMEDIATION}")
+        f"{found['over']}\n{policy.GROWTH_REMEDY}")
 
 
 def test_the_baseline_names_only_files_that_still_need_it(tmp):
@@ -84,10 +99,11 @@ def test_the_baseline_names_only_files_that_still_need_it(tmp):
     policy = _policy()
     found = policy.violations(policy.tracked_sizes())
     assert not found['missing'], (
-        f"BASELINE names files that are not tracked any more: {found['missing']}")
+        'BASELINE names files that are not tracked any more: '
+        f"{found['missing']}\n{policy.STALE_ENTRY_REMEDY}")
     assert not found['graduated'], (
-        'these files are back under their ceiling — delete their BASELINE '
-        f"entries: {found['graduated']}")
+        f"these files are back under their ceiling: {found['graduated']}\n"
+        f'{policy.STALE_ENTRY_REMEDY}')
 
 
 def test_the_ceilings_are_below_everything_they_excuse(tmp):
@@ -110,7 +126,7 @@ def test_tightening_follows_a_shrunk_file_down(tmp):
 
 
 def test_tightening_never_raises_a_number(tmp):
-    """Growth stays a decision somebody makes and a reviewer sees."""
+    """The ratchet follows a file down and never back up."""
     del tmp
     policy = _policy()
     text = "BASELINE = {\n    'server.py': 2624,\n}\n"
@@ -155,21 +171,26 @@ def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
         'by hand')
 
 
-def test_a_refused_run_prints_the_remedy(tmp):
-    """The guidance a refused session actually reads is the current rule."""
+def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
+    """Each kind gets the remedy that is true for it, and no other."""
     del tmp
     policy = _policy()
-    policy.tracked_sizes = lambda: {'huge.py': policy.PRODUCTION_CEILING + 1}
-    captured = io.StringIO()
-    argv = sys.argv
-    sys.argv = ['size_baseline.py']
-    try:
-        with contextlib.redirect_stderr(captured):
-            status = policy.main()
-    finally:
-        sys.argv = argv
-    assert status == 1, status
-    assert policy.REMEDIATION in captured.getvalue(), captured.getvalue()
+    over, under = policy.TEST_CEILING + 1, policy.TEST_CEILING
+    fabricated = {
+        'grown': ({'tests/big.py': over}, {'tests/big.py': over + 1}),
+        'over': ({}, {'tests/big.py': over}),
+        'missing': ({'tests/gone.py': over}, {}),
+        'graduated': ({'tests/small.py': over}, {'tests/small.py': under}),
+    }
+    for kind, (baseline, sizes) in sorted(fabricated.items()):
+        found = policy.violations(sizes, baseline)
+        assert [k for k, v in found.items() if v] == [kind], (kind, found)
+        status, printed = _drive_main(policy, baseline, sizes)
+        assert status == 1, (kind, status)
+        assert policy.REMEDY_FOR[kind] in printed, (kind, printed)
+        wrong = [other for other in set(policy.REMEDY_FOR.values())
+                 if other != policy.REMEDY_FOR[kind] and other in printed]
+        assert not wrong, (kind, printed)
 
 
 if __name__ == '__main__':
