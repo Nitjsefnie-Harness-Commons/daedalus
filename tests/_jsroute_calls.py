@@ -1,7 +1,9 @@
 """Callable parameters and invocation targets for the JavaScript guard."""
 import re
 
-from _jsroute_source import BUILTIN_CHAINS
+from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
+                             previous_nonspace as _js_previous_nonspace,
+                             word_before as _js_word_before)
 
 
 _NON_CALL_WORDS = {
@@ -231,7 +233,7 @@ def parameter_sources(specs, args, mask, text, top_level, computed_key):
 
 def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
                               statement_end, senders,
-                              callable_value=None):
+                              callable_value=None, interpolations=()):
     """Find lexical bindings that an invocation may use as a sender."""
     candidates = set()
     for scope in scopes[1:]:
@@ -239,6 +241,10 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
             binding = visible_binding(name, scope['start'])
             if binding is not None:
                 candidates.add(binding)
+    for match in interpolations:
+        target = visible_binding(match.group(1), match.start())
+        if target is not None:
+            candidates.add(target)
     sender_pattern = (
         r'\b(?:' + '|'.join(map(re.escape, senders)) + r')\b')
     pending = list(bindings)
@@ -263,10 +269,13 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
                           r'(?:async\s+)?function\b', expr))
             resolved = (callable_value((match.end(), end))
                         if callable_value is not None else None)
+            carried = resolved is not None and resolved['form'] in (
+                'get', 'set', 'generator')
             bound_sender = bound and bound.group(1) in senders
             resolved_sender = resolved is not None and (
                 resolved['name'] in senders
-                or resolved['binding'] in candidates)
+                or resolved['binding'] in candidates
+                or carried)
             if (direct or source in candidates
                     or bound_sender or resolved_sender):
                 if target is not None and target not in candidates:
@@ -281,9 +290,9 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
 
 
 def _target(status, binding=None, body=None, member=None, name=None,
-            source=None):
+            source=None, form=None):
     return {'status': status, 'binding': binding, 'body': body,
-            'member': member, 'name': name, 'source': source}
+            'member': member, 'name': name, 'source': source, 'form': form}
 
 
 def _identifier_before(mask, pos):
@@ -364,6 +373,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         member = None
         name = None
         source = None
+        form = None
         call_mode = None
         start = opening
         if before >= 1 and mask[before - 1:before + 1] == '?.':
@@ -382,6 +392,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 member = target['member']
                 name = target['name']
                 source = target['source']
+                form = target['form']
                 start = owner_start
             else:
                 binding = visible_binding(name, start)
@@ -437,6 +448,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 start = owner_start
                 name = target['name']
                 source = target['source']
+                form = target['form']
             else:
                 binding = visible_binding(name, start)
                 status = ('known' if binding is not None
@@ -444,6 +456,8 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         elif before >= 0 and mask[before] == ']':
             bracket = pair_start.get(before)
             if bracket is None:
+                continue
+            if opening in method_positions:
                 continue
             owner_at = bracket
             prefix_end = _previous_nonspace(mask, bracket)
@@ -476,6 +490,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             member = target['member']
             name = target['name']
             source = target['source']
+            form = target['form']
             start = owner_start
         elif before >= 0 and mask[before] == ')':
             wrapper = pair_start.get(before)
@@ -533,7 +548,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             'binding': binding, 'args': args, 'body': body,
             'status': status, 'scope': scope_at(start), 'name': name,
             'member': member, 'source': source, 'parent': False,
-            'argument_calls': []})
+            'form': form, 'argument_calls': []})
     calls.sort(key=lambda call: (call['order'], call['start']))
     nesting = []
     for parent in calls:
@@ -562,3 +577,116 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         call['argument_calls'].sort(
             key=lambda item: (item['order'], item['start']))
     return calls
+
+
+_TEMPLATE = re.compile(r'`(?:\\.|[^`])*`', re.DOTALL)
+_INTERPOLATION = re.compile(r'\$\{')
+_INTERP_ASSIGN = re.compile(r'(?<![\w$])([\w$]+)\s*=(?!=|>)')
+
+
+def _interpolation_spans(template):
+    """Spans of the `${...}` expressions inside one template's text."""
+    found = []
+    body = template.group(0)
+    for opening in _INTERPOLATION.finditer(body):
+        depth = 0
+        cursor = opening.end()
+        left = cursor
+        while cursor < len(body):
+            char = body[cursor]
+            if char in '\'"`':
+                closing = char
+                cursor += 1
+                while cursor < len(body):
+                    if body[cursor] == '\\':
+                        cursor += 2
+                        continue
+                    if body[cursor] == closing:
+                        break
+                    cursor += 1
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                if depth == 0:
+                    found.append((left, cursor))
+                    break
+                depth -= 1
+            cursor += 1
+    return found
+
+
+def interpolation_events(mask, text):
+    """Bind records for the assignments a template's interpolation runs.
+
+    The mask blanks a template whole, so the writes its `${...}` performs
+    are invisible to the assignment walk; they are recorded here from the
+    raw text instead, and the sender walk answers them as unprovable.
+    """
+    found = []
+    for template in _TEMPLATE.finditer(text):
+        for left, right in _interpolation_spans(template):
+            for assignment in _INTERP_ASSIGN.finditer(
+                    template.group(0)[left:right]):
+                found.append((
+                    template.start() + left + assignment.start(),
+                    'interp', assignment))
+    return found
+
+
+def routing_events(mask, text, senders):
+    """Every source position that carries routing state, in source order.
+
+    Declarations and assignments initialise or retarget tracked names, a
+    `.tab` write retargets the routing field, an `Object.assign` merges into
+    a tracked object, and a tracked object handed to any other call escapes:
+    a helper that writes through its parameter is invisible from here, so
+    the object stops being provable at that point rather than being trusted
+    on its literal. The bracket form is found in the raw text because the
+    mask blanks string contents, making `['tab']` unreadable there — a match
+    that begins inside a blanked span is a mention, not code, and the mask
+    preserves positions, so the two diverge at the very first character of
+    the name exactly when the mention is not real code.
+    """
+    declarations = list(re.finditer(
+        r'\b(const|let|var)\s+([\w$]+)\s*=', mask))
+    bindings = []
+    for m in re.finditer(r'(?<![\w$])([\w$]+)\s*=(?!=|>)', mask):
+        before = _js_previous_nonspace(mask, m.start())
+        if before < 0 or mask[before] != '.':
+            bindings.append(m)
+    events = interpolation_events(mask, text)
+    for m in declarations:
+        events.append((m.start(), 'init', m))
+    for m in bindings:
+        events.append((m.start(), 'bind', m))
+    for m in re.finditer(
+            r'(?<![\w$])([\w$]+)\s*\.\s*tab(?![\w$])\s*=', mask):
+        events.append((m.start(), 'prop', m))
+    for m in re.finditer(r'\bObject\s*\.\s*assign\s*\(', mask):
+        events.append((m.start(), 'assign', m))
+    # The bracket form is found in the raw text because the mask blanks
+    # string contents, making `['tab']` unreadable there — but then a match
+    # that begins inside a blanked span is a mention in a string or comment,
+    # not code. The mask preserves positions, so the two diverge at the very
+    # first character of the name exactly when the mention is not real code.
+    for m in re.finditer(
+            r'(?<![\w$])([\w$]+)\s*\[\s*["\']tab["\']\s*\]\s*=', text):
+        if mask[m.start()] == text[m.start()]:
+            events.append((m.start(), 'prop', m))
+    # A tracked object handed to any other call escapes: a helper that writes
+    # through its parameter is invisible from here, so the object stops being
+    # provable at that point rather than being trusted on its literal.
+    for m in re.finditer(r'(?<![\w$])([\w$]+)\s*\(', mask):
+        if m.group(1) in senders or m.group(1) in ('if', 'for', 'while',
+                                                   'switch', 'catch',
+                                                   'function', 'return'):
+            continue
+        # Object.assign's target is modelled above, so it is not an escape;
+        # every other call taking the object is one, member calls included.
+        dot = _js_previous_nonspace(mask, m.start())
+        if (dot >= 0 and mask[dot] == '.'
+                and _js_word_before(mask, dot) == 'Object'):
+            continue
+        events.append((m.start(), 'escape', m))
+    events.sort(key=lambda e: e[0])
+    return events, bindings
