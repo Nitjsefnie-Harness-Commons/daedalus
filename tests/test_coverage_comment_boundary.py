@@ -28,7 +28,7 @@ import test_coverage_comment_workflow as commenter  # noqa: E402
 
 _DOWNLOAD = (
     'actions/download-artifact@'
-    '37930b1c2abaa49bbe596cd826c3c89aef350131'
+    '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'
 )
 _MARKER = '<!-- daedalus-diff-coverage -->\n'
 _HEAD_SHA = 'B' * 40
