@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
+import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
 def _harness(source, bounded_steps=0, module=False):
@@ -203,6 +204,57 @@ def test_windows_retry_escalates_inner_and_outer_timeout_budgets(tmp):
     programs = [entry.args[0][3] for entry in popen.call_args_list]
     assert 'const _dashnodeStepTimeoutMs = 5000;' in programs[0]
     assert 'const _dashnodeStepTimeoutMs = 10000;' in programs[1]
+
+
+def test_windows_declined_retry_is_named_in_the_verdict(tmp):
+    del tmp
+    failure, events, _ = behaviour._controlled_run(
+        'win32', (1101, [behaviour._timeout(),
+                         behaviour._timeout('partial', 'error')]),
+        (1102, [behaviour._result(0, 'wrong retry')]))
+    assert failure.startswith(
+        'dashboard node outer timeout after 1 attempt\n'
+        'retry declined: the post-kill drain did not complete '
+        '(drain outcome: timed out)\n'), failure
+    assert 'attempt 1:' in failure, failure
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_windows_declined_retry_names_a_drain_that_raised(tmp):
+    del tmp
+
+    def raise_drain(_process):
+        raise RuntimeError('drain reader gone')
+
+    failure, events, _ = behaviour._controlled_run(
+        'win32', (1201, [behaviour._timeout(), raise_drain]),
+        (1202, [behaviour._result(0, 'wrong retry')]))
+    expected = (
+        'retry declined: the post-kill drain did not complete '
+        '(drain outcome: raised RuntimeError: drain reader gone)\n')
+    assert expected in failure, failure
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_non_windows_verdict_does_not_name_a_declined_retry(tmp):
+    del tmp
+    failure, events, _ = behaviour._controlled_run(
+        'linux', (1301, [behaviour._timeout(), behaviour._result(-9)]))
+    assert failure.startswith('dashboard node outer timeout after 1 attempt')
+    assert 'attempt 1:' in failure and 'pid: 1301' in failure, failure
+    assert 'retry declined' not in failure, failure
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_both_attempts_verdict_does_not_name_a_declined_retry(tmp):
+    del tmp
+    failure, events, _ = behaviour._controlled_run(
+        'win32', (1401, [behaviour._timeout(), behaviour._result(-9, 'one')]),
+        (1402, [behaviour._timeout(), behaviour._result(-9, 'two')]))
+    assert failure.startswith(
+        'dashboard node outer timeout after 2 attempts\n'), failure
+    assert 'retry declined' not in failure, failure
+    assert [event[0] for event in events].count('popen') == 2, events
 
 
 def main():
