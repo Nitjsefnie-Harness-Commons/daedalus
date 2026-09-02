@@ -5,12 +5,10 @@ the result directory as a parameter. `result_store` owns the locks, the slot
 primitives and the accepted-delivery record; both routes call it exactly as
 the request handler used to.
 
-`res_dir` is only half a parameter: the slot paths these routes build are
-resolved under it, while the delivery paths come back from `result_store`,
-which resolves them from configuration (`DELIVERY_DIR`). Passing anything
-but the configured results root therefore splits one result across two
-trees, so it stays a parameter in name until `result_store` is
-parameterised too — issue 484.
+`res_dir` is the results root, and every file either route writes is
+resolved under it: the slot files directly, and the delivery files through
+`result_store.delivery_root`. One root therefore names one tree, so a
+caller can redirect a whole request's storage by passing a different one.
 """
 import json
 import time
@@ -27,7 +25,7 @@ from daedalus_bridge import result_store
 COMPAT_CONSUME_RETRY_ATTEMPTS = 8
 
 
-def accept_result(res_dir, cmd_dir, token, body):
+def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
     """Store one posted result and publish its dashboard event."""
     tab_id = body.get('tabId', '')
     if tab_id and path_safety.unsafe_component(tab_id):
@@ -59,7 +57,7 @@ def accept_result(res_dir, cmd_dir, token, body):
     try:
         delivery_dir, delivery_file = (
             result_store.delivery_result_paths(
-                token, tab_id, did) if did else (None, None))
+                res_dir, token, tab_id, did) if did else (None, None))
     except ValueError:
         return 400, {'error': 'invalid path component'}
     body.pop('deliveryId', None)
@@ -116,7 +114,8 @@ def accept_result(res_dir, cmd_dir, token, body):
                             entries.append((stamp, delivery_file.name))
                             try:
                                 result_store.evict_delivery_results(
-                                    delivery_dir, entries)
+                                    delivery_dir, entries,
+                                    max_delivery_results)
                             except OSError:
                                 # The result is stored and its caller
                                 # can read it. Failing to trim
@@ -164,7 +163,7 @@ def fetch_result(res_dir, token, params):
         if delivery:
             delivery_dir, res_file, delivery_tab = (
                 result_store.find_delivery_result(
-                    token, tab, delivery)
+                    res_dir, token, tab, delivery)
             )
         else:
             # A requested tab selects its own slot; otherwise use the
@@ -229,7 +228,7 @@ def fetch_result(res_dir, token, params):
                 try:
                     candidate_dir, candidate_file, candidate_tab = (
                         result_store.find_delivery_result(
-                            token, tab, preview_delivery))
+                            res_dir, token, tab, preview_delivery))
                 except ValueError:
                     candidate_dir = None
                 if candidate_dir is None:

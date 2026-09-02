@@ -2,10 +2,14 @@
 import os, json, threading, time, uuid
 
 from daedalus_bridge import atomic_file
-from daedalus_bridge.config import DELIVERY_DIR, MAX_DELIVERY_RESULTS
 from daedalus_bridge.delivery_stripes import stripe_index
 from daedalus_bridge import path_safety
 
+
+# The one spelling of the delivery namespace. Every caller derives it from
+# the results root it was handed, so a root and a delivery directory cannot
+# come to name two different trees.
+DELIVERY_SUBDIR = 'deliveries'
 
 # Result files are single-value delivery slots. POST replacement and
 # conditional GET consumption share this lock so a newer result cannot land
@@ -14,6 +18,11 @@ result_lock = threading.Lock()
 DELIVERY_LOCK_STRIPES = 64
 delivery_locks = tuple(
     threading.Lock() for _ in range(DELIVERY_LOCK_STRIPES))
+
+
+def delivery_root(res_dir):
+    """The delivery namespace under one results root."""
+    return res_dir / DELIVERY_SUBDIR
 
 
 def delivery_lock_for(target_key):
@@ -73,35 +82,38 @@ def result_key(token, tab=''):
     return f'{token}_{tab}' if tab else token
 
 
-def delivery_result_paths(token, tab, did):
+def delivery_result_paths(res_dir, token, tab, did):
     """Return the per-target directory and one checked result file."""
     if (not isinstance(did, str) or not did
             or path_safety.unsafe_component(did)):
         raise ValueError('invalid delivery id')
+    root = delivery_root(res_dir)
     key = path_safety.derived_component(result_key(token, tab))
-    delivery_dir = path_safety.under(DELIVERY_DIR, key)
+    delivery_dir = path_safety.under(root, key)
     # The stripe is keyed on `key`, so the resolved directory must be the
     # one-to-one namespace entry that key names, not an alias to another one.
     alias_attempts = []
     parent_matches = path_safety.same_path(
-        delivery_dir.parent, DELIVERY_DIR, alias_attempts)
+        delivery_dir.parent, root, alias_attempts)
     if not parent_matches or delivery_dir.name != key:
         path_safety.log_path_refusal(
-            'alias', DELIVERY_DIR, (key,), alias_attempts)
+            'alias', root, (key,), alias_attempts)
         raise ValueError('delivery target is an alias')
     delivery_file = path_safety.under(
         delivery_dir, path_safety.derived_component(f'{did}.json'))
     return delivery_dir, delivery_file
 
 
-def find_delivery_result(token, tab, did):
+def find_delivery_result(res_dir, token, tab, did):
     """Find a delivery file and the tab component that owns its slot."""
-    delivery_dir, delivery_file = delivery_result_paths(token, tab, did)
+    delivery_dir, delivery_file = delivery_result_paths(
+        res_dir, token, tab, did)
     if tab or delivery_file.exists():
         return delivery_dir, delivery_file, tab
+    root = delivery_root(res_dir)
     prefix = f'{token}_'
     try:
-        with os.scandir(DELIVERY_DIR) as entries:
+        with os.scandir(root) as entries:
             names = sorted(
                 entry.name for entry in entries
                 if entry.name.startswith(prefix)
@@ -111,7 +123,7 @@ def find_delivery_result(token, tab, did):
     for name in names:
         try:
             candidate_dir = path_safety.under(
-                DELIVERY_DIR, path_safety.derived_component(name))
+                root, path_safety.derived_component(name))
             candidate_file = path_safety.under(
                 candidate_dir, path_safety.derived_component(f'{did}.json'))
         except ValueError:
@@ -162,12 +174,12 @@ def mark_delivery_result(path, entries):
     return stamp
 
 
-def evict_delivery_results(delivery_dir, entries):
-    """Drop files older than the configured stamp boundary."""
-    if not MAX_DELIVERY_RESULTS or len(entries) <= MAX_DELIVERY_RESULTS:
+def evict_delivery_results(delivery_dir, entries, max_results):
+    """Drop files older than the caller's stamp boundary; 0 keeps all."""
+    if not max_results or len(entries) <= max_results:
         return
     ordered = sorted(entries, key=lambda item: item[0])
-    boundary = ordered[-MAX_DELIVERY_RESULTS][0]
+    boundary = ordered[-max_results][0]
     names = [name for stamp, name in entries if stamp < boundary]
     for name in names:
         try:

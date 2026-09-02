@@ -17,7 +17,7 @@ from daedalus_bridge import stream_service
 from daedalus_bridge import tab_registry
 from daedalus_bridge import upload_routes
 from daedalus_bridge.config import (
-    BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR,
+    BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR, MAX_DELIVERY_RESULTS,
     MAX_REQUEST_WORKERS, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
     MAX_SEGMENTS_PER_JOB, PORT, REQUEST_TIMEOUT,
     RES_DIR, SEG_DIR, STREAM_KEEPALIVE, STREAM_MAX_AGE,
@@ -314,7 +314,7 @@ class Handler(RequestMixin):
 
         elif self.path == '/result':
             return self.answer(result_routes.accept_result(
-                RES_DIR, CMD_DIR, token, body))
+                RES_DIR, CMD_DIR, token, body, MAX_DELIVERY_RESULTS))
 
         return self._json(404, {'error': 'not found'})
 

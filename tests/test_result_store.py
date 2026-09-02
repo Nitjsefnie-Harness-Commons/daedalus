@@ -61,7 +61,8 @@ from pathlib import Path
 
 from daedalus_bridge import path_safety, result_store
 
-delivery_root = Path(result_store.DELIVERY_DIR)
+res_dir = Path(os.environ['DAEDALUS_DIR']) / 'results'
+delivery_root = result_store.delivery_root(res_dir)
 key = result_store.result_key('tok', 'extension')
 delivery_dir = delivery_root / key
 delivery_file = delivery_dir / '123_1.json'
@@ -83,7 +84,7 @@ def call_with(answers):
     try:
         with contextlib.redirect_stdout(output):
             paths = result_store.delivery_result_paths(
-                'tok', 'extension', '123_1')
+                res_dir, 'tok', 'extension', '123_1')
     finally:
         path_safety.os.path.realpath = realpath
     return paths, calls, output.getvalue()
@@ -114,7 +115,7 @@ try:
     with contextlib.redirect_stdout(stable_log):
         try:
             result_store.delivery_result_paths(
-                'tok', 'extension', '123_1')
+                res_dir, 'tok', 'extension', '123_1')
         except ValueError:
             stable = 'refused'
         else:
@@ -129,6 +130,25 @@ print('DELIVERY_PATH ' + json.dumps({
     'stable': stable,
     'stable_calls': stable_calls,
     'stable_log': stable_log.getvalue(),
+}))
+'''
+
+
+_UNCONFIGURED_PROBE = r'''
+import json
+import os
+from pathlib import Path
+
+from daedalus_bridge import result_store
+
+root = Path(os.environ['THROWAWAY_ROOT'])
+delivery_dir, delivery_file = result_store.delivery_result_paths(
+    root, 'tok', 'extension', '123_1')
+print('UNCONFIGURED ' + json.dumps({
+    'daedalus_env': sorted(
+        name for name in os.environ if name.startswith('DAEDALUS')),
+    'dir': str(delivery_dir),
+    'file': str(delivery_file),
 }))
 '''
 
@@ -216,6 +236,35 @@ def test_delivery_paths_use_the_retrying_parent_comparison(tmp):
         (str(wrong_root), str(delivery_root)),
     )
     assert f'attempts={stable_attempts!r}' in stable_lines[0], answer
+
+
+def test_the_store_needs_no_bridge_configuration(tmp):
+    """A results root is a parameter, so no `DAEDALUS_*` value is needed.
+
+    The environment is stripped of every `DAEDALUS_*` variable, which the
+    probe reports back: importing `daedalus_bridge.config` there raises
+    `SystemExit`, so a store that still read it could not run at all.
+    """
+    root = Path(tmp) / 'unconfigured' / 'results'
+    root.mkdir(parents=True)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS')}
+    env.update({
+        'PYTHONDONTWRITEBYTECODE': '1',
+        'THROWAWAY_ROOT': str(root),
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', _UNCONFIGURED_PROBE],
+        cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith('UNCONFIGURED ')]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    answer = json.loads(marked[0][len('UNCONFIGURED '):])
+    assert answer['daedalus_env'] == [], answer
+    assert answer['dir'] == str(root / 'deliveries' / 'tok_extension'), answer
+    assert answer['file'] == str(
+        root / 'deliveries' / 'tok_extension' / '123_1.json'), answer
 
 
 def main():
