@@ -31,7 +31,9 @@ POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
 # ("Nowhere does this say growing a listed file is allowed") is refused.
 # The rule reads positively here, so neither belongs in the file anyway.
 FORBIDDEN_CLAIMS = (
-    # The licence this file carried, verbatim, which misled seven sessions.
+    # The licence the policy carried, verbatim. Growth is not bought by
+    # editing the number; it is refused until the code moves or the file
+    # shrinks.
     'growing a listed file is allowed',
     # A first crossing excused by a fresh entry instead of being split.
     'you may add a baseline entry',
@@ -155,14 +157,14 @@ STATES_THE_POLICY = (
     'Under no circumstances may a listed file grow.',
 )
 
-# Licences to grow, which it must refuse. The first is the sentence this
-# file carried until the branch that removed it. This half is a backstop
-# over free prose and does not pretend to catch a paraphrase: a permissive
+# Licences to grow, which it must refuse. The first is the sentence the
+# policy carried until this branch removed it. This half is a backstop over
+# free prose and does not pretend to catch a paraphrase: a permissive
 # sentence written in none of these wordings is caught only where it
-# displaces the rule paragraph, and STATES_THE_RULE is what catches it
-# there - the containment pin below stays satisfied when the constant is
-# reworded in step. "A first crossing may add a BASELINE entry." was
-# listed here until its claim grew a subject; it is what that cost.
+# displaces the rule paragraph and loses the rule's spelling with it.
+# An exception clause appended to an intact rule keeps that spelling and
+# passes, and the containment pin below stays satisfied when the constant
+# is reworded in step.
 SANCTIONS_GROWTH = (
     'Growing a listed file is allowed, because some fixes genuinely belong '
     'in it, but only by editing its recorded number in the same commit.',
@@ -311,14 +313,14 @@ def test_tightening_leaves_a_file_it_has_no_entry_for(tmp):
 
 
 def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
-    """A refused session must not read a bigger number as the fix."""
+    """No wording of the three licences to grow survives in the source."""
     del tmp
     offered = _offered(POLICY_SOURCE.read_text(encoding='utf-8'))
     assert not offered, f'the size policy offers growth by hand: {offered}'
 
 
 def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
-    """A correct statement of the policy is not read as a licence."""
+    """No listed correct statement of the policy contains a licence."""
     del tmp
     assert STATES_THE_POLICY, 'the tolerance battery is empty'
     refused = [(text, _offered(text)) for text in STATES_THE_POLICY
