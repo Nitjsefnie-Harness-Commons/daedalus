@@ -262,9 +262,14 @@ def test_the_store_needs_no_bridge_configuration(tmp):
     assert len(marked) == 1, (proc.stdout, proc.stderr)
     answer = json.loads(marked[0][len('UNCONFIGURED '):])
     assert answer['daedalus_env'] == [], answer
-    assert answer['dir'] == str(root / 'deliveries' / 'tok_extension'), answer
-    assert answer['file'] == str(
-        root / 'deliveries' / 'tok_extension' / '123_1.json'), answer
+    # Resolved on both sides: `under` returns the path it checked, resolved.
+    # The runner happens to resolve the temp root it hands over, so this does
+    # not depend on that staying true.
+    expected_dir = os.path.realpath(root / 'deliveries' / 'tok_extension')
+    assert answer['dir'] == expected_dir, (answer, expected_dir)
+    expected_file = os.path.realpath(
+        root / 'deliveries' / 'tok_extension' / '123_1.json')
+    assert answer['file'] == expected_file, (answer, expected_file)
 
 
 def main():
