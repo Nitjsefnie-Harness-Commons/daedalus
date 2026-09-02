@@ -366,6 +366,7 @@
 !/tests/test_mcp_transport_guards.py
 !/tests/test_overlap_client_state.py
 !/tests/test_overlap_harness.py
+!/tests/test_overlap_stall_retry.py
 !/tests/test_owned_writes.py
 !/tests/test_parent_watch.py
 !/tests/test_path_safety.py
