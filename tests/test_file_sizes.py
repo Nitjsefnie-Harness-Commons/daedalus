@@ -48,7 +48,7 @@ RAISING_VERBS = ('rais', 'increas', 'upward', 'bump', 'rise',
                  'go up', 'goes up', 'grow past', 'grows past')
 _RAISING = r'\b(?:' + '|'.join(RAISING_VERBS) + ')'
 # A comma inside the window, because "never, ever raised" is a sentence
-# somebody writes; the window itself is pinned by the last negative below.
+# somebody writes; the span itself is pinned by the far-negator negative.
 ACCEPTED_RULE_SPELLINGS = (
     r'(?:never|nobody|not|no)\b[a-z ,-]{0,40}?' + _RAISING,
     _RAISING + r'[a-z ,-]{0,40}?(?:forbidden|prohibited)',
@@ -134,8 +134,8 @@ STATES_THE_POLICY = (
     'Under no circumstances may a listed file grow.',
 )
 
-# Licences to grow, which it must refuse: the sentence the policy carried,
-# one more per remaining claim, and one carrying markers. This half is a
+# Licences to grow, which it must refuse: the sentence the policy carried, a
+# marker-carrying variant of it, then one per remaining claim. This half is a
 # backstop over free prose and does not pretend to catch a paraphrase - a
 # permissive sentence written in none of these wordings is caught only where
 # it displaces the rule paragraph and loses the rule's spelling with it. An
