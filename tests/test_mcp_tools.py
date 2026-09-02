@@ -449,6 +449,7 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         assert cases, f'{name}: registered with no pinned refusal'
         tool = registered[name]
         for overrides, exception, message in cases:
+            assert message, f'{name} {overrides}: refusal pinned with no message'
             composition.bridge.calls.clear()
             try:
                 asyncio.run(tool(**_tool_arguments(tool, overrides)))
