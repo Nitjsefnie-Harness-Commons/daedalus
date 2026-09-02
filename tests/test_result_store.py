@@ -146,7 +146,7 @@ delivery_dir, delivery_file = result_store.delivery_result_paths(
     root, 'tok', 'extension', '123_1')
 print('UNCONFIGURED ' + json.dumps({
     'daedalus_env': sorted(
-        name for name in os.environ if name.startswith('DAEDALUS')),
+        name for name in os.environ if name.startswith('DAEDALUS_')),
     'dir': str(delivery_dir),
     'file': str(delivery_file),
 }))
@@ -248,7 +248,7 @@ def test_the_store_needs_no_bridge_configuration(tmp):
     root = Path(tmp) / 'unconfigured' / 'results'
     root.mkdir(parents=True)
     env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS')}
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'PYTHONDONTWRITEBYTECODE': '1',
         'THROWAWAY_ROOT': str(root),
