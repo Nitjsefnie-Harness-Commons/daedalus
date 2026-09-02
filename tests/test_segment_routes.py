@@ -16,8 +16,10 @@ directory these tests pass in is the one that configuration names. Each
 test uses its own job name, because that directory is process-wide.
 """
 import atexit
+import contextlib
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -62,6 +64,40 @@ def _mint(jobs, token, job):
 def _record(job):
     return json.loads(
         (SEG_DIR / f'{job}.json').read_text(encoding='utf-8'))
+
+
+def _write_record(job, record):
+    (SEG_DIR / f'{job}.json').write_text(
+        json.dumps(record), encoding='utf-8')
+
+
+@contextlib.contextmanager
+def _refused(method, matches):
+    """Refuse one pathlib call inside the block, restoring it afterwards.
+
+    This suite runs as root on some machines, where a permission bit is not
+    a portable way to make one filesystem call fail, so the call is named
+    and refused for exactly the path the test is about.
+    """
+    real = getattr(pathlib.Path, method)
+
+    def refusing(self, *args, **kwargs):
+        if matches(self):
+            raise OSError(f'injected {method} failure')
+        return real(self, *args, **kwargs)
+
+    setattr(pathlib.Path, method, refusing)
+    try:
+        yield
+    finally:
+        setattr(pathlib.Path, method, real)
+
+
+def _symlink_or_skip(link, target):
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
 
 
 def _store(routes, sig, job, index, raw):
@@ -258,6 +294,230 @@ def test_mint_writes_nothing_when_the_name_collides(_tmp):
     assert not (SEG_DIR / '.coll.json.tmp').exists()
     assert not (SEG_DIR / 'coll').exists()
     assert (SEG_DIR / 'coll.json').is_dir()
+
+
+def test_admit_and_status_refuse_a_job_whose_directory_escapes_the_root(_tmp):
+    """A spotless job name can still name a directory outside the root.
+
+    `under` is the only check that can see the symlink, and each of these
+    routes joins a second path — the record — that would escape on its own,
+    so each answers its own 400 rather than letting the join raise.
+    """
+    routes = _routes('fixture_segment_routes_escape')
+    outside = Path(_BASE) / 'outside'
+    outside.mkdir(exist_ok=True)
+    _symlink_or_skip(SEG_DIR / 'escape-job', outside)
+    assert routes.admit_segment(
+        SEG_DIR, {'job': ['escape-job'], 'seg': ['0']}, 'sig') == (
+            400, {'error': 'invalid param'})
+    assert routes.segment_status(
+        SEG_DIR, {'job': ['escape-job']}, 'sig') == (
+            400, {'error': 'bad job'})
+
+
+def test_a_write_still_lands_when_the_record_cannot_be_read(_tmp):
+    """Storage keeps going against what the directory really holds.
+
+    Admission authorizes from a readable record; the record can still break
+    before the write reaches it. A record that exists and cannot be read is
+    not one that never existed, and it is not the write path's to answer
+    for either: the write recounts the directory, keeps the segment inside
+    what is actually stored, and leaves the broken record exactly where it
+    was for the mint to answer.
+    """
+    jobs = _jobs('fixture_segment_jobs_write_corrupt')
+    routes = _routes('fixture_segment_routes_write_corrupt')
+    job = 'write-corrupt-job'
+    sig = _mint(jobs, 'writetok', job)
+
+    def admit(index):
+        answer = routes.admit_segment(
+            SEG_DIR, {'job': [job], 'seg': [str(index)]}, sig)
+        assert isinstance(answer, routes.Admission), answer
+        return answer
+
+    admitted = [admit(0), admit(1)]
+    (SEG_DIR / f'{job}.json').write_text('{', encoding='utf-8')
+    assert routes.store_segment(b'abcde', admitted[0]) == (200, {'ok': True})
+    assert (SEG_DIR / job / '000000.ts').read_bytes() == b'abcde'
+    assert (SEG_DIR / f'{job}.json').read_text(encoding='utf-8') == '{'
+    assert routes.store_segment(b'xy', admitted[1]) == (200, {'ok': True})
+    assert sorted(
+        path.name for path in (SEG_DIR / job).glob('*.ts')) == [
+            '000000.ts', '000001.ts']
+
+    # Admission reads the record it authorizes against, so nothing new is
+    # admitted until the mint has answered for the broken one.
+    assert routes.admit_segment(
+        SEG_DIR, {'job': [job], 'seg': ['2']}, sig) == (
+            403, {'error': 'bad sig'})
+
+
+def test_a_write_that_cannot_scan_the_directory_is_answered(_tmp):
+    """A record without totals makes the write recount; a refused scan is a
+    500 rather than an exception that would drop the connection."""
+    jobs = _jobs('fixture_segment_jobs_write_scan')
+    routes = _routes('fixture_segment_routes_write_scan')
+    job = 'write-scan-job'
+    sig = _mint(jobs, 'scantok', job)
+    _write_record(job, {
+        'token': 'scantok', 'sig': sig,
+        'max_segment_index': QUOTAS[0], 'max_segment_count': QUOTAS[1],
+        'max_bytes': QUOTAS[2]})
+    seg_dir = SEG_DIR / job
+    with _refused('iterdir', lambda path: path == seg_dir):
+        assert _store(routes, sig, job, 0, b'abc') == (
+            500, {'error': 'segment storage failure'})
+    assert not (seg_dir / '000000.ts').exists()
+
+
+def test_lookup_answers_for_every_shape_a_job_record_can_take(_tmp):
+    """The token-gated lookup owes an answer to every state a record is in."""
+    jobs = _jobs('fixture_segment_jobs_lookupshapes')
+    routes = _routes('fixture_segment_routes_lookupshapes')
+    job = 'lookup-shapes'
+    _mint(jobs, 'shapetok', job)
+    assert routes.lookup_job(SEG_DIR, 'shapetok', {'job': ['']}) == (
+        400, {'error': 'bad job'})
+    assert routes.lookup_job(
+        SEG_DIR, 'shapetok', {'job': ['a/b']}) == (400, {'error': 'bad job'})
+    assert routes.lookup_job(
+        SEG_DIR, 'shapetok', {'job': ['lookup-never']}) == (
+            404, {'error': 'no such job'})
+    (SEG_DIR / f'{job}.json').write_text('{', encoding='utf-8')
+    assert routes.lookup_job(SEG_DIR, 'shapetok', {'job': [job]}) == (
+        500, {'error': 'segment storage failure'})
+    _write_record(job, {'token': 'shapetok', 'sig': 6})
+    assert routes.lookup_job(SEG_DIR, 'shapetok', {'job': [job]}) == (
+        409, {'error': 'job record cannot resume'})
+    _write_record(job, {'token': 'shapetok', 'sig': 'kept-capability'})
+    assert routes.lookup_job(SEG_DIR, 'shapetok', {'job': [job]}) == (
+        200, {'ok': True, 'sig': 'kept-capability'})
+
+
+def test_mint_refuses_a_resume_record_it_cannot_resume(_tmp):
+    """A record that names the owner but not a usable capability is stuck.
+
+    Re-minting is documented as the resume, so the answer has to be the
+    same 409 a foreign owner gets rather than a fresh capability silently
+    handed out over a record nobody can vouch for.
+    """
+    jobs = _jobs('fixture_segment_jobs_resume')
+    job = 'resume-shapes'
+    for broken in ({'token': 'resumetok'},
+                   {'token': 'resumetok', 'sig': 6},
+                   {'token': 'resumetok', 'sig': 'sí'}):
+        _write_record(job, broken)
+        assert jobs.mint_job(
+            SEG_DIR, 'resumetok', {'job': job},
+            jobs.JobQuotas(*QUOTAS)) == (
+                409, {'error': 'job record cannot resume'}), broken
+    _write_record(job, {
+        'token': 'resumetok', 'sig': 'kept-capability', 'max_bytes': '64'})
+    assert jobs.mint_job(
+        SEG_DIR, 'resumetok', {'job': job}, jobs.JobQuotas(*QUOTAS)) == (
+            409, {'error': 'job record cannot resume'})
+    _write_record(job, {'token': 'resumetok', 'sig': 'kept-capability'})
+    assert jobs.mint_job(
+        SEG_DIR, 'resumetok', {'job': job}, jobs.JobQuotas(-1, 3, 64)) == (
+            409, {'error': 'job record cannot resume'})
+
+    # A legacy record whose directory is gone has nothing to convert, and
+    # the conversion refuses it rather than minting an empty job over it.
+    _write_record('resume-gone', {
+        'token': 'resumetok', 'sig': 'kept-capability'})
+    assert jobs.mint_job(
+        SEG_DIR, 'resumetok', {'job': 'resume-gone'},
+        jobs.JobQuotas(*QUOTAS)) == (
+            409, {'error': 'job record cannot resume'})
+    assert not (SEG_DIR / 'resume-gone').exists()
+
+
+def test_a_legacy_job_that_exceeds_current_quotas_is_not_resumed(_tmp):
+    """Segments stored under older limits do not buy budget under new ones.
+
+    The conversion reads the directory to decide, so a job holding more
+    files, more bytes or a higher index than the quotas it would be
+    converted against is refused instead of being silently adopted.
+    """
+    jobs = _jobs('fixture_segment_jobs_legacyquota')
+    job = 'legacy-quota'
+    seg_dir = SEG_DIR / job
+    seg_dir.mkdir()
+    _write_record(job, {'token': 'legtok', 'sig': 'legacy-capability'})
+    for index in range(QUOTAS[1] + 1):
+        (seg_dir / f'{index:06d}.ts').write_bytes(b'ab')
+    status, payload = jobs.mint_job(
+        SEG_DIR, 'legtok', {'job': job}, jobs.JobQuotas(*QUOTAS))
+    assert (status, payload) == (
+        409, {'error': 'legacy job exceeds current quotas'})
+    assert _record(job) == {
+        'token': 'legtok', 'sig': 'legacy-capability'}
+
+    for index in range(QUOTAS[1]):
+        (seg_dir / f'{index:06d}.ts').unlink()
+    for path in seg_dir.glob('*.ts'):
+        path.unlink()
+    (seg_dir / '000000.ts').write_bytes(b'x' * (QUOTAS[2] + 1))
+    status, payload = jobs.mint_job(
+        SEG_DIR, 'legtok', {'job': job}, jobs.JobQuotas(*QUOTAS))
+    assert (status, payload) == (
+        409, {'error': 'legacy job exceeds current quotas'})
+
+    (seg_dir / '000000.ts').unlink()
+    (seg_dir / f'{QUOTAS[0] + 1:06d}.ts').write_bytes(b'ab')
+    status, payload = jobs.mint_job(
+        SEG_DIR, 'legtok', {'job': job}, jobs.JobQuotas(*QUOTAS))
+    assert (status, payload) == (
+        409, {'error': 'legacy job exceeds current quotas'})
+    assert sorted(path.name for path in seg_dir.iterdir()) == [
+        f'{QUOTAS[0] + 1:06d}.ts']
+
+
+def test_a_resume_reconciles_totals_the_record_has_lost(_tmp):
+    """The resume is the one moment the record is measured against disk.
+
+    A crash between publishing a segment and recording it leaves a record
+    that understates the job; the mint is the right place to notice, since
+    it runs once per resume rather than once per segment, and a write that
+    could not confirm landing is healed here rather than trusted.
+    """
+    jobs = _jobs('fixture_segment_jobs_reconcile')
+    job = 'reconcile-job'
+    sig = _mint(jobs, 'recitok', job)
+    seg_dir = SEG_DIR / job
+    (seg_dir / '000004.ts').write_bytes(b'abcde')
+    (seg_dir / '000000.ts').write_bytes(b'xy')
+    _write_record(job, {
+        'token': 'recitok', 'sig': sig,
+        'max_segment_index': QUOTAS[0], 'max_segment_count': QUOTAS[1],
+        'max_bytes': QUOTAS[2], 'stored_count': 0, 'stored_bytes': 0})
+    status, payload = jobs.mint_job(
+        SEG_DIR, 'recitok', {'job': job}, jobs.JobQuotas(*QUOTAS))
+    assert status == 200 and payload['sig'] == sig, (status, payload)
+    record = _record(job)
+    assert (record['stored_count'], record['stored_bytes']) == (2, 7), record
+    assert not (SEG_DIR / f'.{job}.json.dirty').exists(), 'the mark cleared'
+    assert record['max_segment_count'] == QUOTAS[1], record
+
+
+def test_a_refused_mint_that_cannot_remove_its_directory_still_answers(_tmp):
+    """The rollback degrades instead of raising through the mint.
+
+    Only the directory this call created is removed, and only while empty;
+    when even that is refused the caller still gets the 409 and the
+    leftover directory is left for whatever filled it.
+    """
+    jobs = _jobs('fixture_segment_jobs_rmdir')
+    _mint(jobs, 'rmdirtok', 'rmdir-job.json')
+    created = SEG_DIR / 'rmdir-job'
+    with _refused('rmdir', lambda path: path == created):
+        status, payload = jobs.mint_job(
+            SEG_DIR, 'rmdirtok', {'job': 'rmdir-job'},
+            jobs.JobQuotas(*QUOTAS))
+    assert (status, payload) == (409, {'error': 'job name unavailable'})
+    assert (SEG_DIR / 'rmdir-job.json').is_dir()
+    assert created.is_dir() and not any(created.iterdir())
 
 
 def test_the_modules_need_no_configuration_of_their_own(_tmp):

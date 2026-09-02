@@ -10,6 +10,7 @@ import concurrent.futures
 import http.client
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -18,6 +19,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _segments import (TMP_SEG_ROOT, TOK, mint_job, post_segment,  # noqa: E402
                        seg_job)
+
+# `[SEGMENT-TIMING] <job> stored=<n> <phase>=<ms>... parts=<ms> total=<ms>`
+TIMING_LINE = re.compile(
+    r'\[SEGMENT-TIMING\] (?P<job>\S+) stored=(?P<stored>\d+) '
+    r'(?P<phases>acquire=[\d.]+ usage=[\d.]+ replaced=[\d.]+ '
+    r'write=[\d.]+ record=[\d.]+) '
+    r'parts=(?P<parts>[\d.]+) total=(?P<total>[\d.]+)')
 
 
 def test_legacy_segment_job_migrates_with_existing_usage(tmp):
@@ -513,6 +521,48 @@ def test_a_recount_reconciles_and_clears_the_mark_before_a_rejection(tmp):
         assert record['stored_count'] == 1, record
         dirty_path = Path(docroot) / 'segments' / f'.{job}.json.dirty'
         assert not dirty_path.exists(), 'mark should have cleared on reconcile'
+
+
+def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
+    """`DAEDALUS_DEBUG_TIMING=1` attributes the write path per phase.
+
+    The line is pinned for its shape — the prefix, the job, the stored
+    count and the phase names in the order the phases happen — and never
+    for an elapsed value, which would decide differently on a loaded
+    runner. Unset, the instrumentation prints nothing at all, which the
+    unit contract for `log_timing` pins.
+    """
+    lines = []
+    env = {'DAEDALUS_DEBUG_TIMING': '1'}
+    with _util.bridge(
+            tmp, env=env, output=lines) as (base, _docroot):
+        job = seg_job()
+        _, minted = mint_job(base, TOK, job)
+        sig = minted['sig']
+        for index in ('0', '1'):
+            status, body = post_segment(
+                base, job, sig, index, payload=b'abc')
+            assert status == 200, (index, status, body)
+
+    shape = ('prefix', 'job', 'stored count',
+             'acquire', 'usage', 'replaced', 'write', 'record',
+             'parts', 'total')
+    observed = []
+    for line in lines:
+        match = TIMING_LINE.fullmatch(line.strip())
+        if match:
+            observed.append(match.groupdict())
+    assert len(observed) == 2, (shape, lines)
+    for row in observed:
+        assert row['job'] == job, row
+        # The stored count is the one the write read at its start, so the
+        # first line says 0 and the second 1.
+        assert row['stored'] in ('0', '1'), row
+        names = [pair.split('=')[0] for pair in row['phases'].split()]
+        assert names == ['acquire', 'usage', 'replaced', 'write',
+                         'record'], row
+        for name, value in row.items():
+            assert value is not None, (name, row)
 
 
 def main():
