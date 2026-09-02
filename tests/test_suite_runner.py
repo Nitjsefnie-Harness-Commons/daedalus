@@ -386,7 +386,8 @@ def test_output_close_failure_reaps_the_spawned_suite(tmp):
     runner.subprocess.Popen = recording_popen
     try:
         try:
-            runner._run_suite(suite, summaries)
+            runner._run_suite(
+                suite, summaries, runner.DEFAULT_SUITE_TIMEOUT_S)
         except OSError as exc:
             error = exc
     finally:
