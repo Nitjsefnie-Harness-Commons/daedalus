@@ -491,9 +491,8 @@ print('MINTROOT ' + json.dumps({
 def _mint_root_probe(tmp):
     """Mint one job under a root configuration does not name.
 
-    `DAEDALUS_DIR` is set, so `config.SEG_DIR` exists and is a real second
-    tree the probe can report on; `ALT_SEG_ROOT` is the root handed to
-    `mint_job`.
+    `DAEDALUS_DIR` is set, so `config.SEG_DIR` is a real second tree the
+    probe can report on.
     """
     env = dict(os.environ)
     env.update({
@@ -516,9 +515,8 @@ def _mint_root_probe(tmp):
 def test_the_segments_root_governs_where_a_mint_writes(tmp):
     """The record follows the passed root, and the configured one stays empty.
 
-    The negative half is the control: while the store resolved record paths
-    from `config.SEG_DIR`, a caller passing any other root got the job
-    directory in one tree and the record in another.
+    The negative half is the control: a record path resolved from
+    `config.SEG_DIR` splits the pair across two trees.
     """
     answer = _mint_root_probe(tmp)
     assert answer['status'] == 200, answer

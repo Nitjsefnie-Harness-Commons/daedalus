@@ -36,7 +36,6 @@ def _bare_probe(tmp, script):
 
     `daedalus_bridge.config` exits at import without `DAEDALUS_DIR`, so a
     store that still resolved anything from it could not run here at all.
-    The throwaway segments root arrives as `THROWAWAY_ROOT`.
     """
     root = Path(tmp) / 'bare-segments'
     root.mkdir(parents=True)
@@ -557,12 +556,7 @@ print('BARE ' + json.dumps({
 
 
 def test_the_store_needs_no_bridge_configuration(tmp):
-    """A segments root is a parameter, so no `DAEDALUS_*` value is needed.
-
-    The probe reports the stripped environment back, then round-trips a
-    record under a throwaway root: mint it, mark the totals stale, write
-    them, and read the whole thing back through the same root.
-    """
+    """A segments root is a parameter, so no `DAEDALUS_*` value is needed."""
     root, answer = _bare_probe(tmp, _UNCONFIGURED_PROBE)
     assert answer['daedalus_env'] == [], answer
     # Resolved on both sides: `under` returns the path it checked, resolved.
@@ -600,9 +594,7 @@ print('BARE ' + json.dumps({
 def test_a_capability_authorizes_only_under_the_root_holding_it(tmp):
     """A sig minted under one root does not authorize another root's job.
 
-    Forwarding the wrong root at a call site is possible now that the root
-    travels as a parameter, and this is what makes that visible: with the
-    record still resolved from configuration both answers would agree.
+    With the record resolved from configuration both answers would agree.
     """
     _root, answer = _bare_probe(tmp, _ROOT_SCOPED_SIG_PROBE)
     assert answer == {
