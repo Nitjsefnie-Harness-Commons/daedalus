@@ -41,7 +41,7 @@ def _bare_probe(tmp, script):
     root = Path(tmp) / 'bare-segments'
     root.mkdir(parents=True)
     env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS')}
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'PYTHONDONTWRITEBYTECODE': '1',
         'THROWAWAY_ROOT': str(root),
@@ -546,7 +546,7 @@ segment_store.write_usage(root, job, 2, 5)
 loaded = segment_store.load_record(root, job)
 print('BARE ' + json.dumps({
     'daedalus_env': sorted(
-        name for name in os.environ if name.startswith('DAEDALUS')),
+        name for name in os.environ if name.startswith('DAEDALUS_')),
     'path': str(path),
     'quota': segment_store.quota(loaded),
     'usage': segment_store.usage(loaded),
