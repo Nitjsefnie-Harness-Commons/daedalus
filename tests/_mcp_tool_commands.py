@@ -252,7 +252,6 @@ TOOL_COMMANDS = {
         ({'chrome_tab': 7, 'max_requests': 1},
          [_ext('_net_cap', 'net-capture', timeout=15, tabId=7,
                maxRequests=1)]),
-        ({'max_requests': 0}, [_ext('_net_cap', 'net-capture', timeout=15)]),
     ],
     'net_capture_stop': [
         ({}, [_ext('_net_stop', 'net-capture-stop', timeout=30)]),
@@ -292,6 +291,8 @@ TOOL_REFUSALS = {
     'net_capture': [
         ({'max_requests': True}, ValueError,
          'max_requests must be an integer'),
+        ({'max_requests': 0}, ValueError,
+         'max_requests must be an integer from 1 to 20000; got 0'),
         ({'max_requests': 20001}, ValueError,
          'max_requests must be an integer from 1 to 20000'),
     ],
