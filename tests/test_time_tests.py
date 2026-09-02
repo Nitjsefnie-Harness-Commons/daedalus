@@ -227,6 +227,34 @@ def test_outcomes_stay_outside_suppressed_relay_spans(tmp):
     assert set(report['tests']) == {'test_visible'}
 
 
+def test_the_latest_visible_outcome_wins_for_a_name(tmp):
+    """A repeated name is reported where its latest result line put it.
+
+    A PASS after a non-PASS drops the outcome; a non-PASS after a PASS
+    writes the outcome and leaves the earlier duration standing, so one
+    name can land in both maps.
+    """
+    cases = (
+        (_script('  FAIL  test_x', '  PASS  test_x', '1/2 passed'),
+         {}, {'test_x'}),
+        (_script('  PASS  test_x', '  FAIL  test_x', '1/2 passed'),
+         {'test_x': 'FAIL'}, {'test_x'}),
+        (_script('  PASS  test_ok', '  FAIL  test_x', '  ERROR  test_x',
+                 '1/3 passed'),
+         {'test_x': 'ERROR'}, {'test_ok'}),
+    )
+    for index, (script, outcomes, passing) in enumerate(cases):
+        tree = _selection_tree(Path(tmp) / str(index), script)
+        out = Path(tmp) / str(index) / 'out'
+        assert _time_tests().main(
+            ['--tree', str(tree), '--python', sys.executable,
+             '--out', str(out)]) == 0
+        report = json.loads(
+            (out / 'test_bridge_one.json').read_text('utf-8'))
+        assert report['outcomes'] == outcomes, (index, report)
+        assert set(report['tests']) == passing, (index, report)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='timetests_')
 
