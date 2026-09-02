@@ -7,7 +7,6 @@ the floor directly, which is the only way its detection is banked.
 """
 import ast
 import sys
-import types
 from pathlib import Path
 from unittest import mock
 
@@ -192,35 +191,83 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
         'the citation check stopped iterating the table', checked)
 
 
-def test_the_scan_set_follows_the_imports_not_a_directory(_tmp):
-    """A module the composition imports is scanned wherever it sits.
+LAZY_COMPOSITION = '''
+from pkg import leaf
 
-    A guard moved into a module the composition pulls in used to fall outside
-    a directory-named scan entirely — the blind spot two rounds of widening
-    never closed.
+
+def run():
+    if leaf.dead:
+        from pkg import hidden
+'''
+
+
+def _write_tree(directory, files):
+    for name, source in files.items():
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding='utf-8')
+
+
+def test_the_scan_set_includes_a_module_imported_under_a_dead_branch(_tmp):
+    """The scan set is the composition's static import graph.
+
+    A module imported only inside a function body, under a branch nothing
+    executes, is still a module the composition can import. The sys.modules
+    snapshot this replaces missed exactly this one: round 3's plant B2 sat
+    green at 13/13 with an undeclared raise.
     """
-    composition = types.ModuleType('floor_scan_composition')
-    composition.__file__ = str(_util.ROOT / 'daedalus_mcp' / 'server.py')
+    _write_tree(Path(_tmp), {
+        'composition.py': LAZY_COMPOSITION,
+        'pkg/__init__.py': '',
+        'pkg/leaf.py': 'dead = False\n',
+        'pkg/hidden.py': "raise ValueError('unwitnessed')\n"})
+    scanned = _mcp_guard_floor.composition_scan_set(
+        Path(_tmp) / 'composition.py', _tmp)
+    names = {path.relative_to(Path(_tmp)).as_posix() for path in scanned}
+    assert names == {
+        'composition.py', 'pkg/__init__.py', 'pkg/leaf.py',
+        'pkg/hidden.py'}, names
 
-    def scan():
-        return _mcp_guard_floor.composition_scan_set(composition, _util.ROOT)
 
-    with mock.patch.dict(sys.modules):
-        stranger = types.ModuleType('floor_scan_stranger')
-        stranger.__file__ = str(_util.ROOT / 'daedalus_cli' / 'transport.py')
-        suite = types.ModuleType('floor_scan_suite')
-        suite.__file__ = str(Path(__file__).resolve())
-        foreign = types.ModuleType('floor_scan_foreign')
-        foreign.__file__ = str(Path(_tmp) / 'foreign.py')
-        sys.modules.update({
-            'floor_scan_stranger': stranger,
-            'floor_scan_suite': suite,
-            'floor_scan_foreign': foreign})
-        imported = scan()
-    assert (_util.ROOT / 'daedalus_cli' / 'transport.py').resolve() in imported
-    assert Path(_tmp, 'foreign.py').resolve() not in imported
-    assert Path(__file__).resolve() not in imported
-    assert (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve() in imported
+COMPUTED_IMPORT_COMPOSITION = '''
+import importlib
+
+
+def load(name):
+    return importlib.import_module(name)
+'''
+
+
+def test_a_computed_import_refuses_the_scan(_tmp):
+    """An import the walk cannot read statically fails the scan loudly.
+
+    Naming the module and the import site is what makes the closure
+    bounded rather than bounded-looking; a walk that silently omitted what
+    it cannot resolve would be the fifth boundary variant.
+    """
+    _write_tree(Path(_tmp), {'composition.py': COMPUTED_IMPORT_COMPOSITION})
+    try:
+        _mcp_guard_floor.composition_scan_set(
+            Path(_tmp) / 'composition.py', _tmp)
+    except AssertionError as raised:
+        assert 'composition:6' in str(raised), raised
+        assert 'import_module' in str(raised), raised
+    else:
+        raise AssertionError('a computed import was silently skipped')
+
+
+FOREIGN_IMPORT_COMPOSITION = '''
+import json
+from mcp.server.mcpserver import MCPServer
+'''
+
+
+def test_a_non_repo_local_import_is_skipped(_tmp):
+    """Stdlib and site-package targets are provably not this repository's."""
+    _write_tree(Path(_tmp), {'composition.py': FOREIGN_IMPORT_COMPOSITION})
+    scanned = _mcp_guard_floor.composition_scan_set(
+        Path(_tmp) / 'composition.py', _tmp)
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
 
 
 SELECT_SHAPES = '''
