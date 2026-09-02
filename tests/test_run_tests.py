@@ -64,7 +64,7 @@ def test_a_suite_within_its_budget_still_passes(tmp):
 
 def test_an_invalid_timeout_stops_startup_naming_the_setting(tmp):
     root = _sandbox(tmp, {'test_passer.py': _PASSING_SUITE})
-    for value in ('soon', 'inf', 'INF', '1e400', 'nan'):
+    for value in ('soon', 'inf', 'INF', '1e400', 'nan', '0', '-1'):
         result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': value})
         assert result.returncode != 0, (value, result.returncode,
                                         result.stdout)
