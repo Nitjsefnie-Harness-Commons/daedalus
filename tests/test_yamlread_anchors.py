@@ -240,6 +240,23 @@ def test_a_malformed_anchor_is_refused(tmp):
     _refused(_document('name: &[bad] target'), 'malformed YAML anchor')
 
 
+def test_a_malformed_alias_is_refused(tmp):
+    del tmp
+    for field in ('name: *', 'name: *[bad]'):
+        _refused(_document(field), 'malformed YAML alias')
+
+
+def test_a_tag_with_no_value_is_refused(tmp):
+    """A contentless node is no scalar this reader decodes as a name.
+
+    PyYAML reads `!!str` alone as the empty string, but the reader takes
+    name and id fields as scalar values to match policy against, and the
+    untagged empty field refuses the same way.
+    """
+    del tmp
+    _refused(_document('name: !!str'), 'step name has no scalar value')
+
+
 def test_two_anchors_on_one_node_are_refused(tmp):
     """One node carries at most one anchor."""
     del tmp

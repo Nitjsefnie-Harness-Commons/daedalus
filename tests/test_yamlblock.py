@@ -188,6 +188,15 @@ def test_a_step_name_and_id_may_be_written_as_a_block_scalar(tmp):
         (None, 'one two')]
 
 
+def test_the_dash_may_be_separated_by_any_separation_width(tmp):
+    """The field indent runs past the dash and every separator after it."""
+    del tmp
+    source = ('jobs:\n sample:\n  steps:\n'
+              '   -  name: one\n      if: z\n'
+              '   -   name: two\n       if: z\n')
+    assert _fields(source) == [('one', None), ('two', None)]
+
+
 def test_a_block_scalar_step_field_does_not_swallow_the_next_field(tmp):
     """A block on a dash line is indented from the mapping, not the dash."""
     del tmp
