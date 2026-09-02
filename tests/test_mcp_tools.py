@@ -467,8 +467,8 @@ def test_every_registered_tool_command_is_pinned(_tmp):
     refusals = _mcp_tool_commands.TOOL_REFUSALS
     assert refusals, 'no tool has a pinned refusal'
     sites = _mcp_guard_floor.tool_guards(
-        sorted((_util.ROOT / 'daedalus_mcp').glob('*.py')))
-    assert sites, 'no raise site found in the MCP package'
+        _mcp_guard_floor.composition_scan_set(composition, _util.ROOT))
+    assert sites, 'no raise site found in the modules the composition imports'
     reached = {
         name: _mcp_guard_floor.guard_keys(_mcp_guard_floor.reachable_guards(
             sites, _tool_code_objects(tool)))
@@ -489,7 +489,8 @@ def test_every_registered_tool_command_is_pinned(_tmp):
                 fired = _mcp_guard_floor.witnessed_guard(sites, raised)
                 assert fired in reached[name], (
                     f'{name} {overrides}: refused from {fired}, which is no '
-                    'guard its own code reaches')
+                    'guard its own code reaches'
+                    + _mcp_guard_floor.unreadable_note(sites, fired))
                 witnessed.add((name, fired))
             else:
                 raise AssertionError(f'{name} {overrides}: nothing refused')
