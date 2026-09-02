@@ -370,6 +370,93 @@ def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
     assert 'absent: None' in output, output
 
 
+def test_a_legacy_conversion_that_cannot_read_the_directory_is_answered(tmp):
+    """A legacy job whose directory cannot be enumerated is a storage error.
+
+    The conversion has to measure what the job already holds before it can
+    adopt it under the current quotas, so a scan that cannot run is a 500
+    rather than an exception that would drop the connection or, worse, a
+    silent adoption of an unknown amount.
+    """
+    fault_dir = Path(tmp) / 'segment-fault'
+    fault_dir.mkdir()
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import pathlib\n'
+        '_real_iterdir = pathlib.Path.iterdir\n'
+        'def _fail_legacy_conversion_iterdir(path):\n'
+        '    if path.name == "legacy-fault" '
+        'and path.parent.name == "segments":\n'
+        '        raise OSError("injected legacy conversion failure")\n'
+        '    return _real_iterdir(path)\n'
+        'pathlib.Path.iterdir = _fail_legacy_conversion_iterdir\n',
+        encoding='utf-8')
+    with _util.bridge(
+            tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, docroot):
+        job = 'legacy-fault'
+        seg_root = Path(docroot) / 'segments'
+        seg_dir = seg_root / job
+        seg_dir.mkdir()
+        (seg_dir / '000000.ts').write_bytes(b'abc')
+        record_path = seg_root / f'{job}.json'
+        legacy = {'token': TOK, 'sig': 'legacy-capability'}
+        record_path.write_text(json.dumps(legacy), encoding='utf-8')
+
+        try:
+            status, body = mint_job(base, TOK, job)
+        except http.client.RemoteDisconnected as exc:
+            raise AssertionError(
+                'a legacy conversion that cannot enumerate the job '
+                'directory ended the connection') from exc
+        assert status == 500 and body == {
+            'error': 'segment storage failure'}, (status, body)
+        assert json.loads(
+            record_path.read_text(encoding='utf-8')) == legacy, 'unchanged'
+
+
+def test_a_legacy_upgrade_that_cannot_write_its_record_answers_500(tmp):
+    """A refused upgrade write is a 500 that leaves the record alone.
+
+    The retry the temp write carries is bounded, so a refusal that never
+    clears ends the conversion; the answer is the same 500 the other
+    storage failures give, with neither a half-written temp nor a record
+    that lost its owner behind it.
+    """
+    fault_dir = Path(tmp) / 'segment-fault'
+    fault_dir.mkdir()
+    (fault_dir / 'sitecustomize.py').write_text(
+        'import pathlib\n'
+        '_real_write_text = pathlib.Path.write_text\n'
+        'def _refuse_every_record_write(path, data, **kw):\n'
+        '    if path.name.endswith(".json.tmp"):\n'
+        '        raise OSError("injected record write failure")\n'
+        '    return _real_write_text(path, data, **kw)\n'
+        'pathlib.Path.write_text = _refuse_every_record_write\n',
+        encoding='utf-8')
+    with _util.bridge(
+            tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, docroot):
+        job = 'legacy-upgrade-fault'
+        seg_root = Path(docroot) / 'segments'
+        seg_dir = seg_root / job
+        seg_dir.mkdir()
+        (seg_dir / '000000.ts').write_bytes(b'abc')
+        record_path = seg_root / f'{job}.json'
+        legacy = {'token': TOK, 'sig': 'legacy-capability'}
+        record_path.write_text(json.dumps(legacy), encoding='utf-8')
+
+        try:
+            status, body = mint_job(base, TOK, job)
+        except http.client.RemoteDisconnected as exc:
+            raise AssertionError(
+                'a legacy upgrade whose record write was refused ended '
+                'the connection') from exc
+        assert status == 500 and body == {
+            'error': 'segment storage failure'}, (status, body)
+        assert json.loads(
+            record_path.read_text(encoding='utf-8')) == legacy
+        assert sorted(path.name for path in seg_root.glob('*.tmp')) == [], \
+            sorted(path.name for path in seg_root.glob('*.tmp'))
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segjobs_')
 
