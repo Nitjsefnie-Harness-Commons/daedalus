@@ -157,6 +157,19 @@ def test_replace_answers_the_count_of_the_list_it_wrote(tmp):
     assert sorted(counts) == [1, 3], counts
 
 
+def test_replace_counts_duplicate_tab_ids_as_sent(tmp):
+    """A duplicate tabId is two entries of the sent list and counts as
+    two; the registry keeps the last write for the key, and the count
+    describes the list the caller sent, not the keys it holds.
+    """
+    reg = _load('fixture_tab_registry_replace_duplicate')
+    synced = reg.replace(tmp, 'tok', {'tabs': [{'tabId': '7'},
+                                               {'tabId': '7'}]})
+    assert synced == (200, {'ok': True, 'count': 2}), synced
+    status, tabs = reg.list_tabs('tok')
+    assert status == 200 and [t['tabId'] for t in tabs] == ['7'], tabs
+
+
 def test_replace_refuses_a_tab_list_that_is_not_a_list_of_objects(tmp):
     reg = _load('fixture_tab_registry_replace_bad')
     invalid = (400, {'error': 'invalid tabs'})

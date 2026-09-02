@@ -223,21 +223,34 @@ def test_named_upload_refuses_a_non_screenshot_suffix(tmp):
 
 
 def test_an_uppercase_suffix_is_typed_the_same_by_each_route(tmp):
-    """A suffix admitted by a case-insensitive comparison is typed
-    case-insensitively, by both screenshot selections.
+    """Every suffix the routes accept is typed case-insensitively, by both
+    screenshot selections.
 
-    Both routes discover `SHOT.PNG` through a lowercased membership test,
-    so both must also lowercase the suffix before mapping it to a MIME
-    type; otherwise the same stored file serves as `image/png` on the
-    `path=` selection and as a byte stream on the latest-by-id selection.
+    Both routes discover a file through a lowercased membership test, so
+    both must also lowercase the suffix before mapping it to a MIME type;
+    otherwise the same stored file serves as an image on the `path=`
+    selection and as a byte stream on the latest-by-id selection. The
+    sweep drives every accepted member in three spellings so a fix that
+    lowercases only one spelling or one member still fails.
     """
     routes = _load('fixture_upload_routes_uppercase')
-    _store(tmp, 'tok', 'id1', 'SHOT.PNG', b'IMG')
-    named = routes.named_upload(Path(tmp), 'tok', 'tok/id1/SHOT.PNG')
-    assert named.mime == 'image/png', named
-    latest = routes.latest_screenshot(Path(tmp), 'tok', {})
-    assert latest.path.name == 'SHOT.PNG', latest
-    assert latest.mime == 'image/png', latest
+    mimes = {'png': 'image/png', 'jpeg': 'image/jpeg',
+             'jpg': 'image/jpeg', 'webp': 'image/webp'}
+    for member in sorted(routes.SCREENSHOT_TYPES):
+        mime = mimes[member.lower()]
+        for spelling in (member, member.upper(), member.capitalize()):
+            name = 'SHOT.' + spelling
+            _store(tmp, 'tok', 'id1', name, b'IMG')
+            named = routes.named_upload(Path(tmp), 'tok', f'tok/id1/{name}')
+            assert named.mime == mime, (name, named)
+            all_ids = routes.latest_screenshot(Path(tmp), 'tok', {})
+            assert all_ids.path.name == name, (name, all_ids)
+            assert all_ids.mime == mime, (name, all_ids)
+            by_id = routes.latest_screenshot(
+                Path(tmp), 'tok', {'id': ['id1']})
+            assert by_id.path.name == name, (name, by_id)
+            assert by_id.mime == mime, (name, by_id)
+            (Path(tmp) / 'tok' / 'id1' / name).unlink()
 
 
 def test_screenshot_mime_maps_every_served_format(_tmp):

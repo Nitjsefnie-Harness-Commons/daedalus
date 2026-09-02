@@ -88,6 +88,10 @@ def replace(cmd_dir, token, body):
                 'title': tab_info.get('title', ''),
                 'ts': time.time(),
             }
+        # The count describes the list this caller sent, so it comes from
+        # the local the write loop consumed; re-reading the shared
+        # registry would let a concurrent sync of the same token answer
+        # for this caller once the lock releases.
         count = len(normalized_tabs)
     command_queue.notify_dashboard(
         cmd_dir, token, {'type': 'tabs-synced', 'count': count})
