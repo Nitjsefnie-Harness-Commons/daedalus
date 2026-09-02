@@ -5,6 +5,7 @@ Each stall is driven through a temporary JavaScript worker so the suite checks
 the real Node subprocess boundary and the exact evidence returned to Python.
 """
 import contextlib
+import io
 import subprocess
 import sys
 import time
@@ -192,7 +193,8 @@ def test_a_drain_with_nothing_unread_still_names_the_backstop(tmp):
             cmd='node', timeout=1.0, output=None, stderr=None)
         message = ''
         try:
-            _overlap.run_background_overlap('background', [], [])
+            with contextlib.redirect_stderr(io.StringIO()):
+                _overlap.run_background_overlap('background', [], [])
         except TypeError as broken:
             raise AssertionError(
                 f'the trace reader was handed None: {broken}') from broken
@@ -215,7 +217,8 @@ def test_a_drained_non_ascii_stream_survives_the_backstop_message(tmp):
         popen.return_value.communicate.side_effect = subprocess.TimeoutExpired(
             cmd='node', timeout=1.0, output=b'caf\xc3\xa9-step', stderr=None)
         try:
-            _overlap.run_background_overlap('background', [], [])
+            with contextlib.redirect_stderr(io.StringIO()):
+                _overlap.run_background_overlap('background', [], [])
         except AssertionError as failure:
             message = str(failure)
         else:
