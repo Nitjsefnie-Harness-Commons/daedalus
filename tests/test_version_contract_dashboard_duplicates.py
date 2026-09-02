@@ -255,28 +255,15 @@ def test_prefixed_class_attributes_are_not_dashboard_sites(tmp_path):
         f"<span {prefix}class='sl-v'>8.8.8</span>"
         for prefix in prefixes)
     _insert_before_body(copy_root, markup)
-    result = _run_checker(copy_root)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    dashboard = (copy_root / 'dashboard' / 'index.html').read_text(
-        encoding='utf-8')
     for _class_name, desc in _SITE_CASES:
-        _path, _site_desc, pattern = _dashboard_site(checker, desc)
-        assert len(list(re.finditer(pattern, dashboard))) == 1, desc
+        _assert_one_dashboard_match(copy_root, checker, desc)
 
 
 def test_closed_tag_text_is_not_a_rail_attribute_position(tmp_path):
     copy_root = Path(tmp_path) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     _insert_before_body(copy_root, "<div/>class='rail-foot'>v9.9.9")
-    result = _run_checker(copy_root)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    dashboard = (copy_root / 'dashboard' / 'index.html').read_text(
-        encoding='utf-8')
-    _path, _desc, pattern = _dashboard_site(
-        checker, 'dashboard rail footer')
-    assert len(list(re.finditer(pattern, dashboard))) == 1
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
 
 
 def test_ordinary_text_is_not_a_rail_footer_site(tmp_path):
@@ -362,6 +349,57 @@ def test_leading_class_rail_duplicate_is_refused(tmp_path):
         copy_root, '<div class="wider rail-foot">v9.9.9</div>')
     _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
                               '9.9.9')
+
+
+def test_trailing_whitespace_in_rail_class_duplicate_is_refused(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard rail footer'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, "<div class='rail-foot '>v9.9.9</div>")
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '9.9.9')
+
+
+def test_trailing_whitespace_in_status_line_class_duplicate_is_refused(
+        tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    desc = 'dashboard status line'
+    canonical = _canonical_dashboard_value(copy_root, checker, desc)
+    _insert_before_body(
+        copy_root, "<span class='sl-v '>8.8.8</span>")
+    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                              '8.8.8')
+
+
+def test_rail_class_token_suffix_is_not_a_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<div class='rail-foot-x'>v9.9.9</div>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
+def test_status_line_class_token_suffix_is_not_a_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<span class='sl-v-x'>8.8.8</span>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard status line')
+
+
+def test_rail_class_token_prefix_is_not_a_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<div class='notrail-foot'>v9.9.9</div>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
+def test_span_with_rail_class_is_not_a_rail_site(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<span class='rail-foot'>v9.9.9</span>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
 
 
 def test_attributes_before_class_rail_duplicate_is_refused(tmp_path):
