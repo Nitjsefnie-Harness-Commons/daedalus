@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Windows retry budgets at the dashboard Node process boundary."""
+"""Retry budgets at the dashboard Node process boundary."""
 import subprocess
 import sys
 from pathlib import Path
@@ -270,7 +270,8 @@ def test_non_windows_retries_one_silent_stall_then_returns_success(tmp):
         ('communicate', 1501), ('popen', 1502), ('communicate', 1502)], events
     assert result.stdout == 'second success', result
     assert diagnostic.count('\n') == 1, diagnostic
-    expected = ('recovered', 'attempt 1', 'pid 1501')
+    expected = ('recovered', 'attempt 1', 'pid 1501',
+                'drain completed', 'last phase none recorded')
     assert all(part in diagnostic for part in expected), diagnostic
 
 
@@ -284,7 +285,19 @@ def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
         'dashboard node outer timeout after 1 attempt\n'
         'retry declined: the post-kill drain did not complete '
         '(drain outcome: timed out)\n'), failure
+    assert 'attempt 1:' in failure and 'pid: 1601' in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_last_attempt_decline_does_not_name_a_retry_left_to_decline(tmp):
+    del tmp
+    failure, events, _ = behaviour._controlled_run(
+        'linux', (2101, [behaviour._timeout(), behaviour._result(-9)]),
+        (2102, [behaviour._timeout(), behaviour._timeout('partial', 'err')]))
+    assert failure.startswith(
+        'dashboard node outer timeout after 2 attempts\n'), failure
+    assert 'retry declined' not in failure, failure
+    assert [event[0] for event in events].count('popen') == 2, events
 
 
 def main():
