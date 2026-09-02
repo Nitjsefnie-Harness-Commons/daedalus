@@ -20,6 +20,9 @@ def decode_string_literal(raw):
     while cursor < len(raw) - 1:
         char = raw[cursor]
         cursor += 1
+        if char == raw[0]:
+            # The quote closes here: `'h' + 'ook'` is a concatenation.
+            return None
         if char != '\\':
             values.append(ord(char))
             continue
@@ -150,10 +153,7 @@ def _name_at(mask, text, cursor, right, pair_end, computed_key):
 
 
 def head_name(mask, text, cursor, right, pair_end, computed_key):
-    """Key and past-name offset of a member name at `cursor`, or None.
-
-    The key is None when a computed key is not statically known.
-    """
+    """Key and past-name offset of a member name at `cursor`, or None."""
     found = _name_at(mask, text, cursor, right, pair_end, computed_key)
     if found is not None:
         return found
@@ -290,11 +290,8 @@ def _class_declarations(receiver, name):
 
 
 def _class_members(receiver, opening, close):
-    """Members of one class body, or None when one cannot be read.
-
-    Member tuples are (is_static, form, key, body); a bare field is
-    recorded as (side, 'data', key, None).
-    """
+    """(is_static, form, key, body) per member of one class body, or
+    None when a member cannot be read."""
     mask = receiver.mask
     text = receiver.text
     cursor = opening + 1

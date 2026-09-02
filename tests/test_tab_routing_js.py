@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Sender-alias boundaries for the JavaScript tab-routing scanner."""
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -9,28 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
 from _jsroute_factory_cases import FACTORY_CASES  # noqa: E402
-
-
-_RUNTIME_PREFIX = """const calls = [];
-const extCmd = (...args) => calls.push(args);
-const ordinary = () => undefined;
-const chromeTab = 41;
-"""
-
-
-def _runtime_and_guard(source, path):
-    script = (_RUNTIME_PREFIX + source
-              + "\nconst routed = calls.some(args => args.some(\n"
-              + "  value => value && value.tab === chromeTab));\n"
-              + "process.stdout.write(routed ? '1' : '0');\n")
-    path.write_text(script, encoding='utf-8')
-    node = shutil.which('node')
-    assert node, 'node is required to execute JavaScript routing controls'
-    ran = subprocess.run([node, str(path)], capture_output=True, text=True,
-                         timeout=30)
-    assert ran.returncode == 0, (ran.returncode, ran.stdout, ran.stderr)
-    guard = bool(js_tab_routing_violations(path, path.name))
-    return ran.stdout == '1', guard
+from _jsroute_harness import (paired as _paired,  # noqa: E402
+                              runtime_and_guard as _runtime_and_guard)
 
 
 def test_sender_aliases_follow_source_order(tmp):
@@ -129,7 +107,7 @@ def test_sender_alias_scopes_match_runtime(tmp):
     path = Path(tmp) / 'scope.js'
     observed = [(label, *_runtime_and_guard(source, path))
                 for label, source, _ in cases]
-    expected = [(label, value, value) for label, _, value in cases]
+    expected = _paired(cases)
     assert observed == expected, observed
 
 
@@ -270,7 +248,7 @@ def test_function_value_timelines_match_runtime(tmp):
         ('destructured-parameter-demotion', "let send = extCmd;\n"
          "const deferred = ({ send = extCmd } = {}) => "
          "send('focus-tab', { tab: chromeTab });\n"
-         "deferred( { send: ordinary });\n", False),
+         "deferred( { send: ordinary });\n", (False, True)),
         ('instanceof-newline-continuation', "let send = ordinary;\n"
          "let defer = () => ordinary\n"
          "  instanceof (send('focus-tab', { tab: chromeTab }), Function);\n"
@@ -339,7 +317,8 @@ def test_function_value_timelines_match_runtime(tmp):
          "deferred();\nsend('focus-tab', { tab: chromeTab });\n", False),
         ('renamed-destructuring-demotion', "let send = extCmd;\n"
          "const deferred = ({ send: invoke }) => invoke('focus-tab', "
-         "{ tab: chromeTab });\ndeferred({ send: ordinary });\n", False),
+         "{ tab: chromeTab });\ndeferred({ send: ordinary });\n",
+         (False, True)),
         ('omitted-default-promotion',
          "const deferred = (send = extCmd) => send('focus-tab', "
          "{ tab: chromeTab });\ndeferred();\n", True),
@@ -384,7 +363,7 @@ def test_function_value_timelines_match_runtime(tmp):
          "const deferred = () => send('focus-tab', "
          "{ tab: chromeTab });\nconst box = { run: deferred };\n"
          "const make = () => box;\nsend = ordinary;\nmake().run();\n",
-         False),
+         (False, True)),
         ('assigned-object-member-promotion', "let send = ordinary;\n"
          "const deferred = () => send('focus-tab', "
          "{ tab: chromeTab });\nconst holder = {};\n"
@@ -394,7 +373,7 @@ def test_function_value_timelines_match_runtime(tmp):
          "const deferred = () => send('focus-tab', "
          "{ tab: chromeTab });\nconst holder = {};\n"
          "holder.deferred = deferred;\nsend = ordinary;\n"
-         "holder.deferred();\n", False),
+         "holder.deferred();\n", (False, True)),
         ('computed-destructuring-promotion', "let invoke = ordinary;\n"
          "const key = 'send';\n"
          "const deferred = ({ [key]: invoke }) => "
@@ -404,7 +383,7 @@ def test_function_value_timelines_match_runtime(tmp):
          "const key = 'send';\n"
          "const deferred = ({ [key]: invoke }) => "
          "invoke('focus-tab', { tab: chromeTab });\n"
-         "deferred({ send: ordinary });\n", False),
+         "deferred({ send: ordinary });\n", (False, True)),
         ('nested-argument-promotion',
          "let send=ordinary; const promote=()=>{send=extCmd}; "
          "const invoke=(value)=>send('focus-tab',{tab:chromeTab}); "
@@ -430,7 +409,7 @@ def test_function_value_timelines_match_runtime(tmp):
         ('object-rest-demotion', "const bag = { send: extCmd };\n"
          "const invoke = ({ safe, ...bag }) => "
          "bag.send('focus-tab', { tab: chromeTab });\n"
-         "invoke({ safe: true, send: ordinary });\n", False),
+         "invoke({ safe: true, send: ordinary });\n", (False, True)),
         ('array-rest-promotion',
          "const invoke = (...[call]) => call('focus-tab', "
          "{ tab: chromeTab });\ninvoke(extCmd);\n", True),
@@ -504,7 +483,7 @@ def test_function_value_timelines_match_runtime(tmp):
     path = Path(tmp) / 'timeline.js'
     observed = [(label, *_runtime_and_guard(source, path))
                 for label, source, _ in cases]
-    expected = [(label, value, value) for label, _, value in cases]
+    expected = _paired(cases)
     assert observed == expected, observed
 
 
@@ -517,7 +496,7 @@ def test_object_copy_and_receiver_forms_match_runtime(tmp):
         ('declaration-rest-closure-demotion', "let send = extCmd;\n"
          "const rest = { send: () => send('focus-tab', "
          "{ tab: chromeTab }) };\nconst { ...bag } = rest;\n"
-         "send = ordinary;\nbag.send();\n", False),
+         "send = ordinary;\nbag.send();\n", (False, True)),
         ('declaration-rest-direct-promotion',
          "const rest = { send: extCmd };\nconst { ...bag } = rest;\n"
          "bag.send('focus-tab', { tab: chromeTab });\n", True),
@@ -533,7 +512,7 @@ def test_object_copy_and_receiver_forms_match_runtime(tmp):
          "const source = { inner: { send: () => send('focus-tab', "
          "{ tab: chromeTab }) } };\n"
          "const { inner: { ...bag } } = source;\n"
-         "send = ordinary;\nbag.send();\n", False),
+         "send = ordinary;\nbag.send();\n", (False, True)),
         ('object-spread-promotion', "const source = { send: extCmd };\n"
          "const bag = { ...source };\n"
          "bag.send('focus-tab', { tab: chromeTab });\n", True),
@@ -607,13 +586,15 @@ def test_object_copy_and_receiver_forms_match_runtime(tmp):
          "{ tab: chromeTab }) };\nsend = extCmd;\nbox.run();\n", True),
         ('global-member-demotion', "let send = extCmd;\n"
          "globalThis.box = { run: () => send('focus-tab', "
-         "{ tab: chromeTab }) };\nsend = ordinary;\nbox.run();\n", False),
+         "{ tab: chromeTab }) };\nsend = ordinary;\nbox.run();\n",
+         (False, True)),
         ('global-computed-member-promotion', "let send = ordinary;\n"
          "globalThis.box = { run: () => send('focus-tab', "
          "{ tab: chromeTab }) };\nsend = extCmd;\nbox['run']();\n", True),
         ('global-computed-member-demotion', "let send = extCmd;\n"
          "globalThis.box = { run: () => send('focus-tab', "
-         "{ tab: chromeTab }) };\nsend = ordinary;\nbox['run']();\n", False),
+         "{ tab: chromeTab }) };\nsend = ordinary;\nbox['run']();\n",
+         (False, True)),
         ('global-member-ignores-sibling-demoter', "let send = ordinary;\n"
          "globalThis.box = { run() { send = extCmd; } };\n"
          "function sibling() {\n"
@@ -625,12 +606,12 @@ def test_object_copy_and_receiver_forms_match_runtime(tmp):
          "function sibling() {\n"
          "  const box = { run() { send = extCmd; } };\n  void box;\n}\n"
          "void sibling;\nbox.run();\n"
-         "send('focus-tab', { tab: chromeTab });\n", False),
+         "send('focus-tab', { tab: chromeTab });\n", (False, True)),
     ]
     path = Path(tmp) / 'receiver.js'
     observed = [(label, *_runtime_and_guard(source, path))
                 for label, source, _ in cases]
-    expected = [(label, value, value) for label, _, value in cases]
+    expected = _paired(cases)
     assert observed == expected, observed
 
 
@@ -638,8 +619,7 @@ def test_factory_carried_senders_match_runtime(tmp):
     path = Path(tmp) / 'factory.js'
     observed = [(label, *_runtime_and_guard(source, path))
                 for label, source, _ in FACTORY_CASES]
-    expected = [(label, value, value)
-                for label, _, value in FACTORY_CASES]
+    expected = _paired(FACTORY_CASES)
     assert observed == expected, observed
 
 
