@@ -45,16 +45,25 @@ MARKERS = ('#', "'", '"', '`', '*', '(', ')')
 
 # The rule stated positively, so deleting it is as visible as contradicting
 # it. An alternation because the claim is a family, and a pin that refuses a
-# synonym of it is a pin the next author deletes. The verbs are named
-# because the negatives below are floored on the ones this regex accepts.
-RAISING_VERBS = ('raised', 'increased', 'edited upward')
+# synonym of it is a pin the next author deletes. Stems, so one entry covers
+# a verb's forms; each is witnessed below, and the negatives are floored on
+# the ones this regex accepts. Growth is named as "grow past" rather than
+# bare, because this module's whole subject is files growing and a bare stem
+# reads "not a line limit, and growth past a ceiling is excused" as the rule.
+RAISING_VERBS = ('rais', 'increas', 'upward', 'bump', 'rise',
+                 'go up', 'goes up', 'grow past', 'grows past')
+_RAISING = r'\b(?:' + '|'.join(RAISING_VERBS) + ')'
+# A comma inside the window, because "never, ever raised" is a sentence
+# somebody writes; the window itself is pinned by the last negative below.
 ACCEPTED_RULE_SPELLINGS = (
-    r'(?:never|not|no)\b[a-z -]{0,40}?(?:' + '|'.join(RAISING_VERBS) + ')',
+    r'(?:never|nobody|not|no)\b[a-z ,-]{0,40}?' + _RAISING,
+    _RAISING + r'[a-z ,-]{0,40}?(?:forbidden|prohibited)',
     r'only ever go(?:es)? down',
 )
 STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
-RULE_HELP = ('a negated raising verb ("is never raised by hand", "is not '
-             'edited upward by hand"), or "only ever go down"')
+RULE_HELP = ('a negated raising verb ("is never raised by hand", "never '
+             'goes up", "is not edited upward by hand"), a prohibited one '
+             '("raising it is forbidden"), or "only ever go down"')
 
 # Texts the spelling regex must tell apart, so a regex that stopped
 # discriminating - one matching everything, nothing, or the rule inverted
@@ -64,7 +73,17 @@ RULE_HELP = ('a negated raising verb ("is never raised by hand", "is not '
 # half that makes it this rule rather than any rule, unmeasured.
 RULE_STATED = (
     'a recorded number is never raised by hand',
+    'no recorded number is ever increased by hand',
     'the number is not edited upward by hand',
+    'a listed file never grows past its record',
+    'no change may grow past a recorded number',
+    'the recorded number is never bumped to make room',
+    'a recorded number never goes up',
+    'a recorded number must not go up',
+    'a recorded number must not rise',
+    'nobody raises a recorded number by hand',
+    'a recorded number is never, ever raised by hand',
+    'raising a recorded number is forbidden',
     'the numbers in this table only ever go down',
 )
 RULE_NOT_STATED = (
@@ -72,6 +91,10 @@ RULE_NOT_STATED = (
     'the numbers in this table go down and up',
     'growing a listed file is allowed by editing its recorded number',
     'the ratchet keeps the numbers in this table honest',
+    # The window: a negator this far from a raising verb negates something
+    # else, so widening the span reads this licence as the rule.
+    'not a line limit, and a file over its ceiling is listed at the size '
+    'it was measured, and a recorded number is raised by hand',
     '',
 )
 
