@@ -346,7 +346,7 @@ def test_a_cell_records_its_verdict_beside_its_reports(tmp):
     })
     assert result.returncode == 0, (result.stdout, result.stderr)
     written = (reports / 'verdict.json').read_text(encoding='utf-8')
-    assert written == '{"group": "bridge", "verdict": "fail"}\n', written
+    assert written == '{"group": "bridge", "verdict": "fail", "ratio": null}\n'
 
 
 def test_the_speed_verdict_is_one_aggregate_over_the_cells(tmp):
@@ -437,7 +437,7 @@ def test_the_verdict_table_is_read_from_the_cells_records(tmp):
         })
     assert result.returncode == 0, (result.stdout, result.stderr)
     text = summary.read_text(encoding='utf-8')
-    assert '| bridge | pass | `speed-durations-bridge` |' in text, text
+    assert '| bridge | pass | — | `speed-durations-bridge` |' in text, text
 
     # A run where no cell uploaded a record — no release existed to measure
     # against — explains the empty-table case rather than leaving it blank.
