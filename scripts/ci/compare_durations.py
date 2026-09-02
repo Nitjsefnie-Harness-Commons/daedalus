@@ -378,6 +378,9 @@ def main(argv=None):
             with open(args.ratio_file, 'w', encoding='utf-8') as handle:
                 handle.write(f'{ratio:.3f}\n')
         except OSError:
+            # The ratio feeds the record the aggregate step renders, not the
+            # gate: the exit status has already been decided. A run that
+            # cannot write the number still gates correctly.
             pass
     _render_acceptances(lines, acceptance_rows)
     budget = 1.0 + args.max_regression

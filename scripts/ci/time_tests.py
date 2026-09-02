@@ -13,11 +13,12 @@ read as each result line arrives. `_util.runner` prints one `  PASS  <name>`
 line per test as it finishes, so the gap between consecutive lines is the
 duration of the test the later line names.
 
-Only passing tests are recorded: the comparison intersects the two sides on
-name, and a test that failed on one of them must be absent rather than
-present with however long it took to give up. A non-passing result is kept
-beside the durations, never in them, so the comparison can say how many
-names the runs recorded.
+A name's latest visible result line decides how it is recorded: a PASS
+writes the interval and drops any outcome the name carried, a non-passing
+result writes the outcome and leaves an earlier PASS interval standing. The
+comparison intersects the two sides on name, so a test that never passed on
+one of them is absent rather than present with however long it took to give
+up; the outcomes are also what let it say how many names the runs recorded.
 
 The first test of a suite carries that suite's interpreter startup and
 imports, because there is no earlier line to measure from. That cost lands on
