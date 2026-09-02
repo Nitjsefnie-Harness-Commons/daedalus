@@ -7,10 +7,10 @@ with every individual commit looking reasonable.
 
 The rule is not a line limit. A file over its ceiling is listed in BASELINE at
 the size it was measured and may not exceed it; every other file must stay
-under the ceiling. Growing a listed file is allowed, because some fixes
-genuinely belong in it, but only by editing its recorded number in the same
-commit — where a reviewer sees the monolith getting bigger instead of
-inferring it from a diffstat.
+under the ceiling. A recorded number is never raised by hand and no entry is
+ever added by hand: a change that would push a file past either bound
+relocates the code into a new module, and a file crossing its ceiling for the
+first time is split rather than excused.
 
 Shrinking is the direction this exists to reward, so it costs the author
 nothing: `--tighten` follows a file down, and CI runs it beside the coverage
@@ -21,8 +21,8 @@ when its recorded measurement went stale.
   python3 scripts/ci/size_baseline.py            # report violations, exit 1 on any
   python3 scripts/ci/size_baseline.py --tighten  # follow shrunk files down
 
-`--tighten` never raises a number and never adds an entry: growth stays a
-decision somebody makes and a reviewer sees.
+`--tighten` is the only writer of this table, and it only ever moves a number
+down or drops an entry whose file no longer needs one.
 """
 import argparse
 import re
@@ -39,7 +39,18 @@ SELF = Path(__file__).resolve()
 PRODUCTION_CEILING = 500
 TEST_CEILING = 700
 
-# Issues #97 and #129 are the standing work to empty this table.
+# Both refusal paths quote this rather than restating it, so there is one
+# sentence saying what to do about a refusal and nothing for it to drift
+# out of step with.
+REMEDIATION = (
+    'A recorded number is never raised by hand and no entry is ever added '
+    'by hand: relocate the code into a new module, or shrink the file. '
+    '--tighten is the only writer of this table, and it only ever moves a '
+    'number down or drops an entry.'
+)
+
+# An entry leaves this table when its file drops back under the ceiling
+# and --tighten removes it; nothing else writes here.
 BASELINE = {
     'tests/_pyroute.py': 738,
     'tests/_pyroute_state.py': 780,
@@ -160,6 +171,7 @@ def main():
     for kind, detail in found.items():
         if detail:
             print(f'{kind}: {detail}', file=sys.stderr)
+    print(REMEDIATION, file=sys.stderr)
     return 1
 
 
