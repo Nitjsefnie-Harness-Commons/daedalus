@@ -2,6 +2,7 @@
 import re
 
 from _jsroute_calls import _NON_CALL_WORDS, _trim
+from _jsroute_keys import decode_string_literal
 
 
 _DOT_READ = re.compile(
@@ -12,27 +13,47 @@ _DOT_WRITE = re.compile(
 _PREFIX_UPDATE = re.compile(
     r'(?<![\w$])(?:\+\+|--)\s*([\w$]+)\s*\.\s*([\w$]+)(?![\w$])')
 _QUOTED_READ = re.compile(
-    r'(?<![\w$])([\w$]+)\s*(?:\?\.)?\[\s*([\'"])([\w$]+)\2\s*\]'
+    r'(?<![\w$])([\w$]+)\s*(?:\?\.)?\[\s*([\'"])'
+    r'((?:\\[\s\S]|(?!\2)[^\\])*)\2\s*\]'
     r'(?!\s*=(?!=))')
 _QUOTED_WRITE = re.compile(
-    r'(?<![\w$])([\w$]+)\s*(?:\?\.)?\[\s*([\'"])([\w$]+)\2\s*\]\s*='
-    r'(?!=)')
+    r'(?<![\w$])([\w$]+)\s*(?:\?\.)?\[\s*([\'"])'
+    r'((?:\\[\s\S]|(?!\2)[^\\])*)\2\s*\]\s*'
+    r'(?:=(?!=|>)|[-+*/%]=|\*\*=|\|\|=|&&=|\?\?=|\+\+|--)')
+_QUOTED_PREFIX_UPDATE = re.compile(
+    r'(?<![\w$])(?:\+\+|--)\s*([\w$]+)\s*\[\s*([\'"])'
+    r'((?:\\[\s\S]|(?!\2)[^\\])*)\2\s*\]')
 _DYNAMIC_READ = re.compile(
     r'(?<![\w$])([\w$]+)\s*\[\s*([\w$]+)\s*\]'
     r'(?!\s*=(?!=))(?!\s*\()')
+_DYNAMIC_WRITE = re.compile(
+    r'(?<![\w$])([\w$]+)\s*\[\s*([\w$]+)\s*\]\s*'
+    r'(?:=(?!=|>)|[-+*/%]=|\*\*=|\|\|=|&&=|\?\?=|\+\+|--)')
+_DYNAMIC_PREFIX_UPDATE = re.compile(
+    r'(?<![\w$])(?:\+\+|--)\s*([\w$]+)\s*\[\s*([\w$]+)\s*\]')
+_EXPRESSION_READ = re.compile(
+    r'(?<![\w$])([\w$]+)\s*(?:\?\.)?\[([^]\n]+)\]'
+    r'(?!\s*=(?!=))(?!\s*\()')
+_EXPRESSION_WRITE = re.compile(
+    r'(?<![\w$])([\w$]+)\s*(?:\?\.)?\[([^]\n]+)\]\s*'
+    r'(?:=(?!=|>)|[-+*/%]=|\*\*=|\|\|=|&&=|\?\?=|\+\+|--)')
+_EXPRESSION_PREFIX_UPDATE = re.compile(
+    r'(?<![\w$])(?:\+\+|--)\s*([\w$]+)\s*\[([^]\n]+)\]')
 _SPREAD_SOURCE = re.compile(r'(?<![\w$.])\.\.\.\s*([\w$]+)')
 _DESTRUCTURE_SOURCE = re.compile(r'\}\s*(?:=|of)\s*([\w$]+)')
 _OBJECT_FUNCTION = re.compile(
     r'(?<![\w$])Object\s*\.\s*(?:assign|values|entries)\s*\(')
 
 
-def operation_call(position, scope, status, body=None):
+def operation_call(position, scope, status, body=None, args=(),
+                   argument_status=None):
     """A property operation replayed through the call machinery."""
     return {
         'start': position, 'order': position, 'binding': None,
-        'args': [], 'body': body, 'status': status, 'scope': scope,
+        'args': list(args), 'body': body, 'status': status, 'scope': scope,
         'name': None, 'member': None, 'source': None, 'parent': False,
-        'form': None, 'argument_calls': []}
+        'form': None, 'argument_calls': [],
+        'argument_status': argument_status}
 
 
 def _unwrap_parens(mask, span, pair_end):
@@ -78,49 +99,87 @@ def discover_operations(mask, text, pairs, resolution, reader, calls):
             found.append(operation_call(
                 position, scope_at(position), 'unprovable'))
 
+    def setter_arguments(match):
+        operator = re.search(
+            r'(?:=(?!=|>)|[-+*/%]=|\*\*=|\|\|=|&&=|\?\?=|\+\+|--)$',
+            match.group(0).rstrip()).group(0)
+        if operator not in ('=', '||=', '&&=', '??='):
+            return (), 'unprovable'
+        left, right = _trim(
+            mask, match.end(), reader['expression_end'](mask, match.end()))
+        if left >= right:
+            return (), 'unprovable'
+        return ((left, right),), None
+
+    def record(match, target, wanted, args=(), argument_status=None):
+        if target['status'] == 'unprovable':
+            found.append(operation_call(
+                match.start(), scope_at(match.start()), 'unprovable',
+                args=args, argument_status=argument_status))
+        elif target['status'] == 'known' and target['form'] == wanted:
+            found.append(operation_call(
+                match.start(), scope_at(match.start()), 'known',
+                target['body'], args, argument_status))
+
     for match in _DOT_READ.finditer(mask):
         if deleting(match.start()):
             continue
         target = receivers.member(match.group(1), match.group(2),
                                   match.start(), wanted='get')
-        if target['status'] == 'known' and target['form'] == 'get':
-            found.append(operation_call(
-                match.start(), scope_at(match.start()), 'known',
-                target['body']))
+        record(match, target, 'get')
     for match in _DOT_WRITE.finditer(mask):
         if deleting(match.start()):
             continue
         target = receivers.member(match.group(1), match.group(2),
                                   match.start(), wanted='set')
-        if target['status'] == 'known' and target['form'] == 'set':
-            found.append(operation_call(
-                match.start(), scope_at(match.start()), 'known',
-                target['body']))
+        args, argument_status = setter_arguments(match)
+        record(match, target, 'set', args, argument_status)
     for match in _PREFIX_UPDATE.finditer(mask):
         if deleting(match.start()):
             continue
         target = receivers.member(match.group(1), match.group(2),
                                   match.start(), wanted='set')
-        if target['status'] == 'known' and target['form'] == 'set':
-            found.append(operation_call(
-                match.start(), scope_at(match.start()), 'known',
-                target['body']))
+        record(match, target, 'set', argument_status='unprovable')
+    covered = set()
     for pattern, source_text, form_wanted in (
             (_QUOTED_READ, text, 'get'), (_QUOTED_WRITE, text, 'set'),
-            (_DYNAMIC_READ, mask, 'get')):
+            (_QUOTED_PREFIX_UPDATE, text, 'set'),
+            (_DYNAMIC_READ, mask, 'get'), (_DYNAMIC_WRITE, mask, 'set'),
+            (_DYNAMIC_PREFIX_UPDATE, mask, 'set'),
+            (_EXPRESSION_READ, mask, 'get'),
+            (_EXPRESSION_WRITE, mask, 'set'),
+            (_EXPRESSION_PREFIX_UPDATE, mask, 'set')):
         for match in pattern.finditer(source_text):
             if (mask[match.start()] != text[match.start()]
-                    or deleting(match.start())):
+                    or deleting(match.start())
+                    or (match.start(), form_wanted) in covered):
                 continue
+            covered.add((match.start(), form_wanted))
             owner = match.group(1)
-            key = (match.group(3) if match.lastindex == 3
-                   else ('computed', match.group(2), match.start(2)))
+            if pattern in (_QUOTED_READ, _QUOTED_WRITE,
+                           _QUOTED_PREFIX_UPDATE):
+                key = decode_string_literal(
+                    match.group(2) + match.group(3) + match.group(2))
+            elif pattern in (
+                    _DYNAMIC_READ, _DYNAMIC_WRITE,
+                    _DYNAMIC_PREFIX_UPDATE):
+                key = ('computed', match.group(2), match.start(2))
+            else:
+                key = None
+            if isinstance(key, tuple):
+                key = receivers.computed_key(key)
             target = receivers.member(owner, key, match.start(),
                                       wanted=form_wanted)
-            if target['status'] == 'known' and target['form'] == form_wanted:
-                found.append(operation_call(
-                    match.start(), scope_at(match.start()), 'known',
-                    target['body']))
+            if form_wanted == 'set':
+                if pattern in (_QUOTED_PREFIX_UPDATE,
+                               _DYNAMIC_PREFIX_UPDATE,
+                               _EXPRESSION_PREFIX_UPDATE):
+                    args, argument_status = (), 'unprovable'
+                else:
+                    args, argument_status = setter_arguments(match)
+                record(match, target, form_wanted, args, argument_status)
+            else:
+                record(match, target, form_wanted)
     for match in _SPREAD_SOURCE.finditer(mask):
         spread_unprovable(match.group(1), match.start())
     for match in _DESTRUCTURE_SOURCE.finditer(mask):

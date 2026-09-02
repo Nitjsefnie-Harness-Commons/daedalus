@@ -198,7 +198,7 @@ def method_head_start(mask, name_start, pair_start):
     position = previous_nonspace(mask, name_start)
     while position >= 0:
         char = mask[position:position + 1]
-        if char in ('*', ']', '='):
+        if char in ('#', '*', ']', '='):
             opening = pair_start.get(position)
             if char == ']' and opening is not None:
                 position = previous_nonspace(mask, opening)
@@ -212,8 +212,56 @@ def method_head_start(mask, name_start, pair_start):
                and (mask[word_start - 1].isalnum()
                     or mask[word_start - 1] in '_$')):
             word_start -= 1
-        if mask[word_start:position + 1] in ('get', 'set', 'async'):
+        if mask[word_start:position + 1] in ('get', 'set', 'async', 'static'):
             position = previous_nonspace(mask, word_start)
             continue
         break
     return position
+
+
+def method_scope_openings(mask, text, pair_end, pair_start):
+    """Parameter, body and declaration offsets for method shorthand."""
+    candidates = []
+    names = re.compile(
+        r'(?<![\w$#\\])#?((?:\\u(?:\{[0-9A-Fa-f]+\}'
+        r'|[0-9A-Fa-f]{4})|[\w$])+)\s*\(')
+    for match in names.finditer(mask):
+        head = match.start(1)
+        marker = head + (mask[head:head + 1] == '\\')
+        candidates.append((head, mask.index(
+            '(', head, match.end()), marker))
+    numbers = re.compile(
+        r'(?<![\w$.])(?:\d[\d_]*\.\d[\d_]*'
+        r'(?:[eE][+-]?\d[\d_]*)?|\.\d[\d_]*'
+        r'(?:[eE][+-]?\d[\d_]*)?|\d[\d_]*[eE][+-]?\d[\d_]*)\s*\(')
+    for match in numbers.finditer(mask):
+        opening = mask.index('(', match.start(), match.end())
+        marker = previous_nonspace(mask, opening)
+        while (marker > match.start()
+               and (mask[marker - 1].isalnum()
+                    or mask[marker - 1] in '_$')):
+            marker -= 1
+        candidates.append((match.start(), opening, marker))
+    quoted = re.compile(
+        r'(["\'])(?:\\[\s\S]|(?!\1)[^\\])*\1\s*\(')
+    for match in quoted.finditer(text):
+        opening = text.rfind('(', match.start(), match.end())
+        candidates.append((match.start(), opening, opening))
+    computed = re.compile(
+        r'(?<![\w$])\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*\(')
+    for match in computed.finditer(mask):
+        opening = pair_end.get(match.start(), match.start())
+        candidates.append((match.start(), opening, opening))
+    for head, opening, marker in candidates:
+        if mask[head:opening].strip() in {
+                'catch', 'for', 'if', 'switch', 'while', 'with'}:
+            continue
+        close = pair_end.get(opening, len(mask))
+        body_open = close
+        while body_open < len(mask) and mask[body_open].isspace():
+            body_open += 1
+        previous = method_head_start(mask, head, pair_start)
+        if (mask[body_open:body_open + 1] == '{'
+                and word_before(mask, head) != 'function'
+                and mask[previous:previous + 1] in '{,;}'):
+            yield opening, body_open, marker
