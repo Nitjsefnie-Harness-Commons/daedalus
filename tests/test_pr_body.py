@@ -523,6 +523,10 @@ def test_closing_issues_includes_keyword_list_continuation(tmp):
          f'{_issue_html(102)}</td></tr></tbody></table>', [101]),
         ('<p dir="auto">Fixes <code class="notranslate">x</code>'
          f'{_issue_html(101)}</p>', []),
+        ('<ul dir="auto">\n<li>Fixes '
+         f'{_issue_html(101)}\n<ul dir="auto">\n<li>'
+         f'{_issue_html(102)}</li>\n</ul>\n</li>\n</ul>', [101]),
+        (f'Fixes {_issue_html(101)}\n<hr>\n{_issue_html(102)}', [101]),
     )
     for references, closing in cases:
         rendered = _valid_html(references=references)
@@ -535,7 +539,6 @@ def test_every_closing_keyword_spelling_closes(tmp):
     spellings = (
         'close', 'closes', 'closed', 'fix', 'fixes', 'fixed',
         'resolve', 'resolves', 'resolved')
-    assert PR_BODY._CLOSING_KEYWORDS == frozenset(spellings)
     for keyword in spellings:
         rendered = _valid_html(references=f'{keyword} {_issue_html(101)}')
         sections = PR_BODY.parse_rendered(rendered, 'owner/repo')

@@ -165,7 +165,7 @@ class _RenderedBodyParser(HTMLParser):
                     and attributes.get('src') and not zero_size):
                 self._text.append('\ufffc')
             return
-        if tag in _BLOCK_TAGS and tag in _VOID_TAGS:
+        if tag in _BLOCK_TAGS:
             self._record_block()
         if tag == 'a':
             self._anchor_depth += 1
