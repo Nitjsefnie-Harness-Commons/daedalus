@@ -48,10 +48,9 @@ class HTTPClientProbe:
         self.bridge = bridge
 
     async def get(self, path, **kwargs):
-        headers = kwargs.get('headers', {})
         self.bridge.record(
-            'http_client.get',
-            authorization=headers.get('Authorization'))
+            'http_client.get', path=path, params=kwargs.get('params', {}),
+            headers=kwargs.get('headers', {}))
         status, body = self.bridge.http_bodies.get(path, (200, {'done': []}))
         return HTTPResponseProbe(status, body)
 
@@ -251,7 +250,7 @@ def _tool_code_objects(tool):
             pending.append(wrapped)
 
 
-def _tool_arguments(tool):
+def _tool_arguments(tool, overrides):
     arguments = {}
     for parameter in inspect.signature(tool).parameters.values():
         if parameter.default is not inspect.Parameter.empty:
@@ -260,7 +259,7 @@ def _tool_arguments(tool):
             f'{tool.__name__}: no test value for required argument '
             f'{parameter.name}')
         arguments[parameter.name] = REQUIRED_ARGUMENTS[parameter.name]
-    arguments.update(BRANCH_ARGUMENTS.get(tool.__name__, {}))
+    arguments.update(overrides)
     return arguments
 
 
@@ -276,11 +275,11 @@ def _assert_bound_interactions(
         f'{qualified_name}: {registration} registered tool recorded no '
         'bridge interaction')
     bearer_crossings = [
-        (marker, details['authorization'])
+        (marker, details['headers']['Authorization'])
         for marker, surface, details in interactions
         if surface == 'http_client.get'
-        and details.get('authorization') is not None
-        and details['authorization'] != marker
+        and details['headers'].get('Authorization') is not None
+        and details['headers']['Authorization'] != marker
     ]
     assert not bearer_crossings, (
         f'{qualified_name}: {registration} registered tool crossed '
@@ -306,7 +305,8 @@ def _exercise_composition(composition, registration, expected):
         for name, tool in tools.items():
             qualified_name = f'{module_name}.{name}'
             returned_callables.add(qualified_name)
-            arguments = _tool_arguments(tool)
+            arguments = _tool_arguments(
+                tool, BRANCH_ARGUMENTS.get(tool.__name__, {}))
             interactions = asyncio.run(_bridge_interactions(
                 tool, arguments))
             _assert_bound_interactions(
@@ -410,19 +410,6 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
         f'{direct_tools}')
 
 
-def _pinned_arguments(tool, overrides):
-    arguments = {}
-    for parameter in inspect.signature(tool).parameters.values():
-        if parameter.default is not inspect.Parameter.empty:
-            continue
-        assert parameter.name in REQUIRED_ARGUMENTS, (
-            f'{tool.__name__}: no test value for required argument '
-            f'{parameter.name}')
-        arguments[parameter.name] = REQUIRED_ARGUMENTS[parameter.name]
-    arguments.update(overrides)
-    return arguments
-
-
 def test_every_registered_tool_command_is_pinned(_tmp):
     """Each registered tool puts its pinned command on the probe bridge.
 
@@ -437,10 +424,11 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         f'unpinned={sorted(set(registered) - set(commands))}; '
         f'not registered={sorted(set(commands) - set(registered))}')
     for name, cases in commands.items():
+        assert cases, f'{name}: registered with no pinned case'
         tool = registered[name]
         for overrides, expected in cases:
             composition.bridge.calls.clear()
-            asyncio.run(tool(**_pinned_arguments(tool, overrides)))
+            asyncio.run(tool(**_tool_arguments(tool, overrides)))
             assert composition.bridge.calls == expected, (
                 f'{name} {overrides}: bridge calls differ: '
                 f'{composition.bridge.calls}')
@@ -451,7 +439,7 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         for overrides, exception, message in cases:
             composition.bridge.calls.clear()
             try:
-                asyncio.run(tool(**_pinned_arguments(tool, overrides)))
+                asyncio.run(tool(**_tool_arguments(tool, overrides)))
             except exception as raised:
                 assert message in str(raised), (name, overrides, raised)
             else:
