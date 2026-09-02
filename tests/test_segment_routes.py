@@ -243,22 +243,36 @@ def test_status_lists_the_stored_indices_in_order(_tmp):
             200, {'done': [0, 1, 2], 'count': 3})
 
 
-def test_status_refuses_a_wrong_sig(_tmp):
+def test_status_refuses_a_wrong_sig(tmp):
     jobs = _jobs('fixture_segment_jobs_statussig')
     routes = _routes('fixture_segment_routes_statussig')
-    _mint(jobs, 'statussigtok', 'statussig-job')
+    sig = _mint(jobs, 'statussigtok', 'statussig-job')
     assert routes.segment_status(
         SEG_DIR, {'job': ['statussig-job']}, 'wrong') == (
             403, {'error': 'bad sig'})
     assert routes.segment_status(SEG_DIR, {'job': ['']}, 'wrong') == (
         400, {'error': 'bad job'})
+    # The right capability, against a root holding no record for it: the
+    # sig is checked under the root this call names, not the configured one.
+    assert routes.segment_status(
+        Path(tmp), {'job': ['statussig-job']}, sig) == (
+            403, {'error': 'bad sig'})
 
 
-def test_lookup_reports_an_absent_job_as_absent(_tmp):
-    """The token-gated route is owed a real answer, not the sig conflation."""
+def test_lookup_reports_an_absent_job_as_absent(tmp):
+    """The token-gated route is owed a real answer, not the sig conflation.
+
+    A job the configured root holds is still absent from the root this
+    call names, so the second half is the root control.
+    """
+    jobs = _jobs('fixture_segment_jobs_lookup404')
     routes = _routes('fixture_segment_routes_lookup404')
     assert routes.lookup_job(
         SEG_DIR, 'lookuptok', {'job': ['lookup-never-minted']}) == (
+            404, {'error': 'no such job'})
+    _mint(jobs, 'lookuptok', 'lookup404-job')
+    assert routes.lookup_job(
+        Path(tmp), 'lookuptok', {'job': ['lookup404-job']}) == (
             404, {'error': 'no such job'})
 
 
@@ -613,6 +627,43 @@ def test_a_failed_write_leaves_its_recount_mark_under_the_passed_root(tmp):
     after = sorted(path.name for path in SEG_DIR.iterdir())
     assert after == before, (after, before)
     assert (root / f'.{job}.json.dirty').exists()
+
+
+def test_the_segments_root_governs_a_job_reached_through_a_symlink(tmp):
+    """The root travels with the admission because it cannot be derived.
+
+    `under` hands back the path it checked, resolved, so a job directory
+    that is a symlink to somewhere deeper inside the same root makes
+    `seg_dir.parent` a different directory from the root. Deriving the
+    root that way puts the mark and the totals beside the resolved
+    directory, where `write_usage` finds no record: the segment lands and
+    its record goes on claiming the job stored nothing, answered 200.
+    """
+    routes = _routes('fixture_segment_routes_symlinkroot')
+    jobs = _jobs('fixture_segment_jobs_symlinkroot')
+    root = Path(tmp) / 'link-segments'
+    deeper = root / 'sub' / 'real'
+    deeper.mkdir(parents=True)
+    job = 'symlink-job'
+    _symlink_or_skip(root / job, deeper)
+    status, payload = jobs.mint_job(
+        root, 'symlinktok', {'job': job}, jobs.JobQuotas(*QUOTAS))
+    assert status == 200, (status, payload)
+    admitted = routes.admit_segment(
+        root, {'job': [job], 'seg': ['0']}, payload['sig'])
+    assert isinstance(admitted, routes.Admission), admitted
+    assert os.path.realpath(admitted.seg_dir) == os.path.realpath(deeper)
+    # A refused write is where the mark stays visible; a successful one
+    # clears it inside the same lock hold.
+    with _refused('write_bytes', '.000000.ts.tmp') as fired:
+        assert routes.store_segment(b'abcd', admitted) == (
+            500, {'error': 'segment storage failure'})
+    assert fired == ['.000000.ts.tmp'], fired
+    assert (root / f'.{job}.json.dirty').exists()
+    assert not (deeper / f'.{job}.json.dirty').exists()
+    assert routes.store_segment(b'abcd', admitted) == (200, {'ok': True})
+    record = json.loads((root / f'{job}.json').read_text(encoding='utf-8'))
+    assert (record['stored_count'], record['stored_bytes']) == (1, 4), record
 
 
 def test_the_passed_quota_is_the_one_the_write_path_enforces(tmp):
