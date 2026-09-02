@@ -5,6 +5,9 @@ One entry per registered tool, keyed by the name it registers under. A case is
 filled from the suite's REQUIRED_ARGUMENTS, the overrides are applied, and the
 expected calls are the exact (surface, details) pairs the call must record on
 the probe bridge, in order.
+
+A parameter no case exercises is named in UNPINNED_PARAMETERS, with the reason
+it is still witnessed.
 """
 MARKER = 'pinned'
 
@@ -252,6 +255,8 @@ TOOL_COMMANDS = {
         ({'chrome_tab': 7, 'max_requests': 1},
          [_ext('_net_cap', 'net-capture', timeout=15, tabId=7,
                maxRequests=1)]),
+        ({'max_requests': 20000},
+         [_ext('_net_cap', 'net-capture', timeout=15, maxRequests=20000)]),
     ],
     'net_capture_stop': [
         ({}, [_ext('_net_stop', 'net-capture-stop', timeout=30)]),
@@ -278,6 +283,59 @@ TOOL_COMMANDS = {
                                 reset=True)]),
     ],
 }
+
+UNPINNED_PARAMETERS = {
+    # Per tool: parameters deliberately exercised by no TOOL_COMMANDS override,
+    # each carrying the reason it is still witnessed. A stale entry - one the
+    # signature does not have, or one a case already witnesses - is refused.
+    'exec': {
+        # every waited case pins checked_timeout at the default
+        'timeout',
+    },
+    'put': {
+        # fan-out to every tab is exercised by no case
+        'broadcast',
+        # only the waited path is pinned; put has no wait=False case
+        'wait',
+        # the waited cases pin checked_timeout at the default
+        'timeout',
+    },
+    'reload': {
+        # fan-out to every tab is exercised by no case
+        'broadcast',
+    },
+    'screenshot': {
+        # the default id is the ext_cmd args[0] in every case's expectation
+        'cmd_id',
+        # every case pins ext_cmd timeout at the default
+        'timeout',
+    },
+}
+
+
+def unpinned_parameter_gaps(tool_name, optional, covered):
+    """Optional parameters neither the cases nor the allowlist account for.
+
+    `optional` is a registered tool's defaulted parameter names, `covered` the
+    override keys its TOOL_COMMANDS cases apply, and the tool's
+    UNPINNED_PARAMETERS entry the parameters exercised by no case. A parameter
+    outside both is one whose forwarding no case witnesses: deleting the single
+    case naming it ships a renamed-field regression green. A stale allowlist
+    entry - one the signature does not have, or one a case already witnesses -
+    is refused too, so a signature or forwarding change surfaces instead of the
+    entry rotting.
+    """
+    allowed = set(UNPINNED_PARAMETERS.get(tool_name, ()))
+    optional = set(optional)
+    covered = set(covered)
+    return (
+        [f'UNPINNED_PARAMETERS names {name!r}, which the signature does not '
+         'have' for name in sorted(allowed - optional)]
+        + [f'UNPINNED_PARAMETERS names {name!r}, which a case already '
+           'witnesses' for name in sorted(allowed & covered)]
+        + [f'no case witnesses {name!r}'
+           for name in sorted(optional - covered - allowed)])
+
 
 TOOL_REFUSALS = {
     'exec': [
