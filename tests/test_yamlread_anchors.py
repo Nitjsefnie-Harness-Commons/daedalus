@@ -59,10 +59,32 @@ def test_string_tagged_step_name_decodes_like_the_plain_spelling(tmp):
     assert _names(_document('name: !!str target')) == ['target']
 
 
-def test_non_specific_tagged_step_name_decodes_like_the_plain(tmp):
-    """The non-specific tag `!` resolves a scalar to its string form."""
+def test_the_non_specific_tag_is_refused_in_every_scalar_form(tmp):
+    """`!` resolves by default resolution, not to a string, so no form.
+
+    PyYAML reads `! 5` as the number 5, `! true` as true and `! null` as
+    null, and a quoted or block body changes nothing, so accepting any
+    spelling of it would return a value no parser returns.
+    """
     del tmp
-    assert _names(_document('name: ! target')) == ['target']
+    for field in ('name: ! 5', 'name: ! true', 'name: ! null',
+                  'name: ! "5"'):
+        _refused(_document(field), 'unsupported YAML tag !')
+
+
+def test_the_non_specific_tag_is_refused_on_a_block_scalar(tmp):
+    del tmp
+    _refused('jobs:\n sample:\n  steps:\n'
+             '   - name: ! |\n       5\n     if: z\n',
+             'unsupported YAML tag !')
+
+
+def test_a_string_tagged_number_and_bool_decode_to_strings(tmp):
+    """`!!str` is the one tag whose resolution is guaranteed text."""
+    del tmp
+    for field, decoded in (('name: !!str 5', '5'),
+                           ('name: !!str true', 'true')):
+        assert _names(_document(field)) == [decoded], field
 
 
 def test_an_anchor_and_a_tag_decode_in_either_order(tmp):
@@ -96,9 +118,10 @@ def test_step_id_accepts_every_property_spelling(tmp):
     """The id field takes the properties and aliases a name takes."""
     del tmp
     prefix = 'anchors:\n gate: &a target\n'
-    for field in ('id: &b target', 'id: !!str target', 'id: ! target',
+    for field in ('id: &b target', 'id: !!str target',
                   'id: &b !!str target', 'id: *a'):
         assert _identities(_document(field, prefix)) == ['target'], field
+    _refused(_document('id: ! target', prefix), 'unsupported YAML tag !')
 
 
 def test_anchored_block_scalar_name_decodes_like_the_plain_block(tmp):
