@@ -18,6 +18,8 @@ const extCmd = (...args) => calls.push(args);
 const ordinary = () => undefined;
 const chromeTab = 41;
 const target = { if: (v) => 1, do: (v) => 2 };
+const a = 1;
+let y = 1;
 """
 
 
@@ -174,6 +176,70 @@ _TEMPLATE_CASES = [
     ('division-then-regex', True,
      "let send = ordinary;\n"
      "const half = 4 / /[\"]/.source;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('case-ternary-alternate-write', True,
+     "let send = ordinary;\n"
+     "switch (1) { case 1: const half = 0 ? {b:1} : {c:2}"
+     " / [send = extCmd] / 2; }\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('case-key-second-write', True,
+     "let send = ordinary;\n"
+     "const half = {a:1, case: {b:1} / [send = extCmd] / 2};\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('default-key-second-write', True,
+     "let send = ordinary;\n"
+     "const half = {a:1, default: {b:1} / [send = extCmd] / 2};\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('label-after-ternary-write', True,
+     "let send = ordinary;\n"
+     "let c = 0; let x = c ? 1 : 2;\n"
+     "lbl: {}\n"
+     "/[\"']/.test('q');\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('label-after-optional-chain-write', True,
+     "let send = ordinary;\n"
+     "a?.b;\n"
+     "lbl: {}\n"
+     "/[\"']/.test('q');\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('label-after-nullish-write', True,
+     "let send = ordinary;\n"
+     "let z = y ?? 0;\n"
+     "lbl: {}\n"
+     "/[\"']/.test('q');\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('regex-division-regex-write', True,
+     "let send = ordinary;\n"
+     "const half = /x/ / /[\"]/.source;\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('case-key-first-write', True,
+     "let send = ordinary;\n"
+     "const half = {case: {b:1} / [send = extCmd] / 2};\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('label-after-asi-optional-write', True,
+     "let send = ordinary;\n"
+     "a?.b\n"
+     "lbl: {}\n"
+     "/[\"']/.test('q');\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('label-after-asi-nullish-write', True,
+     "let send = ordinary;\n"
+     "let z2 = y ?? 0\n"
+     "lbl: {}\n"
+     "/[\"']/.test('q');\n"
+     "send = extCmd;\n"
+     "send('focus-tab', { tab: chromeTab });\n"),
+    ('label-after-literal-statement-write', True,
+     "let send = ordinary;\n"
+     "let o = {a:1};\n"
+     "lbl: {}\n"
+     "/[\"']/.test('q');\n"
      "send = extCmd;\n"
      "send('focus-tab', { tab: chromeTab });\n"),
     ('spaced-method-division', True,
@@ -412,6 +478,71 @@ def test_regex_after_a_labelled_block_stays_a_regex(tmp):
         assert len(mask) == len(source), mask
         assert mask == js_mask(shape.replace('/["]/', '/   /')
                                + '\nlet after;\n'), mask
+        assert 'let after;' in mask, mask
+
+
+def test_division_behind_a_ternary_alternate_keeps_a_write_visible(tmp):
+    """A `?` that belongs to the colon being classified makes the `{` behind
+    it a literal; the division behind that literal's `}` keeps a bracketed
+    assignment in view, however the ternary is reached. Reading the `{` as a
+    block instead blanks the assignment and the line after stays silent."""
+    del tmp
+    sources = (
+        'switch (1) { case 1: const half = 0 ? {b:1} : {c:2}'
+        ' / [send = extCmd] / 2; }\nlet after;\n',
+        'const half = {a:1, case: {b:1} / [send = extCmd] / 2};\n'
+        'let after;\n',
+        'const half = {a:1, default: {b:1} / [send = extCmd] / 2};\n'
+        'let after;\n',
+    )
+    for source in sources:
+        mask = js_mask(source)
+        assert len(mask) == len(source), mask
+        assert 'send = extCmd' in mask, mask
+        assert 'let after;' in mask, mask
+
+
+def test_regex_after_a_label_survives_an_earlier_question_mark(tmp):
+    """A `?` in an earlier statement — a ternary, an optional chain, a
+    nullish coalescer — is not the colon's own ternary: the labelled block
+    stays a block, the regex behind it is blanked and the line after stays
+    visible, where a poisoned colon blanks the file from the quote on. The
+    statement boundary behind the label is spelled both ways, with a `;` and
+    with the ASI newline that carries none."""
+    del tmp
+    heads = (
+        'let c = 0; let x = c ? 1 : 2;\n',
+        'a?.b;\n',
+        'let z = y ?? 0;\n',
+        'let x2 = c ? 1 : 2\n',
+        'a?.b\n',
+        'let z2 = y ?? 0\n',
+    )
+    for head in heads:
+        source = head + 'lbl: {}\n/["\']/.test(\'q\');\nlet after;\n'
+        mask = js_mask(source)
+        assert len(mask) == len(source), mask
+        assert mask == js_mask(source.replace('/["\']/', '/    /')), mask
+        assert 'let after;' in mask, mask
+
+
+def test_regex_after_a_label_survives_an_earlier_literal(tmp):
+    """The statement behind a label may end in the very thing the colon walk
+    reads forward from — an object literal, a call argument or an array —
+    and its `}`/`)`/`]` belongs to that statement, not to the label: the
+    label block stays a block and the regex behind it stays a regex."""
+    del tmp
+    heads = (
+        'let o = {a:1};\n',
+        'f({a:1});\n',
+        'let o = [1];\n',
+        'const r = /x/;\n',
+    )
+    for head in heads:
+        source = head + 'lbl: {}\n/["\']/.test(\'q\');\nlet after;\n'
+        mask = js_mask(source)
+        assert len(mask) == len(source), mask
+        assert mask == js_mask(source.replace('/["\']/', '/    /')), mask
         assert 'let after;' in mask, mask
 
 
