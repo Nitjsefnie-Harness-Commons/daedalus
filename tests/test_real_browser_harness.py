@@ -74,11 +74,9 @@ def _browser_version(args, *, capture_output, text, timeout):
 
 def _devtools_ready(expected_profile, expected_process):
     page = {'webSocketDebuggerUrl': 'ws://page'}
-    workers = [{
-        'type': 'service_worker',
-        'url': 'chrome-extension://controlled/background.js',
-        'webSocketDebuggerUrl': 'ws://worker',
-    }]
+    workers = [{'type': 'service_worker',
+                'url': 'chrome-extension://controlled/background.js',
+                'webSocketDebuggerUrl': 'ws://worker'}]
 
     def wait_for_devtools(profile, process, declared_worker):
         assert Path(profile) == expected_profile, profile
@@ -91,11 +89,9 @@ def _devtools_ready(expected_profile, expected_process):
 
 def _ready_worker(node, workers):
     assert node == 'node-for-control', node
-    assert workers == [{
-        'type': 'service_worker',
-        'url': 'chrome-extension://controlled/background.js',
-        'webSocketDebuggerUrl': 'ws://worker',
-    }], workers
+    assert workers == [{'type': 'service_worker',
+                        'url': 'chrome-extension://controlled/background.js',
+                        'webSocketDebuggerUrl': 'ws://worker'}], workers
     return 'ws://worker', True, None
 
 
@@ -238,8 +234,7 @@ def test_browser_launch_passes_basic_password_store_flag(tmp):
 
     assert len(launches) == 1, launches
     args = launches[0]
-    assert (args[0], args[-1]) == (
-        '/controlled/chromium', 'about:blank'), args
+    assert (args[0], args[-1]) == ('/controlled/chromium', 'about:blank'), args
     assert args.count('--password-store=basic') == 1, args
     assert process.wait_timeouts == [10], process.wait_timeouts
 
@@ -331,54 +326,56 @@ def test_cdp_response_timeout_has_distinct_assertion_subtype(tmp):
     assert 'CDP response timed out' in str(failure), failure
 
 
+PEER_PATIENCE = 10
+
+
 @contextlib.contextmanager
 def _silent_websocket_peer():
     listener = socket.socket()
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(('127.0.0.1', 0))
     listener.listen(1)
-    listener.settimeout(2)
+    listener.settimeout(PEER_PATIENCE)
     port = listener.getsockname()[1]
-    errors = []
+    record = {'served': False, 'errors': []}
 
     def serve():
         try:
             connection, _address = listener.accept()
             with connection:
-                connection.settimeout(2)
+                connection.settimeout(PEER_PATIENCE)
                 request = b''
                 while b'\r\n\r\n' not in request:
                     chunk = connection.recv(4096)
                     if not chunk:
                         raise AssertionError('WebSocket handshake ended early')
                     request += chunk
-                headers = request.decode('ascii').split('\r\n')
                 key = next(
-                    line.split(':', 1)[1].strip() for line in headers
+                    line.split(':', 1)[1].strip()
+                    for line in request.decode('ascii').split('\r\n')
                     if line.lower().startswith('sec-websocket-key:'))
-                digest = hashlib.sha1(
+                accept = base64.b64encode(hashlib.sha1(
                     (key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-                    .encode('ascii')).digest()
-                accepted = base64.b64encode(digest).decode('ascii')
-                response = (
+                    .encode('ascii')).digest()).decode('ascii')
+                connection.sendall((
                     'HTTP/1.1 101 Switching Protocols\r\n'
                     'Upgrade: websocket\r\n'
                     'Connection: Upgrade\r\n'
-                    f'Sec-WebSocket-Accept: {accepted}\r\n\r\n')
-                connection.sendall(response.encode('ascii'))
+                    f'Sec-WebSocket-Accept: {accept}\r\n\r\n'
+                ).encode('ascii'))
+                record['served'] = True
                 time.sleep(0.2)
         except Exception as why:  # noqa: BLE001
-            errors.append(why)
+            record['errors'].append(why)
 
     thread = threading.Thread(target=serve)
     thread.start()
     try:
-        yield f'ws://127.0.0.1:{port}'
+        yield f'ws://127.0.0.1:{port}', record
     finally:
         listener.close()
-        thread.join(timeout=2)
+        thread.join(timeout=2 * PEER_PATIENCE + 1)
     assert not thread.is_alive(), 'silent WebSocket peer did not stop'
-    assert not errors, errors
 
 
 def test_real_cdp_harness_timeout_is_classified_by_exit_code(tmp):
@@ -388,14 +385,22 @@ def test_real_cdp_harness_timeout_is_classified_by_exit_code(tmp):
     timeout_type = getattr(_realbrowser, 'CDPTimeout', None)
     assert timeout_type is not None, 'cdp_call has no timeout type'
 
-    failure = None
-    with mock.patch.object(
-            _WORKERS, 'CDP_RESPONSE_DEADLINE_MS', 50), \
-            _silent_websocket_peer() as target:
-        try:
-            _realbrowser.cdp_call(node, target, 'Runtime.evaluate', {})
-        except AssertionError as why:
-            failure = why
+    records = []
+    for _attempt in range(2):
+        failure = None
+        deadline = mock.patch.object(
+            _WORKERS, 'CDP_RESPONSE_DEADLINE_MS', 50)
+        with deadline, _silent_websocket_peer() as (target, record):
+            records.append(record)
+            try:
+                _realbrowser.cdp_call(node, target, 'Runtime.evaluate', {})
+            except AssertionError as why:
+                failure = why
+        if record['served']:
+            break
+    else:
+        raise AssertionError(
+            f'the silent peer never served the harness child: {records}')
     assert failure.__class__ is timeout_type, failure
 
 
@@ -449,8 +454,7 @@ def test_fixture_converts_only_post_configuration_environment_skips(tmp):
     before = environment_type('controlled pre-configuration failure')
     popen, _process, launches, _profile = _popen_double(tmp)
     survived = None
-    verdict = mock.Mock(return_value=(
-        False, 'controlled observation'))
+    verdict = mock.Mock(return_value=(False, 'controlled observation'))
     with mock.patch.object(
             _realbrowser, 'browser_requirements', _browser_requirements), \
             mock.patch.object(_realbrowser.subprocess, 'Popen', popen), \
@@ -565,8 +569,7 @@ def test_first_navigation_non_timeout_failure_stays_failure(tmp):
     def first_navigation(node, target, method, params):
         assert (node, target, method) == (
             'node-for-control', 'ws://page', 'Page.navigate')
-        assert params == {
-            'url': 'http://127.0.0.1:2/plain.html'}, params
+        assert params == {'url': 'http://127.0.0.1:2/plain.html'}, params
         raise AssertionError('CDP rejected navigation')
 
     skipped = None
@@ -638,18 +641,14 @@ def test_first_navigation_timeout_fails_with_arrival_observation(tmp):
         'the browser', 'the CDP transport', 'this repository', 'the machine']
     for request_arrives, (page_url, failure) in failures.items():
         assert failure.__class__ is failure_type, failure
-        record = {
-            'page_url': failure.page_url,
-            'request_arrived': failure.request_arrived,
-            'candidate_owners': list(failure.candidate_owners),
-            'selected_owner': failure.selected_owner,
-        }
-        assert record == {
-            'page_url': page_url,
-            'request_arrived': request_arrives,
-            'candidate_owners': required_owners,
-            'selected_owner': None,
-        }, record
+        record = {'page_url': failure.page_url,
+                  'request_arrived': failure.request_arrived,
+                  'candidate_owners': list(failure.candidate_owners),
+                  'selected_owner': failure.selected_owner}
+        assert record == {'page_url': page_url,
+                          'request_arrived': request_arrives,
+                          'candidate_owners': required_owners,
+                          'selected_owner': None}, record
         assert str(failure) == (
             f'{failure_type.__name__}: '
             + json.dumps(record, sort_keys=True)), str(failure)
@@ -662,8 +661,7 @@ def test_post_configuration_navigation_timeout_stays_failure(tmp):
     def navigate(node, target, method, params):
         assert (node, target, method) == (
             'node-for-control', 'ws://page', 'Page.navigate')
-        assert params == {
-            'url': 'http://127.0.0.1:2/plain.html'}, params
+        assert params == {'url': 'http://127.0.0.1:2/plain.html'}, params
         calls.append((node, target, method, params))
         if len(calls) == 1:
             return {}

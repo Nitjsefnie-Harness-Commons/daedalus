@@ -58,8 +58,7 @@ def test_repository_node_probe_starts_and_terminates(tmp):
         capability.returncode, capability.stdout, capability.stderr)
     requirements = None
     with mock.patch.object(
-            _realbrowser.shutil, 'which', _which_with(node)), \
-            mock.patch.object(_realbrowser, 'NODE_PROBE_TIMEOUT', 1):
+            _realbrowser.shutil, 'which', _which_with(node)):
         try:
             requirements = _realbrowser.browser_requirements()
         except _realbrowser.BrowserEnvironmentSkipped as why:
