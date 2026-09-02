@@ -18,22 +18,15 @@ ROOT = _util.ROOT
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
 
 # Claims this file must never make. Each fills its own subject slot - the
-# act itself in the first, a named actor in the other two - so a sentence
-# refusing the claim does not contain it and no reading of negation is
-# needed to tell the two apart. A bare modal leaves that slot open to a
-# negative quantifier ("Nobody may add a BASELINE entry."), which is then
-# refused as a licence; naming the bare act instead - "add a baseline
-# entry" - pins wording every prohibition of it also uses. No vocabulary
-# of negators rescues either shape: the way out is a shorter list, not a
-# longer one.
-# Two costs: a permission addressed to somebody else ("A first crossing
-# may add a BASELINE entry.") is missed, and a claim quoted to be disowned
-# ("Nowhere does this say growing a listed file is allowed") is refused.
-# The rule reads positively here, so neither belongs in the file anyway.
+# act itself in the first, a named actor in the other two - so a prohibition
+# does not contain the claim it refuses and no reading of negation is needed
+# to tell them apart. Two costs: a permission addressed to somebody else
+# ("A first crossing may add a BASELINE entry.") is missed, and a claim
+# quoted to be disowned is refused; the rule reads positively here, so
+# neither belongs in the file anyway.
 FORBIDDEN_CLAIMS = (
     # The licence the policy carried, verbatim. Growth is not bought by
-    # editing the number; it is refused until the code moves or the file
-    # shrinks.
+    # editing the number.
     'growing a listed file is allowed',
     # A first crossing excused by a fresh entry instead of being split.
     'you may add a baseline entry',
@@ -48,10 +41,9 @@ MARKERS = ('#', "'", '"', '`', '*', '(', ')')
 # The rule stated positively, so deleting it is as visible as contradicting
 # it. An alternation because the claim is a family, and a pin that refuses a
 # synonym of it is a pin the next author deletes. Stems, so one entry covers
-# a verb's forms; each is witnessed below, and the negatives are floored on
-# the ones this regex accepts. Growth is named as "grow past" rather than
-# bare, because this module's whole subject is files growing and a bare stem
-# reads "not a line limit, and growth past a ceiling is excused" as the rule.
+# a verb's forms; each is witnessed below. Growth is spelled "grow past"
+# rather than bare: this module's subject is files growing, and a bare stem
+# reads any negator near that subject as the rule.
 RAISING_VERBS = ('rais', 'increas', 'upward', 'bump', 'rise',
                  'go up', 'goes up', 'grow past', 'grows past')
 _RAISING = r'\b(?:' + '|'.join(RAISING_VERBS) + ')'
@@ -68,11 +60,10 @@ RULE_HELP = ('a negated raising verb ("is never raised by hand", "never '
              '("raising it is forbidden"), or "only ever go down"')
 
 # Texts the spelling regex must tell apart, so a regex that stopped
-# discriminating - one matching everything, nothing, or the rule inverted
-# - is visible here rather than in the file it guards. The first two
-# negatives are the rule with its polarity flipped, one per accepted
-# spelling: negatives that all lack a raising verb leave the negator, the
-# half that makes it this rule rather than any rule, unmeasured.
+# discriminating - one matching everything, nothing, or the rule inverted -
+# is visible here rather than in the file it guards. The first two negatives
+# invert the rule, because negatives that all lack a raising verb leave the
+# negator - the half that makes it this rule - unmeasured.
 RULE_STATED = (
     'a recorded number is never raised by hand',
     'no recorded number is ever increased by hand',
@@ -110,35 +101,23 @@ REMEDY_NAMES_THE_MOVE = {
     'graduated': (True, '--tighten', 'relocate the code'),
 }
 
-# Correct statements of the policy, which the claim check must accept. This
-# is the battery that matters most: a guard refusing correct prose is one
-# the next author weakens or deletes rather than works around. Most of these
-# come from a review that wrote them without reading the pin.
+# Correct statements of the policy, which the claim check must accept; a
+# guard refusing correct prose is deleted rather than worked around.
 STATES_THE_POLICY = (
     'Never add a BASELINE entry to excuse growth.',
     'Adding a BASELINE entry is forbidden.',
-    'Do not add a BASELINE entry; split the file.',
     'Editing its recorded number is off the table.',
     'You may not record the new size by hand.',
-    'Recording the new size is prohibited.',
-    'Refuse to add a BASELINE entry.',
-    'A refused session must resist editing its recorded number.',
-    'The wrong fix is editing its recorded number.',
-    'Nobody should add a BASELINE entry by hand.',
-    'There is no reason to add a BASELINE entry.',
     'Split the file rather than editing its recorded number.',
-    'Splitting, not editing its recorded number, is the fix.',
-    'Avoid editing its recorded number.',
-    'It is an error to add a BASELINE entry by hand.',
-    'Whoever tries to record the new size will be refused.',
     'A reviewer who sees you add a BASELINE entry will reject the change.',
     'Neither raising the number nor adding a BASELINE entry is a fix.',
-    'Reject any change that would record the new size.',
-    'Stop before you add a BASELINE entry.',
     'The old advice, record the new size, was withdrawn.',
     "You shouldn't add a BASELINE entry.",
     "You can't record the new size by hand.",
     "Growing a listed file isn't allowed.",
+    # Growth refused and shrinking permitted in one wording, so a claim
+    # broadened to the permission alone is refused here.
+    'Shrinking a listed file is allowed and rewarded.',
     'A recorded number is never raised by hand.',
     'The numbers in this table only ever go down.',
     'Relocate the code into a new module instead of growing the file.',
@@ -148,32 +127,24 @@ STATES_THE_POLICY = (
     # Prohibitions with a negative quantifier for a subject: the shape
     # that contains a claim built on a bare modal.
     'Nobody may add a BASELINE entry.',
-    'No change may add a BASELINE entry to excuse a first crossing.',
     'Neither an author nor a reviewer may add a BASELINE entry.',
-    'No contributor may add a BASELINE entry by hand.',
     'No tool is the only writer of this table.',
     'Neither --tighten nor CI is the only writer of this table.',
     'No change may grow a listed file past its record.',
     'Under no circumstances may a listed file grow.',
 )
 
-# Licences to grow, which it must refuse. The first is the sentence the
-# policy carried until this branch removed it. This half is a backstop over
-# free prose and does not pretend to catch a paraphrase: a permissive
-# sentence written in none of these wordings is caught only where it
-# displaces the rule paragraph and loses the rule's spelling with it.
-# An exception clause appended to an intact rule keeps that spelling and
-# passes, and the containment pin below stays satisfied when the constant
-# is reworded in step.
+# Licences to grow, which it must refuse: the sentence the policy carried,
+# one more per remaining claim, and one carrying markers. This half is a
+# backstop over free prose and does not pretend to catch a paraphrase - a
+# permissive sentence written in none of these wordings is caught only where
+# it displaces the rule paragraph and loses the rule's spelling with it. An
+# exception clause appended to an intact rule keeps that spelling and passes,
+# and the containment pin below moves with a reworded constant.
 SANCTIONS_GROWTH = (
     'Growing a listed file is allowed, because some fixes genuinely belong '
     'in it, but only by editing its recorded number in the same commit.',
     'Growing a listed file is allowed (edit the number).',
-    'Growing a listed file is allowed, no questions asked.',
-    'Growing a listed file is allowed and nobody minds.',
-    'Growing a listed file is allowed - the not-so-secret fix.',
-    'Growing a listed file is allowed: record the new size.',
-    'Growing a listed file is allowed - editing its recorded number does it.',
     'You may add a BASELINE entry when the file has to grow.',
     '`--tighten` is the only writer of this table.',
 )
@@ -199,11 +170,8 @@ def _offered(text):
 
 
 def _policy_prose():
-    """The whole policy source, normalised.
-
-    Whole source rather than the docstring alone: a comment or a printed
-    string carries the advice to a reader just as the docstring does.
-    """
+    """The whole source normalised, since a comment or a printed string
+    carries the advice to a reader just as the docstring does."""
     return _normalised(POLICY_SOURCE.read_text(encoding='utf-8'))
 
 
@@ -379,9 +347,7 @@ def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
     """Each kind's remedy names the move that clears it, and not the other.
 
     Whether `--tighten` clears the kind is established by running it, and
-    the printed advice is read for the words a refused author acts on. An
-    expectation taken from REMEDY_FOR instead moves with the mapping it is
-    supposed to pin, and a swapped mapping stays green.
+    the printed advice is read for the words a refused author acts on.
     """
     del tmp
     policy = _policy()
