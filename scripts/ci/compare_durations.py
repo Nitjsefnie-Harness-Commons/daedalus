@@ -286,6 +286,7 @@ def main(argv=None):
                         help='fractional slowdown that fails the comparison')
     parser.add_argument('--base-label', default='baseline')
     parser.add_argument('--summary-file')
+    parser.add_argument('--ratio-file')
     parser.add_argument('--accept',
                         help='optional accepted speed-change manifest')
     parser.add_argument(
@@ -349,12 +350,16 @@ def main(argv=None):
         _emit(lines, args.summary_file)
         return 1 if args.require_measurements else 0
 
+    # The total is stated wherever the covered set is, including the one
+    # skip path that runs before the comparison, so it needs only the rounds.
+    total = total_tests([*base_rounds, *head_rounds])
     all_shared = shared_tests([*base_rounds, *head_rounds])
     if not all_shared:
         lines.append('### Test speed')
         lines.append('')
-        lines.append('Skipped: no test passed in every round on both sides, '
-                     'so the comparison has no shared set to sum.')
+        lines.append(f'Skipped: no test passed in every round on both sides '
+                     f'among the {total} tests the suites recorded, so the '
+                     'comparison has no shared set to sum.')
         _render_acceptances(
             lines, _unmeasured_acceptance_rows(acceptances, args.base_label))
         _emit(lines, args.summary_file)
@@ -366,8 +371,14 @@ def main(argv=None):
         base_rounds, head_rounds, excluded=accepted_names)
     acceptance_rows, acceptances_ok = _acceptance_checks(
         acceptances, all_shared, base_rounds, head_rounds, args.base_label)
-    total = total_tests([*base_rounds, *head_rounds])
     ratio = render(lines, args.base_label, shared, pairs, movements, total)
+    # The record step reads the number by file, never this process's stdout.
+    if ratio is not None and args.ratio_file:
+        try:
+            with open(args.ratio_file, 'w', encoding='utf-8') as handle:
+                handle.write(f'{ratio:.3f}\n')
+        except OSError:
+            pass
     _render_acceptances(lines, acceptance_rows)
     budget = 1.0 + args.max_regression
     budget_ok = ratio is None or ratio <= budget
