@@ -318,6 +318,22 @@ because a watcher that has gone blind must not look like a quiet pull request.
 CI announces success and failure alike, and re-resolves the branch head every
 poll since a push moves it.
 
+Waiting on one commit's CI is `ci_wait.py`, beside this file:
+
+```
+python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha>
+```
+
+Its exit code is the verdict, so a caller never has to read the loop: 0 every
+run on the SHA concluded `success`, `neutral` or `skipped`; 1 every run
+concluded and one concluded otherwise, offenders named with URLs; 2 the
+`--timeout` bound expired first; 3 a query failed - loud and at once, never
+retried behind a message that reads like waiting. Unlike `ci_watch.py` it
+PINS the SHA it is given instead of re-resolving the branch head each poll:
+a push landing mid-wait must not turn the answer into one about a commit the
+caller never asked about. Zero runs on the SHA is waiting, not success. Run
+`--once` before a long wait.
+
 **A pull request has three comment surfaces, and a review is not a comment:**
 `pulls/<N>/reviews`, `pulls/<N>/comments` (inline) and `issues/<N>/comments`
 (the conversation). Read or unread is delivery bookkeeping, not evidence that a
