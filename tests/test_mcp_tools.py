@@ -5,7 +5,6 @@ import gc
 import importlib
 import inspect
 import sys
-import types
 import weakref
 from pathlib import Path
 from unittest import mock
@@ -207,52 +206,6 @@ def _assert_matching_inventories(first_composition, second_composition):
         assert set(first_tools) == set(second_tools)
 
 
-def _nested_code_objects(code):
-    pending = [code]
-    visited = set()
-    while pending:
-        current = pending.pop()
-        if id(current) in visited:
-            continue
-        visited.add(id(current))
-        yield current
-        pending.extend(
-            value for value in current.co_consts
-            if isinstance(value, types.CodeType))
-
-
-def _tool_code_objects(tool):
-    pending = [tool]
-    visited_functions = set()
-    visited_codes = set()
-    while pending:
-        function = pending.pop()
-        if id(function) in visited_functions:
-            continue
-        visited_functions.add(id(function))
-        for code in _nested_code_objects(function.__code__):
-            if id(code) not in visited_codes:
-                visited_codes.add(id(code))
-                yield code
-        if function.__closure__:
-            for cell in function.__closure__:
-                try:
-                    value = cell.cell_contents
-                except ValueError:
-                    continue
-                if inspect.isfunction(value):
-                    pending.append(value)
-        for value in function.__defaults__ or ():
-            if inspect.isfunction(value):
-                pending.append(value)
-        for value in (function.__kwdefaults__ or {}).values():
-            if inspect.isfunction(value):
-                pending.append(value)
-        wrapped = getattr(function, '__wrapped__', None)
-        if inspect.isfunction(wrapped):
-            pending.append(wrapped)
-
-
 def _tool_arguments(tool, overrides):
     arguments = {}
     for parameter in inspect.signature(tool).parameters.values():
@@ -393,10 +346,11 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     """No registered tool lexically reaches composition-authored behavior.
 
     The check follows the callable's own and nested code, functions in closure
-    cells, direct function-valued positional and keyword defaults, and
-    ``__wrapped__`` links. Functions held inside default containers are outside
+    cells, direct function-valued positional and keyword defaults,
+    ``__wrapped__`` links, and module-level functions its code names in its
+    own module globals. Functions held inside default containers are outside
     the property, as are composition-authored functions found dynamically at
-    call time through globals, imports, module attributes, ``getattr``, or
+    call time through imports, module attributes, ``getattr``, or
     dictionaries. Code objects with deliberately forged origins are also
     outside the property.
     """
@@ -404,7 +358,7 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     composition_path = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
     scanned = {
         name for name, tool in composition.mcp.registered.items()
-        if any(_tool_code_objects(tool))}
+        if any(_mcp_guard_floor.tool_code_objects(tool, _util.ROOT))}
     assert scanned == set(composition.mcp.registered), (
         'the origin scan traversed no code for: '
         f'{sorted(set(composition.mcp.registered) - scanned)}')
@@ -412,7 +366,7 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
         f'{name} via {code.co_name} at {code.co_filename}:'
         f'{code.co_firstlineno}'
         for name, tool in composition.mcp.registered.items()
-        for code in _tool_code_objects(tool)
+        for code in _mcp_guard_floor.tool_code_objects(tool, _util.ROOT)
         if Path(code.co_filename).resolve() == composition_path)
     assert not direct_tools, (
         'tool behavior authored in daedalus_mcp/server.py: '
@@ -467,11 +421,12 @@ def test_every_registered_tool_command_is_pinned(_tmp):
     refusals = _mcp_tool_commands.TOOL_REFUSALS
     assert refusals, 'no tool has a pinned refusal'
     sites = _mcp_guard_floor.tool_guards(
-        _mcp_guard_floor.composition_scan_set(composition, _util.ROOT))
+        _mcp_guard_floor.composition_scan_set(composition, _util.ROOT),
+        _util.ROOT)
     assert sites, 'no raise site found in the modules the composition imports'
     reached = {
-        name: _mcp_guard_floor.guard_keys(_mcp_guard_floor.reachable_guards(
-            sites, _tool_code_objects(tool)))
+        name: _mcp_guard_floor.reachable_guards(
+            sites, _mcp_guard_floor.tool_code_objects(tool, _util.ROOT))
         for name, tool in registered.items()}
     witnessed = set()
     for name, cases in refusals.items():
@@ -487,10 +442,12 @@ def test_every_registered_tool_command_is_pinned(_tmp):
             except exception as raised:
                 assert message in str(raised), (name, overrides, raised)
                 fired = _mcp_guard_floor.witnessed_guard(sites, raised)
-                assert fired in reached[name], (
+                assert fired in reached[name].values(), (
                     f'{name} {overrides}: refused from {fired}, which is no '
-                    'guard its own code reaches'
-                    + _mcp_guard_floor.unreadable_note(sites, fired))
+                    'raise site its own code reaches; the call must be '
+                    'lexically visible (a closure cell, a default, '
+                    '__wrapped__, or a module-global function) or the site '
+                    'declared')
                 witnessed.add((name, fired))
             else:
                 raise AssertionError(f'{name} {overrides}: nothing refused')
@@ -500,12 +457,15 @@ def test_every_registered_tool_command_is_pinned(_tmp):
     assert not orphans, (
         'UNWITNESSED_GUARDS names tools that are not registered: '
         f'{sorted(orphans)}')
-    stranded = _mcp_guard_floor.stranded_guards(reached, witnessed)
+    stranded = _mcp_guard_floor.stranded_guards(
+        {name: list(keys.values()) for name, keys in reached.items()},
+        witnessed)
     assert not stranded, (
         'unwitnessed or stale guard pins: '
         + '; '.join(f'{tool}: {"; ".join(gaps)}'
                     for tool, gaps in stranded.items()))
-    declared = _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE
+    declared = {entry[:3] for entry
+                in _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE}
     off_surface = _mcp_guard_floor.guards_off_the_tool_surface(sites, reached)
     assert off_surface == declared, (
         'the package raises where no tool reaches and nothing declares it: '
