@@ -443,6 +443,34 @@ def guards_off_the_tool_surface(sites, reached):
         key for keys in reached.values() for key in keys.values()}
 
 
+def missing_citations(table, root):
+    """The cited tests a table names that are absent from the tree.
+
+    A citation is data: its suite is parsed with `ast` and the named test
+    function must be defined there. A suite path that names no file is
+    absent the same way. Rows citing None are stated gaps, not citations,
+    and are never reported.
+    """
+    missing = []
+    for entry in table:
+        cited = entry[3]
+        if cited is None:
+            continue
+        suite, _, name = cited.partition('::')
+        path = Path(root) / suite
+        try:
+            tree = ast.parse(path.read_text(encoding='utf-8'))
+        except OSError:
+            missing.append(cited)
+            continue
+        defined = {node.name for node in ast.walk(tree)
+                   if isinstance(node, (ast.FunctionDef,
+                                        ast.AsyncFunctionDef))}
+        if name not in defined:
+            missing.append(cited)
+    return missing
+
+
 def stranded_guards(reached, witnessed):
     """Every tool's unwitnessed or stale guard pins; `witnessed` is (tool,
     guard) pairs, and the filter back to the owner makes each tool's own
