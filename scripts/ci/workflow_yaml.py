@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 if __package__:
-    # pylint: disable-next=relative-beyond-top-level
+    # pylint: disable=relative-beyond-top-level
     from .yamlblock import (
         BLOCK_HEADER,
         block_end,
@@ -10,9 +10,7 @@ if __package__:
         parse_block_header,
         text_indent,
     )
-    # pylint: disable-next=relative-beyond-top-level
     from .yamlanchor import ALIAS, node_properties, strip_node_properties
-    # pylint: disable-next=relative-beyond-top-level
     from .yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
