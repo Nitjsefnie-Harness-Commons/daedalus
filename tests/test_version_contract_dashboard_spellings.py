@@ -230,7 +230,9 @@ def test_new_spelling_decoys_in_script_are_ignored(tmp_path):
 def test_repeated_class_runs_without_a_close_do_not_flip_the_verdict(
         tmp_path):
     """The shape the trailing region is walked over most: many anchors, many
-    `class` candidates, and no `>v` for any of them to reach.
+    `class` candidates, and no `>v` for any of them to reach. This pins the
+    verdict on that shape, not the guard's presence: removing the rail
+    lookahead leaves this control passing, slowly.
     """
     anchors = 200
     _assert_markup_is_not_a_site(
