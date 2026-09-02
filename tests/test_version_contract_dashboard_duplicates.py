@@ -563,6 +563,27 @@ def test_escaped_dash_transitions_reach_the_first_script_end(tmp_path):
         result.returncode, result.stdout, result.stderr)
 
 
+def test_missing_tag_whitespace_is_not_a_rail_attribute(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<divclass='rail-foot'>v9.9.9</div>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard rail footer')
+
+
+def test_missing_tag_whitespace_is_not_a_status_line_attribute(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<spanclass='sl-v'>8.8.8</span>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard status line')
+
+
+def test_vertical_tab_does_not_separate_a_status_line_attribute(tmp_path):
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    _insert_before_body(copy_root, "<span\vclass='sl-v'>8.8.8</span>")
+    _assert_one_dashboard_match(copy_root, checker, 'dashboard status line')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='versioncontract_dashboard_duplicates_')
