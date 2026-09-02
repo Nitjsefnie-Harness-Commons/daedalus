@@ -100,12 +100,13 @@ def _member_chain(receiver, left, right):
 def constructed_value(receiver, name, opening, close, key, position,
                       wanted=None):
     """Callable value or accessor supplied by one constructed receiver."""
-    is_class, accessor = class_accessor(
-        receiver, name, key, wanted, position)
-    if is_class:
-        if accessor is None:
-            return _target('irrelevant')
-        return _target('known', body=accessor, form=wanted)
+    status, accessor, form = class_accessor(receiver, name, key, wanted)
+    if status == 'known':
+        return _target('known', body=accessor, form=form)
+    if status == 'absent':
+        return _target('irrelevant')
+    if status == 'opaque':
+        return _target('unprovable')
     body, env = receiver._call_environment(name, opening, close, position)
     if body is None:
         return _target('unprovable')
