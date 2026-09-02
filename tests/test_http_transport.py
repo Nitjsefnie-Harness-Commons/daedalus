@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""The request transport mixin and the answer convention.
+"""The request transport mixin, the answer convention, the JSON body helpers.
 
 `daedalus_bridge/http_transport.py` carries the request parsing,
 authentication, body limits and response writing that used to sit on
 `server.py`'s Handler, plus the `answer` convention every route module
 returns into. The mixin is exercised here through a stub subclass that
 records what was sent instead of holding a socket, so the rules are pinned
-in-process rather than only end to end through a bridge child.
+in-process rather than only end to end through a bridge child. The JSON
+body helpers the mixin parses with live in `daedalus_bridge/json_body.py`;
+their semantics and their configuration-free import are pinned here from
+that module directly.
 """
 import io
 import json
@@ -168,6 +171,11 @@ def test_bridge_token_refuses_a_header_and_query_that_disagree(_tmp):
 def test_json_nests_deeper_than_counts_structure_outside_strings(_tmp):
     assert json_body.json_nests_deeper_than(b'[[[1]]]', 2)
     assert not json_body.json_nests_deeper_than(b'[[1]]', 2)
+    # Cumulative openers past the limit with the simultaneous depth never
+    # above it is what the closing arm is for: a wide but shallow body must
+    # stay acceptable.
+    assert not json_body.json_nests_deeper_than(
+        b'[' + b'[]' * 60 + b']', 2)
     # A brace inside a string literal opens nothing, and an escaped quote
     # does not end the literal it sits in.
     assert not json_body.json_nests_deeper_than(b'{"a": "[[[[["}', 2)
@@ -180,6 +188,13 @@ def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
     assert once.duplicate_carrier is None, once.duplicate_carrier
     assert twice.duplicate_carrier == 'token', twice.duplicate_carrier
     assert once != twice
+    # Identical items are not the same request when one named the carrier
+    # twice — and `!=` must agree with `==`, which inherited dict.__ne__
+    # alone does not deliver.
+    repeat = json_body.JSONObject(
+        [('token', 'a'), ('id', 'x'), ('token', 'a')])
+    assert not once == repeat
+    assert once != repeat
 
 
 def test_the_answer_types_import_without_daedalus_configuration(_tmp):
@@ -208,9 +223,7 @@ def test_json_body_imports_without_daedalus_configuration(_tmp):
            if not k.startswith('DAEDALUS_')}
     env['PYTHONPATH'] = str(_util.ROOT)
     done = subprocess.run(
-        [sys.executable, '-c',
-         'from daedalus_bridge.json_body import JSONObject, '
-         'json_nests_deeper_than'],
+        [sys.executable, '-c', 'import daedalus_bridge.json_body'],
         env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
 
