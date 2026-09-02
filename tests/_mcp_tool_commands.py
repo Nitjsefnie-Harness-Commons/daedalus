@@ -6,9 +6,13 @@ filled from the suite's REQUIRED_ARGUMENTS, the overrides are applied, and the
 expected calls are the exact (surface, details) pairs the call must record on
 the probe bridge, in order.
 
-A parameter no case exercises is named in UNPINNED_PARAMETERS, with the reason
-it is safe to leave unwitnessed.
+A parameter no case exercises is named in UNPINNED_PARAMETERS, and a raise
+condition no TOOL_REFUSALS case fires in UNWITNESSED_GUARDS, each with the
+reason it is safe to leave unwitnessed.
 """
+import ast
+from pathlib import Path
+
 MARKER = 'pinned'
 
 
@@ -348,6 +352,8 @@ TOOL_REFUSALS = {
     'remove_css': [({'css': ''}, ValueError, 'css required')],
     'store_hotfix': [({'code': ''}, ValueError, 'code required')],
     'net_capture': [
+        ({'max_requests': 'many'}, ValueError,
+         'max_requests must be an integer'),
         ({'max_requests': True}, ValueError,
          'max_requests must be an integer'),
         ({'max_requests': 0}, ValueError,
@@ -356,3 +362,153 @@ TOOL_REFUSALS = {
          'max_requests must be an integer from 1 to 20000'),
     ],
 }
+
+
+def _guard_operands(test):
+    """The conditions of one `if` test that can fire its raise alone.
+
+    Only `or` splits: each of its operands is independently sufficient, so
+    each needs its own witness. No operand of an `and` is.
+    """
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or):
+        return list(test.values)
+    return [test]
+
+
+def _enclosing_function(node, parents):
+    name = ''
+    while node is not None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node.name
+        node = parents.get(node)
+    return name
+
+
+def _module_guard_sites(path):
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    sites = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Raise):
+            continue
+        guard = parents.get(node)
+        operands = (_guard_operands(guard.test)
+                    if isinstance(guard, ast.If) and node in guard.body
+                    else [node])
+        sites[(str(path.resolve()), node.lineno)] = (
+            _enclosing_function(node, parents),
+            [(ast.unparse(operand), operand) for operand in operands])
+    return sites
+
+
+def tool_guards(paths):
+    """Every raise the MCP tool modules spell, keyed by (file, line).
+
+    Each value is the raise's enclosing function and the conditions that can
+    fire it. Reading the source rather than the pin table is what makes a
+    deleted refusal case visible: the guard stays in the tree once its only
+    witness is gone. An `assert` is left out, since it states a type
+    invariant rather than refusing an operator's argument.
+    """
+    sites = {}
+    for path in paths:
+        sites.update(_module_guard_sites(path))
+    return sites
+
+
+def guard_conditions(sites):
+    """The conditions each raising function guards a raise with."""
+    conditions = {}
+    for function, operands in sites.values():
+        conditions.setdefault(function, []).extend(
+            text for text, _node in operands)
+    return conditions
+
+
+def witnessed_guard(sites, raised):
+    """The (function, condition) a caught refusal actually fired from.
+
+    The innermost traceback frame standing on a known raise names the site,
+    so a guard reached through a helper is witnessed where it is written. Of
+    several `or` operands the first one true of that frame is the one that
+    fired, as the interpreter short-circuited; they are pure reads of the
+    frame, so asking again cannot disturb what ran.
+    """
+    fired = None
+    trace = raised.__traceback__
+    while trace is not None:
+        filename = str(Path(trace.tb_frame.f_code.co_filename).resolve())
+        site = sites.get((filename, trace.tb_lineno))
+        if site is not None:
+            fired = (site, trace.tb_frame)
+        trace = trace.tb_next
+    if fired is None:
+        return None
+    (function, operands), frame = fired
+    for text, node in operands:
+        if len(operands) == 1 or eval(  # pylint: disable=eval-used
+                compile(ast.Expression(node), '<guard>', 'eval'),
+                frame.f_globals, dict(frame.f_locals)):
+            return (function, text)
+    return None
+
+
+UNWITNESSED_GUARDS = {
+    # Per raising function: conditions deliberately witnessed by no refusal
+    # case, each carrying the reason it is safe to leave unwitnessed. A stale
+    # entry, one the function does not raise on or one a case already
+    # witnesses, is refused.
+    'ping': {
+        # test_ping_raises_the_bridge_error pins it: the refusal driver
+        # cannot set the poll body this branch reads
+        "res.get('error')",
+    },
+    'segment_status': {
+        # test_segment_status_refuses_an_absent_job pins it: the refusal
+        # driver cannot set the HTTP status this branch reads
+        'found.status_code == 404',
+        # test_segment_status_refuses_a_job_owned_by_another_token, likewise
+        'found.status_code == 409',
+    },
+}
+
+
+def unwitnessed_guard_gaps(function, conditions, witnessed):
+    """Raise conditions neither a refusal case nor the allowlist accounts for.
+
+    `conditions` is one raising function's guard conditions as its source
+    spells them, `witnessed` the ones TOOL_REFUSALS cases actually fired, and
+    the function's UNWITNESSED_GUARDS entry the ones no case pins. A condition
+    outside both is one a refusal case is the only witness for, so deleting
+    that case strands the guard and the mutant it kills ships green. A stale
+    allowlist entry is refused too, and so is one text spelling two of a
+    function's guards, which would let a single witness stand for both.
+    """
+    conditions = list(conditions)
+    spelled = set(conditions)
+    witnessed = set(witnessed)
+    allowed = set(UNWITNESSED_GUARDS.get(function, ()))
+    return (
+        [f'{text!r} spells two of the guards'
+         for text in sorted(spelled) if conditions.count(text) > 1]
+        + [f'UNWITNESSED_GUARDS names {text!r}, which is guarded by nothing'
+           for text in sorted(allowed - spelled)]
+        + [f'UNWITNESSED_GUARDS names {text!r}, which a refusal case already '
+           'witnesses' for text in sorted(allowed & witnessed)]
+        + [f'no refusal case witnesses {text!r}'
+           for text in sorted(spelled - witnessed - allowed)])
+
+
+def stranded_guards(sites, witnessed):
+    """Every raising function's unwitnessed or stale guard pins."""
+    stranded = {}
+    for function, texts in guard_conditions(sites).items():
+        gaps = unwitnessed_guard_gaps(
+            function, texts,
+            {text for fired, text in witnessed if fired == function})
+        if gaps:
+            stranded[function] = gaps
+    return stranded
