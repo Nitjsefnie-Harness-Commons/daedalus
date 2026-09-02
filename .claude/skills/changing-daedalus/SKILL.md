@@ -151,7 +151,9 @@ file past its number, relocate the code into a new module. A stale entry is
 the one hand edit that is correct: `--tighten` drops an entry whose file is
 back under its ceiling, but an entry naming a file that is gone is deleted
 by hand. `tests/test_file_sizes.py` gates the policy and pins the script's
-prose to it, so the docstring and this rule cannot drift apart again.
+docstring to the remedy a refusal prints and to the rule above, so the
+script cannot teach the older policy again. No test reads this file, so
+keeping this paragraph in step with the script is a reader's job.
 
 ## Git and CI
 
