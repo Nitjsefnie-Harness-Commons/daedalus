@@ -144,13 +144,14 @@ The scanner's own patterns are the specification; do not reproduce them
 anywhere else in the tree, because a rule that quotes them trips them. It also refuses an empty tracked-file enumeration, because
 a scan that came back empty is broken rather than clean.
 
-**`scripts/ci/size_baseline.py` is not hand-edited, and a recorded number is
-not raised.** Growth is not the way out; shrinking is, recorded with
-`--tighten`. If a change would push a listed file past its number, relocate the
-code into a new module. `tests/test_file_sizes.py` gates the same thing.
-The script's own docstring says growth is allowed by editing the number in the
-same commit - that is the older policy and reading it will teach you the wrong
-one.
+**`scripts/ci/size_baseline.py`'s table is never hand-edited to make room,
+and a recorded number is never raised.** Growth is not the way out;
+shrinking is, recorded with `--tighten`. If a change would push a listed
+file past its number, relocate the code into a new module. A stale entry is
+the one hand edit that is correct: `--tighten` drops an entry whose file is
+back under its ceiling, but an entry naming a file that is gone is deleted
+by hand. `tests/test_file_sizes.py` gates the policy and pins the script's
+prose to it, so the docstring and this rule cannot drift apart again.
 
 ## Git and CI
 
