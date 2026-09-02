@@ -566,6 +566,7 @@ def test_two_windows_outer_timeouts_keep_both_attempt_records(_tmp):
                 'last phase: dashboard call settled', 'complete one',
                 'complete two')
     assert all(part in failure for part in expected), failure
+    assert 'retry declined' not in failure, failure
     assert [event[0] for event in events].count('popen') == 2, events
 
 
@@ -574,6 +575,7 @@ def test_non_windows_outer_timeout_does_not_retry(_tmp):
         'linux', (401, [_timeout(), _result(-9)]))
     assert failure.startswith('dashboard node outer timeout after 1 attempt')
     assert 'attempt 1:' in failure and 'pid: 401' in failure, failure
+    assert 'retry declined' not in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
 
 
@@ -688,6 +690,17 @@ def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
     budgets = [event[2] for event in events
                if event[0] in ('reader-join', 'wait')]
     assert budgets[0] > budgets[1] > budgets[2] >= 0, budgets
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_windows_declined_retry_is_named_in_the_verdict(_tmp):
+    failure, events, _ = _controlled_run(
+        'win32', (1101, [_timeout(), _timeout('partial', 'error')]),
+        (1102, [_result(0, 'wrong retry')]))
+    assert failure.startswith(
+        'dashboard node outer timeout after 1 attempt\n'
+        'retry declined: the post-kill drain did not complete '
+        '(drain outcome: timed out)\n'), failure
     assert [event[0] for event in events].count('popen') == 1, events
 
 

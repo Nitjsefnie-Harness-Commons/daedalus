@@ -450,9 +450,14 @@ def run_dashboard_node(
             records = '\n'.join(
                 _format_timeout_attempt(record)
                 for record in timeout_records)
+            note = ''
+            if not failure.retryable and count < attempts:
+                note = (
+                    'retry declined: the post-kill drain did not complete '
+                    f'(drain outcome: {failure.record.drain_outcome})\n')
             raise AssertionError(
                 f'dashboard node outer timeout after {count} {suffix}\n'
-                f'{records}') from failure
+                f'{note}{records}') from failure
         if timeout_records:
             record = timeout_records[0]
             sys.stderr.write(
