@@ -245,6 +245,7 @@
 !/tests/_coverage_suite_fixture.py
 !/tests/_dashnode.py
 !/tests/_deliveries.py
+!/tests/_drain.py
 !/tests/_evalpages.py
 !/tests/_ghexpr.py
 !/tests/_jsread.py
@@ -330,6 +331,7 @@
 !/tests/test_delivery_stripes.py
 !/tests/test_diff_coverage.py
 !/tests/test_diff_coverage_javascript.py
+!/tests/test_drain.py
 !/tests/test_eval_relay.py
 !/tests/test_examples_parse.py
 !/tests/test_extension_boundary.py
