@@ -119,6 +119,13 @@ def _unquoted(text, owner='', flow=False):
         raise YAMLReadError(f'{owner} has an unbalanced flow collection')
 
 
+def text_indent(text):
+    """The indentation of one line, refusing a tab where spaces belong."""
+    if text[:1] == '\t':
+        raise YAMLReadError('tabs in YAML indentation are unsupported')
+    return len(text) - len(text.lstrip(' '))
+
+
 def find_mapping_field(text, owner, allow_tabs=False):
     """Split one inline mapping field, or None when it carries no separator.
 

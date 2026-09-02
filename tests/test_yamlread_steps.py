@@ -363,9 +363,25 @@ def test_block_scalar_with_two_indent_indicators_is_refused(tmp):
         workflow_step_items(source, 'sample')
     except YAMLReadError as error:
         assert str(error) == (
-            'workflow block has two indentation indicators'), error
+            'workflow has two indentation indicators'), error
         return
     raise AssertionError('two block indentation indicators were accepted')
+
+
+def test_a_zero_indentation_indicator_names_the_block_header(tmp):
+    """`|0` is a block header with an indicator this subset refuses."""
+    del tmp
+    source = (
+        'jobs:\n  sample:\n    steps:\n'
+        '      - name: |0\n'
+        '          true\n')
+    try:
+        workflow_step_items(source, 'sample')
+    except YAMLReadError as error:
+        assert str(error) == (
+            'workflow has an unsupported block header'), error
+        return
+    raise AssertionError('a zero indentation indicator was accepted')
 
 
 def test_complete_workflow_and_job_mappings_decode_every_container(tmp):
