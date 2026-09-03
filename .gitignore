@@ -299,6 +299,7 @@
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
 !/tests/_wfgraph.py
+!/tests/_wfjobs.py
 !/tests/_wfpins.py
 !/tests/_wfscalars.py
 !/tests/_wfskip.py
@@ -455,6 +456,7 @@
 !/tests/test_worker_runtime.py
 !/tests/test_workflow_bash.py
 !/tests/test_workflow_eslint.py
+!/tests/test_workflow_job_timeouts.py
 !/tests/test_workflow_parsing.py
 !/tests/test_workflow_spellings.py
 !/tests/test_workflow_triggers.py
