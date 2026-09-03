@@ -28,6 +28,13 @@ updates:
       codeql-action:
         patterns:
           - "github/codeql-action*"
+      # `actions/cache/restore` and `actions/cache/save` are one action to the
+      # workflow's pin — one commit per family, and a run that names two — and
+      # two dependencies to Dependabot. Ungrouped, a version bump arrives as
+      # two pull requests that each leave the family pin red.
+      cache:
+        patterns:
+          - "actions/cache*"
 
   # The Python surface: the `mcp` extra in pyproject.toml, which is the only
   # third-party code that runs in production, and the lint/type/coverage pins
