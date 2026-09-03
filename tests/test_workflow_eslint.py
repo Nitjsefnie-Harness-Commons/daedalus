@@ -86,6 +86,16 @@ def test_the_currency_gate_watches_every_pin(tmp):
     assert 'pinned="${!var}"' in run, run
 
 
+def test_the_gate_fails_closed_when_a_pin_drifts(tmp):
+    """A renamed or deleted env pin resolves empty, and an empty pin makes
+    the integer comparison error inside its own if -- so the gate has to
+    check for that itself, name the variable, and fail the job."""
+    del tmp
+    run = _run(CURRENCY_NAME)
+    assert 'if [ -z "${pinned}" ]' in run, run
+    assert 'echo "${var} is unset or empty' in run, run
+
+
 def test_the_currency_gate_sits_between_install_and_lint(tmp):
     del tmp
     workflow = _tests_yml()

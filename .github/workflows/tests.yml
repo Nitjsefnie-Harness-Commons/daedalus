@@ -258,13 +258,16 @@ jobs:
 
       # Three pins ride one install command, so one of them rotting is
       # enough to break the job: each is compared here with its own
-      # registry's latest stable major, and a query that cannot answer
-      # fails the job rather than passing a pin it never saw. Compare
-      # majors, not patch versions: staying current within a major is npm's
-      # business between runs, while a new major is the maintainer's call.
+      # registry's latest stable major, a pin that has drifted away fails
+      # the job instead of passing an error it swallowed, and a query that
+      # cannot answer fails the job rather than passing a pin it never
+      # saw. Compare majors, not patch versions: staying current within a
+      # major is npm's business between runs, while a new major is the
+      # maintainer's call.
       - name: Check the pins against the registries' latest majors
         run: |
           stale=0
+          drift=0
           for pin in \
             "ESLINT_VERSION:eslint" \
             "ESLINT_JS_VERSION:@eslint/js" \
@@ -273,6 +276,15 @@ jobs:
             var="${pin%%:*}"
             package="${pin#*:}"
             pinned="${!var}"
+            # A renamed or deleted env pin resolves empty, and an empty pin
+            # makes the -gt comparison error inside its own if, which reads
+            # as "not stale". Fail instead, naming the variable.
+            if [ -z "${pinned}" ]; then
+              echo "${var} is unset or empty, so ${package} has no pin" \
+                "to check." >&2
+              drift=1
+              continue
+            fi
             latest="$(npm view "${package}" version)"
             pinned_major="${pinned%%.*}"
             latest_major="${latest%%.*}"
@@ -283,6 +295,11 @@ jobs:
               stale=1
             fi
           done
+          if [ "${drift}" -ne 0 ]; then
+            echo "Restore the named env pins so every installed package" >&2
+            echo "has a pin this job checks." >&2
+            exit 1
+          fi
           if [ "${stale}" -ne 0 ]; then
             echo "Raise the named env pins, and eslint.config.js with" >&2
             echo "them if the new majors need config changes, then re-run" >&2
