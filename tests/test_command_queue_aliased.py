@@ -9,6 +9,7 @@ candidate is left in place rather than unlinked.
 """
 import json
 import os
+import pathlib
 import sys
 import time
 from pathlib import Path
@@ -183,6 +184,33 @@ def test_poll_answers_empty_for_a_hard_linked_legacy_name(tmp):
 
     assert answer == (200, {}), answer
     assert first.exists() and second.exists(), 'a refusal unlinked a name'
+
+
+def test_poll_answers_the_command_when_the_file_will_not_unlink(tmp):
+    """A failed removal is the drains' outcome too: answered, left in place."""
+    service = _load_service('aliased_poll_unlink_failure')
+    cq = service.command_queue
+    _, legacy = cq.command_target_names('tok')
+    path = Path(tmp) / legacy
+    path.write_text('{"id": "kept", "code": "1"}', encoding='utf-8')
+    real_unlink = pathlib.Path.unlink
+    attempted = []
+
+    def refusing_unlink(self, *args, **kwargs):
+        if self.name == legacy:
+            attempted.append(self.name)
+            raise PermissionError('the removal failed')
+        return real_unlink(self, *args, **kwargs)
+
+    pathlib.Path.unlink = refusing_unlink
+    try:
+        answer = service.poll_legacy(Path(tmp), 'tok')
+    finally:
+        pathlib.Path.unlink = real_unlink
+
+    assert attempted == [legacy], attempted
+    assert answer == (200, {'id': 'kept', 'code': '1'}), answer
+    assert path.exists(), 'a failed removal must not lose the command'
 
 
 def test_poll_refuses_a_legacy_name_that_leaves_the_root(tmp):
