@@ -459,6 +459,7 @@
 !/tests/test_worker_route_guard.py
 !/tests/test_worker_runtime.py
 !/tests/test_workflow_bash.py
+!/tests/test_workflow_cache_boundary.py
 !/tests/test_workflow_eslint.py
 !/tests/test_workflow_job_timeouts.py
 !/tests/test_workflow_parsing.py

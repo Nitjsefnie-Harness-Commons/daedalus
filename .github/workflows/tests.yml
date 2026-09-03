@@ -490,7 +490,9 @@ jobs:
 
       # The gate is the answer to the cache-poisoning findings: an untrusted
       # event never writes cross-run state, and a push of main is the one
-      # trigger whose checkout this repository produced.
+      # trigger whose checkout this repository produced. The save follows the
+      # suites, so what it holds reflects a full suite run's downloads rather
+      # than the install's alone.
       - name: Save the pip cache
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -650,9 +652,10 @@ jobs:
           COVERAGE_PROCESS_START: ${{ github.workspace }}/pyproject.toml
         run: python scripts/ci/coverage_suites.py --require-all
 
-      # Saved only after the measurement ran, under the same gate as the
-      # suites job: a pull-request or workflow_dispatch run restores a cache
-      # and never writes one.
+      # Saved only after the measurement ran, so what it holds reflects a
+      # full suite run's downloads, under the same gate as the suites job:
+      # a pull-request or workflow_dispatch run restores a cache and never
+      # writes one.
       - name: Save the pip cache
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -755,9 +758,9 @@ jobs:
           # to describe the code this repository ships.
           python -m pip install . ".[mcp]"
 
-      # Before the measurement: the cache is a property of the install, and
-      # saving here is what keeps it from reflecting anything a later step
-      # left in the directory. Same gate as the other two jobs.
+      # Immediately after the install: the cache's warmest point in this job.
+      # The placement differs from the suites and coverage-matrix jobs only
+      # because no later step here runs pip. Same gate as both of them.
       - name: Save the pip cache
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         if: ${{ !cancelled() && github.event_name == 'push'
