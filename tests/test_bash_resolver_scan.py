@@ -17,7 +17,7 @@ _SITES = (
      '        bash = _util.workflow_bash()',
      "        bash = 'bash'",
      '        return subprocess.run([bash'),
-    ('tests/test_ci_workflows.py',
+    ('tests/test_claim_workflow.py',
      '    bash = _util.workflow_bash()',
      "    bash = 'bash'",
      '    result = subprocess.run([bash'),
