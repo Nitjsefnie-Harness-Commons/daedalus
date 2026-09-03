@@ -175,7 +175,7 @@ the history were visible on exactly one leg.
   return ...` early exits in the request path. Both are the codebase's idiom
   and `setup.cfg` suppresses the style checks that would fight them.
 - **JavaScript** — the extension is classic scripts with `chrome` global; the
-  dashboard is ES modules with no build step. `.eslintrc.json` encodes the
+  dashboard is ES modules with no build step. `eslint.config.js` encodes the
   split. `examples/` is not linted: those snippets are async function bodies
   the bridge wraps, so they carry top-level `return` and top-level `await`
   together and no parser configuration accepts both.
