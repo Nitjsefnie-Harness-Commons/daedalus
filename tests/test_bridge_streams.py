@@ -120,8 +120,7 @@ def test_put_command_validation(tmp):
 
 def test_unencodable_command_body_names_the_body_not_the_path(tmp):
     """A surrogate in a queued command's body is an encoding failure, not a
-    path one — and the refused enqueue leaves no artifact at all, including
-    the hidden temp the failed write opened."""
+    path one; the refused enqueue leaves no artifact, hidden temp included."""
     with _util.bridge(tmp) as (base, docroot):
         status, raw = put_command(
             base, {'token': TOK, 'id': 'enc', 'code': '\ud800'})
@@ -130,9 +129,8 @@ def test_unencodable_command_body_names_the_body_not_the_path(tmp):
         qdir = Path(docroot) / 'commands' / TOK
         entries = list(qdir.iterdir()) if qdir.is_dir() else []
         assert entries == [], entries
-        health_status, health = _util.get_json(base + '/health')
-        assert health_status == 200 and health['ok'] is True, (
-            health_status, health)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
@@ -171,9 +169,8 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
         assert dashboard_status == 500, (dashboard_status, dashboard_raw)
         assert json.loads(dashboard_raw) == {'error': 'dashboard storage failure'}
 
-        health_status, health = _util.get_json(base + '/health')
-        assert health_status == 200 and health['ok'] is True, (
-            health_status, health)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
         status, body = _util.post_json(
             base + '/sync-tabs', {'token': TOK, 'tabs': []})
         assert status == 200 and body == {'ok': True, 'count': 0}, (
@@ -319,10 +316,9 @@ def test_stream_modes_deliver_end_to_end(tmp):
 def test_a_lost_command_ends_the_read_instead_of_riding_keepalives(tmp):
     """An undelivered command must fail its reader, not outlive the suite.
 
-    The stream's keepalives reset the connection's socket timeout, and they
-    arrive more often than that timeout, so a reader bounded only by the
-    socket waits for exactly as long as the bridge stays healthy: a lost
-    command hangs the run with no diagnosis instead of failing with one.
+    The stream's keepalives reset the connection's socket timeout and arrive
+    more often than it, so a reader bounded only by the socket waits exactly
+    as long as the bridge stays healthy: a lost command hangs, undiagnosed.
     """
     outcome = []
     with _util.bridge(
@@ -360,9 +356,8 @@ def test_stream_drops_a_non_object_queue_entry(tmp):
 def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
     """A queued command whose id holds a lone surrogate must not kill the stream.
 
-    The SSE frame itself escapes the surrogate (json.dumps defaults); it was
-    the DELIVERED log line that raised UnicodeEncodeError and tore the stream
-    down after the frame had already gone out.
+    The SSE frame escapes the surrogate (json.dumps defaults); the DELIVERED
+    log line then raised UnicodeEncodeError and tore the stream down.
     """
     served = []
     with _util.bridge(tmp, output=served) as (base, docroot):
@@ -384,9 +379,8 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
         finally:
             response.close()
             conn.close()
-        health_status, health = _util.get_json(base + '/health')
-        assert health_status == 200 and health['ok'] is True, (
-            health_status, health)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
@@ -409,9 +403,8 @@ def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
         finally:
             response.close()
             conn.close()
-        health_status, health = _util.get_json(base + '/health')
-        assert health_status == 200 and health['ok'] is True, (
-            health_status, health)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
@@ -425,10 +418,8 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
     """
     _util.require_undecodable_names(tmp)
     strict = {'PYTHONIOENCODING': 'utf-8:strict'}
-    # The bridge's own log goes into every failure here. This test has failed
-    # intermittently with nothing but "no data frame arrived", and its
-    # DELIVERED lines are the only direct evidence of whether the drain ever
-    # saw the file it was waiting for.
+    # The bridge's own log goes into every failure here, and its DELIVERED
+    # lines are the only direct evidence of whether the drain saw the file.
     served = []
     with _util.bridge(tmp, env=strict, output=served) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
@@ -457,9 +448,8 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
         finally:
             response.close()
             conn.close()
-        health_status, health = _util.get_json(base + '/health')
-        assert health_status == 200 and health['ok'] is True, (
-            health_status, health)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
@@ -491,9 +481,8 @@ def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
         while os.path.exists(stale) and time.time() < deadline:
             time.sleep(0.01)
         assert not os.path.exists(stale), 'the expired entry was not dropped'
-        health_status, health = _util.get_json(base + '/health')
-        assert health_status == 200 and health['ok'] is True, (
-            health_status, health)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
@@ -558,9 +547,8 @@ def test_queue_publication_never_deletes_an_in_progress_write(tmp):
             frame = framer(response, served)
             witness = frame('the complete file behind the partial one')
             assert witness.get('id') == 'scan-witness', witness
-            assert partial.exists(), (
-                'the queue scan unlinked a visible file while its writer '
-                'was open')
+            assert partial.exists(), 'the queue scan unlinked a visible file' \
+                ' while its writer was open'
 
             writer.write(',"code":"second"}')
             writer.flush()
@@ -582,8 +570,8 @@ def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
 
     #23's fifth sighting produced nothing but "no data frame arrived" because
     the capture existed on one test in the family and not its siblings. A
-    capture that is wired but silent would look exactly the same from a
-    failure report, so this drives a real timeout and reads what comes out.
+    capture that is wired but silent looks the same from a failure report,
+    so this drives a real timeout and reads what comes out.
     """
     served = []
     with _util.bridge(tmp, output=served) as (base, _docroot):
@@ -605,6 +593,22 @@ def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
     # from, so this line is in `served` whatever else the bridge has logged.
     assert 'the bridge said: ' in message, message
     assert '[Daedalus] Listening on 127.0.0.1:' in message, message
+
+
+def test_a_replaced_stream_reports_its_own_end(tmp):
+    """The closure diagnosis survives the cleanup that runs after it."""
+    with _util.bridge(tmp) as (base, _docroot):
+        first_conn, first = stream_response(base, TOK, tab='samet')
+        second_conn, second = stream_response(base, TOK, tab='samet')
+        try:
+            next_stream_data(first)
+        except AssertionError as failure:
+            assert 'the stream closed before the next frame' in str(failure)
+        finally:
+            second.close()
+            second_conn.close()
+            first.close()
+            first_conn.close()
 
 
 def test_queue_delivery_updates_the_health_clock(tmp):

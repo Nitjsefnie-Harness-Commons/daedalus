@@ -225,7 +225,13 @@ def next_stream_data(response, timeout=10):
         raise AssertionError(
             f'the stream died before the next frame: {exc}') from exc
     finally:
-        stream_socket.settimeout(original_timeout)
+        try:
+            stream_socket.settimeout(original_timeout)
+        except OSError:
+            # http.client closed the socket once readline reached EOF, so
+            # there is no timeout left to restore; this cleanup failure must
+            # not displace the diagnosis raised above it.
+            pass
 
 
 def assert_oversize_stream_matches_enqueue(base):
