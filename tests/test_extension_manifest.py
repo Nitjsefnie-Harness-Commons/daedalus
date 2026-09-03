@@ -8,11 +8,15 @@ have failed on.
 
 Enforced: the known keys' shapes (fail-closed), a closed allowlist of
 permission names, the match-pattern grammar, and that every named path is a
-file inside the extension root. NOT enforced: the version's spelling, which
-`scripts/check_versions.py` and the version-contract suites own (a non-string
-or empty version is still refused here as a shape violation), the CSP, the
-`icons` sizes, and whether a permission is useful rather than granted. Unknown
-top-level keys are legal MV3 — Chrome ignores them — so they are NOT refused.
+file inside the extension root. An explicit JSON null on a known key is a
+value of the wrong type, not an absent key, and is refused. NOT enforced: the
+version's spelling, which `scripts/check_versions.py` and the version-contract
+suites own (a non-string or empty version is still refused here as a shape
+violation), the CSP, the `icons` sizes, whether a permission is useful rather
+than granted, and unknown keys — legal MV3, ignored by Chrome, never refused.
+Known model gaps, recorded rather than enforced: a match-pattern host may
+carry a port or a bare leading dot here where Chrome refuses both, and the
+`urn:` form is modeled narrower than Chrome's.
 """
 import json
 import sys
@@ -38,17 +42,16 @@ PERMISSIONS = frozenset({
 PATTERN_SCHEMES = frozenset(
     {'*', 'http', 'https', 'ws', 'wss', 'ftp', 'file', 'urn'})
 
-RUN_AT_VALUES = ('document_start', 'document_end', 'document_idle')
-WORLD_VALUES = ('MAIN', 'ISOLATED')
+RUN_AT = ('document_start', 'document_end', 'document_idle')
+WORLD = ('MAIN', 'ISOLATED')
 
 
-def _pattern_violation(key, pattern, ext_root=None):
+def _pattern_violation(key, pattern):
     """Why Chrome would refuse one match pattern at `key`, or None.
 
     `<all_urls>`, or `scheme://host/path` — host the star, `*.<rest>` with a
     nonempty rest, or a starless literal, path beginning with a slash.
     """
-    del ext_root
     if not isinstance(pattern, str) or not pattern:
         return f'{key}: a pattern must be a nonempty string'
     if pattern == '<all_urls>':
@@ -88,15 +91,39 @@ def _pattern_violation(key, pattern, ext_root=None):
 
 
 def _file_violation(key, name, ext_root):
-    """Why `key` does not name a shipped file, or None; containment first."""
+    """Why `key` does not name a shipped file, or None; containment first.
+
+    A backslash is refused: `PurePosixPath` cannot see it as a separator, so
+    on Windows the disk read would resolve outside the extension root.
+    """
     if not isinstance(name, str) or not name:
         return f'{key}: a path must be a nonempty string'
+    if '\\' in name:
+        return f'{key}: {name} names a path with a backslash'
     relative = PurePosixPath(name)
     if relative.is_absolute() or '..' in relative.parts:
         return f'{key}: {name} leaves the extension root'
     if not (Path(ext_root) / name).is_file():
         return f'{key}: {name} is not a file the extension ships'
     return None
+
+
+def _glob_violation(key, value):
+    """Why Chrome would refuse one glob at `key`, or None.
+
+    Globs match URLs, not package files, so a glob is only a string.
+    """
+    if not isinstance(value, str) or not value:
+        return f'{key}: a glob must be a nonempty string'
+    return None
+
+
+def _root_free(check):
+    """Adapt a check that reads no files to the dispatcher's signature."""
+    return lambda key, value, ext_root: check(key, value)
+
+
+_ABSENT = object()
 
 
 def _each_entry(key, entries, check, ext_root):
@@ -117,8 +144,11 @@ def _required_entries(key, entries, check, ext_root):
 
 
 def _optional_entries(key, entries, check, ext_root, nonempty):
-    """Violations for an optional list, `nonempty` keeping the matches rule."""
-    if entries is None:
+    """Violations for an optional list, `nonempty` keeping the matches rule.
+
+    An explicit null is a value of the wrong type, not an absent key.
+    """
+    if entries is _ABSENT:
         return []
     if not isinstance(entries, list):
         return [f'{key}: is not a list']
@@ -147,12 +177,12 @@ def manifest_violations(manifest, ext_root):
         if not isinstance(value, str) or not value:
             add(key, 'is not a nonempty string')
 
-    description = manifest.get('description')
-    if description is not None and not isinstance(description, str):
+    if 'description' in manifest and not isinstance(
+            manifest['description'], str):
         add('description', 'is present but is not a string')
 
-    value = manifest.get('permissions')
-    if value is not None:
+    if 'permissions' in manifest:
+        value = manifest['permissions']
         if not isinstance(value, list):
             add('permissions', 'is not a list')
         else:
@@ -168,11 +198,11 @@ def manifest_violations(manifest, ext_root):
                 seen.add(entry)
 
     violations.extend(_optional_entries(
-        'host_permissions', manifest.get('host_permissions'),
-        _pattern_violation, ext_root, nonempty=False))
+        'host_permissions', manifest.get('host_permissions', _ABSENT),
+        _root_free(_pattern_violation), ext_root, nonempty=False))
 
-    value = manifest.get('background')
-    if value is not None:
+    if 'background' in manifest:
+        value = manifest['background']
         if not isinstance(value, dict):
             add('background', 'is not an object')
         else:
@@ -180,11 +210,11 @@ def manifest_violations(manifest, ext_root):
                                       value.get('service_worker'), ext_root)
             if problem:
                 violations.append(problem)
-            if value.get('type') is not None and value.get('type') != 'module':
+            if 'type' in value and value['type'] != 'module':
                 add('background.type', 'is not module')
 
-    value = manifest.get('content_scripts')
-    if value is not None:
+    if 'content_scripts' in manifest:
+        value = manifest['content_scripts']
         if not isinstance(value, list):
             add('content_scripts', 'is not a list')
         else:
@@ -195,30 +225,35 @@ def manifest_violations(manifest, ext_root):
                     continue
                 violations.extend(_required_entries(
                     f'{where}.matches', script.get('matches'),
-                    _pattern_violation, ext_root))
-                violations.extend(_required_entries(
-                    f'{where}.js', script.get('js'), _file_violation,
-                    ext_root))
+                    _root_free(_pattern_violation), ext_root))
                 violations.extend(_optional_entries(
-                    f'{where}.exclude_matches', script.get('exclude_matches'),
-                    _pattern_violation, ext_root, nonempty=True))
+                    f'{where}.js', script.get('js', _ABSENT), _file_violation,
+                    ext_root, nonempty=True))
                 violations.extend(_optional_entries(
-                    f'{where}.exclude_js', script.get('exclude_js'),
+                    f'{where}.css', script.get('css', _ABSENT),
                     _file_violation, ext_root, nonempty=True))
-                run_at = script.get('run_at')
-                if run_at is not None and run_at not in RUN_AT_VALUES:
-                    add(f'{where}.run_at',
-                        f'is not one of {", ".join(RUN_AT_VALUES)}')
-                all_frames = script.get('all_frames')
-                if all_frames is not None and not isinstance(all_frames, bool):
+                violations.extend(_optional_entries(
+                    f'{where}.exclude_matches',
+                    script.get('exclude_matches', _ABSENT),
+                    _root_free(_pattern_violation), ext_root, nonempty=True))
+                violations.extend(_optional_entries(
+                    f'{where}.include_globs',
+                    script.get('include_globs', _ABSENT),
+                    _root_free(_glob_violation), ext_root, nonempty=True))
+                violations.extend(_optional_entries(
+                    f'{where}.exclude_globs',
+                    script.get('exclude_globs', _ABSENT),
+                    _root_free(_glob_violation), ext_root, nonempty=True))
+                if 'run_at' in script and script['run_at'] not in RUN_AT:
+                    add(f'{where}.run_at', f'is not one of {RUN_AT}')
+                if 'all_frames' in script and not isinstance(
+                        script['all_frames'], bool):
                     add(f'{where}.all_frames', 'is not a boolean')
-                world = script.get('world')
-                if world is not None and world not in WORLD_VALUES:
-                    add(f'{where}.world',
-                        f'is not one of {", ".join(WORLD_VALUES)}')
+                if 'world' in script and script['world'] not in WORLD:
+                    add(f'{where}.world', f'is not one of {WORLD}')
 
-    value = manifest.get('options_ui')
-    if value is not None:
+    if 'options_ui' in manifest:
+        value = manifest['options_ui']
         if not isinstance(value, dict):
             add('options_ui', 'is not an object')
         else:
@@ -226,12 +261,12 @@ def manifest_violations(manifest, ext_root):
                                       ext_root)
             if problem:
                 violations.append(problem)
-            open_in_tab = value.get('open_in_tab')
-            if open_in_tab is not None and not isinstance(open_in_tab, bool):
+            if 'open_in_tab' in value and not isinstance(
+                    value['open_in_tab'], bool):
                 add('options_ui.open_in_tab', 'is not a boolean')
 
-    value = manifest.get('icons')
-    if value is not None:
+    if 'icons' in manifest:
+        value = manifest['icons']
         if not isinstance(value, dict):
             add('icons', 'is not an object')
         else:
@@ -302,10 +337,7 @@ def _extension_root(tmp, *names):
 
 
 def _assert_one_refusal(label, build, where, reason, ext_root=EXTENSION_ROOT):
-    """A mutant is refused once, at the property it mutated, for that reason.
-
-    Exactly one violation is the decoy discipline.
-    """
+    """A mutant dies once, at the property it mutated, for that reason."""
     manifest = build(_real_manifest())
     violations = manifest_violations(manifest, ext_root)
     assert len(violations) == 1, f'{label}: {violations}'
@@ -314,10 +346,7 @@ def _assert_one_refusal(label, build, where, reason, ext_root=EXTENSION_ROOT):
 
 
 def test_the_shipped_manifest_is_accepted(tmp):
-    """The manifest in the tree survives the installer's reading of it.
-
-    Parsed fresh from disk; an unparseable one raises out and fails the suite.
-    """
+    """The shipped manifest is accepted; a JSON error fails the suite."""
     del tmp
     assert manifest_violations(_real_manifest(), EXTENSION_ROOT) == []
 
@@ -349,6 +378,8 @@ def test_every_optional_key_stays_optional(tmp):
         ('all_frames absent',
          _entry(0, 'content_scripts', 'all_frames', _DROP)),
         ('an unknown top-level key', _setting('deployed_by', 'CI')),
+        ('an unknown content-script key',
+         _entry(0, 'content_scripts', 'exclude_js', ['no-such-file.js'])),
     )
     for label, build in variants:
         manifest = build(_real_manifest())
@@ -357,16 +388,15 @@ def test_every_optional_key_stays_optional(tmp):
 
 
 def test_valid_twins_are_accepted(tmp):
-    """The valid twin of each refusal branch is accepted.
-
-    Holds the accept axis apart from the refuse axis.
-    """
-    root = _extension_root(tmp, 'background.js', 'icon.svg')
+    """The valid twin of each refusal branch is accepted."""
+    root = _extension_root(tmp, 'background.js', 'icon.svg', 'style.css')
     twin = {
         'manifest_version': 3,
         'name': 'Twins',
         'version': '1.0',
         'background': {'service_worker': 'background.js', 'type': 'module'},
+        'content_scripts': [{'matches': ['<all_urls>'], 'css':
+                             ['style.css']}],
         'icons': {'16': 'icon.svg'},
     }
     assert manifest_violations(twin, root) == []
@@ -387,8 +417,10 @@ def test_valid_twins_are_accepted(tmp):
         ('exclude_matches naming a real pattern',
          _entry(0, 'content_scripts', 'exclude_matches',
                 ['https://*.example.com/*'])),
-        ('exclude_js naming a real file',
-         _entry(0, 'content_scripts', 'exclude_js', ['worker/util.js'])),
+        ('include_globs naming globs',
+         _entry(0, 'content_scripts', 'include_globs', ['*://*/*'])),
+        ('exclude_globs naming globs',
+         _entry(0, 'content_scripts', 'exclude_globs', ['*/nested/*'])),
         ('open_in_tab true', _inside('options_ui', 'open_in_tab', True)),
     )
     for label, build in variants:
@@ -411,6 +443,8 @@ def test_the_root_and_scalar_branches_are_refused(tmp):
          'is not an integer'),
         ('manifest_version-not-3', _setting('manifest_version', 2),
          'manifest_version', 'is not 3'),
+        ('manifest_version-true', _setting('manifest_version', True),
+         'manifest_version', 'is not an integer'),
         ('name-not-a-string', _setting('name', 7), 'name',
          'is not a nonempty string'),
         ('name-empty', _setting('name', ''), 'name',
@@ -421,6 +455,8 @@ def test_the_root_and_scalar_branches_are_refused(tmp):
          'is not a nonempty string'),
         ('description-not-a-string', _setting('description', 7),
          'description', 'is present but is not a string'),
+        ('description-null', _setting('description', None), 'description',
+         'is present but is not a string'),
     )
     for label, build, where, reason in rows:
         _assert_one_refusal(label, build, where, reason)
@@ -449,8 +485,7 @@ def test_the_permission_branches_are_refused(tmp):
 def test_the_host_pattern_branches_are_refused(tmp):
     """Every way a match pattern can miss the grammar Chrome parses.
 
-    A host with a slash in it is not representable — the host ends at the
-    first slash — so no control plants one.
+    A host with a slash in it is not representable — no control plants one.
     """
     del tmp
     rows = (
@@ -521,9 +556,7 @@ def test_the_background_branches_are_refused(tmp):
 def test_the_content_script_branches_are_refused(tmp):
     """One mutant per refusal branch of the content_scripts entries.
 
-    `matches` and `js` are required — a script naming no pattern runs nowhere
-    and one naming no file does nothing. The exclude lists are checked the
-    same way when present.
+    `matches` is required; the other lists are checked only when present.
     """
     del tmp
     rows = (
@@ -546,10 +579,19 @@ def test_the_content_script_branches_are_refused(tmp):
         ('matches-bad-pattern',
          _entry(0, 'content_scripts', 'matches', ['gopher://*/*']),
          'content_scripts[0].matches[0]', 'gopher'),
-        ('js-missing', _entry(0, 'content_scripts', 'js', _DROP),
-         'content_scripts[0].js', 'is not a nonempty list'),
+        ('js-not-a-list', _entry(0, 'content_scripts', 'js', '<all_urls>'),
+         'content_scripts[0].js', 'is not a list'),
         ('js-empty', _entry(0, 'content_scripts', 'js', []),
-         'content_scripts[0].js', 'is not a nonempty list'),
+         'content_scripts[0].js', 'is present but is empty'),
+        ('css-not-a-list', _entry(0, 'content_scripts', 'css', 'content.js'),
+         'content_scripts[0].css', 'is not a list'),
+        ('css-empty', _entry(0, 'content_scripts', 'css', []),
+         'content_scripts[0].css', 'is present but is empty'),
+        ('css-entry-not-a-string', _entry(0, 'content_scripts', 'css', [7]),
+         'content_scripts[0].css[0]', 'must be a nonempty string'),
+        ('css-missing-file',
+         _entry(0, 'content_scripts', 'css', ['no-such.css']),
+         'content_scripts[0].css[0]', 'is not a file the extension ships'),
         ('js-entry-not-a-string', _entry(0, 'content_scripts', 'js', [7]),
          'content_scripts[0].js[0]', 'must be a nonempty string'),
         ('js-missing-file',
@@ -574,15 +616,21 @@ def test_the_content_script_branches_are_refused(tmp):
          _entry(0, 'content_scripts', 'exclude_matches',
                 ['example.com/*']), 'content_scripts[0].exclude_matches[0]',
          'scheme://host/path'),
-        ('exclude_js-not-a-list',
-         _entry(0, 'content_scripts', 'exclude_js', 'content.js'),
-         'content_scripts[0].exclude_js', 'is not a list'),
-        ('exclude_js-empty', _entry(0, 'content_scripts', 'exclude_js', []),
-         'content_scripts[0].exclude_js', 'is present but is empty'),
-        ('exclude_js-missing-file',
-         _entry(0, 'content_scripts', 'exclude_js', ['no-such-file.js']),
-         'content_scripts[0].exclude_js[0]',
-         'is not a file the extension ships'),
+        ('include_globs-not-a-list',
+         _entry(0, 'content_scripts', 'include_globs', '*'),
+         'content_scripts[0].include_globs', 'is not a list'),
+        ('include_globs-empty',
+         _entry(0, 'content_scripts', 'include_globs', []),
+         'content_scripts[0].include_globs', 'is present but is empty'),
+        ('include_globs-entry-not-a-string',
+         _entry(0, 'content_scripts', 'include_globs', [7]),
+         'content_scripts[0].include_globs[0]', 'must be a nonempty string'),
+        ('exclude_globs-not-a-list',
+         _entry(0, 'content_scripts', 'exclude_globs', '*'),
+         'content_scripts[0].exclude_globs', 'is not a list'),
+        ('exclude_globs-entry-not-a-string',
+         _entry(0, 'content_scripts', 'exclude_globs', [7]),
+         'content_scripts[0].exclude_globs[0]', 'must be a nonempty string'),
     )
     for label, build, where, reason in rows:
         _assert_one_refusal(label, build, where, reason)
@@ -619,10 +667,7 @@ def test_the_options_and_icon_branches_are_refused(tmp):
 
 
 def test_the_path_safety_branches_are_refused(tmp):
-    """A named path that leaves the extension root is refused.
-
-    An absolute path or a parent traversal names no file the package ships.
-    """
+    """A named path that leaves the extension root is refused."""
     del tmp
     rows = (
         ('background-service_worker-absolute-path',
@@ -631,6 +676,9 @@ def test_the_path_safety_branches_are_refused(tmp):
         ('js-parent-traversal',
          _entry(0, 'content_scripts', 'js', ['../server.py']),
          'content_scripts[0].js[0]', 'leaves the extension root'),
+        ('js-backslash-traversal',
+         _entry(0, 'content_scripts', 'js', ['..\\server.py']),
+         'content_scripts[0].js[0]', 'backslash'),
         ('options_ui-page-parent-traversal',
          _inside('options_ui', 'page', '../README.md'), 'options_ui.page',
          'leaves the extension root'),
