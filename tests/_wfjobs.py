@@ -22,7 +22,7 @@ WORKFLOW_EXTENSIONS = ('.yml', '.yaml')
 
 @dataclass(frozen=True)
 class Workflow:
-    """One workflow file's decoded jobs and where each job begins."""
+    """One workflow file's decoded jobs, headers, and bound spellings."""
 
     path: Path
     jobs: dict

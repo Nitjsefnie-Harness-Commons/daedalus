@@ -139,11 +139,7 @@ def test_an_exemption_removed_from_the_workflow_is_a_drift(tmp):
 
 
 def test_the_documentation_check_reads_only_the_exempt_jobs_comment(tmp):
-    """The why must sit on the exempt job; elsewhere in the file is not it.
-
-    The phrases relocated to another job's comment do not satisfy the
-    check, so a whole-file search could not stand in for it.
-    """
+    """The why must sit on the exempt job; elsewhere in the file is not it."""
     root = _copy_real(tmp)
     source = _REAL.read_text(encoding='utf-8')
     phrase = ('    # INFORMATIONAL, never a gate — which is why it is'
