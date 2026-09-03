@@ -186,6 +186,68 @@ def test_poll_answers_empty_for_a_hard_linked_legacy_name(tmp):
     assert first.exists() and second.exists(), 'a refusal unlinked a name'
 
 
+def test_a_directory_named_like_an_entry_is_refused(tmp):
+    queue = _load_queue('aliased_directory_candidate')
+    entry = Path(tmp) / 'tok' / '0000000000001_000001.json'
+    entry.parent.mkdir(parents=True)
+    entry.mkdir()
+
+    stream, reason = queue.open_command_candidate(entry)
+    if stream is not None:
+        stream.close()
+
+    assert stream is None, 'a directory was opened for delivery'
+    assert reason == 'candidate is not a regular file', reason
+    assert entry.is_dir(), 'a refusal removed the candidate'
+
+
+def test_queue_drain_leaves_a_directory_entry_alone(tmp):
+    service = _load_service('aliased_queue_drain_directory')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    entry = qdir / '0000000000001_000001.json'
+    entry.mkdir()
+    frames = []
+
+    delivered = service.drain_queue(
+        qdir, None, None, command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 0, delivered
+    assert frames == [], frames
+    assert entry.is_dir(), 'the drain removed a directory entry'
+
+
+def test_queue_drain_keeps_an_entry_it_cannot_unlink(tmp):
+    """Symmetric with poll: the drop is swallowed and the entry stays."""
+    service = _load_service('aliased_queue_drain_unlink_failure')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    entry = qdir / '0000000000001_000001.json'
+    entry.write_text('["not a command"]', encoding='utf-8')
+    real_unlink = pathlib.Path.unlink
+    attempted = []
+
+    def refusing_unlink(self, *args, **kwargs):
+        if self.name == entry.name:
+            attempted.append(self.name)
+            raise PermissionError('the removal failed')
+        return real_unlink(self, *args, **kwargs)
+
+    def fail(frame):
+        raise AssertionError(f'a non-object entry was delivered: {frame}')
+
+    pathlib.Path.unlink = refusing_unlink
+    try:
+        delivered = service.drain_queue(
+            qdir, None, None, command_ttl=100, frame_writer=fail)
+    finally:
+        pathlib.Path.unlink = real_unlink
+
+    assert attempted == [entry.name], attempted
+    assert delivered == 0, delivered
+    assert entry.exists(), 'a failed removal must not lose the entry'
+
+
 def test_poll_answers_the_command_when_the_file_will_not_unlink(tmp):
     """A failed removal is the drains' outcome too: answered, left in place."""
     service = _load_service('aliased_poll_unlink_failure')
