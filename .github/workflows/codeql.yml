@@ -9,8 +9,9 @@ name: codeql
 # TRIGGER DIFFERS FROM THE OTHER WORKFLOWS ON PURPOSE. `analyze` uploads its
 # SARIF against the ref and SHA of the *event*, so CodeQL has to analyse
 # exactly the commit its alerts will be filed against — which is why the
-# checkout below takes no explicit `ref:`. `push` fires on every branch here
-# and so already covers the head of any same-repo pull request.
+# checkout below takes no explicit `ref:`. `push` here covers `main` only,
+# so the `pull_request:` trigger is what analyses the head of a same-repo
+# pull request before merge — load-bearing, not redundant.
 #
 # The weekly cron is not redundant with push: CodeQL's query packs are
 # updated continuously, and a new query only ever runs against code that
