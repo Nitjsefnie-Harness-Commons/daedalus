@@ -28,7 +28,6 @@
 
 
 # ─── root ───
-!/.eslintrc.json
 !/.gitignore
 !/.pylintrc
 !/AGENTS.md
@@ -38,6 +37,7 @@
 !/LICENSE
 !/README.md
 !/SECURITY.md
+!/eslint.config.js
 !/pyproject.toml
 !/pyrightconfig.json
 !/requirements-dev.txt
