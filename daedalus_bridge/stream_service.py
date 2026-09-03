@@ -131,32 +131,27 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
             # closed: Windows cannot unlink a file it still holds open.
             with opened:
                 age = time.time() - os.fstat(opened.fileno()).st_mtime
-                data = None
-                if age > command_ttl:
-                    action = 'expired'
-                else:
+                expired = age > command_ttl
+                deliverable, data = False, {}
+                if not expired:
                     try:
-                        data = json.loads(opened.read().decode('utf-8'))
+                        parsed = json.loads(opened.read().decode('utf-8'))
                     except (OSError, json.JSONDecodeError, ValueError):
                         # A visible final name may still have an older
                         # non-atomic writer. Leave it in place so that writer
                         # does not finish a command into an unlinked inode;
                         # the TTL sweep bounds the retries.
-                        action = 'keep'
-                    else:
-                        # Readable JSON that is not a command object is
-                        # dropped like an expired entry once we get there.
-                        action = ('deliver' if isinstance(data, dict)
-                                  else 'not-command')
-            if action == 'keep':
-                continue
-            if action != 'deliver':
+                        continue
+                    # Readable JSON that is not a command object is dropped
+                    # with the expired entries, once the descriptor is closed.
+                    if isinstance(parsed, dict):
+                        deliverable, data = True, parsed
+            if not deliverable:
                 try:
                     path.unlink()
                 except OSError:
-                    # Expired either way, or the sweep takes it.
-                    pass
-                if action == 'expired':
+                    pass  # expired either way, or the sweep takes it
+                if expired:
                     print(
                         f'[STREAM] TTL-DROP {log_safe(qdir.name)}/'
                         f'{log_safe(name)}', flush=True)
