@@ -91,15 +91,14 @@ def _pattern_violation(key, pattern):
 
 
 def _file_violation(key, name, ext_root):
-    """Why `key` does not name a shipped file, or None; containment first.
-
-    A backslash is refused: `PurePosixPath` cannot see it as a separator, so
-    on Windows the disk read would resolve outside the extension root.
-    """
+    """Why `key` does not name a shipped file, or None; containment first."""
     if not isinstance(name, str) or not name:
         return f'{key}: a path must be a nonempty string'
-    if '\\' in name:
-        return f'{key}: {name} names a path with a backslash'
+    # A backslash is invisible to PurePosixPath, so on Windows the disk read
+    # below would resolve outside the root; a colon reads as a URL scheme.
+    # Both name nothing a manifest could ship, which resolves relatively.
+    if '\\' in name or ':' in name:
+        return f'{key}: {name} names a path with a backslash or a colon'
     relative = PurePosixPath(name)
     if relative.is_absolute() or '..' in relative.parts:
         return f'{key}: {name} leaves the extension root'
@@ -109,10 +108,7 @@ def _file_violation(key, name, ext_root):
 
 
 def _glob_violation(key, value):
-    """Why Chrome would refuse one glob at `key`, or None.
-
-    Globs match URLs, not package files, so a glob is only a string.
-    """
+    """Why Chrome would refuse one glob at `key`, or None (no file check)."""
     if not isinstance(value, str) or not value:
         return f'{key}: a glob must be a nonempty string'
     return None
@@ -144,10 +140,7 @@ def _required_entries(key, entries, check, ext_root):
 
 
 def _optional_entries(key, entries, check, ext_root, nonempty):
-    """Violations for an optional list, `nonempty` keeping the matches rule.
-
-    An explicit null is a value of the wrong type, not an absent key.
-    """
+    """Violations for an optional list; an explicit null is wrong-typed."""
     if entries is _ABSENT:
         return []
     if not isinstance(entries, list):
@@ -430,10 +423,7 @@ def test_valid_twins_are_accepted(tmp):
 
 
 def test_the_root_and_scalar_branches_are_refused(tmp):
-    """A root that is not an object, and a scalar key of the wrong shape.
-
-    manifest_version 2 is a valid MV2 manifest and still refused here.
-    """
+    """A root that is not an object, and a scalar key of the wrong shape."""
     del tmp
     rows = (
         ('root-not-an-object', lambda manifest: ['not', 'an', 'object'],
@@ -441,6 +431,7 @@ def test_the_root_and_scalar_branches_are_refused(tmp):
         ('manifest_version-not-an-integer',
          _setting('manifest_version', '3'), 'manifest_version',
          'is not an integer'),
+        # manifest_version 2 is a valid MV2 manifest and still refused here.
         ('manifest_version-not-3', _setting('manifest_version', 2),
          'manifest_version', 'is not 3'),
         ('manifest_version-true', _setting('manifest_version', True),
@@ -483,11 +474,9 @@ def test_the_permission_branches_are_refused(tmp):
 
 
 def test_the_host_pattern_branches_are_refused(tmp):
-    """Every way a match pattern can miss the grammar Chrome parses.
-
-    A host with a slash in it is not representable — no control plants one.
-    """
+    """Every way a match pattern can miss the grammar Chrome parses."""
     del tmp
+    # A host with a slash in it is not representable — no control plants one.
     rows = (
         ('host_permissions-not-a-list',
          _setting('host_permissions', '<all_urls>'), 'host_permissions',
@@ -554,11 +543,9 @@ def test_the_background_branches_are_refused(tmp):
 
 
 def test_the_content_script_branches_are_refused(tmp):
-    """One mutant per refusal branch of the content_scripts entries.
-
-    `matches` is required; the other lists are checked only when present.
-    """
+    """One mutant per refusal branch of the content_scripts entries."""
     del tmp
+    # `matches` is required; the other lists are checked only when present.
     rows = (
         ('content_scripts-not-a-list', _setting('content_scripts', {}),
          'content_scripts', 'is not a list'),
@@ -600,6 +587,8 @@ def test_the_content_script_branches_are_refused(tmp):
         ('run_at-not-in-the-enum',
          _entry(0, 'content_scripts', 'run_at', 'document_whenever'),
          'content_scripts[0].run_at', 'is not one of'),
+        ('run_at-null', _entry(0, 'content_scripts', 'run_at', None),
+         'content_scripts[0].run_at', 'is not one of'),
         ('all_frames-not-a-bool',
          _entry(0, 'content_scripts', 'all_frames', 'false'),
          'content_scripts[0].all_frames', 'is not a boolean'),
@@ -624,6 +613,9 @@ def test_the_content_script_branches_are_refused(tmp):
          'content_scripts[0].include_globs', 'is present but is empty'),
         ('include_globs-entry-not-a-string',
          _entry(0, 'content_scripts', 'include_globs', [7]),
+         'content_scripts[0].include_globs[0]', 'must be a nonempty string'),
+        ('include_globs-empty-string-entry',
+         _entry(0, 'content_scripts', 'include_globs', ['']),
          'content_scripts[0].include_globs[0]', 'must be a nonempty string'),
         ('exclude_globs-not-a-list',
          _entry(0, 'content_scripts', 'exclude_globs', '*'),
@@ -679,6 +671,9 @@ def test_the_path_safety_branches_are_refused(tmp):
         ('js-backslash-traversal',
          _entry(0, 'content_scripts', 'js', ['..\\server.py']),
          'content_scripts[0].js[0]', 'backslash'),
+        ('js-drive-letter-path',
+         _entry(0, 'content_scripts', 'js', ['C:/escaped.js']),
+         'content_scripts[0].js[0]', 'colon'),
         ('options_ui-page-parent-traversal',
          _inside('options_ui', 'page', '../README.md'), 'options_ui.page',
          'leaves the extension root'),
