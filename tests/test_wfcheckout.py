@@ -456,22 +456,27 @@ def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
 
 
 def test_checkout_reader_names_a_nested_flow_mapping_as_one(tmp):
-    """A nested flow mapping is refused as a flow mapping, not as an entry.
+    """A nested flow mapping or sequence is refused by its own name.
 
-    `_scalar_value`'s nested branch refuses the flow-mapping prefix before
-    the mapping-entry probe can read the colon inside it; the pin holds that
-    order, so the refusal names the construct the workflow actually used.
+    `_scalar_value`'s nested branch refuses the flow-collection prefixes
+    before the mapping-entry probe can read the colon inside them; the pin
+    holds that order, so each refusal names the construct the workflow
+    actually used rather than the entry the probe would read it as.
     """
     del tmp
-    workflow = (
+    prefix = (
         'jobs:\n'
         '  build:\n'
         '    steps:\n'
         '      - uses: actions/checkout@v4\n'
         '        with:\n'
-        '          ref:\n'
-        '            {point: value}\n')
-    _assert_yaml_refusal(workflow, 'flow mapping', 7)
+        '          ref:\n')
+    pinned = (
+        ('            {point: value}\n', 'flow mapping', 7),
+        ('            [{point: value}]\n', 'flow sequence', 7),
+    )
+    for value, wording, line in pinned:
+        _assert_yaml_refusal(prefix + value, wording, line)
 
 
 def test_checkout_reader_refuses_a_duplicate_top_level_jobs_with_location(tmp):
