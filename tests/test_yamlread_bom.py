@@ -11,7 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _yamlread import (  # noqa: E402
-    YAMLReadError, job_mapping, job_scalar, step_scalars,
+    YAMLReadError, job_mapping, job_scalar, step_mapping_scalar,
+    step_scalar, step_scalars, top_level_mapping,
 )
 
 _MARK = '\ufeff'
@@ -29,7 +30,7 @@ def test_a_marked_workflow_reads_like_its_unmarked_self(tmp):
 
 
 def test_a_mark_is_gone_before_lines_are_read(tmp):
-    """A marked block body reaches `_decode_block` with the mark removed."""
+    """A marked block body reads like its unmarked self."""
     del tmp
     source = _marked('jobs:\n sample:\n  if: >-\n   a\n   b\n')
     assert job_scalar(source, 'sample', 'if') == 'a b'
@@ -46,6 +47,27 @@ def test_a_mark_reaches_the_step_reader(tmp):
     source = _marked(
         'jobs:\n sample:\n  steps:\n   - name: a\n     if: x\n')
     assert step_scalars(source, 'sample', 'if') == ['x']
+
+
+def test_a_mark_reaches_the_step_scalar_reader(tmp):
+    del tmp
+    source = _marked(
+        'jobs:\n sample:\n  steps:\n   - name: a\n     if: x\n')
+    assert step_scalar(source, 'sample', 'a', 'if') == 'x'
+
+
+def test_a_mark_reaches_the_step_mapping_scalar_reader(tmp):
+    del tmp
+    source = _marked(
+        'jobs:\n sample:\n  steps:\n'
+        '   - name: a\n     with:\n      k: v\n')
+    assert step_mapping_scalar(source, 'sample', 'a', 'with', 'k') == 'v'
+
+
+def test_a_mark_reaches_the_top_level_mapping_reader(tmp):
+    del tmp
+    source = _marked('env:\n A: b\njobs:\n sample:\n  if: x\n')
+    assert top_level_mapping(source, 'env') == {'A': 'b'}
 
 
 def test_a_document_of_only_a_mark_reads_empty(tmp):
@@ -77,6 +99,13 @@ def test_a_mark_inside_a_plain_scalar_is_data(tmp):
     assert job_scalar(source, 'sample', 'if') == 'x\ufeff'
     source = 'jobs:\n sample:\n  if: \ufeffx\n'
     assert job_scalar(source, 'sample', 'if') == '\ufeffx'
+
+
+def test_a_mark_inside_a_folded_continuation_is_data(tmp):
+    """A mark in a wrapped plain scalar's continuation folds in as data."""
+    del tmp
+    source = 'jobs:\n sample:\n  if: a\n   \ufeffb\n'
+    assert job_scalar(source, 'sample', 'if') == 'a \ufeffb'
 
 
 def test_a_mark_before_a_mapping_key_is_refused_not_removed(tmp):
