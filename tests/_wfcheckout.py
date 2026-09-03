@@ -97,11 +97,7 @@ class _WorkflowReader(_ScalarReaderMixin):
         return end
 
     def _looks_like_mapping(self, body):
-        try:
-            self._mapping_colon(body, 0, 'scalar')
-        except YAMLReadError:
-            return False
-        return True
+        return self._mapping_colon_position(body) is not None
 
     def _reject_root_quoted_scalar(self, value, index):
         value = self._strip_comment(value).strip(' \t')

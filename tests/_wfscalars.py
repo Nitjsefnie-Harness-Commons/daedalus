@@ -80,7 +80,15 @@ class _ScalarReaderMixin:
                 return text[:index].rstrip(' \t')
         return text.rstrip(' \t')
 
-    def _mapping_colon(self, body, index, context):
+    def _mapping_colon_position(self, body):
+        """The position of the entry colon in `body`, or None when it has
+        none.
+
+        Quote-aware, so a colon inside a quoted key or a quoted value's
+        prefix is not the entry colon. This is the one scan of the entry
+        text: `_mapping_colon` raises on the None this returns, and the
+        value-span checks read the position directly.
+        """
         quote = None
         escaped = False
         doubled_quote = False
@@ -108,8 +116,13 @@ class _ScalarReaderMixin:
             if (char == ':' and (position + 1 == len(body)
                                  or body[position + 1] in ' \t')):
                 return position
-        self._refuse('mapping entry without a colon', index, context)
         return None
+
+    def _mapping_colon(self, body, index, context):
+        position = self._mapping_colon_position(body)
+        if position is None:
+            self._refuse('mapping entry without a colon', index, context)
+        return position
 
     def _mapping_parts(self, index, context, body=None,
                        require_string_key=False):
@@ -229,9 +242,6 @@ class _ScalarReaderMixin:
                                  context)
                 result.append(chr(int(digits, 16)))
                 position += 2 + width
-                continue
-            if escaped in '\n\r':
-                position += 2
                 continue
             self._refuse('unknown double-quote escape', index, context)
         self._refuse('unterminated double-quoted scalar', index, context)
@@ -411,9 +421,9 @@ class _ScalarReaderMixin:
                 return None
             key_indent += body.index(first)
             body = first
-        if not self._looks_like_mapping(body):
+        position = self._mapping_colon_position(body)
+        if position is None:
             return None
-        position = self._mapping_colon(body, index, context)
         value = self._strip_comment(body[position + 1:]).strip(' \t')
         quoted_end = self._quoted_scalar_end(value, index, end, context)
         if quoted_end is not None:
@@ -521,7 +531,6 @@ class _ScalarReaderMixin:
             return self._block_scalar(value, index, key_indent, context)
         if value:
             self._reject_scalar_shape(value, index, context)
-            self._reject_prefix(value, index, context)
             if value.startswith(("'", '"')):
                 quoted_end = self._quoted_scalar_end(
                     value, index, value_end, context)
@@ -538,6 +547,9 @@ class _ScalarReaderMixin:
         if nested_value.startswith('|') or nested_value.startswith('>'):
             return self._block_scalar(nested_value, nested, indent, context)
         self._reject_scalar_shape(nested_value, nested, context)
+        # Not subsumed by `_decode_scalar`'s guard: the mapping probe below
+        # refuses a `{key: value}`-shaped nested value first, and naming the
+        # flow mapping is the accurate refusal.
         self._reject_prefix(nested_value, nested, context)
         if self._looks_like_mapping(nested_value):
             self._refuse('mapping where scalar was required', nested, context)
