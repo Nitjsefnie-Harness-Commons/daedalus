@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Daedalus debug server — SSE command bridge + tab registry."""
+import sys
 import threading, time
 from http.server import HTTPServer
 from socketserver import TCPServer, ThreadingMixIn
 
 from daedalus_cli.output import configure_stdio
 from daedalus_bridge import command_queue, parent_watch
+from daedalus_bridge import data_root_lock
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import mcp_bootstrap
 from daedalus_bridge import result_routes
@@ -430,6 +432,12 @@ if __name__ == '__main__':
     parent_watch.start()
     for directory in (CMD_DIR, RES_DIR, UPLOAD_DIR, SEG_DIR):
         directory.mkdir(parents=True, exist_ok=True)
+    try:
+        bridge_lock = data_root_lock.acquire(BASE)
+    except data_root_lock.DataRootInUse:
+        print(f'[Daedalus] data root already in use: {log_safe(BASE)}',
+              flush=True)
+        sys.exit(1)
     threading.Thread(
         target=command_queue.gc_loop, args=(CMD_DIR, CMD_TTL),
         name='command-gc', daemon=True).start()

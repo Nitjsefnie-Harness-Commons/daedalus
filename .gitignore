@@ -90,6 +90,7 @@
 !/daedalus_bridge/atomic_file.py
 !/daedalus_bridge/command_queue.py
 !/daedalus_bridge/config.py
+!/daedalus_bridge/data_root_lock.py
 !/daedalus_bridge/delivery_stripes.py
 !/daedalus_bridge/env_config.py
 !/daedalus_bridge/http_transport.py
