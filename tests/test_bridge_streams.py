@@ -276,10 +276,8 @@ def test_stream_modes_deliver_end_to_end(tmp):
         assert read_stream_data(base, tab_token, 'tab1')['id'] == 'tab'
 
     dashboard_token = 'stream-dashboard'
-    with _util.bridge(
-            Path(tmp) / 'dashboard',
-            env={'TOKEN': '',
-                 'DAEDALUS_TOKEN': dashboard_token}) as (base, _docroot):
+    env = {'TOKEN': '', 'DAEDALUS_TOKEN': dashboard_token}
+    with _util.bridge(Path(tmp) / 'dashboard', env=env) as (base, _docroot):
         status, body = _util.post_json(base + '/result', {
             'token': dashboard_token, 'tabId': '7', 'id': 'dashboard-result',
             'result': 'FORGED', 'error': None, 'world': 'page:cdp',
@@ -291,10 +289,8 @@ def test_stream_modes_deliver_end_to_end(tmp):
         assert dashboard['world'] == 'page:cdp', dashboard
 
     extension_token = 'stream-extension'
-    with _util.bridge(
-            Path(tmp) / 'extension',
-            env={'TOKEN': '',
-                 'DAEDALUS_TOKEN': extension_token}) as (base, _docroot):
+    env = {'TOKEN': '', 'DAEDALUS_TOKEN': extension_token}
+    with _util.bridge(Path(tmp) / 'extension', env=env) as (base, _docroot):
         status, body = put_command(
             base, {'token': extension_token, 'tab': 'extension',
                    'id': 'extension', 'type': 'screenshot'})
@@ -303,10 +299,8 @@ def test_stream_modes_deliver_end_to_end(tmp):
             base, extension_token, 'extension')['id'] == 'extension'
 
     broadcast_token = 'stream-broadcast'
-    with _util.bridge(
-            Path(tmp) / 'broadcast',
-            env={'TOKEN': '',
-                 'DAEDALUS_TOKEN': broadcast_token}) as (base, _docroot):
+    env = {'TOKEN': '', 'DAEDALUS_TOKEN': broadcast_token}
+    with _util.bridge(Path(tmp) / 'broadcast', env=env) as (base, _docroot):
         status, body = put_command(
             base, {'token': broadcast_token, 'id': 'broadcast', 'code': '2'})
         assert status == 200, (status, body)
@@ -603,7 +597,11 @@ def test_a_replaced_stream_reports_its_own_end(tmp):
         try:
             next_stream_data(first)
         except AssertionError as failure:
-            assert 'the stream closed before the next frame' in str(failure)
+            assert ('the stream closed before the next frame' in str(failure)
+                    or 'the stream died before the next frame'
+                    in str(failure)), failure
+        else:
+            raise AssertionError('the closure went undiagnosed')
         finally:
             second.close()
             second_conn.close()
