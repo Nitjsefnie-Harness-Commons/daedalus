@@ -328,6 +328,7 @@
 !/tests/test_child_coverage.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_workflows.py
+!/tests/test_claim_workflow.py
 !/tests/test_cli.py
 !/tests/test_cli_arg_audit.py
 !/tests/test_cli_result_wait.py
