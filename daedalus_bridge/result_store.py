@@ -18,6 +18,13 @@ DELIVERY_LOCK_STRIPES = 64
 delivery_locks = tuple(
     threading.Lock() for _ in range(DELIVERY_LOCK_STRIPES))
 
+# Stripe membership is observable in delivery-write timing: same-target
+# writes serialize, so a write to one target waits out a write to another
+# target on the same stripe. Discovering a shared stripe that way is
+# accepted, because the keyed mapping (`delivery_stripes`) leaves a caller
+# nothing to compute or choose offline and a per-target lock table would be
+# unbounded over attacker-controlled names.
+
 
 def delivery_root(res_dir):
     """The delivery namespace belonging to one results root."""
