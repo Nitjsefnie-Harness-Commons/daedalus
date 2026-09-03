@@ -385,11 +385,6 @@ def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
         ('jobs:\n  build:\n    steps:\n'
          '      - uses: actions/checkout@v4\n'
          '        with:\n'
-         '          ref: |2\n'
-         '           point\n', 'inconsistent block scalar indentation'),
-        ('jobs:\n  build:\n    steps:\n'
-         '      - uses: actions/checkout@v4\n'
-         '        with:\n'
          "          ref: 'point' tail\n",
          'trailing text after single-quoted scalar'),
         ('jobs:\n  build:\n    steps:\n'
@@ -439,6 +434,26 @@ def test_checkout_reader_refuses_unsupported_walked_constructs(tmp):
     for workflow, wording in cases:
         _assert_yaml_refusal(workflow, wording)
 
+    # A block scalar's indentation refusal names the offending content line,
+    # not the line its header is on. In both fixtures the header sits on
+    # line 6; the content the reader refuses is on line 7 under the explicit
+    # indicator and on line 8 where the indent comes from the first line.
+    pinned = (
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: |2\n'
+         '           point\n', 'inconsistent block scalar indentation', 7),
+        ('jobs:\n  build:\n    steps:\n'
+         '      - uses: actions/checkout@v4\n'
+         '        with:\n'
+         '          ref: |\n'
+         '            a\n'
+         '           b\n', 'inconsistent block scalar indentation', 8),
+    )
+    for workflow, wording, line in pinned:
+        _assert_yaml_refusal(workflow, wording, line)
+
 
 def test_checkout_reader_refuses_a_duplicate_top_level_jobs_with_location(tmp):
     """A duplicate jobs mapping cannot be resolved by choosing one."""
@@ -450,7 +465,7 @@ def test_checkout_reader_refuses_a_duplicate_top_level_jobs_with_location(tmp):
         '      - uses: actions/checkout@v4\n'
         'jobs:\n'
         '  second:\n')
-    _assert_yaml_refusal(workflow, 'second top-level jobs mapping')
+    _assert_yaml_refusal(workflow, 'second top-level jobs mapping', 5)
 
 
 def test_checkout_reader_refuses_duplicate_decoded_job_keys(tmp):
