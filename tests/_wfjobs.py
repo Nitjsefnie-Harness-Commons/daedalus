@@ -9,8 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _repo import ROOT
-from _yamlread import _decoded_mapping_entry, _lines, _section
-from _yamlscalar import YAMLReadError
+from _yamlread import (
+    _decoded_mapping_entry, _indent, _lines, _meaningful, _section,
+)
+from _yamlscalar import (
+    YAMLReadError, decode_inline_scalar, split_mapping_field,
+)
 from _yamlsteps import _decode_complete_value
 
 WORKFLOW_EXTENSIONS = ('.yml', '.yaml')
@@ -23,6 +27,37 @@ class Workflow:
     path: Path
     jobs: dict
     starts: dict
+    bounds: dict
+
+
+def bound_source(workflow, name):
+    """The raw text one job writes its bound with, or None when none."""
+    return workflow.bounds.get(name)
+
+
+def _bound_source(lines, body, jobs_indent, name):
+    """The raw text after `timeout-minutes:` on one job's field line."""
+    entry = _decoded_mapping_entry(lines, *body, jobs_indent, name)
+    if entry is None:
+        return None
+    indent = None
+    for index in range(*_section(lines, entry.index, entry.indent)):
+        line = lines[index]
+        if not _meaningful(line):
+            continue
+        row_indent = _indent(line)
+        if indent is None:
+            indent = row_indent
+        if row_indent != indent:
+            continue
+        text, _ended = line
+        field = text[row_indent:]
+        if field.startswith('- '):
+            continue
+        raw_key, rest = split_mapping_field(field, 'job')
+        if decode_inline_scalar(raw_key, 'job key') == 'timeout-minutes':
+            return rest.strip(' ')
+    return None
 
 
 def workflow_files(directory=None):
@@ -74,7 +109,9 @@ def _decoded(path, source):
     starts = {name: _header(lines, body, jobs.indent, name,
                             (jobs.index + 1, text))
               for name in value}
-    return Workflow(path, value, starts)
+    bounds = {name: _bound_source(lines, body, jobs.indent, name)
+              for name in value}
+    return Workflow(path, value, starts, bounds)
 
 
 def _located(path, error):

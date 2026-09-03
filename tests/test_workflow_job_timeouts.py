@@ -10,6 +10,7 @@ neither `runs-on` nor a job-level `uses` is not a runner job and is not
 asked for a bound; such a job is invalid, and the repository's pinned
 actionlint is the gate that refuses it.
 """
+import math
 import re
 import sys
 from pathlib import Path
@@ -17,13 +18,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wfjobs import load, workflow_files  # noqa: E402
+from _wfjobs import bound_source, load, workflow_files  # noqa: E402
 from _yamlscalar import YAMLReadError  # noqa: E402
 
 _REAL = ROOT / '.github' / 'workflows' / 'tests.yml'
+_DIGITS = r'[0-9](?:_?[0-9])*'
 _NUMBER = re.compile(
-    r'\+?(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9][0-9_]*)(?:[eE][+-]?[0-9_]+)?'
-    r'\Z')
+    rf'\+?(?:{_DIGITS}(?:\.(?:{_DIGITS})?)?|\.{_DIGITS})'
+    rf'(?:[eE][+-]?{_DIGITS})?\Z')
 
 
 def test_every_real_runner_job_declares_a_timeout(tmp):
@@ -136,6 +138,10 @@ def test_each_valid_spelling_that_bounds_a_job_passes(tmp):
             'timeout-minutes: 5', 'timeout-minutes: 4.5'),
         'plus-signed-bound': 'jobs:\n' + BOUNDED_JOB.replace(
             'timeout-minutes: 5', 'timeout-minutes: +5'),
+        'underscored-bound': 'jobs:\n' + BOUNDED_JOB.replace(
+            'timeout-minutes: 5', 'timeout-minutes: 1_000'),
+        'exponent-bound': 'jobs:\n' + BOUNDED_JOB.replace(
+            'timeout-minutes: 5', 'timeout-minutes: 1e3'),
     }
     for name, source in sorted(cases.items()):
         violations = _timeout_violations(_fixture(tmp, name, source))
@@ -195,6 +201,45 @@ def test_each_unbounded_shape_is_named(tmp):
         violations = _timeout_violations(_fixture(tmp, name, source))
         assert len(violations) == 1, f'{name}: {violations}'
         assert 'probe' in violations[0], f'{name}: {violations}'
+
+
+CRASHING_UNDERSCORES = ('1_', '1__0', '1e_', '1e1_', '1_e3', '.5_', '5._',
+                        '1_000_', '1e_3', '1_.5', '5_')
+
+
+def test_an_underscore_spelling_float_rejects_is_refused(tmp):
+    """A shape the numeric read cannot decode is named, never raised.
+
+    Every spelling here passes nothing: the pinned actionlint refuses
+    each one, and the gate refuses it with the value and the job named
+    instead of letting the numeric read escape the violation contract.
+    """
+    for value in CRASHING_UNDERSCORES:
+        source = 'jobs:\n' + BOUNDED_JOB.replace(
+            'timeout-minutes: 5', f'timeout-minutes: {value}')
+        violations = _timeout_violations(_fixture(tmp, f'u-{value}', source))
+        assert len(violations) == 1, f'{value}: {violations}'
+        assert value in violations[0], f'{value}: {violations}'
+
+
+def test_an_overflowing_exponent_is_refused(tmp):
+    """A bound the numeric read cannot hold finitely bounds nothing."""
+    source = 'jobs:\n' + BOUNDED_JOB.replace(
+        'timeout-minutes: 5', 'timeout-minutes: 1e400')
+    violations = _timeout_violations(_fixture(tmp, 'overflow', source))
+    assert len(violations) == 1, violations
+    assert '1e400' in violations[0], violations
+
+
+def test_a_quoted_bound_is_refused(tmp):
+    """A bound written as a string is not the number the job carries."""
+    for value in ('"5"', "'5'"):
+        source = 'jobs:\n' + BOUNDED_JOB.replace(
+            'timeout-minutes: 5', f'timeout-minutes: {value}')
+        violations = _timeout_violations(
+            _fixture(tmp, f'quoted-{value.strip(chr(39) + chr(34))}', source))
+        assert len(violations) == 1, f'{value}: {violations}'
+        assert 'quoted' in violations[0], f'{value}: {violations}'
 
 
 def test_a_local_caller_is_checked_through_its_target(tmp):
@@ -400,6 +445,10 @@ def _unbounded(workflow, name, job):
         return None
     if bound is None:
         return f'{where}: job {name!r} declares no timeout-minutes'
+    source = bound_source(workflow, name) or ''
+    if isinstance(bound, str) and source[:1] in ('"', "'"):
+        return (f'{where}: timeout-minutes {source!r} is quoted in the '
+                f'source, and the pinned actionlint refuses that shape')
     return _positive_literal(bound, where)
 
 
@@ -429,13 +478,26 @@ def _positive_literal(bound, where):
     The accepted spellings are the numeric literals the repository's
     pinned actionlint accepts for `timeout-minutes`, measured against it:
     a plain, fractional, plus-signed or underscore-grouped decimal with
-    an optional exponent. What the gate cannot read as a number from the
-    source text it refuses, naming the value.
+    an optional exponent, underscores only where the numeric read takes
+    them, and a finite value. What the classifier cannot decode it
+    refuses, naming the value; a quoted bound is refused for its
+    spelling, because the pinned actionlint refuses that shape and a
+    divergence is resolved toward refusal. The one residual divergence
+    is a quoted bound inside an inline flow-mapped job, where no field
+    line exists to read the spelling from: the decoded value decides
+    there, and the pinned actionlint refuses the workflow.
     """
     if not isinstance(bound, str) or not _NUMBER.fullmatch(bound):
         return f'{where}: timeout-minutes {bound!r} does not bound the job'
     digits = re.sub(r'(?<=[0-9])_(?=[0-9])', '', bound.lstrip('+'))
-    if float(digits) <= 0:
+    try:
+        value = float(digits)
+    except ValueError:  # a shape the read cannot decode is a refusal
+        return f'{where}: timeout-minutes {bound!r} does not bound the job'
+    if not math.isfinite(value):
+        return (f'{where}: timeout-minutes {bound!r} is not a finite '
+                f'number')
+    if value <= 0:
         return f'{where}: timeout-minutes {digits} is not greater than zero'
     return None
 
