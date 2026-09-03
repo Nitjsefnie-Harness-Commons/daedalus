@@ -392,8 +392,8 @@ class _ScalarReaderMixin:
                         self._refuse('content after block scalar', follower,
                                      context)
                     break
-                self._refuse('inconsistent block scalar indentation', index,
-                             context)
+                self._refuse('inconsistent block scalar indentation',
+                             body_end, context)
             if content_indent is None:
                 content_indent = indent
             body_end += 1
