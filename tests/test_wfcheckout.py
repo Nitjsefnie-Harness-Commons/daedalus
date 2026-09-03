@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""The workflow checkout reader and the pin that keeps its refs trusted.
+"""The structural walk of the workflow checkout reader.
 
-These tests exercise the reader separately from speed measurement, including
-the workflow pin that protects the checkout ref expression.
+These tests exercise the reader's structure handling — the paths it walks for
+checkout refs, the refusals it raises and the lines it names for them, and the
+decoys it must not omit a real checkout for — separately from the scalar layer
+in tests/test_wfscalars.py and the pin in tests/test_checkout_pin.py.
 """
 import sys
 from pathlib import Path
@@ -11,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 import _wfcheckout  # noqa: E402
-from test_checkout_pin import _assert_checkout_refs_safe  # noqa: E402
+from _wfassert import _assert_yaml_refusal  # noqa: E402
 
 
 def test_checkout_reader_returns_structured_checkout_refs(tmp):
@@ -265,17 +267,6 @@ def test_checkout_reader_never_omits_indented_jobs_for_a_quoted_decoy(tmp):
     assert refs is None or refs == [('real', 'hidden')], refs
 
 
-def _assert_yaml_refusal(workflow, wording):
-    try:
-        _wfcheckout.checkout_refs(workflow)
-    except _wfcheckout.YAMLReadError as error:
-        message = str(error)
-        assert wording in message, message
-        assert 'line ' in message, message
-    else:
-        raise AssertionError(f'expected refusal mentioning {wording!r}')
-
-
 def test_checkout_reader_refuses_a_nonzero_root_mapping_indent(tmp):
     """Classify the root indent before skipping nested-looking lines."""
     del tmp
@@ -487,39 +478,6 @@ def test_checkout_reader_refuses_duplicate_decoded_job_keys(tmp):
         else:
             failures.append((second_key, actual))
     assert failures == [], failures
-
-
-def test_checkout_pin_refuses_schema_equivalent_job_keys_before_refs(tmp):
-    """Typed job keys cannot union checkout refs before duplicate checks."""
-    del tmp
-    workflow = (
-        'name: schema-equivalent jobs\n'
-        'on: push\n'
-        'jobs:\n'
-        '  yes:\n'
-        '    runs-on: ubuntu-latest\n'
-        '    steps:\n'
-        '      - id: baseline\n'
-        '        run: echo safe\n'
-        '      - uses: actions/checkout@v4\n'
-        '        with:\n'
-        '          ref: ${{ steps.baseline.outputs.ref }}\n'
-        '  true:\n'
-        '    runs-on: ubuntu-latest\n'
-        '    steps:\n'
-        '      - id: baseline\n'
-        '        run: echo safe\n'
-        '      - uses: actions/checkout@v4\n'
-        '        with:\n'
-        '          ref: ${{ steps.baseline.outputs.point }}\n')
-    try:
-        _assert_checkout_refs_safe(workflow)
-    except AssertionError as error:
-        message = str(error)
-        assert 'plain scalar is not provably a string' in message, message
-        assert 'outputs.ref' not in message, message
-    else:
-        raise AssertionError('expected schema-typed job key refusal')
 
 
 def test_checkout_reader_refuses_a_hex_escaped_duplicate_jobs_key(tmp):

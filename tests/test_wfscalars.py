@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 import _wfcheckout  # noqa: E402
-from test_wfcheckout import _assert_yaml_refusal  # noqa: E402
+from _wfassert import _assert_yaml_refusal  # noqa: E402
 
 
 def test_checkout_reader_decodes_supported_scalar_styles(tmp):
