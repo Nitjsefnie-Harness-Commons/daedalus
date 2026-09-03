@@ -103,6 +103,27 @@ def test_a_need_that_names_no_declared_job_is_refused(tmp):
     assert 'do not exist' in named[0], named
 
 
+def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
+    """One run names every gap, so fixing one cannot hide the other."""
+    source = ('jobs:\n'
+              '  aggregate:\n'
+              '    needs:\n'
+              '      - absent\n'
+              '    runs-on: ubuntu-latest\n'
+              '    timeout-minutes: 5\n'
+              '  probe:\n'
+              '    runs-on: ubuntu-latest\n'
+              '    timeout-minutes: 5\n'
+              '  stray:\n'
+              '    runs-on: ubuntu-latest\n'
+              '    timeout-minutes: 5\n')
+    violations = _scan_fixture(tmp, 'dual-gap', source)
+    assert len(violations) == 2, violations
+    joined = '\n'.join(violations)
+    assert "'absent'" in joined and 'do not exist' in joined, violations
+    assert "'stray'" in joined and 'does not cover' in joined, violations
+
+
 def test_an_exemption_removed_from_the_workflow_is_a_drift(tmp):
     """Reality changed under the constant, so the equality says so."""
     root = _copy_real(tmp)
