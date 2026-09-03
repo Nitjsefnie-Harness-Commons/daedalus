@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """The shipped manifest, read the way Chrome's installer reads it.
 
-A manifest Chrome refuses fails at install time, which no suite here could see
-because the one that loads the extension skips where Chromium is absent. This
-suite needs no browser and no Node, so it fails on every runner Chrome would
-have failed on.
+A manifest Chrome refuses fails at install time, which no suite here could
+see: the one that loads the extension skips where Chromium is absent. This
+one needs no browser and no Node, so it fails on every runner Chrome would.
 
 Enforced: the known keys' shapes (fail-closed), a closed allowlist of
 permission names, the match-pattern grammar, and that every named path is a
@@ -14,9 +13,12 @@ version's spelling, which `scripts/check_versions.py` and the version-contract
 suites own (a non-string or empty version is still refused here as a shape
 violation), the CSP, the `icons` sizes, whether a permission is useful rather
 than granted, and unknown keys — legal MV3, ignored by Chrome, never refused.
-Known model gaps, recorded rather than enforced: a match-pattern host may
-carry a port or a bare leading dot here where Chrome refuses both, and the
-`urn:` form is modeled narrower than Chrome's.
+Known model gaps, recorded rather than enforced: a bare leading dot in a
+match-pattern host is accepted here where Chrome's grammar wants the
+wildcard first; the `urn:` form is modeled narrower than Chrome's; a content
+script naming neither js nor css is accepted where Chrome requires one of
+the two; and background.type is modeled single-valued (`module`), so an
+over-refusal there would fail loudly in CI rather than silently.
 """
 import json
 import sys
@@ -29,16 +31,14 @@ from _repo import ROOT  # noqa: E402
 EXTENSION_ROOT = ROOT / 'extension'
 MANIFEST_PATH = EXTENSION_ROOT / 'manifest.json'
 
-# Closed on purpose: a name that arrived by typo must read as a refusal, so
-# extending PERMISSIONS is a deliberate suite edit.
+# Closed on purpose: a typo must read as a refusal, not an accepted grant.
 PERMISSIONS = frozenset({
     'tabs', 'activeTab', 'cookies', 'scripting', 'storage', 'debugger',
     'notifications', 'clipboardWrite', 'downloads', 'alarms',
     'declarativeNetRequest',
 })
 
-# `<all_urls>` is matched before the scheme is read; `urn` is spelled
-# `urn:<value>`, not `urn://`.
+# `<all_urls>` is matched first; `urn` is spelled `urn:<value>`, not `urn://`.
 PATTERN_SCHEMES = frozenset(
     {'*', 'http', 'https', 'ws', 'wss', 'ftp', 'file', 'urn'})
 
@@ -94,9 +94,8 @@ def _file_violation(key, name, ext_root):
     """Why `key` does not name a shipped file, or None; containment first."""
     if not isinstance(name, str) or not name:
         return f'{key}: a path must be a nonempty string'
-    # A backslash is invisible to PurePosixPath, so on Windows the disk read
-    # below would resolve outside the root; a colon reads as a URL scheme.
-    # Both name nothing a manifest could ship, which resolves relatively.
+    # A backslash is invisible to PurePosixPath (on Windows the disk read
+    # below would resolve outside the root); a colon reads as a URL scheme.
     if '\\' in name or ':' in name:
         return f'{key}: {name} names a path with a backslash or a colon'
     relative = PurePosixPath(name)
@@ -238,12 +237,14 @@ def manifest_violations(manifest, ext_root):
                     script.get('exclude_globs', _ABSENT),
                     _root_free(_glob_violation), ext_root, nonempty=True))
                 if 'run_at' in script and script['run_at'] not in RUN_AT:
-                    add(f'{where}.run_at', f'is not one of {RUN_AT}')
+                    add(f'{where}.run_at',
+                        f'is not one of {", ".join(RUN_AT)}')
                 if 'all_frames' in script and not isinstance(
                         script['all_frames'], bool):
                     add(f'{where}.all_frames', 'is not a boolean')
                 if 'world' in script and script['world'] not in WORLD:
-                    add(f'{where}.world', f'is not one of {WORLD}')
+                    add(f'{where}.world',
+                        f'is not one of {", ".join(WORLD)}')
 
     if 'options_ui' in manifest:
         value = manifest['options_ui']
@@ -360,14 +361,12 @@ def test_every_optional_key_stays_optional(tmp):
     """Optional keys are accepted absent, and an unknown key is not refused."""
     del tmp
     variants = (
-        ('world present as ISOLATED',
-         _entry(1, 'content_scripts', 'world', 'ISOLATED')),
+        ('world ISOLATED', _entry(1, 'content_scripts', 'world', 'ISOLATED')),
         ('world absent', _entry(1, 'content_scripts', 'world', _DROP)),
         ('run_at absent', _entry(0, 'content_scripts', 'run_at', _DROP)),
         ('icons absent', _dropping('icons')),
         ('options_ui absent', _dropping('options_ui')),
-        ('open_in_tab absent',
-         _inside('options_ui', 'open_in_tab', _DROP)),
+        ('open_in_tab absent', _inside('options_ui', 'open_in_tab', _DROP)),
         ('all_frames absent',
          _entry(0, 'content_scripts', 'all_frames', _DROP)),
         ('an unknown top-level key', _setting('deployed_by', 'CI')),
@@ -401,8 +400,7 @@ def test_valid_twins_are_accepted(tmp):
             'http://example.com/path', 'ws://*/*', 'wss://*/*', 'ftp://*/*',
             'file:///*', 'urn:*'])),
         ('a permission subset', _setting('permissions', ['storage'])),
-        ('background type module',
-         _inside('background', 'type', 'module')),
+        ('background type module', _inside('background', 'type', 'module')),
         ('document_end', _entry(0, 'content_scripts', 'run_at',
                                 'document_end')),
         ('document_idle', _entry(0, 'content_scripts', 'run_at',
@@ -415,6 +413,10 @@ def test_valid_twins_are_accepted(tmp):
         ('exclude_globs naming globs',
          _entry(0, 'content_scripts', 'exclude_globs', ['*/nested/*'])),
         ('open_in_tab true', _inside('options_ui', 'open_in_tab', True)),
+        ('all_frames true',
+         _entry(0, 'content_scripts', 'all_frames', True)),
+        ('an empty host_permissions list',
+         _setting('host_permissions', [])),
     )
     for label, build in variants:
         manifest = build(_real_manifest())
@@ -504,6 +506,9 @@ def test_the_host_pattern_branches_are_refused(tmp):
          'host_permissions[0]', 'empty star-dot rest'),
         ('host-pattern-star-in-a-literal-host',
          _setting('host_permissions', ['https://*example.com/*']),
+         'host_permissions[0]', 'star outside the star-dot form'),
+        ('host-pattern-star-in-star-dot-rest',
+         _setting('host_permissions', ['https://*.ex*ample.com/*']),
          'host_permissions[0]', 'star outside the star-dot form'),
         ('host-pattern-file-with-host',
          _setting('host_permissions', ['file://host/path']),
@@ -623,6 +628,9 @@ def test_the_content_script_branches_are_refused(tmp):
         ('exclude_globs-entry-not-a-string',
          _entry(0, 'content_scripts', 'exclude_globs', [7]),
          'content_scripts[0].exclude_globs[0]', 'must be a nonempty string'),
+        ('exclude_globs-empty',
+         _entry(0, 'content_scripts', 'exclude_globs', []),
+         'content_scripts[0].exclude_globs', 'is present but is empty'),
     )
     for label, build, where, reason in rows:
         _assert_one_refusal(label, build, where, reason)
