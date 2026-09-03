@@ -210,9 +210,7 @@ CRASHING_UNDERSCORES = ('1_', '1__0', '1e_', '1e1_', '1_e3', '.5_', '5._',
 def test_an_underscore_spelling_float_rejects_is_refused(tmp):
     """A shape the numeric read cannot decode is named, never raised.
 
-    Every spelling here passes nothing: the pinned actionlint refuses
-    each one, and the gate refuses it with the value and the job named
-    instead of letting the numeric read escape the violation contract.
+    The pinned actionlint refuses every spelling here.
     """
     for value in CRASHING_UNDERSCORES:
         source = 'jobs:\n' + BOUNDED_JOB.replace(
@@ -232,7 +230,7 @@ def test_an_overflowing_exponent_is_refused(tmp):
 
 
 def test_a_quoted_bound_is_refused(tmp):
-    """A bound written as a string is not the number the job carries."""
+    """A bound spelled as a quoted string is refused, not decoded."""
     for value in ('"5"', "'5'"):
         source = 'jobs:\n' + BOUNDED_JOB.replace(
             'timeout-minutes: 5', f'timeout-minutes: {value}')
@@ -480,19 +478,23 @@ def _positive_literal(bound, where):
     a plain, fractional, plus-signed or underscore-grouped decimal with
     an optional exponent, underscores only where the numeric read takes
     them, and a finite value. What the classifier cannot decode it
-    refuses, naming the value; a quoted bound is refused for its
-    spelling, because the pinned actionlint refuses that shape and a
-    divergence is resolved toward refusal. The one residual divergence
-    is a quoted bound inside an inline flow-mapped job, where no field
-    line exists to read the spelling from: the decoded value decides
-    there, and the pinned actionlint refuses the workflow.
+    refuses, naming the value; a bound whose source opens with a quote
+    is refused for its spelling, because the pinned actionlint refuses
+    that shape and a divergence is resolved toward refusal. The residual
+    divergence is a bound whose source line does not carry the value's
+    spelling: a block scalar, where the field carries only the `>` or
+    `|` indicator — the strip forms yield a bare number the gate accepts
+    and the clip forms are refused only by their trailing newline — and
+    a job carried wholly inside a flow collection's continuation of the
+    jobs entry, which no field line is read from. There the decoded
+    value decides, and the pinned actionlint refuses the workflow.
     """
     if not isinstance(bound, str) or not _NUMBER.fullmatch(bound):
         return f'{where}: timeout-minutes {bound!r} does not bound the job'
     digits = re.sub(r'(?<=[0-9])_(?=[0-9])', '', bound.lstrip('+'))
     try:
         value = float(digits)
-    except ValueError:  # a shape the read cannot decode is a refusal
+    except ValueError:
         return f'{where}: timeout-minutes {bound!r} does not bound the job'
     if not math.isfinite(value):
         return (f'{where}: timeout-minutes {bound!r} is not a finite '
