@@ -200,20 +200,31 @@ jobs:
   # with the Python gate, which turns its formatting checks off for the same
   # reason.
   #
-  # There is deliberately NO package.json: the version is pinned right here
+  # There is deliberately NO package.json: the versions are pinned right here
   # and installed with --no-save, so the repository does not read as having
-  # adopted a build step it does not have.
+  # adopted a build step it does not have. The eslint job additionally checks
+  # its own pin against the registry: an out-of-date major fails the job, so
+  # the pin cannot silently rot the way an unnoticed eslint@8 did.
   #
   # examples/ is NOT linted, and that is a real gap rather than an oversight.
   # Those files are snippets the bridge wraps in an async function before
   # running, so they carry top-level `return` AND top-level `await` together.
   # No espree sourceType describes that shape: `script` rejects the await,
-  # `module` rejects the return. They are excluded in .eslintrc.json so a
+  # `module` rejects the return. They are excluded in eslint.config.js so a
   # local run agrees with this one, and the file list below excludes them too
   # so the run is silent rather than six ignore warnings deep.
   eslint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    env:
+      # One copy of each pin, read by the install step and by the currency
+      # check, so the installed version and the checked version cannot
+      # diverge. @eslint/js carries the recommended rules and globals the
+      # browser/serviceworker environments; eslint itself depends on neither.
+      ESLINT_VERSION: "10.9.1"
+      ESLINT_JS_VERSION: "10.0.1"
+      GLOBALS_VERSION: "16.5.0"
 
     steps:
       # actions/checkout v7.0.1
@@ -232,14 +243,38 @@ jobs:
 
       - name: Install eslint (pinned, no package.json, no build step)
         # zizmor: ignore[adhoc-packages]
-        # The finding is "installs a package outside of a lockfile", and the
+        # The finding is "installs packages outside of a lockfile", and the
         # absence of a lockfile is the deliberate design documented above: a
         # package.json here would read as this repository having adopted a
-        # build step, which it has not. The package IS pinned to an exact
-        # version, so the drift the audit targets does not apply.
+        # build step, which it has not. Every package in this command is
+        # pinned to an exact version; what stays unpinned is their transitive
+        # graph, and that residual drift is accepted -- the currency check
+        # below exists because the top-level pin itself is what rots.
         run: >-
           npm install --no-save --no-package-lock --no-audit --no-fund
-          eslint@8.57.1
+          "eslint@${ESLINT_VERSION}"
+          "@eslint/js@${ESLINT_JS_VERSION}"
+          "globals@${GLOBALS_VERSION}"
+
+      # The pin is only as good as its distance from the registry. eslint
+      # drops a major roughly every year, and a pinned major past its end of
+      # support goes quietly -- the eslint@8 pin here outlived upstream
+      # support by years because nothing read it back. Compare majors, not
+      # patch versions: staying current within a major is npm's business
+      # between runs, while a new major is the maintainer's decision.
+      - name: Check the eslint pin against the registry's latest major
+        run: |
+          latest="$(npm view eslint version)"
+          pinned_major="${ESLINT_VERSION%%.*}"
+          latest_major="${latest%%.*}"
+          echo "pinned eslint@${ESLINT_VERSION}; registry latest ${latest}"
+          if [ "${latest_major}" -gt "${pinned_major}" ]; then
+            echo "eslint ${latest} is out, and the pinned major" \
+              "(${ESLINT_VERSION}) is behind it." >&2
+            echo "Raise ESLINT_VERSION (and eslint.config.js if the new" \
+              "major needs config changes), then re-run this job." >&2
+            exit 1
+          fi
 
       - name: eslint
         # git ls-files, so the list is the tracked tree rather than a glob
