@@ -1,10 +1,9 @@
 """The jobs decode and file discovery both workflow-structure gates share.
 
-Both gates read a workflow's jobs and must fail closed over what they
-cannot classify, so one reader serves them: every job is decoded by the
-complete mapping decoder, so a construct it refuses never reaches a gate
-as an empty jobs set, and each job's header line travels with its decoded
-fields so a refusal or a violation names file, line and literal text.
+Every job is decoded by the complete mapping decoder, so a construct that
+decoder refuses never reaches a gate as an empty jobs set, and each job's
+header line travels with its decoded fields so a refusal or a violation
+names file, line and literal text.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,22 +49,37 @@ def jobs_mapping(workflow):
 
 def load(path):
     """Decode one workflow file's jobs, and locate each job's header."""
-    source = path.read_text(encoding='utf-8')
+    try:
+        return _decoded(path, path.read_text(encoding='utf-8'))
+    except YAMLReadError as error:
+        raise _located(path, error) from error
+
+
+def _decoded(path, source):
+    """Read one workflow's jobs, naming the job whose decode refused."""
     lines = _lines(source)
     jobs = _decoded_mapping_entry(lines, 0, len(lines), -1, 'jobs')
     if jobs is None:
-        raise YAMLReadError(f'{path.name} declares no jobs mapping')
+        raise YAMLReadError('declares no jobs mapping')
     text = lines[jobs.index][0].strip()
     body = _section(lines, jobs.index, jobs.indent)
     try:
         value = _jobs_value(lines, jobs)
     except YAMLReadError as error:
         raise YAMLReadError(
-            f'{path.name}:{jobs.index + 1}: {text!r}: {error}') from error
+            f'{jobs.index + 1}: {text!r}: {error}') from error
     starts = {name: _header(lines, body, jobs.indent, name,
                             (jobs.index + 1, text))
               for name in value}
     return Workflow(path, value, starts)
+
+
+def _located(path, error):
+    """Prefix a refusal with the file when it does not say so already."""
+    message = str(error)
+    if message.startswith(f'{path.name}:'):
+        return error
+    return YAMLReadError(f'{path.name}: {message}')
 
 
 def _jobs_value(lines, jobs):
