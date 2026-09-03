@@ -117,17 +117,22 @@ def test_an_exemption_removed_from_the_workflow_is_a_drift(tmp):
     assert 'diff-coverage' in drift[0], drift
 
 
-def test_an_undocumented_exemption_is_named_by_the_gate(tmp):
-    """Comment gone, the gate's own check names what it can no longer see."""
+def test_the_documentation_check_reads_only_the_exempt_jobs_comment(tmp):
+    """The why must sit on the exempt job; elsewhere in the file is not it.
+
+    The phrases relocated to another job's comment do not satisfy the
+    check, so a whole-file search could not stand in for it.
+    """
     root = _copy_real(tmp)
     source = _REAL.read_text(encoding='utf-8')
-    (root / 'tests.yml').write_text(
-        source.replace(
-            '    # INFORMATIONAL, never a gate — which is why it is'
-            ' deliberately absent\n', '    # not a gate\n'),
-        encoding='utf-8')
-    assert _undocumented(
-        (root / 'tests.yml').read_text(encoding='utf-8')) == list(_DOCUMENTED)
+    phrase = ('    # INFORMATIONAL, never a gate — which is why it is'
+              ' deliberately absent\n')
+    stripped = source.replace(phrase, '    # not a gate\n')
+    relocated = stripped.replace(
+        '  timed:\n', '  timed:\n' + phrase, 1)
+    assert source.count('  timed:\n') == 1, 'the relocation anchor moved'
+    (root / 'tests.yml').write_text(relocated, encoding='utf-8')
+    assert _undocumented(relocated) == list(_DOCUMENTED)
 
 
 def test_the_comparison_is_step_name_agnostic(tmp):
