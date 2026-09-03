@@ -7,6 +7,8 @@ a name that stopped naming the object behind it is refused. The queue drain,
 the legacy drain, poll and the expiry sweep share that helper, and a refused
 candidate is left in place rather than unlinked.
 """
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -196,8 +198,16 @@ def test_a_directory_named_like_an_entry_is_refused(tmp):
     if stream is not None:
         stream.close()
 
+    # Refusal and retention are the contract on every platform. Which arm
+    # names the reason is not: a POSIX open returns a descriptor for a
+    # directory and the regular-file check refuses it, while Windows refuses
+    # the open itself.
     assert stream is None, 'a directory was opened for delivery'
-    assert reason == 'candidate is not a regular file', reason
+    assert reason, 'the refusal carries no reason'
+    if os.name == 'nt':
+        assert reason.startswith('cannot open'), reason
+    else:
+        assert reason == 'candidate is not a regular file', reason
     assert entry.is_dir(), 'a refusal removed the candidate'
 
 
@@ -288,6 +298,50 @@ def test_poll_refuses_a_legacy_name_that_leaves_the_root(tmp):
     assert link.is_symlink(), 'the refused alias was unlinked'
     assert json.loads(outside.read_text(encoding='utf-8')) == {
         'id': 'outside-payload', 'code': '1'}
+
+
+def test_a_retained_candidate_logs_its_refusal_once(tmp):
+    """One line per refused candidate, not one per drain pass."""
+    service = _load_service('aliased_refusal_logged_once')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    first = qdir / '0000000000001_000001.json'
+    second = qdir / '0000000000002_000002.json'
+    _write_command(first, 'aliased')
+    _hard_link(first, second)
+    frames = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        for _pass in range(2):
+            service.drain_queue(
+                qdir, None, None, command_ttl=100,
+                frame_writer=frames.append)
+
+    refusals = [line for line in captured.getvalue().splitlines()
+                if '[STREAM] REFUSED' in line]
+    assert frames == [], frames
+    assert refusals, 'no refusal was logged at all'
+    assert len(refusals) == 2, refusals
+
+
+def test_a_retained_legacy_candidate_logs_its_refusal_once(tmp):
+    """The legacy drain shares the once-per-candidate registry."""
+    service = _load_service('aliased_legacy_refusal_logged_once')
+    first = Path(tmp) / 'tok_dup.json'
+    second = Path(tmp) / 'tok_other.json'
+    _write_command(first, 'aliased')
+    _hard_link(first, second)
+    frames = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        for _pass in range(2):
+            service.drain_legacy_file(
+                first, 'dup', command_ttl=100, frame_writer=frames.append)
+
+    refusals = [line for line in captured.getvalue().splitlines()
+                if '[STREAM] REFUSED' in line]
+    assert frames == [], frames
+    assert len(refusals) == 1, refusals
 
 
 def test_sweep_leaves_an_aliased_legacy_pair_for_a_later_pass(tmp):

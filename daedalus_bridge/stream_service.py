@@ -21,6 +21,27 @@ _stream_ids = itertools.count(1)
 _stream_lock = threading.Lock()
 _last_delivery_ts = 0.0
 
+# Refused candidates are retained, so without a record of what was already
+# reported the same object would log a line on every drain pass for as long
+# as a stream stays connected. Bounded like result_store's delivery record:
+# past the bound the oldest entry is forgotten and its next refusal logs
+# again, which keeps the log at one line per candidate per bounded window.
+_refused_candidates = {}
+_REFUSED_CANDIDATE_LIMIT = 4096
+_refused_lock = threading.Lock()
+
+
+def _refusal_once(key, name, reason):
+    """Report one refused candidate the first time this process refuses it."""
+    with _refused_lock:
+        if key in _refused_candidates:
+            return
+        _refused_candidates[key] = None
+        while len(_refused_candidates) > _REFUSED_CANDIDATE_LIMIT:
+            del _refused_candidates[next(iter(_refused_candidates))]
+    print(f'[STREAM] REFUSED {log_safe(name)}: {log_safe(reason)}',
+          flush=True)
+
 
 def register(token, tab):
     """Register one connection and return its opaque id and kill event.
@@ -123,9 +144,9 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
             opened, reason = command_queue.open_command_candidate(path)
             if opened is None:
                 if reason is not None:
-                    print(
-                        f'[STREAM] REFUSED q={log_safe(qdir.name)}/'
-                        f'{log_safe(name)}: {log_safe(reason)}', flush=True)
+                    _refusal_once(
+                        f'queue:{qdir.name}/{name}',
+                        f'q={qdir.name}/{name}', reason)
                 continue  # absent, or refused: never delivered or unlinked
             # Read and decide with the descriptor open, then act with it
             # closed: Windows cannot unlink a file it still holds open.
@@ -136,7 +157,8 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                 if not expired:
                     try:
                         parsed = json.loads(opened.read().decode('utf-8'))
-                    except (OSError, json.JSONDecodeError, ValueError):
+                    except (OSError, json.JSONDecodeError, RecursionError,
+                            ValueError):
                         # A visible final name may still have an older
                         # non-atomic writer. Leave it in place so that writer
                         # does not finish a command into an unlinked inode;
@@ -204,9 +226,8 @@ def poll_legacy(cmd_dir, token):
             opened, reason = command_queue.open_command_candidate(cmd_file)
             if opened is None:
                 if reason is not None:
-                    print(
-                        f'[STREAM] REFUSED legacy={log_safe(cmd_file.name)}: '
-                        f'{log_safe(reason)}', flush=True)
+                    _refusal_once(legacy_claim_key(cmd_file.name),
+                                  f'legacy={cmd_file.name}', reason)
                 return 200, data
             try:
                 with opened:
@@ -247,9 +268,8 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
         opened, reason = command_queue.open_command_candidate(path)
         if opened is None:
             if reason is not None:
-                print(
-                    f'[STREAM] REFUSED legacy={log_safe(path.name)}: '
-                    f'{log_safe(reason)}', flush=True)
+                _refusal_once(legacy_claim_key(path.name),
+                              f'legacy={path.name}', reason)
             return 0  # absent, or refused: left in place
         with opened:
             try:

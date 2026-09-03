@@ -432,6 +432,7 @@ if __name__ == '__main__':
     parent_watch.start()
     for directory in (CMD_DIR, RES_DIR, UPLOAD_DIR, SEG_DIR):
         directory.mkdir(parents=True, exist_ok=True)
+    # The lock precedes the gc thread: a refused process deletes nothing.
     try:
         bridge_lock = data_root_lock.acquire(BASE)
     except data_root_lock.DataRootInUse:
