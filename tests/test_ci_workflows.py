@@ -539,6 +539,11 @@ _CACHE_JOBS = (
 _PIP_CACHE_PATHS = (
     '~/.cache/pip', '~/Library/Caches/pip', '~\\AppData\\Local\\pip\\Cache')
 
+# The release the pinned actions/cache commit resolves to, as its tag spells
+# it on the `uses:` line; a Dependabot bump rewrites the SHA, the comment and
+# this constant together.
+_CACHE_ACTION_VERSION = 'v4.3.0'
+
 
 def _cache_step(steps, action):
     """Return (index, step) for the job's one actions/cache/<action> step."""
@@ -546,6 +551,15 @@ def _cache_step(steps, action):
                if step.get('uses', '').startswith(f'actions/cache/{action}@')]
     assert len(matches) == 1, f'expected one cache/{action} step: {matches}'
     return matches[0]
+
+
+def _uses_version_comment(workflow, job, action):
+    """The version comment on the job's one cache step's `uses:` line."""
+    lines = [line.strip() for line in _job_section(workflow, job)
+             if f'actions/cache/{action}@' in line]
+    assert len(lines) == 1, (job, action, lines)
+    _uses, _marker, comment = lines[0].partition('# ')
+    return comment.strip()
 
 
 def _named_step_index(steps, name):
@@ -583,7 +597,9 @@ def test_the_matrix_jobs_restore_the_pip_cache_before_they_install(tmp):
     The key names the platform, the interpreter and the requirements hash,
     so a cell restores only a cache a same-platform cell of the same
     dependency set wrote, and the three jobs — which install the same
-    dependency set — share one namespace rather than three.
+    dependency set — share one namespace rather than three. The step stays
+    unconditional: gating a restore cannot make it safer, and a gate there
+    would be the save gate wearing the wrong step's name.
     """
     del tmp
     workflow = _tests_yml()
@@ -592,6 +608,9 @@ def test_the_matrix_jobs_restore_the_pip_cache_before_they_install(tmp):
         restore_index, restore = _cache_step(steps, 'restore')
         assert re.fullmatch(r'actions/cache/restore@[0-9a-f]{40}',
                             restore['uses']), restore['uses']
+        comment = _uses_version_comment(workflow, job, 'restore')
+        assert comment == _CACHE_ACTION_VERSION, (job, comment)
+        assert 'if' not in restore, (job, restore.get('if'))
         assert set(restore['with']['path'].splitlines()) == set(
             _PIP_CACHE_PATHS), (job, restore['with']['path'])
         key = restore['with']['key']
@@ -609,9 +628,9 @@ def test_the_matrix_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
     restores and never writes; only a push of main, whose checkout the
     repository itself produced, may. Evaluated as Actions would evaluate it
     rather than substring-matched, so an `||` or a widened ref reads as the
-    defect it is. The save also follows the step that runs the job's suites
-    or measurement, so what a later run restores was put there by a run that
-    actually ran them.
+    defect it is, and a cancelled run writes nothing either way. The save
+    also follows the step that runs the job's suites or measurement, so what
+    a later run restores was put there by a run that actually ran them.
     """
     del tmp
     workflow = _tests_yml()
@@ -619,26 +638,35 @@ def test_the_matrix_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
         steps = complete_job_mapping(workflow, job)['steps']
         restore_index, restore = _cache_step(steps, 'restore')
         save_index, save = _cache_step(steps, 'save')
+        assert re.fullmatch(r'actions/cache/save@[0-9a-f]{40}',
+                            save['uses']), save['uses']
+        comment = _uses_version_comment(workflow, job, 'save')
+        assert comment == _CACHE_ACTION_VERSION, (job, comment)
         assert save['with']['key'] == restore['with']['key'], (job, save)
         assert save['with']['path'] == restore['with']['path'], (job, save)
         gate = save['if']
-        for conjunct in ("github.event_name == 'push'",
+        for conjunct in ('!cancelled()',
+                         "github.event_name == 'push'",
                          "github.ref == 'refs/heads/main'"):
             assert conjunct in gate, (job, conjunct, gate)
-        for github, expected in (
-                ({'event_name': 'push', 'ref': 'refs/heads/main'}, True),
-                ({'event_name': 'push', 'ref': 'refs/heads/other'}, False),
+        for github, cancelled, expected in (
+                ({'event_name': 'push', 'ref': 'refs/heads/main'},
+                 False, True),
+                ({'event_name': 'push', 'ref': 'refs/heads/main'},
+                 True, False),
+                ({'event_name': 'push', 'ref': 'refs/heads/other'},
+                 False, False),
                 ({'event_name': 'pull_request',
-                  'ref': 'refs/pull/185/merge'}, False),
+                  'ref': 'refs/pull/185/merge'}, False, False),
                 ({'event_name': 'workflow_dispatch',
-                  'ref': 'refs/heads/main'}, False),
+                  'ref': 'refs/heads/main'}, False, False),
         ):
             verdict = evaluate_if(gate, {
                 'github': github,
                 'status': {'success': True, 'failure': False,
-                           'cancelled': False},
+                           'cancelled': cancelled},
             })
-            assert verdict is expected, (job, github, gate, verdict)
+            assert verdict is expected, (job, github, cancelled, gate, verdict)
         assert save_index > _named_step_index(steps, save_after), (
             job, save_index, save_after)
         assert save_index > restore_index, (job, save_index, restore_index)
