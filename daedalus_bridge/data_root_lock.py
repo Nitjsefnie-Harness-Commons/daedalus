@@ -24,9 +24,10 @@ def acquire(data_root):
     handle = os.open(str(root / LOCK_NAME), os.O_CREAT | os.O_RDWR)
     try:
         _claim(handle)
-    except OSError:
+    except OSError as error:
         os.close(handle)
-        raise DataRootInUse(f'data root already in use: {root}') from None
+        raise DataRootInUse(
+            f'data root already in use: {root} ({error})') from error
     return handle
 
 
