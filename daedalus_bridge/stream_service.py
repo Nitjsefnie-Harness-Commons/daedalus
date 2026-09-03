@@ -127,34 +127,40 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                         f'[STREAM] REFUSED q={log_safe(qdir.name)}/'
                         f'{log_safe(name)}: {log_safe(reason)}', flush=True)
                 continue  # absent, or refused: never delivered or unlinked
+            # Read and decide with the descriptor open, then act with it
+            # closed: Windows cannot unlink a file it still holds open.
             with opened:
                 age = time.time() - os.fstat(opened.fileno()).st_mtime
+                data = None
                 if age > command_ttl:
-                    # Already gone, or gone by the next sweep: an expired
-                    # command is not delivered either way.
+                    action = 'expired'
+                else:
                     try:
-                        path.unlink()
-                    except OSError:
-                        pass  # expired either way
+                        data = json.loads(opened.read().decode('utf-8'))
+                    except (OSError, json.JSONDecodeError, ValueError):
+                        # A visible final name may still have an older
+                        # non-atomic writer. Leave it in place so that writer
+                        # does not finish a command into an unlinked inode;
+                        # the TTL sweep bounds the retries.
+                        action = 'keep'
+                    else:
+                        # Readable JSON that is not a command object is
+                        # dropped like an expired entry once we get there.
+                        action = ('deliver' if isinstance(data, dict)
+                                  else 'not-command')
+            if action == 'keep':
+                continue
+            if action != 'deliver':
+                try:
+                    path.unlink()
+                except OSError:
+                    # Expired either way, or the sweep takes it.
+                    pass
+                if action == 'expired':
                     print(
                         f'[STREAM] TTL-DROP {log_safe(qdir.name)}/'
                         f'{log_safe(name)}', flush=True)
-                    continue
-                try:
-                    data = json.loads(opened.read().decode('utf-8'))
-                except (OSError, json.JSONDecodeError, ValueError):
-                    # A visible final name may still have an older non-atomic
-                    # writer. Leave it in place so that writer does not finish
-                    # a command into an unlinked inode; the TTL sweep bounds
-                    # retries for an entry that never becomes valid.
-                    continue
-                if not isinstance(data, dict):
-                    # Same: readable JSON that is not a command object.
-                    try:
-                        path.unlink()
-                    except OSError:
-                        pass  # the TTL sweep takes it
-                    continue
+                continue
             if chrome_tab is not None:
                 data['chromeTab'] = chrome_tab
             frame_writer(data)  # BEFORE unlink
@@ -219,7 +225,13 @@ def poll_legacy(cmd_dir, token):
                 return 200, data
             if isinstance(candidate, dict):
                 data = candidate
-                cmd_file.unlink()
+                try:
+                    cmd_file.unlink()
+                except OSError:
+                    # The command is answered either way, so this is the
+                    # at-least-once outcome the drains document: the file
+                    # stays and a later poll may answer it again.
+                    pass
         return 200, data
 
 
@@ -243,7 +255,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
                 print(
                     f'[STREAM] REFUSED legacy={log_safe(path.name)}: '
                     f'{log_safe(reason)}', flush=True)
-            return 0  # absent, or refused: left for the expiry sweep
+            return 0  # absent, or refused: left in place
         with opened:
             try:
                 age = time.time() - os.fstat(opened.fileno()).st_mtime
@@ -254,13 +266,15 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
                 return 0
             if not isinstance(data, dict):
                 return 0
-            if age > command_ttl:
-                # Already gone, or gone by the next sweep.
-                try:
-                    path.unlink()
-                except OSError:
-                    pass  # expired either way
-                return 0
+            expired = age > command_ttl
+        if expired:
+            # Removal waits until the descriptor above is closed: Windows
+            # cannot unlink a file it still holds open.
+            try:
+                path.unlink()
+            except OSError:
+                pass  # expired either way
+            return 0
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
         frame_writer(data)  # BEFORE unlink

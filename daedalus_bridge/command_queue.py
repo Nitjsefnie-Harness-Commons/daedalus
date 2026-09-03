@@ -78,15 +78,19 @@ def open_command_candidate(path):
     name.
 
     Returns ``(stream, None)``, or ``(None, reason)`` when the candidate must
-    not be delivered. Refused: a symlinked name (the open does not follow it
-    where the platform offers ``O_NOFOLLOW``, and the identity check catches
-    it where it does not), an object that is not a regular file or is named
-    more than once, and a name that stopped naming the object the descriptor
-    was opened on. ``reason`` is ``None`` only when the name named nothing at
-    all, which is absence rather than a refusal.
+    not be delivered. Refused: a symlinked name, an object that is not a
+    regular file or is named more than once, and a name that stopped naming
+    the object the descriptor was opened on. A symlinked name is refused
+    where the platform offers ``O_NOFOLLOW`` — a broken one included, since
+    the open refuses the link before looking at its target — and elsewhere
+    the open follows the link and the identity check refuses what it named.
+    Both spellings refuse, so a linked name delivers nothing either way; a
+    platform without ``O_NOFOLLOW`` reports a broken link as absence.
+    ``reason`` is ``None`` only when the name named nothing at all, which is
+    absence rather than a refusal.
 
     No exception escapes: a failing open or stat is itself a refusal. A
-    refused candidate is never removed here; the expiry sweep reconsiders it.
+    refused candidate is never removed here.
     """
     flags = (os.O_RDONLY | getattr(os, 'O_BINARY', 0)
              | getattr(os, 'O_NOFOLLOW', 0))
@@ -118,7 +122,11 @@ def remove_expired(path, now, ttl, legacy=False):
     """Remove one expired command artifact without following symlinks.
 
     Expiry is opportunistic, so a producer can leave a malformed legacy file
-    or a file can disappear while the sweep is looking at it.
+    or a file can disappear while the sweep is looking at it. The two
+    namespaces are not treated alike: a queue entry is expired by name,
+    while a legacy candidate the read refuses — an aliased or swapped one —
+    is retained, because unlinking it would take the name away from a
+    consumer about to refuse it for the same reason.
     """
     if not path.name.endswith(('.json', '.tmp')):
         return
@@ -130,9 +138,6 @@ def remove_expired(path, now, ttl, legacy=False):
                 return
             opened, _ = open_command_candidate(path)
             if opened is None:
-                # A candidate the read refuses is one the sweep must not
-                # consume by name: unlinking it would take the name away from
-                # a consumer about to refuse it for the same reason.
                 return
             # A parse failure means a writer may still hold the file mid-write;
             # any value that parses completely — dict or not — is not that
