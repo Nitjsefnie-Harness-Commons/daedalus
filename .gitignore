@@ -456,5 +456,6 @@
 !/tests/test_yamlread.py
 !/tests/test_yamlread_anchors.py
 !/tests/test_yamlread_blocks.py
+!/tests/test_yamlread_bom.py
 !/tests/test_yamlread_mapping_values.py
 !/tests/test_yamlread_steps.py

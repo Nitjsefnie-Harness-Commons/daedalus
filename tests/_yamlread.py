@@ -3,7 +3,9 @@
 This module deliberately does not parse YAML generally.  It locates a named
 job or step, decodes one plain, folded, or literal scalar, and refuses a shape
 whose full value cannot be proved from the source.  A blank line inside a
-block scalar is data, never an extraction boundary.
+block scalar is data, never an extraction boundary.  One byte-order mark is
+removed exactly where a real parser removes one, the source's first
+character; a mark anywhere else is data.
 """
 import re
 
