@@ -274,6 +274,10 @@ setInterval(() => {}, 10);
         source, bounded_steps=0,
         process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 4.0, failure
+    assert 'attempt 1:' in failure, (
+        'a retry=False failure reports its one attempt record')
+    assert 'dashboard node outer timeout after' not in failure, (
+        'a retry=False failure is not the retry-loop verdict')
     drain_seconds = _drain_seconds(failure)
     assert drain_seconds < 1.5, (
         f'dashboard drain took {drain_seconds:.3f}s')
@@ -296,6 +300,10 @@ def test_process_creation_delay_does_not_inflate_drain_time(tmp):
     finally:
         _dashnode.subprocess.Popen = real_popen
     assert _backstop_seconds(failure) == 1.5, failure
+    assert 'attempt 1:' in failure, (
+        'a retry=False failure reports its one attempt record')
+    assert 'dashboard node outer timeout after' not in failure, (
+        'a retry=False failure is not the retry-loop verdict')
     drain_seconds = _drain_seconds(failure)
     assert drain_seconds < 0.5, (
         f'dashboard drain took {drain_seconds:.3f}s')
@@ -384,6 +392,10 @@ export function formatEvalWorld(value) {
         step_timeout=0.5,
         process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 4.5, failure
+    assert 'attempt 1:' in failure, (
+        'a retry=False failure reports its one attempt record')
+    assert 'dashboard node outer timeout after' not in failure, (
+        'a retry=False failure is not the retry-loop verdict')
     assert 'last phase: dashboard harness finished' in failure, failure
     assert '"cdp"' in failure, failure
     assert '[phase] dashboard module imported' in failure, failure
@@ -396,6 +408,10 @@ def test_synchronous_stall_before_the_first_phase_says_none_recorded(tmp):
         'for (;;) {}', bounded_steps=0,
         process_grace=_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 1.5, failure
+    assert 'attempt 1:' in failure, (
+        'a retry=False failure reports its one attempt record')
+    assert 'dashboard node outer timeout after' not in failure, (
+        'a retry=False failure is not the retry-loop verdict')
     assert 'last phase: none recorded' in failure, failure
 
 
@@ -410,6 +426,10 @@ setInterval(() => {}, 10);
     failure = _harness_failure(
         source, process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
     assert _backstop_seconds(failure) == 4.0, failure
+    assert 'attempt 1:' in failure, (
+        'a retry=False failure reports its one attempt record')
+    assert 'dashboard node outer timeout after' not in failure, (
+        'a retry=False failure is not the retry-loop verdict')
     assert 'last phase: selector [update] (2/3) .*;' in failure, failure
     assert (
         "stdout: 'OUT'; stderr: 'ERR\\n[phase] selector [update] (2/3) .*'"

@@ -275,6 +275,17 @@ def test_non_windows_retries_one_silent_stall_then_returns_success(tmp):
     assert all(part in diagnostic for part in expected), diagnostic
 
 
+def test_clean_run_writes_no_recovery_diagnostic(tmp):
+    """A first-attempt success never announces that a retry recovered."""
+    del tmp
+    result, events, diagnostic = behaviour._controlled_run(
+        'linux', (1701, [behaviour._result(0, 'ok')]))
+    assert diagnostic == '', diagnostic
+    assert result.stdout == 'ok', result
+    assert [event[:2] for event in events] == [
+        ('popen', 1701), ('communicate', 1701)], events
+
+
 def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
     del tmp
     failure, events, _ = behaviour._controlled_run(
