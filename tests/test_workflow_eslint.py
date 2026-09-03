@@ -89,11 +89,17 @@ def test_the_currency_gate_watches_every_pin(tmp):
 def test_the_gate_fails_closed_when_a_pin_drifts(tmp):
     """A renamed or deleted env pin resolves empty, and an empty pin makes
     the integer comparison error inside its own if -- so the gate has to
-    check for that itself, name the variable, and fail the job."""
+    check for that itself, name the variable, and fail the job. The
+    assignment and the exit are pinned separately from the warning: a gate
+    that only prints it fails nothing."""
     del tmp
     run = _run(CURRENCY_NAME)
     assert 'if [ -z "${pinned}" ]' in run, run
     assert 'echo "${var} is unset or empty' in run, run
+    assert '    drift=1\n' in run, run
+    assert re.search(
+        r'if \[ "\$\{drift\}" -ne 0 \]; then\n'
+        r'(?:.*\n)*?  exit 1\nfi\n', run), run
 
 
 def test_the_currency_gate_sits_between_install_and_lint(tmp):
