@@ -1,4 +1,10 @@
-"""Decode the YAML scalar subset used by the workflow checkout reader."""
+"""Decode the scalar subset of YAML the workflow checkout reader accepts.
+
+The module also owns the two jobs the structural walk leans on it for:
+splitting a mapping entry into its key and value text, and finding the
+physical lines a quoted, flow or block scalar spans so the caller skips
+them instead of reading them as structure.
+"""
 
 import re
 
@@ -40,7 +46,22 @@ _SCHEMA_TYPED_NUMBER_OR_TIME = re.compile(
 
 
 class _ScalarReaderMixin:
-    """Decode scalar values for the structural workflow reader."""
+    """Decode scalar values for the structural workflow reader.
+
+    The mixin owns scalar decoding, mapping-entry splitting and value-span
+    detection. It requires from the host `_WorkflowReader`:
+
+    * `self.lines`, the workflow split into physical lines, and
+      `self.source_ends_with_line_break`, whether that source ended with a
+      line break — block scalar chomping at end of input needs it;
+    * `_refuse(what, index, context)` to raise the reader's refusal, with
+      the shape guards `_reject_prefix` and `_reject_scalar_shape`;
+    * `_looks_like_mapping(body)`, the reader's entry probe, which this
+      module's `_mapping_colon_position` answers;
+    * the line walk — `_indent(index, context)`, `_blank(index)` and
+      `_next_nonblank(start, end, context)` — and `_value_end(start, end,
+      parent_indent, context, check_tabs)` for the extent of a nested value.
+    """
 
     def _scalar_blank(self, index):
         return not self.lines[index].strip(' ')
