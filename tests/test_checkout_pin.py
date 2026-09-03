@@ -278,6 +278,39 @@ def test_checkout_pin_skips_github_and_rejects_non_reference_expressions(tmp):
             raise AssertionError(f'expected refusal for {expression}')
 
 
+def test_checkout_pin_refuses_schema_equivalent_job_keys_before_refs(tmp):
+    """Typed job keys cannot union checkout refs before duplicate checks."""
+    del tmp
+    workflow = (
+        'name: schema-equivalent jobs\n'
+        'on: push\n'
+        'jobs:\n'
+        '  yes:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - id: baseline\n'
+        '        run: echo safe\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: ${{ steps.baseline.outputs.ref }}\n'
+        '  true:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    steps:\n'
+        '      - id: baseline\n'
+        '        run: echo safe\n'
+        '      - uses: actions/checkout@v4\n'
+        '        with:\n'
+        '          ref: ${{ steps.baseline.outputs.point }}\n')
+    try:
+        _assert_checkout_refs_safe(workflow)
+    except AssertionError as error:
+        message = str(error)
+        assert 'plain scalar is not provably a string' in message, message
+        assert 'outputs.ref' not in message, message
+    else:
+        raise AssertionError('expected schema-typed job key refusal')
+
+
 def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     """No checkout's `ref:` may come from a name that reads like a head.
 
