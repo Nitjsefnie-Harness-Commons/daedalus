@@ -197,19 +197,31 @@ def _baseline_text(baseline):
     return f'BASELINE = {{\n{entries}}}\n'
 
 
-def _drive_main(policy, baseline, sizes):
-    """`main()` over a fabricated tree, as (status, stderr)."""
-    captured = io.StringIO()
-    argv, table, sizer = sys.argv, policy.BASELINE, policy.tracked_sizes
-    sys.argv = ['size_baseline.py']
-    policy.BASELINE, policy.tracked_sizes = baseline, lambda: sizes
+def _drive_main(policy, tmp, baseline, sizes, tighten=False):
+    """`main()` over a fabricated tree, as (status, stdout, stderr).
+
+    The fabricated policy text also stands in for the module's own file, so
+    the `--tighten` branch rewrites the stand-in and never the real
+    scripts/ci/size_baseline.py.
+    """
+    fake = Path(tmp) / 'size_baseline.py'
+    fake.write_text(_baseline_text(baseline), encoding='utf-8')
+    out, err = io.StringIO(), io.StringIO()
+    argv, table = sys.argv, policy.BASELINE
+    sizer, self_path = policy.tracked_sizes, policy.SELF
+    sys.argv = [str(fake)] + (['--tighten'] if tighten else [])
+    policy.BASELINE = baseline
+    policy.tracked_sizes = lambda: sizes
+    policy.SELF = fake
     try:
-        with contextlib.redirect_stderr(captured):
+        with (contextlib.redirect_stdout(out),
+              contextlib.redirect_stderr(err)):
             status = policy.main()
     finally:
         sys.argv = argv
         policy.BASELINE, policy.tracked_sizes = table, sizer
-    return status, captured.getvalue()
+        policy.SELF = self_path
+    return status, out.getvalue(), err.getvalue()
 
 
 def test_every_tracked_module_satisfies_the_size_policy(tmp):
@@ -364,7 +376,6 @@ def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
     Whether `--tighten` clears the kind is established by running it, and
     the printed advice is read for the words a refused author acts on.
     """
-    del tmp
     policy = _policy()
     over, under = policy.TEST_CEILING + 1, policy.TEST_CEILING
     fabricated = {
@@ -382,15 +393,52 @@ def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
         cleared = rewritten is not None and not any(
             rel in rewritten for rel in baseline)
         assert cleared == clears, (kind, rewritten)
-        status, printed = _drive_main(policy, baseline, sizes)
+        status, out, printed = _drive_main(policy, tmp, baseline, sizes)
         assert status == 1, (kind, status)
         assert names in printed, (kind, names, printed)
         assert never not in printed, (kind, never, printed)
 
 
+def test_a_clean_tree_prints_one_line_and_exits_clean(tmp):
+    """The report path is a clean exit: status 0 and the count on stdout."""
+    policy = _policy()
+    sizes = {'tests/big.py': 800, 'tests/one.py': 1, 'tests/two.py': 2}
+    status, out, err = _drive_main(policy, tmp, {'tests/big.py': 801}, sizes)
+    assert status == 0, (status, out, err)
+    assert out == '3 tracked modules within the size policy\n', out
+    assert err == '', err
+
+
+def test_tightening_without_a_shrink_writes_nothing(tmp):
+    """No module shrank: the branch answers and changes no file."""
+    policy = _policy()
+    baseline = {'tests/big.py': 801}
+    fake = Path(tmp) / 'size_baseline.py'
+    status, out, err = _drive_main(policy, tmp, baseline,
+                                   {'tests/big.py': 801}, tighten=True)
+    assert status == 0, (status, out, err)
+    assert out == 'no module shrank below its recorded size\n', out
+    assert err == '', err
+    assert fake.read_text(encoding='utf-8') == _baseline_text(baseline), (
+        fake.read_text(encoding='utf-8'))
+
+
+def test_tightening_a_shrunk_file_rewrites_the_policy_file(tmp):
+    """A shrink follows the file down on stdout and in the policy file."""
+    policy = _policy()
+    baseline = {'tests/big.py': 801}
+    fake = Path(tmp) / 'size_baseline.py'
+    status, out, err = _drive_main(policy, tmp, baseline,
+                                   {'tests/big.py': 750}, tighten=True)
+    assert status == 0, (status, out, err)
+    assert out == 'tightened the module size baseline\n', out
+    assert err == '', err
+    assert "'tests/big.py': 750," in fake.read_text(encoding='utf-8'), (
+        fake.read_text(encoding='utf-8'))
+
+
 def test_a_mixed_refusal_prints_each_remedy_once(tmp):
     """Three kinds, two answers: both printed, neither twice."""
-    del tmp
     policy = _policy()
     over = policy.TEST_CEILING + 1
     baseline = {'tests/gone.py': over, 'tests/big.py': over}
@@ -398,7 +446,7 @@ def test_a_mixed_refusal_prints_each_remedy_once(tmp):
     found = policy.violations(sizes, baseline)
     assert sorted(k for k, v in found.items() if v) == [
         'grown', 'missing', 'over'], found
-    status, printed = _drive_main(policy, baseline, sizes)
+    status, out, printed = _drive_main(policy, tmp, baseline, sizes)
     assert status == 1, status
     assert printed.count('relocate the code into a new module') == 1, printed
     assert printed.count('deleted by hand') == 1, printed
