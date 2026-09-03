@@ -18,7 +18,7 @@ from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _tests_yml)
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
-from _yamlread import job_mapping  # noqa: E402
+from _yamlread import job_mapping, step_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
@@ -504,6 +504,67 @@ def test_a_release_attests_every_artifact_it_publishes(tmp):
              workflow.index('actions/checkout@'),
              workflow.index('run: python run_tests.py')]
     assert order == sorted(order), order
+
+
+def test_the_wheel_job_proves_both_published_formats(tmp):
+    """The sdist ships as unproven as the wheel is proven.
+
+    release.yml checksums, attests and uploads dist/*.tar.gz, and the wheel
+    job built that wheel alone — nothing installed the sdist, and nothing ran
+    twine over either artifact. A tarball missing a file it needed would have
+    gone public green, because a checksum and an attestation describe what was
+    built, never whether it builds. There is no MANIFEST.in, so a clean
+    install of the tarball is also the only thing that reads the file list
+    setuptools inferred.
+    """
+    del tmp
+    workflow = _tests_yml()
+
+    build = step_scalar(workflow, 'wheel', 'Build the wheel and the sdist',
+                        'run')
+    assert build, 'the wheel job no longer builds anything under that name'
+    # One build step produces both formats; the wheel-only flag is the exact
+    # defect this job exists to keep out.
+    assert 'python -m build\n' in build, build
+    assert '--wheel' not in build, build
+    # twine is a CI tool like any other here: pinned exactly, never floated.
+    assert re.search(r'pip install .* twine==\d+\.\d+\.\d+$', build,
+                     re.MULTILINE), build
+
+    check = step_scalar(workflow, 'wheel', 'Check both artifacts render',
+                        'run')
+    assert check is not None, 'nothing renders the metadata of the artifacts'
+    assert 'twine check --strict dist/*' in check, check
+
+    smoke = step_scalar(workflow, 'wheel',
+                        'Install the sdist, no checkout in reach, and run'
+                        ' its entry point', 'run')
+    assert smoke is not None, 'the sdist is installed by nothing'
+    assert 'python -m venv "$RUNNER_TEMP/probe-sdist"' in smoke, smoke
+    # The tarball alone: installing it beside the wheel would prove the wheel
+    # a second time and leave the sdist's file list as untested as before.
+    assert smoke.splitlines() == [
+        'python -m venv "$RUNNER_TEMP/probe-sdist"',
+        '"$RUNNER_TEMP/probe-sdist/bin/pip" install dist/*.tar.gz',
+        'cd "$RUNNER_TEMP"',
+        '"$RUNNER_TEMP/probe-sdist/bin/daedalus" --version',
+    ], smoke
+
+    # Order is the proof: metadata is rendered over what the build produced,
+    # and the tarball is installed from that same dist rather than a stale one.
+    order = [workflow.index(step) for step in
+             ('- name: Build the wheel and the sdist',
+              '- name: Check both artifacts render',
+              '- name: Install the sdist, no checkout in reach, and run'
+              ' its entry point')]
+    assert order == sorted(order), order
+
+    # A failed smoke test is the artifact worth keeping, for either format.
+    _, marker, after = workflow.partition('name: artifacts-failed-smoke-test')
+    assert marker, 'the failed-smoke artifact no longer carries both formats'
+    artifact, _, _ = after.partition('- name:')
+    assert re.findall(r'dist/\S+', artifact) == ['dist/*.whl',
+                                                 'dist/*.tar.gz'], artifact
 
 
 def test_one_action_family_is_pinned_to_one_version(tmp):
