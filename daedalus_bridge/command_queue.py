@@ -32,9 +32,11 @@ def claim(key):
     """Claim one logical queue key without holding a lock during delivery.
 
     The key is the logical target name; consumers using the same spelling
-    cannot both take a claim. Aliasing is refused in the read, not here: the
-    open does not follow a symlink and an object named more than once is
-    refused, so two names for one object cannot both deliver it.
+    cannot both take a claim. Aliasing is refused in the read, not here: a
+    symlinked name is not followed where the platform can refuse to follow
+    it and is refused by the identity check where it cannot, and an object
+    named more than once is refused, so two names for one object cannot
+    both deliver it.
     """
     if not isinstance(key, str) or not key:
         raise TypeError('claim key must be a non-empty string')
@@ -92,8 +94,11 @@ def open_command_candidate(path):
     No exception escapes: a failing open or stat is itself a refusal. A
     refused candidate is never removed here.
     """
+    # O_NONBLOCK keeps a FIFO named like a command file from hanging the
+    # drain on an open with no writer; it is a no-op for regular files and
+    # absent on Windows, where no such object exists.
     flags = (os.O_RDONLY | getattr(os, 'O_BINARY', 0)
-             | getattr(os, 'O_NOFOLLOW', 0))
+             | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
     try:
         fd = os.open(path, flags)
     except FileNotFoundError:
