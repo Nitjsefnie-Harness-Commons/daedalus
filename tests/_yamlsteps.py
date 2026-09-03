@@ -186,7 +186,7 @@ def _decode_complete_mapping(lines, start, end, parent_indent, owner):
         if field.startswith('- '):
             raise YAMLReadError(f'{owner} is not a mapping')
         fields.append((index, field))
-        index = _value_extent(lines, index, end, field, owner) + 1
+        index = _field_extent(lines, index, end, indent, field, owner) + 1
     values = {}
     for offset, (index, field) in enumerate(fields):
         field_end = fields[offset + 1][0] if offset + 1 < len(
@@ -222,6 +222,10 @@ def _decode_complete_value(
                 f'{owner} {key} has unsupported nested content')
         return _decode_complete_inline(
             joined or value, f'{owner} value for {key!r}')
+    item_end = _indentless_end(lines, index, end, indent)
+    if item_end > index + 1:
+        return _decode_complete_sequence(
+            lines, index + 1, item_end, indent - 1, f'{owner} {key}')
     child = _reader._first_child(lines, index + 1, end, indent)
     if child is None:
         raise YAMLReadError(f'{owner} {key} has no value')
@@ -273,6 +277,55 @@ def _value_extent(lines, index, end, text, owner):
     _joined, close = _flow_extent(
         lines, index, end, _strip_inline_comment(text.strip(' ')))
     return close
+
+
+def _field_extent(lines, index, end, indent, field, owner):
+    """Return the last line index one mapping field spans.
+
+    A field whose inline value is empty may carry its sequence at the
+    field's own indentation, and those items belong to the field rather
+    than ending it: without them a later sibling key would be read before
+    the field's value is.
+    """
+    close = _value_extent(lines, index, end, field, owner)
+    try:
+        _raw_key, raw_value = split_mapping_field(field, owner)
+    except YAMLReadError as error:
+        if str(error) != f'{owner} has an unsupported mapping field':
+            raise
+        return close
+    if _strip_inline_comment(raw_value.strip(' ')):
+        return close
+    return max(close, _indentless_end(lines, index, end, indent))
+
+
+def _indentless_end(lines, index, end, indent):
+    """Return the line after the sequence written at a key's own indent.
+
+    A sequence may sit at its key's own indentation.  It exists only where
+    the key's first child line is one of its items, and it runs to the
+    first meaningful line at that indentation that is not an item, which
+    is where the next field begins.
+    """
+    last = index + 1
+    started = False
+    following = index + 1
+    while following < end:
+        if not _reader._meaningful(lines[following]):
+            following += 1
+            continue
+        row_indent = _reader._indent(lines[following])
+        text, _ended = lines[following]
+        if row_indent < indent:
+            break
+        if row_indent == indent:
+            if not text[indent:].startswith('- '):
+                break
+            started = True
+        following += 1
+        if started:
+            last = following
+    return last
 
 
 def _decode_complete_sequence(lines, start, end, parent_indent, owner):
@@ -334,8 +387,8 @@ def _decode_complete_sequence_mapping(
     text, _ended = lines[index]
     field_indent = item_indent + 2
     fields = [(index, text[field_indent:])]
-    following = _value_extent(
-        lines, index, end, text[field_indent:], owner) + 1
+    following = _field_extent(
+        lines, index, end, field_indent, text[field_indent:], owner) + 1
     while following < end:
         if not _reader._meaningful(lines[following]):
             following += 1
@@ -349,8 +402,8 @@ def _decode_complete_sequence_mapping(
             continue
         text, _ended = lines[following]
         fields.append((following, text[indent:]))
-        following = _value_extent(
-            lines, following, end, text[indent:], owner) + 1
+        following = _field_extent(
+            lines, following, end, indent, text[indent:], owner) + 1
     values = {}
     for offset, (field_index, field) in enumerate(fields):
         field_end = fields[offset + 1][0] if offset + 1 < len(
@@ -392,12 +445,16 @@ def _decode_flow_pair(text, owner):
 
 
 def _decode_flow_item(item, owner):
-    """Decode one flow sequence entry, which may be a single-pair mapping.
+    """Decode one flow sequence entry, which may be a nested collection.
 
     `[a: b]` and `[a:]` are sequences of one mapping each, not scalars that
-    happen to carry a colon.
+    happen to carry a colon, and `[{a: b}]` is a sequence of one mapping
+    rather than a mapping whose key starts with a bracket.
     """
     text = item.strip(' ')
+    collection = split_flow_collection(text, owner)
+    if collection is not None:
+        return _decode_flow_collection(*collection, owner)
     if find_mapping_field(text, owner) is None:
         return _decode_complete_inline(item, owner)
     return dict((_decode_flow_pair(text, owner),))
