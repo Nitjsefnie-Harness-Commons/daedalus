@@ -382,7 +382,6 @@ def test_the_rule_spellings_tell_a_statement_from_its_absence(tmp):
 
 
 def test_the_rule_help_quotes_a_witness_of_every_family(tmp):
-    """Help omitting a spelling sends a correct author away to rewrite."""
     del tmp
     assert len(RULE_HELP_WITNESSES) == len(ACCEPTED_RULE_SPELLINGS), (
         len(RULE_HELP_WITNESSES), len(ACCEPTED_RULE_SPELLINGS))
@@ -472,8 +471,8 @@ def test_tightening_a_shrunk_file_rewrites_the_policy_file(tmp):
     assert status == 0, (status, out, err)
     assert out == 'tightened the module size baseline\n', out
     assert err == '', err
-    assert "'tests/big.py': 750," in fake.read_text(encoding='utf-8'), (
-        fake.read_text(encoding='utf-8'))
+    assert fake.read_text(encoding='utf-8') == _baseline_text(
+        {'tests/big.py': 750}), fake.read_text(encoding='utf-8')
 
 
 def test_a_mixed_refusal_prints_each_remedy_once(tmp):
