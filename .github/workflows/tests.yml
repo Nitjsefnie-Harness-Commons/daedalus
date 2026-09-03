@@ -404,9 +404,11 @@ jobs:
         run: python run_tests.py
 
   wheel:
-    # Proves the published artifact, not just the checkout: an import that
+    # Proves the published artifacts, not just the checkout: an import that
     # resolves only because the source tree is on sys.path would pass the
-    # suites above and still ship a wheel whose commands do not exist.
+    # suites above and still ship a wheel whose commands do not exist, or a
+    # tarball whose file list is whatever setuptools inferred. twine renders
+    # the metadata of both formats before either of them is installed.
     needs:
       - changes
       - pycodestyle
@@ -429,10 +431,14 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Build the wheel
+      - name: Build the wheel and the sdist
         run: |
-          python -m pip install --upgrade pip build
-          python -m build --wheel
+          # twine==7.0.0 is the current stable release.
+          python -m pip install --upgrade pip build twine==7.0.0
+          python -m build
+
+      - name: Check both artifacts render
+        run: python -m twine check --strict dist/*
 
       - name: Install it with no checkout in reach and run its entry point
         run: |
@@ -441,20 +447,30 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/probe/bin/daedalus" --version
 
-      # Uploaded only when the smoke test above did NOT pass. This job exists
-      # to prove the wheel imports and exposes its entry point, and it proved
-      # that the moment the step before this one succeeded — keeping the
-      # artifact after that retained a distributable wheel per push, per pull
-      # request and per manual run, 90 days each. Durable wheels belong to
-      # releases, which release.yml publishes with checksums.
+      - name: Install the sdist, no checkout in reach, and run its entry point
+        run: |
+          python -m venv "$RUNNER_TEMP/probe-sdist"
+          "$RUNNER_TEMP/probe-sdist/bin/pip" install dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/probe-sdist/bin/daedalus" --version
+
+      # Uploaded only when a smoke test above did NOT pass. This job exists to
+      # prove both published formats install and expose their entry point, and
+      # it proved that the moment the steps before this one succeeded —
+      # keeping the artifacts after that retained a distributable wheel and
+      # sdist per push, per pull request and per manual run, 90 days each.
+      # Durable copies belong to releases, which release.yml publishes with
+      # checksums.
       #
-      # A wheel whose smoke test failed is the one worth having: it is the
-      # artifact you need to reproduce the failure, and it is rare.
+      # An artifact whose smoke test failed is the one worth having: it is the
+      # copy you need to reproduce the failure, and it is rare.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         if: ${{ failure() }}
         with:
-          name: wheel-failed-smoke-test
-          path: dist/*.whl
+          name: artifacts-failed-smoke-test
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
           retention-days: 14
 
   coverage-matrix:
