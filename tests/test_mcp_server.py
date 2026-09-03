@@ -52,17 +52,11 @@ def _need_deps():
 def _load_mcp(base_url):
     """Import daedalus_mcp/server.py with a private bridge session bound at import."""
     prev = os.environ.get('DAEDALUS_LOCAL_URL')
-    root = str(_util.ROOT)
-    added_root = root not in sys.path
-    if added_root:
-        sys.path.insert(0, root)
     os.environ['DAEDALUS_LOCAL_URL'] = base_url
     try:
         return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
                           'mcp_server_under_test_' + str(time.time_ns()))
     finally:
-        if added_root:
-            sys.path.remove(root)
         if prev is None:
             os.environ.pop('DAEDALUS_LOCAL_URL', None)
         else:
@@ -323,10 +317,6 @@ def test_local_url_derives_from_the_bridge_port(tmp):
     _need_deps()
     saved = {key: os.environ.get(key)
              for key in ('DAEDALUS_PORT', 'DAEDALUS_LOCAL_URL')}
-    root = str(_util.ROOT)
-    added_root = root not in sys.path
-    if added_root:
-        sys.path.insert(0, root)
     try:
         def fresh(tag):
             return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
@@ -340,8 +330,6 @@ def test_local_url_derives_from_the_bridge_port(tmp):
         os.environ.pop('DAEDALUS_PORT', None)
         assert fresh('fallback').LOCAL_URL == 'http://127.0.0.1:8081'
     finally:
-        if added_root:
-            sys.path.remove(root)
         for key, value in saved.items():
             if value is None:
                 os.environ.pop(key, None)
