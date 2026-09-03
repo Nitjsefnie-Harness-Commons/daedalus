@@ -19,6 +19,7 @@ BRIDGE_PACKAGE = (
     'atomic_file.py',
     'command_queue.py',
     'config.py',
+    'data_root_lock.py',
     'delivery_stripes.py',
     'env_config.py',
     'http_transport.py',
