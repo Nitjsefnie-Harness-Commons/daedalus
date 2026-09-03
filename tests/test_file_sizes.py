@@ -61,8 +61,20 @@ ACCEPTED_RULE_SPELLINGS = (
 )
 STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
 RULE_HELP = ('a negated raising verb ("is never raised by hand", "never '
-             'goes up", "is not edited upward by hand"), a prohibited one '
-             '("raising it is forbidden"), or "only ever go down"')
+             'goes up", "is not edited upward by hand"), a "nobody" '
+             'subject ("nobody raises a recorded number by hand"), a '
+             'prohibited one ("raising it is forbidden"), or "only ever '
+             'go down"')
+
+# One witness per accepted spelling family, quoted in RULE_HELP: help that
+# omits a family sends an author whose prose already uses it away to
+# rewrite a correct statement.
+RULE_HELP_WITNESSES = (
+    'is never raised by hand',
+    'nobody raises a recorded number by hand',
+    'raising it is forbidden',
+    'only ever go down',
+)
 
 # Texts the spelling regex must tell apart, so a regex that stopped
 # discriminating - one matching everything, nothing, or the rule inverted -
@@ -83,6 +95,10 @@ RULE_STATED = (
     'a recorded number is never, ever raised by hand',
     'raising a recorded number is forbidden',
     'the numbers in this table only ever go down',
+    # Contracted, where the negation only survives normalisation if it is
+    # expanded before the apostrophe goes.
+    "a recorded number isn't raised by hand",
+    "the recorded number isn't bumped to make room",
 )
 RULE_NOT_STATED = (
     'a recorded number is raised by hand when a file grows',
@@ -103,6 +119,10 @@ RULE_NOT_STATED = (
     # else, so widening the span reads this licence as the rule.
     'not a line limit, and a file over its ceiling is listed at the size '
     'it was measured, and a recorded number is raised by hand',
+    # Contracted inversions: normalisation that keeps the contraction reads
+    # these as the rule they negate.
+    "raising a recorded number isn't forbidden",
+    "raising a recorded number isn't prohibited",
     '',
 )
 
@@ -170,8 +190,13 @@ def _policy():
 
 
 def _normalised(text):
-    """`text` lowercased, as one line, with prose markers removed."""
-    text = text.lower()
+    """`text` lowercased, as one line, with prose markers removed.
+
+    A contracted negation is expanded first: the marker deletion takes the
+    apostrophe an `isn't` needs, and a negation that reached the spelling
+    regex as `isnt` reads as its own affirmative.
+    """
+    text = text.lower().replace("n't", ' not')
     for marker in MARKERS:
         text = text.replace(marker, '')
     return ' '.join(text.split())
@@ -349,11 +374,24 @@ def test_the_rule_spellings_tell_a_statement_from_its_absence(tmp):
         'no listed negative states the rule inverted, so a regex that lost '
         'its negator would pass here')
     missed = [text for text in RULE_STATED
-              if not STATES_THE_RULE.search(text)]
+              if not STATES_THE_RULE.search(_normalised(text))]
     assert not missed, f'the rule is stated here and not seen: {missed}'
     matched = [text for text in RULE_NOT_STATED
-               if STATES_THE_RULE.search(text)]
+               if STATES_THE_RULE.search(_normalised(text))]
     assert not matched, f'the rule is read into prose lacking it: {matched}'
+
+
+def test_the_rule_help_quotes_a_witness_of_every_family(tmp):
+    """Help omitting a spelling sends a correct author away to rewrite."""
+    del tmp
+    assert len(RULE_HELP_WITNESSES) == len(ACCEPTED_RULE_SPELLINGS), (
+        len(RULE_HELP_WITNESSES), len(ACCEPTED_RULE_SPELLINGS))
+    unnamed = [witness for witness in RULE_HELP_WITNESSES
+               if _normalised(witness) not in _normalised(RULE_HELP)]
+    assert not unnamed, f'RULE_HELP does not quote a witness for: {unnamed}'
+    unseen = [witness for witness in RULE_HELP_WITNESSES
+              if not STATES_THE_RULE.search(_normalised(witness))]
+    assert not unseen, f'a witness no longer states the rule: {unseen}'
 
 
 def test_the_docstring_carries_every_printed_remedy(tmp):
@@ -395,6 +433,7 @@ def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
         assert cleared == clears, (kind, rewritten)
         status, out, printed = _drive_main(policy, tmp, baseline, sizes)
         assert status == 1, (kind, status)
+        assert out == '', (kind, out)
         assert names in printed, (kind, names, printed)
         assert never not in printed, (kind, never, printed)
 
@@ -448,6 +487,7 @@ def test_a_mixed_refusal_prints_each_remedy_once(tmp):
         'grown', 'missing', 'over'], found
     status, out, printed = _drive_main(policy, tmp, baseline, sizes)
     assert status == 1, status
+    assert out == '', out
     assert printed.count('relocate the code into a new module') == 1, printed
     assert printed.count('deleted by hand') == 1, printed
 
