@@ -528,8 +528,8 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     assert 'python -m build\n' in build, build
     assert '--wheel' not in build, build
     # twine is a CI tool like any other here: pinned exactly, never floated.
-    assert re.search(r'pip install .* twine==\d+\.\d+\.\d+$', build,
-                     re.MULTILINE), build
+    install = 'python -m pip install --upgrade pip build twine==7.0.0'
+    assert install in build.splitlines(), build
 
     check = step_scalar(workflow, 'wheel', 'Check both artifacts render',
                         'run')
@@ -554,7 +554,6 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
                         'Install the sdist, no checkout in reach, and run'
                         ' its entry point', 'run')
     assert smoke is not None, 'the sdist is installed by nothing'
-    assert 'python -m venv "$RUNNER_TEMP/probe-sdist"' in smoke, smoke
     # The tarball alone: installing it beside the wheel would prove the wheel
     # a second time and leave the sdist's file list as untested as before.
     assert smoke.splitlines() == [
@@ -564,24 +563,33 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
         '"$RUNNER_TEMP/probe-sdist/bin/daedalus" --version',
     ], smoke
 
-    # Order is the proof: metadata is rendered over what the build produced,
-    # and the tarball is installed from that same dist rather than a stale one.
-    order = [workflow.index(step) for step in
-             ('- name: Build the wheel and the sdist',
-              '- name: Check both artifacts render',
-              '- name: Install it with no checkout in reach and run'
-              ' its entry point',
-              '- name: Install the sdist, no checkout in reach, and run'
-              ' its entry point')]
-    assert order == sorted(order), order
+    # The job's whole step list in order: an added, removed or moved step is
+    # a red event, and metadata still renders before either install.
+    steps = complete_job_mapping(workflow, 'wheel')['steps']
+    identities = [step.get('name') or step.get('uses', '').partition('@')[0]
+                  for step in steps]
+    assert identities == [
+        'actions/checkout',
+        'actions/setup-python',
+        'Build the wheel and the sdist',
+        'Check both artifacts render',
+        'Install it with no checkout in reach and run its entry point',
+        'Install the sdist, no checkout in reach, and run its entry point',
+        'actions/upload-artifact',
+    ], identities
 
     # A failed smoke test is the artifact worth keeping, for either format.
     # The window is the wheel job alone: past the job, a later preamble may
     # name dist/ paths of its own that are not this artifact's.
     wheel_job = '\n'.join(_job_section(workflow, 'wheel'))
-    _, marker, after = wheel_job.partition('name: artifacts-failed-smoke-test')
+    before, marker, after = wheel_job.partition(
+        'name: artifacts-failed-smoke-test')
     assert marker, 'the failed-smoke artifact no longer carries both formats'
+    assert 'if: ${{ failure() }}' in before, (
+        'the failed-smoke artifact uploads on green runs')
     artifact, _, _ = after.partition('- name:')
+    kept = [line.strip() for line in artifact.splitlines()]
+    assert 'retention-days: 14' in kept, artifact
     assert re.findall(r'dist/\S+', artifact) == ['dist/*.whl',
                                                  'dist/*.tar.gz'], artifact
 
