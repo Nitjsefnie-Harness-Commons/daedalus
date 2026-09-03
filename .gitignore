@@ -344,6 +344,7 @@
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
 !/tests/test_dashboard_harness.py
+!/tests/test_dashboard_harness_metadata.py
 !/tests/test_dashboard_node_retry.py
 !/tests/test_delivery_matching.py
 !/tests/test_delivery_stripes.py
