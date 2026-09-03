@@ -433,7 +433,7 @@ jobs:
 
       - name: Build the wheel and the sdist
         run: |
-          # twine==7.0.0 is the current stable release.
+          # twine is pinned exactly here: the metadata gate may not float.
           python -m pip install --upgrade pip build twine==7.0.0
           python -m build
 
