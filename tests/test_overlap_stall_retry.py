@@ -81,6 +81,9 @@ def test_second_silent_stall_names_both_attempts(tmp):
     assert record in message, message
     assert 'retry declined' not in message, message
     assert popen.call_count == 2, popen.call_args_list
+    final = ("attempt 2 (pid 4713): last step: none recorded; "
+             "stdout: ''; stderr: ''; drain timed out: no")
+    assert final in message, message
 
 
 def test_second_stall_with_timed_out_drain_names_it(tmp):
@@ -102,6 +105,7 @@ def test_second_stall_with_timed_out_drain_names_it(tmp):
     final = ("attempt 2 (pid 4713): last step: none recorded; "
              "stdout: ''; stderr: ''; drain timed out: yes")
     assert final in message, message
+    assert message.index(record) < message.index(final), message
 
 
 def test_stall_with_output_does_not_retry(tmp):
