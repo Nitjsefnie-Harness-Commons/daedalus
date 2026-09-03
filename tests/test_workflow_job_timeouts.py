@@ -5,7 +5,10 @@ A job added without `timeout-minutes` inherits GitHub's 360-minute
 default, so an unbounded job is a four-hour ceiling nobody chose. This
 gate classifies every job of both workflow extensions, refuses a
 construct it cannot classify, and refuses a workflow that classifies no
-job at all, rather than reporting success over nothing.
+job at all, rather than reporting success over nothing. A job with
+neither `runs-on` nor a job-level `uses` is not a runner job and is not
+asked for a bound; such a job is invalid, and the repository's pinned
+actionlint is the gate that refuses it.
 """
 import re
 import sys
@@ -18,7 +21,9 @@ from _wfjobs import load, workflow_files  # noqa: E402
 from _yamlscalar import YAMLReadError  # noqa: E402
 
 _REAL = ROOT / '.github' / 'workflows' / 'tests.yml'
-_DECIMAL = re.compile(r'[0-9]+\Z')
+_NUMBER = re.compile(
+    r'\+?(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9][0-9_]*)(?:[eE][+-]?[0-9_]+)?'
+    r'\Z')
 
 
 def test_every_real_runner_job_declares_a_timeout(tmp):
@@ -116,6 +121,21 @@ def test_each_valid_spelling_that_bounds_a_job_passes(tmp):
                           '  other:\n'
                           '    runs-on: ubuntu-latest\n'
                           '    timeout-minutes: 5\n',
+        'indentless-needs': 'jobs:\n'
+                            '  probe:\n'
+                            '    needs:\n'
+                            '    - other\n'
+                            '    runs-on: ubuntu-latest\n'
+                            '    timeout-minutes: 5\n'
+                            '  other:\n'
+                            '    runs-on: ubuntu-latest\n'
+                            '    timeout-minutes: 5\n',
+        'fractional-bound': 'jobs:\n' + BOUNDED_JOB.replace(
+            'timeout-minutes: 5', 'timeout-minutes: 0.5'),
+        'float-bound': 'jobs:\n' + BOUNDED_JOB.replace(
+            'timeout-minutes: 5', 'timeout-minutes: 4.5'),
+        'plus-signed-bound': 'jobs:\n' + BOUNDED_JOB.replace(
+            'timeout-minutes: 5', 'timeout-minutes: +5'),
     }
     for name, source in sorted(cases.items()):
         violations = _timeout_violations(_fixture(tmp, name, source))
@@ -154,10 +174,14 @@ def test_each_unbounded_shape_is_named(tmp):
                             '  probe:\n'
                             '    runs-on: ubuntu-latest\n'
                             '    timeout-minutes: ${{ matrix.timeout }}\n',
-        'float-value': 'jobs:\n'
-                       '  probe:\n'
-                       '    runs-on: ubuntu-latest\n'
-                       '    timeout-minutes: 4.5\n',
+        'indentless-needs-unbounded': 'jobs:\n'
+                                      '  probe:\n'
+                                      '    needs:\n'
+                                      '    - other\n'
+                                      '    runs-on: ubuntu-latest\n'
+                                      '  other:\n'
+                                      '    runs-on: ubuntu-latest\n'
+                                      '    timeout-minutes: 5\n',
         'zero-value': 'jobs:\n'
                       '  probe:\n'
                       '    runs-on: ubuntu-latest\n'
@@ -181,8 +205,46 @@ def test_a_local_caller_is_checked_through_its_target(tmp):
         '  call:\n'
         '    uses: ./.github/workflows/tests.yml\n', encoding='utf-8')
     violations = _timeout_violations(root)
+    named = [line for line in violations if 'aggregate' in line]
+    assert len(named) == 1, violations
+    assert 'tests.yml:' in named[0], named
+
+
+def test_a_quoted_local_caller_target_is_not_read_as_external(tmp):
+    """The quoted target decodes to a local path, not an external one."""
+    root = _planted(tmp)
+    (root / 'caller.yml').write_text(
+        'jobs:\n'
+        '  call:\n'
+        '    uses: "./.github/workflows/tests.yml"\n', encoding='utf-8')
+    violations = _timeout_violations(root)
     assert not [line for line in violations if 'caller.yml' in line], (
         violations)
+    assert not any('cannot be verified' in line for line in violations), (
+        violations)
+
+
+def test_a_defective_caller_still_hands_its_target_to_the_gate(tmp):
+    """Recording the caller's own violation does not end the walk.
+
+    The target is spelled with a name discovery does not pick up, so the
+    through-caller walk is the only route by which it can be reached.
+    """
+    root = _planted(tmp)
+    (root / 'caller.yml').write_text(
+        'jobs:\n'
+        '  call:\n'
+        '    uses: ./.github/workflows/target.txt\n'
+        '    timeout-minutes: 5\n', encoding='utf-8')
+    (root / 'target.txt').write_text(
+        'jobs:\n'
+        '  inner:\n'
+        '    runs-on: ubuntu-latest\n', encoding='utf-8')
+    violations = _timeout_violations(root)
+    assert any('caller.yml' in line for line in violations), violations
+    named = [line for line in violations if 'target.txt' in line]
+    assert len(named) == 1, violations
+    assert "'inner'" in named[0], named
 
 
 def test_a_caller_cannot_carry_its_own_bound(tmp):
@@ -209,6 +271,29 @@ def test_an_external_caller_target_is_refused(tmp):
         encoding='utf-8')
     violations = _timeout_violations(root)
     assert any('owner/repo' in line for line in violations), violations
+
+
+def test_an_external_caller_in_an_inline_job_is_refused(tmp):
+    """The issue's own inline spelling of the same external caller."""
+    root = _planted(tmp)
+    (root / 'flow.yml').write_text(
+        'jobs: {call: {uses:'
+        ' owner/repo/.github/workflows/x.yml@main}}\n', encoding='utf-8')
+    violations = _timeout_violations(root)
+    named = [line for line in violations if 'flow.yml' in line]
+    assert len(named) == 1, violations
+    assert 'owner/repo' in named[0], named
+
+
+def test_a_non_utf8_workflow_is_refused_not_raised(tmp):
+    """Bytes this repository does not ship are a refusal, not a crash."""
+    root = _planted(tmp)
+    (root / 'binary.yml').write_bytes(
+        b'jobs:\n  probe:\n    runs-on: ubuntu\xff-latest\n')
+    violations = _timeout_violations(root)
+    named = [line for line in violations if 'binary.yml' in line]
+    assert len(named) == 1, violations
+    assert 'UTF-8' in named[0], named
 
 
 def test_a_local_target_the_repository_does_not_ship_is_refused(tmp):
@@ -252,14 +337,16 @@ def test_an_unclassifiable_workflow_is_refused_not_passed(tmp):
 
 
 def _planted(tmp):
-    """Copy the real workflow, minus one job's bound, into `tmp`."""
+    """Copy the real workflow, minus the aggregate job's bound, into `tmp`."""
     root = Path(tmp) / '.github' / 'workflows'
     root.mkdir(parents=True, exist_ok=True)
     source = _REAL.read_text(encoding='utf-8')
-    bound = '    timeout-minutes: 5\n    permissions: {}\n'
-    assert source.count(bound) == 1, 'the planted target moved'
+    section = source[source.index('  aggregate:\n'):]
+    bound = '\n    timeout-minutes: 5\n'
+    assert section.count(bound) == 1, 'the planted target moved'
     (root / 'tests.yml').write_text(
-        source.replace(bound, '    permissions: {}\n'), encoding='utf-8')
+        source[:source.index('  aggregate:\n')]
+        + section.replace(bound, '\n', 1), encoding='utf-8')
     return root
 
 
@@ -289,11 +376,10 @@ def _scan(path, violations, checked):
         violations.append(str(error))
         return
     for name, job in workflow.jobs.items():
+        target = _local_target(workflow, name, job, violations)
         problem = _unbounded(workflow, name, job)
         if problem is not None:
             violations.append(problem)
-            continue
-        target = _local_target(workflow, name, job, violations)
         if target is not None:
             _scan(target, violations, checked)
 
@@ -338,11 +424,19 @@ def _local_target(workflow, name, job, violations):
 
 
 def _positive_literal(bound, where):
-    """Refuse a value that is not a positive decimal literal."""
-    if not isinstance(bound, str) or not _DECIMAL.fullmatch(bound):
+    """Refuse a bound that is not a number greater than zero.
+
+    The accepted spellings are the numeric literals the repository's
+    pinned actionlint accepts for `timeout-minutes`, measured against it:
+    a plain, fractional, plus-signed or underscore-grouped decimal with
+    an optional exponent. What the gate cannot read as a number from the
+    source text it refuses, naming the value.
+    """
+    if not isinstance(bound, str) or not _NUMBER.fullmatch(bound):
         return f'{where}: timeout-minutes {bound!r} does not bound the job'
-    if int(bound) == 0:
-        return f'{where}: timeout-minutes 0 does not bound the job'
+    digits = re.sub(r'(?<=[0-9])_(?=[0-9])', '', bound.lstrip('+'))
+    if float(digits) <= 0:
+        return f'{where}: timeout-minutes {digits} is not greater than zero'
     return None
 
 

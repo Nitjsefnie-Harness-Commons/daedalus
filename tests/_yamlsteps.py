@@ -296,7 +296,7 @@ def _field_extent(lines, index, end, indent, field, owner):
         return close
     if _strip_inline_comment(raw_value.strip(' ')):
         return close
-    return max(close, _indentless_end(lines, index, end, indent))
+    return max(close, _indentless_end(lines, index, end, indent) - 1)
 
 
 def _indentless_end(lines, index, end, indent):

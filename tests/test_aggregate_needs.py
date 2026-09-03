@@ -52,9 +52,20 @@ def test_the_real_aggregate_names_ten_jobs_and_two_descendants(tmp):
 def test_the_exemption_is_still_documented_in_the_workflow(tmp):
     """The workflow's own comment must still carry the exemption's why."""
     del tmp
-    comment = _comment_block(_REAL.read_text(encoding='utf-8'))
-    for phrase in _DOCUMENTED:
-        assert phrase in comment, (phrase, comment)
+    assert not _undocumented(_REAL.read_text(encoding='utf-8'))
+
+
+def test_an_undocumented_exemption_is_named_by_the_gate(tmp):
+    """Mutation of the comment away is a refusal the gate itself names."""
+    root = _copy_real(tmp)
+    source = _REAL.read_text(encoding='utf-8')
+    (root / 'tests.yml').write_text(
+        source.replace(
+            '    # INFORMATIONAL, never a gate — which is why it is'
+            ' deliberately absent\n', '    # not a gate\n'),
+        encoding='utf-8')
+    assert _undocumented(
+        (root / 'tests.yml').read_text(encoding='utf-8')) == list(_DOCUMENTED)
 
 
 def test_an_extra_job_outside_the_aggregate_is_named(tmp):
@@ -87,8 +98,9 @@ def test_a_need_that_names_no_declared_job_is_refused(tmp):
               '    runs-on: ubuntu-latest\n'
               '    timeout-minutes: 5\n')
     violations = _scan_fixture(tmp, 'absent-need', source)
-    assert len(violations) == 1, violations
-    assert "'absent'" in violations[0], violations
+    named = [line for line in violations if "'absent'" in line]
+    assert len(named) == 1, violations
+    assert 'do not exist' in named[0], named
 
 
 def test_an_exemption_removed_from_the_workflow_is_a_drift(tmp):
@@ -105,8 +117,8 @@ def test_an_exemption_removed_from_the_workflow_is_a_drift(tmp):
     assert 'diff-coverage' in drift[0], drift
 
 
-def test_an_undocumented_exemption_is_a_drift(tmp):
-    """The comment is half of the exemption: gone, the gate says so."""
+def test_an_undocumented_exemption_is_named_by_the_gate(tmp):
+    """Comment gone, the gate's own check names what it can no longer see."""
     root = _copy_real(tmp)
     source = _REAL.read_text(encoding='utf-8')
     (root / 'tests.yml').write_text(
@@ -114,9 +126,37 @@ def test_an_undocumented_exemption_is_a_drift(tmp):
             '    # INFORMATIONAL, never a gate — which is why it is'
             ' deliberately absent\n', '    # not a gate\n'),
         encoding='utf-8')
-    comment = _comment_block((root / 'tests.yml').read_text(encoding='utf-8'))
-    for phrase in _DOCUMENTED:
-        assert phrase not in comment, (phrase, comment)
+    assert _undocumented(
+        (root / 'tests.yml').read_text(encoding='utf-8')) == list(_DOCUMENTED)
+
+
+def test_the_comparison_is_step_name_agnostic(tmp):
+    """Steps are never consulted, so their spellings cannot move the set.
+
+    Issue 156's silent miss hid a duplicated `Check dependency results`
+    step behind its field order; a needs-completeness gate has no
+    uniqueness guarantee to hide, and this pin holds the shape beside a
+    genuine coverage gap to show the two do not interact.
+    """
+    steps = ('    steps:\n'
+             '      - name: Check dependency results\n'
+             '        run: echo aggregate\n'
+             '      - run: echo again\n'
+             '        name: Check dependency results\n')
+    complete = ('jobs:\n'
+                '  aggregate:\n'
+                '    needs:\n'
+                '      - probe\n'
+                '    runs-on: ubuntu-latest\n'
+                '    timeout-minutes: 5\n'
+                + steps + '  probe:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    timeout-minutes: 5\n')
+    assert not _scan_fixture(tmp, 'steps-complete', complete)
+    gap = complete.replace('    needs:\n      - probe\n', '    needs: []\n')
+    violations = _scan_fixture(tmp, 'steps-gap', gap)
+    assert len(violations) == 1, violations
+    assert "'probe'" in violations[0], violations
 
 
 NEEDS_BLOCK = '    needs:\n      - probe\n'
@@ -236,21 +276,21 @@ def _aggregate_violations(directory=None):
 
 
 def _gaps(workflow):
-    """Check one aggregate job's needs against the jobs around it."""
+    """Every gap in one aggregate job's coverage, not only the first."""
     needs = _needs_of(workflow.jobs)
     aggregate_needs = needs[AGGREGATE]
     unknown = sorted(aggregate_needs - set(workflow.jobs))
-    if unknown:
-        return [f'{_where(workflow)}: needs names jobs that do not exist: '
-                f'{unknown}']
-    descendants = _descendants(needs)
     uncovered = sorted(
-        set(workflow.jobs) - aggregate_needs - {AGGREGATE} - descendants
-        - EXEMPT)
+        set(workflow.jobs) - aggregate_needs - {AGGREGATE}
+        - _descendants(needs) - EXEMPT)
+    violations = []
+    if unknown:
+        violations.append(f'{_where(workflow)}: needs names jobs that do '
+                          f'not exist: {unknown}')
     if uncovered:
-        return [f'{_where(workflow)}: jobs the aggregate does not cover: '
-                f'{uncovered}']
-    return []
+        violations.append(f'{_where(workflow)}: jobs the aggregate does not '
+                          f'cover: {uncovered}')
+    return violations
 
 
 def _exemption_drift(workflow):
@@ -314,6 +354,23 @@ def _comment_block(source):
                 and len(lines[index]) - len(lines[index].lstrip(' ')) == 2),
                len(lines))
     return '\n'.join(lines[start:end])
+
+
+def _undocumented(source):
+    """The documented-why phrases the exempt job's comment is missing."""
+    comment = _comment_block(source)
+    return [phrase for phrase in _DOCUMENTED if phrase not in comment]
+
+
+def test_a_non_utf8_workflow_is_refused_not_raised(tmp):
+    """Bytes the tree does not ship are a refusal, never a crash."""
+    root = Path(tmp) / 'workflows'
+    root.mkdir()
+    (root / 'binary.yml').write_bytes(b'jobs:\n  probe:\n    runs-on: \xff\n')
+    violations = _aggregate_violations(root)
+    named = [line for line in violations if 'binary.yml' in line]
+    assert len(named) == 1, violations
+    assert 'UTF-8' in named[0], named
 
 
 def _copy_real(tmp):
