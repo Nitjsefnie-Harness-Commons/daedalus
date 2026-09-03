@@ -120,6 +120,53 @@ def test_exited_child_unfinished_drain_is_reported(tmp):
     assert 'drain timed out before EOF' in message, message
 
 
+def _data_root_lock():
+    return _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'data_root_lock.py',
+        'data_root_lock_under_test')
+
+
+def test_first_acquire_claims_a_fresh_data_root(tmp):
+    """The first claim on a data root holds a lockfile of its own name."""
+    mod = _data_root_lock()
+    handle = mod.acquire(Path(tmp))
+    try:
+        assert (Path(tmp) / mod.LOCK_NAME).is_file(), sorted(os.listdir(tmp))
+    finally:
+        mod.release(handle)
+
+
+def test_a_second_acquire_on_a_held_data_root_is_refused(tmp):
+    """Two claims on one data root cannot both hold it."""
+    mod = _data_root_lock()
+    first = mod.acquire(Path(tmp))
+    try:
+        second = None
+        try:
+            second = mod.acquire(Path(tmp))
+        except mod.DataRootInUse:
+            second = None
+        if second is not None:
+            mod.release(second)
+            raise AssertionError('a held data root admitted a second claim')
+    finally:
+        mod.release(first)
+
+
+def test_releasing_the_data_root_makes_it_acquirable_again(tmp):
+    """Release closes the held handle; the root is acquirable again."""
+    mod = _data_root_lock()
+    handle = mod.acquire(Path(tmp))
+    mod.release(handle)
+    try:
+        os.fstat(handle)
+    except OSError:
+        pass
+    else:
+        raise AssertionError('the held descriptor survived release')
+    mod.release(mod.acquire(Path(tmp)))
+
+
 def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
     """The first successful bridge start consumes the cold allowance.
 
@@ -476,6 +523,31 @@ def test_a_lost_draw_no_longer_kills_the_bridge_fixture(tmp):
     finally:
         _util.free_port = real_free_port
         squatter.close()
+
+
+def test_a_second_bridge_on_an_in_use_data_root_refuses(tmp):
+    """A bridge refuses to start on a root another bridge already owns.
+
+    The second process is spawned directly rather than through the
+    readiness fixture, which raises on exactly this early exit.
+    """
+    with _util.bridge(tmp) as (_base, docroot):
+        child_env = dict(os.environ)
+        child_env.update({
+            'DAEDALUS_DIR': str(docroot),
+            'DAEDALUS_PORT': '0',
+            'DAEDALUS_MCP_PORT': '0',
+            'PYTHONDONTWRITEBYTECODE': '1',
+            'PYTHONUNBUFFERED': '1',
+        })
+        second = subprocess.run(
+            [sys.executable, str(_util.ROOT / 'server.py')],
+            capture_output=True, text=True, env=child_env,
+            cwd=str(_util.ROOT), timeout=30, check=False)
+    output = second.stdout + second.stderr
+    assert second.returncode != 0, output
+    assert 'data root already in use' in output, output
+    assert not _util.LISTENING.search(output), output
 
 
 def test_shared_log_safe_never_raises_and_stays_useful(tmp):

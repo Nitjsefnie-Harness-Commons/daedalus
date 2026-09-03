@@ -57,6 +57,10 @@ DAEDALUS_TOKEN=<token> \
 python3 server.py
 ```
 
+A data root belongs to exactly one bridge process. A second bridge pointed
+at a root already in use refuses at startup and exits nonzero, so a duplicate
+never serves from the same queue.
+
 Back in the extension options, set **Server URL** to
 `http://127.0.0.1:8081`, keep the same token, and save. Open a normal web
 page that the extension can control, then evaluate its title with the CLI:
