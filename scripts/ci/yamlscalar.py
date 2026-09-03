@@ -5,7 +5,9 @@ a refusal is one of exactly two things.
 
 Admitted: plain, single-quoted and double-quoted scalars, folded and literal
 block scalars, block mappings and block sequences, and flow collections of
-any of those. A value spans lines only where its entry point admits the
+any of those. A sequence may also sit at its key's own indentation, which
+`workflow_mapping` and `complete_job_mapping` read like any other sequence.
+A value spans lines only where its entry point admits the
 construct. Wrapped plain scalars fold in `job_scalar`, `job_mapping`,
 `top_level_mapping`, `step_scalar` values, `step_mappings` values,
 `workflow_mapping`, and `complete_job_mapping`. `step_scalars`,
