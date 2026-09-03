@@ -51,6 +51,9 @@ def load(path):
     """Decode one workflow file's jobs, and locate each job's header."""
     try:
         return _decoded(path, path.read_text(encoding='utf-8'))
+    except UnicodeDecodeError as error:
+        raise YAMLReadError(f'{path.name}: not UTF-8 text: {error}'
+                            ) from error
     except YAMLReadError as error:
         raise _located(path, error) from error
 
@@ -99,7 +102,11 @@ def _jobs_value(lines, jobs):
 
 
 def _header(lines, body, jobs_indent, name, fallback):
-    """Return one job's header line and text, or the jobs line's."""
+    """Return one job's header line and text, or the jobs line's.
+
+    Only an inline flow-mapped jobs value leaves a job no header line of
+    its own, and there the jobs line is where that job lives.
+    """
     entry = _decoded_mapping_entry(lines, *body, jobs_indent, name)
     if entry is None:
         return fallback

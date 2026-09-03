@@ -75,6 +75,27 @@ def test_an_indentless_sequence_of_mappings_decodes(tmp):
     ]
 
 
+def test_a_field_after_an_indentless_sequence_survives(tmp):
+    """The sibling key after the sequence is a field, not its content."""
+    del tmp
+    jobs = _decodes_to(
+        'jobs:\n'
+        '  aggregate:\n'
+        '    needs:\n'
+        '    - probe\n'
+        '    runs-on: ubuntu-latest\n'
+        '    timeout-minutes: 5\n'
+        '  probe:\n'
+        '    runs-on: ubuntu-latest\n'
+        '    timeout-minutes: 9\n')
+    assert jobs['aggregate'] == {
+        'needs': ['probe'],
+        'runs-on': 'ubuntu-latest',
+        'timeout-minutes': '5',
+    }
+    assert jobs['probe']['timeout-minutes'] == '9'
+
+
 BOUNDED = (
     '    runs-on: ubuntu-latest\n'
     '    timeout-minutes: 5\n'
