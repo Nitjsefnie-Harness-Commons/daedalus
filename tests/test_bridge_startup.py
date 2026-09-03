@@ -525,6 +525,37 @@ def test_a_lost_draw_no_longer_kills_the_bridge_fixture(tmp):
         squatter.close()
 
 
+def _refusal_child(docroot, port):
+    """Run one second-bridge child to completion against a held root."""
+    child_env = dict(os.environ)
+    child_env.update({
+        'DAEDALUS_DIR': str(docroot),
+        'DAEDALUS_PORT': port,
+        'DAEDALUS_MCP_PORT': '0',
+        'PYTHONDONTWRITEBYTECODE': '1',
+        'PYTHONUNBUFFERED': '1',
+    })
+    return subprocess.run(
+        [sys.executable, str(_util.ROOT / 'server.py')],
+        capture_output=True, text=True, env=child_env,
+        cwd=str(_util.ROOT),
+        timeout=_util.COLD_START_TIMEOUT, check=False)
+
+
+def _assert_data_root_refusal(child):
+    """The contract every refusing child is held to.
+
+    Nonzero exit, the ownership message, no readiness line, and never an
+    operating-system bind refusal: the root is answered for before the
+    port is touched.
+    """
+    output = child.stdout + child.stderr
+    assert child.returncode != 0, output
+    assert 'data root already in use' in output, output
+    assert not _util.is_bind_error(output), output
+    assert not _util.LISTENING.search(output), output
+
+
 def test_a_second_bridge_on_an_in_use_data_root_refuses(tmp):
     """A bridge refuses to start on a root another bridge already owns.
 
@@ -532,23 +563,24 @@ def test_a_second_bridge_on_an_in_use_data_root_refuses(tmp):
     readiness fixture, which raises on exactly this early exit.
     """
     with _util.bridge(tmp) as (_base, docroot):
-        child_env = dict(os.environ)
-        child_env.update({
-            'DAEDALUS_DIR': str(docroot),
-            'DAEDALUS_PORT': '0',
-            'DAEDALUS_MCP_PORT': '0',
-            'PYTHONDONTWRITEBYTECODE': '1',
-            'PYTHONUNBUFFERED': '1',
-        })
-        second = subprocess.run(
-            [sys.executable, str(_util.ROOT / 'server.py')],
-            capture_output=True, text=True, env=child_env,
-            cwd=str(_util.ROOT),
-            timeout=_util.COLD_START_TIMEOUT, check=False)
-    output = second.stdout + second.stderr
-    assert second.returncode != 0, output
-    assert 'data root already in use' in output, output
-    assert not _util.LISTENING.search(output), output
+        _assert_data_root_refusal(_refusal_child(docroot, '0'))
+        # Spelled out, not LOCK_NAME: a rename would let bridges of different
+        # vintages exclude one another on different files.
+        assert (docroot / 'bridge.lock').is_file(), sorted(os.listdir(docroot))
+
+
+def test_the_data_root_refusal_comes_before_the_bind(tmp):
+    """A refused bridge answers for the root before it touches the port.
+
+    On a fixed-port deployment the port a second bridge would bind is the
+    holder's live listener, so a bind-first ordering would answer the
+    caller with a bind traceback instead of the ownership message. The
+    child asks for the holder's own port and is still answered with the
+    message.
+    """
+    with _util.bridge(tmp) as (base, docroot):
+        _assert_data_root_refusal(
+            _refusal_child(docroot, base.rsplit(':', 1)[1]))
 
 
 def test_shared_log_safe_never_raises_and_stays_useful(tmp):
