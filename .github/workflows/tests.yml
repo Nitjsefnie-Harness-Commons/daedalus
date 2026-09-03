@@ -202,9 +202,9 @@ jobs:
   #
   # There is deliberately NO package.json: the versions are pinned right here
   # and installed with --no-save, so the repository does not read as having
-  # adopted a build step it does not have. The eslint job additionally checks
-  # its own pin against the registry: an out-of-date major fails the job, so
-  # the pin cannot silently rot the way an unnoticed eslint@8 did.
+  # adopted a build step it does not have. The job also checks every pin
+  # against its own registry: an out-of-date major fails the job, so no pin
+  # can silently rot the way an unnoticed eslint@8 did.
   #
   # examples/ is NOT linted, and that is a real gap rather than an oversight.
   # Those files are snippets the bridge wraps in an async function before
@@ -224,7 +224,7 @@ jobs:
       # browser/serviceworker environments; eslint itself depends on neither.
       ESLINT_VERSION: "10.9.1"
       ESLINT_JS_VERSION: "10.0.1"
-      GLOBALS_VERSION: "16.5.0"
+      GLOBALS_VERSION: "17.12.0"
 
     steps:
       # actions/checkout v7.0.1
@@ -256,23 +256,37 @@ jobs:
           "@eslint/js@${ESLINT_JS_VERSION}"
           "globals@${GLOBALS_VERSION}"
 
-      # The pin is only as good as its distance from the registry. eslint
-      # drops a major roughly every year, and a pinned major past its end of
-      # support goes quietly -- the eslint@8 pin here outlived upstream
-      # support by years because nothing read it back. Compare majors, not
-      # patch versions: staying current within a major is npm's business
-      # between runs, while a new major is the maintainer's decision.
-      - name: Check the eslint pin against the registry's latest major
+      # Three pins ride one install command, so one of them rotting is
+      # enough to break the job: each is compared here with its own
+      # registry's latest stable major, and a query that cannot answer
+      # fails the job rather than passing a pin it never saw. Compare
+      # majors, not patch versions: staying current within a major is npm's
+      # business between runs, while a new major is the maintainer's call.
+      - name: Check the pins against the registries' latest majors
         run: |
-          latest="$(npm view eslint version)"
-          pinned_major="${ESLINT_VERSION%%.*}"
-          latest_major="${latest%%.*}"
-          echo "pinned eslint@${ESLINT_VERSION}; registry latest ${latest}"
-          if [ "${latest_major}" -gt "${pinned_major}" ]; then
-            echo "eslint ${latest} is out, and the pinned major" \
-              "(${ESLINT_VERSION}) is behind it." >&2
-            echo "Raise ESLINT_VERSION (and eslint.config.js if the new" \
-              "major needs config changes), then re-run this job." >&2
+          stale=0
+          for pin in \
+            "ESLINT_VERSION:eslint" \
+            "ESLINT_JS_VERSION:@eslint/js" \
+            "GLOBALS_VERSION:globals"
+          do
+            var="${pin%%:*}"
+            package="${pin#*:}"
+            pinned="${!var}"
+            latest="$(npm view "${package}" version)"
+            pinned_major="${pinned%%.*}"
+            latest_major="${latest%%.*}"
+            echo "pinned ${package}@${pinned}; registry latest ${latest}"
+            if [ "${latest_major}" -gt "${pinned_major}" ]; then
+              echo "${package} ${latest} is out," \
+                "and the pin ${var}=${pinned} is a major behind it." >&2
+              stale=1
+            fi
+          done
+          if [ "${stale}" -ne 0 ]; then
+            echo "Raise the named env pins, and eslint.config.js with" >&2
+            echo "them if the new majors need config changes, then re-run" >&2
+            echo "this job." >&2
             exit 1
           fi
 
