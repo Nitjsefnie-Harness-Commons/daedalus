@@ -1,6 +1,7 @@
 """SSE stream lifecycle and command-consumption operations."""
 import itertools
 import json
+import os
 import threading
 import time
 
@@ -94,7 +95,9 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
 
     TTL-expired and non-object entries are removed; unreadable or invalid-JSON
     entries remain for a later scan because a non-atomic publisher may still
-    be writing them. The socket write happens before unlink, so a failed write
+    be writing them. Every candidate is read through a descriptor checked
+    against the name it was found under, so an aliased entry is never
+    delivered. The socket write happens before unlink, so a failed write
     leaves the command queued for redelivery and propagates to tear the stream
     down. Returns the number of commands handed to `frame_writer`.
     """
@@ -117,36 +120,41 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                 f'queue:{qdir.name}/{name}') as owned:
             if not owned:
                 continue  # another consumer covering this queue has it
-            try:
-                age = time.time() - path.stat().st_mtime
-            except OSError:
-                continue  # vanished or became unavailable during the scan
-            if age > command_ttl:
-                # Already gone, or gone by the next sweep: an expired command
-                # is not delivered either way.
+            opened, reason = command_queue.open_command_candidate(path)
+            if opened is None:
+                if reason is not None:
+                    print(
+                        f'[STREAM] REFUSED q={log_safe(qdir.name)}/'
+                        f'{log_safe(name)}: {log_safe(reason)}', flush=True)
+                continue  # absent, or refused: never delivered or unlinked
+            with opened:
+                age = time.time() - os.fstat(opened.fileno()).st_mtime
+                if age > command_ttl:
+                    # Already gone, or gone by the next sweep: an expired
+                    # command is not delivered either way.
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass  # expired either way
+                    print(
+                        f'[STREAM] TTL-DROP {log_safe(qdir.name)}/'
+                        f'{log_safe(name)}', flush=True)
+                    continue
                 try:
-                    path.unlink()
-                except OSError:
-                    pass  # expired either way
-                print(
-                    f'[STREAM] TTL-DROP {log_safe(qdir.name)}/'
-                    f'{log_safe(name)}', flush=True)
-                continue
-            try:
-                data = json.loads(path.read_text(encoding='utf-8'))
-            except (OSError, json.JSONDecodeError, ValueError):
-                # A visible final name may still have an older non-atomic
-                # writer. Leave it in place so that writer does not finish a
-                # command into an unlinked inode; the TTL sweep bounds retries
-                # for an entry that never becomes valid.
-                continue
-            if not isinstance(data, dict):
-                # Same: readable JSON that is not a command object.
-                try:
-                    path.unlink()
-                except OSError:
-                    pass  # the TTL sweep takes it
-                continue
+                    data = json.loads(opened.read().decode('utf-8'))
+                except (OSError, json.JSONDecodeError, ValueError):
+                    # A visible final name may still have an older non-atomic
+                    # writer. Leave it in place so that writer does not finish
+                    # a command into an unlinked inode; the TTL sweep bounds
+                    # retries for an entry that never becomes valid.
+                    continue
+                if not isinstance(data, dict):
+                    # Same: readable JSON that is not a command object.
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass  # the TTL sweep takes it
+                    continue
             if chrome_tab is not None:
                 data['chromeTab'] = chrome_tab
             frame_writer(data)  # BEFORE unlink
@@ -192,19 +200,26 @@ def poll_legacy(cmd_dir, token):
             return 200, {}
         data = {}
         with command_queue.command_fs_lock:
-            if cmd_file.exists():
-                try:
+            opened, reason = command_queue.open_command_candidate(cmd_file)
+            if opened is None:
+                if reason is not None:
+                    print(
+                        f'[STREAM] REFUSED legacy={log_safe(cmd_file.name)}: '
+                        f'{log_safe(reason)}', flush=True)
+                return 200, data
+            try:
+                with opened:
                     candidate = json.loads(
-                        cmd_file.read_text(encoding='utf-8'))
-                    if isinstance(candidate, dict):
-                        data = candidate
-                        cmd_file.unlink()
-                except (OSError, json.JSONDecodeError,
-                        RecursionError, ValueError):
-                    # A legacy drop that cannot be read is not a command. The
-                    # empty answer is the one an absent file gives, and the
-                    # file is left to the TTL sweep.
-                    pass
+                        opened.read().decode('utf-8'))
+            except (OSError, json.JSONDecodeError,
+                    RecursionError, ValueError):
+                # A legacy drop that cannot be read is not a command. The
+                # empty answer is the one an absent file gives, and the
+                # file is left to the TTL sweep.
+                return 200, data
+            if isinstance(candidate, dict):
+                data = candidate
+                cmd_file.unlink()
         return 200, data
 
 
@@ -213,32 +228,39 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
 
     A malformed visible file may still have an open writer from an older,
     non-atomic publisher. Leave it in place and retry on the next scan;
-    deleting it would discard the writer's eventual complete command.
+    deleting it would discard the writer's eventual complete command. The
+    candidate is read through a descriptor checked against the name it was
+    found under, so an aliased name is never delivered.
     """
     # Use the logical filename: path spellings can differ between routes;
     # result_store.delivery_lock_for documents its logical target key.
     with command_queue.claimed(legacy_claim_key(path.name)) as owned:
         if not owned:
             return 0
-        if not path.exists():
-            return 0
-        try:
-            data = json.loads(path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError, RecursionError, ValueError):
-            return 0
-        if not isinstance(data, dict):
-            return 0
-        try:
-            age = time.time() - path.stat().st_mtime
-        except OSError:
-            return 0
-        if age > command_ttl:
-            # Already gone, or gone by the next sweep.
+        opened, reason = command_queue.open_command_candidate(path)
+        if opened is None:
+            if reason is not None:
+                print(
+                    f'[STREAM] REFUSED legacy={log_safe(path.name)}: '
+                    f'{log_safe(reason)}', flush=True)
+            return 0  # absent, or refused: left for the expiry sweep
+        with opened:
             try:
-                path.unlink()
-            except OSError:
-                pass  # expired either way
-            return 0
+                age = time.time() - os.fstat(opened.fileno()).st_mtime
+                data = json.loads(opened.read().decode('utf-8'))
+            except (OSError, json.JSONDecodeError, RecursionError, ValueError):
+                # A visible final name may still have an older non-atomic
+                # publisher. Leave it in place and retry on the next scan.
+                return 0
+            if not isinstance(data, dict):
+                return 0
+            if age > command_ttl:
+                # Already gone, or gone by the next sweep.
+                try:
+                    path.unlink()
+                except OSError:
+                    pass  # expired either way
+                return 0
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
         frame_writer(data)  # BEFORE unlink
