@@ -22,16 +22,24 @@ RESULT_STORE = ROOT / 'daedalus_bridge' / 'result_store.py'
 ARCHITECTURE_MAP = ROOT / 'AGENTS.md'
 
 # What turns a paragraph into this acceptance rather than another paragraph
-# about locks: the delivery write that carries the observation, the wait that
-# reveals it, the alternative the acceptance declines, and the decision
-# itself. Stems, so an inflected rewrite stays the same statement.
-ACCEPTANCE_TERMS = ('stripe', 'delivery', 'wait', 'accept', 'unbounded')
+# about locks: the decision itself, the wait that reveals it, the subject it
+# is about, and the alternative the acceptance declines. Patterns, so an
+# inflected rewrite stays the same statement while the prose already on the
+# bullet -- "acceptance stamp", "delivery id" -- does not carry it for free.
+ACCEPTANCE_TERMS = (
+    r'\bstripe',
+    r'\bwaits?\b',
+    r'\baccepted\b',
+    r'\bunbounded\b',
+)
 
 # How far a statement may sit from what it is a statement about. A move to
 # another module or another section is a withdrawal of the record; a move
-# within the stripe definitions is not.
+# within the stripe definitions is not. The bullet is one line of prose and
+# the record lives on that line, so the adjacent bullets -- one and two lines
+# away -- are not the record either.
 REGION_MARGIN = 2
-BULLET_ADJACENCY = 2
+BULLET_ADJACENCY = 0
 
 STRIPE_TABLE = re.compile(r'^DELIVERY_LOCK_STRIPES\b')
 LOCK_SELECTOR = 'delivery_lock_for'
@@ -61,7 +69,7 @@ def _stripe_region(lines):
 
 
 def _states_acceptance(text):
-    """Whether every acceptance term appears in `text`."""
+    """Whether every acceptance pattern matches `text`."""
     missing = [term for term in ACCEPTANCE_TERMS
                if not re.search(term, text, re.IGNORECASE)]
     return not missing
@@ -111,7 +119,7 @@ def test_acceptance_stated_beside_the_stripe_definitions(tmp):
     found = _acceptance_span(lines, _comment_blocks(lines), region)
     assert found, (
         'no comment block beside the stripe definitions states the '
-        'delivery-write timing acceptance; a block needs every term of '
+        'delivery-write timing acceptance; a block needs every pattern of '
         f'{ACCEPTANCE_TERMS}, and the blocks inside {region} were '
         + repr([
             _block_text(lines, span)
@@ -134,7 +142,7 @@ def test_acceptance_recorded_on_the_delivery_write_path(tmp):
     assert _states_acceptance(text), (
         'the delivery-write path in AGENTS.md no longer records that '
         'discovering a shared stripe by timing a write is accepted; '
-        f'the text around {bullets} is missing a term of '
+        f'bullet {bullets} is missing a match for a pattern of '
         f'{ACCEPTANCE_TERMS}')
 
 
