@@ -341,20 +341,20 @@ def run_background_overlap(background, commands, order, result_base='',
         except subprocess.TimeoutExpired as failure:
             drain_timed_out, out, err = _drain.kill_and_drain(process)
             stdout, stderr = _drain_text(out), _drain_text(err)
-            drain_field = 'yes' if drain_timed_out else 'no'
             steps = re.findall(r'^\[step\] (.+)$', stderr, re.MULTILINE)
             last_step = steps[-1] if steps else 'none recorded'
+            record = (f'attempt {attempt} (pid {process.pid}): last step: '
+                      f'{last_step}; stdout: {stdout!r}; stderr: {stderr!r}; '
+                      f'drain timed out: {"yes" if drain_timed_out else "no"}')
             retrying = attempt < attempts
             if retrying and not stdout and not stderr and not drain_timed_out:
-                records.append(
-                    f'attempt {attempt} (pid {process.pid}): last step: '
-                    f'{last_step}; stdout: {stdout!r}; stderr: {stderr!r}; '
-                    f'drain timed out: {drain_field}')
+                records.append(record)
                 continue
-            note = ''
-            if drain_timed_out:
-                note = ('\nretry declined: the post-kill drain did not '
-                        'complete (drain outcome: timed out)')
+            note = ('\nretry declined: the post-kill drain did not '
+                    'complete (drain outcome: timed out)'
+                    if drain_timed_out and retrying else '')
+            if not retrying:
+                records.append(record)
             prior = ''.join(f'\n{item}' for item in records)
             raise AssertionError(
                 f'overlap harness outer backstop timed out after {timeout}s; '
