@@ -16,6 +16,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _job_section, _tests_yml)
+from _ghexpr import evaluate_if  # noqa: E402
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
 from _yamlread import job_mapping, step_scalar  # noqa: E402
@@ -519,6 +520,128 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     assert required, 'the repository tracks no dependency manifest at all'
     for ecosystem in sorted(required):
         assert f'package-ecosystem: {ecosystem}' in config, ecosystem
+
+
+_CACHE_JOBS = (
+    # (job, the key's python component, the step a save must follow, the
+    # step the restore must precede). `coverage` fixes its interpreter, the
+    # other two read it from the matrix.
+    ('suites', '${{ matrix.python }}', 'Run every suite',
+     'Install the test dependencies and project'),
+    ('coverage-matrix', '${{ matrix.python }}', 'Measure',
+     'Install the coverage toolchain and the project'),
+    ('coverage', '3.13', 'Install the coverage toolchain and the project',
+     'Install the coverage toolchain and the project'),
+)
+
+# Every platform pip cache directory, so one spelling warms all three OSes;
+# actions/cache ignores the two that do not exist on the running platform.
+_PIP_CACHE_PATHS = (
+    '~/.cache/pip', '~/Library/Caches/pip', '~\\AppData\\Local\\pip\\Cache')
+
+
+def _cache_step(steps, action):
+    """Return (index, step) for the job's one actions/cache/<action> step."""
+    matches = [(index, step) for index, step in enumerate(steps)
+               if step.get('uses', '').startswith(f'actions/cache/{action}@')]
+    assert len(matches) == 1, f'expected one cache/{action} step: {matches}'
+    return matches[0]
+
+
+def _named_step_index(steps, name):
+    """Return the index of the job's one step carrying this name."""
+    matches = [index for index, step in enumerate(steps)
+               if step.get('name') == name]
+    assert len(matches) == 1, f'expected one {name!r} step: {matches}'
+    return matches[0]
+
+
+def test_the_matrix_jobs_declare_no_pip_cache_on_setup_python(tmp):
+    """`cache: pip` saves in a post-job step that runs after untrusted code.
+
+    That post step is the cache-poisoning shape issue #166 took out of the
+    speed cells: on a pull_request run it writes a cache a later main run
+    restores. These three jobs install the project and then run it, so they
+    take the cache as two separate steps instead, and the event gate lives
+    on the save half alone.
+    """
+    del tmp
+    workflow = _tests_yml()
+    for job, _python, _save_after, _install in _CACHE_JOBS:
+        steps = complete_job_mapping(workflow, job)['steps']
+        setup = [step for step in steps
+                 if step.get('uses', '').startswith('actions/setup-python')]
+        assert len(setup) == 1, (job, setup)
+        declared = {'cache', 'cache-dependency-path'} & set(
+            setup[0].get('with', {}))
+        assert declared == set(), (job, sorted(declared))
+
+
+def test_the_matrix_jobs_restore_the_pip_cache_before_they_install(tmp):
+    """Restore is safe on every event: a pull request reads what main wrote.
+
+    The key names the platform, the interpreter and the requirements hash,
+    so a cell restores only a cache a same-platform cell of the same
+    dependency set wrote, and the three jobs — which install the same
+    dependency set — share one namespace rather than three.
+    """
+    del tmp
+    workflow = _tests_yml()
+    for job, python, _save_after, install in _CACHE_JOBS:
+        steps = complete_job_mapping(workflow, job)['steps']
+        restore_index, restore = _cache_step(steps, 'restore')
+        assert re.fullmatch(r'actions/cache/restore@[0-9a-f]{40}',
+                            restore['uses']), restore['uses']
+        assert set(restore['with']['path'].splitlines()) == set(
+            _PIP_CACHE_PATHS), (job, restore['with']['path'])
+        key = restore['with']['key']
+        for component in ('runner.os', python,
+                          "hashFiles('requirements-*.txt')"):
+            assert component in key, (job, component, key)
+        assert restore_index < _named_step_index(steps, install), (
+            job, restore_index, install)
+
+
+def test_the_matrix_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
+    """The event gate between restore and save is the whole answer.
+
+    A pull_request or workflow_dispatch run, or a push that is not main,
+    restores and never writes; only a push of main, whose checkout the
+    repository itself produced, may. Evaluated as Actions would evaluate it
+    rather than substring-matched, so an `||` or a widened ref reads as the
+    defect it is. The save also follows the step that runs the job's suites
+    or measurement, so what a later run restores was put there by a run that
+    actually ran them.
+    """
+    del tmp
+    workflow = _tests_yml()
+    for job, _python, save_after, _install in _CACHE_JOBS:
+        steps = complete_job_mapping(workflow, job)['steps']
+        restore_index, restore = _cache_step(steps, 'restore')
+        save_index, save = _cache_step(steps, 'save')
+        assert save['with']['key'] == restore['with']['key'], (job, save)
+        assert save['with']['path'] == restore['with']['path'], (job, save)
+        gate = save['if']
+        for conjunct in ("github.event_name == 'push'",
+                         "github.ref == 'refs/heads/main'"):
+            assert conjunct in gate, (job, conjunct, gate)
+        for github, expected in (
+                ({'event_name': 'push', 'ref': 'refs/heads/main'}, True),
+                ({'event_name': 'push', 'ref': 'refs/heads/other'}, False),
+                ({'event_name': 'pull_request',
+                  'ref': 'refs/pull/185/merge'}, False),
+                ({'event_name': 'workflow_dispatch',
+                  'ref': 'refs/heads/main'}, False),
+        ):
+            verdict = evaluate_if(gate, {
+                'github': github,
+                'status': {'success': True, 'failure': False,
+                           'cancelled': False},
+            })
+            assert verdict is expected, (job, github, gate, verdict)
+        assert save_index > _named_step_index(steps, save_after), (
+            job, save_index, save_after)
+        assert save_index > restore_index, (job, save_index, restore_index)
 
 
 def main():
