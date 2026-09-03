@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
-                      _job_names, _tests_yml)
+                      _job_names, _job_section, _tests_yml)
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
 from _yamlread import job_mapping, step_scalar  # noqa: E402
@@ -534,7 +534,21 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     check = step_scalar(workflow, 'wheel', 'Check both artifacts render',
                         'run')
     assert check is not None, 'nothing renders the metadata of the artifacts'
-    assert 'twine check --strict dist/*' in check, check
+    # Exact: a narrowed glob checks one format and `|| true` checks nothing.
+    assert check == 'python -m twine check --strict dist/*', check
+
+    wheel_smoke = step_scalar(workflow, 'wheel',
+                              'Install it with no checkout in reach and run'
+                              ' its entry point', 'run')
+    assert wheel_smoke is not None, 'the wheel is installed by nothing'
+    # The wheel alone: a tarball in this venv would prove the sdist twice
+    # and the wheel not at all.
+    assert wheel_smoke.splitlines() == [
+        'python -m venv "$RUNNER_TEMP/probe"',
+        '"$RUNNER_TEMP/probe/bin/pip" install dist/*.whl',
+        'cd "$RUNNER_TEMP"',
+        '"$RUNNER_TEMP/probe/bin/daedalus" --version',
+    ], wheel_smoke
 
     smoke = step_scalar(workflow, 'wheel',
                         'Install the sdist, no checkout in reach, and run'
@@ -555,12 +569,17 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     order = [workflow.index(step) for step in
              ('- name: Build the wheel and the sdist',
               '- name: Check both artifacts render',
+              '- name: Install it with no checkout in reach and run'
+              ' its entry point',
               '- name: Install the sdist, no checkout in reach, and run'
               ' its entry point')]
     assert order == sorted(order), order
 
     # A failed smoke test is the artifact worth keeping, for either format.
-    _, marker, after = workflow.partition('name: artifacts-failed-smoke-test')
+    # The window is the wheel job alone: past the job, a later preamble may
+    # name dist/ paths of its own that are not this artifact's.
+    wheel_job = '\n'.join(_job_section(workflow, 'wheel'))
+    _, marker, after = wheel_job.partition('name: artifacts-failed-smoke-test')
     assert marker, 'the failed-smoke artifact no longer carries both formats'
     artifact, _, _ = after.partition('- name:')
     assert re.findall(r'dist/\S+', artifact) == ['dist/*.whl',
