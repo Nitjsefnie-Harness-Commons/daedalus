@@ -543,7 +543,8 @@ def test_a_second_bridge_on_an_in_use_data_root_refuses(tmp):
         second = subprocess.run(
             [sys.executable, str(_util.ROOT / 'server.py')],
             capture_output=True, text=True, env=child_env,
-            cwd=str(_util.ROOT), timeout=30, check=False)
+            cwd=str(_util.ROOT),
+            timeout=_util.COLD_START_TIMEOUT, check=False)
     output = second.stdout + second.stderr
     assert second.returncode != 0, output
     assert 'data root already in use' in output, output
