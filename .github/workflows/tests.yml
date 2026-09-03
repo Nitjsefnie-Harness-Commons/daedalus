@@ -490,9 +490,10 @@ jobs:
 
       # The gate is the answer to the cache-poisoning findings: an untrusted
       # event never writes cross-run state, and a push of main is the one
-      # trigger whose checkout this repository produced. The save follows the
-      # suites, so what it holds reflects a full suite run's downloads rather
-      # than the install's alone.
+      # trigger whose checkout this repository produced. No step between the
+      # install and here runs pip, so the save's position does not change what
+      # the cache holds, only who writes one: a run cancelled during the
+      # suites never reaches this step.
       - name: Save the pip cache
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -652,10 +653,12 @@ jobs:
           COVERAGE_PROCESS_START: ${{ github.workspace }}/pyproject.toml
         run: python scripts/ci/coverage_suites.py --require-all
 
-      # Saved only after the measurement ran, so what it holds reflects a
-      # full suite run's downloads, under the same gate as the suites job:
-      # a pull-request or workflow_dispatch run restores a cache and never
-      # writes one.
+      # Same gate as the suites job: a pull-request or workflow_dispatch run
+      # restores a cache and never writes one. Nothing between the install
+      # and here runs pip either, so the save sits after the measurement for
+      # the same reason: a cancelled run reaches no save. The coverage job
+      # saves at its install instead, running no measurement of its own to
+      # place one after.
       - name: Save the pip cache
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -759,8 +762,9 @@ jobs:
           python -m pip install . ".[mcp]"
 
       # Immediately after the install: the cache's warmest point in this job.
-      # The placement differs from the suites and coverage-matrix jobs only
-      # because no later step here runs pip. Same gate as both of them.
+      # The placement differs from the suites and coverage-matrix jobs
+      # because this job runs no measurement of its own to place a save
+      # after — it combines what they measured. Same gate as both of them.
       - name: Save the pip cache
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         if: ${{ !cancelled() && github.event_name == 'push'
