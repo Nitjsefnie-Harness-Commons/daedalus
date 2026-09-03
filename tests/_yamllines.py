@@ -18,9 +18,15 @@ class _Entry:
 
 
 def _lines(workflow):
-    """Split source while retaining whether each physical line ended."""
+    """Split source while retaining whether each physical line ended.
+
+    One byte-order mark is removed exactly where a real parser removes one:
+    the source's first character.  A mark anywhere else is data.
+    """
     if not isinstance(workflow, str):
         raise YAMLReadError('workflow must be a string')
+    if workflow[:1] == '\ufeff':
+        workflow = workflow[1:]
     return [
         (line.rstrip('\r\n'), line.endswith(('\r', '\n')))
         for line in workflow.splitlines(keepends=True)
