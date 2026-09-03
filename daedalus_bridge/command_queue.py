@@ -2,6 +2,8 @@
 import contextlib
 import itertools
 import json
+import os
+import stat
 import threading
 import time
 import uuid
@@ -30,8 +32,9 @@ def claim(key):
     """Claim one logical queue key without holding a lock during delivery.
 
     The key is the logical target name; consumers using the same spelling
-    cannot both take a claim. Hard links and symlinks leave distinct names as
-    two keys; see issue #186.
+    cannot both take a claim. Aliasing is refused in the read, not here: the
+    open does not follow a symlink and an object named more than once is
+    refused, so two names for one object cannot both deliver it.
     """
     if not isinstance(key, str) or not key:
         raise TypeError('claim key must be a non-empty string')
@@ -59,6 +62,58 @@ def claimed(key):
             release(key)
 
 
+def _candidate_refusal(opened, named):
+    """Why one opened candidate must not be delivered, or None to accept it."""
+    if not stat.S_ISREG(opened.st_mode):
+        return 'candidate is not a regular file'
+    if opened.st_nlink != 1:
+        return f'candidate carries {opened.st_nlink} names'
+    if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+        return 'the name stopped naming the opened object'
+    return None
+
+
+def open_command_candidate(path):
+    """Open one command candidate through a descriptor checked against its
+    name.
+
+    Returns ``(stream, None)``, or ``(None, reason)`` when the candidate must
+    not be delivered. Refused: a symlinked name (the open does not follow it
+    where the platform offers ``O_NOFOLLOW``, and the identity check catches
+    it where it does not), an object that is not a regular file or is named
+    more than once, and a name that stopped naming the object the descriptor
+    was opened on. ``reason`` is ``None`` only when the name named nothing at
+    all, which is absence rather than a refusal.
+
+    No exception escapes: a failing open or stat is itself a refusal. A
+    refused candidate is never removed here; the expiry sweep reconsiders it.
+    """
+    flags = (os.O_RDONLY | getattr(os, 'O_BINARY', 0)
+             | getattr(os, 'O_NOFOLLOW', 0))
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None, None
+    except OSError as error:
+        return None, f'cannot open: {log_safe(error)}'
+    try:
+        opened = os.fstat(fd)
+        named = os.lstat(path)
+    except OSError as error:
+        os.close(fd)
+        return None, f'cannot check: {log_safe(error)}'
+    reason = _candidate_refusal(opened, named)
+    if reason is not None:
+        os.close(fd)
+        return None, reason
+    try:
+        return os.fdopen(fd, 'rb'), None
+    except OSError as error:
+        # io.open closes a descriptor it could not wrap, so there is nothing
+        # left to close here.
+        return None, f'cannot read: {log_safe(error)}'
+
+
 def remove_expired(path, now, ttl, legacy=False):
     """Remove one expired command artifact without following symlinks.
 
@@ -73,10 +128,17 @@ def remove_expired(path, now, ttl, legacy=False):
         if legacy:
             if path.name.startswith('.') or not path.name.endswith('.json'):
                 return
+            opened, _ = open_command_candidate(path)
+            if opened is None:
+                # A candidate the read refuses is one the sweep must not
+                # consume by name: unlinking it would take the name away from
+                # a consumer about to refuse it for the same reason.
+                return
             # A parse failure means a writer may still hold the file mid-write;
             # any value that parses completely — dict or not — is not that
             # case, so it is expired like any other aged command artifact.
-            json.loads(path.read_text(encoding='utf-8'))
+            with opened:
+                json.loads(opened.read().decode('utf-8'))
         path.unlink()
     except (OSError, json.JSONDecodeError, RecursionError, ValueError):
         # A file that cannot be read or removed is reconsidered on the next

@@ -331,6 +331,7 @@
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py
 !/tests/test_command_queue.py
+!/tests/test_command_queue_aliased.py
 !/tests/test_command_queue_unit.py
 !/tests/test_control_writes.py
 !/tests/test_coverage_combine.py
