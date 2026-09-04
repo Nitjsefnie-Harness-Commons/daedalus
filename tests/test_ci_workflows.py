@@ -570,6 +570,17 @@ def _named_step_index(steps, name):
     return matches[0]
 
 
+def test_threshold_push_comment_matches_current_trigger_policy(tmp):
+    del tmp
+    workflow = _tests_yml()
+    start = workflow.index('- name: Commit the raise')
+    comment = workflow[start:]
+    assert 'does not re-run tests or CodeQL' in comment
+    assert 'audit.yml remains unfiltered' in comment
+    assert 'DOES start the workflows again' not in comment
+    assert 'remeasures' not in comment
+
+
 def test_the_matrix_jobs_declare_no_pip_cache_on_setup_python(tmp):
     """`cache: pip` saves in a post-job step that runs after untrusted code.
 
