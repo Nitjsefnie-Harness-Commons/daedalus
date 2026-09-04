@@ -49,22 +49,21 @@ _REVIEWED_REFS = {
 
 _REVIEWED_NONCACHE_REFS = {
     'actions/checkout': '3d3c42e5aac5ba805825da76410c181273ba90b1',
-    'actions/upload-artifact':
-        '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
-    'actions/download-artifact':
-        '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c',
+    'actions/upload-artifact': '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
+    'actions/download-artifact': '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c',
 }
 
 _DECISIVE_CONTROLS = {
-    'astral-sh/setup-uv': (('enable-cache', 'auto'),
-                           ('save-cache', 'true')),
-    'swatinem/rust-cache': (('save-if', 'true'),
-                            ('cache-provider', 'github')),
+    'astral-sh/setup-uv': ((('enable-cache', 'auto'),
+                            ('save-cache', 'true')),
+                           'setup-uv cache post-save'),
+    'swatinem/rust-cache': ((('save-if', 'true'),
+                             ('cache-provider', 'github')),
+                            'rust-cache post-save'),
 }
 
 _DIRECT_ENV_NAMES = (
-    'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL',
-    'ACTIONS_RUNTIME_TOKEN',
+    'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL', 'ACTIONS_RUNTIME_TOKEN',
 )
 _MAX_RUN_LITERAL = 65536
 _IDENTIFIER = r'A-Za-z0-9_'
@@ -337,12 +336,12 @@ def _cache_write_reason(step, job, step_number):
                 reason = 'setup-buildx binary cache'
         elif action in _DECISIVE_CONTROLS:
             if _decisive_opt_out(
-                    inputs, _DECISIVE_CONTROLS[action],
+                    inputs, _DECISIVE_CONTROLS[action][0],
                     (job, step_number, action)):
                 _require_reviewed_writer_ref(action, ref, job, step_number)
                 reason = None
             else:
-                reason = f'{action.rsplit("/", 1)[-1]} cache post-save'
+                reason = _DECISIVE_CONTROLS[action][1]
         elif action == 'docker/build-push-action':
             _require_reviewed_writer_ref(action, ref, job, step_number)
             has_cache_to = 'cache-to' in inputs
@@ -484,14 +483,14 @@ def test_manifest_backed_cache_action_controls(tmp):
         ('docker/setup-buildx-action@v3', {}, True),
         ('docker/setup-buildx-action@v3', {'cache-binary': 'true'}, True),
         ('docker/setup-buildx-action@v3', {'cache-binary': 'false'}, False),
-        ('astral-sh/setup-uv@v7', {}, True),
-        ('astral-sh/setup-uv@v7', {'enable-cache': 'true'}, True),
+        (uv, {}, 'setup-uv cache post-save'),
+        (uv, {'enable-cache': 'true'}, 'setup-uv cache post-save'),
         ('astral-sh/setup-uv@v7', {'enable-cache': 'false'}, False),
         ('astral-sh/setup-uv@v7', {'save-cache': 'false'}, False),
         (uv, {'enable-cache': 'false', 'save-cache': '${{ x }}'}, False),
         (uv, {'enable-cache': '${{ x }}', 'save-cache': 'false'}, False),
-        ('Swatinem/rust-cache@v2', {}, True),
-        ('Swatinem/rust-cache@v2', {'save-if': 'true'}, True),
+        (rust, {}, 'rust-cache post-save'),
+        (rust, {'save-if': 'true'}, 'rust-cache post-save'),
         ('Swatinem/rust-cache@v2', {'save-if': 'false'}, False),
         ('Swatinem/rust-cache@v2', {'cache-provider': 'warpbuild'}, False),
         (rust, {'save-if': 'false', 'cache-provider': '${{ x }}'}, False),
@@ -509,7 +508,8 @@ def test_manifest_backed_cache_action_controls(tmp):
     for uses, inputs, expected in cases:
         actual = _cache_write_reason(
             {'uses': uses, 'with': inputs}, 'sample', 1)
-        assert (actual is not None) is expected, (uses, inputs, actual)
+        assert (actual == expected if isinstance(expected, str)
+                else (actual is not None) is expected), (uses, inputs, actual)
 
 
 def test_generic_setup_cache_input_remains_conservative(tmp):
