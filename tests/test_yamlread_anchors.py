@@ -276,7 +276,8 @@ def test_an_anchor_on_a_sequence_item_is_an_unsupported_alias_target(tmp):
     prefix = 'anchors:\n - &a target\n'
     _reader_refused_exact(
         _document('name: *a', prefix),
-        'step name has an unsupported YAML alias target on a sequence item: &a')
+        'step name has an unsupported YAML alias target on a sequence '
+        'item: &a')
 
 
 def test_an_anchor_on_a_mapping_key_is_an_unsupported_alias_target(tmp):
@@ -295,7 +296,8 @@ def test_an_anchor_on_a_step_mapping_node_is_an_unsupported_alias_target(tmp):
         '   - name: *a\n     if: z\n')
     _reader_refused_exact(
         source,
-        'step name has an unsupported YAML alias target on a sequence item: &a')
+        'step name has an unsupported YAML alias target on a sequence '
+        'item: &a')
 
 
 def test_anchor_name_boundaries_do_not_match_a_longer_name(tmp):
@@ -315,7 +317,8 @@ def test_a_later_unsupported_candidate_does_not_fall_back_to_an_older_one(tmp):
         '  - &a hidden\n')
     _reader_refused_exact(
         _document('name: *a', prefix),
-        'step name has an unsupported YAML alias target on a sequence item: &a')
+        'step name has an unsupported YAML alias target on a sequence '
+        'item: &a')
 
 
 def test_a_colon_bearing_decoy_in_a_block_body_defines_no_target(tmp):
