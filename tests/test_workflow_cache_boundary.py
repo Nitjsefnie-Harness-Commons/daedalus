@@ -292,10 +292,14 @@ def _cache_write_reason(step, job, step_number):
             _require_reviewed_writer_ref(action, ref, job, step_number)
             reason = 'actions/cache combined post-save'
         elif action.startswith('actions/cache/'):
+            if action not in ('actions/cache/restore', 'actions/cache/save'):
+                raise _boundary_error(
+                    job, step_number,
+                    f'unknown actions/cache sub-action {action!r}')
             _require_reviewed_writer_ref(
                 'actions/cache', ref, job, step_number)
-            reason = None if action == 'actions/cache/restore' \
-                else f'{action} cache writer'
+            reason = (None if action == 'actions/cache/restore'
+                      else 'actions/cache/save cache writer')
         elif action == 'actions/setup-go':
             cache = _literal_control(
                 inputs, 'cache', 'true', job, step_number, action)
@@ -459,14 +463,13 @@ def test_steps_less_local_job_is_empty_but_reusable_job_is_pending(tmp):
 
 def test_actions_cache_combined_and_save_write_restore_reads(tmp):
     cases = (
-        ('actions/cache@v4', {}, True),
-        ('actions/cache/save@v4', {}, True),
-        ('actions/cache/restore@v4', {}, False),
+        ('actions/cache@v4', 'actions/cache combined post-save'),
+        ('actions/cache/save@v4', 'actions/cache/save cache writer'),
+        ('actions/cache/restore@v4', None),
     )
-    for uses, inputs, expected in cases:
-        actual = _cache_write_reason(
-            {'uses': uses, 'with': inputs}, 'sample', 1)
-        assert (actual is not None) is expected, (uses, actual)
+    for uses, expected in cases:
+        actual = _cache_write_reason({'uses': uses, 'with': {}}, 'sample', 1)
+        assert actual == expected, (uses, actual)
 
 
 def test_manifest_backed_cache_action_controls(tmp):
@@ -524,24 +527,19 @@ def test_generic_setup_cache_input_remains_conservative(tmp):
 
 def test_unknown_and_dynamic_actions_fail_with_exact_context(tmp):
     del tmp
-    _refuses(
-        _cache_write_reason,
-        {'uses': '${{ matrix.action }}'}, 'wheel', 1,
-        contains=("cache boundary cannot classify job 'wheel' step 1: "
-                  "expression-valued uses '${{ matrix.action }}'"))
-    _refuses(
-        _cache_write_reason, {'uses': 'owner/action@v1'}, 'wheel', 1,
-        contains="no cache policy for action 'owner/action@v1'")
-    _refuses(
-        _cache_write_reason, {'uses': 'actions/checkout@deadbeef'},
-        'wheel', 1, contains="action 'actions/checkout' ref 'deadbeef'")
-    _refuses(
-        _cache_write_reason, {'uses': 'actions/setup-python@deadbeef'},
-        'wheel', 1, contains="action 'actions/setup-python' ref 'deadbeef'")
-    _refuses(
-        _cache_write_reason, {'uses': 'docker/build-push-action@deadbeef'},
-        'wheel', 1,
-        contains="action 'docker/build-push-action' ref 'deadbeef'")
+    for uses, expected in (
+            ('${{ matrix.action }}',
+             "expression-valued uses '${{ matrix.action }}'"),
+            ('owner/action@v1', "no cache policy for action 'owner/action@v1'"),
+            ('actions/checkout@deadbeef', "action 'actions/checkout' ref 'deadbeef'"),
+            ('actions/setup-python@deadbeef',
+             "action 'actions/setup-python' ref 'deadbeef'"),
+            ('docker/build-push-action@deadbeef',
+             "action 'docker/build-push-action' ref 'deadbeef'"),
+            ('actions/cache/unknown@v4',
+             "unknown actions/cache sub-action 'actions/cache/unknown'")):
+        _refuses(_cache_write_reason, {'uses': uses}, 'wheel', 1,
+                 contains=expected)
 
 
 def test_local_docker_and_empty_actions_are_not_silently_cache_free(tmp):
@@ -664,7 +662,9 @@ def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
             (_real_step(uses='${{ matrix.action }}'),
              "expression-valued uses '${{ matrix.action }}'"),
             (_real_step(uses='owner/action@v1'),
-             "no cache policy for action 'owner/action@v1'")):
+             "no cache policy for action 'owner/action@v1'"),
+            (_real_step(uses='actions/cache/unknown@v4'),
+             "unknown actions/cache sub-action 'actions/cache/unknown'")):
         _refuses(_cache_writing_jobs, _insert_wheel_step(workflow, step),
                  contains=expected)
 
