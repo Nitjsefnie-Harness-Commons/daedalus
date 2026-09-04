@@ -206,7 +206,7 @@ def _flow_end(lines, start, end, value):
             elif char == ',':
                 node_start = True
             elif char == ':' and text[cursor + 1:cursor + 2] in (
-                    '', ' ', '\t'):
+                    '', ' ', '\t', "'", '"'):
                 node_start = True
             elif not char.isspace():
                 node_start = False

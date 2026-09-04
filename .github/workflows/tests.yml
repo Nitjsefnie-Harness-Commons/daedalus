@@ -910,10 +910,9 @@ jobs:
         # to this one repository rather than to an account, and revoking it is
         # deleting one key.
         #
-        # Unlike the built-in token, a deploy-key push DOES start the workflows
-        # again — which is what makes the raise-only rule load-bearing rather
-        # than tidy: the run this triggers measures the same coverage,
-        # ratchet.py declines to raise a second time, and the chain stops.
+        # This threshold-only push does not re-run tests or CodeQL: tests.yml
+        # and codeql.yml skip a push containing only .github/ci-thresholds.json.
+        # audit.yml remains unfiltered and is the release-safety run for every push.
         #
         # Without the secret nothing is pushed and the summary remains visible.
         if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true'
