@@ -10,18 +10,70 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _repo import ROOT  # noqa: E402
 from _yamlread import (  # noqa: E402
     YAMLReadError, job_mapping, job_scalar, step_mapping_scalar,
     step_scalar, step_scalars, top_level_mapping,
 )
 
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+from workflow_yaml import workflow_step_items  # noqa: E402
+
 _MARK = '\ufeff'
 _PLAIN = 'jobs:\n sample:\n  if: x'
+_STEPS = (
+    'jobs:\n sample:\n  steps:\n'
+    '   - name: first\n     id: one\n     run: true\n'
+    '   - name: second\n     id: two\n     run: false\n')
 
 
 def _marked(source):
     """Prepend one stream-start mark to a workflow source."""
     return _MARK + source
+
+
+def _production_items(source):
+    """Read the sample steps with the production coordinate reader."""
+    items = workflow_step_items(source, 'sample')
+    assert items is not None, source
+    return items
+
+
+def test_the_production_reader_preserves_marked_step_coordinates(tmp):
+    del tmp
+    plain = _production_items(_STEPS)
+    marked = _production_items(_marked(_STEPS))
+    assert [(item.name, item.identity) for item in marked] == [
+        (item.name, item.identity) for item in plain]
+    for plain_item, marked_item in zip(plain, marked):
+        assert marked_item.start == plain_item.start + 1
+        assert marked_item.end == plain_item.end + 1
+        assert _marked(_STEPS)[marked_item.start:marked_item.end] == (
+            _STEPS[plain_item.start:plain_item.end])
+
+
+def test_a_production_document_of_only_a_mark_reads_empty(tmp):
+    del tmp
+    assert workflow_step_items(_MARK, 'sample') is None
+
+
+def test_the_production_reader_keeps_second_leading_mark_as_data(tmp):
+    del tmp
+    try:
+        workflow_step_items(_marked(_marked(_STEPS)), 'sample')
+    except YAMLReadError as error:
+        assert 'unsupported plain scalar' in str(error), str(error)
+        return
+    raise AssertionError('the second leading mark was silently stripped')
+
+
+def test_the_production_reader_keeps_an_interior_quoted_mark_as_data(tmp):
+    del tmp
+    source = (
+        'jobs:\n sample:\n  steps:\n'
+        '   - name: "a\ufeffb"\n     id: mark\n')
+    assert [(item.name, item.identity) for item in _production_items(source)] == [
+        ('a\ufeffb', 'mark')]
 
 
 def test_a_marked_workflow_reads_like_its_unmarked_self(tmp):
