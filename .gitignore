@@ -356,6 +356,7 @@
 !/tests/test_delivery_stripe_acceptance.py
 !/tests/test_delivery_stripes.py
 !/tests/test_diff_coverage.py
+!/tests/test_diff_coverage_boundaries.py
 !/tests/test_diff_coverage_javascript.py
 !/tests/test_drain.py
 !/tests/test_eval_relay.py
