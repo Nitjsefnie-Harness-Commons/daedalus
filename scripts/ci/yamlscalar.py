@@ -1,54 +1,29 @@
 """Decode the bounded inline YAML scalar subset used by workflow policy.
 
-The workflow readers built on this admit one subset and refuse the rest, and
-a refusal is one of exactly two things.
+The workflow readers built on this admit plain, quoted, folded, and literal
+scalars plus the block mappings, block sequences, and flow collections needed
+by policy. A value spans lines only where its entry point admits the
+construct. Wrapped plain scalars fold in mapping readers and complete step
+mappings; name and id fields, scalar-list readers, and step-name lookups keep
+their unsupported-multiline boundary.
 
-Admitted: plain, single-quoted and double-quoted scalars, folded and literal
-block scalars, block mappings and block sequences, and flow collections of
-any of those. A sequence may also sit at its key's own indentation, which
-`workflow_mapping` and `complete_job_mapping` read like any other sequence.
-A value spans lines only where its entry point admits the
-construct. Wrapped plain scalars fold in `job_scalar`, `job_mapping`,
-`top_level_mapping`, `step_scalar` values, `step_mappings` values,
-`workflow_mapping`, and `complete_job_mapping`. `step_scalars`,
-`step_mapping_scalar`, nested scalar mappings under `step_mappings`, name and
-id fields in `workflow_step_items`, and the step-name lookup used by
-`step_scalar` and `step_mapping_scalar` refuse them. Folding joins with one
-space, and each line of a flow collection contributes its own comment strip
-because a comment between entries is content YAML skips; a comment ENDS a
-plain scalar instead, so nothing continues one after it.
-Equivalent spellings decode to the same value, so quoting a scalar or
-rewriting a block collection in flow style changes nothing a reader sees.
-Node properties are the one place the entry points diverge: a name or id in
-`workflow_step_items` reads an anchor, the `!!str` tag, and an
-alias resolved to the last definition of its anchor before that line, while
-every other entry point refuses all three.
+Only `workflow_step_items` reads node properties. Its scalar alias resolution
+is mapping-value-only: an anchor on a block-sequence item, mapping key, flow
+member, or step mapping node is an explicit unsupported-target refusal. A
+preliminary scan of the whole document classifies block-scalar bodies, open
+quoted values, and opaque flow collections, so an invalid block header in an
+unrelated field can refuse the requested step with that field's owner.
+Accepted mapping-value aliases follow `yaml.BaseLoader`, including numeric-
+and Boolean-shaped plain scalars, quoted scalars, and block scalars, and return
+strings. Duplicate anchor names resolve to the last earlier definition in
+this bounded reader. YAML 1.2 permits `#` in an anchor name, while the tested
+PyYAML 6.0.3 spelling rejects it; that is a recorded oracle divergence.
 
-Refused as invalid YAML: an unterminated quote or bracket, an unquoted flow
-scalar carrying any of `,[]{}`, an interior empty flow item, an empty mapping
-key, a duplicate key, a tab in indentation, inconsistent indentation, a
-malformed block-scalar header or escape, a malformed or repeated node
-property, an alias naming no earlier anchor, and a control or surrogate
-character.
-
-Refused as a boundary of this subset, which every such message names with
-the word `unsupported`: a tab inside a value, a multiline quoted scalar, a
-blank line or a comment inside a plain one, nested content beside a value
-that already closed, an anchor, an alias or a tag where the entry point
-reads none, a tag not known to resolve to a string, an alias to a node this
-reader decodes as no scalar, and a plain scalar outside the character set
-the reader admits. A shape refusal ("... is not a mapping") names the shape
-the reader requires instead.
-
-One boundary is spelled as an invalid-YAML refusal and is written down here
-instead. A field is sliced out by indentation before its brackets are read,
-so a flow collection whose continuation is indented no further than its key
-is cut in half and the decoder is handed something genuinely unbalanced.
-Telling that apart from a collection that never closes needs the rest of the
-document, which is the one thing a field slice does not have.
-
-Deciding full YAML validity is not this module's job. `actionlint` is the
-CI-side oracle for that and gates every workflow change.
+Bare `!` remains refused because this reader deliberately performs no schema
+or tag resolution. The explicit `!!str` tag is the only supported tag here;
+other tags, malformed properties, aliases without an earlier definition, and
+values outside the bounded scalar grammar are refused. Full YAML validity is
+not this module's job; `actionlint` is the CI-side workflow oracle.
 """
 import re
 
