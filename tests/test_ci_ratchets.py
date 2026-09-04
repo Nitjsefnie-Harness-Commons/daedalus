@@ -76,19 +76,21 @@ def test_promoted_modules_import_by_package(tmp):
 
 
 def test_public_update_uses_recorded_measurement_high_water(tmp):
-    """A gain above the recorded measurement raises the calibration."""
+    """Only a gain beyond the measured high water raises the calibration."""
     del tmp
     ratchet = _ratchet()
     data = _document()
-    for measured in (60.0, 78.5, 80.0):
+    for measured in (60.0, 78.5, 80.0, 80.1, 81.5):
         assert ratchet.update(data, Decimal(str(measured)), 'python') is None
-    raised = ratchet.update(data, Decimal('80.1'), 'python')
+    raised = ratchet.update(data, Decimal('81.6'), 'python')
     assert raised is not None
     assert raised['coverage']['python'] == {
-        'measured': Decimal('80.1'), 'floor': Decimal('78.6')}
+        'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
     assert raised['coverage']['javascript'] == {
         'measured': 35.5, 'floor': 34.0}
     assert raised['module_size_baseline'] == data['module_size_baseline']
+    assert ratchet.update(raised, Decimal('81.6'), 'python') is None
+    assert ratchet.update(raised, Decimal('81.7'), 'python') is None
 
 
 def test_rerunning_a_raise_is_idempotent(tmp):
@@ -142,7 +144,7 @@ def test_cli_noop_does_not_rewrite_or_refresh_measurement(tmp):
     """No-op ratchets leave bytes untouched, including recorded measured."""
     path = _copy_thresholds(tmp)
     before = path.read_bytes()
-    result = _run_ratchet(tmp, 'python', '80.0', path)
+    result = _run_ratchet(tmp, 'python', '80.1', path)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert path.read_bytes() == before
     assert 'no raise' in result.stdout
@@ -172,6 +174,14 @@ def test_shipped_file_forcing_measurement_is_derived_and_capped(tmp):
     assert result.returncode == 0, (result.stdout, result.stderr)
     actual = thresholds.load(path)
     assert actual['coverage']['python']['measured'] == forcing
+
+
+def test_issue_581_bounded_measurement_is_a_valid_noop(tmp):
+    """A 100% shipped measurement cannot raise a 99.0% recorded high water."""
+    del tmp
+    ratchet = _ratchet()
+    data = _document(python=(99.0, 97.5))
+    assert ratchet.update(data, Decimal('100.0'), 'python') is None
 
 
 def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
