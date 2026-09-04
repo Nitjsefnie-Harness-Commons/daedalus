@@ -15,6 +15,9 @@ from _repo import ROOT  # noqa: E402
 
 _BINDING_MESSAGE = (
     'a launcher is bound through a form the guard cannot follow')
+_NL = '\n'
+_SCOPE_INVOKE = (
+    'suite.test_python_evaluation_scopes_preserve_builtin_dict_identity(None)')
 
 
 def _binding_violation(line):
@@ -169,13 +172,55 @@ for result in [nullcontext(subprocess.run(
         4)
 
 
-def test_builtin_dict_is_clean_only_while_unshadowed(tmp):
-    del tmp
-    assert _synthetic_violations(
-        """dict(cwd='x')
+def _scope_cases():
+    return (
+        ('unshadowed', """dict(cwd='module')
 def nested():
-    return dict(cwd='x')
-""") == []
+    return dict(cwd='nested')
+""", ()),
+        ('lambda body', "lambda dict: dict(cwd='lambda body')\n",
+         (("dict(cwd='lambda body')", "'lambda body'"),)),
+        ('class body', """dict(cwd='before class')
+class Example:
+    dict = factory
+    value = dict(cwd='class body')
+dict(cwd='after class')
+""", (("dict(cwd='class body')", "'class body'"),)),
+        ('function default', """def build(
+        dict=dict(cwd='function default')):
+    return dict
+""", ()),
+        ('comprehension', """dict(cwd='before comprehension')
+[
+    dict(cwd='inside comprehension')
+    for dict in dict(cwd='comprehension iterable')
+]
+dict(cwd='after comprehension')
+""", (("dict(cwd='inside comprehension')",
+         "'inside comprehension'"),)),
+        ('definition headers', """@decorate(dict(cwd='function decorator'))
+def build(dict):
+    return dict
+@decorate(dict(cwd='class decorator'))
+class Example(dict(cwd='class base')):
+    dict = factory
+lambda dict=dict(cwd='lambda default'): dict
+""", ()),
+    )
+
+
+def _scope_violations(relative, source, expected):
+    return [
+        f'{relative}:{source[:source.index(marker)].count(_NL) + 1}: '
+        f'unresolved callee dict cwd={cwd} declares no env='
+        for marker, cwd in expected]
+
+
+def test_python_evaluation_scopes_preserve_builtin_dict_identity(tmp):
+    del tmp
+    for name, source, expected in _scope_cases():
+        assert _synthetic_violations(source) == _scope_violations(
+            'tests/synthetic.py', source, expected), name
 
 
 def test_shadowed_dict_bindings_remain_launchers_or_unresolved(tmp):
@@ -415,6 +460,32 @@ def _mutation_specs():
         "            yield from _carried_parts(callee)\n",
         "",
     )
+    default_scope = (
+        "            for value in (*node.args.defaults, "
+        "*node.args.kw_defaults):\n"
+        "                if value is not None:\n"
+        "                    visit(value, scope)\n",
+        "            for value in (*node.args.defaults, "
+        "*node.args.kw_defaults):\n"
+        "                if value is not None:\n"
+        "                    visit(value, node)\n",
+    )
+    function_default_scope = (
+        default_scope[0] + "            if node.returns is not None:\n",
+        default_scope[1] + "            if node.returns is not None:\n")
+    lambda_default_scope = (
+        default_scope[0] + "            visit(node.body, node)\n",
+        default_scope[1] + "            visit(node.body, node)\n")
+    class_body_scope = (
+        "            for statement in node.body:\n"
+        "                visit(statement, node)\n"
+        "            return\n"
+        "        if isinstance(node, ast.Lambda):\n",
+        "            for statement in node.body:\n"
+        "                visit(statement, scope)\n"
+        "            return\n"
+        "        if isinstance(node, ast.Lambda):\n",
+    )
     match_as_names = (
         "    names.update(node.name for node in walked\n"
         "                 if isinstance(node, ast.MatchAs)\n"
@@ -434,19 +505,18 @@ def _mutation_specs():
         "",
     )
     match_as_scope = (
-        "            elif isinstance(child, ast.MatchAs) and child.name:\n"
-        "                shadows[scope].add(child.name)\n",
+        "        elif isinstance(node, ast.MatchAs) and node.name:\n"
+        "            shadows[scope].add(node.name)\n",
         "",
     )
     match_star_scope = (
-        "            elif isinstance(child, ast.MatchStar) and child.name:\n"
-        "                shadows[scope].add(child.name)\n",
+        "        elif isinstance(node, ast.MatchStar) and node.name:\n"
+        "            shadows[scope].add(node.name)\n",
         "",
     )
     match_rest_scope = (
-        "            elif isinstance(child, ast.MatchMapping) "
-        "and child.rest:\n"
-        "                shadows[scope].add(child.rest)\n",
+        "        elif isinstance(node, ast.MatchMapping) and node.rest:\n"
+        "            shadows[scope].add(node.rest)\n",
         "",
     )
     return (
@@ -462,6 +532,26 @@ def _mutation_specs():
          'suite.test_match_capture_refuses_a_hidden_launcher(None)'),
         ('callee base', 'bindings', (callee,),
          'suite.test_call_result_assignment_refuses_a_hidden_launcher(None)'),
+        ('function default scope', 'scopes',
+         (function_default_scope,),
+         _SCOPE_INVOKE),
+        ('class body scope', 'scopes', (class_body_scope,),
+         _SCOPE_INVOKE),
+        ('lambda body scope', 'scopes',
+         (("            visit(node.body, node)\n",
+           "            visit(node.body, scope)\n"),),
+         _SCOPE_INVOKE),
+        ('lambda default scope', 'scopes',
+         (lambda_default_scope,),
+         _SCOPE_INVOKE),
+        ('comprehension target scope', 'scopes',
+         (("            visit(first.target, node)\n",
+           "            visit(first.target, scope)\n"),),
+         _SCOPE_INVOKE),
+        ('comprehension iterable scope', 'scopes',
+         (("            visit(first.iter, scope)\n",
+           "            visit(first.iter, node)\n"),),
+         _SCOPE_INVOKE),
         ('MatchAs global', 'scopes', (match_as_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
         ('MatchStar global', 'scopes', (match_star_names,),
@@ -486,25 +576,49 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
         target = (bindings_target if target_name == 'bindings'
                   else scopes_target)
         original = target.read_bytes()
-        text = original.decode('utf-8')
-        for needle, replacement in replacements:
+        crlf = b'\r\n' in original
+        text = original.decode('utf-8').replace('\r\n', '\n')
+        for mutation in replacements:
+            needle, replacement = mutation
             assert text.count(needle) == 1, (name, needle)
             text = text.replace(needle, replacement, 1)
         try:
-            target.write_bytes(text.encode('utf-8'))
+            mutated = text.replace('\n', '\r\n') if crlf else text
+            target.write_bytes(mutated.encode('utf-8'))
             program = (
-                "import sys\n"
-                "sys.path.insert(0, 'tests')\n"
+                "import sys\nsys.path.insert(0, 'tests')\n"
                 "import test_coverage_bindings as suite\n"
                 f"{invocation}\n")
             result = subprocess.run(
-                [sys.executable, '-c', program], cwd=root,
+                [sys.executable, '-B', '-c', program], cwd=root,
                 env=_util.child_coverage('scrub'), capture_output=True,
                 text=True, timeout=30)
         finally:
             target.write_bytes(original)
-        assert result.returncode != 0, name
+        assert result.returncode != 0, (name, result.stdout, result.stderr)
         assert 'AssertionError' in result.stderr, (name, result.stderr)
+
+
+def test_mutation_gate_accepts_crlf_copied_helpers(tmp):
+    root = Path(tmp) / 'repository'
+    copy_test_tree(root)
+    bindings = root / 'tests' / '_coverage_bindings.py'
+    scopes = root / 'tests' / '_coverage_scopes.py'
+    sources = bindings.read_bytes(), scopes.read_bytes()
+    assert b'\r\n' not in sources[0] and b'\r\n' not in sources[1]
+    bindings.write_bytes(sources[0].replace(b'\n', b'\r\n'))
+    scopes.write_bytes(sources[1].replace(b'\n', b'\r\n'))
+    mutation_tmp = Path(tmp) / 'mutations'
+    program = (
+        "import sys\nsys.path.insert(0, 'tests')\n"
+        "import test_coverage_bindings as suite\n"
+        'suite.test_each_new_binding_and_match_arm_is_mutation_sensitive('
+        f'{str(mutation_tmp)!r})\n')
+    result = subprocess.run(
+        [sys.executable, '-c', program], cwd=root,
+        env=_util.child_coverage('scrub'), capture_output=True,
+        text=True, timeout=120)
+    assert result.returncode == 0, result.stderr
 
 
 def test_real_tree_refuses_each_complete_binding_bypass(tmp):
@@ -556,6 +670,23 @@ def test_real_tree_allows_an_unshadowed_builtin_dict(tmp):
     target.write_bytes(source.replace(
         anchor, snippet + anchor, 1).encode('utf-8'))
     assert _coverage_environment_violations(root) == []
+
+
+def test_real_tree_applies_python_evaluation_scopes(tmp):
+    root, target = _real_module_copy(tmp, Path('tests/test_diff_coverage.py'))
+    source = _module_text(target)
+    anchor = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
+    original = target.read_bytes()
+    for name, snippet, expected in _scope_cases():
+        mutated = source.replace(anchor, snippet + anchor, 1)
+        try:
+            target.write_bytes(mutated.encode('utf-8'))
+            violations = _coverage_environment_violations(root)
+        finally:
+            target.write_bytes(original)
+        wanted = _scope_violations(
+            'tests/test_diff_coverage.py', mutated, expected)
+        assert violations == wanted, (name, violations)
 
 
 def test_controls_never_write_inside_the_repository(tmp):
