@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Executable contracts for node properties and aliases on a step scalar."""
-import subprocess
 import sys
 from pathlib import Path
 
@@ -13,9 +12,6 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 from workflow_yaml import (  # noqa: E402
     YAMLReadError, workflow_step_items,
 )
-
-_GATE_STEP = '      - name: Python coverage gate\n'
-
 
 def _document(field, prefix=''):
     """A one-step workflow whose step carries `field` before an `if`."""
@@ -290,47 +286,6 @@ def test_two_anchors_on_one_node_are_refused(tmp):
 def test_two_tags_on_one_node_are_refused(tmp):
     del tmp
     _refused(_document('name: !!str !!str target'), 'two YAML tags')
-
-
-def _run_ratchet(path, text):
-    """Raise the Python floor in a copy of a workflow, returning stdout."""
-    path.write_text(text, encoding='utf-8')
-    done = subprocess.run(
-        [sys.executable, str(ROOT / 'scripts' / 'ci' / 'ratchet.py'),
-         '--language', 'python', '--measured', '99.0',
-         '--workflow', str(path)],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    return done.stdout
-
-
-def _plant(text, step):
-    """Replace the shipped gate step line with `step`."""
-    assert text.count(_GATE_STEP) == 1, _GATE_STEP
-    return text.replace(_GATE_STEP, step, 1)
-
-
-def test_the_ratchet_raises_the_real_workflow_for_each_spelling(tmp):
-    """The reader and the ratchet agree on a real target, not a fixture."""
-    source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    plain = _run_ratchet(Path(tmp) / 'plain.yml', source)
-    assert 'raised the Python coverage floor' in plain, plain
-    aliased = _plant(
-        source.replace(
-            'name: tests\n',
-            'name: tests\n\nenv:\n'
-            '  GATE_NAME: &gatename Python coverage gate\n', 1),
-        '      - name: *gatename\n')
-    spellings = {
-        'anchor.yml': _plant(
-            source, '      - name: &gatename Python coverage gate\n'),
-        'tag.yml': _plant(
-            source, '      - name: !!str Python coverage gate\n'),
-        'alias.yml': aliased,
-    }
-    for filename, text in spellings.items():
-        assert _run_ratchet(Path(tmp) / filename, text) == plain, filename
 
 
 if __name__ == '__main__':

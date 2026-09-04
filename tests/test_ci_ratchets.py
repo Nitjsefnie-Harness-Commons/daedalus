@@ -1,634 +1,327 @@
 #!/usr/bin/env python3
-"""The coverage ratchet: it raises the floor, and only ever upward.
-
-CI rewrites the gate in .github/workflows/tests.yml from what a run actually
-measured, so these tests pin what that rewrite may do — never lower the floor,
-never touch a file whose recorded measurement has already drifted from its
-gate, and never leave behind a number the pinning test would reject.
-"""
+"""Executable contracts for coverage and module-size ratchets."""
+import json
+import os
+import shutil
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _yamlsteps import complete_job_mapping  # noqa: E402
+from _workflowrun import run_step  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 
-_PYTHON_STEP = '      - name: Python coverage gate\n'
-_JAVASCRIPT_STEP = '      - name: JavaScript coverage gate\n'
-_RATCHET_WORKFLOW = """jobs:
-  coverage:
-    steps:
-      - name: Python coverage gate
-        # Python measured: 73.3
-        # Python floor: 72
-        run: python -m coverage report --fail-under=72 --precision=1
-      - name: JavaScript coverage gate
-        # JavaScript measured: 34.6
-        # JavaScript floor: 33.1
-        run: |
-          python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \\
-            --xml javascript-coverage.xml --fail-under=33.1
-"""
+THRESHOLDS_PATH = ROOT / '.github' / 'ci-thresholds.json'
+RATCHET_PATH = ROOT / 'scripts' / 'ci' / 'ratchet.py'
+SIZE_PATH = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
+
+
+def _thresholds():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'thresholds.py',
+                      'ratchet_thresholds')
 
 
 def _ratchet():
-    return _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py', 'ratchet_mod')
+    return _util.load(RATCHET_PATH, 'ratchet_contract')
+
+
+def _size():
+    return _util.load(SIZE_PATH, 'size_contract')
+
+
+def _document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
+    return {
+        'schema_version': 1,
+        'coverage': {
+            'python': {'measured': python[0], 'floor': python[1]},
+            'javascript': {
+                'measured': javascript[0], 'floor': javascript[1]},
+        },
+        'module_size_baseline': {
+            'tests/test_mcp_server.py': 1706,
+            'tests/test_cli.py': 1238,
+        },
+    }
+
+
+def _copy_thresholds(tmp, data=None):
+    thresholds = _thresholds()
+    path = Path(tmp) / 'ci-thresholds.json'
+    thresholds.write(path, _document() if data is None else data)
+    return path
+
+
+def _run_ratchet(tmp, language, measured, thresholds_path):
+    return subprocess.run(
+        [sys.executable, str(RATCHET_PATH), '--language', language,
+         '--measured', str(measured), '--thresholds', str(thresholds_path)],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
 
 
 def test_promoted_modules_import_by_package(tmp):
-    """Shared workflow modules must import without a sys.path test shim."""
+    """The ratchet and shared reader import without workflow YAML coupling."""
     del tmp
     imported = subprocess.run(
         [sys.executable, '-c',
-         'import scripts.ci.workflow_yaml; import scripts.ci.ratchet'],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+         'import scripts.ci.ratchet; import scripts.ci.size_baseline; '
+         'import scripts.ci.thresholds'], cwd=str(ROOT), capture_output=True,
+        text=True, timeout=60)
     assert imported.returncode == 0, (imported.stdout, imported.stderr)
 
 
-def _assert_duplicate_refused(language, anchor, name):
+def test_public_update_uses_recorded_measurement_high_water(tmp):
+    """A gain above the recorded measurement raises the calibration."""
+    del tmp
     ratchet = _ratchet()
-    assert _RATCHET_WORKFLOW.count(anchor) == 1, anchor
-    duplicate = _RATCHET_WORKFLOW.replace(
-        anchor, f'{anchor}\n{anchor}', 1)
-    try:
-        ratchet.update(duplicate, 90.0, language)
-    except SystemExit as why:
-        assert f'exactly one {name}' in str(why), why
-    else:
-        raise AssertionError(
-            f'duplicate {language} {name} was accepted')
-
-
-def _assert_python_gate_raised(workflow):
-    ratchet = _ratchet()
-    try:
-        raised = ratchet.update(workflow, 80.0, 'python')
-    except SystemExit as why:
-        raise AssertionError(str(why)) from why
+    data = _document()
+    for measured in (60.0, 78.5, 80.0):
+        assert ratchet.update(data, Decimal(str(measured)), 'python') is None
+    raised = ratchet.update(data, Decimal('80.1'), 'python')
     assert raised is not None
-    assert '# Python measured: 80.0' in raised, raised
-    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
-    return raised
+    assert raised['coverage']['python'] == {
+        'measured': Decimal('80.1'), 'floor': Decimal('78.6')}
+    assert raised['coverage']['javascript'] == {
+        'measured': 35.5, 'floor': 34.0}
+    assert raised['module_size_baseline'] == data['module_size_baseline']
 
 
-def _assert_python_decoy_ignored(workflow):
-    raised = _assert_python_gate_raised(workflow)
-    assert raised.count('# Python measured: 73.3') == 1, raised
-    assert raised.count('# Python measured: 80.0') == 1, raised
-
-
-def _forged_python_step_payload():
-    return (
-        '      - name: Document the Python gate\n'
-        '        run: |\n'
-        "          cat <<'YAML'\n"
-        '          - name: Python coverage gate\n'
-        '            # Python measured: 73.3\n'
-        '            # Python floor: 72\n'
-        '            run: python -m coverage report '
-        '--fail-under=72 --precision=1\n'
-        '          YAML\n')
-
-
-def test_python_duplicate_measured_marker_is_refused(tmp):
-    """A decoy measured marker must not divert the Python rewrite."""
-    del tmp
-    _assert_duplicate_refused(
-        'python', '        # Python measured: 73.3', 'measured marker')
-
-
-def test_python_duplicate_floor_marker_is_refused(tmp):
-    """A decoy floor marker must not divert the Python rewrite."""
-    del tmp
-    _assert_duplicate_refused(
-        'python', '        # Python floor: 72', 'floor marker')
-
-
-def test_python_duplicate_gate_flag_is_refused(tmp):
-    """A decoy gate flag must not divert the Python rewrite."""
-    del tmp
-    _assert_duplicate_refused(
-        'python',
-        '        run: python -m coverage report '
-        '--fail-under=72 --precision=1',
-        'gate flag')
-
-
-def test_javascript_duplicate_measured_marker_is_refused(tmp):
-    """A decoy measured marker must not divert the JavaScript rewrite."""
-    del tmp
-    _assert_duplicate_refused(
-        'javascript', '        # JavaScript measured: 34.6',
-        'measured marker')
-
-
-def test_javascript_duplicate_floor_marker_is_refused(tmp):
-    """A decoy floor marker must not divert the JavaScript rewrite."""
-    del tmp
-    _assert_duplicate_refused(
-        'javascript', '        # JavaScript floor: 33.1', 'floor marker')
-
-
-def test_javascript_duplicate_gate_flag_is_refused(tmp):
-    """A decoy gate flag must not divert the JavaScript rewrite."""
-    del tmp
-    _assert_duplicate_refused(
-        'javascript',
-        '            --xml javascript-coverage.xml --fail-under=33.1',
-        'gate flag')
-
-
-def test_unknown_language_guard_names_the_language(tmp):
-    """The defensive helper guard must not expose a bare KeyError."""
+def test_rerunning_a_raise_is_idempotent(tmp):
+    """A recorded raise is not repeated when the same result is rerun."""
     del tmp
     ratchet = _ratchet()
-    try:
-        ratchet._patterns('ruby')
-    except SystemExit as why:
-        assert str(why) == 'unknown coverage language: ruby', why
-    else:
-        raise AssertionError('an unknown coverage language was accepted')
+    data = _document()
+    candidate = ratchet.update(data, Decimal('81.6'), 'python')
+    assert candidate is not None
+    assert ratchet.update(candidate, Decimal('81.6'), 'python') is None
 
 
-def test_explicit_scalar_cannot_hide_the_real_gate_anchor(tmp):
-    """A less-indented YAML comment remains the real step anchor."""
+def test_measurement_above_recorded_value_raises(tmp):
+    """A new high measurement updates the selected calibration."""
     del tmp
     ratchet = _ratchet()
-    marker = _PYTHON_STEP + '        # Python measured: 73.3\n'
-    replacement = (
-        '    # Python measured: 73.3\n'
-        + _PYTHON_STEP
-        + '        env:\n'
-        '          RATCHET_NOTE: |2\n'
-        '           # Python measured: 73.3\n'
-        '            scalar content\n')
-    workflow = _RATCHET_WORKFLOW.replace(marker, replacement, 1)
-
-    try:
-        raised = ratchet.update(workflow, 80.0, 'python')
-    except SystemExit as why:
-        raise AssertionError(str(why)) from why
-    assert raised is not None
-    assert '    # Python measured: 73.3\n' in raised, raised
-    assert '           # Python measured: 80.0\n' in raised, raised
-    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
+    data = _document()
+    raised = ratchet.update(data, Decimal('81.6'), 'python')
+    assert raised['coverage']['python']['measured'] == Decimal('81.6')
 
 
-def test_comment_indentation_cannot_hide_the_real_gate_anchor(tmp):
+def test_lower_measurements_never_lower_either_calibration(tmp):
+    """Coverage dips are observations, not permission to weaken the gate."""
     del tmp
     ratchet = _ratchet()
-    marker = _PYTHON_STEP + '        # Python measured: 73.3\n'
-    replacement = _PYTHON_STEP + '      # Python measured: 73.3\n'
-    workflow = _RATCHET_WORKFLOW.replace(marker, replacement, 1)
-    try:
-        raised = ratchet.update(workflow, 80.0, 'python')
-    except SystemExit as why:
-        raise AssertionError(str(why)) from why
-    assert raised is not None
-    assert '      # Python measured: 80.0\n' in raised, raised
-    assert ratchet.read_calibration(raised, 'python') == (80.0, 78.5)
-
-
-def test_anchor_decoy_in_another_job_is_invisible(tmp):
-    del tmp
-    workflow = _RATCHET_WORKFLOW.replace(
-        '  coverage:\n',
-        '  decoy:\n'
-        '    # Python measured: 73.3\n'
-        '    steps: []\n'
-        '  coverage:\n', 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_anchor_decoy_in_another_step_is_invisible(tmp):
-    del tmp
-    decoy = (
-        '      - name: Decoy\n'
-        '        # Python measured: 73.3\n'
-        '        run: "true"\n')
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_anchor_decoy_in_another_run_payload_is_invisible(tmp):
-    del tmp
-    decoy = (
-        '      - name: Decoy\n'
-        '        run:\t|\n'
-        '          # Python measured: 73.3\n')
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_anchor_decoy_in_a_quoted_scalar_is_invisible(tmp):
-    del tmp
-    decoy = (
-        '      - name: Decoy\n'
-        '        env:\n'
-        '          NOTE: "before\n'
-        '          # Python measured: 73.3\n'
-        '            after"\n'
-        '        run: "true"\n')
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_anchor_decoy_in_an_environment_value_is_invisible(tmp):
-    del tmp
-    decoy = (
-        '      - name: Decoy\n'
-        '        env:\n'
-        '          "RATCHET:DECOY": |\n'
-        '            # Python measured: 73.3\n'
-        '        run: "true"\n')
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP, decoy + _PYTHON_STEP, 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_anchor_decoy_in_the_other_language_gate_is_invisible(tmp):
-    del tmp
-    workflow = _RATCHET_WORKFLOW.replace(
-        _JAVASCRIPT_STEP,
-        _JAVASCRIPT_STEP + '        # Python measured: 73.3\n', 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_anchor_decoy_between_gate_steps_is_invisible(tmp):
-    del tmp
-    workflow = _RATCHET_WORKFLOW.replace(
-        _JAVASCRIPT_STEP,
-        '      # Python measured: 73.3\n' + _JAVASCRIPT_STEP, 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_forged_step_payload_is_invisible_when_real_gate_exists(tmp):
-    del tmp
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP, _forged_python_step_payload() + _PYTHON_STEP, 1)
-    _assert_python_decoy_ignored(workflow)
-
-
-def test_forged_step_payload_cannot_replace_a_renamed_real_gate(tmp):
-    del tmp
-    ratchet = _ratchet()
-    renamed_step = _PYTHON_STEP.replace(
-        'coverage gate', 'coverage check')
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP, _forged_python_step_payload() + renamed_step, 1)
-    try:
-        ratchet.update(workflow, 80.0, 'python')
-    except SystemExit as why:
-        assert "step named 'Python coverage gate'; found 0" in str(why), why
-    else:
-        raise AssertionError('a forged payload replaced the renamed gate')
-
-
-def test_step_name_decoys_in_other_scalar_styles_are_invisible(tmp):
-    del tmp
-    decoys = (
-        '      - name: Scalar decoys\n'
-        '        env:\n'
-        '          FOLDED: >-\n'
-        '            - name: Python coverage gate\n'
-        '          QUOTED: "before\n'
-        '          - name: Python coverage gate\n'
-        '            after"\n'
-        '        run: "true"\n')
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP, decoys + _PYTHON_STEP, 1)
-    raised = _assert_python_gate_raised(workflow)
-    assert raised.count('- name: Python coverage gate') == 3, raised
-
-
-def test_semantic_gate_name_with_trailing_comment_is_accepted(tmp):
-    del tmp
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP,
-        '      - name: Python coverage gate # managed\n', 1)
-    _assert_python_gate_raised(workflow)
-
-
-def test_quoted_gate_name_with_extra_separation_is_accepted(tmp):
-    del tmp
-    workflow = _RATCHET_WORKFLOW.replace(
-        _PYTHON_STEP,
-        '      - name :    "Python coverage gate"\n', 1)
-    _assert_python_gate_raised(workflow)
-
-
-def test_trailing_comment_indentation_does_not_change_ownership(tmp):
-    del tmp
-    failures = []
-    for indent in (6, 8, 10):
-        comment = ' ' * indent + '# Python measured: 73.3\n'
-        workflow = _RATCHET_WORKFLOW.replace(
-            _JAVASCRIPT_STEP, comment + _JAVASCRIPT_STEP, 1)
-        try:
-            _assert_python_decoy_ignored(workflow)
-        except AssertionError as error:
-            failures.append(f'{indent}: {error}')
-    assert not failures, '\n'.join(failures)
-
-
-def test_renamed_gate_step_is_refused_by_expected_name(tmp):
-    del tmp
-    ratchet = _ratchet()
-    for language, step in (
-            ('python', _PYTHON_STEP),
-            ('javascript', _JAVASCRIPT_STEP)):
-        expected = step.partition('name: ')[2].strip()
-        renamed = _RATCHET_WORKFLOW.replace(
-            step, step.replace('coverage gate', 'coverage check'), 1)
-        try:
-            ratchet.update(renamed, 90.0, language)
-        except SystemExit as why:
-            assert f"step named '{expected}'" in str(why), why
-        else:
-            raise AssertionError(f'a renamed {language} gate was accepted')
-
-
-def test_the_ratchet_raises_the_floor_to_what_a_run_measured(tmp):
-    """The recorded measurement is what goes stale, so it is rewritten too."""
-    del tmp
-    ratchet = _ratchet()
-    raised = ratchet.update(_RATCHET_WORKFLOW, 80.0, 'python')
-    assert raised is not None, 'a measurement 8 points up justified no raise'
-    measured, floor = ratchet.read_calibration(raised, 'python')
-    assert measured == 80.0, raised
-    assert floor == 78.5, raised
-    assert '--fail-under=78.5' in raised, raised
-
-
-def test_the_ratchet_never_lowers_the_floor(tmp):
-    """A ratchet only turns one way: a run that reached fewer subprocesses is
-    not evidence that the code lost coverage."""
-    del tmp
-    ratchet = _ratchet()
-    for measured in (73.3, 72.0, 60.0, 73.4):
-        assert ratchet.update(
-            _RATCHET_WORKFLOW, measured, 'python') is None, measured
-
-
-def test_the_ratchet_leaves_a_raise_the_pinning_rule_accepts(tmp):
-    """Whatever it writes must satisfy the test that pins these numbers, or
-    the next run goes red on a file this script wrote."""
-    del tmp
-    ratchet = _ratchet()
-    for measured in (80.0, 91.7, 100.0):
-        raised = ratchet.update(_RATCHET_WORKFLOW, measured, 'python')
-        assert raised is not None, measured
-        recorded, floor = ratchet.read_calibration(raised, 'python')
-        assert floor < recorded, (floor, recorded)
-        assert recorded - floor <= 2.0, (recorded, floor)
-
-
-def test_the_ratchet_refuses_a_gate_that_already_disagrees(tmp):
-    """A flag that has drifted from its own comment is a hand fix, not
-    something to bake in under a fresh number."""
-    del tmp
-    ratchet = _ratchet()
-    disagreeing = _RATCHET_WORKFLOW.replace(
-        '--fail-under=72', '--fail-under=70')
-    try:
-        ratchet.update(disagreeing, 90.0, 'python')
-    except SystemExit as why:
-        assert 'fix that by hand' in str(why), why
-    else:
-        raise AssertionError('a disagreeing gate was rewritten anyway')
-
-
-def test_the_ratchet_refuses_a_file_carrying_no_calibration(tmp):
-    """Silently doing nothing would read as 'no raise justified'."""
-    del tmp
-    ratchet = _ratchet()
-    try:
-        ratchet.update(
-            'run: python -m coverage report\n', 90.0, 'python')
-    except SystemExit as why:
-        assert "step named 'Python coverage gate'" in str(why), why
-    else:
-        raise AssertionError('a file with no calibration was accepted')
-
-
-def test_present_gate_missing_measured_marker_records_no_calibration(tmp):
-    del tmp
-    ratchet = _ratchet()
-    workflow = _RATCHET_WORKFLOW.replace(
-        '        # Python measured: 73.3\n', '', 1)
-    try:
-        ratchet.update(workflow, 90.0, 'python')
-    except SystemExit as why:
-        assert str(why) == (
-            'the python coverage gate records no calibration'), why
-    else:
-        raise AssertionError('a gate missing its measured marker was accepted')
-
-
-def test_the_ratchet_rewrites_the_file_it_is_pointed_at(tmp):
-    """The entry point writes only when it raises, and says which it did."""
-    workflow = Path(tmp) / 'tests.yml'
-    workflow.write_text(_RATCHET_WORKFLOW, encoding='utf-8')
-    script = str(ROOT / 'scripts' / 'ci' / 'ratchet.py')
-
-    quiet = subprocess.run(
-        [sys.executable, script, '--language', 'python',
-         '--measured', '73.0',
-         '--workflow', str(workflow)],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
-    assert quiet.returncode == 0, (quiet.stdout, quiet.stderr)
-    assert 'justifies no raise' in quiet.stdout, quiet.stdout
-    assert workflow.read_text(encoding='utf-8') == _RATCHET_WORKFLOW
-
-    raised = subprocess.run(
-        [sys.executable, script, '--language', 'python',
-         '--measured', '80.0',
-         '--workflow', str(workflow)],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
-    assert raised.returncode == 0, (raised.stdout, raised.stderr)
-    assert 'raised the Python coverage floor 72.0 -> 78.5' \
-        in raised.stdout, raised.stdout
-    assert '--fail-under=78.5' in workflow.read_text(encoding='utf-8')
-
-
-def test_package_entry_point_reports_refused_workflow_yaml(tmp):
-    """A reader refusal must become the ratchet's decode diagnostic."""
-    workflow = Path(tmp) / 'refused.yml'
-    workflow.write_text(
-        'jobs:\n  coverage:\n    steps: not-a-sequence\n',
-        encoding='utf-8')
-    result = subprocess.run(
-        [sys.executable, '-m', 'scripts.ci.ratchet',
-         '--language', 'python', '--measured', '80.0',
-         '--workflow', str(workflow)],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=60)
-    assert result.returncode != 0, result.stdout
-    assert result.stdout == '', result.stdout
-    assert result.stderr == (
-        "cannot decode workflow YAML: job 'coverage' steps are not a "
-        'sequence\n'), result.stderr
-
-
-def test_the_ratchet_can_raise_the_real_workflow(tmp):
-    """The regexes are pinned against the file they actually run on, not only
-    against the fixture above."""
-    del tmp
-    ratchet = _ratchet()
-    text = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    recorded, floor = ratchet.read_calibration(text, 'python')
-    assert floor < recorded, (floor, recorded)
-    raised = ratchet.update(text, recorded + 5.0, 'python')
-    assert raised is not None, 'the real workflow refused a five-point raise'
-    new_measured, new_floor = ratchet.read_calibration(raised, 'python')
-    assert new_measured == recorded + 5.0, new_measured
-    assert new_floor > floor, (new_floor, floor)
-
-
-def test_each_coverage_ratchet_records_what_it_was_calibrated_to(tmp):
-    """The floor, the flag and the measurement it was set against agree.
-
-    The ratchet is raised by hand, so nothing keeps it near the number it was
-    calibrated against except someone remembering — and it had drifted 3.2
-    points below measured coverage, which is a regression budget rather than
-    a ratchet. Pinning the recorded measurement next to the floor makes
-    raising one without the other fail here instead of silently widening it.
-    """
-    del tmp
-    workflow = (_util.ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    ratchet = _ratchet()
+    data = _document()
     for language in ('python', 'javascript'):
-        measured, floor = ratchet.read_calibration(workflow, language)
-        assert floor < measured, (language, floor, measured)
-        assert measured - floor <= 2.0, (
-            f'the {language} ratchet allows a '
-            f'{measured - floor:.1f} point regression')
+        assert ratchet.update(data, Decimal('0.0'), language) is None
 
 
-def test_languages_ratchet_independently(tmp):
-    """Raising either trio must leave the other one byte-for-byte alone."""
-    del tmp
-    ratchet = _ratchet()
-    python_before = ratchet.read_calibration(_RATCHET_WORKFLOW, 'python')
-    javascript_before = ratchet.read_calibration(
-        _RATCHET_WORKFLOW, 'javascript')
+def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
+    """Sequential invocations retain the other language and complete map."""
+    thresholds = _thresholds()
+    path = _copy_thresholds(tmp)
+    first = _run_ratchet(tmp, 'python', '81.6', path)
+    assert first.returncode == 0, (first.stdout, first.stderr)
+    second = _run_ratchet(tmp, 'javascript', '37.1', path)
+    assert second.returncode == 0, (second.stdout, second.stderr)
+    data = thresholds.load(path)
+    assert data['coverage']['python'] == {
+        'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
+    assert data['coverage']['javascript'] == {
+        'measured': Decimal('37.1'), 'floor': Decimal('35.6')}
+    assert data['module_size_baseline'] == {
+        'tests/test_cli.py': 1238,
+        'tests/test_mcp_server.py': 1706,
+    }
 
-    python_raise = ratchet.update(_RATCHET_WORKFLOW, 80.0, 'python')
-    assert python_raise is not None
-    javascript_text = _RATCHET_WORKFLOW.partition(
-        '        # JavaScript measured:')[2]
-    assert python_raise.partition(
-        '        # JavaScript measured:')[2] == javascript_text
-    assert ratchet.read_calibration(
-        python_raise, 'javascript') == javascript_before
-    assert ratchet.read_calibration(python_raise, 'python') == (80.0, 78.5)
 
-    javascript_raise = ratchet.update(
-        _RATCHET_WORKFLOW, 40.0, 'javascript')
-    assert javascript_raise is not None
-    python_text = _RATCHET_WORKFLOW.partition(
-        '        # JavaScript measured:')[0]
-    assert javascript_raise.partition(
-        '        # JavaScript measured:')[0] == python_text
-    assert ratchet.read_calibration(
-        javascript_raise, 'python') == python_before
-    assert ratchet.read_calibration(
-        javascript_raise, 'javascript') == (40.0, 38.5)
+def test_cli_noop_does_not_rewrite_or_refresh_measurement(tmp):
+    """No-op ratchets leave bytes untouched, including recorded measured."""
+    path = _copy_thresholds(tmp)
+    before = path.read_bytes()
+    result = _run_ratchet(tmp, 'python', '80.0', path)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert path.read_bytes() == before
+    assert 'no raise' in result.stdout
+
+
+def test_cli_rejects_the_retired_workflow_option(tmp):
+    """Workflow source is no longer an input or a second state authority."""
+    path = _copy_thresholds(tmp)
+    result = subprocess.run(
+        [sys.executable, str(RATCHET_PATH), '--language', 'python',
+         '--measured', '81.6', '--workflow', str(path)], cwd=str(ROOT),
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode != 0
+    assert '--workflow' in result.stderr
+
+
+def test_shipped_file_forcing_measurement_is_derived_and_capped(tmp):
+    """The real-file regression derives forcing and never invents >100."""
+    thresholds = _thresholds()
+    source = thresholds.load(THRESHOLDS_PATH)
+    recorded, _floor = thresholds.coverage(source, 'python')
+    forcing = recorded + Decimal('5.0')
+    forcing = min(forcing, Decimal('100.0'))
+    path = Path(tmp) / 'shipped-copy.json'
+    thresholds.write(path, source)
+    result = _run_ratchet(tmp, 'python', forcing, path)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    actual = thresholds.load(path)
+    assert actual['coverage']['python']['measured'] == forcing
+
+
+def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
+    """Decoded real gate steps flip when only the copied floor changes."""
+    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    job = complete_job_mapping(workflow, 'coverage')
+    assert job is not None
+    steps = {step['name']: step for step in job['steps']
+             if step.get('name') in ('Python coverage gate',
+                                     'JavaScript coverage gate')}
+    assert set(steps) == {'Python coverage gate', 'JavaScript coverage gate'}
+
+    work = Path(tmp) / 'tree'
+    work.mkdir()
+    (work / '.github').mkdir()
+    (work / 'scripts' / 'ci').mkdir(parents=True)
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
+                 work / 'scripts' / 'ci' / 'thresholds.py')
+    (work / '.github' / 'ci-thresholds.json').write_text(
+        json.dumps(_document(python=(80.0, 78.5), javascript=(50.0, 48.5))),
+        encoding='utf-8')
+    (work / 'fixture.py').write_text(
+        '\n'.join(f'line_{index} = {index}' for index in range(10)) + '\n',
+        encoding='utf-8')
+    python_bin = work / 'bin'
+    python_bin.mkdir()
+    shutil.copy2(sys.executable, python_bin / 'python')
+    import coverage
+    cov = coverage.Coverage(data_file=str(work / '.coverage'))
+    cov.start()
+    cov.stop()
+    cov.erase()
+    cov = coverage.Coverage(data_file=str(work / '.coverage'))
+    cov.get_data().add_lines({str(work / 'fixture.py'): set(range(1, 9))})
+    cov.save()
+    environment = dict(os.environ)
+    environment['PATH'] = f'{python_bin}{os.pathsep}{environment["PATH"]}'
+    good = run_step(work, steps['Python coverage gate'], environment,
+                    workflow={}, job={})
+    assert good.returncode == 0, (good.stdout, good.stderr)
+    document = _document(python=(82.0, 80.5), javascript=(50.0, 49.0))
+    (work / '.github' / 'ci-thresholds.json').write_text(
+        json.dumps(document), encoding='utf-8')
+    bad = run_step(work, steps['Python coverage gate'], environment,
+                   workflow={}, job={})
+    assert bad.returncode != 0, (bad.stdout, bad.stderr)
 
 
 def _git(repo, *args):
-    """Run one git command inside a fixture repository."""
     return subprocess.run(('git', '-C', str(repo)) + args, check=True,
                           capture_output=True, text=True, timeout=60)
 
 
-def _ratchet_subject_chain():
-    """The subject-selection chain, exactly as the workflow ships it.
-
-    The anchor is the if arm: a chain with the if/elif files exchanged
-    is refused here rather than extracted, because this test's contract
-    is this chain's spelling.
-    """
-    anchor = 'git diff --quiet -- scripts/ci/size_baseline.py'
-    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    lines = workflow.splitlines()
-    begins = [
-        index for index, line in enumerate(lines)
-        if line.lstrip().startswith('if ') and anchor in line]
-    assert len(begins) == 1, (
-        f'expected one if arm testing {anchor!r} in tests.yml, found '
-        f'{len(begins)} at {begins}: the extracted chain shape changed')
-    start = begins[0]
-    indent = lines[start][:-len(lines[start].lstrip())]
-    end = next((index for index in range(start, len(lines))
-                if lines[index] == f'{indent}fi'), None)
-    assert end is not None, (
-        f'no fi at indent {len(indent)} below the if arm testing '
-        f'{anchor!r} at tests.yml:{start + 1}: the extracted chain '
-        'shape changed')
-    chain = '\n'.join(lines[start:end + 1])
-    assert '.github/workflows/tests.yml' in chain, chain
-    assert 'raise coverage ratchets and tighten module sizes' in chain, chain
-    return chain
-
-
-def _subject_selected(repo, chain):
-    """The bare subject the chain announces, run in `repo`."""
-    done = subprocess.run(
-        [_util.workflow_bash(), '-e', '-o', 'pipefail', '-c', chain],
-        cwd=repo, env=_util.child_coverage('scrub'),
-        capture_output=True, text=True, timeout=60)
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    line = done.stdout.strip()
-    assert line.startswith('subject='), line
-    return line[len('subject='):]
-
-
-def test_ratchet_subject_names_a_file_that_moved(tmp):
-    """A subject announces the file that moved, never the one that did not.
-
-    `git diff --quiet -- <path>` exits 0 when the path is unchanged, so an
-    unnegated condition reaches the arm for the file that did NOT move: a
-    coverage-only raise announced a module-size tighten and the other way
-    round, which titled ratchet commits for a file none of them touched.
-    """
-    chain = _ratchet_subject_chain()
-    workflow_rel = '.github/workflows/tests.yml'
-    baseline_rel = 'scripts/ci/size_baseline.py'
-    cases = (
-        ((workflow_rel,), 'raise the coverage ratchets'),
-        ((baseline_rel,), 'tighten the module size baseline'),
-        ((workflow_rel, baseline_rel),
-         'raise coverage ratchets and tighten module sizes'),
-    )
-    repo = Path(tmp) / 'subjects'
-    repo.mkdir()
+def _seed_publisher_tree(repo, data):
+    (repo / '.github').mkdir(parents=True)
+    (repo / 'scripts' / 'ci').mkdir(parents=True)
+    (repo / 'tests').mkdir()
+    _thresholds().write(repo / '.github' / 'ci-thresholds.json', data)
+    for path in (RATCHET_PATH, SIZE_PATH,
+                 ROOT / 'scripts' / 'ci' / 'thresholds.py'):
+        shutil.copy2(path, repo / 'scripts' / 'ci' / path.name)
+    (repo / 'tests' / 'test_mcp_server.py').write_text(
+        'value = 1\n' * 1706, encoding='utf-8')
     _git(repo, 'init', '-q')
     _git(repo, 'config', 'user.email', 'tests@example.invalid')
     _git(repo, 'config', 'user.name', 'Tests')
-    for rel in (workflow_rel, baseline_rel):
-        path = repo / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f'# {rel}\n', encoding='utf-8')
-    _git(repo, 'add', '-f', '.')
+    _git(repo, 'add', '.')
     _git(repo, 'commit', '-qm', 'base')
-    for changed, subject in cases:
-        for rel in (workflow_rel, baseline_rel):
-            path = repo / rel
-            path.write_text(f'# {rel}\n', encoding='utf-8')
-        for rel in changed:
-            (repo / rel).write_text(
-                f'# {rel}\n# moved\n', encoding='utf-8')
-        assert _subject_selected(repo, chain) == subject, changed
+
+
+def _publisher_step():
+    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    job = complete_job_mapping(workflow, 'coverage')
+    return next(step for step in job['steps']
+                if step.get('name') == 'Work out the raise this run justifies')
+
+
+def _publisher_python(tmp, values):
+    """Create a command shim that stubs only coverage measurement commands."""
+    real = Path(sys.executable)
+    shim = Path(tmp) / 'bin'
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.mkdir()
+    command = shim / 'python'
+    command.write_text(
+        '#!/bin/sh\n'
+        'if [ "$1" = "-m" ] && [ "$2" = "coverage" ]; then\n'
+        '  printf "%s\\n" "$PYTHON_MEASURED"\n'
+        '  exit 0\n'
+        'fi\n'
+        'if [ "$1" = "scripts/ci/js_coverage.py" ]; then\n'
+        '  printf "%s\\n" "$JAVASCRIPT_MEASURED"\n'
+        '  exit 0\n'
+        'fi\n'
+        f'exec {real} "$@"\n', encoding='utf-8')
+    command.chmod(0o755)
+    return shim, values
+
+
+def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
+    """The decoded producer executes real ratchets and stages one JSON path."""
+    repo = Path(tmp) / 'publisher'
+    repo.mkdir()
+    _seed_publisher_tree(repo, _document())
+    shim, values = _publisher_python(Path(tmp) / 'shim', {
+        'PYTHON_MEASURED': '81.6', 'JAVASCRIPT_MEASURED': '35.5'})
+    env = dict(os.environ)
+    env.update(values)
+    env['PATH'] = f'{shim}{os.pathsep}{env["PATH"]}'
+    output = Path(tmp) / 'github-output'
+    summary = Path(tmp) / 'github-summary'
+    output.touch()
+    summary.touch()
+    env['GITHUB_OUTPUT'] = str(output)
+    env['GITHUB_STEP_SUMMARY'] = str(summary)
+    done = run_step(repo, _publisher_step(), env, workflow={}, job={})
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert 'changed=true' in output.read_text(encoding='utf-8')
+    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
+        '.github/ci-thresholds.json']
+    checked = subprocess.run(
+        [sys.executable, str(repo / 'scripts' / 'ci' / 'thresholds.py'),
+         '--check', '--thresholds',
+         str(repo / '.github' / 'ci-thresholds.json')],
+        cwd=repo, capture_output=True, text=True, timeout=60)
+    assert checked.returncode == 0, (checked.stdout, checked.stderr)
+
+
+def test_real_publisher_step_noop_reports_unchanged(tmp):
+    """A run below both high waters creates no publishable diff."""
+    repo = Path(tmp) / 'publisher-noop'
+    repo.mkdir()
+    _seed_publisher_tree(repo, _document())
+    shim, values = _publisher_python(Path(tmp) / 'shim-noop', {
+        'PYTHON_MEASURED': '80.0', 'JAVASCRIPT_MEASURED': '35.5'})
+    env = dict(os.environ)
+    env.update(values)
+    env['PATH'] = f'{shim}{os.pathsep}{env["PATH"]}'
+    output = Path(tmp) / 'github-output-noop'
+    summary = Path(tmp) / 'github-summary-noop'
+    output.touch()
+    summary.touch()
+    env['GITHUB_OUTPUT'] = str(output)
+    env['GITHUB_STEP_SUMMARY'] = str(summary)
+    done = run_step(repo, _publisher_step(), env, workflow={}, job={})
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert 'changed=false' in output.read_text(encoding='utf-8')
+    assert _git(repo, 'diff', '--name-only').stdout == ''
 
 
 def main():

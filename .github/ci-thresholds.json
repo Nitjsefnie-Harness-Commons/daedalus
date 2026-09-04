@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "coverage": {
+    "python": {
+      "measured": 94.4,
+      "floor": 92.9
+    },
+    "javascript": {
+      "measured": 35.5,
+      "floor": 34.0
+    }
+  },
+  "module_size_baseline": {
+    "tests/_pyroute.py": 738,
+    "tests/_pyroute_state.py": 780,
+    "tests/test_bridge_results.py": 1343,
+    "tests/test_cli.py": 1238,
+    "tests/test_mcp_server.py": 1706,
+    "tests/test_tab_routing.py": 793
+  }
+}
