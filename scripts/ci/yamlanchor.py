@@ -1,19 +1,20 @@
 """Read the node properties a workflow scalar may carry before its value.
 
-`!` is refused along with every other non-string tag: PyYAML resolves a
-non-specifically tagged scalar by default resolution, so `! 5` is the
-number 5 and accepting it would return a value no parser calls a string.
+Bare `!` is outside this bounded textual subset because honoring it requires
+schema and tag resolution that this reader does not perform.  The
+`yaml.BaseLoader` oracle still returns text for explicitly string-shaped
+values; this module only recognizes the explicit ``!!str`` tag.
 """
 import re
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level
-    from .yamlscalar import YAMLReadError, _strip_inline_comment
+    from .yamlscalar import YAMLReadError
 else:
-    from yamlscalar import YAMLReadError, _strip_inline_comment
+    from yamlscalar import YAMLReadError
 
 
-ALIAS = re.compile(r'\*(?P<name>[^\s\[\]{},]+)')
+_ALIAS = re.compile(r'\*(?P<name>[^\s\[\]{},]+)')
 _ANCHOR_NAME = re.compile(r'[^\s\[\]{},]+')
 _STRING_TAGS = ('!!str',)
 
@@ -21,8 +22,8 @@ _STRING_TAGS = ('!!str',)
 def node_properties(value):
     """Split leading anchor and tag tokens off `value`, refusing nothing.
 
-    A document-wide scan meets values this reader never decodes, so a
-    malformed property is `strip_node_properties`'s refusal to make.
+    A document-wide scan meets values this reader never decodes, so malformed
+    properties are left for `validate_node_properties` to refuse.
     """
     tokens = []
     while value[:1] in ('&', '!'):
@@ -34,14 +35,8 @@ def node_properties(value):
     return tokens, value
 
 
-def strip_node_properties(value, owner):
-    """The content of `value` after its properties and one inline comment.
-
-    The properties come off before the comment is read, so a quote that
-    opens after an anchor or a tag keeps its `#` text.
-    """
-    tokens, content = node_properties(value)
-    content = _strip_inline_comment(content.strip(' \t'))
+def validate_node_properties(tokens, owner):
+    """Validate already-lexed anchor and tag tokens."""
     anchor = tag = None
     for token in tokens:
         if token.startswith('&'):
@@ -60,4 +55,27 @@ def strip_node_properties(value, owner):
                     f'{owner} has an unsupported YAML tag {tag}: only !!str '
                     'resolves to a string, and a guess at what a parser '
                     'makes of any other is worse than a refusal')
-    return content
+
+
+def parse_alias(value, owner):
+    """Return a complete alias name, or refuse malformed alias text."""
+    if not value.startswith('*'):
+        return None
+    match = _ALIAS.fullmatch(value)
+    if match is None:
+        raise YAMLReadError(f'{owner} has a malformed YAML alias')
+    return match.group('name')
+
+
+def has_anchor_spelling(value, name):
+    """Return whether `value` contains the exact spelling ``&name``."""
+    spelling = f'&{name}'
+    for index in range(len(value) - len(spelling) + 1):
+        if value[index:index + len(spelling)] != spelling:
+            continue
+        before = value[index - 1:index]
+        after = value[index + len(spelling):index + len(spelling) + 1]
+        if ((not before or before.isspace() or before in '[] {},')
+                and (not after or after.isspace() or after in '[] {},')):
+            return True
+    return False
