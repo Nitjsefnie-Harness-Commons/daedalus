@@ -24,12 +24,13 @@ on:
     # this a second time against the same SHA, and a branch with no pull
     # request open is not a tree anyone is reviewing.
     branches: [main]
-    # No paths filter here: at least one gate must run on every commit
-    # that can be tagged; tests.yml, audit.yml and codeql.yml are the
-    # unfiltered set.
+    # Threshold state is produced by the tests workflow. A push containing
+    # only that data skips this expensive analysis; source pushes still run.
+    paths-ignore:
+      - '.github/ci-thresholds.json'
     # release.yml names no workflow of its own — it waits on the runs
     # for the tagged SHA and fails when the count of non-release runs
-    # is zero; version keeps its path filter.
+    # is zero; audit.yml remains the repository-controlled unfiltered gate.
   pull_request:
   schedule:
     # Wednesday 03:47 UTC. Off the hour and off Monday deliberately: the top
