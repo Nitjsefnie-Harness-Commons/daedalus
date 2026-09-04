@@ -296,14 +296,17 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
     thresholds = _thresholds()
     target = Path(tmp) / 'thresholds.json'
     target.write_bytes(b'legacy\n')
-    os.chmod(target, 0o640)
+    os.chmod(target, 0o400)
+    expected_mode = stat.S_IMODE(target.stat().st_mode)
+    if os.name == 'posix':
+        assert expected_mode == 0o400
     thresholds.write(target, _valid())
     first = target.read_bytes()
     assert first.endswith(b'\n'), first
     assert b'NaN' not in first
     assert thresholds.load(target)['coverage']['python']['measured'] \
         == Decimal('94.4')
-    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert stat.S_IMODE(target.stat().st_mode) == expected_mode
     thresholds.write(target, thresholds.load(target))
     assert target.read_bytes() == first
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
