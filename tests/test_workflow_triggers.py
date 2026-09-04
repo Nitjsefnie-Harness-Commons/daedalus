@@ -5,6 +5,7 @@ These tests read workflow trigger blocks through the bounded reader and keep
 the paired-event policy contracts together as the set grows.
 """
 import sys
+import fnmatch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -101,6 +102,11 @@ def _assert_workflow_trigger_filters_match(workflows):
         if 'pull_request' not in triggers or 'push' not in triggers:
             continue
         checked.append(path.name)
+        if path.name in ('tests.yml', 'codeql.yml'):
+            assert not _workflow_path_filters(
+                triggers['pull_request'], path.name), (
+                    f'{path.name} pull_request trigger must remain unfiltered')
+            continue
         filters = [_workflow_path_filters(triggers[event], path.name)
                    for event in ('push', 'pull_request')]
         assert filters[0] == filters[1], (
@@ -178,24 +184,94 @@ def test_workflow_trigger_gate_rejects_quote_collisions_and_accepts_comments(
             raise AssertionError(f'{name}: unequal filters were accepted')
 
 
-def test_contribution_gates_have_unfiltered_push_triggers(tmp):
-    """The three unfiltered contribution workflows run on every push to main.
+def _workflow_runs_for_paths(path, event, changed):
+    """Evaluate the repository's parsed trigger filter for changed paths."""
+    text = path.read_text(encoding='utf-8')
+    triggers = _workflow_triggers(text, path.name)
+    if event not in triggers:
+        return False
+    filters = _workflow_path_filters(triggers[event], path.name)
+    ignored = filters.get('paths-ignore', [])
+    return not ignored or any(
+        not any(fnmatch.fnmatchcase(item, pattern) for pattern in ignored)
+        for item in changed)
 
-    This test owns the release-safety direction: release.yml finds these runs
-    by the shared commit SHA, so a Markdown-only push must not be filtered.
-    """
+
+def test_threshold_only_push_skips_only_expensive_gates(tmp):
+    """Only the exact data file is ignored on expensive push workflows."""
     del tmp
-    gate_names = ('tests.yml', 'audit.yml', 'codeql.yml')
     workflows = ROOT / '.github' / 'workflows'
-    for name in gate_names:
+    threshold = '.github/ci-thresholds.json'
+    source = 'server.py'
+    for name in ('tests.yml', 'codeql.yml'):
+        path = workflows / name
+        assert _workflow_runs_for_paths(path, 'push', [threshold]) is False
+        assert _workflow_runs_for_paths(path, 'push', [threshold, source])
+        assert _workflow_runs_for_paths(path, 'push', [source])
+        assert _workflow_runs_for_paths(path, 'pull_request', [threshold])
+        triggers = _workflow_triggers(path.read_text(encoding='utf-8'), name)
+        assert _workflow_path_filters(triggers['push'], name) == {
+            'paths-ignore': [threshold]}
+        assert not _workflow_path_filters(triggers['pull_request'], name)
+
+    audit = workflows / 'audit.yml'
+    assert _workflow_runs_for_paths(audit, 'push', [threshold])
+    assert _workflow_runs_for_paths(audit, 'push', [threshold, source])
+    assert not _workflow_path_filters(
+        _workflow_triggers(audit.read_text(encoding='utf-8'), 'audit.yml')
+        ['push'], 'audit.yml')
+
+
+def test_threshold_filter_mutations_change_the_run_set(tmp):
+    """Deleting or broadening either ignore is visible through real parsing."""
+    workflows = Path(tmp) / 'workflows'
+    workflows.mkdir()
+    source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    threshold = "      - '.github/ci-thresholds.json'\n"
+    push_block = "    paths-ignore:\n" + threshold
+    for label, mutated in (
+            ('missing', source.replace(push_block, '', 1)),
+            ('broad', source.replace(
+                "      - '.github/ci-thresholds.json'",
+                "      - '.github/**'", 1))):
+        path = workflows / f'{label}.yml'
+        path.write_text(mutated, encoding='utf-8')
+        assert _workflow_runs_for_paths(
+            path, 'push', ['.github/ci-thresholds.json']) \
+            is (label == 'missing')
+        if label == 'broad':
+            assert _workflow_runs_for_paths(
+                path, 'push',
+                ['.github/ci-thresholds.json',
+                 '.github/workflows/source.yml']) \
+                is False
+
+    audit_source = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
+        encoding='utf-8')
+    audit_mutated = audit_source.replace(
+        '  push:\n    # main only.',
+        "  push:\n    paths-ignore:\n      - '.github/ci-thresholds.json'\n"
+        '    # main only.', 1)
+    audit_path = workflows / 'audit.yml'
+    audit_path.write_text(audit_mutated, encoding='utf-8')
+    assert _workflow_runs_for_paths(
+        audit_path, 'push', ['.github/ci-thresholds.json']) is False
+
+
+def test_contribution_gates_have_unfiltered_push_triggers(tmp):
+    """Audit stays the repository-controlled run for every data-only push."""
+    del tmp
+    workflows = ROOT / '.github' / 'workflows'
+    for name in ('tests.yml', 'codeql.yml', 'audit.yml'):
         path = workflows / name
         assert path.is_file(), f'named contribution gate is missing: {name}'
         triggers = _workflow_triggers(
             path.read_text(encoding='utf-8'), name)
         assert 'push' in triggers, f'{name} has no push trigger'
-        assert not _workflow_path_filters(triggers['push'], name), (
-            f'{name} filters its push trigger: '
-            f'{_workflow_path_filters(triggers["push"], name)}')
+    audit = _workflow_triggers(
+        (workflows / 'audit.yml').read_text(encoding='utf-8'), 'audit.yml')
+    assert not _workflow_path_filters(audit['push'], 'audit.yml')
     for retired in ('lint.yml', 'types.yml', 'eslint.yml', 'actionlint.yml'):
         assert not (workflows / retired).exists(), (
             f'moved gate workflow still exists: {retired}')
