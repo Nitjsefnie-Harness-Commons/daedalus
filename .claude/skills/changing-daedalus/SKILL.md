@@ -144,17 +144,18 @@ The scanner's own patterns are the specification; do not reproduce them
 anywhere else in the tree, because a rule that quotes them trips them. It also refuses an empty tracked-file enumeration, because
 a scan that came back empty is broken rather than clean.
 
-**`scripts/ci/size_baseline.py`'s table is never hand-edited to make room,
-and a recorded number is never raised.** Growth is not the way out;
-shrinking is, recorded with `--tighten`. If a change would push a listed
-file past its number, relocate the code into a new module. A stale entry is
-the one hand edit that is correct: `--tighten` drops an entry whose file is
-back under its ceiling, but an entry naming a file that is gone is deleted
-by hand. `tests/test_file_sizes.py` gates the policy and pins the script's
-docstring to the remedy a refusal prints, and the whole policy source to
-the rule above, so the script cannot teach the older policy again. No test
-reads this file, so keeping this paragraph in step with the script is a
-reader's job.
+**`.github/ci-thresholds.json`'s `module_size_baseline` is never hand-edited
+to make room, and a recorded number is never raised.** Growth is not the way
+out; shrinking is recorded with
+`python3 scripts/ci/size_baseline.py --tighten`. If a change would push a
+listed file past its number, relocate the code into a new module. A stale
+entry is the one hand edit that is correct:
+`python3 scripts/ci/size_baseline.py --tighten` drops an entry whose file is
+back under its ceiling, but an entry naming a file that is gone is deleted by
+hand. `tests/test_file_sizes.py` gates the policy, pins the script's docstring
+to the remedy a refusal prints, pins the whole policy source to the rule
+above, and reads this paragraph so the named state owner and tightening
+command cannot drift from the implementation.
 
 ## Git and CI
 

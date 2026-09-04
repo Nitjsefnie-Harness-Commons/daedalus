@@ -64,6 +64,7 @@
 # ─── .github ───
 !/.github/
 !/.github/PULL_REQUEST_TEMPLATE.md
+!/.github/ci-thresholds.json
 !/.github/dependabot.yml
 
 # ─── .github/ISSUE_TEMPLATE ───
@@ -224,6 +225,7 @@
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/speed_summary.py
+!/scripts/ci/thresholds.py
 !/scripts/ci/time_tests.py
 !/scripts/ci/workflow_yaml.py
 !/scripts/ci/yamlanchor.py
@@ -328,6 +330,7 @@
 !/tests/test_checkout_pin.py
 !/tests/test_child_coverage.py
 !/tests/test_ci_ratchets.py
+!/tests/test_ci_thresholds.py
 !/tests/test_ci_workflows.py
 !/tests/test_claim_workflow.py
 !/tests/test_cli.py

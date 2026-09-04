@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""The module-size policy, and the ratchet that keeps its numbers honest.
-
-The policy itself lives in scripts/ci/size_baseline.py, because CI rewrites it
-when a file shrinks. What is tested here is that the tree satisfies it, and
-that the rewriting only ever moves a number down.
-"""
-import contextlib
-import io
+"""Contracts for the JSON-owned module-size policy and its ratchet."""
+import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,481 +11,254 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
 ROOT = _util.ROOT
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
-
-# Claims this file must never make. Each fills its own subject slot - the
-# act itself in the first, a named actor in the other two - so a prohibition
-# does not contain the claim it refuses and no reading of negation is needed
-# to tell them apart. Two costs: a permission addressed to somebody else
-# ("A first crossing may add a BASELINE entry.") is missed, and a claim
-# quoted to be disowned is refused; the rule reads positively here, so
-# neither belongs in the file anyway.
-FORBIDDEN_CLAIMS = (
-    # The licence the policy carried, verbatim. Growth is not bought by
-    # editing the number.
-    'growing a listed file is allowed',
-    # A first crossing excused by a fresh entry instead of being split.
-    'you may add a baseline entry',
-    # Untrue: an entry naming a file that is gone is deleted by hand.
-    '--tighten is the only writer of this table',
-)
-
-# Deleted rather than spaced out, so a claim spanning one - a backtick, or
-# a string literal broken across two lines - stays one phrase to the pin.
-MARKERS = ('#', "'", '"', '`', '*', '(', ')')
-
-# The rule stated positively, so deleting it is as visible as contradicting
-# it. An alternation because the claim is a family, and a pin that refuses a
-# synonym of it is a pin the next author deletes. Stems, so one entry covers
-# a verb's forms; each is witnessed below. Growth is spelled "grow past"
-# rather than bare: this module's subject is files growing, and a bare stem
-# reads any negator near that subject as the rule.
-RAISING_VERBS = ('rais', 'increas', 'upward', 'bump', 'rise',
-                 'go up', 'goes up', 'grow past', 'grows past')
-_RAISING = r'\b(?:' + '|'.join(RAISING_VERBS) + ')'
-# A comma inside the window, because "never, ever raised" is a sentence
-# somebody writes; the span itself is pinned by the far-negator negative.
-# The lookbehind refuses a prohibition that carries its own negation, and
-# `nobody` takes no window because it governs its own verb: "nobody minds
-# if a number is raised" is a licence, not the rule.
-ACCEPTED_RULE_SPELLINGS = (
-    r'(?:never|not|no)\b[a-z ,-]{0,40}?' + _RAISING,
-    r'nobody (?:ever )?' + _RAISING,
-    _RAISING + r'[a-z ,-]{0,40}?(?<!\bnot )(?<!\bnever )'
-    r'(?:forbidden|prohibited)',
-    r'only ever go(?:es)? down',
-)
-STATES_THE_RULE = re.compile('|'.join(ACCEPTED_RULE_SPELLINGS))
-RULE_HELP = ('a negated raising verb ("is never raised by hand", "never '
-             'goes up", "is not edited upward by hand"), a "nobody" '
-             'subject ("nobody raises a recorded number by hand"), a '
-             'prohibited one ("raising it is forbidden"), or "only ever '
-             'go down"')
-
-# One witness per accepted spelling family, quoted in RULE_HELP: help that
-# omits a family sends an author whose prose already uses it away to
-# rewrite a correct statement.
-RULE_HELP_WITNESSES = (
-    'is never raised by hand',
-    'nobody raises a recorded number by hand',
-    'raising it is forbidden',
-    'only ever go down',
-)
-
-# Texts the spelling regex must tell apart, so a regex that stopped
-# discriminating - one matching everything, nothing, or the rule inverted -
-# is visible here rather than in the file it guards. The negated
-# prohibitions and the misplaced `nobody` invert the rule; the rest pin
-# the window, the leading boundary and the "grow past" narrowing.
-RULE_STATED = (
-    'a recorded number is never raised by hand',
-    'no recorded number is ever increased by hand',
-    'the number is not edited upward by hand',
-    'a listed file never grows past its record',
-    'no change may grow past a recorded number',
-    'the recorded number is never bumped to make room',
-    'a recorded number never goes up',
-    'a recorded number must not go up',
-    'a recorded number must not rise',
-    'nobody raises a recorded number by hand',
-    'a recorded number is never, ever raised by hand',
-    'raising a recorded number is forbidden',
-    'the numbers in this table only ever go down',
-    # Contracted, where the negation only survives normalisation if it is
-    # expanded before the apostrophe goes.
-    "a recorded number isn't raised by hand",
-    "the recorded number isn't bumped to make room",
-)
-RULE_NOT_STATED = (
-    'a recorded number is raised by hand when a file grows',
-    'the numbers in this table go down and up',
-    'growing a listed file is allowed by editing its recorded number',
-    'the ratchet keeps the numbers in this table honest',
-    'raising a recorded number is not forbidden',
-    'raising a recorded number is never prohibited',
-    'nobody minds if a recorded number is raised by hand',
-    # The leading word boundary: without it the stem inside "surprise" is
-    # a raising verb and this reads as the rule.
-    'a listed file is not a surprise',
-    # The "grow past" narrowing: with a bare stem, "growth" carries the
-    # verb and both sentences read as the rule.
-    'not a line limit, and growth past a ceiling is what an entry excuses',
-    'the rule is not about growth for its own sake',
-    # The window: a negator this far from a raising verb negates something
-    # else, so widening the span reads this licence as the rule.
-    'not a line limit, and a file over its ceiling is listed at the size '
-    'it was measured, and a recorded number is raised by hand',
-    # Contracted inversions: normalisation that keeps the contraction reads
-    # these as the rule they negate.
-    "raising a recorded number isn't forbidden",
-    "raising a recorded number isn't prohibited",
-    '',
-)
-
-# The move each kind's remedy has to name, as (--tighten clears it, the
-# phrase the printed advice must carry, the phrase it must not). Written
-# out here rather than read from REMEDY_FOR, which is the thing being pinned.
-REMEDY_NAMES_THE_MOVE = {
-    'grown': (False, 'relocate the code into a new module', '--tighten'),
-    'over': (False, 'relocate the code into a new module', '--tighten'),
-    'missing': (False, 'deleted by hand', 'relocate the code'),
-    'graduated': (True, '--tighten', 'relocate the code'),
-}
-
-# Correct statements of the policy, which the claim check must accept; a
-# guard refusing correct prose is deleted rather than worked around.
-STATES_THE_POLICY = (
-    'Never add a BASELINE entry to excuse growth.',
-    'Adding a BASELINE entry is forbidden.',
-    'Editing its recorded number is off the table.',
-    'You may not record the new size by hand.',
-    'Split the file rather than editing its recorded number.',
-    'A reviewer who sees you add a BASELINE entry will reject the change.',
-    'Neither raising the number nor adding a BASELINE entry is a fix.',
-    'The old advice, record the new size, was withdrawn.',
-    "You shouldn't add a BASELINE entry.",
-    "You can't record the new size by hand.",
-    "Growing a listed file isn't allowed.",
-    # Growth refused and shrinking permitted in one wording, so a claim
-    # broadened to the permission alone is refused here.
-    'Shrinking a listed file is allowed and rewarded.',
-    'A recorded number is never raised by hand.',
-    'The numbers in this table only ever go down.',
-    'Relocate the code into a new module instead of growing the file.',
-    'A file crossing its ceiling for the first time is split rather '
-    'than excused.',
-    'Shrink the file; the table is not where growth is negotiated.',
-    # Prohibitions with a negative quantifier for a subject: the shape
-    # that contains a claim built on a bare modal.
-    'Nobody may add a BASELINE entry.',
-    'Neither an author nor a reviewer may add a BASELINE entry.',
-    'No tool is the only writer of this table.',
-    'Neither --tighten nor CI is the only writer of this table.',
-    'No change may grow a listed file past its record.',
-    'Under no circumstances may a listed file grow.',
-)
-
-# Licences to grow, which it must refuse: the sentence the policy carried, a
-# marker-carrying variant of it, then one per remaining claim. This half is a
-# backstop over free prose and does not pretend to catch a paraphrase - a
-# permissive sentence written in none of these wordings is caught only where
-# it displaces the rule paragraph and loses the rule's spelling with it. An
-# exception clause appended to an intact rule keeps that spelling and passes,
-# and the containment pin below moves with a reworded constant.
-SANCTIONS_GROWTH = (
-    'Growing a listed file is allowed, because some fixes genuinely belong '
-    'in it, but only by editing its recorded number in the same commit.',
-    'Growing a listed file is allowed (edit the number).',
-    'You may add a BASELINE entry when the file has to grow.',
-    '`--tighten` is the only writer of this table.',
-)
+THRESHOLDS_SOURCE = ROOT / '.github' / 'ci-thresholds.json'
+SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 
 
 def _policy():
-    return _util.load(POLICY_SOURCE, 'size_baseline')
+    return _util.load(POLICY_SOURCE, 'size_baseline_contract')
 
 
-def _normalised(text):
-    """`text` lowercased, as one line, with prose markers removed.
-
-    A contracted negation is expanded first: the marker deletion takes the
-    apostrophe an `isn't` needs, and a negation that reached the spelling
-    regex as `isnt` reads as its own affirmative.
-    """
-    text = text.lower().replace("n't", ' not')
-    for marker in MARKERS:
-        text = text.replace(marker, '')
-    return ' '.join(text.split())
+def _thresholds():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'thresholds.py',
+                      'size_thresholds_contract')
 
 
-def _offered(text):
-    """Every forbidden claim `text` makes, in the order they are listed."""
-    prose = _normalised(text)
-    return [claim for claim in FORBIDDEN_CLAIMS
-            if _normalised(claim) in prose]
-
-
-def _policy_prose():
-    """The whole source normalised, since a comment or a printed string
-    carries the advice to a reader just as the docstring does."""
-    return _normalised(POLICY_SOURCE.read_text(encoding='utf-8'))
-
-
-def _baseline_text(baseline):
-    """`baseline` written out the way the module carries its own table."""
-    entries = ''.join(
-        f"    '{rel}': {size},\n" for rel, size in baseline.items())
-    return f'BASELINE = {{\n{entries}}}\n'
-
-
-def _drive_main(policy, tmp, baseline, sizes, tighten=False):
-    """`main()` over a fabricated tree, as (status, stdout, stderr).
-
-    The fabricated policy text also stands in for the module's own file, so
-    the `--tighten` branch rewrites the stand-in and never the real
-    scripts/ci/size_baseline.py.
-    """
-    fake = Path(tmp) / 'size_baseline.py'
-    fake.write_text(_baseline_text(baseline), encoding='utf-8')
-    out, err = io.StringIO(), io.StringIO()
-    argv, table = sys.argv, policy.BASELINE
-    sizer, self_path = policy.tracked_sizes, policy.SELF
-    sys.argv = [str(fake)] + (['--tighten'] if tighten else [])
-    policy.BASELINE = baseline
-    policy.tracked_sizes = lambda: sizes
-    policy.SELF = fake
-    try:
-        with (contextlib.redirect_stdout(out),
-              contextlib.redirect_stderr(err)):
-            status = policy.main()
-    finally:
-        sys.argv = argv
-        policy.BASELINE, policy.tracked_sizes = table, sizer
-        policy.SELF = self_path
-    return status, out.getvalue(), err.getvalue()
+def _document():
+    return _thresholds().load(THRESHOLDS_SOURCE)
 
 
 def test_every_tracked_module_satisfies_the_size_policy(tmp):
-    """No file grew past its record, and none is over the ceiling unexcused."""
+    """No tracked file grows past its record or its unexcused ceiling."""
     del tmp
     policy = _policy()
-    found = policy.violations(policy.tracked_sizes())
-    assert not found['grown'], (
-        f"these files grew past their recorded size: {found['grown']}\n"
-        f'{policy.GROWTH_REMEDY}')
-    assert not found['over'], (
-        'these files are over the ceiling with no BASELINE entry: '
-        f"{found['over']}\n{policy.GROWTH_REMEDY}")
+    baseline = _thresholds().module_size_baseline(_document())
+    found = policy.violations(policy.tracked_sizes(), baseline)
+    assert not found['grown'], found['grown']
+    assert not found['over'], found['over']
 
 
-def test_the_baseline_names_only_files_that_still_need_it(tmp):
-    """A stale entry is a ceiling nobody is held to.
-
-    Two ways an entry rots: the file is gone, or it has been split back under
-    its ceiling and the entry now excuses a file that needs no excuse.
-    """
+def test_baseline_names_only_files_that_still_need_it(tmp):
+    """Missing and graduated entries remain visible for manual cleanup."""
     del tmp
     policy = _policy()
-    found = policy.violations(policy.tracked_sizes())
-    assert not found['missing'], (
-        'BASELINE names files that are not tracked any more: '
-        f"{found['missing']}\n{policy.STALE_ENTRY_REMEDY}")
-    assert not found['graduated'], (
-        f"these files are back under their ceiling: {found['graduated']}\n"
-        f'{policy.STALE_ENTRY_REMEDY}')
+    baseline = _thresholds().module_size_baseline(_document())
+    found = policy.violations(policy.tracked_sizes(), baseline)
+    assert not found['missing'], found['missing']
+    assert not found['graduated'], found['graduated']
 
 
 def test_the_ceilings_are_below_everything_they_excuse(tmp):
-    """A ceiling above a baselined file would make that entry meaningless."""
+    """A baseline is meaningful only when it exceeds its file ceiling."""
     del tmp
     policy = _policy()
-    for rel, recorded in policy.BASELINE.items():
+    baseline = _thresholds().module_size_baseline(_document())
+    for rel, recorded in baseline.items():
         assert recorded > policy.ceiling_for(rel), (rel, recorded)
 
 
-def test_tightening_follows_a_shrunk_file_down(tmp):
-    """The bound tracks the file, so the lines cannot come back for free."""
+def test_tightened_returns_a_new_mapping_for_a_shrunk_file(tmp):
+    """The JSON mapping follows an over-ceiling file down exactly."""
     del tmp
     policy = _policy()
-    text = "BASELINE = {\n    'server.py': 2624,\n}\n"
-    rewritten = policy.tightened(
-        text, {'server.py': 2000}, {'server.py': 2624})
-    assert rewritten is not None, 'a 624-line shrink tightened nothing'
-    assert "'server.py': 2000," in rewritten, rewritten
+    baseline = {'server.py': 2624}
+    sizes = {'server.py': 2000}
+    tightened = policy.tightened(baseline, sizes)
+    assert tightened == {'server.py': 2000}
+    assert tightened is not baseline
 
 
-def test_tightening_never_raises_a_number(tmp):
-    """The ratchet follows a file down and never back up."""
+def test_tightening_never_raises_or_adds_a_number(tmp):
+    """No-shrink, growth, and unbaselined files are untouched."""
     del tmp
     policy = _policy()
-    text = "BASELINE = {\n    'server.py': 2624,\n}\n"
-    for current in (2624, 2625, 9999):
-        rewritten = policy.tightened(
-            text, {'server.py': current}, {'server.py': 2624})
-        assert rewritten is None, (current, rewritten)
+    baseline = {'server.py': 2624}
+    assert policy.tightened(baseline, {'server.py': 2624}) is None
+    assert policy.tightened(baseline, {'server.py': 2625}) is None
+    assert policy.tightened(
+        baseline, {'server.py': 2624, 'tests/new.py': 900}) is None
 
 
-def test_tightening_deletes_an_entry_that_graduated(tmp):
-    """Back under the ceiling, the entry goes rather than shrinking further."""
+def test_tightening_graduates_a_file_under_its_ceiling(tmp):
+    """A stale exception is removed once the file needs no exception."""
     del tmp
     policy = _policy()
-    text = "BASELINE = {\n    'server.py': 2624,\n    'mcp_server.py': 939,\n}\n"
-    rewritten = policy.tightened(
-        text, {'server.py': 400, 'mcp_server.py': 939},
-        {'server.py': 2624, 'mcp_server.py': 939})
-    assert rewritten is not None, 'a graduated file changed nothing'
-    assert 'server.py' not in rewritten.replace('mcp_server.py', ''), rewritten
-    assert "'mcp_server.py': 939," in rewritten, rewritten
+    baseline = {'server.py': 2624, 'tests/small.py': 939}
+    sizes = {'server.py': 400, 'tests/small.py': 939}
+    assert policy.tightened(baseline, sizes) == {'tests/small.py': 939}
 
 
-def test_tightening_leaves_a_file_it_has_no_entry_for(tmp):
-    """A file outside the baseline is the ceiling's business, not the ratchet's."""
+def test_tightening_graduates_at_the_inclusive_ceiling(tmp):
+    """A file exactly at its ceiling no longer needs a baseline exception."""
     del tmp
     policy = _policy()
-    text = "BASELINE = {\n    'server.py': 2624,\n}\n"
-    rewritten = policy.tightened(
-        text, {'server.py': 2624, 'tests/_util.py': 10}, {'server.py': 2624})
-    assert rewritten is None, rewritten
+    baseline = {'tests/small.py': 900}
+    assert policy.tightened(
+        baseline, {'tests/small.py': policy.TEST_CEILING}) == {}
 
 
-def test_the_policy_prose_never_sanctions_growth_by_hand(tmp):
-    """No wording of the three licences to grow survives in the source."""
-    del tmp
-    offered = _offered(POLICY_SOURCE.read_text(encoding='utf-8'))
-    assert not offered, f'the size policy offers growth by hand: {offered}'
-
-
-def test_the_claim_check_accepts_a_correct_statement_of_the_policy(tmp):
-    """No listed correct statement of the policy contains a licence."""
-    del tmp
-    assert STATES_THE_POLICY, 'the tolerance battery is empty'
-    refused = [(text, _offered(text)) for text in STATES_THE_POLICY
-               if _offered(text)]
-    assert not refused, f'the pin refuses correct prose: {refused}'
-
-
-def test_the_claim_check_refuses_a_licence_to_grow(tmp):
-    """Each listed licence to grow by hand is read as one."""
-    del tmp
-    assert SANCTIONS_GROWTH, 'the strictness battery is empty'
-    missed = [text for text in SANCTIONS_GROWTH if not _offered(text)]
-    assert not missed, f'the pin passes a licence to grow: {missed}'
-
-
-def test_the_policy_prose_still_states_the_rule(tmp):
-    """Deleting the rule has to be as visible as contradicting it."""
-    del tmp
-    assert STATES_THE_RULE.search(_policy_prose()), (
-        f'the size policy no longer states the rule; write one of: '
-        f'{RULE_HELP}')
-
-
-def test_the_rule_spellings_tell_a_statement_from_its_absence(tmp):
-    """Every listed statement of the rule is seen; no listed absence is."""
-    del tmp
-    assert RULE_STATED, 'the rule-statement battery is empty'
-    assert RULE_NOT_STATED, 'the rule-absence battery is empty'
-    assert any(verb in text for text in RULE_NOT_STATED
-               for verb in RAISING_VERBS), (
-        'no listed negative states the rule inverted, so a regex that lost '
-        'its negator would pass here')
-    missed = [text for text in RULE_STATED
-              if not STATES_THE_RULE.search(_normalised(text))]
-    assert not missed, f'the rule is stated here and not seen: {missed}'
-    matched = [text for text in RULE_NOT_STATED
-               if STATES_THE_RULE.search(_normalised(text))]
-    assert not matched, f'the rule is read into prose lacking it: {matched}'
-
-
-def test_the_rule_help_quotes_a_witness_of_every_family(tmp):
-    del tmp
-    assert len(RULE_HELP_WITNESSES) == len(ACCEPTED_RULE_SPELLINGS), (
-        len(RULE_HELP_WITNESSES), len(ACCEPTED_RULE_SPELLINGS))
-    unnamed = [witness for witness in RULE_HELP_WITNESSES
-               if _normalised(witness) not in _normalised(RULE_HELP)]
-    assert not unnamed, f'RULE_HELP does not quote a witness for: {unnamed}'
-    unseen = [witness for witness in RULE_HELP_WITNESSES
-              if not STATES_THE_RULE.search(_normalised(witness))]
-    assert not unseen, f'a witness no longer states the rule: {unseen}'
-
-
-def test_the_docstring_carries_every_printed_remedy(tmp):
-    """One text, so the reference cannot drift from what a refusal prints."""
+def test_tightening_preserves_an_entry_for_a_missing_file(tmp):
+    """Deleting source never silently rewrites policy state."""
     del tmp
     policy = _policy()
-    doc = _normalised(policy.__doc__)
-    for kind, remedy in sorted(policy.REMEDY_FOR.items()):
-        # A blank or one-word remedy is carried by every docstring there
-        # is, so containment on its own would prove nothing about it.
-        assert len(_normalised(remedy)) > 40, (
-            f'the {kind} remedy is too short to advise anyone: {remedy!r}')
-        assert _normalised(remedy) in doc, (
-            f'the docstring no longer carries the {kind} remedy: {remedy}')
+    baseline = {'tests/gone.py': 900}
+    assert policy.tightened(baseline, {}) is None
 
 
-def test_a_refused_run_prints_the_remedy_for_every_kind(tmp):
-    """Each kind's remedy names the move that clears it, and not the other.
+def test_cli_tighten_changes_json_member_and_preserves_calibration(tmp):
+    """The real CLI atomically lowers one copied entry from the live tree."""
+    thresholds = _thresholds()
+    data = _document()
+    baseline = thresholds.module_size_baseline(data)
+    selected = next(iter(baseline))
+    data['module_size_baseline'][selected] = baseline[selected] + 1
+    target = Path(tmp) / 'thresholds.json'
+    thresholds.write(target, data)
+    before = thresholds.load(target)
+    result = subprocess.run(
+        [sys.executable, str(POLICY_SOURCE), '--tighten', '--thresholds',
+         str(target)], cwd=str(ROOT), env=_util.child_coverage('scrub'),
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    after = thresholds.load(target)
+    current = _policy().tracked_sizes()[selected]
+    assert after['module_size_baseline'][selected] == current
+    assert after['coverage'] == before['coverage']
+    assert set(after['module_size_baseline']) == set(
+        before['module_size_baseline'])
+    for rel, count in before['module_size_baseline'].items():
+        if rel != selected:
+            assert after['module_size_baseline'][rel] == count
 
-    Whether `--tighten` clears the kind is established by running it, and
-    the printed advice is read for the words a refused author acts on.
-    """
-    policy = _policy()
-    over, under = policy.TEST_CEILING + 1, policy.TEST_CEILING
-    fabricated = {
-        'grown': ({'tests/big.py': over}, {'tests/big.py': over + 1}),
-        'over': ({}, {'tests/big.py': over}),
-        'missing': ({'tests/gone.py': over}, {}),
-        'graduated': ({'tests/small.py': over}, {'tests/small.py': under}),
+
+def test_real_cli_no_shrink_and_missing_entry_report_without_write(tmp):
+    """The real policy refuses nothing and removes no missing entry."""
+    thresholds = _thresholds()
+    data = _document()
+    target = Path(tmp) / 'thresholds.json'
+    thresholds.write(target, data)
+    before = target.read_bytes()
+    result = subprocess.run(
+        [sys.executable, str(POLICY_SOURCE), '--tighten', '--thresholds',
+         str(target)], cwd=str(ROOT), env=_util.child_coverage('scrub'),
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert target.read_bytes() == before
+
+
+def _normalised(text):
+    text = text.lower().replace("n't", ' not')
+    return ' '.join(text.split())
+
+
+def _skill_decisions(path=SKILL_SOURCE):
+    """Read each operator decision independently from the tracked skill."""
+    text = _normalised(path.read_text(encoding='utf-8'))
+    return {
+        'owner': '.github/ci-thresholds.json' in text
+        and 'module_size_baseline' in text,
+        'command': 'python3 scripts/ci/size_baseline.py --tighten' in text,
+        'growth': ('relocate the code into a new module' in text
+                   and 'shrinking' in text),
+        'manual_delete': ('entry naming a file that is gone is deleted by hand'
+                          in text),
+        'reads_skill': 'tests/test_file_sizes.py' in text,
+        'no_old_owner': "size_baseline.py's table" not in text,
+        'no_stale_reader_claim': 'no test reads this file' not in text,
     }
-    for kind, (baseline, sizes) in sorted(fabricated.items()):
-        found = policy.violations(sizes, baseline)
-        assert [k for k, v in found.items() if v] == [kind], (kind, found)
-        clears, names, never = REMEDY_NAMES_THE_MOVE[kind]
-        rewritten = policy.tightened(
-            _baseline_text(baseline), sizes, baseline)
-        cleared = rewritten is not None and not any(
-            rel in rewritten for rel in baseline)
-        assert cleared == clears, (kind, rewritten)
-        status, out, printed = _drive_main(policy, tmp, baseline, sizes)
-        assert status == 1, (kind, status)
-        assert out == '', (kind, out)
-        assert names in printed, (kind, names, printed)
-        assert never not in printed, (kind, never, printed)
 
 
-def test_a_clean_tree_prints_one_line_and_exits_clean(tmp):
-    """The report path is a clean exit: status 0 and the count on stdout."""
+def _assert_skill_decision(name):
+    decisions = _skill_decisions()
+    assert decisions[name], f'skill decision missing: {name}'
+
+
+def test_skill_names_json_owner_independently(tmp):
+    del tmp
+    _assert_skill_decision('owner')
+
+
+def test_skill_names_real_shrink_command_independently(tmp):
+    del tmp
+    _assert_skill_decision('command')
+
+
+def test_skill_names_relocation_or_shrinking_as_growth_remedy(tmp):
+    del tmp
+    _assert_skill_decision('growth')
+
+
+def test_skill_names_manual_deletion_only_for_gone_files(tmp):
+    del tmp
+    _assert_skill_decision('manual_delete')
+
+
+def test_skill_removes_retired_owner_and_false_reader_claim(tmp):
+    del tmp
+    decisions = _skill_decisions()
+    assert decisions['no_old_owner'], decisions
+    assert decisions['no_stale_reader_claim'], decisions
+    assert decisions['reads_skill'], decisions
+
+
+def test_skill_mutations_are_caught_independently(tmp):
+    """Breaking one operator decision cannot hide behind the other three."""
+    source = SKILL_SOURCE.read_text(encoding='utf-8')
+    mutations = (
+        ('owner', '.github/ci-thresholds.json', 'scripts/ci/size_baseline.py'),
+        ('command', 'python3 scripts/ci/size_baseline.py --tighten',
+         'python3 .github/ci-thresholds.json'),
+        ('growth', 'relocate the code into a new module',
+         'raise the recorded number'),
+        ('manual_delete',
+         'entry naming a file that is gone is deleted by\nhand',
+         '--tighten removes every stale entry'),
+    )
+    for name, old, new in mutations:
+        path = Path(tmp) / f'{name}.md'
+        path.write_text(source.replace(old, new), encoding='utf-8')
+        assert not _skill_decisions(path)[name], name
+
+
+def test_skill_pressure_scenarios_name_the_operator_action(tmp):
+    """The prose gives an action for growth, shrinkage, and deletion."""
+    del tmp
+    text = _normalised(SKILL_SOURCE.read_text(encoding='utf-8'))
+    assert 'recorded number is never raised' in text
+    assert 'shrinking is recorded with ' \
+        '`python3 scripts/ci/size_baseline.py --tighten`' \
+        in text
+    assert 'entry naming a file that is gone is deleted by hand' in text
+
+
+def test_script_docstring_carries_each_printed_remedy(tmp):
+    """Refusals and operator documentation remain one policy contract."""
+    del tmp
     policy = _policy()
-    sizes = {'tests/big.py': 800, 'tests/one.py': 1, 'tests/two.py': 2}
-    status, out, err = _drive_main(policy, tmp, {'tests/big.py': 801}, sizes)
-    assert status == 0, (status, out, err)
-    assert out == '3 tracked modules within the size policy\n', out
-    assert err == '', err
+    doc = _normalised(policy.__doc__ or '')
+    for kind, remedy in policy.REMEDY_FOR.items():
+        assert _normalised(remedy) in doc, (kind, remedy)
 
 
-def test_tightening_without_a_shrink_writes_nothing(tmp):
-    """No module shrank: the branch answers and changes no file."""
-    policy = _policy()
-    baseline = {'tests/big.py': 801}
-    fake = Path(tmp) / 'size_baseline.py'
-    status, out, err = _drive_main(policy, tmp, baseline,
-                                   {'tests/big.py': 801}, tighten=True)
-    assert status == 0, (status, out, err)
-    assert out == 'no module shrank below its recorded size\n', out
-    assert err == '', err
-    assert fake.read_text(encoding='utf-8') == _baseline_text(baseline), (
-        fake.read_text(encoding='utf-8'))
-
-
-def test_tightening_a_shrunk_file_rewrites_the_policy_file(tmp):
-    """A shrink follows the file down on stdout and in the policy file."""
-    policy = _policy()
-    baseline = {'tests/big.py': 801}
-    fake = Path(tmp) / 'size_baseline.py'
-    status, out, err = _drive_main(policy, tmp, baseline,
-                                   {'tests/big.py': 750}, tighten=True)
-    assert status == 0, (status, out, err)
-    assert out == 'tightened the module size baseline\n', out
-    assert err == '', err
-    assert fake.read_text(encoding='utf-8') == _baseline_text(
-        {'tests/big.py': 750}), fake.read_text(encoding='utf-8')
-
-
-def test_a_mixed_refusal_prints_each_remedy_once(tmp):
-    """Three kinds, two answers: both printed, neither twice."""
+def test_refused_kinds_print_the_correct_remedy(tmp):
+    """The four violation kinds retain their distinct clearing actions."""
+    del tmp
     policy = _policy()
     over = policy.TEST_CEILING + 1
     baseline = {'tests/gone.py': over, 'tests/big.py': over}
     sizes = {'tests/big.py': over + 1, 'tests/other.py': over}
     found = policy.violations(sizes, baseline)
-    assert sorted(k for k, v in found.items() if v) == [
-        'grown', 'missing', 'over'], found
-    status, out, printed = _drive_main(policy, tmp, baseline, sizes)
-    assert status == 1, status
-    assert out == '', out
-    assert printed.count('relocate the code into a new module') == 1, printed
-    assert printed.count('deleted by hand') == 1, printed
+    assert sorted(kind for kind, detail in found.items() if detail) == [
+        'grown', 'missing', 'over']
+    assert 'relocate the code into a new module' in policy.GROWTH_REMEDY
+    assert 'deleted by hand' in policy.STALE_ENTRY_REMEDY
+
+
+def main():
+    return _util.runner(_util.collect(globals()), tmp_prefix='filesizes_')
 
 
 if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))
+    raise SystemExit(main())

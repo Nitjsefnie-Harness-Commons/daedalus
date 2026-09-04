@@ -2,8 +2,10 @@
 """Executable contracts for JavaScript coverage capture and publication."""
 import ast
 import itertools
+import json
 import os
 import re
+import shutil
 import shlex
 import subprocess
 import sys
@@ -16,6 +18,7 @@ from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_names, _matrix_job_running  # noqa: E402
 from _yamlread import job_mapping, step_mapping_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
+from _workflowrun import run_step  # noqa: E402
 
 
 _CAPTURE_KEY = 'NODE_V8_COVERAGE'
@@ -524,6 +527,73 @@ def test_checkout_only_capture_scope_is_refused(tmp):
     _assert_capture_refused(_checkout_scoped_capture(_workflow()))
     step_scoped = _step_scoped_capture(_workflow())
     _assert_capture_refused(_checkout_scoped_capture(step_scoped))
+
+
+def test_javascript_gate_reads_floor_from_thresholds_file(tmp):
+    """The decoded gate flips when only its copied JSON floor changes."""
+    workflow = _workflow()
+    job = complete_job_mapping(workflow, 'coverage')
+    gate = next(step for step in job['steps']
+                if step.get('name') == 'JavaScript coverage gate')
+    work = Path(tmp) / 'tree'
+    (work / '.github').mkdir(parents=True)
+    (work / 'scripts' / 'ci').mkdir(parents=True)
+    (work / 'extension').mkdir()
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
+                 work / 'scripts' / 'ci' / 'thresholds.py')
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'js_coverage.py',
+                 work / 'scripts' / 'ci' / 'js_coverage.py')
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'js_lines.py',
+                 work / 'scripts' / 'ci' / 'js_lines.py')
+    source = work / 'extension' / 'fixture.js'
+    source.write_text('const value = 1;\nconsole.log(value);\n',
+                      encoding='utf-8')
+    coverage_dir = work / 'coverage'
+    coverage_dir.mkdir()
+    record = {
+        'result': [{
+            'url': source.as_uri(),
+            'functions': [{'ranges': [{
+                'startOffset': 0,
+                'endOffset': len('const value = 1;\n'),
+                'count': 1,
+            }]}],
+        }],
+    }
+    (coverage_dir / 'coverage-1.json').write_text(
+        json.dumps(record), encoding='utf-8')
+    subprocess.run(['git', '-C', str(work), 'init', '-q'], check=True)
+    subprocess.run(['git', '-C', str(work), 'config', 'user.email',
+                    'tests@example.invalid'], check=True)
+    subprocess.run(['git', '-C', str(work), 'config', 'user.name', 'Tests'],
+                   check=True)
+    subprocess.run(['git', '-C', str(work), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(work), 'commit', '-qm', 'fixture'],
+                   check=True)
+    document = {
+        'schema_version': 1,
+        'coverage': {
+            'python': {'measured': 94.4, 'floor': 92.9},
+            'javascript': {'measured': 50.0, 'floor': 48.5},
+        },
+        'module_size_baseline': {},
+    }
+    (work / '.github' / 'ci-thresholds.json').write_text(
+        json.dumps(document), encoding='utf-8')
+    python_bin = work / 'bin'
+    python_bin.mkdir()
+    shutil.copy2(sys.executable, python_bin / 'python')
+    environment = dict(os.environ)
+    environment['PATH'] = f'{python_bin}{os.pathsep}{environment["PATH"]}'
+    environment['NODE_V8_COVERAGE'] = str(coverage_dir)
+    passed = run_step(work, gate, environment, workflow={}, job={})
+    assert passed.returncode == 0, (passed.stdout, passed.stderr)
+    document['coverage']['javascript'] = {
+        'measured': 53.0, 'floor': 51.5}
+    (work / '.github' / 'ci-thresholds.json').write_text(
+        json.dumps(document), encoding='utf-8')
+    failed = run_step(work, gate, environment, workflow={}, job={})
+    assert failed.returncode != 0, (failed.stdout, failed.stderr)
 
 
 def main():
