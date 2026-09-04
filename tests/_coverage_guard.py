@@ -1,7 +1,5 @@
 """The analysis behind tests/test_coverage_environment.py.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
 A Python child inheriting COVERAGE_* into a working directory that
 [tool.coverage.paths] does not map back onto the repository records
 paths that vanish with the temporary tree, and `coverage combine` later
@@ -16,19 +14,18 @@ alias moves the cwd launches inherit.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
 chdir reached only by a string (`getattr(os, 'chdir')`) or a call
-result, an unreadable `**` spread on an unrecognised callee, and a
-launcher alias bound by a call result, default argument or match
-capture.
+result, and an unreadable `**` spread on an unrecognised callee.
 """
 import ast
 
+from _coverage_bindings import (
+    _LAUNCHERS, _is_launch_value, _names_one_of,
+    _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
     _is_root_spelling, _scope_shadows, _shadowed_names, root_owner_names)
 
 _DECLARATION = 'child_coverage'
-_LAUNCHERS = frozenset(
-    {'run', 'Popen', 'call', 'check_call', 'check_output'})
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
@@ -183,20 +180,6 @@ class _ModuleFacts:
         return 'invalid'
 
 
-def _is_launch_value(value, facts):
-    """Whether an expression is a subprocess launcher or a known alias."""
-    if isinstance(value, ast.Name):
-        return value.id in facts.launch_callables
-    return (isinstance(value, ast.Attribute)
-            and value.attr in _LAUNCHERS
-            and isinstance(value.value, ast.Name)
-            and value.value.id in facts.subprocess_modules)
-
-
-def _names_one_of(value, names):
-    return isinstance(value, ast.Name) and value.id in names
-
-
 def _spread_names_cwd(node):
     """Whether a ** spread of the call is a mapping literal naming cwd."""
     for keyword in node.keywords:
@@ -214,7 +197,7 @@ def _spread_names_cwd(node):
     return False
 
 
-def _launch_method(node, facts):
+def _launch_method(node, facts, shadowed):
     """A recognised launcher, or any callee that spells cwd readably."""
     function = node.func
     if (isinstance(function, ast.Attribute)
@@ -226,6 +209,9 @@ def _launch_method(node, facts):
             and function.id in facts.launch_callables):
         return f'subprocess.{function.id}'
     if facts.declaration_mode(node) is not None:
+        return None
+    if (isinstance(function, ast.Name) and function.id == 'dict'
+            and function.id not in shadowed):
         return None
     if (any(keyword.arg == 'cwd' for keyword in node.keywords)
             or _spread_names_cwd(node)):
@@ -423,7 +409,7 @@ def _visit(node, relative, function, facts, tree, keeps, violations,
                    shadowed | facts.scope_shadows.get(child, set()))
             continue
         if isinstance(child, ast.Call):
-            method = _launch_method(child, facts)
+            method = _launch_method(child, facts, shadowed)
             if method is not None:
                 _check_launch(child, method, relative, function, facts,
                               tree, keeps, violations, shadowed)
@@ -602,57 +588,6 @@ def _helper_rebind_violations(tree, facts, relative):
     return violations
 
 
-def _bound_values(node):
-    """Every (statement line, value) the statement binds unreadably."""
-    if isinstance(node, ast.Assign):
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            return []
-        return [(node.lineno, node.value)]
-    if isinstance(node, ast.AnnAssign):
-        if node.value is None or isinstance(node.target, ast.Name):
-            return []
-        return [(node.lineno, node.value)]
-    if isinstance(node, ast.AugAssign):
-        return [(node.lineno, node.value)]
-    if isinstance(node, (ast.For, ast.AsyncFor)):
-        return [(node.lineno, node.iter)]
-    if isinstance(node, (ast.With, ast.AsyncWith)):
-        return [(node.lineno, item.context_expr) for item in node.items
-                if item.optional_vars is not None]
-    if isinstance(node, ast.NamedExpr):
-        return [(node.lineno, node.value)]
-    return []
-
-
-def _carried_parts(value):
-    """A bound value's elements and call arguments; a callee is not entered."""
-    if isinstance(value, ast.Call):
-        for part in [*value.args,
-                     *(keyword.value for keyword in value.keywords)]:
-            yield from _carried_parts(part)
-    elif isinstance(value, (ast.Tuple, ast.List, ast.Set)):
-        for part in value.elts:
-            yield from _carried_parts(part)
-    elif isinstance(value, ast.Starred):
-        yield from _carried_parts(value.value)
-    else:
-        yield value
-
-
-def _unfollowable_launcher_bindings(tree, facts, relative):
-    """A launcher bound where the alias walk cannot see is refused there."""
-    violations = []
-    for node in memo_nodes(tree):
-        for line, value in _bound_values(node):
-            if any(_names_one_of(part, facts.subprocess_modules)
-                   or _is_launch_value(part, facts)
-                   for part in _carried_parts(value)):
-                violations.append(
-                    f'{relative}:{line}: a launcher is bound '
-                    'through a form the guard cannot follow')
-    return violations
-
-
 def _analyze(relative, source, keeps):
     tree = ast.parse(source, filename=relative)
     facts = _ModuleFacts(tree)
@@ -660,7 +595,10 @@ def _analyze(relative, source, keeps):
     _visit(tree, relative, '<module>', facts, tree, keeps, violations)
     violations.extend(_declaration_name_violations(tree, facts, relative))
     violations.extend(_helper_rebind_violations(tree, facts, relative))
-    violations.extend(_unfollowable_launcher_bindings(tree, facts, relative))
+    violations.extend(
+        f'{relative}:{line}: a launcher is bound through a form the guard '
+        'cannot follow'
+        for line in _unfollowable_launcher_bindings(tree, facts))
     return violations
 
 

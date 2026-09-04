@@ -168,6 +168,14 @@ def _shadowed_names(tree):
                                       ast.AsyncFunctionDef, ast.ClassDef)))
     names.update(node.name for node in walked
                  if isinstance(node, ast.ExceptHandler) and node.name)
+    names.update(node.name for node in walked
+                 if isinstance(node, ast.MatchAs)
+                 and node.name)
+    names.update(node.name for node in walked
+                 if isinstance(node, ast.MatchStar)
+                 and node.name)
+    names.update(node.rest for node in walked
+                 if isinstance(node, ast.MatchMapping) and node.rest)
     root_values = []
     for node in walked:
         if isinstance(node, ast.Assign):
@@ -228,6 +236,12 @@ def _scope_shadows(tree):
                 shadows[scope].add(child.id)
             elif isinstance(child, ast.ExceptHandler) and child.name:
                 shadows[scope].add(child.name)
+            elif isinstance(child, ast.MatchAs) and child.name:
+                shadows[scope].add(child.name)
+            elif isinstance(child, ast.MatchStar) and child.name:
+                shadows[scope].add(child.name)
+            elif isinstance(child, ast.MatchMapping) and child.rest:
+                shadows[scope].add(child.rest)
             record(scope, child)
 
     record(tree, tree)

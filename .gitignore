@@ -244,6 +244,7 @@
 !/tests/_cmdqueue_faults.py
 !/tests/_control_calls.py
 !/tests/_control_writes.py
+!/tests/_coverage_bindings.py
 !/tests/_coverage_comment_steps.py
 !/tests/_coverage_guard.py
 !/tests/_coverage_memo.py
@@ -339,6 +340,7 @@
 !/tests/test_command_queue_aliased.py
 !/tests/test_command_queue_unit.py
 !/tests/test_control_writes.py
+!/tests/test_coverage_bindings.py
 !/tests/test_coverage_combine.py
 !/tests/test_coverage_comment_boundary.py
 !/tests/test_coverage_comment_fork.py
