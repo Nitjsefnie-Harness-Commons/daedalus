@@ -313,19 +313,27 @@ def test_flow_properties_keep_same_line_quoted_members_opaque(tmp):
 
 def test_no_space_flow_mapping_keeps_quoted_closing_brace_opaque(tmp):
     del tmp
-    prefix = (
-        'anchors:\n'
-        ' decoy: {\n'
-        '  "key":"quoted } delimiter",\n'
-        '  "other": &a hidden\n'
-        ' }\n')
-    source = _document('name: *a', prefix)
-    parsed = yaml.load(source, Loader=yaml.BaseLoader)
-    assert parsed['jobs']['sample']['steps'][0]['name'] == 'hidden'
-    _reader_refused_exact(
-        source,
-        'step name has an unsupported YAML alias target in a flow '
-        'collection: &a')
+    values = (
+        ('"key":"quoted } and escaped \\\" delimiter"',
+         'quoted } and escaped " delimiter'),
+        ("'key':'quoted } and doubled '' delimiter'",
+         "quoted } and doubled ' delimiter"),
+    )
+    for member, expected in values:
+        prefix = (
+            'anchors:\n'
+            ' decoy: {\n'
+            f'  {member},\n'
+            '  "other": &a hidden\n'
+            ' }\n')
+        source = _document('name: *a', prefix)
+        parsed = yaml.load(source, Loader=yaml.BaseLoader)
+        assert parsed['anchors']['decoy']['key'] == expected
+        assert parsed['jobs']['sample']['steps'][0]['name'] == 'hidden'
+        _reader_refused_exact(
+            source,
+            'step name has an unsupported YAML alias target in a flow '
+            'collection: &a')
 
 
 def test_verbatim_tags_keep_same_line_flow_members_opaque(tmp):
