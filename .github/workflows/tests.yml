@@ -241,6 +241,7 @@ jobs:
           actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "22"
+          package-manager-cache: false
 
       - name: Install eslint (pinned, no package.json, no build step)
         # zizmor: ignore[adhoc-packages]
