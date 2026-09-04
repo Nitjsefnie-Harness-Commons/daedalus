@@ -86,6 +86,8 @@ def _coverage_value(value, name):
     result = _number(value, name)
     if result < 0 or result > 100:
         raise ValueError(f'{name} must be between 0.0 and 100.0')
+    if result.as_tuple().exponent < -1:
+        raise ValueError(f'{name} must have at most one decimal place')
     try:
         rounded = result.quantize(_ONE_DECIMAL)
     except InvalidOperation:

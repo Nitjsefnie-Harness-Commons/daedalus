@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Raise one coverage calibration from a measured run."""
 import argparse
+import importlib
 import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 if __package__:
-    # pylint: disable-next=relative-beyond-top-level
+    # pylint: disable-next=relative-beyond-top-level,no-name-in-module
     from . import thresholds
 else:
-    import thresholds
+    thresholds = importlib.import_module('thresholds')
 
 
 CALIBRATION_GAP = Decimal('1.5')
@@ -71,7 +72,7 @@ def main(argv=None):
     try:
         data = thresholds.load(args.thresholds)
         measured = _measurement(args.measured)
-        recorded, floor = read_calibration(data, args.language)
+        floor = read_calibration(data, args.language)[1]
         candidate = update(data, measured, args.language)
         if candidate is None:
             label = args.language.capitalize()

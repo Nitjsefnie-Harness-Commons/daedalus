@@ -166,8 +166,9 @@ def test_shipped_file_forcing_measurement_is_derived_and_capped(tmp):
     thresholds = _thresholds()
     source = thresholds.load(THRESHOLDS_PATH)
     recorded, _floor = thresholds.coverage(source, 'python')
-    forcing = recorded + Decimal('5.0')
-    forcing = min(forcing, Decimal('100.0'))
+    forcing = min(
+        recorded + _ratchet().RAISE_HYSTERESIS + Decimal('0.1'),
+        Decimal('100.0'))
     path = Path(tmp) / 'shipped-copy.json'
     thresholds.write(path, source)
     result = _run_ratchet(tmp, 'python', forcing, path)
@@ -233,7 +234,8 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
 
 def _git(repo, *args):
     return subprocess.run(('git', '-C', str(repo)) + args, check=True,
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60,
+                          env=_util.child_coverage('scrub'))
 
 
 def _seed_publisher_tree(repo, data):
@@ -308,7 +310,8 @@ def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
         [sys.executable, str(repo / 'scripts' / 'ci' / 'thresholds.py'),
          '--check', '--thresholds',
          str(repo / '.github' / 'ci-thresholds.json')],
-        cwd=repo, capture_output=True, text=True, timeout=60)
+        cwd=repo, capture_output=True, text=True, timeout=60,
+        env=_util.child_coverage('scrub'))
     assert checked.returncode == 0, (checked.stdout, checked.stderr)
 
 
