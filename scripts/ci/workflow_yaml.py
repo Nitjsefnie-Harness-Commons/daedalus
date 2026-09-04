@@ -164,13 +164,14 @@ def _node_parts(line):
 
 
 def _flow_property_end(text, start):
+    if text.startswith('!<', start):
+        return text.find('>', start + 2) + 1 or len(text)
     return next((i for i in range(start + 1, len(text))
                  if text[i].isspace() or text[i] in ',[]{}'), len(text))
 
 
 def _flow_end(lines, start, end, value):
-    depth = 0
-    quote = None
+    depth, quote = 0, None
     node_start = True
     for index in range(start, end):
         text = value if index == start else lines[index].text

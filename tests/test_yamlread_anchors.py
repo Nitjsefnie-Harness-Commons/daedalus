@@ -303,6 +303,62 @@ def test_flow_properties_keep_same_line_quoted_members_opaque(tmp):
             'collection: &a')
 
 
+def test_verbatim_tags_keep_same_line_flow_members_opaque(tmp):
+    del tmp
+    values = (
+        '[!<tag:yaml.org,2002:str> "quoted ] delimiter", &a hidden]',
+        '{key: !<tag:yaml.org,2002:str> "quoted } delimiter", '
+        'other: &a hidden}',
+    )
+    for value in values:
+        _assert_flow_property_decoy(f'decoy: {value}\n')
+
+
+def test_verbatim_tags_keep_multiline_flow_members_opaque(tmp):
+    del tmp
+    values = (
+        ('decoy: [\n'
+         '  !<tag:yaml.org,2002:str> "quoted ] delimiter", # member\n'
+         '  &a hidden\n'
+         ' ]\n'),
+        ('decoy: {\n'
+         '  key: !<tag:yaml.org,2002:str> "quoted } delimiter", # member\n'
+         '  other: &a hidden\n'
+         ' }\n'),
+    )
+    for decoy in values:
+        _assert_flow_property_decoy(decoy)
+
+
+def test_verbatim_tag_flow_candidates_refuse_without_an_older_target(tmp):
+    del tmp
+    prefix = (
+        'anchors:\n'
+        ' decoy: [\n'
+        '  !<tag:yaml.org,2002:str> "quoted ] delimiter",\n'
+        '  &a hidden\n'
+        ' ]\n')
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unsupported YAML alias target in a flow '
+        'collection: &a')
+
+
+def test_unclosed_verbatim_tag_keeps_the_remaining_flow_opaque(tmp):
+    del tmp
+    prefix = (
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy: [\n'
+        '  !<tag:yaml.org,2002:str "unterminated property",\n'
+        '  &a hidden\n'
+        ' ]\n')
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unsupported YAML alias target in a flow '
+        'collection: &a')
+
+
 def test_same_line_flow_alias_candidates_are_refused_as_opaque(tmp):
     del tmp
     for value in ('[&a hidden]', '{key: &a hidden}'):
