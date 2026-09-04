@@ -202,7 +202,84 @@ def _parameter_names(arguments):
                if extra is not None})
 
 
-def _scope_shadows(tree):
+def _evaluation_scopes(tree):
+    """Nodes with their evaluation scope, plus lexical scope parents."""
+    scoped = []
+    parents = {tree: None}
+
+    def enclosing(scope):
+        if isinstance(scope, ast.ClassDef):
+            return parents[scope]
+        return scope
+
+    def visit_arguments(arguments, scope):
+        arguments = (arguments.posonlyargs + arguments.args
+                     + arguments.kwonlyargs)
+        for argument in arguments:
+            if argument.annotation is not None:
+                visit(argument.annotation, scope)
+
+    def visit(node, scope):
+        scoped.append((node, scope))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parents[node] = enclosing(scope)
+            for decorator in node.decorator_list:
+                visit(decorator, scope)
+            visit_arguments(node.args, scope)
+            for value in (*node.args.defaults, *node.args.kw_defaults):
+                if value is not None:
+                    visit(value, scope)
+            if node.returns is not None:
+                visit(node.returns, scope)
+            for value in getattr(node, 'type_params', ()):
+                visit(value, scope)
+            for statement in node.body:
+                visit(statement, node)
+            return
+        if isinstance(node, ast.ClassDef):
+            parents[node] = enclosing(scope)
+            for decorator in node.decorator_list:
+                visit(decorator, scope)
+            for value in (*node.bases, *node.keywords,
+                          *getattr(node, 'type_params', ())):
+                visit(value, scope)
+            for statement in node.body:
+                visit(statement, node)
+            return
+        if isinstance(node, ast.Lambda):
+            parents[node] = enclosing(scope)
+            visit_arguments(node.args, scope)
+            for value in (*node.args.defaults, *node.args.kw_defaults):
+                if value is not None:
+                    visit(value, scope)
+            visit(node.body, node)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
+                             ast.GeneratorExp)):
+            parents[node] = enclosing(scope)
+            first, *remaining = node.generators
+            visit(first.iter, scope)
+            visit(first.target, node)
+            for condition in first.ifs:
+                visit(condition, node)
+            for generator in remaining:
+                visit(generator.iter, node)
+                visit(generator.target, node)
+                for condition in generator.ifs:
+                    visit(condition, node)
+            values = ([node.key, node.value] if isinstance(node, ast.DictComp)
+                      else [node.elt])
+            for value in values:
+                visit(value, node)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope)
+
+    visit(tree, tree)
+    return tuple(scoped), parents
+
+
+def _scope_shadows(tree, layout=None):
     """Shadowed names per scope, attributed to the scope that binds them.
 
     A name bound inside one function cannot reach another's expressions, so
@@ -215,34 +292,33 @@ def _scope_shadows(tree):
     attribution drifts — a parameter this function stops attributing resolves
     from an outer binding instead of being out of scope.
     """
-    shadows = {tree: set()}
-
-    def record(scope, node):
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                  ast.ClassDef)):
-                shadows[scope].add(child.name)
-                shadows[child] = set()
-                if not isinstance(child, ast.ClassDef):
-                    shadows[child].update(_parameter_names(child.args))
-                record(child, child)
-                continue
-            if isinstance(child, ast.Lambda):
-                shadows[child] = set(_parameter_names(child.args))
-                record(child, child)
-                continue
-            if (isinstance(child, ast.Name)
-                    and isinstance(child.ctx, (ast.Store, ast.Del))):
-                shadows[scope].add(child.id)
-            elif isinstance(child, ast.ExceptHandler) and child.name:
-                shadows[scope].add(child.name)
-            elif isinstance(child, ast.MatchAs) and child.name:
-                shadows[scope].add(child.name)
-            elif isinstance(child, ast.MatchStar) and child.name:
-                shadows[scope].add(child.name)
-            elif isinstance(child, ast.MatchMapping) and child.rest:
-                shadows[scope].add(child.rest)
-            record(scope, child)
-
-    record(tree, tree)
+    scoped, parents = layout or _evaluation_scopes(tree)
+    shadows = {scope: set() for scope in parents}
+    for node, scope in scoped:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            shadows[scope].add(node.name)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.Lambda)):
+            shadows[node].update(_parameter_names(node.args))
+        if (isinstance(node, ast.Name)
+                and isinstance(node.ctx, (ast.Store, ast.Del))):
+            shadows[scope].add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            shadows[scope].add(node.name)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            shadows[scope].add(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            shadows[scope].add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            shadows[scope].add(node.rest)
     return shadows
+
+
+def _visible_scope_shadows(scope, shadows, parents):
+    """Names shadowed where an expression in `scope` is evaluated."""
+    visible = set()
+    while scope is not None:
+        visible.update(shadows[scope])
+        scope = parents[scope]
+    return visible

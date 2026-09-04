@@ -23,7 +23,8 @@ from _coverage_bindings import (
     _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
-    _is_root_spelling, _scope_shadows, _shadowed_names, root_owner_names)
+    _evaluation_scopes, _is_root_spelling, _scope_shadows,
+    _shadowed_names, _visible_scope_shadows, root_owner_names)
 
 _DECLARATION = 'child_coverage'
 _MUTATING_METHODS = frozenset({
@@ -57,10 +58,13 @@ class _ModuleFacts:
     def __init__(self, tree):
         self.shadowed_names = _shadowed_names(tree)
         self.root_owners = root_owner_names(tree)
-        self.scope_shadows = _scope_shadows(tree)
+        self.scoped_nodes, self.scope_parents = _evaluation_scopes(tree)
+        layout = self.scoped_nodes, self.scope_parents
+        self.scope_shadows = _scope_shadows(tree, layout)
         self.module_shadows = set(self.scope_shadows[tree])
         if 'ROOT' not in self.shadowed_names:
             self.module_shadows.discard('ROOT')
+        self.scope_shadows[tree] = self.module_shadows
         self.subprocess_modules = set()
         self.launch_callables = set()
         self.declaration_modules = set()
@@ -398,23 +402,27 @@ def _check_launch(node, method, relative, function, facts, tree, keeps,
         keeps.append((relative, function))
 
 
-def _visit(node, relative, function, facts, tree, keeps, violations,
-           shadowed=None):
-    if shadowed is None:
-        shadowed = frozenset(facts.module_shadows)
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            _visit(child, relative, child.name, facts, tree, keeps,
-                   violations,
-                   shadowed | facts.scope_shadows.get(child, set()))
+def _scope_function(scope, parents):
+    """Nearest named function containing an evaluation scope."""
+    while scope is not None:
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return scope.name
+        scope = parents[scope]
+    return '<module>'
+
+
+def _visit(relative, facts, tree, keeps, violations):
+    for child, scope in facts.scoped_nodes:
+        if not isinstance(child, ast.Call):
             continue
-        if isinstance(child, ast.Call):
-            method = _launch_method(child, facts, shadowed)
-            if method is not None:
-                _check_launch(child, method, relative, function, facts,
-                              tree, keeps, violations, shadowed)
-        _visit(child, relative, function, facts, tree, keeps, violations,
-               shadowed)
+        shadowed = _visible_scope_shadows(
+            scope, facts.scope_shadows, facts.scope_parents)
+        method = _launch_method(child, facts, shadowed)
+        if method is None:
+            continue
+        function = _scope_function(scope, facts.scope_parents)
+        _check_launch(child, method, relative, function, facts, tree,
+                      keeps, violations, shadowed)
 
 
 def _declaration_names(facts):
@@ -592,7 +600,7 @@ def _analyze(relative, source, keeps):
     tree = ast.parse(source, filename=relative)
     facts = _ModuleFacts(tree)
     violations = []
-    _visit(tree, relative, '<module>', facts, tree, keeps, violations)
+    _visit(relative, facts, tree, keeps, violations)
     violations.extend(_declaration_name_violations(tree, facts, relative))
     violations.extend(_helper_rebind_violations(tree, facts, relative))
     violations.extend(

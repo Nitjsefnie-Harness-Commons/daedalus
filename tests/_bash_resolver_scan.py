@@ -24,7 +24,7 @@ should not.
 import ast
 import re
 
-from _coverage_scopes import _scope_shadows
+from _coverage_scopes import _evaluation_scopes, _scope_shadows
 
 _HELPER = 'workflow_bash'
 _WHICH = 'which'
@@ -49,32 +49,6 @@ def _binding_of(node):
     return names, value
 
 
-def _scope_layout(tree):
-    """Plain-name bindings per scope, and each scope's parent.
-
-    Keyed exactly as `_scope_shadows` keys them, so a launch resolves a name
-    against the scopes that can supply it rather than the whole module.
-    """
-    bindings = {tree: {}}
-    parents = {tree: None}
-
-    def record(scope, node):
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                  ast.ClassDef, ast.Lambda)):
-                bindings[child] = {}
-                parents[child] = scope
-                record(child, child)
-                continue
-            names, value = _binding_of(child)
-            for name in names:
-                bindings[scope].setdefault(name, []).append(value)
-            record(scope, child)
-
-    record(tree, tree)
-    return bindings, parents
-
-
 class _ModuleFacts:
     """The names one module binds to a resolver, a which, or a launcher."""
 
@@ -85,8 +59,14 @@ class _ModuleFacts:
         self.helper_functions = set()
         self.which_functions = set()
         self.launch_callables = set()
-        self.scopes = _scope_shadows(tree)
-        self.bindings, self.parents = _scope_layout(tree)
+        self.scoped_nodes, self.parents = _evaluation_scopes(tree)
+        layout = self.scoped_nodes, self.parents
+        self.scopes = _scope_shadows(tree, layout)
+        self.bindings = {scope: {} for scope in self.parents}
+        for node, scope in self.scoped_nodes:
+            names, value = _binding_of(node)
+            for name in names:
+                self.bindings[scope].setdefault(name, []).append(value)
         self._collect(tree)
         self._propagate_aliases(tree)
 
@@ -259,26 +239,20 @@ def _check_launch(node, method, scope, facts, relative, violations):
             f'as {ast.unparse(value)}, not {_HELPER}()')
 
 
-def _visit(node, scope, facts, relative, violations):
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                              ast.ClassDef, ast.Lambda)):
-            _visit(child, child, facts, relative, violations)
-            continue
+def _visit(facts, relative, violations):
+    for child, scope in facts.scoped_nodes:
         if not isinstance(child, ast.Call):
-            _visit(child, scope, facts, relative, violations)
             continue
         method = _launch_method(child, facts)
         if method:
             _check_launch(child, method, scope, facts, relative, violations)
-        _visit(child, scope, facts, relative, violations)
 
 
 def _analyze(relative, source):
     tree = ast.parse(source, filename=relative)
     facts = _ModuleFacts(tree)
     violations = []
-    _visit(tree, tree, facts, relative, violations)
+    _visit(facts, relative, violations)
     return violations
 
 

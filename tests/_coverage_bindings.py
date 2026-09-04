@@ -70,7 +70,7 @@ def _pattern_binds(pattern):
 
 
 def _carried_parts(value):
-    """A bound value's elements and call arguments; a callee is not entered."""
+    """Carried elements and arguments, including a call-based callee."""
     if isinstance(value, ast.Call):
         for part in [*value.args,
                      *(keyword.value for keyword in value.keywords)]:
