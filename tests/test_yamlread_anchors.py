@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -45,6 +47,16 @@ def _reader_refused(source, detail):
     raise AssertionError(f'a spelling {detail!r} must refuse was accepted')
 
 
+def _reader_refused_exact(source, detail):
+    """Require one exact production-reader refusal."""
+    try:
+        workflow_step_items(source, 'sample')
+    except YAMLReadError as error:
+        assert str(error) == detail, str(error)
+        return
+    raise AssertionError(f'expected exact refusal: {detail}')
+
+
 def test_parse_alias_accepts_only_a_complete_alias_spelling(tmp):
     del tmp
     parse_alias = getattr(yamlanchor, 'parse_alias', None)
@@ -77,23 +89,20 @@ def test_string_tagged_step_name_decodes_like_the_plain_spelling(tmp):
 
 
 def test_the_non_specific_tag_is_refused_in_every_scalar_form(tmp):
-    """`!` resolves by default resolution, not to a string, so no form.
-
-    PyYAML reads `! 5` as the number 5, `! true` as true and `! null` as
-    null, and a quoted or block body changes nothing, so accepting any
-    spelling of it would return a value no parser returns.
-    """
+    """Bare `!` needs schema/tag resolution outside this bounded reader."""
     del tmp
-    for field in ('name: ! 5', 'name: ! true', 'name: ! null',
-                  'name: ! "5"'):
+    for field in (
+            'name: ! 5', 'name: ! true', 'name: ! null',
+            'name: ! "5"'):
         _reader_refused(_document(field), 'unsupported YAML tag !')
 
 
 def test_the_non_specific_tag_is_refused_on_a_block_scalar(tmp):
     del tmp
-    _reader_refused('jobs:\n sample:\n  steps:\n'
-             '   - name: ! |\n       5\n     if: z\n',
-             'unsupported YAML tag !')
+    _reader_refused(
+        'jobs:\n sample:\n  steps:\n'
+        '   - name: ! |\n       5\n     if: z\n',
+        'unsupported YAML tag !')
 
 
 def test_a_string_tagged_number_and_bool_decode_to_strings(tmp):
@@ -119,8 +128,9 @@ def test_a_quoted_name_after_properties_keeps_hash_sign_text(tmp):
 def test_a_quoted_name_continued_past_a_property_is_a_boundary(tmp):
     """A multiline quoted scalar is an unsupported boundary, not invalid."""
     del tmp
-    _reader_refused(_document('name: &a "one\n          two"'),
-             'unsupported multiline scalar')
+    _reader_refused(
+        _document('name: &a "one\n          two"'),
+        'unsupported multiline scalar')
 
 
 def test_aliased_step_name_decodes_to_the_anchored_value(tmp):
@@ -161,6 +171,22 @@ def test_an_alias_resolves_to_the_last_anchor_defined_before_it(tmp):
     assert _names(_document('name: *a', prefix)) == ['target']
 
 
+def test_mapping_value_aliases_match_base_loader_strings(tmp):
+    del tmp
+    cases = (
+        ('number', '5'),
+        ('boolean', 'true'),
+        ('quoted', '"quoted"'),
+        ('block', '|\n  block\n'),
+    )
+    for key, value in cases:
+        source = _document(
+            'name: *a', f'anchors:\n {key}: &a {value}'
+            + ('' if value.endswith('\n') else '\n'))
+        parsed = yaml.load(source, Loader=yaml.BaseLoader)
+        assert _names(source) == [parsed['jobs']['sample']['steps'][0]['name']]
+
+
 def test_an_alias_reads_an_anchor_defined_on_an_earlier_step_field(tmp):
     del tmp
     source = ('jobs:\n sample:\n  steps:\n'
@@ -182,10 +208,121 @@ def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
         _reader_refused(_document('name: *a', prefix), 'unknown YAML alias: &a')
 
 
+def test_bare_sequence_block_scalars_do_not_define_alias_targets(tmp):
+    del tmp
+    prefix = (
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - |\n'
+        '    key: &a hidden\n'
+        '  - >\n'
+        '    key: &a hidden\n')
+    assert _names(_document('name: *a', prefix)) == ['target']
+
+
+def test_bare_sequence_open_quotes_do_not_define_alias_targets(tmp):
+    del tmp
+    prefix = (
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - "open\n'
+        '    key: &a hidden"\n'
+        "  - 'open\n"
+        "    key: &a hidden'\n")
+    assert _names(_document('name: *a', prefix)) == ['target']
+
+
+def test_multiline_flow_alias_candidates_are_refused_as_opaque(tmp):
+    del tmp
+    for value, closing in (
+            ('[\n  &a hidden,\n', '  ]\n'),
+            ('{\n  key: &a hidden,\n', '}\n')):
+        prefix = f'anchors:\n first: &a target\n decoy: {value}{closing}'
+        _reader_refused_exact(
+            _document('name: *a', prefix),
+            'step name has an unsupported YAML alias target in a flow '
+            'collection: &a')
+
+
+def test_same_line_flow_alias_candidates_are_refused_as_opaque(tmp):
+    del tmp
+    for value in ('[&a hidden]', '{key: &a hidden}'):
+        prefix = f'anchors:\n first: &a target\n decoy: {value}\n'
+        _reader_refused_exact(
+            _document('name: *a', prefix),
+            'step name has an unsupported YAML alias target in a flow '
+            'collection: &a')
+
+
+def test_flow_extent_keeps_nested_quotes_and_comments_opaque(tmp):
+    del tmp
+    prefix = (
+        'anchors:\n first: &a target\n decoy: [\n'
+        '  "quoted ] and escaped \\\" ]",\n'
+        "  'single ] and doubled '' quote',\n"
+        '  {nested: ["still ]"]}, # closing brackets are comment data\n'
+        '  &a hidden\n'
+        ']\n')
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unsupported YAML alias target in a flow '
+        'collection: &a')
+
+
+def test_an_anchor_on_a_sequence_item_is_an_unsupported_alias_target(tmp):
+    del tmp
+    prefix = 'anchors:\n - &a target\n'
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unsupported YAML alias target on a sequence item: &a')
+
+
+def test_an_anchor_on_a_mapping_key_is_an_unsupported_alias_target(tmp):
+    del tmp
+    prefix = 'anchors:\n &a key: target\n'
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unsupported YAML alias target on a mapping key: &a')
+
+
+def test_an_anchor_on_a_step_mapping_node_is_an_unsupported_alias_target(tmp):
+    del tmp
+    source = (
+        'jobs:\n sample:\n  steps:\n'
+        '   - &a name: hidden\n     if: z\n'
+        '   - name: *a\n     if: z\n')
+    _reader_refused_exact(
+        source,
+        'step name has an unsupported YAML alias target on a sequence item: &a')
+
+
+def test_anchor_name_boundaries_do_not_match_a_longer_name(tmp):
+    del tmp
+    prefix = 'anchors:\n first: &ab wrong\n decoy: [&ab hidden]\n'
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unknown YAML alias: &a')
+
+
+def test_a_later_unsupported_candidate_does_not_fall_back_to_an_older_one(tmp):
+    del tmp
+    prefix = (
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - &a hidden\n')
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unsupported YAML alias target on a sequence item: &a')
+
+
 def test_a_colon_bearing_decoy_in_a_block_body_defines_no_target(tmp):
     del tmp
-    _reader_refused(_document('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
-             'unknown YAML alias: &a')
+    _reader_refused(
+        _document('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
+        'unknown YAML alias: &a')
 
 
 def test_a_colon_bearing_decoy_in_a_quoted_scalar_defines_no_target(tmp):
@@ -237,7 +374,8 @@ def test_an_alias_to_a_nested_scalar_names_the_scalar(tmp):
 def test_an_alias_to_an_empty_mapping_value_names_an_empty_node(tmp):
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n')
-    _reader_refused(source, 'step name has an unsupported alias to an empty node: &a')
+    _reader_refused_exact(
+        source, 'step name has an unsupported alias to an empty node: &a')
 
 
 def test_an_alias_to_a_sequence_is_refused(tmp):
@@ -286,14 +424,16 @@ def test_a_malformed_alias_is_refused(tmp):
 def test_an_alias_carrying_an_anchor_is_refused(tmp):
     """An alias is a complete node; PyYAML refuses properties on one."""
     del tmp
-    _reader_refused(_document('name: &x *b'),
-             'alias carrying node properties: &x *b')
+    _reader_refused(
+        _document('name: &x *b'),
+        'alias carrying node properties: &x *b')
 
 
 def test_an_alias_carrying_a_tag_is_refused(tmp):
     del tmp
-    _reader_refused(_document('id: !!str *t'),
-             'alias carrying node properties: !!str *t')
+    _reader_refused(
+        _document('id: !!str *t'),
+        'alias carrying node properties: !!str *t')
 
 
 def test_a_tag_with_no_value_is_refused(tmp):

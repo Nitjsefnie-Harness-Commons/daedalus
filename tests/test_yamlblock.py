@@ -129,21 +129,26 @@ def test_a_header_outside_the_grammar_is_not_a_header(tmp):
     del tmp
     for header in ('|x', '||', '>-+', 'one', '|2 ', ''):
         assert parse_block_header(header, 'step name') is None, header
-    _call_refused(lambda: parse_block_header('|0', 'step name'),
-             'step name has an unsupported block header')
-    _call_refused(lambda: parse_block_header('|2-3', 'step name'),
-             'step name has two indentation indicators')
+    _call_refused(
+        lambda: parse_block_header('|0', 'step name'),
+        'step name has an unsupported block header')
+    _call_refused(
+        lambda: parse_block_header('|2-3', 'step name'),
+        'step name has two indentation indicators')
 
 
 def test_a_body_short_of_the_content_indent_is_refused(tmp):
     del tmp
-    _call_refused(lambda: _decode('|', '    \n  one\n'),
-             'step name block indentation is incomplete')
-    _call_refused(lambda: _decode('|', '  one\n one\n'),
-             'step name block indentation is incomplete')
+    _call_refused(
+        lambda: _decode('|', '    \n  one\n'),
+        'step name block indentation is incomplete')
+    _call_refused(
+        lambda: _decode('|', '  one\n one\n'),
+        'step name block indentation is incomplete')
     assert text_indent('   one') == 3
-    _call_refused(lambda: text_indent('\tone'),
-             'tabs in YAML indentation are unsupported')
+    _call_refused(
+        lambda: text_indent('\tone'),
+        'tabs in YAML indentation are unsupported')
 
 
 def test_a_block_ends_at_the_first_line_it_no_longer_covers(tmp):
