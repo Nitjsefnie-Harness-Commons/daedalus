@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Executable contracts for coverage and module-size ratchets."""
+import contextlib, io
 import json
 import os
 import shutil
@@ -15,7 +16,7 @@ from _repo import ROOT  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflowrun import run_step  # noqa: E402
 
-sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+sys.path[:0] = [str(ROOT), str(ROOT / 'scripts' / 'ci')]
 
 
 THRESHOLDS_PATH = ROOT / '.github' / 'ci-thresholds.json'
@@ -65,18 +66,55 @@ def _run_ratchet(tmp, language, measured, thresholds_path):
         cwd=str(ROOT), capture_output=True, text=True, timeout=60)
 
 
+def _value_error(call):
+    try:
+        call()
+    except ValueError as error:
+        return str(error)
+    return None
+
+
 def test_promoted_modules_import_by_package(tmp):
     """The ratchet and shared reader import without workflow YAML coupling."""
     del tmp
     command = '; '.join((
-        'import scripts.ci.ratchet',
-        'import scripts.ci.size_baseline',
-        'import scripts.ci.thresholds',
-    ))
+        'import scripts.ci.ratchet', 'import scripts.ci.size_baseline',
+        'import scripts.ci.thresholds', 'import scripts.ci.workflow_yaml'))
     imported = subprocess.run(
         [sys.executable, '-c', command], cwd=str(ROOT), capture_output=True,
         text=True, timeout=60)
     assert imported.returncode == 0, (imported.stdout, imported.stderr)
+    assert all(__import__(name, fromlist=['*']) for name in ('scripts.ci.ratchet', 'scripts.ci.size_baseline', 'scripts.ci.thresholds', 'scripts.ci.workflow_yaml'))
+
+
+def test_measurement_rejects_bool_bad_numeric_and_nonfinite(_tmp):
+    class BadFloat(float):
+        def __str__(self):
+            return 'not-a-number'
+    ratchet = _ratchet()
+    cases = ((True, 'measured must be a finite JSON number'), (BadFloat(80.0), 'measured must be a finite JSON number'), (Decimal('NaN'), 'measured must be finite'))
+    for value, message in cases:
+        assert _value_error(lambda value=value: ratchet._measurement(value)) == message
+
+
+def test_floor_for_and_update_refuse_unknown_language_before_mutation(_tmp):
+    ratchet = _ratchet()
+    assert ratchet.floor_for(Decimal('81.0')) == Decimal('79.5')
+    data = {'not': 'a threshold document'}
+    assert _value_error(lambda: ratchet.update(data, Decimal('81.6'), 'ruby')) == 'unknown coverage language: ruby'
+    assert data == {'not': 'a threshold document'}
+
+
+def test_main_reports_invalid_measurement_without_writing(tmp):
+    before = (path := _copy_thresholds(tmp)).read_bytes()
+    ratchet = _ratchet()
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        status = ratchet.main(['--language', 'python', '--measured', 'nan',
+                               '--thresholds', str(path)])
+    assert status == 1
+    assert stderr.getvalue() == 'measured must be finite\n'
+    assert path.read_bytes() == before
 
 
 def test_public_update_uses_recorded_measurement_high_water(tmp):
@@ -144,14 +182,21 @@ def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
     }
 
 
-def test_cli_noop_does_not_rewrite_or_refresh_measurement(tmp):
-    """No-op ratchets leave bytes untouched, including recorded measured."""
+def test_main_noop_then_raise_preserves_and_updates_thresholds(tmp):
+    """No-op ratchets leave bytes untouched; raises publish new calibration."""
     path = _copy_thresholds(tmp)
     before = path.read_bytes()
-    result = _run_ratchet(tmp, 'python', '80.1', path)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert path.read_bytes() == before
-    assert 'no raise' in result.stdout
+    ratchet = _ratchet()
+    for measured, expected in (('80.1', 'no raise'), ('81.6', 'raised')):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status = ratchet.main(['--language', 'python', '--measured',
+                                   measured, '--thresholds', str(path)])
+        assert status == 0
+        assert expected in output.getvalue()
+        if measured == '80.1':
+            assert path.read_bytes() == before
+    assert _thresholds().load(path)['coverage']['python']['floor'] == Decimal('80.1')
 
 
 def test_cli_rejects_the_retired_workflow_option(tmp):
@@ -199,7 +244,6 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
              if step.get('name') in ('Python coverage gate',
                                      'JavaScript coverage gate')}
     assert set(steps) == {'Python coverage gate', 'JavaScript coverage gate'}
-
     work = Path(tmp) / 'tree'
     work.mkdir()
     (work / '.github').mkdir()
@@ -454,7 +498,6 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
         'changed=true', 'python_measured=81.6', 'javascript_measured=35.5']
     assert '### Recorded by this run' in changed_summary.read_text(
         encoding='utf-8')
-
     noop = _run_publisher_case(
         tmp, 'publisher-noop-matrix', _document(), '80.0', '35.5')
     _repo, _path, _before, noop_output, noop_summary, done = noop
@@ -477,7 +520,6 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     assert 'HEAD:main' in commit['run']
     assert 'GIT_SSH_COMMAND' in commit['run']
     assert '--force' not in commit['run']
-
     for event, ref, measured, status, expected in (
             ('push', 'refs/heads/main', 'success',
              {'success': True, 'failure': False, 'cancelled': False}, True),
@@ -498,7 +540,6 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
             'status': status,
         }
         assert evaluate_if(ratchet['if'], context) is expected, context
-
     for changed, secret, status, expected in (
             ('true', 'key',
              {'success': True, 'failure': False, 'cancelled': False}, True),
@@ -547,7 +588,6 @@ def test_publisher_condition_mutations_are_rejected(tmp):
         mutated = ratchet.replace(removed, 'true')
         assert evaluate_if(mutated, context) is True
         assert evaluate_if(ratchet, context) is False
-
     ratchet_failure = {
         'github': {'event_name': 'push', 'ref': 'refs/heads/main'},
         'steps': {'measure': {'conclusion': 'success'}},
@@ -557,7 +597,6 @@ def test_publisher_condition_mutations_are_rejected(tmp):
     assert evaluate_if(
         ratchet.replace('!cancelled()', 'success()'),
         ratchet_failure) is False
-
     cancelled = {
         'steps': {'ratchet': {'outputs': {'changed': 'true'}}},
         'env': {'RATCHET_SSH_KEY': 'key'},

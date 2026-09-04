@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Contracts for the JSON-owned module-size policy and its ratchet."""
+import contextlib
+import io
 import shutil
 import subprocess
 import sys
@@ -26,6 +28,13 @@ def _thresholds():
 
 def _document():
     return _thresholds().load(THRESHOLDS_SOURCE)
+
+
+def _captured_main(policy, argv):
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        status = policy.main(argv)
+    return status, stdout.getvalue(), stderr.getvalue()
 
 
 def test_every_tracked_module_satisfies_the_size_policy(tmp):
@@ -103,6 +112,116 @@ def test_tightening_preserves_an_entry_for_a_missing_file(tmp):
     policy = _policy()
     baseline = {'tests/gone.py': 900}
     assert policy.tightened(baseline, {}) is None
+
+
+def test_main_reports_clean_and_all_violation_modes(tmp):
+    """The direct CLI reports every kind and de-duplicates its remedies."""
+    thresholds = _thresholds()
+    policy = _policy()
+    target = Path(tmp) / 'thresholds.json'
+    data = _document()
+    data['module_size_baseline'] = {}
+    thresholds.write(target, data)
+    original = policy.tracked_sizes
+    policy.tracked_sizes = lambda: {'server.py': 10}
+    try:
+        status, stdout, stderr = _captured_main(
+            policy, ['--thresholds', str(target)])
+        assert status == 0
+        assert stdout == '1 tracked modules within the size policy\n'
+        assert stderr == ''
+
+        data['module_size_baseline'] = {
+            'tests/grown.py': 700,
+            'tests/graduated.py': 900,
+            'tests/missing.py': 900,
+        }
+        thresholds.write(target, data)
+        policy.tracked_sizes = lambda: {
+            'tests/grown.py': 701,
+            'tests/graduated.py': 700,
+            'tests/over.py': 701,
+        }
+        status, stdout, stderr = _captured_main(
+            policy, ['--thresholds', str(target)])
+    finally:
+        policy.tracked_sizes = original
+    assert status == 1
+    assert stdout == ''
+    for detail in (
+            "grown: {'tests/grown.py': (701, 700)}",
+            "over: {'tests/over.py': (701, 700)}",
+            "missing: ['tests/missing.py']",
+            "graduated: {'tests/graduated.py': (700, 700)}"):
+        assert detail in stderr, stderr
+    assert stderr.count(policy.GROWTH_REMEDY) == 1
+    assert stderr.count(policy.STALE_ENTRY_REMEDY) == 1
+
+
+def test_main_tighten_noop_then_changes_only_selected_member(tmp):
+    """Tightening preserves a no-op byte-for-byte and lowers one entry."""
+    thresholds = _thresholds()
+    policy = _policy()
+    target = Path(tmp) / 'thresholds.json'
+    data = _document()
+    data['module_size_baseline'] = {
+        'tests/changed.py': 901,
+        'tests/steady.py': 902,
+    }
+    thresholds.write(target, data)
+    original = policy.tracked_sizes
+    try:
+        policy.tracked_sizes = lambda: {
+            'tests/changed.py': 901,
+            'tests/steady.py': 902,
+        }
+        before = target.read_bytes()
+        status, stdout, stderr = _captured_main(
+            policy, ['--tighten', '--thresholds', str(target)])
+        assert status == 0
+        assert stdout == 'no module shrank below its recorded size\n'
+        assert stderr == ''
+        assert target.read_bytes() == before
+
+        policy.tracked_sizes = lambda: {
+            'tests/changed.py': 850,
+            'tests/steady.py': 902,
+        }
+        before = thresholds.load(target)
+        status, stdout, stderr = _captured_main(
+            policy, ['--tighten', '--thresholds', str(target)])
+    finally:
+        policy.tracked_sizes = original
+    assert status == 0
+    assert stdout == 'tightened the module size baseline\n'
+    assert stderr == ''
+    after = thresholds.load(target)
+    assert after['module_size_baseline'] == {
+        'tests/changed.py': 850,
+        'tests/steady.py': 902,
+    }
+    assert after['coverage'] == before['coverage']
+
+
+def test_main_reports_threshold_load_failures_without_traceback(tmp):
+    """Missing, unreadable, and malformed threshold inputs fail closed."""
+    policy = _policy()
+    missing = Path(tmp) / 'missing.json'
+    unreadable = Path(tmp) / 'unreadable'
+    unreadable.mkdir()
+    invalid = Path(tmp) / 'invalid.json'
+    invalid.write_bytes(b'{')
+    for target, marker in (
+            (missing, 'cannot read thresholds:'),
+            (unreadable, 'cannot read thresholds:'),
+            (invalid, 'invalid thresholds JSON:')):
+        status, stdout, stderr = _captured_main(
+            policy, ['--thresholds', str(target)])
+        assert status == 1
+        assert stdout == ''
+        assert stderr.startswith(marker + ' '), stderr
+        assert stderr.count('\n') == 1
+        assert 'Traceback' not in stderr
 
 
 def test_cli_tighten_changes_json_member_and_preserves_calibration(tmp):

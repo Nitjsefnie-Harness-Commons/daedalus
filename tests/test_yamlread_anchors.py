@@ -253,6 +253,14 @@ def test_multiline_flow_alias_candidates_are_refused_as_opaque(tmp):
             'collection: &a')
 
 
+def test_unclosed_flow_keeps_apparent_jobs_opaque(tmp):
+    del tmp
+    source = ('decoy: [one, two\n'
+              'jobs:\n sample:\n  steps:\n'
+              '   - name: hidden\n     if: z\n')
+    assert workflow_step_items(source, 'sample') is None
+
+
 def _assert_flow_property_decoy(decoy):
     prefix = 'anchors:\n first: &a target\n ' + decoy
     _reader_refused_exact(
