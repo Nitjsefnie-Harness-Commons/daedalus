@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""The fail-closed inventory of jobs that can write the Actions cache."""
+"""Fail-closed inventory of statically classified cache-writing jobs.
+Direct shell detection is bounded literal scanning; arbitrary shell, checked-in
+scripts, constructed names, and downloaded code are not interpreted."""
 import re
 import sys
 from pathlib import Path
@@ -51,6 +53,13 @@ _REVIEWED_NONCACHE_REFS = {
         '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
     'actions/download-artifact':
         '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c',
+}
+
+_DECISIVE_CONTROLS = {
+    'astral-sh/setup-uv': (('enable-cache', 'auto'),
+                           ('save-cache', 'true')),
+    'swatinem/rust-cache': (('save-if', 'true'),
+                            ('cache-provider', 'github')),
 }
 
 _DIRECT_ENV_NAMES = (
@@ -220,10 +229,6 @@ def _direct_cache_run(run):
     return None
 
 
-def _reviewed_ref(action, ref):
-    return ref in _REVIEWED_REFS.get(action, ())
-
-
 def _reviewed_noncache_action(action, ref, job, step_number):
     expected = _REVIEWED_NONCACHE_REFS.get(action)
     if expected is None:
@@ -236,7 +241,7 @@ def _reviewed_noncache_action(action, ref, job, step_number):
 
 
 def _require_reviewed_writer_ref(action, ref, job, step_number):
-    if not _reviewed_ref(action, ref):
+    if ref not in _REVIEWED_REFS.get(action, ()):
         raise AssertionError(
             f"cache boundary has no reviewed manifest for job {job!r} "
             f"step {step_number} action {action!r} ref {ref!r}")
@@ -247,6 +252,18 @@ def _direct_reason(run, job, step_number):
         return _direct_cache_run(run)
     except AssertionError as error:
         raise _boundary_error(job, step_number, str(error)) from error
+
+
+def _decisive_opt_out(inputs, controls, context):
+    errors = []
+    for key, default in controls:
+        disabled = 'warpbuild' if key == 'cache-provider' else 'false'
+        try:
+            if _literal_control(inputs, key, default, *context) == disabled:
+                return True
+        except AssertionError as error: errors.append(error)
+    if errors: raise errors[0]
+    return False
 
 
 def _cache_write_reason(step, job, step_number):
@@ -318,26 +335,14 @@ def _cache_write_reason(step, job, step_number):
                 reason = None
             else:
                 reason = 'setup-buildx binary cache'
-        elif action == 'astral-sh/setup-uv':
-            enabled = _literal_control(
-                inputs, 'enable-cache', 'auto', job, step_number, action)
-            saving = _literal_control(
-                inputs, 'save-cache', 'true', job, step_number, action)
-            if enabled == 'false' or saving == 'false':
+        elif action in _DECISIVE_CONTROLS:
+            if _decisive_opt_out(
+                    inputs, _DECISIVE_CONTROLS[action],
+                    (job, step_number, action)):
                 _require_reviewed_writer_ref(action, ref, job, step_number)
                 reason = None
             else:
-                reason = 'setup-uv cache post-save'
-        elif action == 'swatinem/rust-cache':
-            save_if = _literal_control(
-                inputs, 'save-if', 'true', job, step_number, action)
-            provider = _literal_control(
-                inputs, 'cache-provider', 'github', job, step_number, action)
-            if save_if == 'false' or provider == 'warpbuild':
-                _require_reviewed_writer_ref(action, ref, job, step_number)
-                reason = None
-            else:
-                reason = 'rust-cache post-save'
+                reason = f'{action.rsplit("/", 1)[-1]} cache post-save'
         elif action == 'docker/build-push-action':
             _require_reviewed_writer_ref(action, ref, job, step_number)
             has_cache_to = 'cache-to' in inputs
@@ -374,7 +379,7 @@ def _cache_write_reason(step, job, step_number):
 
 
 def _cache_writing_jobs(workflow):
-    """Return every job whose cache boundary is statically classified."""
+    """Return statically classified cache-writing jobs."""
     writers = set()
     for job in _job_names(workflow):
         mapping = complete_job_mapping(workflow, job)
@@ -432,13 +437,20 @@ def _refuses(call, *args, contains=None):
     raise AssertionError(f'{call.__name__} accepted the planted ambiguity')
 
 
+def _assert_writer_inventory(workflow):
+    actual = _cache_writing_jobs(workflow)
+    assert actual == set(_CACHE_WRITING_JOBS), (
+        f"unrecorded cache-writing jobs: "
+        f"{sorted(actual - _CACHE_WRITING_JOBS)!r}; "
+        f"recorded cache-writing jobs gone quiet: "
+        f"{sorted(_CACHE_WRITING_JOBS - actual)!r}")
+
+
 def test_only_the_recorded_jobs_write_the_actions_cache(tmp):
-    del tmp
-    assert _cache_writing_jobs(_tests_yml()) == set(_CACHE_WRITING_JOBS)
+    _assert_writer_inventory(_tests_yml())
 
 
 def test_steps_less_local_job_is_empty_but_reusable_job_is_pending(tmp):
-    del tmp
     local = 'jobs:\n  local:\n    runs-on: ubuntu-latest\n'
     assert _cache_writing_jobs(local) == set()
     reusable = 'jobs:\n  called:\n    uses: ./.github/workflows/other.yml\n'
@@ -447,7 +459,6 @@ def test_steps_less_local_job_is_empty_but_reusable_job_is_pending(tmp):
 
 
 def test_actions_cache_combined_and_save_write_restore_reads(tmp):
-    del tmp
     cases = (
         ('actions/cache@v4', {}, True),
         ('actions/cache/save@v4', {}, True),
@@ -460,7 +471,8 @@ def test_actions_cache_combined_and_save_write_restore_reads(tmp):
 
 
 def test_manifest_backed_cache_action_controls(tmp):
-    del tmp
+    uv = 'astral-sh/setup-uv@v7'
+    rust = 'Swatinem/rust-cache@v2'
     cases = (
         ('actions/setup-go@v6', {}, True),
         ('actions/setup-go@v6', {'cache': 'true'}, True),
@@ -476,10 +488,14 @@ def test_manifest_backed_cache_action_controls(tmp):
         ('astral-sh/setup-uv@v7', {'enable-cache': 'true'}, True),
         ('astral-sh/setup-uv@v7', {'enable-cache': 'false'}, False),
         ('astral-sh/setup-uv@v7', {'save-cache': 'false'}, False),
+        (uv, {'enable-cache': 'false', 'save-cache': '${{ x }}'}, False),
+        (uv, {'enable-cache': '${{ x }}', 'save-cache': 'false'}, False),
         ('Swatinem/rust-cache@v2', {}, True),
         ('Swatinem/rust-cache@v2', {'save-if': 'true'}, True),
         ('Swatinem/rust-cache@v2', {'save-if': 'false'}, False),
         ('Swatinem/rust-cache@v2', {'cache-provider': 'warpbuild'}, False),
+        (rust, {'save-if': 'false', 'cache-provider': '${{ x }}'}, False),
+        (rust, {'save-if': '${{ x }}', 'cache-provider': 'warpbuild'}, False),
         ('docker/build-push-action@v6', {'cache-from': 'type=gha'}, False),
         ('docker/build-push-action@v6', {'cache-to': 'type=gha'}, True),
         ('docker/build-push-action@v6',
@@ -497,7 +513,6 @@ def test_manifest_backed_cache_action_controls(tmp):
 
 
 def test_generic_setup_cache_input_remains_conservative(tmp):
-    del tmp
     assert _cache_write_reason(
         {'uses': 'example/setup-thing@v1', 'with': {'cache': 'false'}},
         'sample', 1) is not None
@@ -655,14 +670,15 @@ def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
 
 
 def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
-    del tmp
     workflow = _tests_yml()
-    assert _cache_writing_jobs(workflow) == set(_CACHE_WRITING_JOBS)
+    _assert_writer_inventory(workflow)
     line = '          package-manager-cache: false\n'
     assert line in workflow
     without_opt_out = workflow.replace(line, '', 1)
-    assert _cache_writing_jobs(without_opt_out) == (
-        set(_CACHE_WRITING_JOBS) | {'eslint'})
+    message = _refuses(_assert_writer_inventory, without_opt_out)
+    assert message == (
+        "unrecorded cache-writing jobs: ['eslint']; "
+        "recorded cache-writing jobs gone quiet: []")
 
 
 def test_production_cache_steps_keep_restore_and_save_separate(tmp):
