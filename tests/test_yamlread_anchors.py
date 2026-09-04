@@ -318,6 +318,15 @@ def test_no_space_flow_mapping_keeps_quoted_closing_brace_opaque(tmp):
          'quoted } and escaped " delimiter'),
         ("'key':'quoted } and doubled '' delimiter'",
          "quoted } and doubled ' delimiter"),
+        ('"key":&x "quoted } and escaped \\\" delimiter"',
+         'quoted } and escaped " delimiter'),
+        ("'key':&x 'quoted } and doubled '' delimiter'",
+         "quoted } and doubled ' delimiter"),
+        ('"key":!<tag:yaml.org,2002:str> '
+         '"quoted } and escaped \\\" delimiter"',
+         'quoted } and escaped " delimiter'),
+        ("'key':!<tag:yaml.org,2002:str> 'quoted } and doubled '' delimiter'",
+         "quoted } and doubled ' delimiter"),
     )
     for member, expected in values:
         prefix = (
