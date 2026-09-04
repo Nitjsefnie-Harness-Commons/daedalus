@@ -75,7 +75,10 @@ def has_anchor_spelling(value, name):
             continue
         before = value[index - 1:index]
         after = value[index + len(spelling):index + len(spelling) + 1]
-        if ((not before or before.isspace() or before in '[] {},')
-                and (not after or after.isspace() or after in '[] {},')):
+        if _is_property_boundary(before) and _is_property_boundary(after):
             return True
     return False
+
+
+def _is_property_boundary(value):
+    return not value or value.isspace() or value in '[] {},'
