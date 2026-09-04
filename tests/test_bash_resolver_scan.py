@@ -289,6 +289,40 @@ launch = lambda tmp: subprocess.run([program, '-c', 'true'], cwd=tmp)
     assert len(outer) == 1, outer
 
 
+def test_definition_headers_and_comprehensions_use_their_real_scopes(tmp):
+    del tmp
+    cases = (
+        ("""import subprocess
+bash = 'bash'
+def build(bash=subprocess.run([bash], cwd=tmp)):
+    return bash
+""", (3,)),
+        ("""import subprocess
+bash = 'bash'
+build = lambda bash=subprocess.run([bash], cwd=tmp): bash
+""", (3,)),
+        ("""import subprocess
+import _util
+bash = 'bash'
+class Example(factory(subprocess.run([bash], cwd=tmp))):
+    bash = _util.workflow_bash()
+    subprocess.run([bash], cwd=tmp)
+""", (4,)),
+        ("""import subprocess
+bash = 'bash'
+subprocess.run([bash], cwd=tmp)
+[subprocess.run([bash], cwd=tmp) for bash in values]
+subprocess.run([bash], cwd=tmp)
+""", (3, 5)),
+    )
+    for source, lines in cases:
+        violations = _synthetic(source)
+        expected = [
+            f'tests/synthetic.py:{line}: run resolves the workflow shell '
+            "as 'bash', not workflow_bash()" for line in lines]
+        assert violations == expected, (lines, violations)
+
+
 def test_a_parameter_shadows_an_outer_binding(tmp):
     """A launch through a parameter is out of scope, not resolved outward.
 
