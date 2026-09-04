@@ -145,7 +145,8 @@ def test_step_id_accepts_every_property_spelling(tmp):
     for field in ('id: &b target', 'id: !!str target',
                   'id: &b !!str target', 'id: *a'):
         assert _identities(_document(field, prefix)) == ['target'], field
-    _reader_refused(_document('id: ! target', prefix), 'unsupported YAML tag !')
+    _reader_refused(
+        _document('id: ! target', prefix), 'unsupported YAML tag !')
 
 
 def test_anchored_block_scalar_name_decodes_like_the_plain_block(tmp):
@@ -197,7 +198,8 @@ def test_an_alias_reads_an_anchor_defined_on_an_earlier_step_field(tmp):
 
 def test_an_alias_with_no_earlier_anchor_is_refused(tmp):
     del tmp
-    _reader_refused(_document('name: *missing'), 'unknown YAML alias: &missing')
+    _reader_refused(
+        _document('name: *missing'), 'unknown YAML alias: &missing')
 
 
 def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
@@ -205,7 +207,8 @@ def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
     for prefix in ('anchors:\n gate: |\n  &a hidden\n',
                    'anchors:\n gate: "&a hidden"\n',
                    'anchors:\n# gate: &a hidden\n gate: real\n'):
-        _reader_refused(_document('name: *a', prefix), 'unknown YAML alias: &a')
+        _reader_refused(
+            _document('name: *a', prefix), 'unknown YAML alias: &a')
 
 
 def test_bare_sequence_block_scalars_do_not_define_alias_targets(tmp):
@@ -405,7 +408,8 @@ def test_an_alias_to_a_flow_collection_names_the_collection(tmp):
     del tmp
     for child in ('[x]', '{k: v}', '{a}'):
         source = _document('name: *a', f'anchors:\n gate: &a\n  {child}\n')
-        _reader_refused(source, 'unsupported alias to a nested flow collection')
+        _reader_refused(
+            source, 'unsupported alias to a nested flow collection')
 
 
 def test_a_non_string_tag_is_refused(tmp):

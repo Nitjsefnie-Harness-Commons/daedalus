@@ -2,12 +2,12 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-PyYAML is not a dependency of this project and CI never installs it, so
-the workflow suites scan text. What they need from that text is one
-nesting level deep: which triggers an `on:` block declares, and which
-path filters each one carries. Both answers have to survive the spellings
-YAML allows for the same thing, which is why this is a module rather than
-a substring check at each call site.
+PyYAML is a test-only dependency for the BaseLoader oracle; production has no
+YAML parser dependency, so these workflow suites scan text. What they need
+from that text is one nesting level deep: which triggers an `on:` block
+declares, and which path filters each one carries. Both answers have to
+survive the spellings YAML allows for the same thing, which is why this is a
+module rather than a substring check at each call site.
 
 The bounded grammar is an allow-list. Mapping keys are only unquoted plain
 keys made from lowercase letters, digits, `_`, and `-`; every quoted or other
