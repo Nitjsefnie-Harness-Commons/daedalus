@@ -341,7 +341,7 @@ def _run_publisher_case(tmp, name, data, python_measured, javascript_measured,
     _seed_publisher_tree(repo, data)
     threshold_path = repo / '.github' / 'ci-thresholds.json'
     if raw is not None:
-        threshold_path.write_text(raw, encoding='utf-8')
+        threshold_path.write_bytes(raw)
         _git(repo, 'add', str(threshold_path.relative_to(repo)))
         _git(repo, 'commit', '-qm', 'malformed base')
     before = threshold_path.read_bytes()
@@ -419,13 +419,14 @@ def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
 
 def test_real_publisher_step_rejects_malformed_data_without_publishing(tmp):
     """A malformed document fails closed before any output or diff."""
-    raw = '{"schema_version": 1}\n'
+    raw = b'{"schema_version": 1}\r\n'
     result = _run_publisher_case(
         tmp, 'publisher-malformed', _document(), '81.6', '35.5', raw=raw)
     repo, path, before, output, _summary, done = result
     assert done.returncode != 0
     assert 'changed=' not in output.read_text(encoding='utf-8')
-    assert path.read_bytes() == before == raw.encode('utf-8')
+    assert before.endswith(b'\r\n')
+    assert path.read_bytes() == before == raw
     assert _git(repo, 'diff', '--name-only').stdout == ''
 
 
@@ -480,6 +481,8 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     for event, ref, measured, status, expected in (
             ('push', 'refs/heads/main', 'success',
              {'success': True, 'failure': False, 'cancelled': False}, True),
+            ('push', 'refs/heads/main', 'success',
+             {'success': False, 'failure': True, 'cancelled': False}, True),
             ('pull_request', 'refs/heads/main', 'success',
              {'success': True, 'failure': False, 'cancelled': False}, False),
             ('push', 'refs/heads/other', 'success',
@@ -499,6 +502,8 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     for changed, secret, status, expected in (
             ('true', 'key',
              {'success': True, 'failure': False, 'cancelled': False}, True),
+            ('true', 'key',
+             {'success': False, 'failure': True, 'cancelled': False}, True),
             ('false', 'key',
              {'success': True, 'failure': False, 'cancelled': False}, False),
             ('true', '',
@@ -543,6 +548,16 @@ def test_publisher_condition_mutations_are_rejected(tmp):
         assert evaluate_if(mutated, context) is True
         assert evaluate_if(ratchet, context) is False
 
+    ratchet_failure = {
+        'github': {'event_name': 'push', 'ref': 'refs/heads/main'},
+        'steps': {'measure': {'conclusion': 'success'}},
+        'status': {'success': False, 'failure': True, 'cancelled': False},
+    }
+    assert evaluate_if(ratchet, ratchet_failure) is True
+    assert evaluate_if(
+        ratchet.replace('!cancelled()', 'success()'),
+        ratchet_failure) is False
+
     cancelled = {
         'steps': {'ratchet': {'outputs': {'changed': 'true'}}},
         'env': {'RATCHET_SSH_KEY': 'key'},
@@ -569,6 +584,15 @@ def test_publisher_condition_mutations_are_rejected(tmp):
     assert evaluate_if(
         commit['if'].replace("env.RATCHET_SSH_KEY != ''", 'true'),
         missing_secret) is True
+    commit_failure = {
+        'steps': {'ratchet': {'outputs': {'changed': 'true'}}},
+        'env': {'RATCHET_SSH_KEY': 'key'},
+        'status': {'success': False, 'failure': True, 'cancelled': False},
+    }
+    assert evaluate_if(commit['if'], commit_failure) is True
+    assert evaluate_if(
+        commit['if'].replace('!cancelled()', 'success()'),
+        commit_failure) is False
 
 
 def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
