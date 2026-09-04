@@ -392,18 +392,21 @@ def test_block_scalar_with_two_indent_indicators_is_refused(tmp):
         '        run: >1+2\n'
         '          true\n')
     _item_reader_refused(
-        source, 'workflow has two indentation indicators')
+        source, "mapping field 'run' has two indentation indicators")
 
 
 def test_a_zero_indentation_indicator_names_the_block_header(tmp):
-    """`|0` is a block header with an indicator this subset refuses."""
     del tmp
-    source = (
-        'jobs:\n  sample:\n    steps:\n'
-        '      - name: |0\n'
-        '          true\n')
-    _item_reader_refused(
-        source, 'workflow has an unsupported block header')
+    cases = (('name: |0\n'
+              '          true\n',
+              "mapping field 'name' has an unsupported block " "header"),
+             ('name: target\n'
+              '        run: |0\n'
+              '          true\n',
+              "mapping field 'run' has an unsupported block " "header"))
+    for step, detail in cases:
+        _item_reader_refused(
+            'jobs:\n  sample:\n    steps:\n      - ' + step, detail)
 
 
 def test_complete_workflow_and_job_mappings_decode_every_container(tmp):
