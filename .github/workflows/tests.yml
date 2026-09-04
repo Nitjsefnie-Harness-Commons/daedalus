@@ -828,48 +828,29 @@ jobs:
             javascript-coverage.xml
           if-no-files-found: error
 
-      # Keep this exact name: ratchet.py scopes the three anchors to this step.
+      # Keep this exact name: coverage policy tests select this gate by name.
       - name: Python coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        # A RATCHET, not a target. The floor sits just under what this job
-        # actually measures, so ordinary churn stays green and a real
-        # regression goes red. The step below raises it from what this run
-        # measured — never lower it to make a red build green.
-        #
-        # The two numbers below are checked against each other and against the
-        # flag by
-        # test_each_coverage_ratchet_records_what_it_was_calibrated_to.
-        # The buffer absorbs measurement variation — which suites reach a
-        # subprocess before it exits, and which optional dependency set the
-        # runner resolved — not a licence to regress into it.
-        # Python measured: 94.4
-        # Python floor: 92.9
-        run: python -m coverage report --fail-under=92.9 --precision=1
+        # The loader owns the floor; this command remains coverage.py's gate.
+        run: |
+          python_floor="$(python scripts/ci/thresholds.py \
+            --coverage-floor python)"
+          python -m coverage report "--fail-under=$python_floor" --precision=1
 
-      # Keep this exact name: ratchet.py scopes the three anchors to this step.
+      # Keep this exact name: coverage policy tests select this gate by name.
       - name: JavaScript coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        # JavaScript uses physical code lines, so this floor is independent
-        # of the Python statement floor above. It has the same 1.5-point
-        # run-to-run buffer and the same raise-only rule.
-        # JavaScript measured: 35.5
-        # JavaScript floor: 34.0
+        # JavaScript uses physical code lines, so its floor is independent.
         run: |
+          javascript_floor="$(python scripts/ci/thresholds.py \
+            --coverage-floor javascript)"
           python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \
-            --xml javascript-coverage.xml --fail-under=34.0
+            --xml javascript-coverage.xml \
+            "--fail-under=$javascript_floor"
 
       - name: Work out the raise this run justifies
-        # The floor was raised by hand, so the measurement recorded beside it
-        # went stale silently: it read 73.3 while the job measured 75, and the
-        # test pinning the two numbers cannot tell a current measurement from
-        # one taken fifteen commits ago. This closes that by making the run
-        # that takes the measurement also record it.
-        #
         # Only from a push to main. A pull request measures a tree that is not
-        # main, and a fork's token cannot push at all. ratchet.py only ever
-        # raises, so a run that reached fewer subprocesses writes nothing —
-        # and that is also what makes this terminate: the run triggered by the
-        # commit below measures the same coverage and justifies no second one.
+        # main, and a fork's token cannot push at all. Ratchets only raise.
         id: ratchet
         if: ${{ !cancelled() && steps.measure.conclusion == 'success'
                 && github.event_name == 'push'
@@ -883,44 +864,35 @@ jobs:
               --format=total
           )"
           python scripts/ci/ratchet.py --language python \
-            --measured "$python_measured"
+            --measured "$python_measured" \
+            --thresholds .github/ci-thresholds.json
           python scripts/ci/ratchet.py --language javascript \
-            --measured "$javascript_measured"
+            --measured "$javascript_measured" \
+            --thresholds .github/ci-thresholds.json
           # The size baseline ratchets the other way: it follows a file down
           # when it shrinks, so the lines cannot come back for free. Growth is
           # never written here — that stays a decision a reviewer sees.
-          python scripts/ci/size_baseline.py --tighten
-          # git decides whether anything moved, so the scripts stay rewriters
-          # and this stays a publisher; neither has to report to the other.
-          paths='.github/workflows/tests.yml scripts/ci/size_baseline.py'
-          # shellcheck disable=SC2086  # two known paths, deliberately split
+          python scripts/ci/size_baseline.py --tighten \
+            --thresholds .github/ci-thresholds.json
+          python scripts/ci/thresholds.py --check \
+            --thresholds .github/ci-thresholds.json
+          paths='.github/ci-thresholds.json'
           if git diff --quiet -- $paths; then
-            echo "raised=false" >> "$GITHUB_OUTPUT"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             printf '%s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
               "${javascript_measured}% justified no raise; no module shrank." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {
-              echo 'raised=true'
+              echo 'changed=true'
               echo "python_measured=${python_measured}"
               echo "javascript_measured=${javascript_measured}"
-              # --quiet exits 0 for an unchanged path, so each
-              # single-file arm announces one file's subject while
-              # testing the other file's diff.
-              if git diff --quiet -- scripts/ci/size_baseline.py; then
-                echo 'subject=raise the coverage ratchets'
-              elif git diff --quiet -- .github/workflows/tests.yml; then
-                echo 'subject=tighten the module size baseline'
-              else
-                echo 'subject=raise coverage ratchets and tighten module sizes'
-              fi
             } >> "$GITHUB_OUTPUT"
             {
               echo '### Recorded by this run'
               echo
               echo '```diff'
-              # shellcheck disable=SC2086
               git diff -- $paths
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
@@ -941,15 +913,12 @@ jobs:
         # than tidy: the run this triggers measures the same coverage,
         # ratchet.py declines to raise a second time, and the chain stops.
         #
-        # Without the secret nothing is pushed and the summary above still
-        # carries the number, so a fork or an unprovisioned repository gets a
-        # visible raise to make by hand rather than a red build.
-        if: ${{ !cancelled() && steps.ratchet.outputs.raised == 'true'
+        # Without the secret nothing is pushed and the summary remains visible.
+        if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true'
                 && env.RATCHET_SSH_KEY != '' }}
         env:
           RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
           REPO: ${{ github.repository }}
-          SUBJECT: ${{ steps.ratchet.outputs.subject }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$RATCHET_SSH_KEY" > ~/.ssh/ratchet
@@ -962,10 +931,9 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/tests.yml scripts/ci/size_baseline.py
+          git add .github/ci-thresholds.json
           # No co-author trailer: no model authored this commit.
-          git commit -m "ci: ${SUBJECT}" \
-            -m 'Recorded by .github/workflows/tests.yml from what this run measured.'
+          git commit -m 'ci: update CI ratchets'
           # HEAD:main, never a force: overwriting someone's commit to record a
           # coverage number is never the right trade.
           export GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts'
