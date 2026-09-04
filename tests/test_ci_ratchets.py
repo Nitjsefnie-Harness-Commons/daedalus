@@ -33,10 +33,6 @@ def _ratchet():
     return _util.load(RATCHET_PATH, 'ratchet_contract')
 
 
-def _size():
-    return _util.load(SIZE_PATH, 'size_contract')
-
-
 def _document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
     return {
         'schema_version': 1,
@@ -76,7 +72,6 @@ def _value_error(call):
 
 def test_promoted_modules_import_by_package(tmp):
     """The ratchet and shared reader import without workflow YAML coupling."""
-    del tmp
     command = '; '.join((
         'import scripts.ci.ratchet', 'import scripts.ci.size_baseline',
         'import scripts.ci.thresholds', 'import scripts.ci.workflow_yaml'))
@@ -84,7 +79,9 @@ def test_promoted_modules_import_by_package(tmp):
         [sys.executable, '-c', command], cwd=str(ROOT), capture_output=True,
         text=True, timeout=60)
     assert imported.returncode == 0, (imported.stdout, imported.stderr)
-    assert all(__import__(name, fromlist=['*']) for name in ('scripts.ci.ratchet', 'scripts.ci.size_baseline', 'scripts.ci.thresholds', 'scripts.ci.workflow_yaml'))
+    assert all(__import__(name, fromlist=['*']) for name in (
+        'scripts.ci.ratchet', 'scripts.ci.size_baseline',
+        'scripts.ci.thresholds', 'scripts.ci.workflow_yaml'))
 
 
 def test_measurement_rejects_bool_bad_numeric_and_nonfinite(_tmp):
@@ -92,16 +89,22 @@ def test_measurement_rejects_bool_bad_numeric_and_nonfinite(_tmp):
         def __str__(self):
             return 'not-a-number'
     ratchet = _ratchet()
-    cases = ((True, 'measured must be a finite JSON number'), (BadFloat(80.0), 'measured must be a finite JSON number'), (Decimal('NaN'), 'measured must be finite'))
+    cases = (
+        (True, 'measured must be a finite JSON number'),
+        (BadFloat(80.0), 'measured must be a finite JSON number'),
+        (Decimal('NaN'), 'measured must be finite'))
     for value, message in cases:
-        assert _value_error(lambda value=value: ratchet._measurement(value)) == message
+        assert _value_error(
+            lambda value=value: ratchet._measurement(value)) == message
 
 
 def test_floor_for_and_update_refuse_unknown_language_before_mutation(_tmp):
     ratchet = _ratchet()
     assert ratchet.floor_for(Decimal('81.0')) == Decimal('79.5')
     data = {'not': 'a threshold document'}
-    assert _value_error(lambda: ratchet.update(data, Decimal('81.6'), 'ruby')) == 'unknown coverage language: ruby'
+    assert _value_error(
+        lambda: ratchet.update(data, Decimal('81.6'), 'ruby')) \
+        == 'unknown coverage language: ruby'
     assert data == {'not': 'a threshold document'}
 
 
@@ -119,7 +122,6 @@ def test_main_reports_invalid_measurement_without_writing(tmp):
 
 def test_public_update_uses_recorded_measurement_high_water(tmp):
     """Only a gain beyond the measured high water raises the calibration."""
-    del tmp
     ratchet = _ratchet()
     data = _document()
     for measured in (60.0, 78.5, 80.0, 80.1, 81.5):
@@ -137,7 +139,6 @@ def test_public_update_uses_recorded_measurement_high_water(tmp):
 
 def test_rerunning_a_raise_is_idempotent(tmp):
     """A recorded raise is not repeated when the same result is rerun."""
-    del tmp
     ratchet = _ratchet()
     data = _document()
     candidate = ratchet.update(data, Decimal('81.6'), 'python')
@@ -147,7 +148,6 @@ def test_rerunning_a_raise_is_idempotent(tmp):
 
 def test_measurement_above_recorded_value_raises(tmp):
     """A new high measurement updates the selected calibration."""
-    del tmp
     ratchet = _ratchet()
     data = _document()
     raised = ratchet.update(data, Decimal('81.6'), 'python')
@@ -156,7 +156,6 @@ def test_measurement_above_recorded_value_raises(tmp):
 
 def test_lower_measurements_never_lower_either_calibration(tmp):
     """Coverage dips are observations, not permission to weaken the gate."""
-    del tmp
     ratchet = _ratchet()
     data = _document()
     for language in ('python', 'javascript'):
@@ -196,7 +195,8 @@ def test_main_noop_then_raise_preserves_and_updates_thresholds(tmp):
         assert expected in output.getvalue()
         if measured == '80.1':
             assert path.read_bytes() == before
-    assert _thresholds().load(path)['coverage']['python']['floor'] == Decimal('80.1')
+    assert _thresholds().load(path)['coverage']['python']['floor'] \
+        == Decimal('80.1')
 
 
 def test_cli_rejects_the_retired_workflow_option(tmp):
@@ -211,27 +211,28 @@ def test_cli_rejects_the_retired_workflow_option(tmp):
 
 
 def test_shipped_file_forcing_measurement_is_derived_and_capped(tmp):
-    """The real-file regression derives forcing and never invents >100."""
     thresholds = _thresholds()
     source = thresholds.load(THRESHOLDS_PATH)
-    recorded, _floor = thresholds.coverage(source, 'python')
-    forcing = min(
-        recorded + _ratchet().RAISE_HYSTERESIS + Decimal('0.1'),
-        Decimal('100.0'))
-    path = Path(tmp) / 'shipped-copy.json'
-    thresholds.write(path, source)
-    result = _run_ratchet(tmp, 'python', forcing, path)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    actual = thresholds.load(path)
-    assert actual['coverage']['python']['measured'] == forcing
-
-
-def test_issue_581_bounded_measurement_is_a_valid_noop(tmp):
-    """A 100% shipped measurement cannot raise a 99.0% recorded high water."""
-    del tmp
     ratchet = _ratchet()
-    data = _document(python=(99.0, 97.5))
-    assert ratchet.update(data, Decimal('100.0'), 'python') is None
+    path = Path(tmp) / 'shipped-copy.json'
+    for recorded in map(Decimal, ('94.4', '98.4', '98.5', '99.0')):
+        source['coverage']['python'] = {
+            'measured': recorded,
+            'floor': recorded - thresholds.CALIBRATION_GAP}
+        thresholds.write(path, source)
+        forcing = min(recorded + ratchet.RAISE_HYSTERESIS + Decimal('0.1'),
+                      Decimal('100.0'))
+        result = _run_ratchet(tmp, 'python', forcing, path)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        actual = thresholds.load(path)
+        if forcing - recorded > ratchet.RAISE_HYSTERESIS:
+            assert actual['coverage']['python']['measured'] == forcing
+            assert actual['coverage']['python']['floor'] \
+                == forcing - thresholds.CALIBRATION_GAP
+            assert 'raised' in result.stdout
+        else:
+            assert actual == source
+            assert 'no raise' in result.stdout
 
 
 def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
@@ -509,7 +510,6 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
 
 def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     """Actual publisher conditions require main, change, green, and secret."""
-    del tmp
     ratchet = _publisher_step()
     commit = _publisher_commit_step()
     assert "github.event_name == 'push'" in ratchet['if']
@@ -564,7 +564,6 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
 
 def test_publisher_condition_mutations_are_rejected(tmp):
     """Removing any authority or change guard flips a recorded control."""
-    del tmp
     ratchet = _publisher_step()['if']
     commit = _publisher_commit_step()
     main_context = {
