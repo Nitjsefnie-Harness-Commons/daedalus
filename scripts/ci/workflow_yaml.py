@@ -4,7 +4,9 @@ from dataclasses import dataclass
 if __package__:
     # pylint: disable=relative-beyond-top-level
     from .yamlblock import block_end, decode_block, parse_block_header
-    from .yamlanchor import ALIAS, node_properties, strip_node_properties
+    from .yamlanchor import (
+        node_properties, parse_alias, validate_node_properties,
+    )
     from .yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
@@ -14,7 +16,7 @@ if __package__:
     )
 else:
     from yamlblock import block_end, decode_block, parse_block_header
-    from yamlanchor import ALIAS, node_properties, strip_node_properties
+    from yamlanchor import node_properties, parse_alias, validate_node_properties
     from yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
@@ -149,8 +151,7 @@ def _prepared_value(raw_value):
     return tokens, _strip_inline_comment(bare.strip(' \t'))
 
 
-def _scalar_lines(lines):
-    texts = [line.text for line in lines]
+def _scalar_regions(lines, texts):
     scalar = set()
     index = 0
     while index < len(lines):
@@ -179,7 +180,7 @@ def _scalar_lines(lines):
             index = stop
             continue
         index += 1
-    return scalar
+    return scalar, set()
 
 
 def _section(lines, scalar, start, parent_indent):
@@ -238,7 +239,7 @@ def _mapping_body(lines, scalar, entry, owner):
     return body
 
 
-def _alias_value(lines, scalar, alias_index, name, owner):
+def _alias_value(lines, texts, scalar, alias_index, name, owner):
     """The value of the last `&name` node defined before `alias_index`."""
     target = f'{owner} alias &{name}'
     for index in range(alias_index - 1, -1, -1):
@@ -264,31 +265,34 @@ def _alias_value(lines, scalar, alias_index, name, owner):
                     shape = 'flow collection'
                 elif _line_field(body) is not None:
                     shape = 'mapping'
+            if first is None:
+                raise YAMLReadError(
+                    f'{owner} has an unsupported alias to an empty node: '
+                    f'&{name}')
             raise YAMLReadError(
                 f'{owner} has an unsupported alias to a nested '
                 f'{shape}: &{name}')
+        prepared = (tokens, content)
         return _step_value(
-            lines, scalar, index, end, indent, raw_value, target)
+            lines, texts, scalar, index, end, indent, prepared, target)
     raise YAMLReadError(f'{owner} has an unknown YAML alias: &{name}')
 
 
-def _step_value(lines, scalar, start, end, indent, raw_value, owner):
-    tokens, content = _prepared_value(raw_value)
+def _step_value(lines, texts, scalar, start, end, indent, prepared, owner):
+    tokens, content = prepared
+    validate_node_properties(tokens, owner)
+    alias = parse_alias(content, owner)
     if tokens and content.startswith('*'):
         raise YAMLReadError(
             f'{owner} has an alias carrying node properties: '
             f'{" ".join(tokens)} {content}')
-    value = strip_node_properties(raw_value.strip(' \t'), owner)
-    if value.startswith('*'):
-        alias = ALIAS.fullmatch(value)
-        if alias is None:
-            raise YAMLReadError(f'{owner} has a malformed YAML alias')
-        return _alias_value(lines, scalar, start, alias.group('name'), owner)
+    if alias is not None:
+        return _alias_value(lines, texts, scalar, start, alias, owner)
+    value = content
     if not value:
         raise YAMLReadError(f'{owner} has no scalar value')
     header = parse_block_header(value, owner)
     if header is not None:
-        texts = [line.text for line in lines]
         stop = block_end(texts, start + 1, end, indent, header)
         body = [
             (line.text, line.end > line.start + len(line.text))
@@ -299,7 +303,7 @@ def _step_value(lines, scalar, start, end, indent, raw_value, owner):
         if _quote_is_open(value) is not None:
             raise YAMLReadError(f'{owner} has an unsupported multiline scalar')
         return decode_inline_scalar(value, owner)
-    if value.startswith(('*', '[', '{', '@', '`')):
+    if value.startswith(('[', '{', '@', '`')):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
     if '\t' in value or any(
             ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
@@ -328,7 +332,7 @@ def _step_fields(lines, scalar, index, end, item_indent):
     return field_indent, fields
 
 
-def _decoded_step_fields(lines, scalar, index, end, item_indent):
+def _decoded_step_fields(lines, texts, scalar, index, end, item_indent):
     field_indent, fields = _step_fields(
         lines, scalar, index, end, item_indent)
     values = {}
@@ -341,8 +345,8 @@ def _decoded_step_fields(lines, scalar, index, end, item_indent):
             raise YAMLReadError(f'duplicate mapping key: {key}')
         if key in ('name', 'id'):
             values[key] = _step_value(
-                lines, scalar, field_index, field_end, field_indent,
-                raw_value, f'step {key}')
+                lines, texts, scalar, field_index, field_end, field_indent,
+                _prepared_value(raw_value), f'step {key}')
         else:
             values[key] = None
     return values
@@ -351,7 +355,8 @@ def _decoded_step_fields(lines, scalar, index, end, item_indent):
 def workflow_step_items(workflow, job):
     """Return actual mapping items in the named job's steps sequence."""
     lines = _lines(workflow)
-    scalar = _scalar_lines(lines)
+    texts = [line.text for line in lines]
+    scalar, _opaque = _scalar_regions(lines, texts)
     jobs = _mapping_entry(lines, scalar, 0, len(lines), -1, 'jobs')
     jobs_body = _mapping_body(lines, scalar, jobs, 'jobs')
     if jobs_body is None:
@@ -391,7 +396,7 @@ def workflow_step_items(workflow, job):
         item_end = indices[offset + 1] if offset + 1 < len(
             indices) else end
         fields = _decoded_step_fields(
-            lines, scalar, index, item_end, item_indent)
+            lines, texts, scalar, index, item_end, item_indent)
         content = [
             line_index for line_index in range(index, item_end)
             if line_index in scalar or _meaningful(lines[line_index])

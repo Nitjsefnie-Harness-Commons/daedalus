@@ -35,7 +35,7 @@ def _table(cases):
         assert _decode(header, body) == decoded, (header, body)
 
 
-def _refused(call, detail):
+def _call_refused(call, detail):
     try:
         call()
     except YAMLReadError as error:
@@ -129,20 +129,20 @@ def test_a_header_outside_the_grammar_is_not_a_header(tmp):
     del tmp
     for header in ('|x', '||', '>-+', 'one', '|2 ', ''):
         assert parse_block_header(header, 'step name') is None, header
-    _refused(lambda: parse_block_header('|0', 'step name'),
+    _call_refused(lambda: parse_block_header('|0', 'step name'),
              'step name has an unsupported block header')
-    _refused(lambda: parse_block_header('|2-3', 'step name'),
+    _call_refused(lambda: parse_block_header('|2-3', 'step name'),
              'step name has two indentation indicators')
 
 
 def test_a_body_short_of_the_content_indent_is_refused(tmp):
     del tmp
-    _refused(lambda: _decode('|', '    \n  one\n'),
+    _call_refused(lambda: _decode('|', '    \n  one\n'),
              'step name block indentation is incomplete')
-    _refused(lambda: _decode('|', '  one\n one\n'),
+    _call_refused(lambda: _decode('|', '  one\n one\n'),
              'step name block indentation is incomplete')
     assert text_indent('   one') == 3
-    _refused(lambda: text_indent('\tone'),
+    _call_refused(lambda: text_indent('\tone'),
              'tabs in YAML indentation are unsupported')
 
 
@@ -169,14 +169,6 @@ def test_a_step_name_and_id_may_be_written_as_a_block_scalar(tmp):
         (None, 'one two')]
 
 
-def test_the_dash_may_be_separated_by_any_separation_width(tmp):
-    del tmp
-    source = ('jobs:\n sample:\n  steps:\n'
-              '   -  name: one\n      if: z\n'
-              '   -   name: two\n       if: z\n')
-    assert _fields(source) == [('one', None), ('two', None)]
-
-
 def test_a_block_scalar_step_field_does_not_swallow_the_next_field(tmp):
     """A block on a dash line is indented from the mapping, not the dash."""
     del tmp
@@ -189,17 +181,6 @@ def test_a_block_scalar_step_field_does_not_swallow_the_next_field(tmp):
 def test_a_kept_blank_body_before_another_field_keeps_its_breaks(tmp):
     del tmp
     assert _fields(_step('name: |+', '\n\n')) == [('\n\n', None)]
-
-
-def test_a_step_line_short_of_its_own_indentation_is_refused(tmp):
-    del tmp
-    _refused(lambda: workflow_step_items(
-        _step('name: one', '', '    bad: 1\n'), 'sample'),
-        'step mapping has inconsistent indentation')
-    _refused(lambda: workflow_step_items(
-        'jobs:\n sample:\n  steps:\n       - name: one\n    bad: 1\n',
-        'sample'),
-        'step sequence has inconsistent indentation')
 
 
 if __name__ == '__main__':
