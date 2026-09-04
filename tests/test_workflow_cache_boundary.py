@@ -528,18 +528,15 @@ def test_generic_setup_cache_input_remains_conservative(tmp):
 def test_unknown_and_dynamic_actions_fail_with_exact_context(tmp):
     del tmp
     for uses, expected in (
-            ('${{ matrix.action }}',
-             "expression-valued uses '${{ matrix.action }}'"),
-            ('owner/action@v1', "no cache policy for action 'owner/action@v1'"),
-            ('actions/checkout@deadbeef', "action 'actions/checkout' ref 'deadbeef'"),
-            ('actions/setup-python@deadbeef',
-             "action 'actions/setup-python' ref 'deadbeef'"),
-            ('docker/build-push-action@deadbeef',
-             "action 'docker/build-push-action' ref 'deadbeef'"),
-            ('actions/cache/unknown@v4',
-             "unknown actions/cache sub-action 'actions/cache/unknown'")):
-        _refuses(_cache_write_reason, {'uses': uses}, 'wheel', 1,
-                 contains=expected)
+            ('${{ matrix.action }}', "cache boundary cannot classify job 'wheel' step 1: expression-valued uses '${{ matrix.action }}'"),
+            ('owner/action@v1', "cache boundary cannot classify job 'wheel' step 1: no cache policy for action 'owner/action@v1'; inspect its primary action.yml"),
+            ('actions/checkout@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'actions/checkout' ref 'deadbeef'"),
+            ('actions/setup-python@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'actions/setup-python' ref 'deadbeef'"),
+            ('docker/build-push-action@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'docker/build-push-action' ref 'deadbeef'"),
+            ('actions/cache/unknown@v4', "cache boundary cannot classify job 'wheel' step 1: unknown actions/cache sub-action 'actions/cache/unknown'"),
+            ('actions/cache/save@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'actions/cache' ref 'deadbeef'")):
+        assert _refuses(_cache_write_reason, {'uses': uses}, 'wheel', 1,
+                        contains=expected) == expected
 
 
 def test_local_docker_and_empty_actions_are_not_silently_cache_free(tmp):
