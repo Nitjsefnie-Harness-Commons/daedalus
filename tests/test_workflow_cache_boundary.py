@@ -3,12 +3,12 @@
 
 The per-job pins in test_ci_workflows.py each look at the job they pin, so
 none of them can see a cache step appear on a job none of them names. This
-suite holds the boundary: the exact set of jobs allowed to carry a
-setup-python `cache:` input, or a step using any member of the actions/cache
-family — the combined `actions/cache@`, whose save runs as a post-job step,
-as well as the split `actions/cache/restore@` and `actions/cache/save@`. The
-set is recorded in full, so a new member is a red test rather than a silent
-widening.
+suite holds the boundary: the exact set of jobs allowed to hold a step that
+reaches the Actions cache. A step does that two ways, and the rule below is
+those two mechanisms rather than a roster of the action names in use today —
+by using a member of the actions/cache family, or by passing a `cache:`
+input to a setup action. The set is recorded in full, so a new carrier is a
+red test rather than a silent widening.
 """
 import sys
 from pathlib import Path
@@ -30,28 +30,37 @@ _CACHE_WRITE_JOBS = frozenset((
 ))
 
 
-# Both spellings of the action, matched by the delimiter that ends the name:
-# the combined `actions/cache@`, which restores on the step and saves in a
-# post-job step, and the split `actions/cache/save@` and
-# `actions/cache/restore@`. A prefix over the family rather than a set of
-# the three names known today, so a further sub-action is matched as well.
+# The two names each mechanism goes by, matched with the delimiter that ends
+# them so a near miss is not swallowed: the actions/cache family, combined
+# (`actions/cache@`, whose save runs as a post-job step) or split
+# (`actions/cache/<sub-action>@`), and the setup-action family, whose members
+# are named `<owner>/setup-<tool>` and share the `cache:` input.
 _CACHE_ACTIONS = ('actions/cache@', 'actions/cache/')
+_SETUP_ACTION = '/setup-'
+
+
+def _reaches_the_actions_cache(step):
+    """Whether one step reaches the Actions cache, by either mechanism.
+
+    Case-insensitively: an action name is not a case-sensitive identifier,
+    and neither mechanism becomes something else when respelled.
+    """
+    uses = step.get('uses', '').casefold()
+    if uses.startswith(_CACHE_ACTIONS):
+        return True
+    return _SETUP_ACTION in uses and 'cache' in step.get('with', {})
 
 
 def _cache_write_jobs(workflow):
-    """Jobs carrying a setup-python `cache:` input or an actions/cache step.
+    """Jobs holding at least one step that reaches the Actions cache.
 
-    A job declaring no steps of its own carries neither: a `uses:` job's
-    caching belongs to the workflow it calls.
+    A job declaring no steps of its own holds none: a `uses:` job's caching
+    belongs to the workflow it calls.
     """
     carriers = set()
     for job in _job_names(workflow):
         steps = complete_job_mapping(workflow, job).get('steps', [])
-        setup = [step for step in steps
-                 if step.get('uses', '').startswith('actions/setup-python')]
-        if (any('cache' in step.get('with', {}) for step in setup)
-                or any(step.get('uses', '').startswith(_CACHE_ACTIONS)
-                       for step in steps)):
+        if any(_reaches_the_actions_cache(step) for step in steps):
             carriers.add(job)
     return carriers
 
@@ -59,14 +68,10 @@ def _cache_write_jobs(workflow):
 def test_only_the_recorded_jobs_carry_a_cache_write_path(tmp):
     """The set of jobs that reach the Actions cache is exactly this six.
 
-    A pin that iterates the three jobs this branch changed cannot see a
-    cache step appear on any other job: `cache: pip` planted on the wheel
-    job, and a combined `actions/cache@` planted on the timed job, each left
-    every one of them green. This is the boundary, so it names the whole
-    allowed set rather than iterating it — the three cache jobs plus the
-    lint trio whose `cache: pip` is issue #611's recorded known exception —
-    and it goes red when either spelling appears on a job nobody recorded,
-    or when a recorded job's own cache path disappears.
+    A pin that iterates named jobs cannot see a cache step appear on a job
+    it does not name, so this one asserts on the whole set: it goes red when
+    a step reaching the cache by either mechanism appears on a job nobody
+    recorded, and when a recorded job's own cache path disappears.
     """
     del tmp
     carrying = _cache_write_jobs(_tests_yml())
@@ -91,6 +96,62 @@ def test_a_steps_less_job_carries_no_cache_path(tmp):
                 '    steps:\n'
                 '      - uses: actions/cache@v4\n')
     assert _cache_write_jobs(workflow) == {'local'}
+
+
+def test_a_cache_input_on_any_setup_action_is_a_cache_path(tmp):
+    """An unseen setup action carrying `cache:` is a cache write path.
+
+    The rule is the mechanism, not the roster: `cache:` is the setup-action
+    family's shared toolchain-cache input, so a setup action nobody has
+    written here yet is a carrier the first time one is added. The name is
+    matched case-insensitively, and the input is required — a setup action
+    without it reaches no cache. tests.yml holds no such action to plant on.
+    """
+    del tmp
+    workflow = ('jobs:\n'
+                '  unseen-setup:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    steps:\n'
+                '      - uses: actions/setup-go@v6\n'
+                '        with:\n'
+                '          cache: true\n'
+                '  mixed-case:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    steps:\n'
+                '      - uses: Actions/Cache@v4\n'
+                '  quiet:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    steps:\n'
+                '      - uses: actions/setup-go@v6\n')
+    assert _cache_write_jobs(workflow) == {'unseen-setup', 'mixed-case'}
+
+
+def test_a_near_miss_action_name_reaches_no_cache(tmp):
+    """Each mechanism's name is matched only up to its own delimiter.
+
+    Drop the delimiter from either and the match widens to names that are
+    not that mechanism at all — `actions/cache-warmer` for the family,
+    anything called `setupfoo` for the setup limb. tests.yml contains no
+    such near miss, so the recorded-set assertion cannot see the loosening
+    and this fixture is what fails on it.
+    """
+    del tmp
+    workflow = ('jobs:\n'
+                '  near-cache:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    steps:\n'
+                '      - uses: actions/cache-warmer@v1\n'
+                '  near-setup:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    steps:\n'
+                '      - uses: actions/setupfoo@v1\n'
+                '        with:\n'
+                '          cache: pip\n'
+                '  real:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    steps:\n'
+                '      - uses: actions/cache/save@v4\n')
+    assert _cache_write_jobs(workflow) == {'real'}
 
 
 if __name__ == '__main__':
