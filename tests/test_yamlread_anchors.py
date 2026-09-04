@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 from workflow_yaml import (  # noqa: E402
     YAMLReadError, workflow_step_items,
 )
+import yamlanchor  # noqa: E402
 
 
 def _document(field, prefix=''):
@@ -34,7 +35,7 @@ def _identities(source):
     return [item.identity for item in items]
 
 
-def _refused(source, detail):
+def _reader_refused(source, detail):
     """Require the sample job's steps to be refused, naming `detail`."""
     try:
         workflow_step_items(source, 'sample')
@@ -42,6 +43,27 @@ def _refused(source, detail):
         assert detail in str(error), str(error)
         return
     raise AssertionError(f'a spelling {detail!r} must refuse was accepted')
+
+
+def test_parse_alias_accepts_only_a_complete_alias_spelling(tmp):
+    del tmp
+    parse_alias = getattr(yamlanchor, 'parse_alias', None)
+    assert callable(parse_alias), 'parse_alias interface is missing'
+    assert parse_alias('*name', 'step name') == 'name'
+    assert parse_alias('name', 'step name') is None
+
+
+def test_parse_alias_refuses_a_malformed_alias_spelling(tmp):
+    del tmp
+    parse_alias = getattr(yamlanchor, 'parse_alias', None)
+    assert callable(parse_alias), 'parse_alias interface is missing'
+    for value in ('*', '*[bad]', '*name]'):
+        try:
+            parse_alias(value, 'step name')
+        except YAMLReadError as error:
+            assert str(error) == 'step name has a malformed YAML alias', error
+            continue
+        raise AssertionError(f'malformed alias {value!r} was accepted')
 
 
 def test_anchored_step_name_decodes_like_the_plain_spelling(tmp):
@@ -64,12 +86,12 @@ def test_the_non_specific_tag_is_refused_in_every_scalar_form(tmp):
     del tmp
     for field in ('name: ! 5', 'name: ! true', 'name: ! null',
                   'name: ! "5"'):
-        _refused(_document(field), 'unsupported YAML tag !')
+        _reader_refused(_document(field), 'unsupported YAML tag !')
 
 
 def test_the_non_specific_tag_is_refused_on_a_block_scalar(tmp):
     del tmp
-    _refused('jobs:\n sample:\n  steps:\n'
+    _reader_refused('jobs:\n sample:\n  steps:\n'
              '   - name: ! |\n       5\n     if: z\n',
              'unsupported YAML tag !')
 
@@ -97,7 +119,7 @@ def test_a_quoted_name_after_properties_keeps_hash_sign_text(tmp):
 def test_a_quoted_name_continued_past_a_property_is_a_boundary(tmp):
     """A multiline quoted scalar is an unsupported boundary, not invalid."""
     del tmp
-    _refused(_document('name: &a "one\n          two"'),
+    _reader_refused(_document('name: &a "one\n          two"'),
              'unsupported multiline scalar')
 
 
@@ -113,7 +135,7 @@ def test_step_id_accepts_every_property_spelling(tmp):
     for field in ('id: &b target', 'id: !!str target',
                   'id: &b !!str target', 'id: *a'):
         assert _identities(_document(field, prefix)) == ['target'], field
-    _refused(_document('id: ! target', prefix), 'unsupported YAML tag !')
+    _reader_refused(_document('id: ! target', prefix), 'unsupported YAML tag !')
 
 
 def test_anchored_block_scalar_name_decodes_like_the_plain_block(tmp):
@@ -149,7 +171,7 @@ def test_an_alias_reads_an_anchor_defined_on_an_earlier_step_field(tmp):
 
 def test_an_alias_with_no_earlier_anchor_is_refused(tmp):
     del tmp
-    _refused(_document('name: *missing'), 'unknown YAML alias: &missing')
+    _reader_refused(_document('name: *missing'), 'unknown YAML alias: &missing')
 
 
 def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
@@ -157,18 +179,18 @@ def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
     for prefix in ('anchors:\n gate: |\n  &a hidden\n',
                    'anchors:\n gate: "&a hidden"\n',
                    'anchors:\n# gate: &a hidden\n gate: real\n'):
-        _refused(_document('name: *a', prefix), 'unknown YAML alias: &a')
+        _reader_refused(_document('name: *a', prefix), 'unknown YAML alias: &a')
 
 
 def test_a_colon_bearing_decoy_in_a_block_body_defines_no_target(tmp):
     del tmp
-    _refused(_document('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
+    _reader_refused(_document('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
              'unknown YAML alias: &a')
 
 
 def test_a_colon_bearing_decoy_in_a_quoted_scalar_defines_no_target(tmp):
     del tmp
-    _refused(_document(
+    _reader_refused(_document(
         'name: *a',
         'anchors:\n gate: "k: &a hidden\n  j: &a deeper"\n'),
         'unknown YAML alias: &a')
@@ -180,7 +202,7 @@ def test_an_alias_refuses_an_anchor_defined_after_it(tmp):
     source = ('jobs:\n sample:\n  steps:\n'
               '   - name: *a\n     if: z\n'
               'anchors:\n gate: &a target\n')
-    _refused(source, 'unknown YAML alias: &a')
+    _reader_refused(source, 'unknown YAML alias: &a')
 
 
 def test_a_quote_opening_after_a_property_may_continue_at_column_zero(tmp):
@@ -197,38 +219,44 @@ def test_an_alias_to_a_multiline_quoted_scalar_is_a_boundary(tmp):
     quote this reader cannot take, exactly as the direct form does."""
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a "one\n  two"\n')
-    _refused(source, 'unsupported multiline scalar')
+    _reader_refused(source, 'unsupported multiline scalar')
 
 
 def test_an_alias_to_a_nested_mapping_is_refused(tmp):
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  key: value\n')
-    _refused(source, 'unsupported alias to a nested mapping')
+    _reader_refused(source, 'unsupported alias to a nested mapping')
 
 
 def test_an_alias_to_a_nested_scalar_names_the_scalar(tmp):
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  hidden\n')
-    _refused(source, 'unsupported alias to a nested scalar')
+    _reader_refused(source, 'unsupported alias to a nested scalar')
+
+
+def test_an_alias_to_an_empty_mapping_value_names_an_empty_node(tmp):
+    del tmp
+    source = _document('name: *a', 'anchors:\n gate: &a\n')
+    _reader_refused(source, 'step name has an unsupported alias to an empty node: &a')
 
 
 def test_an_alias_to_a_sequence_is_refused(tmp):
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  - one\n')
-    _refused(source, 'unsupported alias to a nested sequence')
+    _reader_refused(source, 'unsupported alias to a nested sequence')
 
 
 def test_a_dash_without_a_space_names_a_scalar(tmp):
     """`-5` is the plain scalar `-5`, so the dash-width limb names it."""
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  -5\n')
-    _refused(source, 'unsupported alias to a nested scalar')
+    _reader_refused(source, 'unsupported alias to a nested scalar')
 
 
 def test_a_tab_widened_dash_still_names_a_sequence(tmp):
     del tmp
     source = _document('name: *a', 'anchors:\n gate: &a\n  -\t5\n')
-    _refused(source, 'unsupported alias to a nested sequence')
+    _reader_refused(source, 'unsupported alias to a nested sequence')
 
 
 def test_an_alias_to_a_flow_collection_names_the_collection(tmp):
@@ -236,35 +264,35 @@ def test_an_alias_to_a_flow_collection_names_the_collection(tmp):
     del tmp
     for child in ('[x]', '{k: v}', '{a}'):
         source = _document('name: *a', f'anchors:\n gate: &a\n  {child}\n')
-        _refused(source, 'unsupported alias to a nested flow collection')
+        _reader_refused(source, 'unsupported alias to a nested flow collection')
 
 
 def test_a_non_string_tag_is_refused(tmp):
     del tmp
-    _refused(_document('name: !!int 5'), 'unsupported YAML tag !!int')
+    _reader_refused(_document('name: !!int 5'), 'unsupported YAML tag !!int')
 
 
 def test_a_malformed_anchor_is_refused(tmp):
     del tmp
-    _refused(_document('name: &[bad] target'), 'malformed YAML anchor')
+    _reader_refused(_document('name: &[bad] target'), 'malformed YAML anchor')
 
 
 def test_a_malformed_alias_is_refused(tmp):
     del tmp
     for field in ('name: *', 'name: *[bad]'):
-        _refused(_document(field), 'malformed YAML alias')
+        _reader_refused(_document(field), 'malformed YAML alias')
 
 
 def test_an_alias_carrying_an_anchor_is_refused(tmp):
     """An alias is a complete node; PyYAML refuses properties on one."""
     del tmp
-    _refused(_document('name: &x *b'),
+    _reader_refused(_document('name: &x *b'),
              'alias carrying node properties: &x *b')
 
 
 def test_an_alias_carrying_a_tag_is_refused(tmp):
     del tmp
-    _refused(_document('id: !!str *t'),
+    _reader_refused(_document('id: !!str *t'),
              'alias carrying node properties: !!str *t')
 
 
@@ -276,17 +304,17 @@ def test_a_tag_with_no_value_is_refused(tmp):
     untagged empty field refuses the same way.
     """
     del tmp
-    _refused(_document('name: !!str'), 'step name has no scalar value')
+    _reader_refused(_document('name: !!str'), 'step name has no scalar value')
 
 
 def test_two_anchors_on_one_node_are_refused(tmp):
     del tmp
-    _refused(_document('name: &a &b target'), 'two YAML anchors')
+    _reader_refused(_document('name: &a &b target'), 'two YAML anchors')
 
 
 def test_two_tags_on_one_node_are_refused(tmp):
     del tmp
-    _refused(_document('name: !!str !!str target'), 'two YAML tags')
+    _reader_refused(_document('name: !!str !!str target'), 'two YAML tags')
 
 
 if __name__ == '__main__':

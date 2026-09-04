@@ -36,6 +36,21 @@ def _job_raises(source, detail):
     raise AssertionError(f'{detail} job syntax was accepted')
 
 
+def _item_reader_refused(source, detail):
+    """Require the production step reader to name its refusal."""
+    try:
+        workflow_step_items(source, 'sample')
+    except YAMLReadError as error:
+        assert detail in str(error), str(error)
+        return
+    raise AssertionError(f'{detail} workflow syntax was accepted')
+
+
+def _step_source(field, body='', tail='     if: z\n'):
+    """Build one sample step for production-reader controls."""
+    return f'jobs:\n sample:\n  steps:\n   - {field}\n{body}{tail}'
+
+
 def test_step_name_can_follow_another_mapping_field(tmp):
     """A later name field still identifies its sequence item."""
     del tmp
@@ -309,13 +324,8 @@ def test_incomplete_multiline_quote_is_refused(tmp):
     source = (
         'jobs:\n  sample:\n    steps:\n'
         '      - run: "never closes\n')
-    try:
-        workflow_step_items(source, 'sample')
-    except YAMLReadError as error:
-        assert str(error) == (
-            'workflow has an incomplete quoted scalar'), error
-        return
-    raise AssertionError('an incomplete multiline quote was accepted')
+    _item_reader_refused(
+        source, 'workflow has an incomplete quoted scalar')
 
 
 def test_block_scalar_boundaries_preserve_sibling_steps(tmp):
@@ -351,6 +361,28 @@ def test_block_scalar_boundaries_preserve_sibling_steps(tmp):
         assert [item.name for item in items] == expected, items
 
 
+def test_the_dash_may_be_separated_by_any_separation_width(tmp):
+    del tmp
+    source = ('jobs:\n sample:\n  steps:\n'
+              '   -  name: one\n      if: z\n'
+              '   -   name: two\n       if: z\n')
+    items = workflow_step_items(source, 'sample')
+    assert items is not None
+    assert [(item.name, item.identity) for item in items] == [
+        ('one', None), ('two', None)]
+
+
+def test_a_step_line_short_of_its_own_indentation_is_refused(tmp):
+    del tmp
+    _item_reader_refused(
+        _step_source('name: one', '', '    bad: 1\n'),
+        'step mapping has inconsistent indentation')
+    _item_reader_refused(
+        'jobs:\n sample:\n  steps:\n       - name: one\n'
+        '    bad: 1\n',
+        'step sequence has inconsistent indentation')
+
+
 def test_block_scalar_with_two_indent_indicators_is_refused(tmp):
     """Two explicit indentation indicators are not a scalar header."""
     del tmp
@@ -359,13 +391,8 @@ def test_block_scalar_with_two_indent_indicators_is_refused(tmp):
         '      - name: target\n'
         '        run: >1+2\n'
         '          true\n')
-    try:
-        workflow_step_items(source, 'sample')
-    except YAMLReadError as error:
-        assert str(error) == (
-            'workflow has two indentation indicators'), error
-        return
-    raise AssertionError('two block indentation indicators were accepted')
+    _item_reader_refused(
+        source, 'workflow has two indentation indicators')
 
 
 def test_a_zero_indentation_indicator_names_the_block_header(tmp):
@@ -375,13 +402,8 @@ def test_a_zero_indentation_indicator_names_the_block_header(tmp):
         'jobs:\n  sample:\n    steps:\n'
         '      - name: |0\n'
         '          true\n')
-    try:
-        workflow_step_items(source, 'sample')
-    except YAMLReadError as error:
-        assert str(error) == (
-            'workflow has an unsupported block header'), error
-        return
-    raise AssertionError('a zero indentation indicator was accepted')
+    _item_reader_refused(
+        source, 'workflow has an unsupported block header')
 
 
 def test_complete_workflow_and_job_mappings_decode_every_container(tmp):
@@ -621,13 +643,7 @@ def test_workflow_step_items_refuses_a_wrapped_name_or_id(tmp):
             f'      - {key}: s\n'
             '          t\n'
             '        run: true\n')
-        try:
-            workflow_step_items(source, 'sample')
-        except YAMLReadError as error:
-            assert 'unsupported multiline scalar' in str(error), str(error)
-            continue
-        raise AssertionError(
-            f'workflow_step_items truncated a wrapped step {key}')
+        _item_reader_refused(source, 'unsupported multiline scalar')
 
 
 def test_step_lookup_refuses_a_wrapped_name(tmp):
