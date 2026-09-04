@@ -399,11 +399,11 @@ def test_a_zero_indentation_indicator_names_the_block_header(tmp):
     del tmp
     cases = (('name: |0\n'
               '          true\n',
-              "mapping field 'name' has an unsupported block " "header"),
+              "mapping field 'name' has an unsupported block header"),
              ('name: target\n'
               '        run: |0\n'
               '          true\n',
-              "mapping field 'run' has an unsupported block " "header"))
+              "mapping field 'run' has an unsupported block header"))
     for step, detail in cases:
         _item_reader_refused(
             'jobs:\n  sample:\n    steps:\n      - ' + step, detail)

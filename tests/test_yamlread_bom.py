@@ -72,7 +72,9 @@ def test_the_production_reader_keeps_an_interior_quoted_mark_as_data(tmp):
     source = (
         'jobs:\n sample:\n  steps:\n'
         '   - name: "a\ufeffb"\n     id: mark\n')
-    assert [(item.name, item.identity) for item in _production_items(source)] == [
+    values = [(item.name, item.identity)
+              for item in _production_items(source)]
+    assert values == [
         ('a\ufeffb', 'mark')]
 
 
