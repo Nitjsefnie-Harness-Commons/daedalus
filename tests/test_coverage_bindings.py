@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Launcher bindings the coverage-environment guard cannot follow."""
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,11 +12,13 @@ from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from test_bash_resolver_scan import _BASH_MUTATION_SPECS  # noqa: E402
 
 
 _BINDING_MESSAGE = (
     'a launcher is bound through a form the guard cannot follow')
 _NL = '\n'
+_FRESH_SOURCE_MARKER = 'mutation child loaded fresh source'
 _SCOPE_INVOKE = (
     'suite.test_python_evaluation_scopes_preserve_builtin_dict_identity(None)')
 
@@ -198,6 +201,15 @@ dict(cwd='after class')
 dict(cwd='after comprehension')
 """, (("dict(cwd='inside comprehension')",
          "'inside comprehension'"),)),
+        ('comprehension walrus', """[(dict := factory)
+ for item in values]
+dict(cwd='after walrus')
+""", (("dict(cwd='after walrus')", "'after walrus'"),)),
+        ('nested comprehension walrus', """def build():
+    [[(dict := factory) for inner in items] for outer in groups]
+    return dict(cwd='after nested walrus')
+""", (("dict(cwd='after nested walrus')",
+         "'after nested walrus'"),)),
         ('definition headers', """@decorate(dict(cwd='function decorator'))
 def build(dict):
     return dict
@@ -254,28 +266,6 @@ dict(cwd='x')
         violations = _synthetic_violations(source)
         assert len(violations) == 1, violations
         assert 'dict' in violations[0], violations
-
-
-def test_bash_resolver_match_captures_shadow_outer_bindings(tmp):
-    patterns = ('dict', '[*dict]', '{**dict}')
-    for pattern in patterns:
-        source = f'''import subprocess
-dict = 'bash'
-def launch(value, tmp):
-    match value:
-        case {pattern}:
-            subprocess.run([dict, '-c', 'true'], cwd=tmp)
-'''
-        program = (
-            'import sys\n'
-            f'sys.path.insert(0, {str(ROOT / "tests")!r})\n'
-            'from _bash_resolver_scan import _synthetic_violations\n'
-            f'assert _synthetic_violations({source!r}) == []\n')
-        result = subprocess.run(
-            [sys.executable, '-c', program], cwd=tmp,
-            env=_util.child_coverage('scrub'), capture_output=True,
-            text=True, timeout=30)
-        assert result.returncode == 0, result.stderr
 
 
 def test_match_captures_cannot_disguise_nonroot_chdir(tmp):
@@ -504,20 +494,16 @@ def _mutation_specs():
         "and node.rest)\n",
         "",
     )
-    match_as_scope = (
-        "        elif isinstance(node, ast.MatchAs) and node.name:\n"
-        "            shadows[scope].add(node.name)\n",
-        "",
-    )
-    match_star_scope = (
-        "        elif isinstance(node, ast.MatchStar) and node.name:\n"
-        "            shadows[scope].add(node.name)\n",
-        "",
-    )
-    match_rest_scope = (
-        "        elif isinstance(node, ast.MatchMapping) and node.rest:\n"
-        "            shadows[scope].add(node.rest)\n",
-        "",
+    walrus_scope = (
+        "        if isinstance(node, ast.NamedExpr):\n"
+        "            visit(node.value, scope)\n"
+        "            visit(node.target, "
+        "_containing_binding_scope(scope, parents))\n"
+        "            return\n",
+        "        if isinstance(node, ast.NamedExpr):\n"
+        "            visit(node.value, scope)\n"
+        "            visit(node.target, scope)\n"
+        "            return\n",
     )
     return (
         ('plain assignment', 'bindings', (assign,),
@@ -552,19 +538,15 @@ def _mutation_specs():
          (("            visit(first.iter, scope)\n",
            "            visit(first.iter, node)\n"),),
          _SCOPE_INVOKE),
+        ('comprehension walrus scope', 'scopes', (walrus_scope,),
+         _SCOPE_INVOKE),
         ('MatchAs global', 'scopes', (match_as_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
         ('MatchStar global', 'scopes', (match_star_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
         ('MatchMapping global', 'scopes', (match_rest_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
-        ('MatchAs scope', 'scopes', (match_as_scope,),
-         "suite.test_bash_resolver_match_captures_shadow_outer_bindings('.')"),
-        ('MatchStar scope', 'scopes', (match_star_scope,),
-         "suite.test_bash_resolver_match_captures_shadow_outer_bindings('.')"),
-        ('MatchMapping scope', 'scopes', (match_rest_scope,),
-         "suite.test_bash_resolver_match_captures_shadow_outer_bindings('.')"),
-    )
+    ) + _BASH_MUTATION_SPECS
 
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
@@ -572,9 +554,11 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
     copy_test_tree(root)
     bindings_target = root / 'tests' / '_coverage_bindings.py'
     scopes_target = root / 'tests' / '_coverage_scopes.py'
+    bash_target = root / 'tests' / '_bash_resolver_scan.py'
     for name, target_name, replacements, invocation in _mutation_specs():
         target = (bindings_target if target_name == 'bindings'
-                  else scopes_target)
+                  else scopes_target if target_name == 'scopes'
+                  else bash_target)
         original = target.read_bytes()
         crlf = b'\r\n' in original
         text = original.decode('utf-8').replace('\r\n', '\n')
@@ -588,13 +572,21 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
             program = (
                 "import sys\nsys.path.insert(0, 'tests')\n"
                 "import test_coverage_bindings as suite\n"
+                "assert sys.dont_write_bytecode, "
+                "'cached bytecode writes enabled without -B'\n"
+                f"print({_FRESH_SOURCE_MARKER!r})\n"
                 f"{invocation}\n")
             result = subprocess.run(
                 [sys.executable, '-B', '-c', program], cwd=root,
-                env=_util.child_coverage('scrub'), capture_output=True,
+                env=_util.child_coverage('scrub', {
+                    name: os.environ[name] for name in dict(os.environ)
+                    if name != 'PYTHONDONTWRITEBYTECODE'}),
+                capture_output=True,
                 text=True, timeout=30)
         finally:
             target.write_bytes(original)
+        assert result.stdout == _FRESH_SOURCE_MARKER + '\n', (
+            'cached bytecode freshness', result.stdout, result.stderr)
         assert result.returncode != 0, (name, result.stdout, result.stderr)
         assert 'AssertionError' in result.stderr, (name, result.stderr)
 
@@ -604,10 +596,16 @@ def test_mutation_gate_accepts_crlf_copied_helpers(tmp):
     copy_test_tree(root)
     bindings = root / 'tests' / '_coverage_bindings.py'
     scopes = root / 'tests' / '_coverage_scopes.py'
-    sources = bindings.read_bytes(), scopes.read_bytes()
-    assert b'\r\n' not in sources[0] and b'\r\n' not in sources[1]
-    bindings.write_bytes(sources[0].replace(b'\n', b'\r\n'))
-    scopes.write_bytes(sources[1].replace(b'\n', b'\r\n'))
+    bash = root / 'tests' / '_bash_resolver_scan.py'
+    sources = [bindings.read_bytes(), scopes.read_bytes(), bash.read_bytes()]
+    crlf_sources = [source.replace(b'\r\n', b'\n').replace(
+        b'\n', b'\r\n') for source in sources]
+    assert all(b'\r\n' in source
+               and b'\n' not in source.replace(b'\r\n', b'')
+               for source in crlf_sources)
+    bindings.write_bytes(crlf_sources[0])
+    scopes.write_bytes(crlf_sources[1])
+    bash.write_bytes(crlf_sources[2])
     mutation_tmp = Path(tmp) / 'mutations'
     program = (
         "import sys\nsys.path.insert(0, 'tests')\n"
@@ -615,10 +613,12 @@ def test_mutation_gate_accepts_crlf_copied_helpers(tmp):
         'suite.test_each_new_binding_and_match_arm_is_mutation_sensitive('
         f'{str(mutation_tmp)!r})\n')
     result = subprocess.run(
-        [sys.executable, '-c', program], cwd=root,
+        [sys.executable, '-B', '-c', program], cwd=root,
         env=_util.child_coverage('scrub'), capture_output=True,
         text=True, timeout=120)
     assert result.returncode == 0, result.stderr
+    assert [bindings.read_bytes(), scopes.read_bytes(),
+            bash.read_bytes()] == crlf_sources
 
 
 def test_real_tree_refuses_each_complete_binding_bypass(tmp):

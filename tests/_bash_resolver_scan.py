@@ -12,7 +12,7 @@ one.
 
 Recognition is enumerated, and a program element the analysis cannot read is
 not judged — a shell computed at runtime, a name the scan cannot bind to a
-value (a parameter, an import, a walrus), a name chain longer than the
+value (such as a parameter or import), a name chain longer than the
 `_MAX_PROGRAM_DEPTH` links the resolution follows, or a `which` of a
 non-literal name, the route `tests/_workflowrun.py` uses for whatever a
 workflow `shell:` template names. So is a `shell=True` command whose leading
@@ -24,7 +24,8 @@ should not.
 import ast
 import re
 
-from _coverage_scopes import _evaluation_scopes, _scope_shadows
+from _coverage_scopes import (
+    _containing_binding_scope, _evaluation_scopes, _scope_shadows)
 
 _HELPER = 'workflow_bash'
 _WHICH = 'which'
@@ -40,6 +41,8 @@ def _binding_of(node):
     if isinstance(node, ast.Assign):
         targets, value = node.targets, node.value
     elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        targets, value = [node.target], node.value
+    elif isinstance(node, ast.NamedExpr):
         targets, value = [node.target], node.value
     else:
         return (), None
@@ -65,6 +68,8 @@ class _ModuleFacts:
         self.bindings = {scope: {} for scope in self.parents}
         for node, scope in self.scoped_nodes:
             names, value = _binding_of(node)
+            if isinstance(node, ast.NamedExpr):
+                scope = _containing_binding_scope(scope, self.parents)
             for name in names:
                 self.bindings[scope].setdefault(name, []).append(value)
         self._collect(tree)

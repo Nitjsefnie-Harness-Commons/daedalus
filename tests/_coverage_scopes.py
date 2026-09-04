@@ -17,6 +17,10 @@ _ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
 _REFLECTIVE_READS = frozenset({'getattr', 'hasattr'})
 
 
+_COMPREHENSION_SCOPES = (
+    ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
 def _chain(node):
     parts = []
     while isinstance(node, (ast.Attribute, ast.Subscript)):
@@ -202,8 +206,15 @@ def _parameter_names(arguments):
                if extra is not None})
 
 
+def _containing_binding_scope(scope, parents):
+    """Nearest scope outside any nested comprehension scopes."""
+    while isinstance(scope, _COMPREHENSION_SCOPES):
+        scope = parents[scope]
+    return scope
+
+
 def _evaluation_scopes(tree):
-    """Nodes with their evaluation scope, plus lexical scope parents."""
+    """Nodes with their evaluation or binding scope, plus scope parents."""
     scoped = []
     parents = {tree: None}
 
@@ -254,8 +265,11 @@ def _evaluation_scopes(tree):
                     visit(value, scope)
             visit(node.body, node)
             return
-        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
-                             ast.GeneratorExp)):
+        if isinstance(node, ast.NamedExpr):
+            visit(node.value, scope)
+            visit(node.target, _containing_binding_scope(scope, parents))
+            return
+        if isinstance(node, _COMPREHENSION_SCOPES):
             parents[node] = enclosing(scope)
             first, *remaining = node.generators
             visit(first.iter, scope)
