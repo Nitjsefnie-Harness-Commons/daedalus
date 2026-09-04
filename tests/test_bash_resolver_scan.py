@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """No test launches the workflow shell except through the shared resolver."""
 import ast
+import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bash_resolver_scan  # noqa: E402
 import _util  # noqa: E402
+from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 
 # The three resolver call sites, each as (module, the spelling the site
@@ -62,6 +65,36 @@ def _mutated_copy(tmp, site):
 
 def _synthetic(source):
     return _bash_resolver_scan._synthetic_violations(source)
+
+
+_MATCH_INVOKE = (
+    "__import__('test_bash_resolver_scan')."
+    "test_match_captures_shadow_outer_bindings('.')")
+_WALRUS_INVOKE = (
+    "__import__('test_bash_resolver_scan')."
+    'test_comprehension_walrus_binds_in_containing_scope(None)')
+_BASH_MUTATION_SPECS = (
+    ('MatchAs scope', 'scopes', ((
+        "        elif isinstance(node, ast.MatchAs) and node.name:\n"
+        "            shadows[scope].add(node.name)\n", ""),),
+     _MATCH_INVOKE),
+    ('MatchStar scope', 'scopes', ((
+        "        elif isinstance(node, ast.MatchStar) and node.name:\n"
+        "            shadows[scope].add(node.name)\n", ""),),
+     _MATCH_INVOKE),
+    ('MatchMapping scope', 'scopes', ((
+        "        elif isinstance(node, ast.MatchMapping) and node.rest:\n"
+        "            shadows[scope].add(node.rest)\n", ""),),
+     _MATCH_INVOKE),
+    ('Bash walrus binding', 'bash', ((
+        "    elif isinstance(node, ast.NamedExpr):\n"
+        "        targets, value = [node.target], node.value\n", ""),),
+     _WALRUS_INVOKE),
+    ('Bash walrus binding scope', 'bash', ((
+        "            if isinstance(node, ast.NamedExpr):\n"
+        "                scope = _containing_binding_scope("
+        "scope, self.parents)\n", ""),), _WALRUS_INVOKE),
+)
 
 
 def test_every_launch_names_the_shared_resolver(tmp):
@@ -323,6 +356,48 @@ subprocess.run([bash], cwd=tmp)
         assert violations == expected, (lines, violations)
 
 
+def test_comprehension_walrus_binds_in_containing_scope(tmp):
+    del tmp
+    cases = (
+        ("""import subprocess
+[(program := 'bash') for item in values]
+subprocess.run([program], cwd=tmp)
+""", 3),
+        ("""import subprocess
+def launch(tmp):
+    [[(program := 'bash') for inner in items] for outer in groups]
+    subprocess.run([program], cwd=tmp)
+""", 4),
+    )
+    for source, line in cases:
+        violations = _synthetic(source)
+        assert violations == [
+            f'tests/synthetic.py:{line}: run resolves the workflow shell '
+            "as 'bash', not workflow_bash()"], violations
+
+
+def test_match_captures_shadow_outer_bindings(tmp):
+    patterns = ('dict', '[*dict]', '{**dict}')
+    for pattern in patterns:
+        source = f'''import subprocess
+dict = 'bash'
+def launch(value, tmp):
+    match value:
+        case {pattern}:
+            subprocess.run([dict, '-c', 'true'], cwd=tmp)
+'''
+        program = (
+            'import sys\n'
+            f'sys.path.insert(0, {str(ROOT / "tests")!r})\n'
+            'from _bash_resolver_scan import _synthetic_violations\n'
+            f'assert _synthetic_violations({source!r}) == []\n')
+        result = subprocess.run(
+            [sys.executable, '-c', program], cwd=tmp,
+            env=_util.child_coverage('scrub'), capture_output=True,
+            text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+
+
 def test_a_parameter_shadows_an_outer_binding(tmp):
     """A launch through a parameter is out of scope, not resolved outward.
 
@@ -397,6 +472,53 @@ def test_each_real_site_is_caught_when_it_bypasses(tmp):
         violations = _bash_resolver_scan._tree_violations(root)
         assert any(v.startswith(expected) for v in violations), (
             site[0], expected, violations)
+
+
+def test_copied_tree_tracks_a_comprehension_walrus(tmp):
+    root = _tree_copy(tmp)
+    relative = 'tests/test_claim_workflow.py'
+    target = root / relative
+    source = target.read_text(encoding='utf-8')
+    anchor = '_GH_STUB = r"""'
+    snippet = ("[(program := 'bash') for item in values]\n"
+               "subprocess.run([program], cwd=tmp)\n")
+    assert source.count(anchor) == 1
+    mutated = source.replace(anchor, snippet + anchor, 1)
+    target.write_text(mutated, encoding='utf-8')
+    line = mutated[:mutated.index('subprocess.run([program]')].count('\n') + 1
+    violations = _bash_resolver_scan._tree_violations(root)
+    expected = (f'{relative}:{line}: run resolves '
+                "the workflow shell as 'bash', not workflow_bash()")
+    assert expected in violations, violations
+
+
+def test_binding_mutation_gate_requires_fresh_source(tmp):
+    root = Path(tmp) / 'freshness-repository'
+    copy_test_tree(root)
+    target = root / 'tests' / 'test_coverage_bindings.py'
+    source = target.read_text(encoding='utf-8')
+    needle = ("[sys.executable, '-B', '-c', program], cwd=root,\n"
+              "                env=_util.child_coverage('scrub', {")
+    assert source.count(needle) == 1
+    target.write_text(source.replace(
+        needle, needle.replace("'-B', ", ''), 1), encoding='utf-8')
+    mutation_tmp = Path(tmp) / 'freshness-mutations'
+    program = (
+        "import sys\nsys.path.insert(0, 'tests')\n"
+        "import test_coverage_bindings as suite\n"
+        'suite.test_each_new_binding_and_match_arm_is_mutation_sensitive('
+        f'{str(mutation_tmp)!r})\n')
+    result = subprocess.run(
+        [sys.executable, '-B', '-c', program], cwd=root,
+        env=_util.child_coverage('scrub', {
+            name: os.environ[name] for name in dict(os.environ)
+            if name != 'PYTHONDONTWRITEBYTECODE'}),
+        capture_output=True, text=True, timeout=120)
+    caches = sorted((mutation_tmp / 'repository' / 'tests').glob(
+        '__pycache__/*.pyc'))
+    assert caches, 'the mutant left no cached bytecode'
+    assert result.returncode != 0, 'the missing -B mutation was false-green'
+    assert 'cached bytecode' in result.stderr, result.stderr
 
 
 def test_a_copied_tree_is_clean_before_a_mutation_is_planted(tmp):
