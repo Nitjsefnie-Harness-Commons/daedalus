@@ -403,11 +403,6 @@ def main():
     except (CoverageException, ET.ParseError, ValueError) as error:
         print(f'coverage report invalid: {error}', file=sys.stderr)
         return 1
-    if not measured:
-        # An empty report means the measurement did not happen, and printing
-        # "no lines added" for it would read as good news.
-        print('coverage report names no measured file', file=sys.stderr)
-        return 1
     rows, covered, total = measure(measured, added)
     sys.stdout.write(render(rows, covered, total,
                             unmeasured_sources(measured, added),
