@@ -175,17 +175,21 @@ def test_an_alias_resolves_to_the_last_anchor_defined_before_it(tmp):
 def test_mapping_value_aliases_match_base_loader_strings(tmp):
     del tmp
     cases = (
+        ('plain', 'target'),
         ('number', '5'),
         ('boolean', 'true'),
-        ('quoted', '"quoted"'),
-        ('block', '|\n  block\n'),
+        ('single', "'single quoted'"),
+        ('double', '"double quoted"'),
+        ('literal', '|\n  literal block\n'),
+        ('folded', '>\n  folded block\n'),
     )
     for key, value in cases:
         source = _document(
             'name: *a', f'anchors:\n {key}: &a {value}'
             + ('' if value.endswith('\n') else '\n'))
         parsed = yaml.load(source, Loader=yaml.BaseLoader)
-        assert _names(source) == [parsed['jobs']['sample']['steps'][0]['name']]
+        expected = parsed['jobs']['sample']['steps'][0]['name']
+        assert _names(source) == [expected], key
 
 
 def test_an_alias_reads_an_anchor_defined_on_an_earlier_step_field(tmp):
@@ -243,6 +247,56 @@ def test_multiline_flow_alias_candidates_are_refused_as_opaque(tmp):
             ('[\n  &a hidden,\n', '  ]\n'),
             ('{\n  key: &a hidden,\n', '}\n')):
         prefix = f'anchors:\n first: &a target\n decoy: {value}{closing}'
+        _reader_refused_exact(
+            _document('name: *a', prefix),
+            'step name has an unsupported YAML alias target in a flow '
+            'collection: &a')
+
+
+def _assert_flow_property_decoy(decoy):
+    prefix = 'anchors:\n first: &a target\n ' + decoy
+    _reader_refused_exact(
+        _document('name: *a', prefix),
+        'step name has an unsupported YAML alias target in a flow '
+        'collection: &a')
+
+
+def test_anchor_before_double_quote_keeps_multiline_flow_opaque(tmp):
+    del tmp
+    _assert_flow_property_decoy(
+        'decoy: [\n'
+        '  &x "quoted ] and escaped \\\" delimiter", # member\n'
+        '  &a hidden\n'
+        ' ]\n')
+
+
+def test_anchor_before_single_quote_keeps_multiline_flow_opaque(tmp):
+    del tmp
+    _assert_flow_property_decoy(
+        'decoy: {\n'
+        "  key: &x 'quoted } and doubled '' quote', # member\n"
+        '  other: &a hidden\n'
+        ' }\n')
+
+
+def test_tag_before_quote_keeps_multiline_flow_opaque(tmp):
+    del tmp
+    _assert_flow_property_decoy(
+        'decoy: [\n'
+        '  !!str "tagged ] and escaped \\\" delimiter", # member\n'
+        '  &a hidden\n'
+        ' ]\n')
+
+
+def test_flow_properties_keep_same_line_quoted_members_opaque(tmp):
+    del tmp
+    values = (
+        '[&x "quoted ] and escaped \\\" delimiter", &a hidden]',
+        "{key: &x 'quoted } and doubled '' quote', other: &a hidden}",
+        '[!!str "tagged ] and escaped \\\" delimiter", &a hidden]',
+    )
+    for value in values:
+        prefix = f'anchors:\n first: &a target\n decoy: {value}\n'
         _reader_refused_exact(
             _document('name: *a', prefix),
             'step name has an unsupported YAML alias target in a flow '
