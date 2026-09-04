@@ -56,6 +56,9 @@ def _lines(workflow):
         raise YAMLReadError('workflow must be a string')
     lines = []
     offset = 0
+    if workflow[:1] == '\ufeff':
+        workflow = workflow[1:]
+        offset = 1
     for raw in workflow.splitlines(keepends=True):
         lines.append(_Line(raw.rstrip('\r\n'), offset, offset + len(raw)))
         offset += len(raw)
