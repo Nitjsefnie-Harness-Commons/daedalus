@@ -76,8 +76,7 @@ def _indent(line):
 
 
 def _meaningful(line):
-    return (bool(line.text.strip(' '))
-            and not line.text.lstrip(' ').startswith('#'))
+    return bool(line.text.strip(' ')) and line.text.lstrip(' ')[:1] != '#'
 
 
 def _split_field(text, owner):
@@ -164,6 +163,11 @@ def _node_parts(line):
     return None
 
 
+def _flow_property_end(text, start):
+    return next((i for i in range(start + 1, len(text))
+                 if text[i].isspace() or text[i] in ',[]{}'), len(text))
+
+
 def _flow_end(lines, start, end, value):
     depth = 0
     quote = None
@@ -186,6 +190,9 @@ def _flow_end(lines, start, end, value):
                 continue
             if char == '#' and (cursor == 0 or text[cursor - 1].isspace()):
                 break
+            if node_start and char in '&!':
+                cursor = _flow_property_end(text, cursor)
+                continue
             if node_start and char in ("'", '"'):
                 quote = char
             elif char in '[{':
@@ -221,9 +228,8 @@ def _scalar_regions(lines, texts):
             continue
         raw_value, parent_indent, raw_key, _dashed = parts
         _tokens, value = _prepared_value(raw_value)
-        header_owner = (
-            f'mapping field {raw_key.strip()!r}'
-            if raw_key is not None else 'sequence item')
+        header_owner = (f'mapping field {raw_key.strip()!r}'
+                        if raw_key is not None else 'sequence item')
         header = parse_block_header(value, header_owner)
         if header is not None:
             stop = block_end(
@@ -372,29 +378,28 @@ def _step_value(
     if alias is not None:
         return _alias_value(
             lines, texts, scalar, opaque, start, alias, owner)
-    value = content
-    if not value:
+    if not content:
         raise YAMLReadError(f'{owner} has no scalar value')
-    header = parse_block_header(value, owner)
+    header = parse_block_header(content, owner)
     if header is not None:
         stop = block_end(texts, start + 1, end, indent, header)
         body = [(line.text, line.end > line.start + len(line.text))
                 for line in lines[start + 1:stop]]
         return decode_block(body, indent, header, owner)
-    if value.startswith(("'", '"')):
-        if _quote_is_open(value) is not None:
+    if content.startswith(("'", '"')):
+        if _quote_is_open(content) is not None:
             raise YAMLReadError(f'{owner} has an unsupported multiline scalar')
-        return decode_inline_scalar(value, owner)
-    if value.startswith(('[', '{', '@', '`')):
+        return decode_inline_scalar(content, owner)
+    if content.startswith(('[', '{', '@', '`')):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
-    if '\t' in value or any(
+    if '\t' in content or any(
             ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
-            for char in value):
+            for char in content):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
     if any(_meaningful(lines[index]) and _indent(lines[index]) > indent
            for index in range(start + 1, end)):
         raise YAMLReadError(f'{owner} has an unsupported multiline scalar')
-    return value
+    return content
 
 
 def _step_fields(lines, scalar, index, end, item_indent):
@@ -416,8 +421,7 @@ def _step_fields(lines, scalar, index, end, item_indent):
 
 def _decoded_step_fields(
         lines, texts, scalar, opaque, index, end, item_indent):
-    field_indent, fields = _step_fields(
-        lines, scalar, index, end, item_indent)
+    field_indent, fields = _step_fields(lines, scalar, index, end, item_indent)
     if fields:
         first_index, first_field = fields[0]
         tokens, first_field = node_properties(first_field)
@@ -451,16 +455,13 @@ def workflow_step_items(workflow, job):
     jobs_body = _mapping_body(lines, scalar, jobs, 'jobs')
     if jobs is None or jobs_body is None:
         return None
-    job_entry = _mapping_entry(
-        lines, scalar, *jobs_body, jobs.indent, job)
+    job_entry = _mapping_entry(lines, scalar, *jobs_body, jobs.indent, job)
     if job_entry is None:
         return None
-    job_body = _mapping_body(
-        lines, scalar, job_entry, f'job {job!r}')
+    job_body = _mapping_body(lines, scalar, job_entry, f'job {job!r}')
     if job_body is None:
         return None
-    steps = _mapping_entry(
-        lines, scalar, *job_body, job_entry.indent, 'steps')
+    steps = _mapping_entry(lines, scalar, *job_body, job_entry.indent, 'steps')
     if steps is None:
         return None
     if steps.rest.strip(' \t'):
@@ -489,11 +490,10 @@ def workflow_step_items(workflow, job):
             indices) else end
         fields = _decoded_step_fields(
             lines, texts, scalar, opaque, index, item_end, item_indent)
-        content = [
-            line_index for line_index in range(index, item_end)
-            if line_index in scalar or _meaningful(lines[line_index])
-        ]
+        last = max(line_index for line_index in range(index, item_end)
+                   if line_index in scalar or _meaningful(lines[line_index]))
         items.append(StepItem(
-            index, item_end, item_indent, lines[index].start,
-            lines[content[-1]].end, fields.get('name'), fields.get('id')))
+            index=index, end_index=item_end, indent=item_indent,
+            start=lines[index].start, end=lines[last].end,
+            name=fields.get('name'), identity=fields.get('id')))
     return items
