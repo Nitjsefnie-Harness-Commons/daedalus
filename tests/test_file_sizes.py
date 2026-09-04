@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 """Contracts for the JSON-owned module-size policy and its ratchet."""
-import json
-import os
-import re
 import subprocess
 import sys
 from pathlib import Path

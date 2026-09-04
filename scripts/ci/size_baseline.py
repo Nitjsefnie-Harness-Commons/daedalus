@@ -13,15 +13,16 @@ record a shrink.
   python3 scripts/ci/size_baseline.py --tighten
 """
 import argparse
+import importlib
 import subprocess
 import sys
 from pathlib import Path
 
 if __package__:
-    # pylint: disable-next=relative-beyond-top-level
+    # pylint: disable-next=relative-beyond-top-level,no-name-in-module
     from . import thresholds
 else:
-    import thresholds
+    thresholds = importlib.import_module('thresholds')
 
 
 ROOT = Path(__file__).resolve().parents[2]

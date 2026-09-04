@@ -13,6 +13,7 @@ from workflow_yaml import (  # noqa: E402
     YAMLReadError, workflow_step_items,
 )
 
+
 def _document(field, prefix=''):
     """A one-step workflow whose step carries `field` before an `if`."""
     return (f'{prefix}jobs:\n sample:\n  steps:\n'

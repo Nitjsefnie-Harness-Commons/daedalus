@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Contracts for the shared CI threshold document reader and writer."""
-import contextlib
-import io
 import json
 import os
 import stat
