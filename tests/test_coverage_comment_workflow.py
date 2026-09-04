@@ -13,6 +13,7 @@ from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
+from _coverage_comment_steps import publication_contract  # noqa: E402
 from _yamlread import (  # noqa: E402
     YAMLReadError, _indent, job_mapping, job_scalar,
     step_scalar, step_scalars,
@@ -452,7 +453,6 @@ def test_trusted_destination_and_body_bound_are_executable(tmp):
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
     assert '/comments' not in calls.read_text(encoding='utf-8'), \
         calls.read_text(encoding='utf-8')
-
     oversized, _state, calls, _output = _run_comment_block(
         tmp, 'Post or update the pull request comment', state=[],
         body='x' * 60001)
@@ -547,6 +547,11 @@ def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
         pull_reads = call_text.count('"repos/owner/repo/pulls/170"')
         assert pull_reads == 1, f'{branch} pull-head lookups: {pull_reads}'
         assert recorded_writes(calls) == [], call_text
+
+
+def test_publication_contract(tmp):
+    publication_contract(tmp, _workflow, _run_block, _run_shell_block,
+                         _write_executable)
 
 
 def test_commenter_runs_every_completed_run_and_orders_stale_gate(
@@ -681,7 +686,7 @@ def test_the_coverage_commenter_guards_its_privileged_shell(tmp):
     # Actions' default shell is `bash -e` without pipefail, so in
     # `x="$(gh api | jq ...)"` a failed API call reads as an empty answer.
     guarded = re.findall(r'run: \|\n\s+set -euo pipefail\n', workflow)
-    assert len(guarded) == workflow.count('run: |') == 4, workflow
+    assert len(guarded) == workflow.count('run: |') == 5, workflow
     assert 'cancel-in-progress: true' in workflow, workflow
     # The destination comes from the event; the artifact's copy is compared.
     assert 'repos/$HEAD_REPO/commits/$HEAD_SHA/pulls' in workflow, workflow
