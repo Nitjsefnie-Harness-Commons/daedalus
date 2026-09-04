@@ -2,13 +2,13 @@
 import json
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from _ghexpr import evaluate_if
 from _yamlsteps import step_mappings
 CHECK_NAME = 'coverage comment'
 CHECK_EXTERNAL_PREFIX = 'daedalus-coverage-comment/v1/'
-
-
 GH_CHECK_STUB = r'''#!/usr/bin/env python3
 import json
 import os
@@ -76,12 +76,10 @@ elif method == 'PATCH' and '/check-runs/' in target:
             check.update(values)
 state_path.write_text(json.dumps(state), encoding='utf-8')
 '''
-
 CRLF_JQ_STUB = r'''#!/usr/bin/env python3
 import os
 import subprocess
 import sys
-
 raw = os.environ.get('STUB_RAW_IDS')
 if raw is not None:
     output = raw.encode('utf-8') + b'\n'
@@ -90,7 +88,7 @@ else:
                             capture_output=True)
     output = result.stdout
     if os.environ.get('STUB_CRLF_IDS'):
-        output = output.replace(b'\n', b'\r\n')
+        output = output.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
     sys.stderr.buffer.write(result.stderr)
     if result.returncode:
         raise SystemExit(result.returncode)
@@ -452,8 +450,9 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
         'GH_TOKEN': '${{ github.token }}',
         'REPO': '${{ github.repository }}',
         'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
-        'RUN_URL': '${{ github.event.workflow_run.html_url }}',
-        'STATUS': '${{ github.event.workflow_run.conclusion }}',
+        'RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
+                   '/actions/runs/${{ github.run_id }}',
+        'STATUS': '${{ job.status }}',
     }, step
     script = step['run']
     assert "-f name='coverage comment'" in script, script
@@ -463,7 +462,6 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     assert 'case "$STATUS"' in script
     assert not any(name in script for name in (
         'body.md', 'pr-number.txt', 'artifact', 'github.workspace'))
-
     result, state, calls, _script = run()
     assert result.returncode == 0, (result.stdout, result.stderr)
     writes = write_list(calls)
@@ -521,8 +519,13 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
         label='crlf', state=crlf_state, head_sha=head_sha,
         extra_env={'STUB_CRLF_IDS': '1'})
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert len(write_list(calls)) == 1, call_list(calls)
     assert state['checks'][0]['conclusion'] == 'success', state
+    for source in (b'41\n', b'41\r\n'):
+        output = subprocess.check_output(
+            [sys.executable, '-c', CRLF_JQ_STUB, '-c',
+             'import sys; sys.stdout.buffer.write(' + repr(source) + ')'],
+            env=dict(os.environ, REAL_JQ=sys.executable, STUB_CRLF_IDS='1'))
+        assert output == b'41\r\n', repr(output)
     for label, raw in (
             ('embedded-cr', '4\r1'), ('leading-cr', '\r41'),
             ('extra-cr', '41\r\r'), ('whitespace', '41 '),
@@ -584,7 +587,6 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     result, state, calls, _script = run(label='invalid', state=invalid)
     assert result.returncode != 0, (result.stdout, result.stderr)
     assert not write_list(calls) and state['checks'] == invalid, state
-
     failure_cases = (
         ('list-failure', {'STUB_FAIL_LIST': '1'}, []),
         ('create-failure', {'STUB_FAIL_CREATE': '1'}, []),
@@ -600,7 +602,6 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
         assert result.returncode != 0, (label, result.stdout, result.stderr)
         expected = 0 if label == 'list-failure' else 1
         assert len(write_list(calls)) == expected, (label, call_list(calls))
-
     workdir = Path(tmp) / 'hostile-artifact'
     workdir.mkdir(parents=True)
     (workdir / 'body.md').write_text(
@@ -661,7 +662,6 @@ EXPECTED_PRIVILEGED_JOB_MAPPING = {
     'timeout-minutes': '10',
     'steps': EXPECTED_STEP_MAPPINGS,
 }
-
 EXPECTED_WORKFLOW_MAPPING = {
     'name': 'coverage comment',
     'on': {

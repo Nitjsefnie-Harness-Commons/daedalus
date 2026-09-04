@@ -42,8 +42,9 @@ _EXPECTED_PUBLICATION_STEP = {
         'GH_TOKEN': '${{ github.token }}',
         'REPO': '${{ github.repository }}',
         'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
-        'RUN_URL': '${{ github.event.workflow_run.html_url }}',
-        'STATUS': '${{ github.event.workflow_run.conclusion }}',
+        'RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
+                   '/actions/runs/${{ github.run_id }}',
+        'STATUS': '${{ job.status }}',
     },
     'run': r'''set -euo pipefail
 
