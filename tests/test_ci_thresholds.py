@@ -5,7 +5,7 @@ import os
 import stat
 import subprocess
 import sys
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -53,6 +53,15 @@ def _assert_refused(path, needle):
     result = _check(path)
     assert result.returncode != 0, (result.stdout, result.stderr)
     assert needle in result.stderr, (needle, result.stderr)
+
+
+def _assert_load_refused(path, needle):
+    try:
+        _thresholds().load(path)
+    except ValueError as error:
+        assert str(error).startswith(needle), str(error)
+    else:
+        raise AssertionError('invalid threshold input was accepted')
 
 
 def _restrictive_mode(platform_name):
@@ -162,6 +171,51 @@ def test_coverage_numbers_are_finite_bounded_and_one_decimal(tmp):
         _assert_refused(path, 'non-finite JSON number')
 
 
+def test_invalid_utf8_and_malformed_json_are_refused(tmp):
+    """Threshold loading reports both byte and syntax failures plainly."""
+    path = Path(tmp) / 'invalid.json'
+    path.write_bytes(b'\xff')
+    _assert_load_refused(path, 'invalid thresholds JSON:')
+    path.write_bytes(b'{')
+    _assert_load_refused(path, 'invalid thresholds JSON:')
+
+
+def test_in_memory_coverage_rejects_nonfinite_and_nonobject_values(tmp):
+    del tmp
+    thresholds = _thresholds()
+    candidate = _valid()
+    candidate['coverage']['python']['measured'] = Decimal('NaN')
+    try:
+        thresholds._normalise(candidate)
+    except ValueError as error:
+        assert str(error) == 'coverage.python.measured must be finite'
+    else:
+        raise AssertionError('non-finite in-memory coverage was accepted')
+    candidate = _valid()
+    candidate['coverage']['python'] = []
+    try:
+        thresholds._normalise(candidate)
+    except ValueError as error:
+        assert str(error) == 'coverage.python must be an object'
+    else:
+        raise AssertionError('non-object in-memory coverage was accepted')
+
+
+def test_low_decimal_precision_is_a_clean_threshold_refusal(tmp):
+    del tmp
+    thresholds = _thresholds()
+    with localcontext() as context:
+        context.prec = 1
+        try:
+            thresholds._coverage_value(
+                Decimal('94.4'), 'coverage.python.measured')
+        except ValueError as error:
+            assert str(error) == (
+                'coverage.python.measured must have at most one decimal place')
+        else:
+            raise AssertionError('low precision accepted an invalid value')
+
+
 def test_coverage_floor_is_strictly_lower_with_exact_gap(tmp):
     """The calibration contract rejects both a weak floor and a wrong gap."""
     path = Path(tmp) / 'thresholds.json'
@@ -191,6 +245,24 @@ def test_baseline_paths_and_counts_are_safe_and_positive(tmp):
         candidate['module_size_baseline'] = {'tests/x.py': count}
         _write_json(path, candidate)
         _assert_refused(path, 'module_size_baseline.tests/x.py')
+
+
+def test_baseline_path_encoding_limits_are_refused(tmp):
+    path = Path(tmp) / 'thresholds.json'
+    for unsafe in ('tests/\ud800.py', 'tests/' + 'x' * 241 + '.py'):
+        candidate = _valid()
+        candidate['module_size_baseline'] = {unsafe: 1}
+        _write_json(path, candidate)
+        _assert_load_refused(path, 'unsafe module path')
+
+
+def test_nonobject_baseline_and_missing_threshold_file_are_refused(tmp):
+    path = Path(tmp) / 'thresholds.json'
+    candidate = _valid()
+    candidate['module_size_baseline'] = []
+    _write_json(path, candidate)
+    _assert_load_refused(path, 'module_size_baseline must be an object')
+    _assert_load_refused(Path(tmp) / 'missing.json', 'cannot read thresholds:')
 
 
 def test_public_accessors_return_validated_data(tmp):
