@@ -1,10 +1,10 @@
 """Exact decoded mappings and doubles for the coverage-comment workflow."""
 import json
 import os
+import shutil
 from pathlib import Path
-
+from _ghexpr import evaluate_if
 from _yamlsteps import step_mappings
-
 CHECK_NAME = 'coverage comment'
 CHECK_EXTERNAL_PREFIX = 'daedalus-coverage-comment/v1/'
 
@@ -14,22 +14,17 @@ import json
 import os
 import sys
 from pathlib import Path
-
 args = sys.argv[1:]
 state_path = Path(os.environ['STUB_STATE'])
 calls_path = Path(os.environ['STUB_CALLS'])
 state = json.loads(state_path.read_text(encoding='utf-8'))
 with calls_path.open('a', encoding='utf-8') as handle:
     handle.write(json.dumps(args) + chr(10))
-
-
 def endpoint():
     for value in args:
         if value.startswith('repos/'):
             return value
     return ''
-
-
 def fields():
     result = {}
     for index, value in enumerate(args[:-1]):
@@ -38,23 +33,27 @@ def fields():
             if separator:
                 result[key] = field
     return result
-
-
 target = endpoint()
-if target.endswith('/check-runs') and '-X' not in args:
+method_flag = '-X' if '-X' in args else '--method'
+method = args[args.index(method_flag) + 1] if method_flag in args else ''
+values = fields()
+if target.endswith('/check-runs') and method in ('', 'GET'):
     if os.environ.get('STUB_FAIL_LIST'):
         print('stub list failure', file=sys.stderr)
         raise SystemExit(23)
     if os.environ.get('STUB_MALFORMED_JSON'):
         print('{malformed', end='')
         raise SystemExit(0)
-    for check in state.get('checks', []):
-        print(json.dumps(check))
+    checks = state.get('checks', [])
+    if values.get('filter') != 'all':
+        checks = checks[-1:]
+    for check in checks:
+        if os.environ.get('STUB_CRLF_IDS'):
+            sys.stdout.buffer.write(
+                (json.dumps(check) + '\r\n').encode('utf-8'))
+        else:
+            print(json.dumps(check))
     raise SystemExit(0)
-
-
-method = args[args.index('-X') + 1] if '-X' in args else ''
-values = fields()
 if method == 'POST' and target.endswith('/check-runs'):
     if os.environ.get('STUB_FAIL_CREATE'):
         print('stub create failure', file=sys.stderr)
@@ -68,6 +67,9 @@ elif method == 'PATCH' and '/check-runs/' in target:
     if os.environ.get('STUB_FAIL_PATCH'):
         print('stub patch failure', file=sys.stderr)
         raise SystemExit(25)
+    if 'head_sha' in values:
+        print('head_sha is not valid on PATCH', file=sys.stderr)
+        raise SystemExit(26)
     check_id = target.rsplit('/', 1)[1]
     for check in state.get('checks', []):
         if str(check.get('id')) == check_id:
@@ -75,7 +77,26 @@ elif method == 'PATCH' and '/check-runs/' in target:
 state_path.write_text(json.dumps(state), encoding='utf-8')
 '''
 
-EXPECTED_STEP_MAPPINGS = [
+CRLF_JQ_STUB = r'''#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+
+raw = os.environ.get('STUB_RAW_IDS')
+if raw is not None:
+    output = raw.encode('utf-8') + b'\n'
+else:
+    result = subprocess.run([os.environ['REAL_JQ'], *sys.argv[1:]],
+                            capture_output=True)
+    output = result.stdout
+    if os.environ.get('STUB_CRLF_IDS'):
+        output = output.replace(b'\n', b'\r\n')
+    sys.stderr.buffer.write(result.stderr)
+    if result.returncode:
+        raise SystemExit(result.returncode)
+sys.stdout.buffer.write(output)
+'''
+EXPECTED_STEP_MAPPINGS = (
     {
         "name": "Check for the comment artifact",
         "id": "artifact",
@@ -366,7 +387,7 @@ EXPECTED_STEP_MAPPINGS = [
         "    ;;\n"
         "esac\n",
     },
-]
+)
 
 
 def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
@@ -378,6 +399,13 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
         workdir = Path(tmp) / label
         (workdir / 'bin').mkdir(parents=True, exist_ok=True)
         write_executable(workdir / 'bin' / 'gh', GH_CHECK_STUB)
+        real_jq = None
+        needs_jq_stub = extra_env and any(
+            name in extra_env for name in ('STUB_CRLF_IDS', 'STUB_RAW_IDS'))
+        if needs_jq_stub:
+            real_jq = shutil.which('jq')
+            assert real_jq is not None, 'jq is required for CRLF tests'
+            write_executable(workdir / 'bin' / 'jq', CRLF_JQ_STUB)
         state_path = workdir / 'state.json'
         if not state_path.exists():
             state_path.write_text(
@@ -391,6 +419,8 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
             'HEAD_SHA': head_sha, 'RUN_URL': run_url, 'STATUS': status,
             'STUB_STATE': str(state_path), 'STUB_CALLS': str(calls),
         }
+        if real_jq:
+            env['REAL_JQ'] = real_jq
         if extra_env:
             env.update(extra_env)
         script = extract_block(workflow_reader(), 'Publish coverage check')
@@ -413,7 +443,6 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
                     for index in range(len(args) - 1)
                     if args[index] in ('-f', '--raw-field')
                     and '=' in args[index + 1])
-
     workflow = workflow_reader()
     steps = step_mappings(workflow, 'comment')
     assert steps[-1]['name'] == 'Publish coverage check', steps
@@ -451,16 +480,17 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     }, fields(write)
     assert state['checks'][0]['conclusion'] == 'success', state
     list_call = call_list(calls)[0]
-    assert list_call[:3] == ['api', '-H', 'Cache-Control: no-cache'], list_call
+    assert list_call[:3] == ['api', '--method', 'GET'], list_call
+    assert list_call[list_call.index('-H') + 1] == (
+        'Cache-Control: no-cache'), list_call
+    assert 'filter=all' in list_call and 'per_page=100' in list_call, list_call
     assert '--paginate' in list_call and '--jq' in list_call, list_call
-
     for status in ('failure', 'cancelled'):
         result, state, calls, _script = run(label=status, status=status)
         assert result.returncode == 0, (status, result.stdout, result.stderr)
         assert state['checks'][0]['conclusion'] == status, state
         assert len(write_list(calls)) == 1, calls.read_text(
             encoding='utf-8')
-
     head_sha = 'b' * 40
     identity = CHECK_EXTERNAL_PREFIX + head_sha
     duplicate_state = [
@@ -483,7 +513,25 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
                 'repos/owner/repo/check-runs/42'], writes
     assert [check['conclusion'] for check in updated['checks']] == [
         'success', 'success', 'failure', 'failure'], updated
-
+    crlf_state = [{
+        'id': 41, 'name': CHECK_NAME, 'external_id': identity,
+        'app': {'slug': 'github-actions'}, 'conclusion': 'failure',
+    }]
+    result, state, calls, _script = run(
+        label='crlf', state=crlf_state, head_sha=head_sha,
+        extra_env={'STUB_CRLF_IDS': '1'})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(write_list(calls)) == 1, call_list(calls)
+    assert state['checks'][0]['conclusion'] == 'success', state
+    for label, raw in (
+            ('embedded-cr', '4\r1'), ('leading-cr', '\r41'),
+            ('extra-cr', '41\r\r'), ('whitespace', '41 '),
+            ('signed', '+41'), ('empty', ''), ('nondigit', '41x')):
+        result, state, calls, _script = run(
+            label=label, extra_env={'STUB_RAW_IDS': raw})
+        assert result.returncode != 0, (label, result.stdout, result.stderr)
+        assert not write_list(calls), (label, call_list(calls))
+        assert state['checks'] == [], (label, state)
     first, _state, calls, _script = run(label='repeat')
     assert first.returncode == 0, (first.stdout, first.stderr)
     second, _state, calls, _script = run(label='repeat', status='failure')
@@ -494,7 +542,6 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
         'POST', 'PATCH', 'PATCH'], call_list(calls)
     assert len(state['checks']) == 1 and state['checks'][0]['conclusion'] == (
         'failure'), state
-
     failed, _state, calls, _script = run(label='rerun', status='failure')
     assert failed.returncode == 0, (failed.stdout, failed.stderr)
     succeeded, state, calls, _script = run(label='rerun', status='success')
@@ -503,13 +550,11 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
         'POST', 'PATCH'], call_list(calls)
     assert len(state['checks']) == 1 and state['checks'][0]['conclusion'] == (
         'success'), state
-
     result, state, calls, _script = run(
         label='before-resolution', status='failure')
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert state['checks'][0]['conclusion'] == 'failure', state
     assert len(write_list(calls)) == 1
-
     head_sha = 'c' * 40
     result, state, calls, _script = run(
         label='fork', head_sha=head_sha,
@@ -520,12 +565,10 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     assert 'head_sha=' + head_sha in write
     assert state['checks'][0]['external_id'] == (
         CHECK_EXTERNAL_PREFIX + head_sha)
-
     result, state, calls, _script = run(label='unexpected', status='timed_out')
     assert result.returncode != 0, (result.stdout, result.stderr)
     assert not call_list(calls), call_list(calls)
     assert state['checks'] == [], state
-
     result, state, calls, _script = run(
         label='malformed', extra_env={'STUB_MALFORMED_JSON': '1'})
     assert result.returncode != 0, (result.stdout, result.stderr)
@@ -571,6 +614,45 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     assert state['checks'][0]['name'] == CHECK_NAME, state
     assert all('attacker' not in value for args in call_list(calls)
                for value in args), call_list(calls)
+    conditions = {
+        item['name']: item.get('if') for item in steps
+        if item['name'] in ('Mark missing patch coverage',
+                            'Download the comment artifact',
+                            'Post or update the pull request comment')
+    }
+    scenarios = (
+        ('artifact-present-success', 'true', 'false', 'success'),
+        ('artifact-absent-failure', None, 'false', 'failure'),
+        ('failure-before-resolution', None, '', 'failure'),
+        ('failure-after-resolution', 'true', 'false', 'failure'),
+        ('stale-head', 'true', 'true', 'success'),
+        ('cancellation', 'true', 'false', 'cancelled'),
+    )
+    for label, present, stale, status in scenarios:
+        context = {
+            'steps': {
+                'artifact': {'outputs': {} if present is None else {
+                    'present': present}},
+                'pr': {'outputs': {'stale': stale}},
+            },
+            'status': {name: status == name for name in (
+                'success', 'failure', 'cancelled')},
+        }
+        assert evaluate_if(step['if'], context) is True, label
+        ready = status == 'success' and present == 'true' and stale != 'true'
+        missing = status == 'success' and present != 'true' and stale != 'true'
+        expected = {
+            'Mark missing patch coverage': missing,
+            'Download the comment artifact': ready,
+            'Post or update the pull request comment': ready,
+        }
+        for name, condition in conditions.items():
+            assert evaluate_if(condition, context) is expected[name], (
+                label, name, condition)
+        result, state, _calls, _script = run(
+            label='orchestration-' + label, status=status)
+        assert result.returncode == 0, (label, result.stdout, result.stderr)
+        assert state['checks'][0]['conclusion'] == status, (label, state)
 
 
 EXPECTED_PRIVILEGED_JOB_MAPPING = {
@@ -605,3 +687,14 @@ EXPECTED_WORKFLOW_MAPPING = {
         'comment': EXPECTED_PRIVILEGED_JOB_MAPPING,
     },
 }
+
+
+def complete_workflow_expectations(publication_step):
+    """Return one complete, independently-owned workflow expectation."""
+    steps = EXPECTED_STEP_MAPPINGS + (publication_step,)
+    job = {**EXPECTED_PRIVILEGED_JOB_MAPPING, 'steps': list(steps)}
+    workflow = {
+        **EXPECTED_WORKFLOW_MAPPING,
+        'jobs': {**EXPECTED_WORKFLOW_MAPPING['jobs'], 'comment': job},
+    }
+    return steps, job, workflow
