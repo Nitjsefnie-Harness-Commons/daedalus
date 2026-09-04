@@ -5,7 +5,8 @@ if __package__:
     # pylint: disable=relative-beyond-top-level
     from .yamlblock import block_end, decode_block, parse_block_header
     from .yamlanchor import (
-        node_properties, parse_alias, validate_node_properties,
+        has_anchor_spelling, node_properties, parse_alias,
+        validate_node_properties,
     )
     from .yamlscalar import (
         YAMLReadError,
@@ -16,7 +17,10 @@ if __package__:
     )
 else:
     from yamlblock import block_end, decode_block, parse_block_header
-    from yamlanchor import node_properties, parse_alias, validate_node_properties
+    from yamlanchor import (
+        has_anchor_spelling, node_properties, parse_alias,
+        validate_node_properties,
+    )
     from yamlscalar import (
         YAMLReadError,
         _strip_inline_comment,
@@ -89,16 +93,6 @@ def _field_indent(line):
     return indent
 
 
-def _line_field(text):
-    body = text.lstrip(' ')
-    if body.startswith('-') and body[1:2] in (' ', '\t'):
-        body = body[1:].lstrip(' \t')
-    try:
-        return _split_field(body, 'mapping')
-    except YAMLReadError:
-        return None
-
-
 def _quote_is_open(value):
     value = value.lstrip(' \t')
     if value[:1] not in ("'", '"'):
@@ -151,24 +145,89 @@ def _prepared_value(raw_value):
     return tokens, _strip_inline_comment(bare.strip(' \t'))
 
 
+def _node_parts(line):
+    indent = _indent(line)
+    body = line.text[indent:]
+    dashed = body.startswith('-') and body[1:2] in (' ', '\t')
+    if dashed:
+        body = body[1:].lstrip(' \t')
+    try:
+        field = _split_field(body, 'mapping')
+    except YAMLReadError:
+        field = None
+    if field is not None:
+        key, value = field
+        position = _field_indent(line) if dashed else indent
+        return value, position, key, dashed
+    if dashed:
+        return body, indent, None, True
+    return None
+
+
+def _flow_end(lines, start, end, value):
+    depth = 0
+    quote = None
+    node_start = True
+    for index in range(start, end):
+        text = value if index == start else lines[index].text
+        cursor = 0
+        while cursor < len(text):
+            char = text[cursor]
+            if quote:
+                if quote == "'" and text[cursor:cursor + 2] == "''":
+                    cursor += 2
+                    continue
+                if quote == '"' and char == '\\':
+                    cursor += 2
+                    continue
+                if char == quote:
+                    quote = None
+                cursor += 1
+                continue
+            if char == '#' and (cursor == 0 or text[cursor - 1].isspace()):
+                break
+            if node_start and char in ("'", '"'):
+                quote = char
+            elif char in '[{':
+                depth, node_start = depth + 1, True
+            elif char in ']}':
+                depth -= 1
+                if depth <= 0:
+                    return index + 1
+                node_start = False
+            elif char == ',':
+                node_start = True
+            elif char == ':' and text[cursor + 1:cursor + 2] in (
+                    '', ' ', '\t'):
+                node_start = True
+            elif not char.isspace():
+                node_start = False
+            cursor += 1
+    return end
+
+
 def _scalar_regions(lines, texts):
+    """Find scalar continuations and opaque flow-collection extents."""
     scalar = set()
+    opaque = set()
     index = 0
     while index < len(lines):
-        if not _meaningful(lines[index]):
+        if not _meaningful(lines[index]) or index in scalar:
             index += 1
             continue
-        field = _line_field(lines[index].text)
-        if field is None:
+        parts = _node_parts(lines[index])
+        if parts is None:
             index += 1
             continue
-        _key, raw_value = field
+        raw_value, parent_indent, raw_key, _dashed = parts
         _tokens, value = _prepared_value(raw_value)
-        header = parse_block_header(value, 'workflow')
+        header_owner = (
+            f'mapping field {raw_key.strip()!r}'
+            if raw_key is not None else 'sequence item')
+        header = parse_block_header(value, header_owner)
         if header is not None:
             stop = block_end(
-                texts, index + 1, len(texts),
-                _field_indent(lines[index]), header)
+                texts, index + 1, len(texts), parent_indent, header)
             scalar.update(range(index + 1, stop))
             index = stop
             continue
@@ -179,8 +238,14 @@ def _scalar_regions(lines, texts):
             scalar.update(range(index + 1, stop))
             index = stop
             continue
+        if value.startswith(('[', '{')):
+            stop = _flow_end(lines, index, len(lines), value)
+            opaque.update(range(index, stop))
+            scalar.update(range(index + 1, stop))
+            index = stop
+            continue
         index += 1
-    return scalar, set()
+    return scalar, opaque
 
 
 def _section(lines, scalar, start, parent_indent):
@@ -239,20 +304,37 @@ def _mapping_body(lines, scalar, entry, owner):
     return body
 
 
-def _alias_value(lines, texts, scalar, alias_index, name, owner):
-    """The value of the last `&name` node defined before `alias_index`."""
+def _alias_value(lines, texts, scalar, opaque, alias_index, name, owner):
     target = f'{owner} alias &{name}'
     for index in range(alias_index - 1, -1, -1):
+        if (index in opaque
+                and has_anchor_spelling(lines[index].text, name)):
+            raise YAMLReadError(
+                f'{owner} has an unsupported YAML alias target in a flow '
+                f'collection: &{name}')
         if index in scalar or not _meaningful(lines[index]):
             continue
-        field = _line_field(lines[index].text)
-        if field is None:
+        parts = _node_parts(lines[index])
+        if parts is None:
             continue
-        raw_value = field[1]
+        raw_value, indent, raw_key, dashed = parts
+        if raw_key is not None:
+            key_tokens, _key = node_properties(raw_key.lstrip(' \t'))
+            if f'&{name}' in key_tokens:
+                position = 'sequence item' if dashed else 'mapping key'
+                raise YAMLReadError(
+                    f'{owner} has an unsupported YAML alias target on a '
+                    f'{position}: &{name}')
+        if raw_key is None:
+            tokens, content = _prepared_value(raw_value)
+            if not dashed or f'&{name}' not in tokens:
+                continue
+            raise YAMLReadError(
+                f'{owner} has an unsupported YAML alias target on a '
+                f'sequence item: &{name}')
         tokens, content = _prepared_value(raw_value)
         if f'&{name}' not in tokens:
             continue
-        indent = _field_indent(lines[index])
         _body, end = _section(lines, scalar, index, indent)
         if not content:
             first = _first_child(lines, scalar, index + 1, end, indent)
@@ -263,7 +345,7 @@ def _alias_value(lines, texts, scalar, alias_index, name, owner):
                     shape = 'sequence'
                 elif body.startswith(('[', '{')):
                     shape = 'flow collection'
-                elif _line_field(body) is not None:
+                elif _node_parts(lines[first]) is not None:
                     shape = 'mapping'
             if first is None:
                 raise YAMLReadError(
@@ -274,11 +356,12 @@ def _alias_value(lines, texts, scalar, alias_index, name, owner):
                 f'{shape}: &{name}')
         prepared = (tokens, content)
         return _step_value(
-            lines, texts, scalar, index, end, indent, prepared, target)
+            lines, texts, scalar, opaque, index, end, indent, prepared, target)
     raise YAMLReadError(f'{owner} has an unknown YAML alias: &{name}')
 
 
-def _step_value(lines, texts, scalar, start, end, indent, prepared, owner):
+def _step_value(
+        lines, texts, scalar, opaque, start, end, indent, prepared, owner):
     tokens, content = prepared
     validate_node_properties(tokens, owner)
     alias = parse_alias(content, owner)
@@ -287,17 +370,16 @@ def _step_value(lines, texts, scalar, start, end, indent, prepared, owner):
             f'{owner} has an alias carrying node properties: '
             f'{" ".join(tokens)} {content}')
     if alias is not None:
-        return _alias_value(lines, texts, scalar, start, alias, owner)
+        return _alias_value(
+            lines, texts, scalar, opaque, start, alias, owner)
     value = content
     if not value:
         raise YAMLReadError(f'{owner} has no scalar value')
     header = parse_block_header(value, owner)
     if header is not None:
         stop = block_end(texts, start + 1, end, indent, header)
-        body = [
-            (line.text, line.end > line.start + len(line.text))
-            for line in lines[start + 1:stop]
-        ]
+        body = [(line.text, line.end > line.start + len(line.text))
+                for line in lines[start + 1:stop]]
         return decode_block(body, indent, header, owner)
     if value.startswith(("'", '"')):
         if _quote_is_open(value) is not None:
@@ -332,9 +414,17 @@ def _step_fields(lines, scalar, index, end, item_indent):
     return field_indent, fields
 
 
-def _decoded_step_fields(lines, texts, scalar, index, end, item_indent):
+def _decoded_step_fields(
+        lines, texts, scalar, opaque, index, end, item_indent):
     field_indent, fields = _step_fields(
         lines, scalar, index, end, item_indent)
+    if fields:
+        first_index, first_field = fields[0]
+        tokens, first_field = node_properties(first_field)
+        if tokens:
+            validate_node_properties(tokens, 'step mapping')
+            fields = ([(first_index, first_field)] if first_field else []) + \
+                fields[1:]
     values = {}
     for offset, (field_index, field) in enumerate(fields):
         field_end = fields[offset + 1][0] if offset + 1 < len(
@@ -345,8 +435,8 @@ def _decoded_step_fields(lines, texts, scalar, index, end, item_indent):
             raise YAMLReadError(f'duplicate mapping key: {key}')
         if key in ('name', 'id'):
             values[key] = _step_value(
-                lines, texts, scalar, field_index, field_end, field_indent,
-                _prepared_value(raw_value), f'step {key}')
+                lines, texts, scalar, opaque, field_index, field_end,
+                field_indent, _prepared_value(raw_value), f'step {key}')
         else:
             values[key] = None
     return values
@@ -356,13 +446,15 @@ def workflow_step_items(workflow, job):
     """Return actual mapping items in the named job's steps sequence."""
     lines = _lines(workflow)
     texts = [line.text for line in lines]
-    scalar, _opaque = _scalar_regions(lines, texts)
+    scalar, opaque = _scalar_regions(lines, texts)
     jobs = _mapping_entry(lines, scalar, 0, len(lines), -1, 'jobs')
     jobs_body = _mapping_body(lines, scalar, jobs, 'jobs')
-    if jobs_body is None:
+    if jobs is None or jobs_body is None:
         return None
     job_entry = _mapping_entry(
         lines, scalar, *jobs_body, jobs.indent, job)
+    if job_entry is None:
+        return None
     job_body = _mapping_body(
         lines, scalar, job_entry, f'job {job!r}')
     if job_body is None:
@@ -396,17 +488,12 @@ def workflow_step_items(workflow, job):
         item_end = indices[offset + 1] if offset + 1 < len(
             indices) else end
         fields = _decoded_step_fields(
-            lines, texts, scalar, index, item_end, item_indent)
+            lines, texts, scalar, opaque, index, item_end, item_indent)
         content = [
             line_index for line_index in range(index, item_end)
             if line_index in scalar or _meaningful(lines[line_index])
         ]
         items.append(StepItem(
-            index=index,
-            end_index=item_end,
-            indent=item_indent,
-            start=lines[index].start,
-            end=lines[content[-1]].end,
-            name=fields.get('name'),
-            identity=fields.get('id')))
+            index, item_end, item_indent, lines[index].start,
+            lines[content[-1]].end, fields.get('name'), fields.get('id')))
     return items
