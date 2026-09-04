@@ -13,6 +13,7 @@ else:
 
 
 CALIBRATION_GAP = Decimal('1.5')
+RAISE_HYSTERESIS = Decimal('1.5')
 LANGUAGES = ('python', 'javascript')
 
 
@@ -43,13 +44,14 @@ def update(data, measured, language):
     if language not in LANGUAGES:
         raise ValueError(f'unknown coverage language: {language}')
     candidate = thresholds._normalise(data)
-    measurement = _measurement(measured)
+    measured = _measurement(measured)
     recorded_measured, _floor = read_calibration(candidate, language)
-    if measurement <= recorded_measured:
+    should_raise = measured - recorded_measured > RAISE_HYSTERESIS
+    if not should_raise:
         return None
     candidate['coverage'][language] = {
-        'measured': measurement,
-        'floor': measurement - CALIBRATION_GAP,
+        'measured': measured,
+        'floor': measured - CALIBRATION_GAP,
     }
     return thresholds._normalise(candidate)
 
