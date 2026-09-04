@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Contracts for the JSON-owned module-size policy and its ratchet."""
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -143,6 +144,142 @@ def test_real_cli_no_shrink_and_missing_entry_report_without_write(tmp):
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert target.read_bytes() == before
+
+
+def _run_tighten(target, script=POLICY_SOURCE, cwd=ROOT):
+    return subprocess.run(
+        [sys.executable, str(script), '--tighten', '--thresholds',
+         str(target)], cwd=str(cwd), env=_util.child_coverage('scrub'),
+        capture_output=True, text=True, timeout=60)
+
+
+def test_real_cli_tighten_no_shrink_reports_exactly_and_preserves_document(
+        tmp):
+    """The copied real CLI leaves an unchanged document byte-for-byte."""
+    thresholds = _thresholds()
+    target = Path(tmp) / 'no-shrink.json'
+    thresholds.write(target, _document())
+    before = target.read_bytes()
+    result = _run_tighten(target)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'no module shrank below its recorded size\n'
+    assert result.stderr == ''
+    assert target.read_bytes() == before
+
+
+def test_real_cli_tighten_shrink_writes_only_the_lowered_member(tmp):
+    """The copied real CLI records a file shrink and preserves other state."""
+    thresholds = _thresholds()
+    data = _document()
+    selected = 'tests/test_mcp_server.py'
+    current = _policy().tracked_sizes()[selected]
+    data['module_size_baseline'][selected] = current + 1
+    target = Path(tmp) / 'shrink.json'
+    thresholds.write(target, data)
+    before = thresholds.load(target)
+    result = _run_tighten(target)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'tightened the module size baseline\n'
+    after = thresholds.load(target)
+    assert after['coverage'] == before['coverage']
+    assert after['module_size_baseline'][selected] == current
+    for rel, count in before['module_size_baseline'].items():
+        if rel != selected:
+            assert after['module_size_baseline'][rel] == count
+
+
+def test_real_cli_tighten_graduates_at_the_inclusive_ceiling(tmp):
+    """The copied real CLI removes an entry at its inclusive ceiling."""
+    thresholds = _thresholds()
+    data = _document()
+    selected = 'scripts/ci/thresholds.py'
+    current = _policy().tracked_sizes()[selected]
+    assert current <= _policy().PRODUCTION_CEILING
+    data['module_size_baseline'][selected] = current + 1
+    target = Path(tmp) / 'graduation.json'
+    thresholds.write(target, data)
+    before = thresholds.load(target)
+    result = _run_tighten(target)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'tightened the module size baseline\n'
+    after = thresholds.load(target)
+    assert selected not in after['module_size_baseline']
+    assert after['coverage'] == before['coverage']
+    assert after['module_size_baseline'] == {
+        rel: count for rel, count in before['module_size_baseline'].items()
+        if rel != selected}
+
+
+def test_real_cli_tighten_growth_reports_without_upward_write(tmp):
+    """The copied real CLI never records a grown module upward."""
+    thresholds = _thresholds()
+    data = _document()
+    selected = 'tests/test_mcp_server.py'
+    current = _policy().tracked_sizes()[selected]
+    assert current > _policy().TEST_CEILING
+    data['module_size_baseline'][selected] = current - 1
+    target = Path(tmp) / 'growth.json'
+    thresholds.write(target, data)
+    before = target.read_bytes()
+    result = _run_tighten(target)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'no module shrank below its recorded size\n'
+    assert target.read_bytes() == before
+
+
+def test_real_cli_tighten_over_ceiling_unbaselined_file_reports_without_write(
+        tmp):
+    """An unbaselined over-ceiling file cannot be added by the tightener."""
+    thresholds = _thresholds()
+    data = _document()
+    repo = Path(tmp) / 'over-ceiling-tree'
+    (repo / '.github').mkdir(parents=True)
+    (repo / 'scripts' / 'ci').mkdir(parents=True)
+    (repo / 'tests').mkdir()
+    shutil.copy2(POLICY_SOURCE, repo / 'scripts' / 'ci' / 'size_baseline.py')
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
+                 repo / 'scripts' / 'ci' / 'thresholds.py')
+    selected = 'tests/over_ceiling.py'
+    (repo / selected).write_text('line = 1\n' * 701, encoding='utf-8')
+    target = repo / '.github' / 'ci-thresholds.json'
+    thresholds.write(target, data)
+    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
+    subprocess.run(
+        ['git', '-C', str(repo), 'config', 'user.email',
+         'tests@example.invalid'], check=True)
+    subprocess.run(
+        ['git', '-C', str(repo), 'config', 'user.name', 'Tests'], check=True)
+    subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(repo), 'commit', '-qm', 'base'],
+                   check=True)
+    before = target.read_bytes()
+    result = _run_tighten(
+        target, repo / 'scripts' / 'ci' / 'size_baseline.py', repo)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'no module shrank below its recorded size\n'
+    assert target.read_bytes() == before
+    after = thresholds.load(target)
+    assert selected not in after['module_size_baseline']
+    assert after['coverage'] == data['coverage']
+    assert after['module_size_baseline'] == data['module_size_baseline']
+
+
+def test_real_cli_tighten_missing_entry_reports_without_deleting_it(tmp):
+    """A genuinely missing tracked entry remains for manual deletion."""
+    thresholds = _thresholds()
+    data = _document()
+    missing = 'tests/genuinely_missing_task3_entry.py'
+    data['module_size_baseline'][missing] = 900
+    target = Path(tmp) / 'missing.json'
+    thresholds.write(target, data)
+    before = target.read_bytes()
+    result = _run_tighten(target)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'no module shrank below its recorded size\n'
+    assert target.read_bytes() == before
+    after = thresholds.load(target)
+    assert after['module_size_baseline'][missing] == 900
+    assert after['coverage'] == data['coverage']
 
 
 def _normalised(text):

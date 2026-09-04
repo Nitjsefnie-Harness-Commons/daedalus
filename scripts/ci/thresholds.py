@@ -228,6 +228,7 @@ def _remove_temp(path):
     try:
         Path(path).unlink()
     except OSError:
+        # Cleanup must not hide the publication failure that prompted it.
         pass
 
 
@@ -239,6 +240,7 @@ def write(path, data):
     try:
         mode = stat.S_IMODE(target.stat().st_mode)
     except FileNotFoundError:
+        # A new destination keeps mkstemp's restrictive default mode.
         pass
     parent = target.parent
     fd, temporary = tempfile.mkstemp(
@@ -261,6 +263,7 @@ def write(path, data):
             try:
                 os.close(open_fd)
             except OSError:
+                # Preserve the primary failure when redundant close fails.
                 pass
         if not replaced:
             _remove_temp(temporary_path)
