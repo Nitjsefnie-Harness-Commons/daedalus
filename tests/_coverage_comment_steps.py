@@ -622,14 +622,14 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
                             'Post or update the pull request comment')
     }
     scenarios = (
-        ('artifact-present-success', 'true', 'false', 'success'),
-        ('artifact-absent-failure', None, 'false', 'failure'),
-        ('failure-before-resolution', None, '', 'failure'),
-        ('failure-after-resolution', 'true', 'false', 'failure'),
-        ('stale-head', 'true', 'true', 'success'),
-        ('cancellation', 'true', 'false', 'cancelled'),
+        ('artifact-present-success', 'true', 'false', 'success', 'success'),
+        ('artifact-absent-failure', None, 'false', 'success', 'success'),
+        ('failure-before-resolution', None, '', 'failure', 'failure'),
+        ('failure-after-resolution', 'true', 'false', 'failure', 'failure'),
+        ('stale-head', 'true', 'true', 'success', 'success'),
+        ('cancellation', 'true', 'false', 'cancelled', 'cancelled'),
     )
-    for label, present, stale, status in scenarios:
+    for label, present, stale, status, publish in scenarios:
         context = {
             'steps': {
                 'artifact': {'outputs': {} if present is None else {
@@ -651,9 +651,9 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
             assert evaluate_if(condition, context) is expected[name], (
                 label, name, condition)
         result, state, _calls, _script = run(
-            label='orchestration-' + label, status=status)
+            label='orchestration-' + label, status=publish)
         assert result.returncode == 0, (label, result.stdout, result.stderr)
-        assert state['checks'][0]['conclusion'] == status, (label, state)
+        assert state['checks'][0]['conclusion'] == publish, (label, state)
 
 
 EXPECTED_PRIVILEGED_JOB_MAPPING = {
