@@ -526,28 +526,38 @@ def test_generic_setup_cache_input_remains_conservative(tmp):
 
 
 def test_unknown_and_dynamic_actions_fail_with_exact_context(tmp):
-    del tmp
     for uses, expected in (
-            ('${{ matrix.action }}', "cache boundary cannot classify job 'wheel' step 1: expression-valued uses '${{ matrix.action }}'"),
-            ('owner/action@v1', "cache boundary cannot classify job 'wheel' step 1: no cache policy for action 'owner/action@v1'; inspect its primary action.yml"),
-            ('actions/checkout@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'actions/checkout' ref 'deadbeef'"),
-            ('actions/setup-python@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'actions/setup-python' ref 'deadbeef'"),
-            ('docker/build-push-action@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'docker/build-push-action' ref 'deadbeef'"),
-            ('actions/cache/unknown@v4', "cache boundary cannot classify job 'wheel' step 1: unknown actions/cache sub-action 'actions/cache/unknown'"),
-            ('actions/cache/save@deadbeef', "cache boundary has no reviewed manifest for job 'wheel' step 1 action 'actions/cache' ref 'deadbeef'")):
+            ('${{ matrix.action }}', "cache boundary cannot classify job "
+             "'wheel' step 1: expression-valued uses '${{ matrix.action }}'"),
+            ('owner/action@v1', "cache boundary cannot classify job "
+             "'wheel' step 1: no cache policy for action 'owner/action@v1'; "
+             "inspect its primary action.yml"),
+            ('actions/checkout@deadbeef', "cache boundary has no reviewed "
+             "manifest for job 'wheel' step 1 action 'actions/checkout' "
+             "ref 'deadbeef'"),
+            ('actions/setup-python@deadbeef', "cache boundary has no reviewed "
+             "manifest for job 'wheel' step 1 action 'actions/setup-python' "
+             "ref 'deadbeef'"),
+            ('docker/build-push-action@deadbeef',
+             "cache boundary has no reviewed manifest for job 'wheel' step 1 "
+             "action 'docker/build-push-action' ref 'deadbeef'"),
+            ('actions/cache/unknown@v4', "cache boundary cannot classify job "
+             "'wheel' step 1: unknown actions/cache sub-action "
+             "'actions/cache/unknown'"),
+            ('actions/cache/save@deadbeef', "cache boundary has no reviewed "
+             "manifest for job 'wheel' step 1 action 'actions/cache' "
+             "ref 'deadbeef'")):
         assert _refuses(_cache_write_reason, {'uses': uses}, 'wheel', 1,
                         contains=expected) == expected
 
 
 def test_local_docker_and_empty_actions_are_not_silently_cache_free(tmp):
-    del tmp
     for uses in ('./local-action', 'docker://alpine:3.20', None):
         _refuses(_cache_write_reason, {'uses': uses}, 'wheel', 1,
                  contains='cache boundary cannot classify')
 
 
 def test_action_family_delimiters_do_not_widen_cache_or_setup_names(tmp):
-    del tmp
     for uses in (
             'actions/cache-warmer@v4',
             'actions/setupfoo@v1',
@@ -559,7 +569,6 @@ def test_action_family_delimiters_do_not_widen_cache_or_setup_names(tmp):
 
 
 def test_controls_needed_for_opt_out_must_be_literal(tmp):
-    del tmp
     for uses, key in (
             ('actions/setup-go@v6', 'cache'),
             ('actions/setup-node@v7', 'package-manager-cache'),
@@ -573,7 +582,6 @@ def test_controls_needed_for_opt_out_must_be_literal(tmp):
 
 
 def test_malformed_controls_and_destinations_fail_closed(tmp):
-    del tmp
     _refuses(
         _cache_write_reason,
         {'uses': 'actions/setup-go@v6', 'with': {'cache': ['false']}},
@@ -590,7 +598,6 @@ def test_malformed_controls_and_destinations_fail_closed(tmp):
 
 
 def test_direct_cache_markers_are_token_bounded(tmp):
-    del tmp
     positives = (
         'curl "$ACTIONS_CACHE_URL/_apis/artifactcache/cache"',
         'curl "/_apis/artifactcache/cache"',
@@ -619,7 +626,6 @@ def test_direct_cache_markers_are_token_bounded(tmp):
 
 
 def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
-    del tmp
     for run in (
             'docker buildx build --cache-to type=${TYPE} .',
             'docker buildx build --cache-to "$CACHE_DEST" .',
@@ -629,7 +635,6 @@ def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
 
 
 def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
-    del tmp
     workflow = _tests_yml()
     positives = (
         _real_step(uses='actions/setup-go@v6'),
@@ -653,7 +658,6 @@ def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
 
 
 def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
-    del tmp
     workflow = _tests_yml()
     for step, expected in (
             (_real_step(uses='${{ matrix.action }}'),
@@ -679,7 +683,6 @@ def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
 
 
 def test_production_cache_steps_keep_restore_and_save_separate(tmp):
-    del tmp
     workflow = _tests_yml()
     for job in ('suites', 'coverage-matrix', 'coverage'):
         steps = complete_job_mapping(workflow, job)['steps']

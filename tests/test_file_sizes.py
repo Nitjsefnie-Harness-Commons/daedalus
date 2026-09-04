@@ -32,7 +32,8 @@ def _document():
 
 def _captured_main(policy, argv):
     stdout, stderr = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+    with (contextlib.redirect_stdout(stdout),
+          contextlib.redirect_stderr(stderr)):
         status = policy.main(argv)
     return status, stdout.getvalue(), stderr.getvalue()
 
