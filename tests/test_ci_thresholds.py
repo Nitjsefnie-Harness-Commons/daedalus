@@ -55,6 +55,10 @@ def _assert_refused(path, needle):
     assert needle in result.stderr, (needle, result.stderr)
 
 
+def _restrictive_mode(platform_name):
+    return 0o400 if platform_name == 'posix' else 0o600
+
+
 def test_shipped_document_is_exact_and_cli_checkable(tmp):
     """The tracked migration is the one source of all calibration state."""
     del tmp
@@ -296,10 +300,12 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
     thresholds = _thresholds()
     target = Path(tmp) / 'thresholds.json'
     target.write_bytes(b'legacy\n')
-    os.chmod(target, 0o400)
+    os.chmod(target, _restrictive_mode(os.name))
     expected_mode = stat.S_IMODE(target.stat().st_mode)
     if os.name == 'posix':
         assert expected_mode == 0o400
+    else:
+        assert expected_mode & stat.S_IWRITE
     thresholds.write(target, _valid())
     first = target.read_bytes()
     assert first.endswith(b'\n'), first
@@ -310,6 +316,15 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
     thresholds.write(target, thresholds.load(target))
     assert target.read_bytes() == first
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
+
+
+def test_restrictive_mode_selection_keeps_windows_destination_writable(tmp):
+    """The Windows request is writable while POSIX remains restrictive."""
+    del tmp
+    assert _restrictive_mode('posix') == 0o400
+    windows_mode = _restrictive_mode('nt')
+    assert windows_mode == 0o600
+    assert windows_mode & stat.S_IWRITE
 
 
 def main():
