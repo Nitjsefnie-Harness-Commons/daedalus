@@ -121,7 +121,7 @@ def _call_receiver_parts(value):
     callee = value.func
     while isinstance(callee, (ast.Attribute, ast.Subscript)):
         callee = callee.value
-    if isinstance(callee, ast.Dict):
+    if isinstance(callee, (ast.Tuple, ast.List, ast.Set, ast.Dict)):
         yield from _carried_parts(callee)
 
 
