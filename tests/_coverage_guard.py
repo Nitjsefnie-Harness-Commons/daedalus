@@ -23,8 +23,9 @@ from _coverage_bindings import (
     _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
-    _evaluation_scopes, _is_root_spelling, _scope_shadows,
-    _shadowed_names, _visible_scope_shadows, root_owner_names)
+    _evaluation_scopes, _is_root_spelling, _scope_bindings,
+    _scope_shadows, _shadowed_names, _visible_scope_shadows,
+    root_owner_names)
 
 _DECLARATION = 'child_coverage'
 _MUTATING_METHODS = frozenset({
@@ -65,6 +66,8 @@ class _ModuleFacts:
         if 'ROOT' not in self.shadowed_names:
             self.module_shadows.discard('ROOT')
         self.scope_shadows[tree] = self.module_shadows
+        self.scope_bindings = _scope_bindings(self.scoped_nodes,
+                                              self.scope_shadows)
         self.subprocess_modules = set()
         self.launch_callables = set()
         self.declaration_modules = set()
@@ -184,7 +187,7 @@ class _ModuleFacts:
         return 'invalid'
 
 
-def _launch_method(node, facts, shadowed):
+def _launch_method(node, facts, bound):
     """A recognised launcher, or any callee that spells cwd readably."""
     function = node.func
     if (isinstance(function, ast.Attribute)
@@ -198,7 +201,7 @@ def _launch_method(node, facts, shadowed):
     if facts.declaration_mode(node) is not None:
         return None
     if (isinstance(function, ast.Name) and function.id == 'dict'
-            and function.id not in shadowed):
+            and function.id not in bound):
         return None
     if _has_cwd_control(node):
         return f'unresolved callee {ast.unparse(function)}'
@@ -399,7 +402,9 @@ def _visit(relative, facts, tree, keeps, violations):
             continue
         shadowed = _visible_scope_shadows(
             scope, facts.scope_shadows, facts.scope_parents)
-        method = _launch_method(child, facts, shadowed)
+        bound = _visible_scope_shadows(
+            scope, facts.scope_bindings, facts.scope_parents)
+        method = _launch_method(child, facts, bound)
         if method is None:
             continue
         function = _scope_function(scope, facts.scope_parents)

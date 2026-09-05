@@ -317,14 +317,6 @@ def _scope_shadows(tree, layout=None):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                              ast.Lambda)):
             shadows[node].update(_parameter_names(node.args))
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            # Importing a root helper module is the binding a root spelling
-            # is written against, not a rebinding of it; root_owner_names
-            # judges those, and storing the same name still shadows below.
-            shadows[scope].update(alias.asname
-                                  or alias.name.split('.')[0]
-                                  for alias in node.names
-                                  if alias.name not in _ROOT_MODULES)
         if (isinstance(node, ast.Name)
                 and isinstance(node.ctx, (ast.Store, ast.Del))):
             shadows[scope].add(node.id)
@@ -339,8 +331,25 @@ def _scope_shadows(tree, layout=None):
     return shadows
 
 
+def _scope_bindings(scoped, shadows):
+    """Shadowed names per scope, plus the names each scope's imports bind.
+
+    Binding a name and rebinding one are different questions, and an
+    import answers only the first: `from x import dict` binds a name over
+    the builtin, but it is not the replacement of a value a root spelling
+    is written against. A caller asking which names a scope binds reads
+    this; one asking which values were replaced reads `_scope_shadows`.
+    """
+    bindings = {scope: set(names) for scope, names in shadows.items()}
+    for node, scope in scoped:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bindings[scope].update(alias.asname or alias.name.split('.')[0]
+                                   for alias in node.names)
+    return bindings
+
+
 def _visible_scope_shadows(scope, shadows, parents):
-    """Names shadowed where an expression in `scope` is evaluated."""
+    """Names the given per-scope product holds where `scope` evaluates."""
     visible = set()
     while scope is not None:
         visible.update(shadows[scope])
