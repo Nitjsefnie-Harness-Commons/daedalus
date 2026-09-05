@@ -208,7 +208,7 @@ jobs:
             fi
           }
           case "$existing" in
-            '') echo 'no patch-coverage marker to update' ;;
+            '') echo 'no patch-coverage marker to update'; exit 1 ;;
             *[!0-9]*)
               echo "comment id is not only digits: $existing" >&2
               exit 1
@@ -219,7 +219,7 @@ jobs:
               fi
               gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
                 -F body=@comment.md >/dev/null
-              echo "marked patch coverage as unavailable for $HEAD_SHA"
+              echo "marked patch coverage as unavailable for $HEAD_SHA"; exit 1
               ;;
           esac
 
