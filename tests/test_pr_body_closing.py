@@ -40,9 +40,7 @@ GITHUB_OUTSIDE_SECTIONS_HTML = (
     'daedalus/issues/105">#105</a></h2>\n'
     '<p dir="auto">Ran the suite.</p>')
 
-# Captured from the same endpoint, in the same mode and context, for a
-# body closing 101 in its Related section and carrying "Fixes #104" in a
-# footnote definition; the twin moves that text into a Changes list item.
+# Captured from the same endpoint, in the same mode and context.
 GITHUB_ISSUE_104 = (
     '<a class="issue-link js-issue-link" data-error-text="Failed to load '
     'title" data-id="5232205124" data-permission-text="Title is private" '
@@ -246,6 +244,12 @@ def test_preamble_closing_reference_is_collected(tmp):
 
 
 def test_heading_closing_reference_is_collected(tmp):
+    """A heading's closing reference is body-wide, not section-level.
+
+    The empty ``issues`` and ``links`` record the absence of a
+    section-level leak, which the heading-close reset enforces as much as
+    the ``inside`` guard does, so neither of them pins the other.
+    """
     del tmp
     body = PR_BODY.parse_rendered(
         GITHUB_OUTSIDE_SECTIONS_HTML, REPOSITORY)
@@ -268,7 +272,7 @@ def test_closing_issues_reports_a_repeated_number_once(tmp):
 def test_captured_renderings_pin_the_closing_answer(tmp):
     del tmp
     assert {name for name, _ in CAPTURED_CLOSING} == {
-        name for name in GITHUB_HTML if '<a ' in GITHUB_HTML[name]}
+        name for name, markup in GITHUB_HTML.items() if '<a ' in markup}
     failures = []
     for name, expected in CAPTURED_CLOSING:
         body = PR_BODY.parse_rendered(
