@@ -49,7 +49,11 @@ class Section(NamedTuple):
     text: str
     links: tuple[str, ...]
     issues: tuple[int, ...]
-    closing: tuple[bool, ...]
+
+
+class Body(NamedTuple):
+    sections: tuple[Section, ...]
+    closing: tuple[int, ...]
 
 
 class Rule(NamedTuple):
@@ -119,6 +123,7 @@ class _RenderedBodyParser(HTMLParser):
         _repository_parts(repository)
         self.repository = repository
         self.sections = []
+        self.closing = []
         self.saw_element = False
         self._open_tags = []
         self._heading_tag = None
@@ -128,7 +133,6 @@ class _RenderedBodyParser(HTMLParser):
         self._text = []
         self._links = []
         self._issues = []
-        self._closing = []
         self._gap = []
         self._anchor_depth = 0
         self._previous_closing = False
@@ -180,10 +184,12 @@ class _RenderedBodyParser(HTMLParser):
             self._links.append(href)
         number = issue_number(href, self.repository)
         if number is not None:
-            gap = ''.join(self._gap)
+            closing = _gap_closing(
+                ''.join(self._gap), self._previous_closing)
             self._issues.append(number)
-            self._closing.append(_gap_closing(gap, self._previous_closing))
-            self._previous_closing = self._closing[-1]
+            if closing:
+                self.closing.append(number)
+            self._previous_closing = closing
             self._gap = []
 
     def handle_startendtag(self, tag, attrs):
@@ -273,14 +279,12 @@ class _RenderedBodyParser(HTMLParser):
             return
         self.sections.append(Section(
             self._name, self._key, ''.join(self._text),
-            tuple(self._links), tuple(self._issues),
-            tuple(self._closing)))
+            tuple(self._links), tuple(self._issues)))
         self._name = None
         self._key = None
         self._text = []
         self._links = []
         self._issues = []
-        self._closing = []
         self._gap = []
         self._previous_closing = False
 
@@ -289,18 +293,17 @@ def parse_rendered(rendered, repository):
     parser = _RenderedBodyParser(repository)
     parser.feed(rendered or '')
     parser.finish()
-    return parser.sections
+    return Body(tuple(parser.sections), tuple(parser.closing))
 
 
-def closing_issues(sections):
+def closing_issues(body):
     """Ordered issue references whose text carries a closing keyword."""
     found = []
     seen = set()
-    for section in sections:
-        for number, closing in zip(section.issues, section.closing):
-            if closing and number not in seen:
-                seen.add(number)
-                found.append(number)
+    for number in body.closing:
+        if number not in seen:
+            seen.add(number)
+            found.append(number)
     return found
 
 
