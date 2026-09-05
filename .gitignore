@@ -399,6 +399,7 @@
 !/tests/test_parent_watch.py
 !/tests/test_path_safety.py
 !/tests/test_pr_body.py
+!/tests/test_pr_body_closing.py
 !/tests/test_pr_gate.py
 !/tests/test_pr_gate_claims.py
 !/tests/test_queued_command.py
