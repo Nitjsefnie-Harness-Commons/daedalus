@@ -197,74 +197,94 @@ EXPECTED_STEP_MAPPINGS = (
         'echo "number=$numbers" >> "$GITHUB_OUTPUT"\n'
         "echo 'stale=false' >> \"$GITHUB_OUTPUT\"\n",
     },
-    {
-        "name": "Mark missing patch coverage",
-        "if": "steps.artifact.outputs.present != 'true' && "
-        "steps.pr.outputs.stale != 'true'",
-        "env": {
-            "GH_TOKEN": "${{ github.token }}",
-            "REPO": "${{ github.repository }}",
-            "HEAD_SHA": "${{ github.event.workflow_run.head_sha }}",
-            "PR_NUMBER": "${{ steps.pr.outputs.number }}",
-        },
-        "run": "set -euo pipefail\n"
-        "\n"
-        "marker='<!-- daedalus-diff-coverage -->'\n"
-        "{\n"
-        "  printf '%s\\n\\n' \"$marker\"\n"
-        "  printf 'Patch coverage was not measured for commit %s.\\n' \\\n"
-        '    "$HEAD_SHA"\n'
-        "} > comment.md\n"
-        "if ! gh api -H 'Cache-Control: no-cache' --paginate \\\n"
-        '  "repos/$REPO/issues/$PR_NUMBER/comments" \\\n'
-        "  --jq '.[]' > comments.json\n"
-        "then\n"
-        '  echo "listing the comments on $PR_NUMBER failed" >&2\n'
-        "  exit 1\n"
-        "fi\n"
-        'existing="$(\n'
-        '  jq -s \'map(select(.user.login == "github-actions[bot]" and\n'
-        '    ((.body // "") | startswith(\n'
-        '      "<!-- daedalus-diff-coverage -->")))) |\n'
-        "    .[0].id // empty' comments.json\n"
-        ')"\n'
-        "revalidate_head() {\n"
-        "  if ! current_sha=\"$(gh api -H 'Cache-Control: no-cache' \\\n"
-        '    "repos/$REPO/pulls/$PR_NUMBER" --jq \'.head.sha\')"\n'
-        "  then\n"
-        '    echo "reading the current head of pull request $PR_NUMBER" '
-        "\\\n"
-        '      "failed" >&2\n'
-        "    exit 1\n"
-        "  fi\n"
-        '  if [ -z "$current_sha" ]; then\n'
-        '    echo "pull request $PR_NUMBER has no current head SHA" >&2\n'
-        "    exit 1\n"
-        "  fi\n"
-        '  if [ "$current_sha" != "$HEAD_SHA" ]; then\n'
-        '    echo "run $HEAD_SHA is stale; current pull request head is " '
-        "\\\n"
-        '      "$current_sha"\n'
-        "    return 1\n"
-        "  fi\n"
-        "}\n"
-        'case "$existing" in\n'
-        "  '') echo 'no patch-coverage marker to update'; exit 1 ;;\n"
-        "  *[!0-9]*)\n"
-        '    echo "comment id is not only digits: $existing" >&2\n'
-        "    exit 1\n"
-        "    ;;\n"
-        "  *)\n"
-        "    if ! revalidate_head; then\n"
-        "      exit 0\n"
-        "    fi\n"
-        '    gh api -X PATCH "repos/$REPO/issues/comments/$existing" \\\n'
-        "      -F body=@comment.md >/dev/null\n"
-        '    echo "marked patch coverage as unavailable for $HEAD_SHA"; '
-        'exit 1\n'
-        "    ;;\n"
-        "esac\n",
-    },
+    {'name': 'Mark missing patch coverage',
+     'if': "steps.artifact.outputs.present != 'true' && "
+           "steps.pr.outputs.stale != 'true'",
+     'env': {'GH_TOKEN': '${{ github.token }}',
+             'REPO': '${{ github.repository }}',
+             'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
+             'PR_NUMBER': '${{ steps.pr.outputs.number }}',
+             'RUN_ID': '${{ github.event.workflow_run.id }}'},
+     'run': 'set -euo pipefail\n'
+            '\n'
+            'exit_code=1\n'
+            "if ! gh api -H 'Cache-Control: no-cache' --paginate \\\n"
+            '  "repos/$REPO/actions/runs/$RUN_ID/jobs" \\\n'
+            "  --jq '.jobs[]' > jobs.json\n"
+            'then\n'
+            '  echo "listing the jobs of run $RUN_ID failed" >&2\n'
+            '  exit 1\n'
+            'fi\n'
+            'if jq -se \'any(.[]; .name == "coverage" and\n'
+            '  .conclusion == "skipped")\' jobs.json >/dev/null\n'
+            'then\n'
+            '  echo \'skipped=true\' >> "$GITHUB_OUTPUT"\n'
+            '  exit_code=0\n'
+            'fi\n'
+            '\n'
+            "marker='<!-- daedalus-diff-coverage -->'\n"
+            '{\n'
+            '  printf \'%s\\n\\n\' "$marker"\n'
+            "  printf 'Patch coverage was not measured for commit "
+            "%s.\\n' \\\n"
+            '    "$HEAD_SHA"\n'
+            '} > comment.md\n'
+            "if ! gh api -H 'Cache-Control: no-cache' --paginate \\\n"
+            '  "repos/$REPO/issues/$PR_NUMBER/comments" \\\n'
+            "  --jq '.[]' > comments.json\n"
+            'then\n'
+            '  echo "listing the comments on $PR_NUMBER failed" >&2\n'
+            '  exit 1\n'
+            'fi\n'
+            'existing="$(\n'
+            '  jq -s \'map(select(.user.login == "github-actions[bot]" '
+            'and\n'
+            '    ((.body // "") | startswith(\n'
+            '      "<!-- daedalus-diff-coverage -->")))) |\n'
+            "    .[0].id // empty' comments.json\n"
+            ')"\n'
+            'revalidate_head() {\n'
+            '  if ! current_sha="$(gh api -H \'Cache-Control: no-cache\' '
+            '\\\n'
+            '    "repos/$REPO/pulls/$PR_NUMBER" --jq \'.head.sha\')"\n'
+            '  then\n'
+            '    echo "reading the current head of pull request '
+            '$PR_NUMBER" \\\n'
+            '      "failed" >&2\n'
+            '    exit 1\n'
+            '  fi\n'
+            '  if [ -z "$current_sha" ]; then\n'
+            '    echo "pull request $PR_NUMBER has no current head SHA" '
+            '>&2\n'
+            '    exit 1\n'
+            '  fi\n'
+            '  if [ "$current_sha" != "$HEAD_SHA" ]; then\n'
+            '    echo "run $HEAD_SHA is stale; current pull request head '
+            'is " \\\n'
+            '      "$current_sha"\n'
+            '    return 1\n'
+            '  fi\n'
+            '}\n'
+            'case "$existing" in\n'
+            "  '') echo 'no patch-coverage marker to update'; exit "
+            '"$exit_code" ;;\n'
+            '  *[!0-9]*)\n'
+            '    echo "comment id is not only digits: $existing" >&2\n'
+            '    exit 1\n'
+            '    ;;\n'
+            '  *)\n'
+            '    if ! revalidate_head; then\n'
+            '      exit 0\n'
+            '    fi\n'
+            '    gh api -X PATCH "repos/$REPO/issues/comments/$existing" '
+            '\\\n'
+            '      -F body=@comment.md >/dev/null\n'
+            '    echo "marked patch coverage as unavailable for '
+            '$HEAD_SHA"\n'
+            '    exit "$exit_code"\n'
+            '    ;;\n'
+            'esac\n',
+     'id': 'missing'},
     {
         "name": "Download the comment artifact",
         "if": "steps.artifact.outputs.present == 'true' && "
@@ -422,3 +442,92 @@ def complete_workflow_expectations(publication_step):
         'jobs': {**EXPECTED_WORKFLOW_MAPPING['jobs'], 'comment': job},
     }
     return steps, job, workflow
+
+
+GH_ARTIFACT_STUB = r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+
+response = json.loads(os.environ['STUB_RESPONSE'])
+args = sys.argv[1:]
+expression = args[args.index('--jq') + 1]
+if os.environ.get('ASSERT_NO_COVERAGE_ENV'):
+    leaked = sorted(
+        name for name in os.environ if name.startswith('COVERAGE_'))
+    if leaked:
+        raise SystemExit('coverage environment leaked: ' + ','.join(leaked))
+if expression == '.artifacts[]':
+    for item in response.get('artifacts', []):
+        print(json.dumps(item))
+elif expression == '.[]':
+    for item in response.values():
+        print(json.dumps(item))
+else:
+    raise SystemExit('unexpected jq expression: ' + expression)
+"""
+
+
+GH_COMMENT_STUB = r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+state_path = Path(os.environ['STUB_STATE'])
+calls_path = Path(os.environ['STUB_CALLS'])
+state = json.loads(state_path.read_text(encoding='utf-8'))
+with calls_path.open('a', encoding='utf-8') as handle:
+    handle.write(json.dumps(args) + chr(10))
+
+
+def endpoint():
+    for value in args:
+        if value.startswith('repos/'):
+            return value
+    return ''
+
+
+target = endpoint()
+if '--jq' in args:
+    expression = args[args.index('--jq') + 1]
+    if target.endswith('/comments'):
+        for comment in state:
+            print(json.dumps(comment))
+    elif target.endswith('/jobs'):
+        assert target == 'repos/owner/repo/actions/runs/123/jobs', target
+        assert '--paginate' in args, args
+        assert 'Cache-Control: no-cache' in args, args
+        assert expression == '.jobs[]', expression
+        if os.environ.get('STUB_FAIL_JOBS'):
+            raise SystemExit('stub jobs lookup failure')
+        for job in json.loads(os.environ.get('STUB_JOBS', '[]')):
+            print(json.dumps(job))
+    elif '/commits/' in target:
+        raise SystemExit('unexpected commits query: ' + target)
+    elif '/pulls/' in target:
+        print(os.environ['CURRENT_HEAD'])
+    elif expression:
+        raise SystemExit('unexpected query endpoint: ' + target)
+    raise SystemExit(0)
+
+if '-X' not in args:
+    raise SystemExit(0)
+method = args[args.index('-X') + 1]
+body_arg = next((value for value in args if value.startswith('body=@')), None)
+body = Path(body_arg[6:]).read_text(encoding='utf-8') if body_arg else ''
+if method == 'POST' and target.endswith('/comments'):
+    state.append({
+        'id': 1,
+        'user': {'login': 'github-actions[bot]'},
+        'body': body,
+    })
+elif method == 'PATCH' and '/issues/comments/' in target:
+    comment_id = int(target.rsplit('/', 1)[1])
+    for comment in state:
+        if comment['id'] == comment_id:
+            comment['body'] = body
+state_path.write_text(json.dumps(state), encoding='utf-8')
+"""
+
