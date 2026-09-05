@@ -126,5 +126,108 @@ def test_explicit_mapping_value_keeps_its_scalar_content_opaque(tmp):
             assert [item.name for item in items] == [expected] == ['target']
 
 
+def _property_value_source(value, properties, explicit, gap, property_indent):
+    pair = '   ? SECOND\n   :\n' if explicit else '   SECOND:\n'
+    lines = [
+        'jobs:\n',
+        ' sample:\n',
+        '  env:\n',
+        '   FIRST: &a target\n',
+        pair,
+        gap,
+    ]
+    for offset, prop in enumerate(properties):
+        lines.append(' ' * property_indent + prop + '\n')
+        if offset + 1 < len(properties):
+            lines.append(gap)
+    lines.extend([
+        ' ' * property_indent + value,
+        '  steps:\n',
+        '   - name: *a\n',
+        '     if: z\n',
+    ])
+    return ''.join(lines)
+
+
+def _property_value(value, property_indent):
+    body_indent = ' ' * (property_indent + 2)
+    if value in ('|', '>-'):
+        return f'{value}\n{body_indent}k: &a hidden\n'
+    return f'{value}\n{body_indent}k: &a hidden{value[0]}\n'
+
+
+def test_property_only_lines_keep_mapping_values_opaque(tmp):
+    """Properties before a scalar header belong to that value."""
+    del tmp
+    properties = (('!!str',), ('&b',), ('!!str', '&b'),
+                  ('&b', '!!str'))
+    for explicit in (True, False):
+        for property_indent in (4, 5):
+            for props in properties:
+                for value in ('|', '>-', '"open', "'open"):
+                    for gap in ('', '\n', '    # comment\n'):
+                        scalar = _property_value(value, property_indent)
+                        source = _property_value_source(
+                            scalar, props, explicit, gap, property_indent)
+                        parsed = yaml.load(source, Loader=yaml.BaseLoader)
+                        expected = parsed['jobs']['sample']['steps'][0]['name']
+                        items = workflow_step_items(source, 'sample')
+                        assert items is not None, source
+                        assert [item.name for item in items] == [expected]
+                        assert expected == 'target', source
+
+
+def _detached_value_source(body, gap, property_indent):
+    lines = [
+        'jobs:\n',
+        ' sample:\n',
+        '  env:\n',
+        '   FIRST:\n',
+        gap,
+    ]
+    for offset, line in enumerate(body):
+        lines.append(' ' * property_indent + line + '\n')
+        if offset + 1 < len(body):
+            lines.append(gap)
+    lines.extend([
+        '  steps:\n',
+        '   - name: *a\n',
+        '     if: z\n',
+    ])
+    return ''.join(lines)
+
+
+def test_detached_mapping_value_properties_keep_anchor_diagnostic(tmp):
+    """A detached value's anchor stays owned by its mapping value."""
+    del tmp
+    cases = (
+        (('!!str', '&a target'), 'target'),
+        (('!!str', '&a', 'target'), 'target'),
+        (('&a', '!!str', 'target'), 'target'),
+        (('&a target', '!!str'), None),
+    )
+    for body, expected in cases:
+        for property_indent in (4, 5):
+            for gap in ('', '\n', '    # comment\n'):
+                if expected is None and gap == '    # comment\n':
+                    continue
+                source = _detached_value_source(
+                    body, gap, property_indent)
+                parsed = yaml.load(source, Loader=yaml.BaseLoader)
+                actual = parsed['jobs']['sample']['steps'][0]['name']
+                if expected is not None:
+                    assert actual == expected
+                try:
+                    workflow_step_items(source, 'sample')
+                except YAMLReadError as error:
+                    message = str(error)
+                    assert (
+                        'unsupported YAML alias target on a mapping value: '
+                        '&a' in message), message
+                    assert 'unknown YAML alias' not in message, message
+                    continue
+                raise AssertionError(source)
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
