@@ -60,7 +60,7 @@ def test_parser_rejects_unusable_html(tmp):
     accepted = []
     for rendered in unusable:
         try:
-            PR_BODY.parse_rendered(rendered, 'owner/repo').sections
+            PR_BODY.parse_rendered(rendered, 'owner/repo')
         except ValueError as error:
             assert 'rendered HTML' in str(error), error
         else:
@@ -71,7 +71,7 @@ def test_parser_rejects_unusable_html(tmp):
 def test_parser_rejects_unfinished_heading(tmp):
     del tmp
     try:
-        PR_BODY.parse_rendered('<h2>Summary', 'owner/repo').sections
+        PR_BODY.parse_rendered('<h2>Summary', 'owner/repo')
     except ValueError as error:
         assert 'unfinished heading' in str(error), error
     else:
@@ -84,7 +84,7 @@ def test_parser_rejects_malformed_repositories(tmp):
     accepted = []
     for repository in ('owner', 'a/b/c', '/'):
         try:
-            PR_BODY.parse_rendered(rendered, repository).sections
+            PR_BODY.parse_rendered(rendered, repository)
         except ValueError as error:
             assert 'owner/name' in str(error), error
         else:
