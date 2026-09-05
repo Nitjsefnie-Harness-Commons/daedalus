@@ -1,9 +1,7 @@
-"""Read the node properties a workflow scalar may carry before its value.
+"""Read leading anchor and tag properties on workflow scalars.
 
-Bare `!` is outside this bounded textual subset because honoring it requires
-schema and tag resolution that this reader does not perform.  The
-`yaml.BaseLoader` oracle can stringify some other tagged values as well, but
-this module only recognizes the explicit ``!!str`` tag.
+Only `!!str` is supported. Bare `!` requires schema/tag resolution outside
+this reader, even where `yaml.BaseLoader` could stringify the value.
 """
 import re
 
@@ -20,10 +18,9 @@ _STRING_TAGS = ('!!str',)
 
 
 def node_properties(value):
-    """Split leading anchor and tag tokens off `value`, refusing nothing.
+    """Leave malformed properties for `validate_node_properties`.
 
-    A document-wide scan meets values this reader never decodes, so malformed
-    properties are left for `validate_node_properties` to refuse.
+    The document-wide scan also encounters values this reader never decodes.
     """
     tokens = []
     while value[:1] in ('&', '!'):
@@ -36,7 +33,6 @@ def node_properties(value):
 
 
 def validate_node_properties(tokens, owner):
-    """Validate already-lexed anchor and tag tokens."""
     anchor = tag = None
     for token in tokens:
         if token.startswith('&'):
@@ -58,7 +54,6 @@ def validate_node_properties(tokens, owner):
 
 
 def parse_alias(value, owner):
-    """Return a complete alias name, or refuse malformed alias text."""
     if not value.startswith('*'):
         return None
     match = _ALIAS.fullmatch(value)
@@ -68,7 +63,6 @@ def parse_alias(value, owner):
 
 
 def has_anchor_spelling(value, name):
-    """Return whether `value` contains the exact spelling ``&name``."""
     spelling = f'&{name}'
     for index in range(len(value) - len(spelling) + 1):
         if value[index:index + len(spelling)] != spelling:

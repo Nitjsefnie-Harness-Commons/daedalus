@@ -24,13 +24,10 @@ on:
     # this a second time against the same SHA, and a branch with no pull
     # request open is not a tree anyone is reviewing.
     branches: [main]
-    # Threshold state is produced by the tests workflow. A push containing
-    # only that data skips this expensive analysis; source pushes still run.
+    # Ratchet commits change only this data; audit still gates those pushes.
     paths-ignore:
       - '.github/ci-thresholds.json'
-    # release.yml names no workflow of its own — it waits on the runs
-    # for the tagged SHA and fails when the count of non-release runs
-    # is zero; audit.yml remains the repository-controlled unfiltered gate.
+    # release.yml needs a run on the tagged SHA; audit remains unfiltered.
   pull_request:
   schedule:
     # Wednesday 03:47 UTC. Off the hour and off Monday deliberately: the top

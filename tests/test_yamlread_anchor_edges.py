@@ -574,7 +574,6 @@ def test_unsupported_tag_diagnostic_does_not_claim_a_false_resolution(tmp):
 
 
 def test_explicit_flow_key_quotes_hide_delimiters_and_anchor_text(tmp):
-    """Quoted explicit keys keep delimiters and apparent anchors opaque."""
     del tmp
     for opener, closer in (('{', '}'), ('[', ']')):
         for quote in ('"', "'"):

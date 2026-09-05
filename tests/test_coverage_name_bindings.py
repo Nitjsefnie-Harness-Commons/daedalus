@@ -11,7 +11,7 @@ from test_coverage_scope_bindings import (  # noqa: E402
     _IMPORT_LAUNCH, _unresolved_dict)
 
 
-# Name(Store) covers target grammar; string fields cover the other binders.
+# Name(Store) covers targets; other binders use string fields.
 _BINDING_FORMS = (
     ('assign', '{name} = helper\n{launch}'),
     ('chain', 'other = {name} = helper\n{launch}'),
@@ -130,7 +130,6 @@ def test_declarations_route_bindings_to_the_declared_scope(tmp):
     for statement in ('{name} = helper', 'from helpers import {name}',
                       'import helpers as {name}', '{name}: object',
                       'for {name} in values: pass'):
-        # The module launch must see a global declared inside a function.
         template = ('def f():\n    global {name}\n    ' + statement
                     + '\n{launch}')
         _assert_bound_pair('global-' + statement, template)

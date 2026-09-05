@@ -178,7 +178,6 @@ def normalise(data):
 
 
 def load(path=THRESHOLDS):
-    """Load and validate one threshold document."""
     target = Path(path)
     try:
         raw = target.read_bytes()
@@ -188,7 +187,6 @@ def load(path=THRESHOLDS):
 
 
 def coverage(data, language):
-    """Return a validated ``(measured, floor)`` pair for ``language``."""
     if language not in _COVERAGE_LANGUAGES:
         raise ValueError(f'unknown coverage language: {language}')
     normalised = normalise(data)
@@ -197,7 +195,6 @@ def coverage(data, language):
 
 
 def module_size_baseline(data):
-    """Return the validated module-size mapping."""
     return dict(normalise(data)['module_size_baseline'])
 
 

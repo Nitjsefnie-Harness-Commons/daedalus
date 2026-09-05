@@ -15,7 +15,6 @@ from _coverage_comment_steps import (
 
 def _runner(tmp, workflow_reader, extract_block, shell_runner,
             write_executable):
-    """Exercise the final publication block against a stateful API double."""
     def run(label='check', state=None, status='success', head_sha='a' * 40,
             run_url='https://github.com/owner/repo/actions/runs/7',
             extra_env=None):

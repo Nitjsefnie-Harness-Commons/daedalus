@@ -31,12 +31,10 @@ def _measurement(value):
 
 
 def floor_for(measured):
-    """Return the one-decimal floor justified by ``measured``."""
     return _measurement(measured) - CALIBRATION_GAP
 
 
 def read_calibration(data, language):
-    """Return the validated recorded measurement and floor."""
     return thresholds.coverage(data, language)
 
 

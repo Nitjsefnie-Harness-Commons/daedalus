@@ -2,6 +2,6 @@
 # type pins are not dragged into a job that only measures. Pinned for the same
 # reason they are: a tool release must not turn CI red on an unchanged commit.
 coverage==7.16.0
-# PyYAML is test-only: the anchor controls compare accepted scalar values with
-# its BaseLoader oracle, while production readers remain parser-free.
+# Production readers have no YAML dependency; tests use BaseLoader as an
+# oracle.
 PyYAML==6.0.3

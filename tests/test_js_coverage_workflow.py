@@ -530,7 +530,6 @@ def test_checkout_only_capture_scope_is_refused(tmp):
 
 
 def test_javascript_gate_reads_floor_from_thresholds_file(tmp):
-    """The decoded gate flips when only its copied JSON floor changes."""
     workflow = _workflow()
     job = complete_job_mapping(workflow, 'coverage')
     gate = next(step for step in job['steps']

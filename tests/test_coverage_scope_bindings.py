@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Bindings and annotation positions the guard's scope model must see.
-
-The model lives in tests/_coverage_scopes.py, which tests/_coverage_guard.py
-and tests/_bash_resolver_scan.py both read; a name an import binds and an
-annotation on a variadic parameter are the two positions it stopped visiting.
-"""
+"""Shared scope controls for coverage and Bash launch guards."""
 import sys
 from pathlib import Path
 
@@ -154,11 +149,9 @@ def test_variadic_parameter_annotations_are_judged(tmp):
 
 
 def _planted_violations(tmp, snippet, offset):
-    """Judge the real module with `snippet` above its declaration."""
     root = Path(tmp) / 'repository'
     copy_test_tree(root)
-    # Spelled out rather than _REAL_MODULE: a write target is proved
-    # from the text beside it, and a module constant proves nothing.
+    # The write guard requires a literal path here, not a module constant.
     target = root / 'tests/test_diff_coverage.py'
     original = target.read_bytes()
     text = original.decode('utf-8').replace('\r\n', '\n')

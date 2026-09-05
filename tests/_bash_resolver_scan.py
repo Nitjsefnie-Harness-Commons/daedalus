@@ -1,25 +1,15 @@
 """The analysis behind tests/test_bash_resolver_scan.py.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+`_util.workflow_bash()` keeps Windows from selecting the WSL launcher. This
+scan catches subprocess launches that bypass it through a literal executable,
+a literal leading word under `shell=True`, or `shutil.which` of that name.
 
-A workflow-shell test resolves Bash through `_util.workflow_bash()` so Windows
-cannot select the WSL launcher; a call site that resolves that shell any other
-way is invisible until the slow Windows leg reaches it. This scan reads the
-test tree syntactically and names every subprocess launch whose program element
-reaches that shell by another route: a literal spelling of the executable, a
-`shell=True` command string whose leading word is one, or a `shutil.which` of
-one.
-
-Recognition is enumerated, and a program element the analysis cannot read is
-not judged — a shell computed at runtime, a name the scan cannot bind to a
-value (such as a parameter or import), a name chain longer than the
-`_MAX_PROGRAM_DEPTH` links the resolution follows, or a `which` of a
-non-literal name, the route `tests/_workflowrun.py` uses for whatever a
-workflow `shell:` template names. So is a `shell=True` command whose leading
-word is not a literal spelling, and so is a command string the module
-computes (`'bash -c ' + script`), which no constant-side judgement reaches.
-That boundary is where to look first when this scan passes something it
-should not.
+Outside the scan: runtime-computed shells, unresolved names (including
+parameters and imports), chains beyond `_MAX_PROGRAM_DEPTH`, and `which` of
+a non-literal name. The last case includes `tests/_workflowrun.py` resolving
+a workflow's `shell:` template. Computed command strings such as
+`'bash -c ' + script` and non-literal leading words under `shell=True` are
+also outside the scan.
 """
 import ast
 import re

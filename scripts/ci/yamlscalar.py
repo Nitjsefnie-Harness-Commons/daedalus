@@ -1,29 +1,23 @@
-"""Decode the bounded inline YAML scalar subset used by workflow policy.
+"""Bounded YAML scalars for workflow policy.
 
-The workflow readers built on this admit plain, quoted, folded, and literal
-scalars plus the block mappings, block sequences, and flow collections needed
-by policy. A value spans lines only where its entry point admits the
-construct. Wrapped plain scalars fold in mapping readers and complete step
-mappings; name and id fields, scalar-list readers, and step-name lookups keep
-their unsupported-multiline boundary.
+Multiline support depends on the entry point. Mapping readers and complete
+step mappings fold wrapped plain scalars; name/id fields, scalar lists, and
+step-name lookups refuse them.
 
-Only `workflow_step_items` reads node properties. Its scalar alias resolution
-is mapping-value-only: an anchor on a block-sequence item, mapping key, flow
-member, or step mapping node is an explicit unsupported-target refusal. A
-preliminary scan of the whole document classifies block-scalar bodies, open
-quoted values, and opaque flow collections, so an invalid block header in an
-unrelated field can refuse the requested step with that field's owner.
-Accepted mapping-value aliases follow `yaml.BaseLoader`, including numeric-
-and Boolean-shaped plain scalars, quoted scalars, and block scalars, and return
-strings. Duplicate anchor names resolve to the last earlier definition in
-this bounded reader. YAML 1.2 permits `#` in an anchor name, while the tested
-PyYAML 6.0.3 spelling rejects it; that is a recorded oracle divergence.
+Only `workflow_step_items` reads node properties, resolving aliases solely
+to mapping values. Anchors on sequence items, keys, flow members, or step
+nodes are refused. A document-wide scan hides scalar bodies and flow
+collections; a malformed block header can therefore refuse an unrelated
+requested step, naming the header's owner.
 
-Bare `!` remains refused because this reader deliberately performs no schema
-or tag resolution. The explicit `!!str` tag is the only supported tag here;
-other tags, malformed properties, aliases without an earlier definition, and
-values outside the bounded scalar grammar are refused. Full YAML validity is
-not this module's job; `actionlint` is the CI-side workflow oracle.
+Mapping-value aliases follow `yaml.BaseLoader` and return strings, including
+for numeric- and Boolean-shaped scalars. Duplicate anchors resolve to the
+last earlier definition. YAML 1.2 permits `#` in anchor names; PyYAML 6.0.3
+rejects it, an intentional oracle divergence.
+
+Only `!!str` is supported. Bare `!` requires schema/tag resolution outside
+this reader. Malformed properties, undefined aliases, and unsupported scalar
+syntax are refused; `actionlint` remains the full workflow YAML oracle.
 """
 import re
 

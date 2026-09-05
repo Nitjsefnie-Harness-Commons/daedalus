@@ -33,7 +33,6 @@ def _marked(source):
 
 
 def _production_items(source):
-    """Read the sample steps with the production coordinate reader."""
     items = workflow_step_items(source, 'sample')
     assert items is not None, source
     return items

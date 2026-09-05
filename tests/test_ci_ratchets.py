@@ -71,7 +71,6 @@ def _value_error(call):
 
 
 def test_promoted_modules_import_by_package(tmp):
-    """The ratchet and shared reader import without workflow YAML coupling."""
     command = '; '.join((
         'import scripts.ci.ratchet', 'import scripts.ci.size_baseline',
         'import scripts.ci.thresholds', 'import scripts.ci.workflow_yaml'))
@@ -121,7 +120,6 @@ def test_main_reports_invalid_measurement_without_writing(tmp):
 
 
 def test_public_update_uses_recorded_measurement_high_water(tmp):
-    """Only a gain beyond the measured high water raises the calibration."""
     ratchet = _ratchet()
     data = _document()
     for measured in (60.0, 78.5, 80.0, 80.1, 81.5):
@@ -138,7 +136,6 @@ def test_public_update_uses_recorded_measurement_high_water(tmp):
 
 
 def test_rerunning_a_raise_is_idempotent(tmp):
-    """A recorded raise is not repeated when the same result is rerun."""
     ratchet = _ratchet()
     data = _document()
     candidate = ratchet.update(data, Decimal('81.6'), 'python')
@@ -147,7 +144,6 @@ def test_rerunning_a_raise_is_idempotent(tmp):
 
 
 def test_measurement_above_recorded_value_raises(tmp):
-    """A new high measurement updates the selected calibration."""
     ratchet = _ratchet()
     data = _document()
     raised = ratchet.update(data, Decimal('81.6'), 'python')
@@ -155,7 +151,6 @@ def test_measurement_above_recorded_value_raises(tmp):
 
 
 def test_lower_measurements_never_lower_either_calibration(tmp):
-    """Coverage dips are observations, not permission to weaken the gate."""
     ratchet = _ratchet()
     data = _document()
     for language in ('python', 'javascript'):
@@ -163,7 +158,6 @@ def test_lower_measurements_never_lower_either_calibration(tmp):
 
 
 def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
-    """Sequential invocations retain the other language and complete map."""
     thresholds = _thresholds()
     path = _copy_thresholds(tmp)
     first = _run_ratchet(tmp, 'python', '81.6', path)
@@ -182,7 +176,6 @@ def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
 
 
 def test_main_noop_then_raise_preserves_and_updates_thresholds(tmp):
-    """No-op ratchets leave bytes untouched; raises publish new calibration."""
     path = _copy_thresholds(tmp)
     before = path.read_bytes()
     ratchet = _ratchet()
@@ -200,7 +193,6 @@ def test_main_noop_then_raise_preserves_and_updates_thresholds(tmp):
 
 
 def test_cli_rejects_the_retired_workflow_option(tmp):
-    """Workflow source is no longer an input or a second state authority."""
     path = _copy_thresholds(tmp)
     result = subprocess.run(
         [sys.executable, str(RATCHET_PATH), '--language', 'python',
@@ -236,7 +228,6 @@ def test_shipped_file_forcing_measurement_is_derived_and_capped(tmp):
 
 
 def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
-    """Decoded real gate steps flip when only the copied floor changes."""
     workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     job = complete_job_mapping(workflow, 'coverage')
@@ -425,7 +416,6 @@ def test_publisher_python_carries_posix_and_windows_paths_without_embedding(
 
 
 def test_real_publisher_step_size_only_preserves_calibrations(tmp):
-    """The decoded producer publishes a size shrink without coverage drift."""
     data = _document()
     data['module_size_baseline']['tests/test_mcp_server.py'] = 1707
     result = _run_publisher_case(
@@ -444,7 +434,6 @@ def test_real_publisher_step_size_only_preserves_calibrations(tmp):
 
 
 def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
-    """The decoded producer retains both independent updates in one file."""
     data = _document()
     data['module_size_baseline']['tests/test_mcp_server.py'] = 1707
     result = _run_publisher_case(
@@ -463,7 +452,6 @@ def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
 
 
 def test_real_publisher_step_rejects_malformed_data_without_publishing(tmp):
-    """A malformed document fails closed before any output or diff."""
     raw = b'{"schema_version": 1}\r\n'
     result = _run_publisher_case(
         tmp, 'publisher-malformed', _document(), '81.6', '35.5', raw=raw)
@@ -476,7 +464,6 @@ def test_real_publisher_step_rejects_malformed_data_without_publishing(tmp):
 
 
 def test_real_publisher_step_writer_failure_is_fail_closed(tmp):
-    """A real writer boundary failure leaves bytes and staging unchanged."""
     result = _run_publisher_case(
         tmp, 'publisher-writer-failure', _document(), '81.6', '35.5',
         writer_failure=True)
@@ -490,7 +477,6 @@ def test_real_publisher_step_writer_failure_is_fail_closed(tmp):
 
 
 def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
-    """Changed and no-op decoded runs expose distinct output contracts."""
     changed = _run_publisher_case(
         tmp, 'publisher-coverage', _document(), '81.6', '35.5')
     _repo, _path, _before, changed_output, changed_summary, done = changed
@@ -509,7 +495,6 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
 
 
 def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
-    """Actual publisher conditions require main, change, green, and secret."""
     ratchet = _publisher_step()
     commit = _publisher_commit_step()
     assert "github.event_name == 'push'" in ratchet['if']
@@ -564,7 +549,6 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
 
 
 def test_publisher_condition_mutations_are_rejected(tmp):
-    """Removing any authority or change guard flips a recorded control."""
     ratchet = _publisher_step()['if']
     commit = _publisher_commit_step()
     main_context = {
@@ -635,7 +619,6 @@ def test_publisher_condition_mutations_are_rejected(tmp):
 
 
 def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
-    """The decoded producer executes real ratchets and stages one JSON path."""
     repo = Path(tmp) / 'publisher'
     repo.mkdir()
     _seed_publisher_tree(repo, _document())
@@ -671,7 +654,6 @@ def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
 
 
 def test_real_publisher_step_noop_reports_unchanged(tmp):
-    """A run below both high waters creates no publishable diff."""
     repo = Path(tmp) / 'publisher-noop'
     repo.mkdir()
     _seed_publisher_tree(repo, _document())

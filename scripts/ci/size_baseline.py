@@ -6,8 +6,7 @@ The mutable policy state is the ``module_size_baseline`` member of
 no entry is ever added by hand: relocate the code into a new module, or shrink
 the file. A stale entry goes away rather than being kept: --tighten drops one
 whose file is back under its ceiling, and an entry naming a file that is gone
-is deleted by hand. Run ``python3 scripts/ci/size_baseline.py --tighten`` to
-record a shrink.
+is deleted by hand.
 
   python3 scripts/ci/size_baseline.py
   python3 scripts/ci/size_baseline.py --tighten
@@ -45,7 +44,6 @@ REMEDY_FOR = {
 
 
 def ceiling_for(rel):
-    """Return the ceiling that applies to ``rel``."""
     return TEST_CEILING if rel.startswith('tests/') else PRODUCTION_CEILING
 
 
@@ -70,7 +68,6 @@ def tracked_sizes(root=ROOT):
 
 
 def violations(sizes, baseline):
-    """Return all policy violations grouped by kind."""
     return {
         'grown': {rel: (sizes[rel], recorded)
                   for rel, recorded in baseline.items()
