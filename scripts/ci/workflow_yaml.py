@@ -65,10 +65,10 @@ def _split_field(text, owner):
     return split_mapping_field(text, owner, allow_tabs=True)
 
 
-def _field_indent(line):
+def _field_indent(line, nested=False):
     """Where a mapping field starts, past any sequence dash on its line."""
     indent = _indent(line)
-    while line.text[indent:indent + 1] == '-' and line.text[indent + 1:indent + 2] in (' ', '\t'): indent += 1 + len(line.text[indent + 1:]) - len(line.text[indent + 1:].lstrip(' \t'))
+    while line.text[indent:indent + 1] == '-' and line.text[indent + 1:indent + 2] in (' ', '\t') and (nested or indent == _indent(line)): indent += 1 + len(line.text[indent + 1:]) - len(line.text[indent + 1:].lstrip(' \t'))
     return indent
 
 
@@ -132,17 +132,17 @@ def _node_parts(line):
     dashed = body.startswith('-') and body[1:2] in (' ', '\t')
     if dashed:
         body = body[1:].lstrip(' \t')
+    candidate = line.text[_field_indent(line, True):] if dashed else body
+    if candidate[:1] == '?' and candidate[1:2] in ('', ' ', '\t'): return candidate[1:].lstrip(' \t'), _field_indent(line, True) if dashed else indent, '?', dashed
     try:
-        field = _split_field(body, 'mapping')
+        field = _split_field(candidate, 'mapping')
     except YAMLReadError:
         field = None
     if field is not None:
         key, value = field
-        position = _field_indent(line) if dashed else indent
+        position = _field_indent(line, True) if dashed else indent
         return value, position, key, dashed
     if body == '-' and not dashed: return '', indent, None, True
-    candidate = line.text[_field_indent(line):] if dashed else body
-    if candidate[:1] == '?' and candidate[1:2] in ('', ' ', '\t'): return candidate[1:].lstrip(' \t'), _field_indent(line) if dashed else indent, '?', dashed
     if dashed: return body, indent, None, True
     return None
 
@@ -313,12 +313,12 @@ def _mapping_body(lines, scalar, entry, owner):
 
 
 def _anchor_position(lines, index, name, parts):
+    previous = next((i for i in range(index - 1, -1, -1) if _meaningful(lines[i])), -1)
+    previous_parts = _node_parts(lines[previous]) if previous >= 0 else None
+    previous_value, previous_depth = _sequence_value(previous_parts[0])[1:] if previous_parts is not None else ('', 0)
     if parts is None:
         indent, tokens = _indent(lines[index]), _prepared_value(lines[index].text[_indent(lines[index]):])[0]
-        previous = next((i for i in range(index - 1, -1, -1) if _meaningful(lines[i])), -1)
-        previous_parts = _node_parts(lines[previous]) if previous >= 0 else None
         if previous_parts is None: return None
-        _previous_tokens, previous_value, previous_depth = _sequence_value(previous_parts[0])
         if f'&{name}' not in tokens or previous_value or previous_parts[2] not in (None, '?') or _indent(lines[previous]) >= indent: return None
         return 'mapping key' if previous_parts[2] == '?' else 'nested sequence' if previous_depth else 'sequence item'
     raw_value, _indentation, raw_key, dashed = parts
@@ -326,7 +326,7 @@ def _anchor_position(lines, index, name, parts):
     elif raw_key is None:
         tokens, _value, depth = _sequence_value(raw_value)
         position = 'nested sequence item' if depth else 'sequence item'
-    else: _value, position, tokens = raw_key, 'sequence item' if dashed else 'mapping key', _prepared_value(raw_key)[0]
+    else: _value, position, tokens = raw_key, 'nested sequence item' if ((dashed and _field_indent(lines[index], True) != _field_indent(lines[index], False)) or (not dashed and previous >= 0 and previous_depth and not previous_value and _indent(lines[previous]) < _indent(lines[index]))) else 'sequence item' if dashed else 'mapping key', _prepared_value(raw_key)[0]
     return position if f'&{name}' in tokens else None
 
 
