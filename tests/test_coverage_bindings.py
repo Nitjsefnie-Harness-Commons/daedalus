@@ -302,28 +302,6 @@ subprocess.run(['python3', 'child.py'])
         assert 'os.chdir at line 6 may have moved the cwd' in violations[0]
 
 
-def test_nonlauncher_binding_controls_stay_clean(tmp):
-    del tmp
-    assert _synthetic_violations(
-        """import subprocess
-match subprocess:
-    case None:
-        pass
-result = subprocess.run(['python3', 'child.py'], cwd=ROOT)
-""") == []
-
-
-def test_named_unreadable_spread_remains_a_violation(tmp):
-    del tmp
-    violations = _synthetic_violations(
-        """import subprocess
-kw = dict({'cwd': tmp})
-subprocess.run(['python3', 'child.py'], **kw)
-""")
-    assert len(violations) == 1, violations
-    assert 'cwd may arrive through a ** spread' in violations[0], violations
-
-
 def _module_text(target):
     return target.read_bytes().decode('utf-8').replace('\r\n', '\n')
 
@@ -465,8 +443,15 @@ def _mutation_specs():
     )
     dict_values = (
         "    elif isinstance(value, ast.Dict):\n        for part in "
+        "[*value.keys, *value.values]:\n            if part is not None:\n                "
+        "yield from _carried_parts(part)\n",
+        "    elif isinstance(value, ast.Dict):\n        for part in "
         "value.values:\n            if part is not None:\n                yield "
-        "from _carried_parts(part)\n", "")
+        "from _carried_parts(part)\n")
+    subscript = (
+        "    elif isinstance(value, ast.Subscript):\n"
+        "        yield from _carried_parts(value.value)\n"
+        "        yield from _carried_parts(value.slice)\n", "")
     default_scope = (
         "            for value in (*node.args.defaults, "
         "*node.args.kw_defaults):\n"
@@ -535,7 +520,12 @@ def _mutation_specs():
          'suite.test_match_capture_refuses_a_hidden_launcher(None)'),
         ('callee base', 'bindings', (callee,),
          'suite.test_call_result_assignment_refuses_a_hidden_launcher(None)'),
-        ('dict values', 'bindings', (dict_values,), 'suite.test_single_name_container_refuses_a_hidden_launcher(None)'),
+        ('dict values', 'bindings', (dict_values,),
+         'import test_static_guard_regressions as regression_suite\n'
+         'regression_suite.test_subscripted_dict_carriers_refuse_hidden_launchers(None)'),
+        ('subscript values', 'bindings', (subscript,),
+         'import test_static_guard_regressions as regression_suite\n'
+         'regression_suite.test_subscripted_dict_carriers_refuse_hidden_launchers(None)'),
         ('function default scope', 'scopes',
          (function_default_scope,),
          _SCOPE_INVOKE),

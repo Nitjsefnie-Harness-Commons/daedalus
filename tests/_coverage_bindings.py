@@ -84,9 +84,12 @@ def _carried_parts(value):
         for part in value.elts:
             yield from _carried_parts(part)
     elif isinstance(value, ast.Dict):
-        for part in value.values:
+        for part in [*value.keys, *value.values]:
             if part is not None:
                 yield from _carried_parts(part)
+    elif isinstance(value, ast.Subscript):
+        yield from _carried_parts(value.value)
+        yield from _carried_parts(value.slice)
     elif isinstance(value, ast.Starred):
         yield from _carried_parts(value.value)
     else:
