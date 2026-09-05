@@ -27,6 +27,10 @@ _INLINE_INVOKE = (
 _SCOPE_BINDING_INVOKE = (
     'import test_coverage_scope_bindings as binding_suite; '
     'binding_suite.test_import_bindings_shadow_the_builtin_dict(None)')
+_ROOT_PROVENANCE_INVOKE = (
+    'import test_coverage_scope_bindings as binding_suite; '
+    'binding_suite.test_import_bindings_do_not_rebind_root_'
+    'spellings(None)')
 _ANNOTATION_INVOKE = (
     'import test_coverage_scope_bindings as binding_suite; '
     'binding_suite.test_variadic_parameter_annotations_are_judged(None)')
@@ -518,19 +522,16 @@ def _mutation_specs():
         "and node.rest)\n",
         "",
     )
-    import_shadows = (
-        "            shadows[scope].update(alias.asname\n"
-        "                                  or alias.name.split('.')[0]\n"
-        "                                  for alias in node.names\n"
-        "                                  if alias.name not in "
-        "_ROOT_MODULES)\n",
+    import_bindings = (
+        "            bindings[scope].update("
+        "alias.asname or alias.name.split('.')[0]\n"
+        "                                   for alias in node.names)\n",
         "            pass\n",
     )
-    root_owner_imports = (
-        "                                  for alias in node.names\n"
-        "                                  if alias.name not in "
-        "_ROOT_MODULES)\n",
-        "                                  for alias in node.names)\n",
+    binding_aliasing = (
+        "    bindings = {scope: set(names) "
+        "for scope, names in shadows.items()}\n",
+        "    bindings = shadows\n",
     )
     variadic_annotations = (
         "        variadic = [value for value in (arguments.vararg, "
@@ -589,10 +590,10 @@ def _mutation_specs():
          _SCOPE_INVOKE),
         ('comprehension walrus scope', 'scopes', (walrus_scope,),
          _SCOPE_INVOKE),
-        ('import shadows', 'scopes', (import_shadows,),
+        ('import bindings', 'scopes', (import_bindings,),
          _SCOPE_BINDING_INVOKE),
-        ('root owner imports', 'scopes', (root_owner_imports,),
-         _SCOPE_BINDING_INVOKE),
+        ('binding set aliasing', 'scopes', (binding_aliasing,),
+         _ROOT_PROVENANCE_INVOKE),
         ('variadic annotations', 'scopes', (variadic_annotations,),
          _ANNOTATION_INVOKE),
         ('MatchAs global', 'scopes', (match_as_names,),

@@ -39,6 +39,10 @@ def _import_bindings():
         ('import alias', 'import helpers as dict'),
         ('from-import alias', 'from helpers import thing as dict'),
         ('dotted import head', 'import dict.tools'),
+        ('reserved member alias', 'from helpers import _util as dict'),
+        ('reserved module alias', 'import _util as dict'),
+        ('reserved behaviour alias',
+         'from helpers import test_dashboard_behaviour as dict'),
     )
 
 
@@ -70,6 +74,25 @@ def other():
 def go():
     return dict(cwd='nested')
 """, []),
+    )
+
+
+def _root_provenance_cases():
+    return (
+        ('a module ROOT import stays provable', """import subprocess
+from _repo import ROOT
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", []),
+        ('a function-local ROOT import stays provable', """import subprocess
+def go():
+    from _repo import ROOT
+    subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", []),
+        ('a later alias leaves an owner an owner', """import subprocess
+import _util
+import helpers as _util
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""", []),
         ('a root helper import is not a rebinding', """import subprocess
 import test_dashboard_behaviour as behaviour
 subprocess.run(['python3', 'child.py'], cwd=behaviour.ROOT)
@@ -80,6 +103,12 @@ behaviour = replacement
 subprocess.run(['python3', 'child.py'], cwd=behaviour.ROOT)
 """, _rebound_owner(4)),
     )
+
+
+def test_import_bindings_do_not_rebind_root_spellings(tmp):
+    del tmp
+    for name, source, expected in _root_provenance_cases():
+        assert _synthetic_violations(source) == expected, name
 
 
 def test_import_bindings_shadow_the_builtin_dict(tmp):
@@ -158,6 +187,13 @@ def test_a_real_module_variadic_annotation_is_judged(tmp):
         "        ['python3', 'child.py'], cwd=tmp)):\n    pass\n", 1)
     _assert_planted(line, planted, restored,
                     'subprocess.run cwd=tmp declares no env=')
+
+
+def test_a_real_module_reserved_member_alias_is_judged(tmp):
+    line, planted, restored = _planted_violations(
+        tmp, f'from helpers import _util as dict\n{_IMPORT_LAUNCH}\n', 2)
+    _assert_planted(line, planted, restored,
+                    'unresolved callee dict cwd=tmp declares no env=')
 
 
 def test_controls_never_write_inside_the_repository(tmp):
