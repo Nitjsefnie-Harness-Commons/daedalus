@@ -47,6 +47,94 @@ def test_mutation_gate_accepts_crlf_copied_helpers(tmp):
             bash.read_bytes()] == crlf_sources
 
 
+def test_subscripted_dict_carriers_refuse_hidden_launchers(tmp):
+    del tmp
+    pairs = (
+        (
+            """import os
+import subprocess
+launcher = {'sp': subprocess}['sp']
+os.chdir(tmp)
+launcher.run(['python3', 'child.py'])
+""",
+            3,
+            """import os
+import subprocess
+result = {'sp': subprocess.run(
+        ['python3', 'child.py'], cwd=tmp)}['sp']
+""",
+            3),
+        (
+            """import os
+import subprocess
+os.chdir(tmp)
+def go(launcher={'sp': subprocess}['sp']):
+    launcher.run(['python3', 'child.py'])
+go()
+""",
+            4,
+            """import os
+import subprocess
+def go(result={'sp': subprocess.run(
+        ['python3', 'child.py'], cwd=tmp)}['sp']):
+    return result
+""",
+            3),
+        (
+            """import os
+import subprocess
+launchers = {subprocess: 'sp'}
+os.chdir(tmp)
+for launcher in launchers:
+    launcher.run(['python3', 'child.py'])
+""",
+            3,
+            """import os
+import subprocess
+results = {subprocess.run(
+        ['python3', 'child.py'], cwd=tmp): 'sp'}
+""",
+            3),
+    )
+    for unsafe, unsafe_line, explicit, explicit_line in pairs:
+        _coverage_suite._assert_binding_pair(
+            unsafe, unsafe_line, explicit, explicit_line)
+
+
+def test_subscripted_unresolved_callee_stays_unresolved(tmp):
+    del tmp
+    source = """import subprocess
+launchers = {'sp': mystery}
+launchers['sp'](['python3', 'child.py'], cwd=tmp)
+"""
+    assert _coverage_suite._synthetic_violations(source) == [
+        "tests/synthetic.py:3: unresolved callee launchers['sp'] "
+        'cwd=tmp declares no env='
+    ]
+
+
+def test_nonlauncher_binding_controls_stay_clean(tmp):
+    del tmp
+    assert _coverage_suite._synthetic_violations(
+        """import subprocess
+match subprocess:
+    case None:
+        pass
+result = subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""") == []
+
+
+def test_named_unreadable_spread_remains_a_violation(tmp):
+    del tmp
+    violations = _coverage_suite._synthetic_violations(
+        """import subprocess
+kw = dict({'cwd': tmp})
+subprocess.run(['python3', 'child.py'], **kw)
+""")
+    assert len(violations) == 1, violations
+    assert 'cwd may arrive through a ** spread' in violations[0], violations
+
+
 def test_real_tree_refuses_each_complete_binding_bypass(tmp):
     root, target = _real_module_copy(tmp, Path('tests/test_diff_coverage.py'))
     source = _coverage_suite._module_text(target)
