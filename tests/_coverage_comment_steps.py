@@ -530,4 +530,3 @@ elif method == 'PATCH' and '/issues/comments/' in target:
             comment['body'] = body
 state_path.write_text(json.dumps(state), encoding='utf-8')
 """
-
