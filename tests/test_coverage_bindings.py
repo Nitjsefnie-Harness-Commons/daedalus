@@ -22,10 +22,12 @@ _SCOPE_INVOKE = (
     'suite.test_python_evaluation_scopes_preserve_builtin_dict_identity(None)')
 _INLINE_INVOKE = (
     'import test_static_guard_regressions as regression_suite; '
-    'regression_suite.test_inline_dict_receivers_refuse_hidden_launchers(None)')
+    'regression_suite.test_inline_dict_receivers_refuse_hidden_'
+    'launchers(None)')
 _SUBSCRIPT_INVOKE = (
     'import test_static_guard_regressions as regression_suite; '
-    'regression_suite.test_subscripted_dict_carriers_refuse_hidden_launchers(None)')
+    'regression_suite.test_subscripted_dict_carriers_refuse_hidden_'
+    'launchers(None)')
 
 
 def _binding_violation(line):
@@ -449,7 +451,9 @@ def _mutation_specs():
     )
     dict_values = (
         "    elif isinstance(value, ast.Dict):\n        for part in "
-        "[*value.keys, *value.values]:\n            if part is not None:\n                "
+        "[*value.keys, *value.values]:\n"
+        "            if part is not None:\n"
+        "                "
         "yield from _carried_parts(part)\n",
         "")
     subscript = (
@@ -459,7 +463,8 @@ def _mutation_specs():
     call_receiver = (
         "        if (isinstance(node, ast.Call)\n"
         "                and not _has_cwd_control(node)\n"
-        "                and any(_names_one_of(part, facts.subprocess_modules)\n"
+        "                and any(_names_one_of(part, "
+        "facts.subprocess_modules)\n"
         "                        or _is_launch_value(part, facts)\n"
         "                        for part in _call_receiver_parts(node))):\n"
         "            lines.append(node.lineno)\n", "")
