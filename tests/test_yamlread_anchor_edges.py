@@ -407,6 +407,31 @@ def test_following_line_scalar_headers_stop_before_sibling_anchors(tmp):
         assert _names(source) == [expected] == ['target'], source
 
 
+def test_standalone_scalar_headers_keep_the_containing_dash_indent(tmp):
+    del tmp
+    cases = (
+        ('|2', 4, 4, '', ''),
+        ('|2-', 4, 5, '', ''),
+        ('>2-', 4, 4, '', ''),
+        ('|', 4, 3, '', ''),
+        ('|+', 4, 5, '', ''),
+        ('>+', 4, 3, '', ''),
+        ('|2', 3, 4, '', ''),
+        ('>+2', 5, 6, '&b', ''),
+        ('|2', 4, 4, '', '\n    # comment\n'),
+        ('>2-', 3, 4, '&b', '\n    # comment\n'),
+    )
+    for header, header_indent, content_indent, properties, gap in cases:
+        marker = '  -' + (f' {properties}' if properties else '') + '\n'
+        prefix = (
+            f'anchors:\n first: &a target\n decoys:\n{marker}{gap}'
+            f'{" " * header_indent}{header}\n'
+            f'{" " * content_indent}key: &a hidden\n')
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert _names(source) == [expected] == ['target'], source
+
+
 def test_nested_explicit_key_scalar_keeps_mapping_sibling_visible(tmp):
     del tmp
     prefixes = (
