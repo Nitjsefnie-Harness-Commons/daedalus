@@ -112,10 +112,11 @@ def continued_quote_end(source, start, end, quote):
     raise YAMLReadError('workflow has an incomplete quoted scalar')
 
 
-def prepared_value(raw_value):
+def prepared_value(raw_value, strip_comments=True):
     """Return node properties and comment-stripped scalar content."""
     tokens, bare = node_properties(raw_value.lstrip(' \t'))
-    return tokens, _strip_inline_comment(bare.strip(' \t'))
+    bare = bare.strip(' \t')
+    return tokens, _strip_inline_comment(bare) if strip_comments else bare
 
 
 def property_only(line):
@@ -124,16 +125,17 @@ def property_only(line):
     return bool(tokens) and not value
 
 
-def sequence_value(raw, dashed=True):
+def sequence_value(raw, dashed=True, strip_comments=True):
     """Strip nested sequence dashes and explicit-key indicators."""
-    tokens, value = prepared_value(raw)
+    tokens, value = prepared_value(raw, strip_comments)
     depth = 0
     while (
             dashed and (value == '-' or value.startswith(('- ', '-\t')))
             or (value[:1] == '?' and value[1:2] in ('', ' ', '\t'))):
         is_dash = value == '-' or value.startswith(('- ', '-\t'))
         depth += int(is_dash)
-        tokens, value = prepared_value(value[1:].lstrip(' \t'))
+        tokens, value = prepared_value(
+            value[1:].lstrip(' \t'), strip_comments)
     return tokens, value, depth
 
 
@@ -306,7 +308,8 @@ def _flow_start(source, end, candidate):
     if candidate is None:
         return None
     candidate_index, raw_value, _parts, _base_depth = candidate
-    _tokens, value, _depth = sequence_value(raw_value)
+    _tokens, value, _depth = sequence_value(
+        raw_value, strip_comments=False)
     if not value.startswith(('[', '{')):
         return None
     return candidate_index, _flow_end(source, candidate_index, end, value)
