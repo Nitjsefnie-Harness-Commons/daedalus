@@ -224,9 +224,11 @@ def _evaluation_scopes(tree):
         return scope
 
     def visit_arguments(arguments, scope):
-        arguments = (arguments.posonlyargs + arguments.args
-                     + arguments.kwonlyargs)
-        for argument in arguments:
+        variadic = [value for value in (arguments.vararg, arguments.kwarg)
+                    if value is not None]
+        named = (arguments.posonlyargs + arguments.args
+                 + arguments.kwonlyargs)
+        for argument in named + variadic:
             if argument.annotation is not None:
                 visit(argument.annotation, scope)
 
@@ -315,6 +317,14 @@ def _scope_shadows(tree, layout=None):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                              ast.Lambda)):
             shadows[node].update(_parameter_names(node.args))
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            # Importing a root helper module is the binding a root spelling
+            # is written against, not a rebinding of it; root_owner_names
+            # judges those, and storing the same name still shadows below.
+            shadows[scope].update(alias.asname
+                                  or alias.name.split('.')[0]
+                                  for alias in node.names
+                                  if alias.name not in _ROOT_MODULES)
         if (isinstance(node, ast.Name)
                 and isinstance(node.ctx, (ast.Store, ast.Del))):
             shadows[scope].add(node.id)
