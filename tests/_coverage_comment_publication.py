@@ -14,7 +14,7 @@ from _coverage_comment_steps import (
 
 
 def _runner(tmp, workflow_reader, extract_block, shell_runner,
-                         write_executable):
+            write_executable):
     """Exercise the final publication block against a stateful API double."""
     def run(label='check', state=None, status='success', head_sha='a' * 40,
             run_url='https://github.com/owner/repo/actions/runs/7',
@@ -58,17 +58,20 @@ def call_list(path):
     return [json.loads(line) for line in path.read_text(
         encoding='utf-8').splitlines() if line]
 
+
 def write_list(path):
     def is_write(args):
         return '-X' in args and args[args.index('-X') + 1] in (
             'POST', 'PATCH')
     return [args for args in call_list(path) if is_write(args)]
 
+
 def fields(args):
     return dict(args[index + 1].split('=', 1)
                 for index in range(len(args) - 1)
                 if args[index] in ('-f', '--raw-field')
                 and '=' in args[index + 1])
+
 
 def _mapping(workflow_reader):
     workflow = workflow_reader()
@@ -323,7 +326,10 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     original = workflow_reader().encode('utf-8')
     workflow.write_bytes(original)
     assert workflow.read_bytes() == original
-    copied_reader = lambda: workflow.read_text(encoding='utf-8')
+
+    def copied_reader():
+        return workflow.read_text(encoding='utf-8')
+
     run = _runner(tmp, copied_reader, extract_block, shell_runner,
                   write_executable)
     _absent_scenarios(tmp, run, copied_reader(), extract_block,

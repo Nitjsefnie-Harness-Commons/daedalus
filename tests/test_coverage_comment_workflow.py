@@ -24,8 +24,6 @@ from _yamlread import (  # noqa: E402
 )
 
 
-
-
 def _workflow():
     """Read the commenter workflow under test."""
     return (ROOT / '.github' / 'workflows' / 'coverage-comment.yml').read_text(
