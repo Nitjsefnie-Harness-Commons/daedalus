@@ -275,6 +275,63 @@ def test_issue_lookup_failure_fails_without_writes(tmp):
         'repos/owner/repo/issues/101\n')
 
 
+def test_preamble_closing_reference_is_checked(tmp):
+    del tmp
+    rendered = (
+        '<p dir="auto">Fixes ' + _issue_html(104) + '</p>\n'
+        + _valid_html())
+    api = _api(
+        issues={'101': _issue('alice'), '104': _issue('bob')},
+        rendered=rendered)
+    code, writes, _output, _error = _execute(
+        api, 'Fixes #104\n\n' + _valid_body())
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments')]
+    _assert_gate_message(
+        writes[0], OPEN_FIRST, ['Issue `#104` is not assigned to you.'])
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
+
+
+def test_heading_closing_reference_is_checked(tmp):
+    del tmp
+    rendered = (
+        _valid_html()
+        + f'\n<h2 dir="auto">Fixes {_issue_html(105)}</h2>\n'
+        + _text_html('Ran the suite.'))
+    api = _api(
+        issues={'101': _issue('alice'), '105': _issue('bob')},
+        rendered=rendered)
+    body = _valid_body() + '\n## Fixes #105\n\nRan the suite.\n'
+    code, writes, _output, _error = _execute(api, body)
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments'),
+        ('PATCH', 'repos/owner/repo/pulls/99')]
+    _assert_gate_message(
+        writes[0], CLOSED_FIRST,
+        ['Section `Fixes #105` is not defined by the template.',
+         'Issue `#105` is not assigned to you.'], closed=True)
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
+
+
+def test_comma_separated_closing_list_is_checked(tmp):
+    del tmp
+    rendered = _valid_html(references=(
+        f'Fixes {_issue_html(101)}, {_issue_html(104)}'))
+    api = _api(
+        issues={'101': _issue('alice'), '104': _issue('bob')},
+        rendered=rendered)
+    code, writes, _output, _error = _execute(
+        api, _valid_body('Fixes #101, #104'))
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments')]
+    _assert_gate_message(
+        writes[0], OPEN_FIRST, ['Issue `#104` is not assigned to you.'])
+    _assert_numbers_code_spanned(_comment_body(writes[0]))
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='prgateclaims_')

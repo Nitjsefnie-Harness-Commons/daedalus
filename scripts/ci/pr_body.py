@@ -151,6 +151,8 @@ class _RenderedBodyParser(HTMLParser):
             name.casefold(): value or '' for name, value in attrs}
         if (tag == 'section' and 'data-footnotes' in attributes
                 and 'footnotes' in attributes.get('class', '').split()):
+            # Closing references inside a footnote stay uncollected; the
+            # gap that leaves is tracked by issue 554.
             self._footnote_depth = 1
             return
         if tag in _HEADING_TAGS:
@@ -159,6 +161,7 @@ class _RenderedBodyParser(HTMLParser):
             self._finish_section()
             self._heading_tag = tag
             self._heading_parts = []
+            self._break_closing_list()
             return
         if tag == 'img':
             self._record_text(attributes.get('alt', ''))
@@ -173,24 +176,29 @@ class _RenderedBodyParser(HTMLParser):
             self._record_block()
         if tag == 'a':
             self._anchor_depth += 1
-        if tag != 'a' or self._heading_tag is not None or self._key is None:
+        if tag != 'a':
             return
         destinations = [
             value for name, value in attrs if name.casefold() == 'href']
         if not destinations:
             return
         href = destinations[0]
-        if href:
+        # Only the closing channel reads the whole body; a link or an issue
+        # reference belongs to the section it sits in, and a preamble or
+        # heading anchor is in none.
+        inside = self._heading_tag is None and self._key is not None
+        if href and inside:
             self._links.append(href)
         number = issue_number(href, self.repository)
-        if number is not None:
-            closing = _gap_closing(
-                ''.join(self._gap), self._previous_closing)
+        if number is None:
+            return
+        closing = _gap_closing(''.join(self._gap), self._previous_closing)
+        if inside:
             self._issues.append(number)
-            if closing:
-                self.closing.append(number)
-            self._previous_closing = closing
-            self._gap = []
+        if closing:
+            self.closing.append(number)
+        self._previous_closing = closing
+        self._gap = []
 
     def handle_startendtag(self, tag, attrs):
         tag = tag.casefold()
@@ -222,6 +230,7 @@ class _RenderedBodyParser(HTMLParser):
         self._issues = []
         self._heading_tag = None
         self._heading_parts = []
+        self._break_closing_list()
 
     def handle_data(self, data):
         self._record_text(data)
@@ -246,19 +255,19 @@ class _RenderedBodyParser(HTMLParser):
             self._text.append(data)
 
     def _record_pending(self, data):
-        if (self._footnote_depth or self._heading_tag is not None
-                or self._key is None or self._anchor_depth):
+        if self._footnote_depth or self._anchor_depth:
             return
         self._gap.append(data)
 
     def _record_block(self):
-        # A block boundary breaks a closing-keyword list: a keyword on one
-        # side of a paragraph, list-item or table-cell break governs no
-        # anchor on the other, so the gap text and the running list state
-        # both restart inside each block.
-        if (self._footnote_depth or self._heading_tag is not None
-                or self._key is None):
+        if self._footnote_depth:
             return
+        self._break_closing_list()
+
+    def _break_closing_list(self):
+        # A block or heading boundary breaks a closing-keyword list: a
+        # keyword on one side governs no anchor on the other, so the gap
+        # text and the running list state both restart across it.
         self._gap = []
         self._previous_closing = False
 
@@ -285,8 +294,6 @@ class _RenderedBodyParser(HTMLParser):
         self._text = []
         self._links = []
         self._issues = []
-        self._gap = []
-        self._previous_closing = False
 
 
 def parse_rendered(rendered, repository):
