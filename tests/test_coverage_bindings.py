@@ -523,27 +523,24 @@ def _mutation_specs():
         "",
     )
     import_bindings = (
-        "            # A star import binds names only its own module "
-        "knows.\n"
-        "            bindings[scope].update("
-        "alias.asname or alias.name.split('.')[0]\n"
-        "                                   for alias in node.names\n"
-        "                                   if alias.name != '*')\n",
-        "            pass\n",
+        "    if isinstance(node, ast.ImportFrom):\n"
+        "        return {alias.asname or alias.name "
+        "for alias in node.names}\n",
+        "    if isinstance(node, ast.ImportFrom):\n        return set()\n",
     )
     narrowed_bindings = (
-        "                                   for alias in node.names\n"
-        "                                   if alias.name != '*')\n",
-        "                                   for alias in node.names\n"
-        "                                   if alias.name != '*'\n"
-        "                                   and (alias.name != '_util'\n"
-        "                                        or isinstance("
-        "scope, ast.Module)))\n",
+        "        return {alias.asname or alias.name "
+        "for alias in node.names}\n",
+        "        return {alias.asname or alias.name for alias in node.names\n"
+        "                if alias.name != '_util'}\n",
     )
     binding_aliasing = (
-        "    bindings = {scope: set(names) "
-        "for scope, names in shadows.items()}\n",
-        "    bindings = shadows\n",
+        "    return shadows\n\n\n_FUNCTION_SCOPES",
+        "    for node, scope in scoped:\n"
+        "        if isinstance(node, (ast.Import, ast.ImportFrom)):\n"
+        "            shadows[scope].update(\n"
+        "                alias.asname or alias.name for alias in node.names)\n"
+        "    return shadows\n\n\n_FUNCTION_SCOPES",
     )
     variadic_annotations = (
         "        variadic = [value for value in (arguments.vararg, "
@@ -606,7 +603,7 @@ def _mutation_specs():
          _SCOPE_BINDING_INVOKE),
         ('narrowed bindings', 'scopes', (narrowed_bindings,),
          _SCOPE_BINDING_INVOKE),
-        ('binding set aliasing', 'scopes', (binding_aliasing,),
+        ('imports contaminate shadows', 'scopes', (binding_aliasing,),
          _ROOT_PROVENANCE_INVOKE),
         ('variadic annotations', 'scopes', (variadic_annotations,),
          _ANNOTATION_INVOKE),
