@@ -118,6 +118,12 @@ def prepared_value(raw_value):
     return tokens, _strip_inline_comment(bare.strip(' \t'))
 
 
+def property_only(line):
+    """Return whether a line contains only node properties."""
+    tokens, value = prepared_value(line.text[indent(line):])
+    return bool(tokens) and not value
+
+
 def sequence_value(raw, dashed=True):
     """Strip nested sequence dashes and explicit-key indicators."""
     tokens, value = prepared_value(raw)
@@ -174,6 +180,15 @@ def _block_scalar_end(source, texts, index, parent_indent, value, owner,
              if meaningful(source[i])),
             len(source),
         )
+        while (
+                header_index < len(source)
+                and indent(source[header_index]) > parent_indent
+                and property_only(source[header_index])):
+            header_index = next(
+                (i for i in range(header_index + 1, len(source))
+                 if meaningful(source[i])),
+                len(source),
+            )
         if (header_index >= len(source)
                 or indent(source[header_index]) < parent_indent):
             return None
