@@ -132,8 +132,7 @@ EXPECTED_STEP_MAPPINGS = (
         "  *)\n"
         '    echo "unexpected artifact lookup result: $present" >&2\n'
         "    exit 1\n"
-        "    ;;\n"
-        "esac\n",
+        "    ;;\nesac\n",
     },
     {
         "name": "Resolve the target pull request from the event",
@@ -269,7 +268,8 @@ EXPECTED_STEP_MAPPINGS = (
         "    fi\n"
         '    gh api -X PATCH "repos/$REPO/issues/comments/$existing" \\\n'
         "      -F body=@comment.md >/dev/null\n"
-        '    echo "marked patch coverage as unavailable for $HEAD_SHA"; exit 1\n'
+        '    echo "marked patch coverage as unavailable for $HEAD_SHA"; '
+        'exit 1\n'
         "    ;;\n"
         "esac\n",
     },

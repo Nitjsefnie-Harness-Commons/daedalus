@@ -228,6 +228,7 @@
 !/scripts/ci/thresholds.py
 !/scripts/ci/time_tests.py
 !/scripts/ci/workflow_yaml.py
+!/scripts/ci/workflow_yaml_scan.py
 !/scripts/ci/yamlanchor.py
 !/scripts/ci/yamlblock.py
 !/scripts/ci/yamlscalar.py
@@ -424,6 +425,7 @@
 !/tests/test_speed_summary.py
 !/tests/test_speed_verdicts.py
 !/tests/test_speedharness.py
+!/tests/test_static_guard_regressions.py
 !/tests/test_static_routes.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_stream_route.py
@@ -473,6 +475,7 @@
 !/tests/test_workflow_triggers.py
 !/tests/test_yamlblock.py
 !/tests/test_yamlread.py
+!/tests/test_yamlread_anchor_edges.py
 !/tests/test_yamlread_anchors.py
 !/tests/test_yamlread_blocks.py
 !/tests/test_yamlread_bom.py
