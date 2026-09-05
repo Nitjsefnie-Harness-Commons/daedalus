@@ -275,7 +275,7 @@ def test_captured_renderings_pin_the_closing_answer(tmp):
         found = PR_BODY.closing_issues(body)
         if found != expected:
             failures.append((name, found, expected))
-    # Issue 585's captured leg for this fixture; its footnote holds no anchor.
+    # Issue 585's leg for this fixture; its footnote holds no issue anchor.
     body = PR_BODY.parse_rendered(GITHUB_FOOTNOTE_HTML, REPOSITORY)
     found = PR_BODY.closing_issues(body)
     if found != [101]:
