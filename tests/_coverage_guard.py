@@ -187,7 +187,7 @@ class _ModuleFacts:
         return 'invalid'
 
 
-def _launch_method(node, facts, bound):
+def _launch_method(node, facts, scope):
     """A recognised launcher, or any callee that spells cwd readably."""
     function = node.func
     if (isinstance(function, ast.Attribute)
@@ -201,7 +201,8 @@ def _launch_method(node, facts, bound):
     if facts.declaration_mode(node) is not None:
         return None
     if (isinstance(function, ast.Name) and function.id == 'dict'
-            and function.id not in bound):
+            and function.id not in _visible_scope_shadows(
+                scope, facts.scope_bindings, facts.scope_parents)):
         return None
     if _has_cwd_control(node):
         return f'unresolved callee {ast.unparse(function)}'
@@ -400,13 +401,11 @@ def _visit(relative, facts, tree, keeps, violations):
     for child, scope in facts.scoped_nodes:
         if not isinstance(child, ast.Call):
             continue
-        shadowed = _visible_scope_shadows(
-            scope, facts.scope_shadows, facts.scope_parents)
-        bound = _visible_scope_shadows(
-            scope, facts.scope_bindings, facts.scope_parents)
-        method = _launch_method(child, facts, bound)
+        method = _launch_method(child, facts, scope)
         if method is None:
             continue
+        shadowed = _visible_scope_shadows(
+            scope, facts.scope_shadows, facts.scope_parents)
         function = _scope_function(scope, facts.scope_parents)
         _check_launch(child, method, relative, function, facts, tree,
                       keeps, violations, shadowed)
