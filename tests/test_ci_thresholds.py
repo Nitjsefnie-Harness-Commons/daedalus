@@ -404,20 +404,42 @@ def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
     thresholds.write(path, source)
     ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
                          'thresholds_lifecycle_ratchet')
-    updated = ratchet.update(
-        thresholds.load(path), Decimal('96.0'), 'python')
-    assert updated is not None
-    thresholds.write(path, updated)
+    recorded, _floor = thresholds.coverage(source, 'python')
+    measured = min(
+        recorded + ratchet.RAISE_HYSTERESIS + Decimal('0.1'),
+        Decimal('100.0'))
+    should_raise = measured - recorded > ratchet.RAISE_HYSTERESIS
+    before = path.read_bytes()
+    assert ratchet.main([
+        '--language', 'python', '--measured', str(measured),
+        '--thresholds', str(path)]) == 0
+    updated = thresholds.load(path)
+    if should_raise:
+        assert path.read_bytes() != before
+        assert updated['coverage']['python'] == {
+            'measured': measured,
+            'floor': measured - ratchet.CALIBRATION_GAP}
+    else:
+        assert path.read_bytes() == before
+        assert updated == source
+    after = path.read_bytes()
+    assert ratchet.main([
+        '--language', 'python', '--measured', str(measured),
+        '--thresholds', str(path)]) == 0
+    assert path.read_bytes() == after
 
     size_baseline = _util.load(
         ROOT / 'scripts' / 'ci' / 'size_baseline.py',
         'thresholds_lifecycle_size_baseline')
     updated = thresholds.load(path)
     baseline = thresholds.module_size_baseline(updated)
-    selected = max(baseline, key=baseline.get)
-    sizes = {selected: baseline[selected] - 1}
-    tightened = size_baseline.tightened(baseline, sizes)
-    assert tightened is not None
+    if baseline:
+        sizes = {rel: size_baseline.ceiling_for(rel) for rel in baseline}
+        tightened = size_baseline.tightened(baseline, sizes)
+        assert tightened == {}
+    else:
+        assert size_baseline.tightened(baseline, {}) is None
+        tightened = {}
     updated['module_size_baseline'] = tightened
     thresholds.write(path, updated)
     original_path = DATA_PATH
@@ -429,10 +451,75 @@ def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
     finally:
         globals()['DATA_PATH'] = original_path
     loaded = thresholds.load(path)
+    expected_measured = measured if should_raise else recorded
     assert loaded['coverage']['python'] == {
-        'measured': Decimal('96.0'), 'floor': Decimal('94.5')}
+        'measured': expected_measured,
+        'floor': expected_measured - ratchet.CALIBRATION_GAP}
     assert loaded['module_size_baseline'] == tightened
     assert thresholds.load(DATA_PATH) == source
+
+
+def _run_lifecycle_against(tmp, path):
+    original_path = DATA_PATH
+    globals()['DATA_PATH'] = path
+    try:
+        test_shipped_document_lifecycle_accepts_real_policy_updates(tmp)
+    finally:
+        globals()['DATA_PATH'] = original_path
+
+
+def test_lifecycle_accepts_an_already_raised_calibration(tmp):
+    thresholds = _thresholds()
+    source = thresholds.load(DATA_PATH)
+    source['coverage']['python'] = {
+        'measured': Decimal('96.0'), 'floor': Decimal('94.5')}
+    path = Path(tmp) / 'already-raised.json'
+    thresholds.write(path, source)
+    ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
+                         'thresholds_already_raised_ratchet')
+    before = path.read_bytes()
+    assert ratchet.main([
+        '--language', 'python', '--measured', '96.0',
+        '--thresholds', str(path)]) == 0
+    assert path.read_bytes() == before
+    _run_lifecycle_against(tmp, path)
+
+
+def test_lifecycle_accepts_the_finite_coverage_ceiling(tmp):
+    thresholds = _thresholds()
+    source = thresholds.load(DATA_PATH)
+    source['coverage']['python'] = {
+        'measured': Decimal('100.0'), 'floor': Decimal('98.5')}
+    path = Path(tmp) / 'coverage-ceiling.json'
+    thresholds.write(path, source)
+    ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
+                         'thresholds_coverage_ceiling_ratchet')
+    before = path.read_bytes()
+    assert ratchet.main([
+        '--language', 'python', '--measured', '100.0',
+        '--thresholds', str(path)]) == 0
+    assert path.read_bytes() == before
+    _run_lifecycle_against(tmp, path)
+
+
+def test_lifecycle_accepts_a_fully_tightened_empty_baseline(tmp):
+    thresholds = _thresholds()
+    source = thresholds.load(DATA_PATH)
+    size_baseline = _util.load(
+        ROOT / 'scripts' / 'ci' / 'size_baseline.py',
+        'thresholds_empty_baseline_size_baseline')
+    baseline = thresholds.module_size_baseline(source)
+    if baseline:
+        sizes = {rel: size_baseline.ceiling_for(rel) for rel in baseline}
+        tightened = size_baseline.tightened(baseline, sizes)
+        assert tightened == {}
+    else:
+        assert size_baseline.tightened(baseline, {}) is None
+        tightened = {}
+    source['module_size_baseline'] = tightened
+    path = Path(tmp) / 'empty-baseline.json'
+    thresholds.write(path, source)
+    _run_lifecycle_against(tmp, path)
 
 
 def test_restrictive_mode_selection_keeps_windows_destination_writable(tmp):
