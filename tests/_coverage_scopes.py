@@ -343,8 +343,10 @@ def _scope_bindings(scoped, shadows):
     bindings = {scope: set(names) for scope, names in shadows.items()}
     for node, scope in scoped:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
+            # A star import binds names only its own module knows.
             bindings[scope].update(alias.asname or alias.name.split('.')[0]
-                                   for alias in node.names)
+                                   for alias in node.names
+                                   if alias.name != '*')
     return bindings
 
 

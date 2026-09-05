@@ -58,6 +58,11 @@ def go():
     from helpers import dict
     {_IMPORT_LAUNCH}
 """, _unresolved_dict(4)),
+        ('a local reserved-member alias binds too', f"""import os
+def go():
+    from helpers import _util as dict
+    {_IMPORT_LAUNCH}
+""", _unresolved_dict(4)),
         ('a module import reaches a nested def', f"""import os
 import helpers as dict
 def outer():
