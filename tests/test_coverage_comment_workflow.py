@@ -14,89 +14,16 @@ from _workflowrun import recorded_writes  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
+from _coverage_comment_steps import (  # noqa: E402
+    GH_ARTIFACT_STUB as _GH_ARTIFACT_STUB,
+    GH_COMMENT_STUB as _GH_COMMENT_STUB,
+)
 from _yamlread import (  # noqa: E402
     YAMLReadError, _indent, job_mapping, job_scalar,
     step_scalar, step_scalars,
 )
 
 
-_GH_ARTIFACT_STUB = r"""#!/usr/bin/env python3
-import json
-import os
-import sys
-
-response = json.loads(os.environ['STUB_RESPONSE'])
-args = sys.argv[1:]
-expression = args[args.index('--jq') + 1]
-if os.environ.get('ASSERT_NO_COVERAGE_ENV'):
-    leaked = sorted(
-        name for name in os.environ if name.startswith('COVERAGE_'))
-    if leaked:
-        raise SystemExit('coverage environment leaked: ' + ','.join(leaked))
-if expression == '.artifacts[]':
-    for item in response.get('artifacts', []):
-        print(json.dumps(item))
-elif expression == '.[]':
-    for item in response.values():
-        print(json.dumps(item))
-else:
-    raise SystemExit('unexpected jq expression: ' + expression)
-"""
-
-
-_GH_COMMENT_STUB = r"""#!/usr/bin/env python3
-import json
-import os
-import sys
-from pathlib import Path
-
-args = sys.argv[1:]
-state_path = Path(os.environ['STUB_STATE'])
-calls_path = Path(os.environ['STUB_CALLS'])
-state = json.loads(state_path.read_text(encoding='utf-8'))
-with calls_path.open('a', encoding='utf-8') as handle:
-    handle.write(json.dumps(args) + chr(10))
-
-
-def endpoint():
-    for value in args:
-        if value.startswith('repos/'):
-            return value
-    return ''
-
-
-target = endpoint()
-if '--jq' in args:
-    expression = args[args.index('--jq') + 1]
-    if target.endswith('/comments'):
-        for comment in state:
-            print(json.dumps(comment))
-    elif '/commits/' in target:
-        raise SystemExit('unexpected commits query: ' + target)
-    elif '/pulls/' in target:
-        print(os.environ['CURRENT_HEAD'])
-    elif expression:
-        raise SystemExit('unexpected query endpoint: ' + target)
-    raise SystemExit(0)
-
-if '-X' not in args:
-    raise SystemExit(0)
-method = args[args.index('-X') + 1]
-body_arg = next((value for value in args if value.startswith('body=@')), None)
-body = Path(body_arg[6:]).read_text(encoding='utf-8') if body_arg else ''
-if method == 'POST' and target.endswith('/comments'):
-    state.append({
-        'id': 1,
-        'user': {'login': 'github-actions[bot]'},
-        'body': body,
-    })
-elif method == 'PATCH' and '/issues/comments/' in target:
-    comment_id = int(target.rsplit('/', 1)[1])
-    for comment in state:
-        if comment['id'] == comment_id:
-            comment['body'] = body
-state_path.write_text(json.dumps(state), encoding='utf-8')
-"""
 
 
 def _workflow():
@@ -429,7 +356,7 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
         'GH_TOKEN': 'stub',
-        'REPO': 'owner/repo', 'HEAD_REPO': 'owner/repo',
+        'REPO': 'owner/repo', 'HEAD_REPO': 'owner/repo', 'RUN_ID': '123',
         'PR_NUMBER': pr_number,
         'HEAD_SHA': head_sha,
         'CURRENT_HEAD': current_head,

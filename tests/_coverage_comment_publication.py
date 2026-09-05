@@ -8,6 +8,7 @@ from pathlib import Path
 from _ghexpr import evaluate_if
 from _yamlsteps import step_mappings
 from _coverage_comment_steps import (
+    GH_ARTIFACT_STUB, GH_COMMENT_STUB,
     CHECK_NAME, CHECK_EXTERNAL_PREFIX, GH_CHECK_STUB, CRLF_JQ_STUB,
 )
 
@@ -82,6 +83,7 @@ def _mapping(workflow_reader):
         'RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
                    '/actions/runs/${{ github.run_id }}',
         'STATUS': '${{ job.status }}',
+        'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
     }, step
     script = step['run']
     assert "-f name='coverage comment'" in script, script
@@ -314,10 +316,193 @@ SCENARIOS = (_create, _duplicates, _crlf, _reruns, _failures)
 
 def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
                          write_executable):
-    run = _runner(tmp, workflow_reader, extract_block, shell_runner,
+    workflow = Path(tmp) / '.github/workflows/coverage-comment.yml'
+    workflow.parent.mkdir(parents=True)
+    original = workflow_reader().encode('utf-8')
+    workflow.write_bytes(original)
+    assert workflow.read_bytes() == original
+    copied_reader = lambda: workflow.read_text(encoding='utf-8')
+    run = _runner(tmp, copied_reader, extract_block, shell_runner,
                   write_executable)
-    step, steps = _mapping(workflow_reader)
+    _absent_scenarios(tmp, run, copied_reader(), extract_block,
+                      shell_runner, write_executable)
+    step, steps = _mapping(copied_reader)
     for scenario in SCENARIOS:
         scenario(run)
     _hostile(run, tmp)
     _orchestration(run, step, steps)
+
+
+ABSENT_SCENARIOS = (
+    ('docs-only', [{'name': 'test', 'conclusion': 'success'},
+                   {'name': 'coverage', 'conclusion': 'skipped'}], 0,
+     'neutral'),
+    ('no-coverage-job', [], 1, 'failure'),
+    ('successful-coverage', [{'name': 'coverage', 'conclusion': 'success'}],
+     1, 'failure'),
+    ('failed-coverage', [{'name': 'coverage', 'conclusion': 'failure'}],
+     1, 'failure'),
+    ('cancelled-coverage', [{'name': 'coverage', 'conclusion': 'cancelled'}],
+     1, 'failure'),
+    ('other-skipped', [{'name': 'test', 'conclusion': 'skipped'}],
+     1, 'failure'),
+)
+
+
+def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
+                     write_executable, scenario, prior, fail_jobs=False):
+    label, jobs, exit_code, conclusion = scenario
+    workdir = Path(tmp) / f'absent-{label}-{len(prior)}-{fail_jobs}'
+    (workdir / 'bin').mkdir(parents=True)
+    output = workdir / 'github-output'
+    output.touch()
+    state = workdir / 'state.json'
+    state.write_text(json.dumps(prior), encoding='utf-8')
+    calls = workdir / 'calls.jsonl'
+    env = {
+        **os.environ,
+        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
+        'GH_TOKEN': 'stub', 'REPO': 'owner/repo', 'RUN_ID': '123',
+        'HEAD_SHA': 'a' * 40, 'CURRENT_HEAD': 'a' * 40, 'PR_NUMBER': '170',
+        'GITHUB_OUTPUT': str(output), 'STUB_STATE': str(state),
+        'STUB_CALLS': str(calls), 'STUB_JOBS': json.dumps(jobs),
+        'STUB_RESPONSE': '{"total_count": 0, "artifacts": []}',
+        'STUB_FAIL_JOBS': '1' if fail_jobs else '',
+    }
+    write_executable(workdir / 'bin' / 'gh', GH_ARTIFACT_STUB)
+    artifact = shell_runner(workdir, extract_block(
+        workflow, 'Check for the comment artifact'), env)
+    assert artifact.returncode == 0, (artifact.stdout, artifact.stderr)
+    assert output.read_text(encoding='utf-8') == ''
+    write_executable(workdir / 'bin' / 'gh', GH_COMMENT_STUB)
+    missing = shell_runner(workdir, extract_block(
+        workflow, 'Mark missing patch coverage'), env)
+    assert missing.returncode == (1 if fail_jobs else exit_code), (
+        label, missing.returncode, missing.stdout, missing.stderr)
+    if fail_jobs:
+        assert 'jobs' in missing.stderr, missing.stderr
+    else:
+        assert any(args for args in call_list(calls)
+                   if 'repos/owner/repo/actions/runs/123/jobs' in args)
+    skipped = 'skipped=true' in output.read_text(encoding='utf-8')
+    result, checks, _calls, _script = run(
+        label=workdir.name + '-publish',
+        status='failure' if missing.returncode else 'success',
+        extra_env={'JOB_SKIPPED': 'true' if skipped else ''})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    check = checks['checks'][0]
+    assert check['conclusion'] == ('failure' if fail_jobs else conclusion), (
+        label, check)
+    if conclusion == 'neutral' and not fail_jobs:
+        assert check['output[summary]'] == (
+            'Coverage was not measured for a documentation-only change.')
+
+
+def _absent_scenarios(tmp, run, workflow, extract_block, shell_runner,
+                      write_executable):
+    prior = [{'id': 1, 'user': {'login': 'github-actions[bot]'},
+              'body': '<!-- daedalus-diff-coverage -->old percentage'}]
+    for scenario in ABSENT_SCENARIOS:
+        for comments in ([], prior):
+            _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
+                             write_executable, scenario, comments)
+    _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
+                     write_executable, ABSENT_SCENARIOS[0], [], True)
+
+
+EXPECTED_PUBLICATION_STEP = {
+    'name': 'Publish coverage check',
+    'if': 'always()',
+    'env': {
+        'GH_TOKEN': '${{ github.token }}',
+        'REPO': '${{ github.repository }}',
+        'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
+        'RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
+                   '/actions/runs/${{ github.run_id }}',
+        'STATUS': '${{ job.status }}',
+        'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
+    },
+    'run': r'''set -euo pipefail
+
+case "$STATUS" in
+  success|failure|cancelled) ;;
+  *)
+    echo "unexpected workflow-run conclusion: $STATUS" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$STATUS" = success ] && [ "${JOB_SKIPPED:-}" = true ]; then
+  STATUS=neutral
+fi
+
+external_id="daedalus-coverage-comment/v1/$HEAD_SHA"
+if ! gh api --method GET -H 'Cache-Control: no-cache' --paginate \
+  "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+  -f filter=all -f per_page=100 \
+  --jq '.check_runs[]' > check-runs.json
+then
+  echo "listing coverage comment checks for $HEAD_SHA failed" >&2
+  exit 1
+fi
+if ! jq -s --arg name 'coverage comment' \
+  --arg external_id "$external_id" \
+  'map(select(.name == $name and
+    .external_id == $external_id and
+    .app.slug == "github-actions") | .id) | .[]' \
+  check-runs.json > check-ids.txt
+then
+  echo "decoding coverage comment checks failed" >&2
+  exit 1
+fi
+while IFS= read -r check_id; do
+  check_id="${check_id%$'\r'}"
+  case "$check_id" in
+    ''|*[!0-9]*)
+      echo "coverage comment check id is not only digits:" \
+        "$check_id" >&2
+      exit 1
+      ;;
+  esac
+done < check-ids.txt
+
+write_check() {
+  local method="$1"
+  local target="$2"
+  local -a args=(
+    -X "$method" "$target"
+    -f name='coverage comment'
+    -f status=completed
+    -f conclusion="$STATUS"
+    -f external_id="$external_id"
+    -f details_url="$RUN_URL"
+  )
+  if [ "$STATUS" = neutral ]; then
+    local summary='Coverage was not measured for a '
+    summary+='documentation-only change.'
+    args+=( -f 'output[title]=Coverage not measured'
+      -f "output[summary]=$summary" )
+  fi
+  if [ "$method" = POST ]; then
+    args+=( -f head_sha="$HEAD_SHA" )
+  fi
+  if ! gh api "${args[@]}" >/dev/null
+  then
+    echo "publishing coverage comment check failed:" \
+      "$method $target" >&2
+    return 1
+  fi
+}
+
+if [ ! -s check-ids.txt ]; then
+  write_check POST "repos/$REPO/check-runs"
+  echo "created coverage comment check for $HEAD_SHA"
+else
+  while IFS= read -r check_id; do
+    check_id="${check_id%$'\r'}"
+    write_check PATCH "repos/$REPO/check-runs/$check_id"
+  done < check-ids.txt
+  echo "updated coverage comment checks for $HEAD_SHA"
+fi
+''',
+}

@@ -159,6 +159,7 @@ jobs:
           echo 'stale=false' >> "$GITHUB_OUTPUT"
 
       - name: Mark missing patch coverage
+        id: missing
         if: >-
           steps.artifact.outputs.present != 'true'
           && steps.pr.outputs.stale != 'true'
@@ -166,9 +167,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
+
+          exit_code=1
+          if ! gh api -H 'Cache-Control: no-cache' --paginate \
+            "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[]' > jobs.json
+          then
+            echo "listing the jobs of run $RUN_ID failed" >&2
+            exit 1
+          fi
+          if jq -se 'any(.[]; .name == "coverage" and
+            .conclusion == "skipped")' jobs.json >/dev/null
+          then
+            echo 'skipped=true' >> "$GITHUB_OUTPUT"
+            exit_code=0
+          fi
 
           marker='<!-- daedalus-diff-coverage -->'
           {
@@ -208,7 +225,7 @@ jobs:
             fi
           }
           case "$existing" in
-            '') echo 'no patch-coverage marker to update'; exit 1 ;;
+            '') echo 'no patch-coverage marker to update'; exit "$exit_code" ;;
             *[!0-9]*)
               echo "comment id is not only digits: $existing" >&2
               exit 1
@@ -219,7 +236,8 @@ jobs:
               fi
               gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
                 -F body=@comment.md >/dev/null
-              echo "marked patch coverage as unavailable for $HEAD_SHA"; exit 1
+              echo "marked patch coverage as unavailable for $HEAD_SHA"
+              exit "$exit_code"
               ;;
           esac
 
@@ -339,6 +357,7 @@ jobs:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
           STATUS: ${{ job.status }}
+          JOB_SKIPPED: ${{ steps.missing.outputs.skipped }}
         run: |
           set -euo pipefail
 
@@ -349,6 +368,10 @@ jobs:
               exit 1
               ;;
           esac
+
+          if [ "$STATUS" = success ] && [ "${JOB_SKIPPED:-}" = true ]; then
+            STATUS=neutral
+          fi
 
           external_id="daedalus-coverage-comment/v1/$HEAD_SHA"
           if ! gh api --method GET -H 'Cache-Control: no-cache' --paginate \
@@ -391,6 +414,12 @@ jobs:
               -f external_id="$external_id"
               -f details_url="$RUN_URL"
             )
+            if [ "$STATUS" = neutral ]; then
+              local summary='Coverage was not measured for a '
+              summary+='documentation-only change.'
+              args+=( -f 'output[title]=Coverage not measured'
+                -f "output[summary]=$summary" )
+            fi
             if [ "$method" = POST ]; then
               args+=( -f head_sha="$HEAD_SHA" )
             fi

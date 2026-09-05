@@ -14,6 +14,9 @@ from _ghexpr import evaluate_if  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
     complete_workflow_expectations,
 )
+from _coverage_comment_publication import (  # noqa: E402
+    EXPECTED_PUBLICATION_STEP as _EXPECTED_PUBLICATION_STEP,
+)
 from _repo import ROOT  # noqa: E402
 from _wfpins import WorkflowPinError, pinned_action  # noqa: E402
 from _yamlread import YAMLReadError, top_level_mapping  # noqa: E402
@@ -35,91 +38,6 @@ _PERMISSIONS = {
     'pull-requests': 'write', 'actions': 'read', 'checks': 'write',
 }
 
-_EXPECTED_PUBLICATION_STEP = {
-    'name': 'Publish coverage check',
-    'if': 'always()',
-    'env': {
-        'GH_TOKEN': '${{ github.token }}',
-        'REPO': '${{ github.repository }}',
-        'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
-        'RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
-                   '/actions/runs/${{ github.run_id }}',
-        'STATUS': '${{ job.status }}',
-    },
-    'run': r'''set -euo pipefail
-
-case "$STATUS" in
-  success|failure|cancelled) ;;
-  *)
-    echo "unexpected workflow-run conclusion: $STATUS" >&2
-    exit 1
-    ;;
-esac
-
-external_id="daedalus-coverage-comment/v1/$HEAD_SHA"
-if ! gh api --method GET -H 'Cache-Control: no-cache' --paginate \
-  "repos/$REPO/commits/$HEAD_SHA/check-runs" \
-  -f filter=all -f per_page=100 \
-  --jq '.check_runs[]' > check-runs.json
-then
-  echo "listing coverage comment checks for $HEAD_SHA failed" >&2
-  exit 1
-fi
-if ! jq -s --arg name 'coverage comment' \
-  --arg external_id "$external_id" \
-  'map(select(.name == $name and
-    .external_id == $external_id and
-    .app.slug == "github-actions") | .id) | .[]' \
-  check-runs.json > check-ids.txt
-then
-  echo "decoding coverage comment checks failed" >&2
-  exit 1
-fi
-while IFS= read -r check_id; do
-  check_id="${check_id%$'\r'}"
-  case "$check_id" in
-    ''|*[!0-9]*)
-      echo "coverage comment check id is not only digits:" \
-        "$check_id" >&2
-      exit 1
-      ;;
-  esac
-done < check-ids.txt
-
-write_check() {
-  local method="$1"
-  local target="$2"
-  local -a args=(
-    -X "$method" "$target"
-    -f name='coverage comment'
-    -f status=completed
-    -f conclusion="$STATUS"
-    -f external_id="$external_id"
-    -f details_url="$RUN_URL"
-  )
-  if [ "$method" = POST ]; then
-    args+=( -f head_sha="$HEAD_SHA" )
-  fi
-  if ! gh api "${args[@]}" >/dev/null
-  then
-    echo "publishing coverage comment check failed:" \
-      "$method $target" >&2
-    return 1
-  fi
-}
-
-if [ ! -s check-ids.txt ]; then
-  write_check POST "repos/$REPO/check-runs"
-  echo "created coverage comment check for $HEAD_SHA"
-else
-  while IFS= read -r check_id; do
-    check_id="${check_id%$'\r'}"
-    write_check PATCH "repos/$REPO/check-runs/$check_id"
-  done < check-ids.txt
-  echo "updated coverage comment checks for $HEAD_SHA"
-fi
-''',
-}
 
 (
     EXPECTED_STEP_MAPPINGS,
