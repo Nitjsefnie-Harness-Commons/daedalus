@@ -184,7 +184,8 @@ os.chdir(tmp)
 def test_guard_and_binding_scans_share_cwd_predicate(tmp):
     del tmp
     from _coverage_bindings import _has_cwd_control  # noqa: PLC0415
-    from _coverage_guard import _has_cwd_control as guard_has_cwd_control  # noqa: PLC0415
+    from _coverage_guard import (  # noqa: PLC0415
+        _has_cwd_control as guard_has_cwd_control)
 
     assert guard_has_cwd_control is _has_cwd_control
 
@@ -436,7 +437,8 @@ def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
 
 
 def test_production_cache_steps_keep_restore_and_save_separate(tmp):
-    from test_workflow_cache_boundary import _cache_write_reason  # noqa: PLC0415
+    from test_workflow_cache_boundary import (  # noqa: PLC0415
+        _cache_write_reason)
     from _wfgraph import _tests_yml  # noqa: PLC0415
     from _yamlsteps import complete_job_mapping  # noqa: PLC0415
 
