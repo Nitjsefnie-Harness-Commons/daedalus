@@ -68,9 +68,7 @@ def _split_field(text, owner):
 def _field_indent(line):
     """Where a mapping field starts, past any sequence dash on its line."""
     indent = _indent(line)
-    after_dash = line.text[indent + 1:]
-    if line.text[indent:indent + 1] == '-' and after_dash[:1] in (' ', '\t'):
-        indent += 1 + len(after_dash) - len(after_dash.lstrip(' \t'))
+    while line.text[indent:indent + 1] == '-' and line.text[indent + 1:indent + 2] in (' ', '\t'): indent += 1 + len(line.text[indent + 1:]) - len(line.text[indent + 1:].lstrip(' \t'))
     return indent
 
 
@@ -117,13 +115,15 @@ def _continued_quote_end(lines, start, end, quote):
 
 
 def _prepared_value(raw_value):
-    """A field value's property tokens and its comment-stripped content.
-
-    The properties come off first: a quote opening after an anchor or a
-    tag is a quote, not plain text, so its `#` is not a comment.
-    """
+    """Return node properties and comment-stripped scalar content."""
     tokens, bare = node_properties(raw_value.lstrip(' \t'))
     return tokens, _strip_inline_comment(bare.strip(' \t'))
+
+
+def _sequence_value(raw, dashed=True):
+    tokens, value, depth = (*_prepared_value(raw), 0)
+    while (dashed and (value == '-' or value.startswith(('- ', '-\t')))) or (value[:1] == '?' and value[1:2] in ('', ' ', '\t')): depth, (tokens, value) = depth + (value == '-' or value.startswith(('- ', '-\t'))), _prepared_value(value[1:].lstrip(' \t'))
+    return tokens, value, depth
 
 
 def _node_parts(line):
@@ -141,23 +141,19 @@ def _node_parts(line):
         position = _field_indent(line) if dashed else indent
         return value, position, key, dashed
     if body == '-' and not dashed: return '', indent, None, True
-    if body[:1] == '?' and body[1:2] in ('', ' ', '\t'): return body[1:].lstrip(' \t'), indent, '?', False
+    candidate = line.text[_field_indent(line):] if dashed else body
+    if candidate[:1] == '?' and candidate[1:2] in ('', ' ', '\t'): return candidate[1:].lstrip(' \t'), _field_indent(line) if dashed else indent, '?', dashed
     if dashed: return body, indent, None, True
     return None
 
 
 def _block_scalar_end(lines, texts, index, parent_indent, value, owner, dashed):
-    _tokens, value = _prepared_value(value)
-    depth = 0
-    while value == '-' or value.startswith(('- ', '-\t')): depth, (_tokens, value) = depth + 1, _prepared_value(value[1:].lstrip(' \t'))
-    if value[:1] == '?' and value[1:2] in ('', ' ', '\t'): _tokens, value = _prepared_value(value[1:].lstrip(' \t'))
-    header, header_index = parse_block_header(value, owner), index
+    _tokens, value, depth = _sequence_value(value)
+    header, header_index, candidate_depth = parse_block_header(value, owner), index, 0
     if header is None and not value:
         header_index = next((i for i in range(index + 1, len(lines)) if _meaningful(lines[i])), len(lines))
         if header_index >= len(lines) or _indent(lines[header_index]) < parent_indent: return None
-        _, (_tokens, value), candidate_depth = _indent(lines[header_index]), _prepared_value(lines[header_index].text[_indent(lines[header_index]):]), 0
-        while dashed and (value == '-' or value.startswith(('- ', '-\t'))): candidate_depth, depth, (_tokens, value) = candidate_depth + 1, depth + 1, _prepared_value(value[1:].lstrip(' \t'))
-        if dashed and value[:1] == '?' and value[1:2] in ('', ' ', '\t'): _tokens, value = _prepared_value(value[1:].lstrip(' \t'))
+        _, (_tokens, value, candidate_depth) = _indent(lines[header_index]), _sequence_value(lines[header_index].text[_indent(lines[header_index]):], dashed)
         header = parse_block_header(value, owner)
     if header is not None:
         block_indent, block_line = parent_indent if not depth else _indent(lines[index]), lines[index]
@@ -167,6 +163,14 @@ def _block_scalar_end(lines, texts, index, parent_indent, value, owner, dashed):
     quote = _quote_is_open(value)
     if quote is not None: return header_index, _continued_quote_end(lines, header_index + 1, len(lines), quote)
     return None
+
+
+def _flow_start(lines, index, end, raw_value, dashed):
+    _tokens, value, _depth = _sequence_value(raw_value)
+    candidate = next((i for i in range(index + 1, len(lines)) if _meaningful(lines[i])), len(lines)) if not value and dashed else index
+    if candidate >= len(lines): return None
+    if candidate != index: _tokens, value, _depth = _sequence_value(lines[candidate].text[_indent(lines[candidate]):])
+    return (candidate, _flow_end(lines, candidate, end, value)) if value.startswith(('[', '{')) else None
 
 
 def _flow_property_end(text, start):
@@ -241,11 +245,11 @@ def _scalar_regions(lines, texts):
             scalar.update(range(header_index + 1, stop))
             index = stop
             continue
-        _tokens, value = _prepared_value(raw_value)
-        if value.startswith(('[', '{')):
-            stop = _flow_end(lines, index, len(lines), value)
-            opaque.update(range(index, stop))
-            scalar.update(range(index + 1, stop))
+        flow = _flow_start(lines, index, len(lines), raw_value, _dashed or raw_key is not None)
+        if flow is not None:
+            flow_index, stop = flow
+            opaque.update(range(flow_index, stop))
+            scalar.update(range(flow_index + 1, stop))
             index = stop
             continue
         index += 1
@@ -311,20 +315,18 @@ def _mapping_body(lines, scalar, entry, owner):
 def _anchor_position(lines, index, name, parts):
     if parts is None:
         indent, tokens = _indent(lines[index]), _prepared_value(lines[index].text[_indent(lines[index]):])[0]
-        previous = index - 1
-        while previous >= 0 and not _meaningful(lines[previous]):
-            previous -= 1
+        previous = next((i for i in range(index - 1, -1, -1) if _meaningful(lines[i])), -1)
         previous_parts = _node_parts(lines[previous]) if previous >= 0 else None
-        if f'&{name}' not in tokens or previous_parts is None or _prepared_value(previous_parts[0])[1] or previous_parts[2] not in (None, '?') or _indent(lines[previous]) >= indent: return None
-        return 'mapping key' if previous_parts[2] == '?' else 'sequence item'
+        if previous_parts is None: return None
+        _previous_tokens, previous_value, previous_depth = _sequence_value(previous_parts[0])
+        if f'&{name}' not in tokens or previous_value or previous_parts[2] not in (None, '?') or _indent(lines[previous]) >= indent: return None
+        return 'mapping key' if previous_parts[2] == '?' else 'nested sequence' if previous_depth else 'sequence item'
     raw_value, _indentation, raw_key, dashed = parts
-    if raw_key == '?': value, position = raw_value, 'mapping key'
+    if raw_key == '?': position, tokens = 'mapping key', _prepared_value(raw_value)[0]
     elif raw_key is None:
-        depth = 0
-        while raw_value == '-' or raw_value.startswith(('- ', '-\t')): depth, raw_value = depth + 1, raw_value[1:].lstrip(' \t')
-        value, position = raw_value, 'nested sequence item' if depth else 'sequence item'
-    else: value, position = raw_key, 'sequence item' if dashed else 'mapping key'
-    tokens = _prepared_value(value)[0]
+        tokens, _value, depth = _sequence_value(raw_value)
+        position = 'nested sequence item' if depth else 'sequence item'
+    else: _value, position, tokens = raw_key, 'sequence item' if dashed else 'mapping key', _prepared_value(raw_key)[0]
     return position if f'&{name}' in tokens else None
 
 

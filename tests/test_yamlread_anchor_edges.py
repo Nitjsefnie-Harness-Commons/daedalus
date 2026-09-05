@@ -209,6 +209,126 @@ def test_nested_explicit_key_scalar_content_hides_anchors(tmp):
             assert _names(source) == [expected] == ['target'], source
 
 
+def test_nested_mapping_scalar_header_keeps_mapping_sibling_visible(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' decoys:\n'
+        '  - - key: |2\n'
+        '        scalar\n'
+        '      first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  - - key: >2-\n'
+        '        scalar\n'
+        '      first: &a target\n',
+    )
+    for prefix in prefixes:
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert _names(source) == [expected] == ['target'], source
+
+
+def test_nested_explicit_key_scalar_keeps_mapping_sibling_visible(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' decoys:\n'
+        '  - - ? |2\n'
+        '        scalar\n'
+        '      : value\n'
+        '      first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  - - ? >2-\n'
+        '        scalar\n'
+        '      : value\n'
+        '      first: &a target\n',
+    )
+    for prefix in prefixes:
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert _names(source) == [expected] == ['target'], source
+
+
+def test_nested_flow_scalar_quotes_are_opaque(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - - ["open\n'
+        '      key: &a hidden"]\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  -\n'
+        '   [\n'
+        '     "open\n'
+        '       key: &a hidden"\n'
+        '   ]\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - -\n'
+        '     [\n'
+        '       "open\n'
+        '         key: &a hidden"\n'
+        '     ]\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        '  key:\n'
+        '   [\n'
+        '     "open\n'
+        '       key: &a hidden"\n'
+        '   ]\n',
+    )
+    for prefix in prefixes:
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert expected == 'target', source
+        _refused(source, 'flow collection')
+
+
+def test_nested_anchor_position_diagnostics_normalize_prefixes(tmp):
+    del tmp
+    cases = (
+        (
+            'anchors:\n'
+            ' decoys:\n'
+            '  - -\n'
+            '     &a target\n',
+            'nested sequence',
+        ),
+        (
+            'anchors:\n'
+            ' decoys:\n'
+            '  - -\n'
+            '  # comment\n'
+            '     &a target\n',
+            'nested sequence',
+        ),
+        (
+            'anchors:\n'
+            ' decoys:\n'
+            '  - - ? &a key\n'
+            '      : value\n',
+            'mapping key',
+        ),
+        (
+            'anchors:\n'
+            ' decoys:\n'
+            '  - - ? &a |2\n'
+            '        scalar\n'
+            '      : value\n',
+            'mapping key',
+        ),
+    )
+    for prefix, detail in cases:
+        _refused(_document(prefix), detail)
+
+
 def test_present_unsupported_anchor_positions_name_their_yaml_position(tmp):
     del tmp
     cases = (
