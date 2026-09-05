@@ -9,7 +9,8 @@ any other callee does so when it spells one readably (`cwd=`, a `**`
 spread of a mapping literal naming `cwd`, or `dict(cwd=...)`); a
 launcher bound where the alias walk cannot follow is refused there; a
 root owner reached any way but a plain attribute read stops proving
-ROOT; and `chdir` or `fchdir` on any base or through a from-import
+ROOT; a star import removes the builtin-dict exemption;
+and `chdir` or `fchdir` on any base or through a from-import
 alias moves the cwd launches inherit.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
@@ -23,7 +24,7 @@ from _coverage_bindings import (
     _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
-    _evaluation_scopes, _is_root_spelling, _scope_bindings,
+    _evaluation_scopes, _is_root_spelling, _name_is_unbound, _scope_bindings,
     _scope_shadows, _shadowed_names, _visible_scope_shadows,
     root_owner_names)
 
@@ -66,8 +67,11 @@ class _ModuleFacts:
         if 'ROOT' not in self.shadowed_names:
             self.module_shadows.discard('ROOT')
         self.scope_shadows[tree] = self.module_shadows
-        self.scope_bindings = _scope_bindings(self.scoped_nodes,
-                                              self.scope_shadows)
+        binding_nodes, self.binding_parents = _evaluation_scopes(
+            tree, type_scopes=True)
+        self.binding_scopes = dict(binding_nodes)
+        self.scope_bindings = _scope_bindings(binding_nodes,
+                                              self.binding_parents)
         self.subprocess_modules = set()
         self.launch_callables = set()
         self.declaration_modules = set()
@@ -187,7 +191,7 @@ class _ModuleFacts:
         return 'invalid'
 
 
-def _launch_method(node, facts, scope):
+def _launch_method(node, facts):
     """A recognised launcher, or any callee that spells cwd readably."""
     function = node.func
     if (isinstance(function, ast.Attribute)
@@ -201,8 +205,9 @@ def _launch_method(node, facts, scope):
     if facts.declaration_mode(node) is not None:
         return None
     if (isinstance(function, ast.Name) and function.id == 'dict'
-            and function.id not in _visible_scope_shadows(
-                scope, facts.scope_bindings, facts.scope_parents)):
+            and _name_is_unbound(
+                function.id, facts.binding_scopes.get(node),
+                facts.scope_bindings, facts.binding_parents)):
         return None
     if _has_cwd_control(node):
         return f'unresolved callee {ast.unparse(function)}'
@@ -401,7 +406,7 @@ def _visit(relative, facts, tree, keeps, violations):
     for child, scope in facts.scoped_nodes:
         if not isinstance(child, ast.Call):
             continue
-        method = _launch_method(child, facts, scope)
+        method = _launch_method(child, facts)
         if method is None:
             continue
         shadowed = _visible_scope_shadows(

@@ -207,5 +207,23 @@ def test_controls_never_write_inside_the_repository(tmp):
     assert not violations, '\n'.join(violations)
 
 
+def test_real_target_star_import_removes_the_exemption(tmp):
+    source = 'from review_launchers import *\n' + _IMPORT_LAUNCH + '\n'
+    line, planted, restored = _planted_violations(tmp, source, 2)
+    _assert_planted(line, planted, restored,
+                    'unresolved callee dict cwd=tmp declares no env=')
+    assert restored == [], restored
+
+
+def test_real_target_global_import_removes_the_exemption(tmp):
+    source = ('def bind():\n    global dict\n'
+              '    from review_launchers import dict\nbind()\n'
+              + _IMPORT_LAUNCH + '\n')
+    line, planted, restored = _planted_violations(tmp, source, 5)
+    _assert_planted(line, planted, restored,
+                    'unresolved callee dict cwd=tmp declares no env=')
+    assert restored == [], restored
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
