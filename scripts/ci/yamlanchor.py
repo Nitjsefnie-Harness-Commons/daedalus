@@ -2,8 +2,8 @@
 
 Bare `!` is outside this bounded textual subset because honoring it requires
 schema and tag resolution that this reader does not perform.  The
-`yaml.BaseLoader` oracle still returns text for explicitly string-shaped
-values; this module only recognizes the explicit ``!!str`` tag.
+`yaml.BaseLoader` oracle can stringify some other tagged values as well, but
+this module only recognizes the explicit ``!!str`` tag.
 """
 import re
 
@@ -52,9 +52,9 @@ def validate_node_properties(tokens, owner):
             tag = token
             if tag not in _STRING_TAGS:
                 raise YAMLReadError(
-                    f'{owner} has an unsupported YAML tag {tag}: only !!str '
-                    'resolves to a string, and a guess at what a parser '
-                    'makes of any other is worse than a refusal')
+                    f'{owner} has an unsupported YAML tag {tag}: this reader '
+                    'only accepts !!str; other tag resolution is outside its '
+                    'bounded grammar')
 
 
 def parse_alias(value, owner):
