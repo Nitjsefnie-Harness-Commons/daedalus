@@ -573,5 +573,33 @@ def test_unsupported_tag_diagnostic_does_not_claim_a_false_resolution(tmp):
     raise AssertionError('unsupported YAML tag was accepted')
 
 
+def test_explicit_flow_key_quotes_hide_delimiters_and_anchor_text(tmp):
+    """Quoted explicit keys keep delimiters and apparent anchors opaque."""
+    del tmp
+    for opener, closer in (('{', '}'), ('[', ']')):
+        for quote in ('"', "'"):
+            for nested in (False, True):
+                outer = ('[', ']') if nested else ('', '')
+                prefix = ('anchors:\n first: &a target\n'
+                          f' decoy: {outer[0]}{opener} ? {quote}quoted '
+                          f'{closer} delimiter\n'
+                          '   key: &a hidden\n'
+                          f'   end{quote} : value {closer}{outer[1]}\n')
+                source = _document(prefix)
+                expected = _base_name(source)
+                assert expected == 'target', source
+                _refused(source, 'flow collection')
+
+
+def test_detached_mapping_value_anchor_names_its_position(tmp):
+    del tmp
+    for gap in ('', '\n   # comment\n'):
+        source = ('jobs:\n sample:\n  env:\n   FIRST:\n' + gap
+                  + '    &a target\n  steps:\n   - name: *a\n'
+                  '     if: z\n')
+        assert _base_name(source) == 'target'
+        _refused(source, 'mapping value')
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))

@@ -3,9 +3,15 @@
 import sys
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _repo import ROOT  # noqa: E402
 from _yamlread import YAMLReadError, job_mapping  # noqa: E402
+
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+from workflow_yaml import workflow_step_items  # noqa: E402
 
 
 def test_a_wrapped_mapping_value_must_start_as_plain(tmp):
@@ -99,6 +105,25 @@ def test_a_comment_ends_a_wrapped_mapping_value(tmp):
         assert 'unsupported multiline scalar' in str(error), str(error)
         return
     raise AssertionError('job_mapping folded past an inline comment')
+
+
+def test_explicit_mapping_value_keeps_its_scalar_content_opaque(tmp):
+    """An explicit key's value cannot redefine an earlier anchor."""
+    del tmp
+    values = ('|\n     k: &a hidden\n', '>-\n     k: &a hidden\n',
+              '"open\n     k: &a hidden"\n',
+              "'open\n     k: &a hidden'\n")
+    for value in values:
+        for gap in ('', '\n   # comment\n'):
+            source = ('jobs:\n sample:\n  env:\n'
+                      '   FIRST: &a target\n'
+                      f'   ? SECOND{gap}\n   : {value}'
+                      '  steps:\n   - name: *a\n     if: z\n')
+            parsed = yaml.load(source, Loader=yaml.BaseLoader)
+            expected = parsed['jobs']['sample']['steps'][0]['name']
+            items = workflow_step_items(source, 'sample')
+            assert items is not None, source
+            assert [item.name for item in items] == [expected] == ['target']
 
 
 if __name__ == '__main__':

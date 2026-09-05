@@ -3,13 +3,53 @@ from dataclasses import dataclass
 
 if __package__:
     # pylint: disable=relative-beyond-top-level
+    from .workflow_yaml_scan import (
+        field_indent as _field_indent,
+        indent as _indent,
+        lines as _lines,
+        meaningful as _meaningful,
+        node_parts as _node_parts,
+        prepared_value as _prepared_value,
+        quote_is_open as _quote_is_open,
+        scalar_regions as _scalar_regions,
+        sequence_value as _sequence_value,
+    )
+    from .yamlanchor import (
+        has_anchor_spelling,
+        node_properties,
+        parse_alias,
+        validate_node_properties,
+    )
     from .yamlblock import block_end, decode_block, parse_block_header
-    from .yamlanchor import has_anchor_spelling, node_properties, parse_alias, validate_node_properties
-    from .yamlscalar import YAMLReadError, _strip_inline_comment, decode_inline_scalar, split_mapping_field, text_indent
+    from .yamlscalar import (
+        YAMLReadError,
+        decode_inline_scalar,
+        split_mapping_field,
+    )
 else:
+    from workflow_yaml_scan import (
+        field_indent as _field_indent,
+        indent as _indent,
+        lines as _lines,
+        meaningful as _meaningful,
+        node_parts as _node_parts,
+        prepared_value as _prepared_value,
+        quote_is_open as _quote_is_open,
+        scalar_regions as _scalar_regions,
+        sequence_value as _sequence_value,
+    )
+    from yamlanchor import (
+        has_anchor_spelling,
+        node_properties,
+        parse_alias,
+        validate_node_properties,
+    )
     from yamlblock import block_end, decode_block, parse_block_header
-    from yamlanchor import has_anchor_spelling, node_properties, parse_alias, validate_node_properties
-    from yamlscalar import YAMLReadError, _strip_inline_comment, decode_inline_scalar, split_mapping_field, text_indent
+    from yamlscalar import (
+        YAMLReadError,
+        decode_inline_scalar,
+        split_mapping_field,
+    )
 
 
 @dataclass(frozen=True)
@@ -26,236 +66,14 @@ class StepItem:
 
 
 @dataclass(frozen=True)
-class _Line:
-    text: str
-    start: int
-    end: int
-
-
-@dataclass(frozen=True)
 class _Entry:
     index: int
     indent: int
     rest: str = ''
 
 
-def _lines(workflow):
-    if not isinstance(workflow, str):
-        raise YAMLReadError('workflow must be a string')
-    lines = []
-    offset = 0
-    if workflow[:1] == '\ufeff':
-        workflow = workflow[1:]
-        offset = 1
-    for raw in workflow.splitlines(keepends=True):
-        lines.append(_Line(raw.rstrip('\r\n'), offset, offset + len(raw)))
-        offset += len(raw)
-    return lines
-
-
-def _indent(line):
-    return text_indent(line.text)
-
-
-def _meaningful(line):
-    return bool(line.text.strip(' ')) and line.text.lstrip(' ')[:1] != '#'
-
-
 def _split_field(text, owner):
     return split_mapping_field(text, owner, allow_tabs=True)
-
-
-def _field_indent(line, nested=False):
-    """Where a mapping field starts, past any sequence dash on its line."""
-    indent = _indent(line)
-    while line.text[indent:indent + 1] == '-' and line.text[indent + 1:indent + 2] in (' ', '\t') and (nested or indent == _indent(line)): indent += 1 + len(line.text[indent + 1:]) - len(line.text[indent + 1:].lstrip(' \t'))
-    return indent
-
-
-def _quote_is_open(value):
-    value = value.lstrip(' \t')
-    if value[:1] not in ("'", '"'):
-        return None
-    quote = value[0]
-    index = 1
-    while index < len(value):
-        char = value[index]
-        if quote == "'" and char == "'":
-            if value[index:index + 2] == "''":
-                index += 2
-                continue
-            return None
-        if quote == '"' and char == '\\':
-            index += 2
-            continue
-        if char == quote:
-            return None
-        index += 1
-    return quote
-
-
-def _continued_quote_end(lines, start, end, quote):
-    for index in range(start, end):
-        value = lines[index].text
-        cursor = 0
-        while cursor < len(value):
-            char = value[cursor]
-            if quote == "'" and char == "'":
-                if value[cursor:cursor + 2] == "''":
-                    cursor += 2
-                    continue
-                return index + 1
-            if quote == '"' and char == '\\':
-                cursor += 2
-                continue
-            if char == quote:
-                return index + 1
-            cursor += 1
-    raise YAMLReadError('workflow has an incomplete quoted scalar')
-
-
-def _prepared_value(raw_value):
-    """Return node properties and comment-stripped scalar content."""
-    tokens, bare = node_properties(raw_value.lstrip(' \t'))
-    return tokens, _strip_inline_comment(bare.strip(' \t'))
-
-
-def _sequence_value(raw, dashed=True):
-    tokens, value, depth = (*_prepared_value(raw), 0)
-    while (dashed and (value == '-' or value.startswith(('- ', '-\t')))) or (value[:1] == '?' and value[1:2] in ('', ' ', '\t')): depth, (tokens, value) = depth + (value == '-' or value.startswith(('- ', '-\t'))), _prepared_value(value[1:].lstrip(' \t'))
-    return tokens, value, depth
-
-
-def _node_parts(line):
-    indent = _indent(line)
-    body = line.text[indent:]
-    dashed = body.startswith('-') and body[1:2] in (' ', '\t')
-    if dashed:
-        body = body[1:].lstrip(' \t')
-    candidate = line.text[_field_indent(line, True):] if dashed else body
-    if candidate[:1] == '?' and candidate[1:2] in ('', ' ', '\t'): return candidate[1:].lstrip(' \t'), _field_indent(line, True) if dashed else indent, '?', dashed
-    try:
-        field = _split_field(candidate, 'mapping')
-    except YAMLReadError:
-        field = None
-    if field is not None:
-        key, value = field
-        position = _field_indent(line, True) if dashed else indent
-        return value, position, key, dashed
-    if body == '-' and not dashed: return '', indent, None, True
-    if dashed: return body, indent, None, True
-    return None
-
-
-def _block_scalar_end(lines, texts, index, parent_indent, value, owner, dashed):
-    _tokens, value, depth = _sequence_value(value)
-    header, header_index, candidate_depth, header_indent, header_parts = parse_block_header(value, owner), index, 0, parent_indent, None
-    if header is None and not value:
-        header_index = next((i for i in range(index + 1, len(lines)) if _meaningful(lines[i])), len(lines))
-        if header_index >= len(lines) or _indent(lines[header_index]) < parent_indent: return None
-        header_parts = _node_parts(lines[header_index]) if dashed else None
-        header_indent, candidate = (parent_indent, lines[header_index].text[_indent(lines[header_index]):]) if header_parts is None else (header_parts[1], header_parts[0])
-        _tokens, value, candidate_depth = _sequence_value(candidate, dashed if header_parts is None else header_parts[3])
-        header = parse_block_header(value, owner)
-    if header is not None:
-        block_indent, block_line = parent_indent if not depth else _indent(lines[index]), lines[index]
-        if header_index != index and dashed and header_parts is not None: block_indent, depth, block_line = header_indent, candidate_depth, lines[header_index]
-        for _ in range(depth): block_indent = block_indent + 1 + len(block_line.text[block_indent + 1:]) - len(block_line.text[block_indent + 1:].lstrip(' \t'))
-        return header_index, block_end(texts, header_index + 1, len(texts), block_indent, header)
-    quote = _quote_is_open(value)
-    if quote is not None: return header_index, _continued_quote_end(lines, header_index + 1, len(lines), quote)
-    return None
-
-
-def _flow_start(lines, index, end, raw_value, dashed):
-    _tokens, value, _depth = _sequence_value(raw_value)
-    candidate = next((i for i in range(index + 1, len(lines)) if _meaningful(lines[i])), len(lines)) if not value and dashed else index
-    if candidate >= len(lines): return None
-    if candidate != index: _tokens, value, _depth = _sequence_value(lines[candidate].text[_indent(lines[candidate]):])
-    return (candidate, _flow_end(lines, candidate, end, value)) if value.startswith(('[', '{')) else None
-
-
-def _flow_property_end(text, start):
-    if text.startswith('!<', start):
-        return text.find('>', start + 2) + 1 or len(text)
-    return next((i for i in range(start + 1, len(text))
-                 if text[i].isspace() or text[i] in ',[]{}'), len(text))
-
-
-def _flow_end(lines, start, end, value):
-    depth, quote = 0, None
-    node_start = True
-    for index in range(start, end):
-        text = value if index == start else lines[index].text
-        cursor = 0
-        while cursor < len(text):
-            char = text[cursor]
-            if quote:
-                if quote == "'" and text[cursor:cursor + 2] == "''":
-                    cursor += 2
-                    continue
-                if quote == '"' and char == '\\':
-                    cursor += 2
-                    continue
-                if char == quote:
-                    quote = None
-                cursor += 1
-                continue
-            if char == '#' and (cursor == 0 or text[cursor - 1].isspace()):
-                break
-            if node_start and char in '&!':
-                cursor = _flow_property_end(text, cursor)
-                continue
-            if node_start and char in ("'", '"'):
-                quote = char
-            elif char in '[{':
-                depth, node_start = depth + 1, True
-            elif char in ']}':
-                depth -= 1
-                if depth <= 0:
-                    return index + 1
-                node_start = False
-            elif char == ',':
-                node_start = True
-            elif char == ':' and text[cursor + 1:cursor + 2] in (
-                    '', ' ', '\t', "'", '"', '&', '!'):
-                node_start = True
-            elif not char.isspace():
-                node_start = False
-            cursor += 1
-    return end
-
-
-def _scalar_regions(lines, texts):
-    """Find scalar continuations and opaque flow-collection extents."""
-    scalar = set()
-    opaque = set()
-    index = 0
-    while index < len(lines):
-        if not _meaningful(lines[index]) or index in scalar:
-            index += 1
-            continue
-        parts = _node_parts(lines[index])
-        if parts is None:
-            index += 1
-            continue
-        raw_value, parent_indent, raw_key, _dashed = parts
-        header_owner = ('mapping key' if raw_key == '?' else f'mapping field {raw_key.strip()!r}' if raw_key is not None else 'sequence item')
-        stop = _block_scalar_end(lines, texts, index, parent_indent, raw_value, header_owner, _dashed)
-        if stop is not None:
-            header_index, stop = stop
-            scalar.update(range(header_index + 1, stop))
-            index = stop
-            continue
-        flow = _flow_start(lines, index, len(lines), raw_value, _dashed or raw_key is not None)
-        if flow is not None:
-            flow_index, stop = flow
-            opaque.update(range(flow_index, stop))
-            scalar.update(range(flow_index + 1, stop))
-            index = stop
-            continue
-        index += 1
-    return scalar, opaque
 
 
 def _section(lines, scalar, start, parent_indent):
@@ -315,24 +133,64 @@ def _mapping_body(lines, scalar, entry, owner):
 
 
 def _anchor_position(lines, index, name, parts):
-    previous = next((i for i in range(index - 1, -1, -1) if _meaningful(lines[i])), -1)
+    previous = next(
+        (i for i in range(index - 1, -1, -1) if _meaningful(lines[i])),
+        -1,
+    )
     previous_parts = _node_parts(lines[previous]) if previous >= 0 else None
-    previous_value, previous_depth = _sequence_value(previous_parts[0])[1:] if previous_parts is not None else ('', 0)
+    if previous_parts is None:
+        previous_value, previous_depth = '', 0
+    else:
+        _tokens, previous_value, previous_depth = _sequence_value(
+            previous_parts[0])
     if parts is None:
-        indent, tokens = _indent(lines[index]), _prepared_value(lines[index].text[_indent(lines[index]):])[0]
-        if previous_parts is None: return None
-        if f'&{name}' not in tokens or previous_value or previous_parts[2] not in (None, '?') or _indent(lines[previous]) >= indent: return None
-        return 'mapping key' if previous_parts[2] == '?' else 'nested sequence' if previous_depth else 'sequence item'
+        line_indent = _indent(lines[index])
+        tokens = _prepared_value(
+            lines[index].text[line_indent:])[0]
+        if previous_parts is None:
+            return None
+        if f'&{name}' not in tokens or previous_value:
+            return None
+        if _indent(lines[previous]) >= line_indent:
+            return None
+        previous_key = previous_parts[2]
+        if previous_key not in (None, '?'):
+            return 'mapping value'
+        if previous_key == '?':
+            return 'mapping key'
+        return 'nested sequence' if previous_depth else 'sequence item'
     raw_value, _indentation, raw_key, dashed = parts
-    if raw_key == '?': position, tokens = 'mapping key', _prepared_value(raw_value)[0]
+    if raw_key == '?':
+        position, tokens = 'mapping key', _prepared_value(raw_value)[0]
     elif raw_key is None:
         tokens, _value, depth = _sequence_value(raw_value)
         position = 'nested sequence item' if depth else 'sequence item'
-    else: _value, position, tokens = raw_key, 'nested sequence item' if ((dashed and _field_indent(lines[index], True) != _field_indent(lines[index], False)) or (not dashed and previous >= 0 and previous_depth and not previous_value and _indent(lines[previous]) < _indent(lines[index]))) else 'sequence item' if dashed else 'mapping key', _prepared_value(raw_key)[0]
+    elif raw_key == '':
+        return None
+    else:
+        nested = (
+            dashed
+            and (_field_indent(lines[index], True)
+                 != _field_indent(lines[index], False))
+        ) or (
+            not dashed
+            and previous >= 0
+            and previous_depth
+            and not previous_value
+            and _indent(lines[previous]) < _indent(lines[index])
+        )
+        if nested:
+            position = 'nested sequence item'
+        elif dashed:
+            position = 'sequence item'
+        else:
+            position = 'mapping key'
+        tokens = _prepared_value(raw_key)[0]
     return position if f'&{name}' in tokens else None
 
 
-def _alias_value(lines, texts, scalar, opaque, alias_index, name, owner):
+def _alias_value(
+        lines, texts, scalar, opaque, alias_index, name, owner):
     target = f'{owner} alias &{name}'
     for index in range(alias_index - 1, -1, -1):
         if (index in opaque
@@ -378,11 +236,21 @@ def _alias_value(lines, texts, scalar, opaque, alias_index, name, owner):
                 f'{shape}: &{name}')
         prepared = (tokens, content)
         return _step_value(
-            lines, texts, scalar, opaque, index, end, indent, prepared, target)
+            lines,
+            texts,
+            scalar,
+            opaque,
+            index,
+            end,
+            indent,
+            prepared,
+            target,
+        )
     raise YAMLReadError(f'{owner} has an unknown YAML alias: &{name}')
 
 
-def _step_value(lines, texts, scalar, opaque, start, end, indent, prepared, owner):
+def _step_value(
+        lines, texts, scalar, opaque, start, end, indent, prepared, owner):
     tokens, content = prepared
     validate_node_properties(tokens, owner)
     alias = parse_alias(content, owner)
@@ -391,7 +259,15 @@ def _step_value(lines, texts, scalar, opaque, start, end, indent, prepared, owne
             f'{owner} has an alias carrying node properties: '
             f'{" ".join(tokens)} {content}')
     if alias is not None:
-        return _alias_value(lines, texts, scalar, opaque, start, alias, owner)
+        return _alias_value(
+            lines,
+            texts,
+            scalar,
+            opaque,
+            start,
+            alias,
+            owner,
+        )
     if not content:
         raise YAMLReadError(f'{owner} has no scalar value')
     header = parse_block_header(content, owner)
@@ -406,7 +282,9 @@ def _step_value(lines, texts, scalar, opaque, start, end, indent, prepared, owne
         return decode_inline_scalar(content, owner)
     if content.startswith(('[', '{', '@', '`')):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
-    if '\t' in content or any(ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff for char in content):
+    if '\t' in content or any(
+            ord(char) < 0x20 or 0xd800 <= ord(char) <= 0xdfff
+            for char in content):
         raise YAMLReadError(f'{owner} has an unsupported scalar')
     if any(_meaningful(lines[index]) and _indent(lines[index]) > indent
            for index in range(start + 1, end)):
@@ -431,7 +309,8 @@ def _step_fields(lines, scalar, index, end, item_indent):
     return field_indent, fields
 
 
-def _decoded_step_fields(lines, texts, scalar, opaque, index, end, item_indent):
+def _decoded_step_fields(
+        lines, texts, scalar, opaque, index, end, item_indent):
     field_indent, fields = _step_fields(lines, scalar, index, end, item_indent)
     if fields:
         first_index, first_field = fields[0]
@@ -448,7 +327,17 @@ def _decoded_step_fields(lines, texts, scalar, opaque, index, end, item_indent):
         if key in values and key in ('name', 'id'):
             raise YAMLReadError(f'duplicate mapping key: {key}')
         if key in ('name', 'id'):
-            values[key] = _step_value(lines, texts, scalar, opaque, field_index, field_end, field_indent, _prepared_value(raw_value), f'step {key}')
+            values[key] = _step_value(
+                lines,
+                texts,
+                scalar,
+                opaque,
+                field_index,
+                field_end,
+                field_indent,
+                _prepared_value(raw_value),
+                f'step {key}',
+            )
         else:
             values[key] = None
     return values
@@ -494,7 +383,27 @@ def workflow_step_items(workflow, job):
     items = []
     for offset, index in enumerate(indices):
         item_end = indices[offset + 1] if offset + 1 < len(indices) else end
-        fields = _decoded_step_fields(lines, texts, scalar, opaque, index, item_end, item_indent)
-        last = max(line_index for line_index in range(index, item_end) if line_index in scalar or _meaningful(lines[line_index]))
-        items.append(StepItem(index=index, end_index=item_end, indent=item_indent, start=lines[index].start, end=lines[last].end, name=fields.get('name'), identity=fields.get('id')))
+        fields = _decoded_step_fields(
+            lines,
+            texts,
+            scalar,
+            opaque,
+            index,
+            item_end,
+            item_indent,
+        )
+        last = max(
+            line_index
+            for line_index in range(index, item_end)
+            if line_index in scalar or _meaningful(lines[line_index])
+        )
+        items.append(StepItem(
+            index=index,
+            end_index=item_end,
+            indent=item_indent,
+            start=lines[index].start,
+            end=lines[last].end,
+            name=fields.get('name'),
+            identity=fields.get('id'),
+        ))
     return items
