@@ -83,6 +83,10 @@ def _carried_parts(value):
     elif isinstance(value, (ast.Tuple, ast.List, ast.Set)):
         for part in value.elts:
             yield from _carried_parts(part)
+    elif isinstance(value, ast.Dict):
+        for part in value.values:
+            if part is not None:
+                yield from _carried_parts(part)
     elif isinstance(value, ast.Starred):
         yield from _carried_parts(value.value)
     else:
