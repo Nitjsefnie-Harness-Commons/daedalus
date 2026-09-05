@@ -248,6 +248,7 @@
 !/tests/_control_calls.py
 !/tests/_control_writes.py
 !/tests/_coverage_bindings.py
+!/tests/_coverage_comment_publication.py
 !/tests/_coverage_comment_steps.py
 !/tests/_coverage_guard.py
 !/tests/_coverage_memo.py

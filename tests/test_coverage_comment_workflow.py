@@ -13,7 +13,7 @@ from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
-from _coverage_comment_steps import publication_contract  # noqa: E402
+from _coverage_comment_publication import publication_contract  # noqa: E402
 from _yamlread import (  # noqa: E402
     YAMLReadError, _indent, job_mapping, job_scalar,
     step_scalar, step_scalars,
