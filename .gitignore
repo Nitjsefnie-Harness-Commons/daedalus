@@ -353,6 +353,7 @@
 !/tests/test_coverage_config.py
 !/tests/test_coverage_environment.py
 !/tests/test_coverage_memo.py
+!/tests/test_coverage_name_bindings.py
 !/tests/test_coverage_scope_bindings.py
 !/tests/test_coverage_suites.py
 !/tests/test_dashboard_accessibility.py

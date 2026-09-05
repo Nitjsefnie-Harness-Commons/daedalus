@@ -213,7 +213,7 @@ def _containing_binding_scope(scope, parents):
     return scope
 
 
-def _evaluation_scopes(tree):
+def _evaluation_scopes(tree, type_scopes=False):
     """Nodes with their evaluation or binding scope, plus scope parents."""
     scoped = []
     parents = {tree: None}
@@ -232,30 +232,50 @@ def _evaluation_scopes(tree):
             if argument.annotation is not None:
                 visit(argument.annotation, scope)
 
+    def annotation_scope(node, scope):
+        parameters = getattr(node, 'type_params', ())
+        if not type_scopes or not parameters:
+            return scope
+        annotation = object()
+        parents[annotation] = scope
+        for parameter in parameters:
+            visit(parameter, annotation)
+        return annotation
+
     def visit(node, scope):
         scoped.append((node, scope))
+        if type_scopes and isinstance(node, getattr(ast, 'TypeAlias', ())):
+            parents[node] = annotation_scope(node, scope)
+            visit(node.name, scope)
+            visit(node.value, node)
+            return
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            parents[node] = enclosing(scope)
+            annotation = annotation_scope(node, scope)
+            parents[node] = enclosing(annotation)
             for decorator in node.decorator_list:
                 visit(decorator, scope)
-            visit_arguments(node.args, scope)
+            visit_arguments(node.args, annotation)
             for value in (*node.args.defaults, *node.args.kw_defaults):
                 if value is not None:
                     visit(value, scope)
             if node.returns is not None:
-                visit(node.returns, scope)
-            for value in getattr(node, 'type_params', ()):
-                visit(value, scope)
+                visit(node.returns, annotation)
+            if not type_scopes:
+                for value in getattr(node, 'type_params', ()):
+                    visit(value, scope)
             for statement in node.body:
                 visit(statement, node)
             return
         if isinstance(node, ast.ClassDef):
-            parents[node] = enclosing(scope)
+            annotation = annotation_scope(node, scope)
+            parents[node] = enclosing(annotation)
             for decorator in node.decorator_list:
                 visit(decorator, scope)
-            for value in (*node.bases, *node.keywords,
-                          *getattr(node, 'type_params', ())):
-                visit(value, scope)
+            for value in (*node.bases, *node.keywords):
+                visit(value, annotation)
+            if not type_scopes:
+                for value in getattr(node, 'type_params', ()):
+                    visit(value, scope)
             for statement in node.body:
                 visit(statement, node)
             return
@@ -331,23 +351,82 @@ def _scope_shadows(tree, layout=None):
     return shadows
 
 
-def _scope_bindings(scoped, shadows):
-    """Shadowed names per scope, plus the names each scope's imports bind.
+_FUNCTION_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_TYPE_PARAMETERS = tuple(getattr(ast, name) for name in (
+    'TypeVar', 'ParamSpec', 'TypeVarTuple') if hasattr(ast, name))
+_ALL_NAMES = '*'
 
-    Binding a name and rebinding one are different questions, and an
-    import answers only the first: `from x import dict` binds a name over
-    the builtin, but it is not the replacement of a value a root spelling
-    is written against. A caller asking which names a scope binds reads
-    this; one asking which values were replaced reads `_scope_shadows`.
+
+def _bound_names(node):
+    if (isinstance(node, ast.Name)
+            and isinstance(node.ctx, (ast.Store, ast.Del))):
+        return {node.id}
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                         *_TYPE_PARAMETERS)):
+        return {node.name}
+    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return {node.name} if node.name else set()
+    if isinstance(node, ast.MatchMapping):
+        return {node.rest} if node.rest else set()
+    if isinstance(node, ast.Import):
+        return {alias.asname or alias.name.split('.')[0]
+                for alias in node.names}
+    if isinstance(node, ast.ImportFrom):
+        return {alias.asname or alias.name for alias in node.names}
+    return set()
+
+
+def _scope_bindings(scoped, parents):
+    """All grammar-bound names, independent of the rebinding product.
+
+    A star import carries the all-names sentinel. Declarations bind their
+    destination even without an assignment, since uncertainty cannot prove
+    a builtin. Store-context names cover every assignment target shape.
     """
-    bindings = {scope: set(names) for scope, names in shadows.items()}
+    local = {scope: set() for scope in parents}
+    global_names = {scope: set() for scope in parents}
+    nonlocal_names = {scope: set() for scope in parents}
     for node, scope in scoped:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            # A star import binds names only its own module knows.
-            bindings[scope].update(alias.asname or alias.name.split('.')[0]
-                                   for alias in node.names
-                                   if alias.name != '*')
+        local[scope].update(_bound_names(node))
+        if isinstance(node, _FUNCTION_SCOPES):
+            local[node].update(_parameter_names(node.args))
+        if isinstance(node, ast.Global):
+            global_names[scope].update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            nonlocal_names[scope].update(node.names)
+    module = next(scope for scope, parent in parents.items() if parent is None)
+    bindings = {scope: names - global_names[scope] - nonlocal_names[scope]
+                for scope, names in local.items()}
+    for scope in parents:
+        bindings[module].update(global_names[scope])
+        for name in nonlocal_names[scope]:
+            target = parents[scope]
+            while target is not None:
+                if (isinstance(target, _FUNCTION_SCOPES)
+                        and name not in global_names[target]
+                        and name not in nonlocal_names[target]
+                        and (name in local[target]
+                             or _ALL_NAMES in local[target])):
+                    break
+                target = parents[target]
+            bindings[module if target is None else target].add(name)
     return bindings
+
+
+def _name_is_unbound(name, scope, bindings, parents):
+    if scope is None:
+        return False
+    skip_class = False
+    while scope is not None:
+        if scope not in bindings or scope not in parents:
+            return False
+        names = (set() if skip_class and isinstance(scope, ast.ClassDef)
+                 else bindings[scope])
+        if name in names or _ALL_NAMES in names:
+            return False
+        skip_class |= isinstance(scope, (*_FUNCTION_SCOPES, ast.ClassDef))
+        scope = parents[scope]
+    return True
 
 
 def _visible_scope_shadows(scope, shadows, parents):

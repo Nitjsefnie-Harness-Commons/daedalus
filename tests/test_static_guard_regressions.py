@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_guard import _coverage_environment_violations  # noqa: E402
 from _coverage_scopes import (  # noqa: E402
-    _evaluation_scopes, _scope_bindings, _scope_shadows)
+    _evaluation_scopes, _scope_bindings)
 from _owned_writes import copy_test_tree  # noqa: E402
 import test_coverage_bindings as _coverage_suite  # noqa: E402
 
@@ -276,14 +276,15 @@ def test_real_tree_allows_an_unshadowed_builtin_dict(tmp):
     assert _coverage_environment_violations(root) == []
 
 
-def test_a_star_import_records_no_bound_name(tmp):
+def test_a_star_import_removes_the_builtin_exemption(tmp):
     del tmp
     assert _coverage_suite._synthetic_violations(
-        "from helpers import *\nkw = dict(cwd='x')\n") == []
+        "from helpers import *\nkw = dict(cwd='x')\n") == [
+            "tests/synthetic.py:2: unresolved callee dict "
+            "cwd='x' declares no env="]
     tree = ast.parse('from helpers import *\n')
-    layout = _evaluation_scopes(tree)
-    bindings = _scope_bindings(layout[0], _scope_shadows(tree, layout))
-    assert bindings[tree] == set(), bindings[tree]
+    bindings = _scope_bindings(*_evaluation_scopes(tree))
+    assert '*' in bindings[tree], bindings[tree]
 
 
 def test_real_tree_applies_python_evaluation_scopes(tmp):
