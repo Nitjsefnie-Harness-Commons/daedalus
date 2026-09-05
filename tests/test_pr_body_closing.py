@@ -19,28 +19,7 @@ REPOSITORY = 'Nitjsefnie-Harness-Commons/daedalus'
 RELATED = 'related issues and pull requests'
 
 # Captured from GitHub's /markdown endpoint in GFM mode with
-# Nitjsefnie-Harness-Commons/daedalus as the context, for the source
-# "Fixes #104\n\n## Fixes #105\n\nRan the suite.".
-GITHUB_OUTSIDE_SECTIONS_HTML = (
-    '<p dir="auto">Fixes <a class="issue-link js-issue-link" '
-    'data-error-text="Failed to load title" data-id="5232205124" '
-    'data-permission-text="Title is private" '
-    'data-url="https://github.com/Nitjsefnie-Harness-Commons/daedalus/'
-    'issues/104" data-hovercard-type="issue" '
-    'data-hovercard-url="/Nitjsefnie-Harness-Commons/daedalus/issues/104/'
-    'hovercard" href="https://github.com/Nitjsefnie-Harness-Commons/'
-    'daedalus/issues/104">#104</a></p>\n'
-    '<h2 dir="auto">Fixes <a class="issue-link js-issue-link" '
-    'data-error-text="Failed to load title" data-id="5232282547" '
-    'data-permission-text="Title is private" '
-    'data-url="https://github.com/Nitjsefnie-Harness-Commons/daedalus/'
-    'issues/105" data-hovercard-type="issue" '
-    'data-hovercard-url="/Nitjsefnie-Harness-Commons/daedalus/issues/105/'
-    'hovercard" href="https://github.com/Nitjsefnie-Harness-Commons/'
-    'daedalus/issues/105">#105</a></h2>\n'
-    '<p dir="auto">Ran the suite.</p>')
-
-# Captured from the same endpoint, in the same mode and context.
+# Nitjsefnie-Harness-Commons/daedalus as the context.
 GITHUB_ISSUE_104 = (
     '<a class="issue-link js-issue-link" data-error-text="Failed to load '
     'title" data-id="5232205124" data-permission-text="Title is private" '
@@ -50,6 +29,20 @@ GITHUB_ISSUE_104 = (
     'ercard" '
     'href="https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues/104'
     '">#104</a>')
+
+# Captured from the same endpoint, in the same mode and context, for the
+# source "Fixes #104\n\n## Fixes #105\n\nRan the suite.".
+GITHUB_OUTSIDE_SECTIONS_HTML = (
+    f'<p dir="auto">Fixes {GITHUB_ISSUE_104}</p>\n'
+    '<h2 dir="auto">Fixes <a class="issue-link js-issue-link" '
+    'data-error-text="Failed to load title" data-id="5232282547" '
+    'data-permission-text="Title is private" '
+    'data-url="https://github.com/Nitjsefnie-Harness-Commons/daedalus/'
+    'issues/105" data-hovercard-type="issue" '
+    'data-hovercard-url="/Nitjsefnie-Harness-Commons/daedalus/issues/105/'
+    'hovercard" href="https://github.com/Nitjsefnie-Harness-Commons/'
+    'daedalus/issues/105">#105</a></h2>\n'
+    '<p dir="auto">Ran the suite.</p>')
 
 GITHUB_FOOTNOTE_CLOSING_HTML = (
     f'<h2 dir="auto">Summary</h2>\n<p dir="auto">One sentence.</p>\n<h2 '
@@ -282,6 +275,7 @@ def test_captured_renderings_pin_the_closing_answer(tmp):
         found = PR_BODY.closing_issues(body)
         if found != expected:
             failures.append((name, found, expected))
+    # Issue 585's captured leg for this fixture; its footnote holds no anchor.
     body = PR_BODY.parse_rendered(GITHUB_FOOTNOTE_HTML, REPOSITORY)
     found = PR_BODY.closing_issues(body)
     if found != [101]:
