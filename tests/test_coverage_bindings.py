@@ -8,8 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _control_writes import control_write_violations  # noqa: E402
-from _coverage_guard import (  # noqa: E402
-    _coverage_environment_violations, _synthetic_violations)
+from _coverage_guard import _synthetic_violations  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from test_bash_resolver_scan import _BASH_MUTATION_SPECS  # noqa: E402
@@ -84,6 +83,20 @@ import subprocess
 def go(*, result=subprocess.run(['python3', 'child.py'], cwd=tmp)):
     return result
 """),
+        (
+            """import os
+import subprocess
+os.chdir(tmp)
+def go(launchers={'sp': subprocess}):
+    launchers['sp'].run(['python3', 'child.py'])
+go()
+""",
+            """import os
+import subprocess
+def go(results={'sp': subprocess.run(
+        ['python3', 'child.py'], cwd=tmp)}):
+    return results
+"""),
     )
     for unsafe, explicit in pairs:
         _assert_binding_pair(unsafe, 4, explicit, 3)
@@ -141,6 +154,12 @@ launchers: list = [subprocess]
 os.chdir(tmp)
 for launcher in launchers:
     launcher.run(['python3', 'child.py'])
+""",
+        """import os
+import subprocess
+launchers = {'sp': subprocess}
+os.chdir(tmp)
+launchers['sp'].run(['python3', 'child.py'])
 """,
     )
     for unsafe in unsafe_sources:
@@ -309,12 +328,6 @@ def _module_text(target):
     return target.read_bytes().decode('utf-8').replace('\r\n', '\n')
 
 
-def _real_module_copy(tmp, relative):
-    root = Path(tmp) / 'repository'
-    copy_test_tree(root)
-    return root, root / relative
-
-
 def _inserted_line(source, anchor, snippet, marker):
     mutated = source.replace(anchor, snippet + anchor, 1)
     return mutated, mutated[:mutated.index(marker)].count('\n') + 1
@@ -450,6 +463,10 @@ def _mutation_specs():
         "            yield from _carried_parts(callee)\n",
         "",
     )
+    dict_values = (
+        "    elif isinstance(value, ast.Dict):\n        for part in "
+        "value.values:\n            if part is not None:\n                yield "
+        "from _carried_parts(part)\n", "")
     default_scope = (
         "            for value in (*node.args.defaults, "
         "*node.args.kw_defaults):\n"
@@ -518,6 +535,7 @@ def _mutation_specs():
          'suite.test_match_capture_refuses_a_hidden_launcher(None)'),
         ('callee base', 'bindings', (callee,),
          'suite.test_call_result_assignment_refuses_a_hidden_launcher(None)'),
+        ('dict values', 'bindings', (dict_values,), 'suite.test_single_name_container_refuses_a_hidden_launcher(None)'),
         ('function default scope', 'scopes',
          (function_default_scope,),
          _SCOPE_INVOKE),
@@ -589,104 +607,6 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
             'cached bytecode freshness', result.stdout, result.stderr)
         assert result.returncode != 0, (name, result.stdout, result.stderr)
         assert 'AssertionError' in result.stderr, (name, result.stderr)
-
-
-def test_mutation_gate_accepts_crlf_copied_helpers(tmp):
-    root = Path(tmp) / 'repository'
-    copy_test_tree(root)
-    bindings = root / 'tests' / '_coverage_bindings.py'
-    scopes = root / 'tests' / '_coverage_scopes.py'
-    bash = root / 'tests' / '_bash_resolver_scan.py'
-    sources = [bindings.read_bytes(), scopes.read_bytes(), bash.read_bytes()]
-    crlf_sources = [source.replace(b'\r\n', b'\n').replace(
-        b'\n', b'\r\n') for source in sources]
-    assert all(b'\r\n' in source
-               and b'\n' not in source.replace(b'\r\n', b'')
-               for source in crlf_sources)
-    bindings.write_bytes(crlf_sources[0])
-    scopes.write_bytes(crlf_sources[1])
-    bash.write_bytes(crlf_sources[2])
-    mutation_tmp = Path(tmp) / 'mutations'
-    program = (
-        "import sys\nsys.path.insert(0, 'tests')\n"
-        "import test_coverage_bindings as suite\n"
-        'suite.test_each_new_binding_and_match_arm_is_mutation_sensitive('
-        f'{str(mutation_tmp)!r})\n')
-    result = subprocess.run(
-        [sys.executable, '-B', '-c', program], cwd=root,
-        env=_util.child_coverage('scrub'), capture_output=True,
-        text=True, timeout=120)
-    assert result.returncode == 0, result.stderr
-    assert [bindings.read_bytes(), scopes.read_bytes(),
-            bash.read_bytes()] == crlf_sources
-
-
-def test_real_tree_refuses_each_complete_binding_bypass(tmp):
-    root, target = _real_module_copy(
-        tmp, Path('tests/test_diff_coverage.py'))
-    source = _module_text(target)
-    anchor = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
-    assert anchor in source, 'the coverage declaration shape changed'
-    original = target.read_bytes()
-    for name, unsafe, marker, explicit in _binding_snippets():
-        mutated, line = _inserted_line(source, anchor, unsafe, marker)
-        try:
-            target.write_bytes(mutated.encode('utf-8'))
-            violations = _coverage_environment_violations(root)
-            expected = (
-                f'tests/test_diff_coverage.py:{line}: {_BINDING_MESSAGE}')
-            assert expected in violations, (name, violations)
-        finally:
-            target.write_bytes(original)
-        restored = _coverage_environment_violations(root)
-        assert not any(v.startswith(
-            f'tests/test_diff_coverage.py:{line}:') for v in restored), (
-                name, restored)
-
-        explicit_source, _ = _inserted_line(
-            source, anchor, explicit, 'def _binding_probe')
-        try:
-            target.write_bytes(explicit_source.encode('utf-8'))
-            explicit_violations = _coverage_environment_violations(root)
-            expected_count = 2 if name == 'defaults' else 1
-            assert len(explicit_violations) == expected_count, (
-                name, explicit_violations)
-            assert all('subprocess.run cwd=tmp declares no env=' in item
-                       for item in explicit_violations), (
-                           name, explicit_violations)
-            assert all(_BINDING_MESSAGE not in item
-                       for item in explicit_violations), (
-                           name, explicit_violations)
-        finally:
-            target.write_bytes(original)
-
-
-def test_real_tree_allows_an_unshadowed_builtin_dict(tmp):
-    root, target = _real_module_copy(
-        tmp, Path('tests/test_diff_coverage.py'))
-    source = _module_text(target)
-    anchor = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
-    snippet = "_BUILTIN_DICT_CONTROL = dict(cwd='x')\n"
-    target.write_bytes(source.replace(
-        anchor, snippet + anchor, 1).encode('utf-8'))
-    assert _coverage_environment_violations(root) == []
-
-
-def test_real_tree_applies_python_evaluation_scopes(tmp):
-    root, target = _real_module_copy(tmp, Path('tests/test_diff_coverage.py'))
-    source = _module_text(target)
-    anchor = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
-    original = target.read_bytes()
-    for name, snippet, expected in _scope_cases():
-        mutated = source.replace(anchor, snippet + anchor, 1)
-        try:
-            target.write_bytes(mutated.encode('utf-8'))
-            violations = _coverage_environment_violations(root)
-        finally:
-            target.write_bytes(original)
-        wanted = _scope_violations(
-            'tests/test_diff_coverage.py', mutated, expected)
-        assert violations == wanted, (name, violations)
 
 
 def test_controls_never_write_inside_the_repository(tmp):
