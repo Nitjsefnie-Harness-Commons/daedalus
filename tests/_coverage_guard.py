@@ -19,7 +19,7 @@ result, and an unreadable `**` spread on an unrecognised callee.
 import ast
 
 from _coverage_bindings import (
-    _LAUNCHERS, _is_launch_value, _names_one_of,
+    _LAUNCHERS, _has_cwd_control, _is_launch_value, _names_one_of,
     _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
@@ -184,23 +184,6 @@ class _ModuleFacts:
         return 'invalid'
 
 
-def _spread_names_cwd(node):
-    """Whether a ** spread of the call is a mapping literal naming cwd."""
-    for keyword in node.keywords:
-        value = keyword.value
-        if keyword.arg is not None:
-            continue
-        if isinstance(value, ast.Dict) and any(
-                isinstance(key, ast.Constant) and key.value == 'cwd'
-                for key in value.keys):
-            return True
-        if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
-                and value.func.id == 'dict'
-                and any(item.arg == 'cwd' for item in value.keywords)):
-            return True
-    return False
-
-
 def _launch_method(node, facts, shadowed):
     """A recognised launcher, or any callee that spells cwd readably."""
     function = node.func
@@ -217,8 +200,7 @@ def _launch_method(node, facts, shadowed):
     if (isinstance(function, ast.Name) and function.id == 'dict'
             and function.id not in shadowed):
         return None
-    if (any(keyword.arg == 'cwd' for keyword in node.keywords)
-            or _spread_names_cwd(node)):
+    if _has_cwd_control(node):
         return f'unresolved callee {ast.unparse(function)}'
     return None
 

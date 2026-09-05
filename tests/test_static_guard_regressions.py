@@ -133,6 +133,28 @@ os.chdir(tmp)
 for launcher in {'outer': {'sp': subprocess}}['outer'].values():
     launcher.run(['python3', 'child.py'])
 """, 4),
+        ("""import os
+import subprocess
+os.chdir(tmp)
+[{'sp': subprocess}][0]['sp'].run(['python3', 'child.py'])
+""", 4),
+        ("""import os
+import subprocess
+os.chdir(tmp)
+({'sp': subprocess},)[0]['sp'].run(['python3', 'child.py'])
+""", 4),
+        ("""import os
+import subprocess
+os.chdir(tmp)
+for launcher in [{'sp': subprocess}][0].values():
+    launcher.run(['python3', 'child.py'])
+""", 4),
+        ("""import os
+import subprocess
+os.chdir(tmp)
+for launcher in ([{'sp': subprocess}],)[0][0].values():
+    launcher.run(['python3', 'child.py'])
+""", 4),
     )
     for source, line in unsafe_sources:
         assert _coverage_suite._synthetic_violations(source) == [
@@ -154,6 +176,14 @@ os.chdir(tmp)
         "tests/synthetic.py:4: unresolved callee "
         "{'sp': subprocess}['sp'].run cwd=tmp declares no env="
     ]
+
+
+def test_guard_and_binding_scans_share_cwd_predicate(tmp):
+    del tmp
+    from _coverage_bindings import _has_cwd_control  # noqa: PLC0415
+    from _coverage_guard import _has_cwd_control as guard_has_cwd_control  # noqa: PLC0415
+
+    assert guard_has_cwd_control is _has_cwd_control
 
 
 def test_inline_dict_receiver_keeps_unresolved_callee_diagnostic(tmp):
