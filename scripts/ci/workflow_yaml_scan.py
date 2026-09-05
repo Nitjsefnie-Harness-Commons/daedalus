@@ -165,46 +165,55 @@ def node_parts(line):
     return None
 
 
-def _block_scalar_end(source, texts, index, parent_indent, value, owner,
-                      dashed):
-    """Return a block or multiline quote's end, if the value opens one."""
-    _tokens, value, depth = sequence_value(value)
-    header = parse_block_header(value, owner)
-    header_index = index
-    candidate_depth = 0
-    header_indent = parent_indent
-    header_parts = None
-    if header is None and not value:
-        header_index = next(
+def _value_candidate(source, index, parent_indent, value, dashed):
+    """Return one node's value after detached properties, if any."""
+    raw_value = value
+    _tokens, normalized, depth = sequence_value(value)
+    candidate_index = index
+    candidate_parts = None
+    if not normalized:
+        candidate_index = next(
             (i for i in range(index + 1, len(source))
              if meaningful(source[i])),
             len(source),
         )
         while (
-                header_index < len(source)
-                and indent(source[header_index]) > parent_indent
-                and property_only(source[header_index])):
-            header_index = next(
-                (i for i in range(header_index + 1, len(source))
+                candidate_index < len(source)
+                and indent(source[candidate_index]) > parent_indent
+                and property_only(source[candidate_index])):
+            candidate_index = next(
+                (i for i in range(candidate_index + 1, len(source))
                  if meaningful(source[i])),
                 len(source),
             )
-        if (header_index >= len(source)
-                or indent(source[header_index]) < parent_indent):
+        if (candidate_index >= len(source)
+                or indent(source[candidate_index]) < parent_indent):
             return None
-        header_parts = node_parts(source[header_index]) if dashed else None
-        if header_parts is None:
-            header_indent = parent_indent
-            candidate = source[header_index].text[
-                indent(source[header_index]):]
-        else:
-            header_indent = header_parts[1]
-            candidate = header_parts[0]
-        _tokens, value, candidate_depth = sequence_value(
-            candidate,
-            dashed if header_parts is None else header_parts[3],
-        )
-        header = parse_block_header(value, owner)
+        if dashed:
+            candidate_parts = node_parts(source[candidate_index])
+        value = source[candidate_index].text[
+            indent(source[candidate_index]):]
+        return candidate_index, value, candidate_parts, depth
+    return candidate_index, raw_value, None, depth
+
+
+def _block_scalar_end(source, texts, index, parent_indent, owner,
+                      dashed, candidate):
+    """Return a block or multiline quote's end, if the value opens one."""
+    if candidate is None:
+        return None
+    header_index, raw_value, header_parts, base_depth = candidate
+    if header_parts is None:
+        value_dash = dashed
+        value = raw_value
+    else:
+        value_dash = header_parts[3]
+        value = header_parts[0]
+    _tokens, value, candidate_depth = sequence_value(value, value_dash)
+    depth = candidate_depth if header_parts is not None else base_depth
+    header = parse_block_header(value, owner)
+    header_indent = (parent_indent if header_parts is None
+                     else header_parts[1])
     if header is not None:
         if depth:
             block_indent = indent(source[index])
@@ -214,7 +223,6 @@ def _block_scalar_end(source, texts, index, parent_indent, value, owner,
             block_line = source[index]
         if header_index != index and dashed and header_parts is not None:
             block_indent = header_indent
-            depth = candidate_depth
             block_line = source[header_index]
         for _ in range(depth):
             spacing = block_line.text[block_indent + 1:]
@@ -294,24 +302,14 @@ def _flow_end(source, start, end, value):
     return end
 
 
-def _flow_start(source, index, end, raw_value, dashed):
-    _tokens, value, _depth = sequence_value(raw_value)
-    if not value and dashed:
-        candidate = next(
-            (i for i in range(index + 1, len(source))
-             if meaningful(source[i])),
-            len(source),
-        )
-    else:
-        candidate = index
-    if candidate >= len(source):
+def _flow_start(source, end, candidate):
+    if candidate is None:
         return None
-    if candidate != index:
-        _tokens, value, _depth = sequence_value(
-            source[candidate].text[indent(source[candidate]):])
+    candidate_index, raw_value, _parts, _base_depth = candidate
+    _tokens, value, _depth = sequence_value(raw_value)
     if not value.startswith(('[', '{')):
         return None
-    return candidate, _flow_end(source, candidate, end, value)
+    return candidate_index, _flow_end(source, candidate_index, end, value)
 
 
 def scalar_regions(source, texts):
@@ -336,8 +334,17 @@ def scalar_regions(source, texts):
             owner = f'mapping field {raw_key.strip()!r}'
         else:
             owner = 'sequence item'
+        candidate = _value_candidate(
+            source, index, parent_indent, raw_value, dashed)
         stop = _block_scalar_end(
-            source, texts, index, parent_indent, raw_value, owner, dashed)
+            source,
+            texts,
+            index,
+            parent_indent,
+            owner,
+            dashed,
+            candidate,
+        )
         if stop is not None:
             header_index, stop = stop
             scalar.update(range(header_index + 1, stop))
@@ -345,10 +352,8 @@ def scalar_regions(source, texts):
             continue
         flow = _flow_start(
             source,
-            index,
             len(source),
-            raw_value,
-            dashed or raw_key is not None,
+            candidate,
         )
         if flow is not None:
             flow_index, stop = flow

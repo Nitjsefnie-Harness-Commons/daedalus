@@ -177,6 +177,77 @@ def test_property_only_lines_keep_mapping_values_opaque(tmp):
                         assert expected == 'target', source
 
 
+def _flow_value(opener, quote, body_indent):
+    closer = '}' if opener == '{' else ']'
+    body = ' ' * body_indent
+    return (
+        f'{opener} ? {quote}quoted {closer} delimiter\n'
+        f'{body}key: &a hidden\n'
+        f'{body}end{quote} : value {closer}\n')
+
+
+def _flow_property_source(value, properties, explicit, gap):
+    pair = ' ? DECOY\n :\n' if explicit else ' decoy:\n'
+    lines = [
+        'anchors:\n',
+        ' first: &a target\n',
+        pair,
+        gap,
+    ]
+    for offset, prop in enumerate(properties):
+        lines.append('  ' + prop + '\n')
+        if offset + 1 < len(properties):
+            lines.append(gap)
+    lines.extend([
+        '  ' + value,
+        'jobs:\n',
+        ' sample:\n',
+        '  steps:\n',
+        '   - name: *a\n',
+        '     if: z\n',
+    ])
+    return ''.join(lines)
+
+
+def test_property_only_lines_keep_flow_values_opaque(tmp):
+    """Properties before a flow value preserve its quoted delimiters."""
+    del tmp
+    cases = (
+        ('{', '"', False, ('!!str',)),
+        ('{', '"', False, ('&b', '!!str')),
+        ('{', "'", False, ('!!str',)),
+        ('{', "'", False, ('&b', '!!str')),
+        ('[', '"', False, ('!!str',)),
+        ('[', '"', False, ('&b', '!!str')),
+        ('[', "'", False, ('!!str',)),
+        ('[', "'", False, ('&b', '!!str')),
+        ('{', '"', True, ('!!str',)),
+        ('{', '"', True, ('&b', '!!str')),
+        ('{', "'", True, ('!!str',)),
+        ('{', "'", True, ('&b', '!!str')),
+        ('[', '"', True, ('!!str',)),
+        ('[', '"', True, ('&b', '!!str')),
+        ('[', "'", True, ('!!str',)),
+        ('[', "'", True, ('&b', '!!str')),
+    )
+    for opener, quote, explicit, properties in cases:
+        for gap in ('', '\n', '  # comment\n'):
+            value = _flow_value(opener, quote, 4)
+            source = _flow_property_source(
+                value, properties, explicit, gap)
+            parsed = yaml.load(source, Loader=yaml.BaseLoader)
+            expected = parsed['jobs']['sample']['steps'][0]['name']
+            assert expected == 'target', source
+            try:
+                workflow_step_items(source, 'sample')
+            except YAMLReadError as error:
+                message = str(error)
+                assert 'flow collection' in message, message
+                assert 'unknown YAML alias' not in message, message
+                continue
+            raise AssertionError(source)
+
+
 def _detached_value_source(body, gap, property_indent):
     lines = [
         'jobs:\n',
