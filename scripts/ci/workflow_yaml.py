@@ -149,17 +149,17 @@ def _node_parts(line):
 
 def _block_scalar_end(lines, texts, index, parent_indent, value, owner, dashed):
     _tokens, value, depth = _sequence_value(value)
-    header, header_index, candidate_depth, header_indent = parse_block_header(value, owner), index, 0, parent_indent
+    header, header_index, candidate_depth, header_indent, header_parts = parse_block_header(value, owner), index, 0, parent_indent, None
     if header is None and not value:
         header_index = next((i for i in range(index + 1, len(lines)) if _meaningful(lines[i])), len(lines))
         if header_index >= len(lines) or _indent(lines[header_index]) < parent_indent: return None
         header_parts = _node_parts(lines[header_index]) if dashed else None
-        header_indent, candidate = (_indent(lines[header_index]), lines[header_index].text[_indent(lines[header_index]):]) if header_parts is None else (header_parts[1], header_parts[0])
+        header_indent, candidate = (parent_indent, lines[header_index].text[_indent(lines[header_index]):]) if header_parts is None else (header_parts[1], header_parts[0])
         _tokens, value, candidate_depth = _sequence_value(candidate, dashed if header_parts is None else header_parts[3])
         header = parse_block_header(value, owner)
     if header is not None:
         block_indent, block_line = parent_indent if not depth else _indent(lines[index]), lines[index]
-        if header_index != index and dashed: block_indent, depth, block_line = header_indent, candidate_depth, lines[header_index]
+        if header_index != index and dashed and header_parts is not None: block_indent, depth, block_line = header_indent, candidate_depth, lines[header_index]
         for _ in range(depth): block_indent = block_indent + 1 + len(block_line.text[block_indent + 1:]) - len(block_line.text[block_indent + 1:].lstrip(' \t'))
         return header_index, block_end(texts, header_index + 1, len(texts), block_indent, header)
     quote = _quote_is_open(value)
