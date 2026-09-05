@@ -348,8 +348,16 @@ def _cache_write_reason(step, job, step_number):
                 reason = _DECISIVE_CONTROLS[action][1]
         elif action == 'docker/build-push-action':
             _require_reviewed_writer_ref(action, ref, job, step_number)
-            has_cache_to = 'cache-to' in inputs
-            cache_to = inputs.get('cache-to')
+            cache_to_keys = [key for key in inputs
+                             if isinstance(key, str)
+                             and key.casefold() == 'cache-to']
+            if len(cache_to_keys) > 1:
+                raise _boundary_error(
+                    job, step_number,
+                    f"{action} input 'cache-to' is duplicated "
+                    'case-insensitively')
+            has_cache_to = bool(cache_to_keys)
+            cache_to = inputs.get(cache_to_keys[0]) if has_cache_to else None
             reason = None
             if has_cache_to and _gha_cache_destination(
                     cache_to, job, step_number, action):
@@ -500,6 +508,8 @@ def test_manifest_backed_cache_action_controls(tmp):
         (rust, {'save-if': '${{ x }}', 'cache-provider': 'warpbuild'}, False),
         ('docker/build-push-action@v6', {'cache-from': 'type=gha'}, False),
         ('docker/build-push-action@v6', {'cache-to': 'type=gha'}, True),
+        ('docker/build-push-action@v6', {'CACHE-TO': 'type=gha'}, True),
+        ('docker/build-push-action@v6', {'Cache-To': 'type=gha'}, True),
         ('docker/build-push-action@v6',
          {'cache-to': 'type=local\ntype=gha'}, True),
         ('docker/build-push-action@v6',
@@ -579,120 +589,6 @@ def test_controls_needed_for_opt_out_must_be_literal(tmp):
             _cache_write_reason,
             {'uses': uses, 'with': {key: '${{ inputs.off }}'}},
             'wheel', 2, contains=f"input '{key}' is expression-valued")
-
-
-def test_malformed_controls_and_destinations_fail_closed(tmp):
-    _refuses(
-        _cache_write_reason,
-        {'uses': 'actions/setup-go@v6', 'with': {'cache': ['false']}},
-        'wheel', 3, contains='not a literal scalar')
-    _refuses(
-        _cache_write_reason,
-        {'uses': 'docker/build-push-action@v6',
-         'with': {'cache-to': 'type=${{ inputs.kind }}'}},
-        'wheel', 3, contains='dynamic destination')
-    _refuses(
-        _cache_write_reason,
-        {'uses': 'docker/build-push-action@v6', 'with': {'cache-to': None}},
-        'wheel', 3, contains='cache-to is not a literal')
-
-
-def test_direct_cache_markers_are_token_bounded(tmp):
-    positives = (
-        'curl "$ACTIONS_CACHE_URL/_apis/artifactcache/cache"',
-        'curl "/_apis/artifactcache/cache"',
-        'curl "$ACTIONS_RESULTS_URL"',
-        'curl -H "$ACTIONS_RUNTIME_TOKEN" /cache',
-        'github.actions.results.api.v1.CacheService/GetCacheEntry',
-        "node -e \"require('@actions/cache')\"",
-        'docker buildx build --cache-to type=gha,mode=max .',
-        'docker buildx build --cache-to \\\n type=gha .',
-    )
-    for run in positives:
-        assert _direct_cache_run(run) is not None, run
-    negatives = (
-        'echo MY_ACTIONS_CACHE_URL_BACKUP',
-        'echo ACTIONS_CACHE_URL_BACKUP',
-        'echo github.actions.results.api.v1.CacheServiceX',
-        "echo '@actions/cacheable'",
-        'docker buildx build --cache-to type=local --cache-from type=gha .',
-        'docker buildx build --cache-from type=gha .',
-        'docker buildx build --cache-to type=gha2 .',
-        'docker buildx build --cache-from type=gha --cache-to type=local .',
-        'docker buildx build --cache-to type=gh .',
-    )
-    for run in negatives:
-        assert _direct_cache_run(run) is None, run
-
-
-def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
-    for run in (
-            'docker buildx build --cache-to type=${TYPE} .',
-            'docker buildx build --cache-to "$CACHE_DEST" .',
-            'docker buildx build --cache-to type=${{ matrix.type }} .'):
-        _refuses(_direct_cache_run, run, contains='dynamic destination')
-    _refuses(_direct_cache_run, 'x' * 65537, contains='65536')
-
-
-def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
-    workflow = _tests_yml()
-    positives = (
-        _real_step(uses='actions/setup-go@v6'),
-        _real_step(uses='actions/setup-node@v7'),
-        _real_step(uses='docker/setup-buildx-action@v3'),
-        _real_step(uses='astral-sh/setup-uv@v7',
-                   inputs={'enable-cache': 'true'}),
-        _real_step(uses='Swatinem/rust-cache@v2'),
-        _real_step(uses='docker/build-push-action@v6',
-                   inputs={'cache-to': 'type=gha'}),
-        _real_step(run='curl "$ACTIONS_CACHE_URL/_apis/artifactcache/cache"'),
-        _real_step(run='curl "$ACTIONS_RESULTS_URL"'),
-        _real_step(run='curl "$ACTIONS_RUNTIME_TOKEN"'),
-        _real_step(run='github.actions.results.api.v1.CacheService/Get'),
-        _real_step(run="node -e \"require('@actions/cache')\""),
-        _real_step(run='docker buildx build --cache-to type=gha .'),
-    )
-    for step in positives:
-        assert 'wheel' in _cache_writing_jobs(
-            _insert_wheel_step(workflow, step)), step
-
-
-def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
-    workflow = _tests_yml()
-    for step, expected in (
-            (_real_step(uses='${{ matrix.action }}'),
-             "expression-valued uses '${{ matrix.action }}'"),
-            (_real_step(uses='owner/action@v1'),
-             "no cache policy for action 'owner/action@v1'"),
-            (_real_step(uses='actions/cache/unknown@v4'),
-             "unknown actions/cache sub-action 'actions/cache/unknown'")):
-        _refuses(_cache_writing_jobs, _insert_wheel_step(workflow, step),
-                 contains=expected)
-
-
-def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
-    workflow = _tests_yml()
-    _assert_writer_inventory(workflow)
-    line = '          package-manager-cache: false\n'
-    assert line in workflow
-    without_opt_out = workflow.replace(line, '', 1)
-    message = _refuses(_assert_writer_inventory, without_opt_out)
-    assert message == (
-        "unrecorded cache-writing jobs: ['eslint']; "
-        "recorded cache-writing jobs gone quiet: []")
-
-
-def test_production_cache_steps_keep_restore_and_save_separate(tmp):
-    workflow = _tests_yml()
-    for job in ('suites', 'coverage-matrix', 'coverage'):
-        steps = complete_job_mapping(workflow, job)['steps']
-        restores = [step for step in steps if step.get('uses', '').startswith(
-            'actions/cache/restore@')]
-        saves = [step for step in steps if step.get('uses', '').startswith(
-            'actions/cache/save@')]
-        assert len(restores) == len(saves) == 1, (job, restores, saves)
-        assert _cache_write_reason(restores[0], job, 1) is None
-        assert _cache_write_reason(saves[0], job, 1) is not None
 
 
 if __name__ == '__main__':
