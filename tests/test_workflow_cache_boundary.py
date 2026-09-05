@@ -2,12 +2,15 @@
 """Fail-closed inventory of statically classified cache-writing jobs.
 Direct shell detection is bounded literal scanning; arbitrary shell, checked-in
 scripts, constructed names, and downloaded code are not interpreted."""
+import csv
+import io
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -143,8 +146,18 @@ def _literal_control(inputs, name, default, job, step_number, action):
     return value.strip().casefold()
 
 
+def _cache_to_records(value):
+    try:
+        records = csv.reader(io.StringIO(value.strip(), newline=''),
+                             strict=True)
+        return [','.join(record).strip() for record in records
+                if record and any(record)]
+    except csv.Error:
+        return None
+
+
 def _gha_cache_destination(value, job, step_number, owner):
-    """Whether a cache-to input has a comma-delimited type=gha field."""
+    """A GHA exporter or an undecodable destination may write cache."""
     values = value if isinstance(value, list) else [value]
     if not values or any(not isinstance(item, str) for item in values):
         raise _boundary_error(
@@ -157,8 +170,11 @@ def _gha_cache_destination(value, job, step_number, owner):
             job, step_number, f'{owner} cache-to contains control characters')
     fields = []
     for item in values:
-        fields.extend(field.strip() for line in item.splitlines()
-                      for field in line.split(','))
+        records = _cache_to_records(item)
+        if records is None:
+            return True
+        fields.extend(field.strip() for record in records
+                      for field in record.split(','))
     if any(field.casefold() == 'type=gha' for field in fields):
         return True
     if any('${{' in item or '}}' in item or '${' in item or re.search(
@@ -167,7 +183,8 @@ def _gha_cache_destination(value, job, step_number, owner):
         raise _boundary_error(
             job, step_number,
             f'{owner} cache-to has a dynamic destination')
-    return False
+    return any(not re.fullmatch(r'[-A-Za-z0-9_]+=[^\s\"\']+', field)
+               for field in fields)
 
 
 def _token_marker(name):
@@ -589,6 +606,53 @@ def test_controls_needed_for_opt_out_must_be_literal(tmp):
             _cache_write_reason,
             {'uses': uses, 'with': {key: '${{ inputs.off }}'}},
             'wheel', 2, contains=f"input '{key}' is expression-valued")
+
+
+def test_csv_cache_exporters_are_inventoried_on_the_real_workflow(tmp):
+    # Re-check Util.getInputList(cache-to, {ignoreComma: true}) when bumping
+    # docker/actions-toolkit@0.62.1 in the reviewed build-push action pin.
+    target = Path(tmp) / '.github/workflows/tests.yml'
+    target.parent.mkdir(parents=True)
+    original = (ROOT / '.github/workflows/tests.yml').read_bytes()
+    target.write_bytes(original)
+    assert target.read_bytes() == original
+    _assert_writer_inventory(target.read_text(encoding='utf-8'))
+    for value, writer in (
+            ('"type=gha"', True), ('"type=gha",mode=max', True),
+            ('"type=gha,mode=max"', True),
+            ('"type=local', True), ('unknown', True),
+            ('type=local', False), ('"type=local"', False),
+            ('"type=local",mode=max', False)):
+        step = _real_step(
+            uses='docker/build-push-action@'
+                 '10e90e3645eae34f1e60eeb005ba3a3d33f178e8',
+            inputs={'cache-to': "'" + value + "'"})
+        changed = _insert_wheel_step(original.decode('utf-8'), step)
+        try:
+            target.write_bytes(changed.encode('utf-8'))
+            planted = target.read_text(encoding='utf-8')
+            if writer:
+                _refuses(_assert_writer_inventory, planted,
+                         contains="unrecorded cache-writing jobs: ['wheel']")
+                assert 'wheel' in _cache_writing_jobs(planted), value
+            else:
+                _assert_writer_inventory(planted)
+        finally:
+            target.write_bytes(original)
+        assert target.read_bytes() == original
+        _assert_writer_inventory(target.read_text(encoding='utf-8'))
+
+
+def test_cache_csv_decoding_keeps_commas_and_unescapes_doubled_quotes(tmp):
+    del tmp
+    for value, expected in (
+            ('"type=gha"', ['type=gha']),
+            ('"type=gha",mode=max', ['type=gha,mode=max']),
+            ('"type=gha,mode=max"', ['type=gha,mode=max']),
+            ('"type=local","dest=a""b"', ['type=local,dest=a"b']),
+            ('type=local\n\n"type=gha"', ['type=local', 'type=gha']),
+            ('"type=local', None)):
+        assert _cache_to_records(value) == expected, value
 
 
 if __name__ == '__main__':
