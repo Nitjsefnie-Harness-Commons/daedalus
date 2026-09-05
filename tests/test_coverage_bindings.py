@@ -24,6 +24,12 @@ _INLINE_INVOKE = (
     'import test_static_guard_regressions as regression_suite; '
     'regression_suite.test_inline_dict_receivers_refuse_hidden_'
     'launchers(None)')
+_SCOPE_BINDING_INVOKE = (
+    'import test_coverage_scope_bindings as binding_suite; '
+    'binding_suite.test_import_bindings_shadow_the_builtin_dict(None)')
+_ANNOTATION_INVOKE = (
+    'import test_coverage_scope_bindings as binding_suite; '
+    'binding_suite.test_variadic_parameter_annotations_are_judged(None)')
 _SUBSCRIPT_INVOKE = (
     'import test_static_guard_regressions as regression_suite; '
     'regression_suite.test_subscripted_dict_carriers_refuse_hidden_'
@@ -512,6 +518,26 @@ def _mutation_specs():
         "and node.rest)\n",
         "",
     )
+    import_shadows = (
+        "            shadows[scope].update(alias.asname\n"
+        "                                  or alias.name.split('.')[0]\n"
+        "                                  for alias in node.names\n"
+        "                                  if alias.name not in "
+        "_ROOT_MODULES)\n",
+        "            pass\n",
+    )
+    root_owner_imports = (
+        "                                  for alias in node.names\n"
+        "                                  if alias.name not in "
+        "_ROOT_MODULES)\n",
+        "                                  for alias in node.names)\n",
+    )
+    variadic_annotations = (
+        "        variadic = [value for value in (arguments.vararg, "
+        "arguments.kwarg)\n"
+        "                    if value is not None]\n",
+        "        variadic = []\n",
+    )
     walrus_scope = (
         "        if isinstance(node, ast.NamedExpr):\n"
         "            visit(node.value, scope)\n"
@@ -563,6 +589,12 @@ def _mutation_specs():
          _SCOPE_INVOKE),
         ('comprehension walrus scope', 'scopes', (walrus_scope,),
          _SCOPE_INVOKE),
+        ('import shadows', 'scopes', (import_shadows,),
+         _SCOPE_BINDING_INVOKE),
+        ('root owner imports', 'scopes', (root_owner_imports,),
+         _SCOPE_BINDING_INVOKE),
+        ('variadic annotations', 'scopes', (variadic_annotations,),
+         _ANNOTATION_INVOKE),
         ('MatchAs global', 'scopes', (match_as_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
         ('MatchStar global', 'scopes', (match_star_names,),
