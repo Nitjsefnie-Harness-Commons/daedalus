@@ -342,6 +342,71 @@ def test_empty_nested_literal_stops_before_a_sibling_anchor(tmp):
         assert _names(source) == [expected] == ['target'], source
 
 
+def test_following_line_scalar_headers_stop_before_sibling_anchors(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' decoys:\n'
+        '  -\n'
+        '    ? |2\n'
+        '      scalar\n'
+        '    : value\n'
+        '    first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  - &b\n'
+        '    ? |2\n'
+        '      scalar\n'
+        '    : value\n'
+        '    first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  -\n'
+        '    - ? |2\n'
+        '        scalar\n'
+        '      : value\n'
+        '      first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  -\n'
+        '    - ? >+2\n'
+        '        scalar\n'
+        '      : value\n'
+        '      first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  -\n'
+        '    ? |\n'
+        '    : value\n'
+        '    first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  -\n'
+        '\n'
+        '    # comment\n'
+        '    ? |\n'
+        '\n'
+        '    : value\n'
+        '\n'
+        '    first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  -\n'
+        '\n'
+        '    # comment\n'
+        '    -\n'
+        '\n'
+        '      ? |2\n'
+        '        scalar\n'
+        '      : value\n'
+        '      first: &a target\n',
+    )
+    for prefix in prefixes:
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert _names(source) == [expected] == ['target'], source
+
+
 def test_nested_explicit_key_scalar_keeps_mapping_sibling_visible(tmp):
     del tmp
     prefixes = (
