@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Focused real-tree regressions for the static guard suites."""
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_guard import _coverage_environment_violations  # noqa: E402
+from _coverage_scopes import (  # noqa: E402
+    _evaluation_scopes, _scope_bindings, _scope_shadows)
 from _owned_writes import copy_test_tree  # noqa: E402
 import test_coverage_bindings as _coverage_suite  # noqa: E402
 
@@ -270,6 +273,16 @@ def test_real_tree_allows_an_unshadowed_builtin_dict(tmp):
     target.write_bytes(source.replace(
         anchor, snippet + anchor, 1).encode('utf-8'))
     assert _coverage_environment_violations(root) == []
+
+
+def test_a_star_import_records_no_bound_name(tmp):
+    del tmp
+    assert _coverage_suite._synthetic_violations(
+        "from helpers import *\nkw = dict(cwd='x')\n") == []
+    tree = ast.parse('from helpers import *\n')
+    layout = _evaluation_scopes(tree)
+    bindings = _scope_bindings(layout[0], _scope_shadows(tree, layout))
+    assert bindings[tree] == set(), bindings[tree]
 
 
 def test_real_tree_applies_python_evaluation_scopes(tmp):
