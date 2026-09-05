@@ -515,7 +515,8 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     assert "github.event_name == 'push'" in ratchet['if']
     assert "github.ref == 'refs/heads/main'" in ratchet['if']
     assert 'steps.measure.conclusion == \'success\'' in ratchet['if']
-    assert 'git add .github/ci-thresholds.json' in commit['run']
+    assert 'git add .github/ci-thresholds.json' in (
+        commit['run'].splitlines()), commit['run']
     assert "git commit -m 'ci: update CI ratchets'" in commit['run']
     assert 'HEAD:main' in commit['run']
     assert 'GIT_SSH_COMMAND' in commit['run']
@@ -651,6 +652,7 @@ def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
     env['GITHUB_STEP_SUMMARY'] = str(summary)
     done = run_step(repo, _publisher_step(), env, workflow={}, job={})
     assert done.returncode == 0, (done.stdout, done.stderr)
+    assert 'thresholds valid' in done.stdout, done.stdout
     assert 'changed=true' in output.read_text(encoding='utf-8')
     assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
         '.github/ci-thresholds.json']
