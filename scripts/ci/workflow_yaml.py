@@ -10,6 +10,7 @@ if __package__:
         meaningful as _meaningful,
         node_parts as _node_parts,
         prepared_value as _prepared_value,
+        property_only as _property_only,
         quote_is_open as _quote_is_open,
         scalar_regions as _scalar_regions,
         sequence_value as _sequence_value,
@@ -34,6 +35,7 @@ else:
         meaningful as _meaningful,
         node_parts as _node_parts,
         prepared_value as _prepared_value,
+        property_only as _property_only,
         quote_is_open as _quote_is_open,
         scalar_regions as _scalar_regions,
         sequence_value as _sequence_value,
@@ -133,11 +135,16 @@ def _mapping_body(lines, scalar, entry, owner):
 
 
 def _anchor_position(lines, index, name, parts):
-    previous = next(
-        (i for i in range(index - 1, -1, -1) if _meaningful(lines[i])),
-        -1,
-    )
-    previous_parts = _node_parts(lines[previous]) if previous >= 0 else None
+    previous = -1
+    previous_parts = None
+    for candidate in range(index - 1, -1, -1):
+        if not _meaningful(lines[candidate]):
+            continue
+        previous = candidate
+        previous_parts = _node_parts(lines[candidate])
+        if (previous_parts is not None
+                or not _property_only(lines[candidate])):
+            break
     if previous_parts is None:
         previous_value, previous_depth = '', 0
     else:
