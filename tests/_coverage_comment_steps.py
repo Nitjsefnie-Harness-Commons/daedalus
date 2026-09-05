@@ -258,7 +258,7 @@ EXPECTED_STEP_MAPPINGS = (
         "  fi\n"
         "}\n"
         'case "$existing" in\n'
-        "  '') echo 'no patch-coverage marker to update' ;;\n"
+        "  '') echo 'no patch-coverage marker to update'; exit 1 ;;\n"
         "  *[!0-9]*)\n"
         '    echo "comment id is not only digits: $existing" >&2\n'
         "    exit 1\n"
@@ -269,7 +269,7 @@ EXPECTED_STEP_MAPPINGS = (
         "    fi\n"
         '    gh api -X PATCH "repos/$REPO/issues/comments/$existing" \\\n'
         "      -F body=@comment.md >/dev/null\n"
-        '    echo "marked patch coverage as unavailable for $HEAD_SHA"\n'
+        '    echo "marked patch coverage as unavailable for $HEAD_SHA"; exit 1\n'
         "    ;;\n"
         "esac\n",
     },
@@ -623,7 +623,7 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     }
     scenarios = (
         ('artifact-present-success', 'true', 'false', 'success', 'success'),
-        ('artifact-absent-failure', None, 'false', 'success', 'success'),
+        ('artifact-absent-failure', None, 'false', 'failure', 'failure'),
         ('failure-before-resolution', None, '', 'failure', 'failure'),
         ('failure-after-resolution', 'true', 'false', 'failure', 'failure'),
         ('stale-head', 'true', 'true', 'success', 'success'),

@@ -477,7 +477,7 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
     marked, state, calls, _output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=state,
         head_sha='B', current_head='B')
-    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert marked.returncode != 0, (marked.stdout, marked.stderr)
     assert len(recorded_writes(calls)) == 1, \
         calls.read_text(encoding='utf-8')
     assert 'Patch coverage was not measured for commit B.' in \
@@ -500,7 +500,7 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
     marked, state, calls, _output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=state,
         head_sha='B', current_head='B')
-    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert marked.returncode != 0, (marked.stdout, marked.stderr)
     assert len(recorded_writes(calls)) == 1, \
         calls.read_text(encoding='utf-8')
     assert 'Patch coverage was not measured for commit B.' in \
