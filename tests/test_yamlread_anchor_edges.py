@@ -28,6 +28,11 @@ def _names(source):
     return [item.name for item in items]
 
 
+def _base_name(source):
+    parsed = yaml.load(source, Loader=yaml.BaseLoader)
+    return parsed['jobs']['sample']['steps'][0]['name']
+
+
 def _refused(source, detail):
     try:
         workflow_step_items(source, 'sample')
@@ -92,9 +97,116 @@ def test_following_line_block_headers_hide_mapping_scalar_content(tmp):
     )
     for prefix in prefixes:
         source = _document(prefix)
-        parsed = yaml.load(source, Loader=yaml.BaseLoader)
-        expected = parsed['jobs']['sample']['steps'][0]['name']
+        expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
+
+
+def test_nested_quoted_scalar_content_hides_anchors(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        '  - - "open\n'
+        '      key: &a hidden"\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        "  - - 'open\n"
+        "      key: &a hidden'\n",
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        '  -\n'
+        '   "open\n'
+        '     key: &a hidden"\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        "  -\n"
+        "   'open\n"
+        "     key: &a hidden'\n",
+    )
+    for prefix in prefixes:
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert _names(source) == [expected] == ['target'], source
+
+
+def test_nested_scalar_boundaries_preserve_same_level_siblings(tmp):
+    del tmp
+    headers = ('|2', '|2-', '>2', '|', '>-')
+    for header in headers:
+        prefixes = (
+            'anchors:\n'
+            ' decoy:\n'
+            f'  - - {header}\n'
+            '      hidden\n'
+            '    - first: &a target\n',
+            'anchors:\n'
+            ' decoy:\n'
+            f'  - - {header}\n'
+            '    - first: &a target\n',
+        )
+        for prefix in prefixes:
+            source = _document(prefix)
+            expected = _base_name(source)
+            assert _names(source) == [expected] == ['target'], source
+
+
+def test_bare_sequence_anchor_position_skips_blank_and_comment_lines(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' decoy:\n'
+        '  -\n'
+        '\n'
+        '   &a target\n',
+        'anchors:\n'
+        ' decoy:\n'
+        '  -\n'
+        '  # comment\n'
+        '   &a target\n',
+    )
+    for prefix in prefixes:
+        _refused(_document(prefix), 'sequence item')
+
+
+def test_separate_line_explicit_key_anchor_names_mapping_key(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' decoy:\n'
+        '  ?\n'
+        '   &a key\n'
+        '  : value\n',
+        'anchors:\n'
+        ' decoy:\n'
+        '  ?\n'
+        '\n'
+        '  # comment\n'
+        '   &a key\n'
+        '  : value\n',
+    )
+    for prefix in prefixes:
+        _refused(_document(prefix), 'mapping key')
+
+
+def test_nested_explicit_key_scalar_content_hides_anchors(tmp):
+    del tmp
+    headers = ('|', '|-', '|2', '>-', '>2')
+    for header in headers:
+        for properties in ('', '&b '):
+            prefix = (
+                'anchors:\n'
+                ' first: &a target\n'
+                ' decoy:\n'
+                f'  - - ? {properties}{header}\n'
+                '        key: &a hidden\n'
+                '      : value\n')
+            source = _document(prefix)
+            expected = _base_name(source)
+            assert _names(source) == [expected] == ['target'], source
 
 
 def test_present_unsupported_anchor_positions_name_their_yaml_position(tmp):
