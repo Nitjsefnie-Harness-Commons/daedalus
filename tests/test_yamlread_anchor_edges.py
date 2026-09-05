@@ -209,6 +209,92 @@ def test_nested_explicit_key_scalar_content_hides_anchors(tmp):
             assert _names(source) == [expected] == ['target'], source
 
 
+def test_nested_explicit_quoted_key_scalar_hides_anchors(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - - ? "part: open\n'
+        '        key: &a hidden\n'
+        '        end"\n'
+        '      : value\n',
+        "anchors:\n"
+        " first: &a target\n"
+        " decoys:\n"
+        "  - - ? 'part: open\n"
+        "        key: &a hidden\n"
+        "        end'\n"
+        "      : value\n",
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - - - - ? "part: open\n'
+        '            key: &a hidden\n'
+        '            end"\n'
+        '          : value\n',
+        "anchors:\n"
+        " first: &a target\n"
+        " decoys:\n"
+        "  - - - - ? 'part: open\n"
+        "            key: &a hidden\n"
+        "            end'\n"
+        "          : value\n",
+    )
+    for prefix in prefixes:
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert _names(source) == [expected] == ['target'], source
+
+
+def test_inline_anchored_keys_name_their_yaml_position(tmp):
+    del tmp
+    cases = (
+        ('anchors:\n ? &a "key: value" : value\n', 'mapping key'),
+        ('anchors:\n ? &a key : value\n', 'mapping key'),
+        (
+            'anchors:\n'
+            ' ?\n'
+            '\n'
+            ' # comment\n'
+            '  &a "key: value"\n'
+            ' : value\n',
+            'mapping key',
+        ),
+        (
+            'anchors:\n'
+            ' ?\n'
+            '\n'
+            ' # comment\n'
+            '  &a key\n'
+            ' : value\n',
+            'mapping key',
+        ),
+        ('anchors:\n - - &a "key: value" : value\n', 'nested sequence'),
+        ('anchors:\n - - &a key: value\n', 'nested sequence'),
+        ('anchors:\n - - - - &a "key: value" : value\n', 'nested sequence'),
+        ('anchors:\n - - - - &a key: value\n', 'nested sequence'),
+        (
+            'anchors:\n'
+            ' - -\n'
+            '\n'
+            '  # comment\n'
+            '     &a "key: value"\n',
+            'nested sequence',
+        ),
+        (
+            'anchors:\n'
+            ' - -\n'
+            '\n'
+            '  # comment\n'
+            '     &a key: value\n',
+            'nested sequence',
+        ),
+    )
+    for prefix, detail in cases:
+        _refused(_document(prefix), detail)
+
+
 def test_nested_mapping_scalar_header_keeps_mapping_sibling_visible(tmp):
     del tmp
     prefixes = (
@@ -222,6 +308,33 @@ def test_nested_mapping_scalar_header_keeps_mapping_sibling_visible(tmp):
         '  - - key: >2-\n'
         '        scalar\n'
         '      first: &a target\n',
+    )
+    for prefix in prefixes:
+        source = _document(prefix)
+        expected = _base_name(source)
+        assert _names(source) == [expected] == ['target'], source
+
+
+def test_empty_nested_literal_stops_before_a_sibling_anchor(tmp):
+    del tmp
+    prefixes = (
+        'anchors:\n'
+        ' decoy:\n'
+        '  - - |\n'
+        '    - first: &a target\n',
+        'anchors:\n'
+        ' decoy:\n'
+        '  - -\n'
+        '    |\n'
+        '    - first: &a target\n',
+        'anchors:\n'
+        ' decoy:\n'
+        '  - -\n'
+        '\n'
+        '    # comment\n'
+        '    |\n'
+        '\n'
+        '    - first: &a target\n',
     )
     for prefix in prefixes:
         source = _document(prefix)
@@ -327,6 +440,24 @@ def test_nested_anchor_position_diagnostics_normalize_prefixes(tmp):
     )
     for prefix, detail in cases:
         _refused(_document(prefix), detail)
+
+
+def test_step_reader_rejects_nested_sequence_items(tmp):
+    del tmp
+    source = (
+        'jobs:\n'
+        ' sample:\n'
+        '  steps:\n'
+        '   - - name: hidden\n'
+        '       if: z\n')
+    parsed = yaml.load(source, Loader=yaml.BaseLoader)
+    assert isinstance(parsed['jobs']['sample']['steps'][0], list), parsed
+    try:
+        workflow_step_items(source, 'sample')
+    except YAMLReadError as error:
+        assert 'step key has an unsupported plain scalar' in str(error), error
+        return
+    raise AssertionError('nested sequence item was returned as a step')
 
 
 def test_present_unsupported_anchor_positions_name_their_yaml_position(tmp):
