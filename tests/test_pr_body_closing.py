@@ -77,8 +77,8 @@ GITHUB_SECTION_CLOSING_HTML = (
     f'<li>One change</li>\n<li>Fixes {GITHUB_ISSUE_104}</li>\n</ul>\n<h2 '
     f'dir="auto">Testing</h2>\n<p dir="auto">Ran the suite.</p>')
 
-# Every captured rendering in tests/_prgate.py that carries an anchor in
-# section content, against the answer closing_issues gives for it.
+# The answer closing_issues gives for each captured rendering in
+# tests/_prgate.py that carries an anchor; its control pins that set.
 CAPTURED_CLOSING = (
     ('angle_prose', []),
     ('balanced_destination', []),
@@ -267,6 +267,8 @@ def test_closing_issues_reports_a_repeated_number_once(tmp):
 
 def test_captured_renderings_pin_the_closing_answer(tmp):
     del tmp
+    assert {name for name, _ in CAPTURED_CLOSING} == {
+        name for name in GITHUB_HTML if '<a ' in GITHUB_HTML[name]}
     failures = []
     for name, expected in CAPTURED_CLOSING:
         body = PR_BODY.parse_rendered(
