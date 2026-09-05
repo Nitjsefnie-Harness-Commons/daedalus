@@ -447,6 +447,7 @@ def _real_step(uses=None, run=None, inputs=None):
 
 
 def _insert_wheel_step(workflow, step):
+    workflow = workflow.replace('\r\n', '\n')
     marker = '  wheel:\n'
     start = workflow.index(marker)
     steps = workflow.index('    steps:\n', start) + len('    steps:\n')
@@ -613,33 +614,37 @@ def test_csv_cache_exporters_are_inventoried_on_the_real_workflow(tmp):
     target = Path(tmp) / '.github/workflows/tests.yml'
     target.parent.mkdir(parents=True)
     original = (ROOT / '.github/workflows/tests.yml').read_bytes()
-    target.write_bytes(original)
-    assert target.read_bytes() == original
-    _assert_writer_inventory(target.read_text(encoding='utf-8'))
-    for value, writer in (
-            ('"type=gha"', True), ('"type=gha",mode=max', True),
-            ('"type=gha,mode=max"', True),
-            ('"type=local', True), ('unknown', True),
-            ('type=local', False), ('"type=local"', False),
-            ('"type=local",mode=max', False)):
-        step = _real_step(
-            uses='docker/build-push-action@'
-                 '10e90e3645eae34f1e60eeb005ba3a3d33f178e8',
-            inputs={'cache-to': "'" + value + "'"})
-        changed = _insert_wheel_step(original.decode('utf-8'), step)
-        try:
-            target.write_bytes(changed.encode('utf-8'))
-            planted = target.read_text(encoding='utf-8')
-            if writer:
-                _refuses(_assert_writer_inventory, planted,
-                         contains="unrecorded cache-writing jobs: ['wheel']")
-                assert 'wheel' in _cache_writing_jobs(planted), value
-            else:
-                _assert_writer_inventory(planted)
-        finally:
-            target.write_bytes(original)
+    lf = original.replace(b'\r\n', b'\n')
+    for original in (lf, lf.replace(b'\n', b'\r\n')):
+        target.write_bytes(original)
         assert target.read_bytes() == original
         _assert_writer_inventory(target.read_text(encoding='utf-8'))
+        for value, writer in (
+                ('"type=gha"', True), ('"type=gha",mode=max', True),
+                ('"type=gha,mode=max"', True),
+                ('"type=local', True), ('unknown', True),
+                ('type=local', False), ('"type=local"', False),
+                ('"type=local",mode=max', False)):
+            step = _real_step(
+                uses='docker/build-push-action@'
+                     '10e90e3645eae34f1e60eeb005ba3a3d33f178e8',
+                inputs={'cache-to': "'" + value + "'"})
+            changed = _insert_wheel_step(original.decode('utf-8'), step)
+            try:
+                target.write_bytes(changed.encode('utf-8'))
+                planted = target.read_text(encoding='utf-8')
+                if writer:
+                    _refuses(
+                        _assert_writer_inventory, planted,
+                        contains="unrecorded cache-writing jobs: ['wheel']")
+                    assert _cache_writing_jobs(planted) == (
+                        _CACHE_WRITING_JOBS | {'wheel'}), value
+                else:
+                    _assert_writer_inventory(planted)
+            finally:
+                target.write_bytes(original)
+            assert target.read_bytes() == original
+            _assert_writer_inventory(target.read_text(encoding='utf-8'))
 
 
 def test_cache_csv_decoding_keeps_commas_and_unescapes_doubled_quotes(tmp):
