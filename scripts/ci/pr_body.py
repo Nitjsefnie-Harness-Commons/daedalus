@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Read GitHub-rendered pull-request HTML for admission checks."""
+"""Read GitHub-rendered pull-request HTML for admission checks.
+
+closing_issues takes a whole Body because its subject is body-wide; every
+other helper here takes sections.
+"""
 import re
 from html import unescape
 from html.parser import HTMLParser
