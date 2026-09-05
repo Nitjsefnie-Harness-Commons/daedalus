@@ -13,6 +13,9 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+
+
 SCRIPT = ROOT / 'scripts' / 'ci' / 'thresholds.py'
 DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
 
@@ -22,21 +25,7 @@ def _thresholds():
 
 
 def _valid():
-    return {
-        'schema_version': 1,
-        'coverage': {
-            'python': {'measured': 94.4, 'floor': 92.9},
-            'javascript': {'measured': 35.5, 'floor': 34.0},
-        },
-        'module_size_baseline': {
-            'tests/_pyroute.py': 738,
-            'tests/_pyroute_state.py': 780,
-            'tests/test_bridge_results.py': 1343,
-            'tests/test_cli.py': 1238,
-            'tests/test_mcp_server.py': 1706,
-            'tests/test_tab_routing.py': 793,
-        },
-    }
+    return json.loads(DATA_PATH.read_text(encoding='utf-8'))
 
 
 def _write_json(path, value):
@@ -64,35 +53,49 @@ def _assert_load_refused(path, needle):
         raise AssertionError('invalid threshold input was accepted')
 
 
+def _assert_document_contract(path):
+    thresholds = _thresholds()
+    data = thresholds.load(path)
+    assert data['schema_version'] == 1
+    assert set(data['coverage']) == {'python', 'javascript'}
+    for language in ('python', 'javascript'):
+        measured, floor = thresholds.coverage(data, language)
+        assert floor < measured
+        assert measured - floor == thresholds.CALIBRATION_GAP
+        assert set(data['coverage'][language]) == {'measured', 'floor'}
+    baseline = thresholds.module_size_baseline(data)
+    assert baseline == data['module_size_baseline']
+    assert all(count > 0 for count in baseline.values())
+    result = _check(path)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    return data
+
+
+def _assert_cli_floor(path):
+    thresholds = _thresholds()
+    expected = thresholds.coverage(thresholds.load(path), 'python')[1]
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), '--coverage-floor', 'python',
+         '--thresholds', str(path)], cwd=str(ROOT), capture_output=True,
+        text=True, timeout=60)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == f'{expected:.1f}\n', result.stdout
+    assert result.stderr == '', result.stderr
+
+
 def _restrictive_mode(platform_name):
     return 0o400 if platform_name == 'posix' else 0o600
 
 
 def test_shipped_document_is_exact_and_cli_checkable(tmp):
-    """The tracked migration is the one source of all calibration state."""
+    """The tracked document is valid and remains CLI-checkable."""
     del tmp
-    thresholds = _thresholds()
-    data = thresholds.load(DATA_PATH)
-    assert thresholds.coverage(data, 'python') == (
-        Decimal('94.4'), Decimal('92.9'))
-    assert thresholds.coverage(data, 'javascript') == (
-        Decimal('35.5'), Decimal('34.0'))
-    assert thresholds.module_size_baseline(data) == _valid()[
-        'module_size_baseline']
-    result = _check(DATA_PATH)
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    _assert_document_contract(DATA_PATH)
 
 
 def test_cli_prints_only_the_requested_floor(tmp):
     """The floor command is safe to use in a quoted shell substitution."""
-    del tmp
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), '--coverage-floor', 'python',
-         '--thresholds', str(DATA_PATH)], cwd=str(ROOT), capture_output=True,
-        text=True, timeout=60)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == '92.9\n', result.stdout
-    assert result.stderr == '', result.stderr
+    _assert_cli_floor(DATA_PATH)
 
 
 def test_required_and_unknown_fields_are_rejected(tmp):
@@ -141,14 +144,14 @@ def test_duplicate_keys_are_rejected_before_mapping_construction(tmp):
     path = Path(tmp) / 'duplicate.json'
     path.write_text(
         '{"schema_version":1,"schema_version":1,'
-        '"coverage":{"python":{"measured":94.4,"floor":92.9},'
-        '"javascript":{"measured":35.5,"floor":34.0}},'
+        '"coverage":{"python":{"measured":80.0,"floor":78.5},'
+        '"javascript":{"measured":81.0,"floor":79.5}},'
         '"module_size_baseline":{}}', encoding='utf-8')
     _assert_refused(path, 'duplicate JSON key: schema_version')
     path.write_text(
         '{"schema_version":1,"coverage":{"python":'
-        '{"measured":94.4,"measured":95.0,"floor":93.5},'
-        '"javascript":{"measured":35.5,"floor":34.0}},'
+        '{"measured":80.0,"measured":81.0,"floor":79.5},'
+        '"javascript":{"measured":81.0,"floor":79.5}},'
         '"module_size_baseline":{}}', encoding='utf-8')
     _assert_refused(path, 'duplicate JSON key: measured')
 
@@ -156,7 +159,7 @@ def test_duplicate_keys_are_rejected_before_mapping_construction(tmp):
 def test_coverage_numbers_are_finite_bounded_and_one_decimal(tmp):
     """Coverage values have an exact tenths representation and no booleans."""
     path = Path(tmp) / 'thresholds.json'
-    values = (True, '94.4', 'NaN', 'Infinity', -0.1, 100.1, 94.44)
+    values = (True, '80.0', 'NaN', 'Infinity', -0.1, 100.1, 80.04)
     for value in values:
         candidate = _valid()
         candidate['coverage']['python']['measured'] = value
@@ -165,8 +168,8 @@ def test_coverage_numbers_are_finite_bounded_and_one_decimal(tmp):
     for literal in ('NaN', 'Infinity', '-Infinity'):
         path.write_text(
             '{"schema_version":1,"coverage":{"python":'
-            f'{{"measured":{literal},"floor":92.9}},'
-            '"javascript":{"measured":35.5,"floor":34.0}},'
+            f'{{"measured":{literal},"floor":78.5}},'
+            '"javascript":{"measured":81.0,"floor":79.5}},'
             '"module_size_baseline":{}}', encoding='utf-8')
         _assert_refused(path, 'non-finite JSON number')
 
@@ -208,7 +211,7 @@ def test_low_decimal_precision_is_a_clean_threshold_refusal(tmp):
         context.prec = 1
         try:
             thresholds._coverage_value(
-                Decimal('94.4'), 'coverage.python.measured')
+                Decimal('80.0'), 'coverage.python.measured')
         except ValueError as error:
             assert str(error) == (
                 'coverage.python.measured must have at most one decimal place')
@@ -271,8 +274,10 @@ def test_public_accessors_return_validated_data(tmp):
     thresholds = _thresholds()
     data = thresholds.load(DATA_PATH)
     assert thresholds.coverage(data, 'python') == (
-        Decimal('94.4'), Decimal('92.9'))
-    assert thresholds.module_size_baseline(data)['tests/test_cli.py'] == 1238
+        data['coverage']['python']['measured'],
+        data['coverage']['python']['floor'])
+    assert thresholds.module_size_baseline(data) \
+        == data['module_size_baseline']
     try:
         thresholds.coverage(data, 'ruby')
     except ValueError as error:
@@ -288,11 +293,12 @@ def test_invalid_candidate_never_touches_existing_destination(tmp):
     target.write_bytes(b'old bytes\n')
     before = target.stat()
     candidate = _valid()
-    candidate['coverage']['python']['floor'] = 92.8
+    candidate['coverage']['python']['floor'] = \
+        candidate['coverage']['python']['measured']
     try:
         thresholds.write(target, candidate)
     except ValueError as error:
-        assert 'calibration gap must be 1.5' in str(error), error
+        assert 'floor must be below measured' in str(error), error
     else:
         raise AssertionError('invalid candidate was written')
     assert target.read_bytes() == b'old bytes\n'
@@ -378,16 +384,55 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
         assert expected_mode == 0o400
     else:
         assert expected_mode & stat.S_IWRITE
-    thresholds.write(target, _valid())
+    source = thresholds.load(DATA_PATH)
+    thresholds.write(target, source)
     first = target.read_bytes()
     assert first.endswith(b'\n'), first
     assert b'NaN' not in first
-    assert thresholds.load(target)['coverage']['python']['measured'] \
-        == Decimal('94.4')
+    assert thresholds.load(target) == source
     assert stat.S_IMODE(target.stat().st_mode) == expected_mode
     thresholds.write(target, thresholds.load(target))
     assert target.read_bytes() == first
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
+
+
+def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
+    """Registered threshold checks survive coverage and size ratchets."""
+    thresholds = _thresholds()
+    path = Path(tmp) / 'lifecycle.json'
+    source = thresholds.load(DATA_PATH)
+    thresholds.write(path, source)
+    ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
+                         'thresholds_lifecycle_ratchet')
+    updated = ratchet.update(
+        thresholds.load(path), Decimal('96.0'), 'python')
+    assert updated is not None
+    thresholds.write(path, updated)
+
+    size_baseline = _util.load(
+        ROOT / 'scripts' / 'ci' / 'size_baseline.py',
+        'thresholds_lifecycle_size_baseline')
+    updated = thresholds.load(path)
+    baseline = thresholds.module_size_baseline(updated)
+    selected = max(baseline, key=baseline.get)
+    sizes = {selected: baseline[selected] - 1}
+    tightened = size_baseline.tightened(baseline, sizes)
+    assert tightened is not None
+    updated['module_size_baseline'] = tightened
+    thresholds.write(path, updated)
+    original_path = DATA_PATH
+    globals()['DATA_PATH'] = path
+    try:
+        test_shipped_document_is_exact_and_cli_checkable(tmp)
+        test_cli_prints_only_the_requested_floor(tmp)
+        test_public_accessors_return_validated_data(tmp)
+    finally:
+        globals()['DATA_PATH'] = original_path
+    loaded = thresholds.load(path)
+    assert loaded['coverage']['python'] == {
+        'measured': Decimal('96.0'), 'floor': Decimal('94.5')}
+    assert loaded['module_size_baseline'] == tightened
+    assert thresholds.load(DATA_PATH) == source
 
 
 def test_restrictive_mode_selection_keeps_windows_destination_writable(tmp):
