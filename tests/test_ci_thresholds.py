@@ -189,7 +189,7 @@ def test_in_memory_coverage_rejects_nonfinite_and_nonobject_values(tmp):
     candidate = _valid()
     candidate['coverage']['python']['measured'] = Decimal('NaN')
     try:
-        thresholds._normalise(candidate)
+        thresholds.normalise(candidate)
     except ValueError as error:
         assert str(error) == 'coverage.python.measured must be finite'
     else:
@@ -197,7 +197,7 @@ def test_in_memory_coverage_rejects_nonfinite_and_nonobject_values(tmp):
     candidate = _valid()
     candidate['coverage']['python'] = []
     try:
-        thresholds._normalise(candidate)
+        thresholds.normalise(candidate)
     except ValueError as error:
         assert str(error) == 'coverage.python must be an object'
     else:
@@ -210,7 +210,7 @@ def test_low_decimal_precision_is_a_clean_threshold_refusal(tmp):
     with localcontext() as context:
         context.prec = 1
         try:
-            thresholds._coverage_value(
+            thresholds.coverage_value(
                 Decimal('80.0'), 'coverage.python.measured')
         except ValueError as error:
             assert str(error) == (
