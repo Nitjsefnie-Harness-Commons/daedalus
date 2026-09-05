@@ -138,6 +138,8 @@ def _duplicates(run):
          'app': {'slug': 'other-app'}, 'conclusion': 'failure'},
         {'id': 44, 'name': 'other', 'external_id': identity,
          'app': {'slug': 'github-actions'}, 'conclusion': 'failure'},
+        {'id': 45, 'name': CHECK_NAME, 'external_id': 'foreign',
+         'app': {'slug': 'github-actions'}, 'conclusion': 'failure'},
     ]
     result, updated, calls, _script = run(
         label='duplicates', state=duplicate_state, head_sha=head_sha)
@@ -148,7 +150,7 @@ def _duplicates(run):
                 'repos/owner/repo/check-runs/41',
                 'repos/owner/repo/check-runs/42'], writes
     assert [check['conclusion'] for check in updated['checks']] == [
-        'success', 'success', 'failure', 'failure'], updated
+        'success', 'success', 'failure', 'failure', 'failure'], updated
 
 
 def _crlf(run):
