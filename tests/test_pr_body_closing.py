@@ -10,8 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, PR_BODY, _html_body, _issue_html,
-    _text_html, _valid_html,
+    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, GITHUB_ISSUE_101, PR_BODY, _html_body,
+    _issue_html, _text_html, _valid_html,
 )
 
 
@@ -39,6 +39,43 @@ GITHUB_OUTSIDE_SECTIONS_HTML = (
     'hovercard" href="https://github.com/Nitjsefnie-Harness-Commons/'
     'daedalus/issues/105">#105</a></h2>\n'
     '<p dir="auto">Ran the suite.</p>')
+
+# Captured from the same endpoint, in the same mode and context, for a
+# body closing 101 in its Related section and carrying "Fixes #104" in a
+# footnote definition; the twin moves that text into a Changes list item.
+GITHUB_ISSUE_104 = (
+    '<a class="issue-link js-issue-link" data-error-text="Failed to load '
+    'title" data-id="5232205124" data-permission-text="Title is private" '
+    'data-url="https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues'
+    '/104" data-hovercard-type="issue" '
+    'data-hovercard-url="/Nitjsefnie-Harness-Commons/daedalus/issues/104/hov'
+    'ercard" '
+    'href="https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues/104'
+    '">#104</a>')
+
+GITHUB_FOOTNOTE_CLOSING_HTML = (
+    f'<h2 dir="auto">Summary</h2>\n<p dir="auto">One sentence.</p>\n<h2 '
+    f'dir="auto">Related Issues and Pull Requests</h2>\n<p dir="auto">Fixes '
+    f'{GITHUB_ISSUE_101}</p>\n<h2 dir="auto">Changes</h2>\n<ul dir="auto">\n'
+    f'<li>One change<sup><a '
+    f'href="#user-content-fn-1-d80c8cefc4d4d0c0cc35d32ce0250e0e" '
+    f'id="user-content-fnref-1-d80c8cefc4d4d0c0cc35d32ce0250e0e" '
+    f'data-footnote-ref="" aria-describedby="footnote-label">1</a></sup></li>'
+    f'\n</ul>\n<h2 dir="auto">Testing</h2>\n<p dir="auto">Ran the suite.</p>'
+    f'\n<section data-footnotes="" class="footnotes"><h2 id="footnote-label" '
+    f'class="sr-only" dir="auto">Footnotes</h2>\n<ol dir="auto">\n<li '
+    f'id="user-content-fn-1-d80c8cefc4d4d0c0cc35d32ce0250e0e">\n<p '
+    f'dir="auto">Fixes {GITHUB_ISSUE_104} <a '
+    f'href="#user-content-fnref-1-d80c8cefc4d4d0c0cc35d32ce0250e0e" '
+    f'data-footnote-backref="" aria-label="Back to reference 1" '
+    f'class="data-footnote-backref">↩</a></p>\n</li>\n</ol>\n</section>')
+
+GITHUB_SECTION_CLOSING_HTML = (
+    f'<h2 dir="auto">Summary</h2>\n<p dir="auto">One sentence.</p>\n<h2 '
+    f'dir="auto">Related Issues and Pull Requests</h2>\n<p dir="auto">Fixes '
+    f'{GITHUB_ISSUE_101}</p>\n<h2 dir="auto">Changes</h2>\n<ul dir="auto">\n'
+    f'<li>One change</li>\n<li>Fixes {GITHUB_ISSUE_104}</li>\n</ul>\n<h2 '
+    f'dir="auto">Testing</h2>\n<p dir="auto">Ran the suite.</p>')
 
 # Every captured rendering in tests/_prgate.py that carries an anchor in
 # section content, against the answer closing_issues gives for it.
@@ -244,6 +281,25 @@ def test_captured_renderings_pin_the_closing_answer(tmp):
     if found != [101]:
         failures.append(('footnote_html', found, [101]))
     assert failures == [], failures
+
+
+def test_a_footnote_definition_closes_nothing_a_section_would(tmp):
+    """Pin the footnote gap against the collection it suppresses.
+
+    The two captures differ only in where ``Fixes #104`` sits: a footnote
+    definition in the first, an ordinary Changes item in the second. Both
+    close 101 from their Related section, so the ``[101]`` answer records
+    that suppressing a footnote leaves the rest of the body collecting,
+    and an anchor collected inside a footnote answers ``[101, 104]`` here
+    while leaving the twin unchanged.
+    """
+    del tmp
+    footnote = PR_BODY.parse_rendered(
+        GITHUB_FOOTNOTE_CLOSING_HTML, REPOSITORY)
+    assert PR_BODY.closing_issues(footnote) == [101]
+    section = PR_BODY.parse_rendered(
+        GITHUB_SECTION_CLOSING_HTML, REPOSITORY)
+    assert PR_BODY.closing_issues(section) == [101, 104]
 
 
 # A heading carries text of its own, and that text lands in the gap the
