@@ -20,6 +20,12 @@ _NL = '\n'
 _FRESH_SOURCE_MARKER = 'mutation child loaded fresh source'
 _SCOPE_INVOKE = (
     'suite.test_python_evaluation_scopes_preserve_builtin_dict_identity(None)')
+_INLINE_INVOKE = (
+    'import test_static_guard_regressions as regression_suite; '
+    'regression_suite.test_inline_dict_receivers_refuse_hidden_launchers(None)')
+_SUBSCRIPT_INVOKE = (
+    'import test_static_guard_regressions as regression_suite; '
+    'regression_suite.test_subscripted_dict_carriers_refuse_hidden_launchers(None)')
 
 
 def _binding_violation(line):
@@ -445,13 +451,18 @@ def _mutation_specs():
         "    elif isinstance(value, ast.Dict):\n        for part in "
         "[*value.keys, *value.values]:\n            if part is not None:\n                "
         "yield from _carried_parts(part)\n",
-        "    elif isinstance(value, ast.Dict):\n        for part in "
-        "value.values:\n            if part is not None:\n                yield "
-        "from _carried_parts(part)\n")
+        "")
     subscript = (
         "    elif isinstance(value, ast.Subscript):\n"
         "        yield from _carried_parts(value.value)\n"
         "        yield from _carried_parts(value.slice)\n", "")
+    call_receiver = (
+        "        if (isinstance(node, ast.Call)\n"
+        "                and not _has_cwd_control(node)\n"
+        "                and any(_names_one_of(part, facts.subprocess_modules)\n"
+        "                        or _is_launch_value(part, facts)\n"
+        "                        for part in _call_receiver_parts(node))):\n"
+        "            lines.append(node.lineno)\n", "")
     default_scope = (
         "            for value in (*node.args.defaults, "
         "*node.args.kw_defaults):\n"
@@ -521,11 +532,10 @@ def _mutation_specs():
         ('callee base', 'bindings', (callee,),
          'suite.test_call_result_assignment_refuses_a_hidden_launcher(None)'),
         ('dict values', 'bindings', (dict_values,),
-         'import test_static_guard_regressions as regression_suite\n'
-         'regression_suite.test_subscripted_dict_carriers_refuse_hidden_launchers(None)'),
+         _INLINE_INVOKE),
         ('subscript values', 'bindings', (subscript,),
-         'import test_static_guard_regressions as regression_suite\n'
-         'regression_suite.test_subscripted_dict_carriers_refuse_hidden_launchers(None)'),
+         _SUBSCRIPT_INVOKE),
+        ('call receiver', 'bindings', (call_receiver,), _INLINE_INVOKE),
         ('function default scope', 'scopes',
          (function_default_scope,),
          _SCOPE_INVOKE),
