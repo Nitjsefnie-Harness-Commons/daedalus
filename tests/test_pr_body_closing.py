@@ -246,6 +246,10 @@ def test_captured_renderings_pin_the_closing_answer(tmp):
     assert failures == [], failures
 
 
+# A heading carries text of its own, and that text lands in the gap the
+# next anchor reads. Each boundary case therefore uses a heading whose
+# text cannot stand in for the boundary: an empty one, or one holding
+# nothing but the anchor.
 def test_preamble_keyword_does_not_govern_a_section_anchor(tmp):
     del tmp
     cases = (
@@ -255,7 +259,7 @@ def test_preamble_keyword_does_not_govern_a_section_anchor(tmp):
     for preamble, expected in cases:
         rendered = (
             preamble
-            + '<h2 dir="auto">Related Issues and Pull Requests</h2>\n'
+            + '<h2 dir="auto"></h2>\n'
             + f'{_issue_html(104)}\n')
         body = PR_BODY.parse_rendered(rendered, 'owner/repo')
         assert PR_BODY.closing_issues(body) == expected, preamble
@@ -285,7 +289,7 @@ def test_paragraph_keyword_does_not_govern_a_heading_anchor(tmp):
         rendered = (
             '<h2 dir="auto">Summary</h2>\n'
             + content
-            + f'<h2 dir="auto">See {_issue_html(104)}</h2>\n')
+            + f'<h2 dir="auto">{_issue_html(104)}</h2>\n')
         body = PR_BODY.parse_rendered(rendered, 'owner/repo')
         assert PR_BODY.closing_issues(body) == expected, content
 
