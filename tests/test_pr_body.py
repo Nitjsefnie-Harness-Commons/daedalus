@@ -20,7 +20,7 @@ RELATED = 'related issues and pull requests'
 
 def test_parser_splits_sections_and_collects_links_and_issues(tmp):
     del tmp
-    sections = PR_BODY.parse_rendered(_valid_html(), 'owner/repo')
+    sections = PR_BODY.parse_rendered(_valid_html(), 'owner/repo').sections
     assert [section.key for section in sections] == [
         'summary', RELATED, 'changes', 'testing']
     related = sections[1]
@@ -34,13 +34,14 @@ def test_parser_accepts_heading_depth_emphasis_and_colon(tmp):
     rendered = (
         '<h3><em>Related Issues and Pull Requests:</em></h3>\n'
         f'<p>Fixes {_issue_html(101)}</p>')
-    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo').sections
     assert [section.key for section in sections] == [RELATED]
 
 
 def test_parser_ignores_github_footnotes(tmp):
     del tmp
-    sections = PR_BODY.parse_rendered(GITHUB_FOOTNOTE_HTML, REPOSITORY)
+    sections = PR_BODY.parse_rendered(
+        GITHUB_FOOTNOTE_HTML, REPOSITORY).sections
     assert 'footnotes' not in [section.key for section in sections]
     assert PR_BODY.referenced_issues(sections) == [101]
 
@@ -59,7 +60,7 @@ def test_parser_rejects_unusable_html(tmp):
     accepted = []
     for rendered in unusable:
         try:
-            PR_BODY.parse_rendered(rendered, 'owner/repo')
+            PR_BODY.parse_rendered(rendered, 'owner/repo').sections
         except ValueError as error:
             assert 'rendered HTML' in str(error), error
         else:
@@ -70,7 +71,7 @@ def test_parser_rejects_unusable_html(tmp):
 def test_parser_rejects_unfinished_heading(tmp):
     del tmp
     try:
-        PR_BODY.parse_rendered('<h2>Summary', 'owner/repo')
+        PR_BODY.parse_rendered('<h2>Summary', 'owner/repo').sections
     except ValueError as error:
         assert 'unfinished heading' in str(error), error
     else:
@@ -83,7 +84,7 @@ def test_parser_rejects_malformed_repositories(tmp):
     accepted = []
     for repository in ('owner', 'a/b/c', '/'):
         try:
-            PR_BODY.parse_rendered(rendered, repository)
+            PR_BODY.parse_rendered(rendered, repository).sections
         except ValueError as error:
             assert 'owner/name' in str(error), error
         else:
@@ -106,7 +107,7 @@ def test_visible_reference_fixtures_remain_visible(tmp):
         sections = PR_BODY.parse_rendered(
             _html_body(('Related Issues and Pull Requests',
                         GITHUB_HTML[name])),
-            REPOSITORY)
+            REPOSITORY).sections
         found = PR_BODY.referenced_issues(sections)
         if found != [101]:
             failures.append((name, found))
@@ -130,7 +131,7 @@ def test_nontext_reference_fixtures_remain_hidden(tmp):
         sections = PR_BODY.parse_rendered(
             _html_body(('Related Issues and Pull Requests',
                         GITHUB_HTML[name])),
-            REPOSITORY)
+            REPOSITORY).sections
         found = PR_BODY.referenced_issues(sections)
         if found:
             failures.append((name, found))
@@ -143,7 +144,7 @@ def test_parser_ignores_named_anchor_without_href(tmp):
     del tmp
     rendered = _html_body(
         ('Related Issues and Pull Requests', GITHUB_HTML['named_anchor']))
-    sections = PR_BODY.parse_rendered(rendered, REPOSITORY)
+    sections = PR_BODY.parse_rendered(rendered, REPOSITORY).sections
     assert sections[0].links == ()
     assert PR_BODY.referenced_issues(sections) == []
 
@@ -152,14 +153,14 @@ def test_numeric_character_references_contribute_visible_text(tmp):
     del tmp
     rendered = _html_body(
         ('Summary', '<p>&#35;101 &#x23;101</p>'))
-    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo').sections
     assert sections[0].text.strip() == '#101 #101'
 
 
 def test_bare_section_text_is_not_duplicated_at_close(tmp):
     del tmp
     rendered = _html_body(('Summary', 'hello world'))
-    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo').sections
     assert sections[0].text == '\nhello world', repr(sections[0].text)
 
 
@@ -174,7 +175,7 @@ def test_parser_state_names_do_not_collide_with_the_base(tmp):
 def test_related_helpers_return_empty_without_related_section(tmp):
     del tmp
     sections = PR_BODY.parse_rendered(
-        _html_body(('Summary', '<p>text</p>')), 'owner/repo')
+        _html_body(('Summary', '<p>text</p>')), 'owner/repo').sections
     actual = (
         PR_BODY.referenced_issues(sections),
         PR_BODY.related_links(sections),
@@ -217,7 +218,7 @@ def test_issue_number_language(tmp):
 
 
 def _layout_errors(rendered, template=TEMPLATE):
-    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo').sections
     return PR_BODY.layout_errors(sections, template)
 
 
@@ -395,7 +396,7 @@ def test_retains_instruction_comment(tmp):
 
 def _may_reference(source, related_html):
     sections = PR_BODY.parse_rendered(
-        _valid_html(references=related_html), 'owner/repo')
+        _valid_html(references=related_html), 'owner/repo').sections
     return PR_BODY.related_may_reference(source, sections, TEMPLATE)
 
 
@@ -434,7 +435,7 @@ def test_related_may_reference_accepts_reference_shapes(tmp):
     for name, spelling, rendered in cases:
         source = _valid_body(references=spelling)
         sections = PR_BODY.parse_rendered(
-            _valid_html(references=rendered), 'owner/repo')
+            _valid_html(references=rendered), 'owner/repo').sections
         full = PR_BODY.related_may_reference(source, sections, TEMPLATE)
         raw = PR_BODY.related_may_reference(source, [], TEMPLATE)
         if not full or not raw:
@@ -502,7 +503,7 @@ def test_related_may_reference_accepts_rendered_link_alone(tmp):
     del tmp
     rendered = _valid_html(
         references='<p dir="auto"><a href="#101">reference</a></p>')
-    sections = PR_BODY.parse_rendered(rendered, 'owner/repo')
+    sections = PR_BODY.parse_rendered(rendered, 'owner/repo').sections
     assert PR_BODY.related_may_reference('nothing', sections, TEMPLATE)
 
 

@@ -325,16 +325,17 @@ def _run(api, repo, pr, actor, template):
     if not isinstance(rendered, str):
         raise _GateError('markdown response is not text')
     try:
-        sections = parse_rendered(rendered, repo)
+        parsed = parse_rendered(rendered, repo)
     except ValueError as error:
         raise _GateError(
             f'could not analyze rendered body: {error}') from error
+    sections = parsed.sections
 
     layout = layout_errors(sections, template)
     if retains_instruction_comment(body, template):
         layout.append(INSTRUCTION_REASON)
     references = referenced_issues(sections)
-    closing = closing_issues(sections)
+    closing = closing_issues(parsed)
     known = set(references)
     for number in closing:
         if number not in known:
