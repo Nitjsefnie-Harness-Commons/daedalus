@@ -601,5 +601,45 @@ def test_detached_mapping_value_anchor_names_its_position(tmp):
         _refused(source, 'mapping value')
 
 
+def _flow_member_document(member, top_level):
+    steps = ('jobs:\n sample:\n  runs-on: ubuntu-latest\n  steps:\n'
+             '   - uses: actions/checkout@abc\n')
+    if top_level:
+        steps = f'x: [{member}, b]\n' + steps
+    else:
+        steps += f'     with:\n      args: [{member}, b]\n'
+    return steps + ('   - name: hidden step\n'
+                    '     uses: actions/cache@deadbeef\n')
+
+
+def test_flow_member_properties_preserve_quoted_hashes(tmp):
+    del tmp
+    for prop in ('&a', '!!str'):
+        for quote in ("'", '"'):
+            for top_level in (False, True):
+                member = f'{prop} {quote}x # y{quote}'
+                source = _flow_member_document(member, top_level)
+                parsed = yaml.load(source, Loader=yaml.BaseLoader)
+                expected = [step.get('name') for step in
+                            parsed['jobs']['sample']['steps']]
+                assert _names(source) == expected == [None, 'hidden step'], (
+                    prop, quote, top_level, source)
+
+
+def test_flow_member_properties_keep_unquoted_hashes_as_comments(tmp):
+    del tmp
+    for prop in ('&a', '!!str'):
+        for top_level in (False, True):
+            member = f'{prop} x # ], hidden: [\n        '
+            source = _flow_member_document(member, top_level)
+            parsed = yaml.load(source, Loader=yaml.BaseLoader)
+            expected = [step.get('name') for step in
+                        parsed['jobs']['sample']['steps']]
+            assert _names(source) == expected == [None, 'hidden step'], source
+            collection = (parsed['x'] if top_level else
+                          parsed['jobs']['sample']['steps'][0]['with']['args'])
+            assert collection == ['x', 'b'], collection
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
