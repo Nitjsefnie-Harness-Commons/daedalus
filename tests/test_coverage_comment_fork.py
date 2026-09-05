@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable contracts for the fork pull request fallback resolution."""
+"""Executable contracts for the coverage comment workflow."""
 import json
 import os
 import sys
@@ -7,6 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ghexpr import evaluate_if  # noqa: E402
+from _coverage_comment_steps import GH_CHECK_STUB  # noqa: E402
 import test_coverage_comment_workflow as commenter  # noqa: E402
 
 
@@ -113,6 +115,97 @@ def test_a_same_repository_run_never_reaches_the_fallback(tmp):
     text = output.read_text(encoding='utf-8')
     assert f'number={_PR_NUMBER}' in text, text
     assert 'stale=false' in text, text
+
+
+_MISSING_HEAD_SHA = 'b' * 40
+_MARKER = '<!-- daedalus-diff-coverage -->'
+_PRIOR_MARKER = [{
+    'id': 1,
+    'user': {'login': 'github-actions[bot]'},
+    'body': _MARKER,
+}]
+
+
+def _run_publication(tmp, status):
+    """Run the real final check publisher with the derived job status."""
+    workdir = Path(tmp) / 'publish'
+    (workdir / 'bin').mkdir(parents=True, exist_ok=True)
+    commenter._write_executable(workdir / 'bin' / 'gh', GH_CHECK_STUB)
+    state = workdir / 'state.json'
+    state.write_text(json.dumps({'checks': []}), encoding='utf-8')
+    calls = workdir / 'calls.jsonl'
+    calls.write_text('', encoding='utf-8')
+    env = {
+        **os.environ,
+        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
+        'GH_TOKEN': 'stub',
+        'REPO': 'owner/repo',
+        'HEAD_SHA': _MISSING_HEAD_SHA,
+        'RUN_URL': 'https://github.com/owner/repo/actions/runs/7',
+        'STATUS': status,
+        'STUB_STATE': str(state),
+        'STUB_CALLS': str(calls),
+    }
+    result = commenter._run_shell_block(
+        workdir,
+        commenter._run_block(commenter._workflow(), 'Publish coverage check'),
+        env)
+    return result, json.loads(state.read_text(encoding='utf-8'))
+
+
+def _run_missing_artifact_case(tmp, prior_comments):
+    """Run every relevant shell step and publish the resulting job status."""
+    artifact, output = commenter._run_artifact_check(
+        tmp, {'total_count': 0, 'artifacts': []})
+    assert artifact.returncode == 0, (artifact.stdout, artifact.stderr)
+    assert output == '', output
+
+    resolved, _state, _calls, output = commenter._run_comment_block(
+        tmp, 'Resolve the target pull request from the event', state=[],
+        head_sha=_MISSING_HEAD_SHA, current_head=_MISSING_HEAD_SHA)
+    assert resolved.returncode == 0, (resolved.stdout, resolved.stderr)
+    text = output.read_text(encoding='utf-8')
+    assert 'number=170' in text, text
+    assert 'stale=false' in text, text
+
+    context = {
+        'steps': {
+            'artifact': {'outputs': {}},
+            'pr': {'outputs': {'stale': 'false'}},
+        },
+        'status': {'success': True, 'failure': False, 'cancelled': False},
+    }
+    condition = commenter._step_condition(
+        commenter._workflow(), 'Mark missing patch coverage')
+    assert evaluate_if(condition, context) is True, condition
+
+    marked, comments, _calls, _output = commenter._run_comment_block(
+        tmp, 'Mark missing patch coverage', state=prior_comments,
+        head_sha=_MISSING_HEAD_SHA, current_head=_MISSING_HEAD_SHA)
+    status = 'failure' if marked.returncode else 'success'
+    published, checks = _run_publication(tmp, status)
+    assert published.returncode == 0, (published.stdout, published.stderr)
+    assert checks['checks'][0]['conclusion'] != 'success', checks
+    return marked, comments, checks
+
+
+def test_missing_artifact_fails_named_check_without_prior_marker(tmp):
+    """An absent artifact fails the named check when no marker exists."""
+    marked, comments, checks = _run_missing_artifact_case(
+        Path(tmp) / 'without-marker', [])
+    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert comments == [], comments
+    assert checks['checks'][0]['conclusion'] == 'failure', checks
+
+
+def test_missing_artifact_fails_named_check_with_prior_marker(tmp):
+    """An absent artifact still fails after invalidating an old marker."""
+    marked, comments, checks = _run_missing_artifact_case(
+        Path(tmp) / 'with-marker', _PRIOR_MARKER)
+    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert len(comments) == 1, comments
+    assert 'not measured' in comments[0]['body'], comments
+    assert checks['checks'][0]['conclusion'] == 'failure', checks
 
 
 if __name__ == '__main__':
