@@ -9,7 +9,6 @@ _LAUNCHERS = frozenset(
 
 
 def _is_launch_value(value, facts):
-    """Whether an expression is a subprocess launcher or a known alias."""
     if isinstance(value, ast.Name):
         return value.id in facts.launch_callables
     return (isinstance(value, ast.Attribute)
@@ -61,7 +60,6 @@ def _bound_values(node, facts):
 
 
 def _pattern_binds(pattern):
-    """Whether a match pattern captures at least one name."""
     return any(
         isinstance(part, (ast.MatchAs, ast.MatchStar)) and part.name
         or isinstance(part, ast.MatchMapping) and part.rest
@@ -97,7 +95,6 @@ def _carried_parts(value):
 
 
 def _has_cwd_control(value):
-    """Whether a call spells a cwd keyword or a literal cwd spread."""
     for keyword in value.keywords:
         if keyword.arg == 'cwd':
             return True
@@ -117,7 +114,6 @@ def _has_cwd_control(value):
 
 
 def _call_receiver_parts(value):
-    """Carried elements in a dictionary-backed call receiver."""
     callee = value.func
     while isinstance(callee, (ast.Attribute, ast.Subscript)):
         callee = callee.value

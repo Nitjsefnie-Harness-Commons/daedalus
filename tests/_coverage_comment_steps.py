@@ -434,7 +434,6 @@ EXPECTED_WORKFLOW_MAPPING = {
 
 
 def complete_workflow_expectations(publication_step):
-    """Return one complete, independently-owned workflow expectation."""
     steps = EXPECTED_STEP_MAPPINGS + (publication_step,)
     job = {**EXPECTED_PRIVILEGED_JOB_MAPPING, 'steps': list(steps)}
     workflow = {

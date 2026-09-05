@@ -88,7 +88,6 @@ def _restrictive_mode(platform_name):
 
 
 def test_shipped_document_is_exact_and_cli_checkable(tmp):
-    """The tracked document is valid and remains CLI-checkable."""
     del tmp
     _assert_document_contract(DATA_PATH)
 
@@ -99,7 +98,6 @@ def test_cli_prints_only_the_requested_floor(tmp):
 
 
 def test_required_and_unknown_fields_are_rejected(tmp):
-    """Schema drift must fail closed instead of silently selecting a value."""
     path = Path(tmp) / 'thresholds.json'
     cases = []
     for key in ('schema_version', 'coverage', 'module_size_baseline'):
@@ -118,7 +116,6 @@ def test_required_and_unknown_fields_are_rejected(tmp):
 
 
 def test_nested_required_and_unknown_fields_are_rejected(tmp):
-    """Both language records and the baseline have exact member sets."""
     path = Path(tmp) / 'thresholds.json'
     for language in ('python', 'javascript'):
         value = _valid()
@@ -157,7 +154,6 @@ def test_duplicate_keys_are_rejected_before_mapping_construction(tmp):
 
 
 def test_coverage_numbers_are_finite_bounded_and_one_decimal(tmp):
-    """Coverage values have an exact tenths representation and no booleans."""
     path = Path(tmp) / 'thresholds.json'
     values = (True, '80.0', 'NaN', 'Infinity', -0.1, 100.1, 80.04)
     for value in values:
@@ -175,7 +171,6 @@ def test_coverage_numbers_are_finite_bounded_and_one_decimal(tmp):
 
 
 def test_invalid_utf8_and_malformed_json_are_refused(tmp):
-    """Threshold loading reports both byte and syntax failures plainly."""
     path = Path(tmp) / 'invalid.json'
     path.write_bytes(b'\xff')
     _assert_load_refused(path, 'invalid thresholds JSON:')
@@ -220,7 +215,6 @@ def test_low_decimal_precision_is_a_clean_threshold_refusal(tmp):
 
 
 def test_coverage_floor_is_strictly_lower_with_exact_gap(tmp):
-    """The calibration contract rejects both a weak floor and a wrong gap."""
     path = Path(tmp) / 'thresholds.json'
     for measured, floor, needle in (
             (80.0, 80.0, 'floor must be below measured'),
@@ -234,7 +228,6 @@ def test_coverage_floor_is_strictly_lower_with_exact_gap(tmp):
 
 
 def test_baseline_paths_and_counts_are_safe_and_positive(tmp):
-    """Filesystem policy state cannot smuggle traversal or invalid counts."""
     path = Path(tmp) / 'thresholds.json'
     for unsafe in ('', '/absolute.py', r'..\\escape.py', '../escape.py',
                    'tests/../escape.py', 'tests/has:colon.py',
@@ -269,7 +262,6 @@ def test_nonobject_baseline_and_missing_threshold_file_are_refused(tmp):
 
 
 def test_public_accessors_return_validated_data(tmp):
-    """Accessor calls repeat the named language and baseline contracts."""
     del tmp
     thresholds = _thresholds()
     data = thresholds.load(DATA_PATH)
@@ -287,7 +279,6 @@ def test_public_accessors_return_validated_data(tmp):
 
 
 def test_invalid_candidate_never_touches_existing_destination(tmp):
-    """Validation precedes the temporary file and replacement boundaries."""
     thresholds = _thresholds()
     target = Path(tmp) / 'thresholds.json'
     target.write_bytes(b'old bytes\n')
@@ -368,13 +359,11 @@ def _write_failure(tmp, boundary):
 
 
 def test_atomic_writer_preserves_old_bytes_for_each_failure_boundary(tmp):
-    """Write, flush, and replace failures all leave no partial publication."""
     for boundary in ('write', 'flush', 'replace'):
         _write_failure(tmp, boundary)
 
 
 def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
-    """Canonical bytes and destination permissions survive repeated writes."""
     thresholds = _thresholds()
     target = Path(tmp) / 'thresholds.json'
     target.write_bytes(b'legacy\n')
@@ -397,7 +386,6 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
 
 
 def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
-    """Registered threshold checks survive coverage and size ratchets."""
     thresholds = _thresholds()
     path = Path(tmp) / 'lifecycle.json'
     source = thresholds.load(DATA_PATH)
@@ -523,7 +511,6 @@ def test_lifecycle_accepts_a_fully_tightened_empty_baseline(tmp):
 
 
 def test_restrictive_mode_selection_keeps_windows_destination_writable(tmp):
-    """The Windows request is writable while POSIX remains restrictive."""
     del tmp
     assert _restrictive_mode('posix') == 0o400
     windows_mode = _restrictive_mode('nt')

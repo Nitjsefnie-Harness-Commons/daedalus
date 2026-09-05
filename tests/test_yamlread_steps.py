@@ -37,7 +37,6 @@ def _job_raises(source, detail):
 
 
 def _item_reader_refused(source, detail):
-    """Require the production step reader to name its refusal."""
     try:
         workflow_step_items(source, 'sample')
     except YAMLReadError as error:
@@ -47,7 +46,6 @@ def _item_reader_refused(source, detail):
 
 
 def _step_source(field, body='', tail='     if: z\n'):
-    """Build one sample step for production-reader controls."""
     return f'jobs:\n sample:\n  steps:\n   - {field}\n{body}{tail}'
 
 

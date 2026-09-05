@@ -108,7 +108,6 @@ def test_a_comment_ends_a_wrapped_mapping_value(tmp):
 
 
 def test_explicit_mapping_value_keeps_its_scalar_content_opaque(tmp):
-    """An explicit key's value cannot redefine an earlier anchor."""
     del tmp
     values = ('|\n     k: &a hidden\n', '>-\n     k: &a hidden\n',
               '"open\n     k: &a hidden"\n',
@@ -157,7 +156,6 @@ def _property_value(value, property_indent):
 
 
 def test_property_only_lines_keep_mapping_values_opaque(tmp):
-    """Properties before a scalar header belong to that value."""
     del tmp
     properties = (('!!str',), ('&b',), ('!!str', '&b'),
                   ('&b', '!!str'))
@@ -210,7 +208,6 @@ def _flow_property_source(value, properties, explicit, gap):
 
 
 def test_property_only_lines_keep_flow_values_opaque(tmp):
-    """Properties before a flow value preserve its quoted delimiters."""
     del tmp
     cases = (
         ('{', '"', False, ('!!str',)),
@@ -269,7 +266,6 @@ def _detached_value_source(body, gap, property_indent):
 
 
 def test_detached_mapping_value_properties_keep_anchor_diagnostic(tmp):
-    """A detached value's anchor stays owned by its mapping value."""
     del tmp
     cases = (
         (('!!str', '&a target'), 'target'),

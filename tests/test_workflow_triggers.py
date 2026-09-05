@@ -185,7 +185,6 @@ def test_workflow_trigger_gate_rejects_quote_collisions_and_accepts_comments(
 
 
 def _workflow_runs_for_paths(path, event, changed):
-    """Evaluate the repository's parsed trigger filter for changed paths."""
     text = path.read_text(encoding='utf-8')
     triggers = _workflow_triggers(text, path.name)
     if event not in triggers:
@@ -198,7 +197,6 @@ def _workflow_runs_for_paths(path, event, changed):
 
 
 def test_threshold_only_push_skips_only_expensive_gates(tmp):
-    """Only the exact data file is ignored on expensive push workflows."""
     del tmp
     workflows = ROOT / '.github' / 'workflows'
     threshold = '.github/ci-thresholds.json'
@@ -223,7 +221,6 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
 
 
 def test_threshold_filter_mutations_change_the_run_set(tmp):
-    """Deleting or broadening either ignore is visible through real parsing."""
     workflows = Path(tmp) / 'workflows'
     workflows.mkdir()
     source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -260,7 +257,6 @@ def test_threshold_filter_mutations_change_the_run_set(tmp):
 
 
 def test_contribution_gates_have_unfiltered_push_triggers(tmp):
-    """Audit stays the repository-controlled run for every data-only push."""
     del tmp
     workflows = ROOT / '.github' / 'workflows'
     for name in ('tests.yml', 'codeql.yml', 'audit.yml'):
