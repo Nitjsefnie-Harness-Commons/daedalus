@@ -27,7 +27,7 @@ def _measurement(value):
         raise ValueError('measured must be a finite JSON number') from None
     if not result.is_finite():
         raise ValueError('measured must be finite')
-    return thresholds._coverage_value(result, 'measured')
+    return thresholds.coverage_value(result, 'measured')
 
 
 def floor_for(measured):
@@ -44,7 +44,7 @@ def update(data, measured, language):
     """Return an updated document, or ``None`` when no raise is justified."""
     if language not in LANGUAGES:
         raise ValueError(f'unknown coverage language: {language}')
-    candidate = thresholds._normalise(data)
+    candidate = thresholds.normalise(data)
     measured = _measurement(measured)
     recorded_measured, _floor = read_calibration(candidate, language)
     should_raise = measured - recorded_measured > RAISE_HYSTERESIS
@@ -54,7 +54,7 @@ def update(data, measured, language):
         'measured': measured,
         'floor': measured - CALIBRATION_GAP,
     }
-    return thresholds._normalise(candidate)
+    return thresholds.normalise(candidate)
 
 
 def _parser():

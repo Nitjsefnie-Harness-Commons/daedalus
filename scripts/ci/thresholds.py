@@ -18,6 +18,10 @@ _SCHEMA_VERSION = 1
 _COVERAGE_LANGUAGES = ('python', 'javascript')
 _TOP_LEVEL_FIELDS = ('schema_version', 'coverage', 'module_size_baseline')
 _COVERAGE_FIELDS = ('measured', 'floor')
+_FIELD_LABELS = {
+    'thresholds': 'field: {field}',
+    'coverage': 'coverage language: {field}',
+}
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _DEVICE_NAMES = {
     'CON', 'PRN', 'AUX', 'NUL',
@@ -67,22 +71,17 @@ def _number(value, name):
 def _required_fields(value, expected, name):
     if not isinstance(value, dict):
         raise ValueError(f'{name} must be an object')
+    label = _FIELD_LABELS.get(name, f'field: {name}.{{field}}')
     for field in expected:
         if field not in value:
-            label = field if name == 'thresholds' else f'{name}.{field}'
-            if name == 'coverage':
-                raise ValueError(f'missing coverage language: {field}')
-            raise ValueError(f'missing field: {label}')
+            raise ValueError(f'missing {label.format(field=field)}')
     expected_set = set(expected)
     for field in value:
         if field not in expected_set:
-            label = field if name == 'thresholds' else f'{name}.{field}'
-            if name == 'coverage':
-                raise ValueError(f'unknown coverage language: {field}')
-            raise ValueError(f'unknown field: {label}')
+            raise ValueError(f'unknown {label.format(field=field)}')
 
 
-def _coverage_value(value, name):
+def coverage_value(value, name):
     result = _number(value, name)
     if result < 0 or result > 100:
         raise ValueError(f'{name} must be between 0.0 and 100.0')
@@ -117,7 +116,7 @@ def _path_component_safe(component):
         return False
 
 
-def _module_path(value, name):
+def _module_path(value):
     if not isinstance(value, str) or not value or '\\' in value:
         raise ValueError(f'unsafe module path: {value!r}')
     if value.startswith('/') or value.startswith('//'):
@@ -131,11 +130,10 @@ def _module_path(value, name):
     components = value.split('/')
     if not all(_path_component_safe(component) for component in components):
         raise ValueError(f'unsafe module path: {value!r}')
-    del name
     return value
 
 
-def _normalise(data):
+def normalise(data):
     _required_fields(data, _TOP_LEVEL_FIELDS, 'thresholds')
     schema = _number(data['schema_version'], 'schema_version')
     if schema != _SCHEMA_VERSION or schema != schema.to_integral_value():
@@ -149,9 +147,9 @@ def _normalise(data):
         record = coverage_data[language]
         prefix = f'coverage.{language}'
         _required_fields(record, _COVERAGE_FIELDS, prefix)
-        measured = _coverage_value(
+        measured = coverage_value(
             record['measured'], f'{prefix}.measured')
-        floor = _coverage_value(record['floor'], f'{prefix}.floor')
+        floor = coverage_value(record['floor'], f'{prefix}.floor')
         if floor >= measured:
             raise ValueError(f'{prefix}.floor must be below measured')
         if measured - floor != CALIBRATION_GAP:
@@ -166,7 +164,7 @@ def _normalise(data):
         raise ValueError('module_size_baseline must be an object')
     normalised_baseline = {}
     for path, value in baseline.items():
-        safe_path = _module_path(path, 'module_size_baseline')
+        safe_path = _module_path(path)
         count = _number(value, f'module_size_baseline.{safe_path}')
         if count <= 0 or count != count.to_integral_value():
             raise ValueError(
@@ -186,21 +184,21 @@ def load(path=THRESHOLDS):
         raw = target.read_bytes()
     except OSError as error:
         raise ValueError(f'cannot read thresholds: {error}') from None
-    return _normalise(_decode(raw))
+    return normalise(_decode(raw))
 
 
 def coverage(data, language):
     """Return a validated ``(measured, floor)`` pair for ``language``."""
     if language not in _COVERAGE_LANGUAGES:
         raise ValueError(f'unknown coverage language: {language}')
-    normalised = _normalise(data)
+    normalised = normalise(data)
     record = normalised['coverage'][language]
     return record['measured'], record['floor']
 
 
 def module_size_baseline(data):
     """Return the validated module-size mapping."""
-    return dict(_normalise(data)['module_size_baseline'])
+    return dict(normalise(data)['module_size_baseline'])
 
 
 def _json_ready(value):
@@ -214,13 +212,13 @@ def _json_ready(value):
 
 
 def _render(data):
-    normalised = _normalise(data)
+    normalised = normalise(data)
     ready = _json_ready(normalised)
     text = json.dumps(
         ready, ensure_ascii=True, indent=2, sort_keys=False,
         allow_nan=False) + '\n'
     encoded = text.encode('utf-8')
-    if _normalise(_decode(encoded)) != normalised:
+    if normalise(_decode(encoded)) != normalised:
         raise ValueError('serialized thresholds failed validation')
     return encoded
 
