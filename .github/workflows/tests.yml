@@ -911,8 +911,9 @@ jobs:
         # deleting one key.
         #
         # This threshold-only push does not re-run tests or CodeQL: tests.yml
-        # and codeql.yml skip a push containing only .github/ci-thresholds.json.
-        # audit.yml remains unfiltered and is the release-safety run for every push.
+        # and codeql.yml skip a push containing only
+        # .github/ci-thresholds.json. audit.yml remains unfiltered and is the
+        # release-safety run for every push.
         #
         # Without the secret nothing is pushed and the summary remains visible.
         if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true'
