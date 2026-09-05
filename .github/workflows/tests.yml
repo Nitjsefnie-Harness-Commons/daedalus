@@ -15,13 +15,10 @@ on:
     # this a second time against the same SHA, and a branch with no pull
     # request open is not a tree anyone is reviewing.
     branches: [main]
-    # Threshold state is produced by this workflow. A push containing only
-    # that data skips this expensive workflow; source pushes still run it.
+    # Ratchet commits change only this data; audit still gates those pushes.
     paths-ignore:
       - '.github/ci-thresholds.json'
-    # release.yml names no workflow of its own — it waits on the runs
-    # for the tagged SHA and fails when the count of non-release runs
-    # is zero; audit.yml remains the repository-controlled unfiltered gate.
+    # release.yml needs a run on the tagged SHA; audit remains unfiltered.
     #
     # Documentation-only runs are narrowed inside the workflow instead, by
     # the classifier's docs_only output: one suite leg runs, coverage and
@@ -830,19 +827,18 @@ jobs:
             javascript-coverage.xml
           if-no-files-found: error
 
-      # Keep this exact name: coverage policy tests select this gate by name.
+      # Policy tests select this step by its exact name.
       - name: Python coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        # The loader owns the floor; this command remains coverage.py's gate.
         run: |
           python_floor="$(python scripts/ci/thresholds.py \
             --coverage-floor python)"
           python -m coverage report "--fail-under=$python_floor" --precision=1
 
-      # Keep this exact name: coverage policy tests select this gate by name.
+      # Policy tests select this step by its exact name.
       - name: JavaScript coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        # JavaScript uses physical code lines, so its floor is independent.
+        # JavaScript floors use physical code-line coverage.
         run: |
           javascript_floor="$(python scripts/ci/thresholds.py \
             --coverage-floor javascript)"
@@ -851,8 +847,7 @@ jobs:
             "--fail-under=$javascript_floor"
 
       - name: Work out the raise this run justifies
-        # Only from a push to main. A pull request measures a tree that is not
-        # main, and a fork's token cannot push at all. Ratchets only raise.
+        # Only measurements from main may change its calibration.
         id: ratchet
         if: ${{ !cancelled() && steps.measure.conclusion == 'success'
                 && github.event_name == 'push'
@@ -910,12 +905,9 @@ jobs:
         # to this one repository rather than to an account, and revoking it is
         # deleting one key.
         #
-        # This threshold-only push does not re-run tests or CodeQL: tests.yml
-        # and codeql.yml skip a push containing only
-        # .github/ci-thresholds.json. audit.yml remains unfiltered and is the
-        # release-safety run for every push.
-        #
-        # Without the secret nothing is pushed and the summary remains visible.
+        # A threshold-only push does not re-run tests or CodeQL;
+        # audit.yml remains unfiltered.
+        # Without the deploy key, changes remain in the summary.
         if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true'
                 && env.RATCHET_SSH_KEY != '' }}
         env:

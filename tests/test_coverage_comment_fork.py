@@ -127,7 +127,6 @@ _PRIOR_MARKER = [{
 
 
 def _run_publication(tmp, status):
-    """Run the real final check publisher with the derived job status."""
     workdir = Path(tmp) / 'publish'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     commenter._write_executable(workdir / 'bin' / 'gh', GH_CHECK_STUB)
@@ -154,7 +153,6 @@ def _run_publication(tmp, status):
 
 
 def _run_missing_artifact_case(tmp, prior_comments):
-    """Run every relevant shell step and publish the resulting job status."""
     artifact, output = commenter._run_artifact_check(
         tmp, {'total_count': 0, 'artifacts': []})
     assert artifact.returncode == 0, (artifact.stdout, artifact.stderr)
@@ -190,7 +188,6 @@ def _run_missing_artifact_case(tmp, prior_comments):
 
 
 def test_missing_artifact_fails_named_check_without_prior_marker(tmp):
-    """An absent artifact fails the named check when no marker exists."""
     marked, comments, checks = _run_missing_artifact_case(
         Path(tmp) / 'without-marker', [])
     assert marked.returncode != 0, (marked.stdout, marked.stderr)
@@ -199,7 +196,6 @@ def test_missing_artifact_fails_named_check_without_prior_marker(tmp):
 
 
 def test_missing_artifact_fails_named_check_with_prior_marker(tmp):
-    """An absent artifact still fails after invalidating an old marker."""
     marked, comments, checks = _run_missing_artifact_case(
         Path(tmp) / 'with-marker', _PRIOR_MARKER)
     assert marked.returncode != 0, (marked.stdout, marked.stderr)

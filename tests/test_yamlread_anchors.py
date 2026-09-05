@@ -48,7 +48,6 @@ def _reader_refused(source, detail):
 
 
 def _reader_refused_exact(source, detail):
-    """Require one exact production-reader refusal."""
     try:
         workflow_step_items(source, 'sample')
     except YAMLReadError as error:

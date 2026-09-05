@@ -407,7 +407,6 @@ def _cache_write_reason(step, job, step_number):
 
 
 def _cache_writing_jobs(workflow):
-    """Return statically classified cache-writing jobs."""
     writers = set()
     for job in _job_names(workflow):
         mapping = complete_job_mapping(workflow, job)

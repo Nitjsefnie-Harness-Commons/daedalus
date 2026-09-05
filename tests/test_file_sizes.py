@@ -39,7 +39,6 @@ def _captured_main(policy, argv):
 
 
 def test_every_tracked_module_satisfies_the_size_policy(tmp):
-    """No tracked file grows past its record or its unexcused ceiling."""
     del tmp
     policy = _policy()
     baseline = _thresholds().module_size_baseline(_document())
@@ -49,7 +48,6 @@ def test_every_tracked_module_satisfies_the_size_policy(tmp):
 
 
 def test_baseline_names_only_files_that_still_need_it(tmp):
-    """Missing and graduated entries remain visible for manual cleanup."""
     del tmp
     policy = _policy()
     baseline = _thresholds().module_size_baseline(_document())
@@ -59,7 +57,6 @@ def test_baseline_names_only_files_that_still_need_it(tmp):
 
 
 def test_the_ceilings_are_below_everything_they_excuse(tmp):
-    """A baseline is meaningful only when it exceeds its file ceiling."""
     del tmp
     policy = _policy()
     baseline = _thresholds().module_size_baseline(_document())
@@ -68,7 +65,6 @@ def test_the_ceilings_are_below_everything_they_excuse(tmp):
 
 
 def test_tightened_returns_a_new_mapping_for_a_shrunk_file(tmp):
-    """The JSON mapping follows an over-ceiling file down exactly."""
     del tmp
     policy = _policy()
     baseline = {'server.py': 2624}
@@ -79,7 +75,6 @@ def test_tightened_returns_a_new_mapping_for_a_shrunk_file(tmp):
 
 
 def test_tightening_never_raises_or_adds_a_number(tmp):
-    """No-shrink, growth, and unbaselined files are untouched."""
     del tmp
     policy = _policy()
     baseline = {'server.py': 2624}
@@ -90,7 +85,6 @@ def test_tightening_never_raises_or_adds_a_number(tmp):
 
 
 def test_tightening_graduates_a_file_under_its_ceiling(tmp):
-    """A stale exception is removed once the file needs no exception."""
     del tmp
     policy = _policy()
     baseline = {'server.py': 2624, 'tests/small.py': 939}
@@ -99,7 +93,6 @@ def test_tightening_graduates_a_file_under_its_ceiling(tmp):
 
 
 def test_tightening_graduates_at_the_inclusive_ceiling(tmp):
-    """A file exactly at its ceiling no longer needs a baseline exception."""
     del tmp
     policy = _policy()
     baseline = {'tests/small.py': 900}
@@ -108,7 +101,6 @@ def test_tightening_graduates_at_the_inclusive_ceiling(tmp):
 
 
 def test_tightening_preserves_an_entry_for_a_missing_file(tmp):
-    """Deleting source never silently rewrites policy state."""
     del tmp
     policy = _policy()
     baseline = {'tests/gone.py': 900}
@@ -116,7 +108,6 @@ def test_tightening_preserves_an_entry_for_a_missing_file(tmp):
 
 
 def test_main_reports_clean_and_all_violation_modes(tmp):
-    """The direct CLI reports every kind and de-duplicates its remedies."""
     thresholds = _thresholds()
     policy = _policy()
     target = Path(tmp) / 'thresholds.json'
@@ -160,7 +151,6 @@ def test_main_reports_clean_and_all_violation_modes(tmp):
 
 
 def test_main_tighten_noop_then_changes_only_selected_member(tmp):
-    """Tightening preserves a no-op byte-for-byte and lowers one entry."""
     thresholds = _thresholds()
     policy = _policy()
     target = Path(tmp) / 'thresholds.json'
@@ -205,7 +195,6 @@ def test_main_tighten_noop_then_changes_only_selected_member(tmp):
 
 
 def test_main_reports_threshold_load_failures_without_traceback(tmp):
-    """Missing, unreadable, and malformed threshold inputs fail closed."""
     policy = _policy()
     missing = Path(tmp) / 'missing.json'
     unreadable = Path(tmp) / 'unreadable'
@@ -226,7 +215,6 @@ def test_main_reports_threshold_load_failures_without_traceback(tmp):
 
 
 def _size_fixture(tmp, files, baseline, name):
-    """Create a tracked tree for one real size-policy CLI invocation."""
     thresholds = _thresholds()
     repo = Path(tmp) / name
     (repo / '.github').mkdir(parents=True)
@@ -256,7 +244,6 @@ def _size_fixture(tmp, files, baseline, name):
 
 
 def test_cli_tighten_changes_json_member_and_preserves_calibration(tmp):
-    """The real CLI atomically lowers one controlled fixture entry."""
     policy = _policy()
     thresholds = _thresholds()
     selected = 'tests/shrinking.py'
@@ -274,7 +261,6 @@ def test_cli_tighten_changes_json_member_and_preserves_calibration(tmp):
 
 
 def test_real_cli_no_shrink_and_missing_entry_report_without_write(tmp):
-    """A controlled no-op preserves a missing entry and its document bytes."""
     policy = _policy()
     thresholds = _thresholds()
     stable = 'tests/stable.py'
@@ -302,7 +288,6 @@ def _run_tighten(target, script=POLICY_SOURCE, cwd=ROOT):
 
 
 def test_real_cli_tighten_already_empty_baseline_is_noop(tmp):
-    """An already-empty valid baseline remains byte-for-byte unchanged."""
     policy = _policy()
     selected = 'tests/unbaselined.py'
     current = policy.ceiling_for(selected)
@@ -318,7 +303,6 @@ def test_real_cli_tighten_already_empty_baseline_is_noop(tmp):
 
 
 def test_real_cli_tighten_shrink_writes_only_the_lowered_member(tmp):
-    """The copied real CLI records one shrink and preserves other state."""
     policy = _policy()
     thresholds = _thresholds()
     selected = 'tests/shrinking.py'
@@ -340,7 +324,6 @@ def test_real_cli_tighten_shrink_writes_only_the_lowered_member(tmp):
 
 
 def test_real_cli_tighten_graduates_last_entry_to_empty(tmp):
-    """The copied real CLI graduates the final entry into an empty map."""
     policy = _policy()
     thresholds = _thresholds()
     selected = 'tests/graduating.py'
@@ -360,7 +343,6 @@ def test_real_cli_tighten_graduates_last_entry_to_empty(tmp):
 
 
 def test_real_cli_tighten_growth_reports_without_upward_write(tmp):
-    """The copied real CLI never records a controlled grown module upward."""
     policy = _policy()
     selected = 'tests/growing.py'
     current = policy.TEST_CEILING + 2
@@ -376,7 +358,6 @@ def test_real_cli_tighten_growth_reports_without_upward_write(tmp):
 
 def test_real_cli_tighten_over_ceiling_unbaselined_file_reports_without_write(
         tmp):
-    """An unbaselined fixture over its ceiling cannot be added."""
     policy = _policy()
     thresholds = _thresholds()
     data = _document()
@@ -399,7 +380,6 @@ def test_real_cli_tighten_over_ceiling_unbaselined_file_reports_without_write(
 
 
 def test_real_cli_tighten_missing_entry_reports_without_deleting_it(tmp):
-    """A genuinely missing fixture entry remains for manual deletion."""
     policy = _policy()
     thresholds = _thresholds()
     data = _document()
@@ -425,7 +405,6 @@ def _normalised(text):
 
 
 def _skill_decisions(path=SKILL_SOURCE):
-    """Read each operator decision independently from the tracked skill."""
     text = _normalised(path.read_text(encoding='utf-8'))
     return {
         'owner': '.github/ci-thresholds.json' in text
@@ -475,7 +454,6 @@ def test_skill_removes_retired_owner_and_false_reader_claim(tmp):
 
 
 def test_skill_mutations_are_caught_independently(tmp):
-    """Breaking one operator decision cannot hide behind the other three."""
     source = SKILL_SOURCE.read_text(encoding='utf-8')
     mutations = (
         ('owner', '.github/ci-thresholds.json', 'scripts/ci/size_baseline.py'),
@@ -494,7 +472,6 @@ def test_skill_mutations_are_caught_independently(tmp):
 
 
 def test_skill_pressure_scenarios_name_the_operator_action(tmp):
-    """The prose gives an action for growth, shrinkage, and deletion."""
     del tmp
     text = _normalised(SKILL_SOURCE.read_text(encoding='utf-8'))
     assert 'recorded number is never raised' in text
@@ -505,7 +482,6 @@ def test_skill_pressure_scenarios_name_the_operator_action(tmp):
 
 
 def test_script_docstring_carries_each_printed_remedy(tmp):
-    """Refusals and operator documentation remain one policy contract."""
     del tmp
     policy = _policy()
     doc = _normalised(policy.__doc__ or '')
@@ -514,7 +490,6 @@ def test_script_docstring_carries_each_printed_remedy(tmp):
 
 
 def test_refused_kinds_print_the_correct_remedy(tmp):
-    """The four violation kinds retain their distinct clearing actions."""
     del tmp
     policy = _policy()
     over = policy.TEST_CEILING + 1

@@ -47,17 +47,14 @@ def lines(workflow):
 
 
 def indent(line):
-    """Return the indentation of one source line."""
     return text_indent(line.text)
 
 
 def meaningful(line):
-    """Return whether a line carries non-comment YAML content."""
     return bool(line.text.strip(' ')) and line.text.lstrip(' ')[:1] != '#'
 
 
 def field_indent(line, nested=False):
-    """Return where a mapping field starts, past a sequence dash."""
     result = indent(line)
     while (
             line.text[result:result + 1] == '-'
@@ -113,14 +110,12 @@ def continued_quote_end(source, start, end, quote):
 
 
 def prepared_value(raw_value, strip_comments=True):
-    """Return node properties and comment-stripped scalar content."""
     tokens, bare = node_properties(raw_value.lstrip(' \t'))
     bare = bare.strip(' \t')
     return tokens, _strip_inline_comment(bare) if strip_comments else bare
 
 
 def property_only(line):
-    """Return whether a line contains only node properties."""
     tokens, value = prepared_value(line.text[indent(line):])
     return bool(tokens) and not value
 
@@ -316,7 +311,6 @@ def _flow_start(source, end, candidate):
 
 
 def scalar_regions(source, texts):
-    """Find scalar continuations and opaque flow-collection extents."""
     scalar = set()
     opaque = set()
     index = 0

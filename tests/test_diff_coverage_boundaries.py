@@ -12,26 +12,22 @@ import diff_coverage  # noqa: E402
 
 
 def test_decode_git_path_keeps_a_final_unmatched_backslash(tmp):
-    """A quoted path ending in a backslash retains that byte."""
     del tmp
     assert diff_coverage._decode_git_path('"b/end\\') == 'end\\'
 
 
 def test_decode_git_path_decodes_the_tab_escape(tmp):
-    """Git's one-character tab escape becomes a tab in the source path."""
     del tmp
     assert diff_coverage._decode_git_path('"b/a\\tb"') == 'a\tb'
 
 
 def test_measure_skips_added_lines_without_statement_records(tmp):
-    """A measured file with no touched records produces no coverage row."""
     del tmp
     assert diff_coverage.measure({'x.py': {1: 1}}, {'x.py': {9}}) == (
         [], 0, 0)
 
 
 def test_executable_lines_skips_a_nameless_class_before_a_usable_one(tmp):
-    """A class without a filename cannot invalidate a later usable class."""
     coverage_xml = Path(tmp) / 'classes.xml'
     coverage_xml.write_text(
         '<coverage><classes>'
@@ -46,7 +42,6 @@ def test_executable_lines_skips_a_nameless_class_before_a_usable_one(tmp):
 
 
 def test_executable_lines_refuses_coordinate_zero(tmp):
-    """Cobertura coordinates must be positive source-line numbers."""
     coverage_xml = Path(tmp) / 'zero.xml'
     coverage_xml.write_text(
         '<coverage><class filename="zero.py"><lines>'
@@ -63,7 +58,6 @@ def test_executable_lines_refuses_coordinate_zero(tmp):
 
 
 def test_validate_statement_records_refuses_an_omitted_statement(tmp):
-    """Every executable added statement must have an XML record."""
     source = Path(tmp) / 'statements.py'
     source.write_text('first = 1\nsecond = 2\n', encoding='utf-8')
     measured = {str(source): {1: 1}}

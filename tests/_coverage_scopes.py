@@ -379,9 +379,8 @@ def _bound_names(node):
 def _scope_bindings(scoped, parents):
     """All grammar-bound names, independent of the rebinding product.
 
-    A star import carries the all-names sentinel. Declarations bind their
-    destination even without an assignment, since uncertainty cannot prove
-    a builtin. Store-context names cover every assignment target shape.
+    Declarations bind their destination even without an assignment:
+    uncertainty cannot prove a builtin. Star imports bind every name.
     """
     local = {scope: set() for scope in parents}
     global_names = {scope: set() for scope in parents}
@@ -430,7 +429,6 @@ def _name_is_unbound(name, scope, bindings, parents):
 
 
 def _visible_scope_shadows(scope, shadows, parents):
-    """Names the given per-scope product holds where `scope` evaluates."""
     visible = set()
     while scope is not None:
         visible.update(shadows[scope])

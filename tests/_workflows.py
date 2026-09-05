@@ -1,32 +1,17 @@
 """Reading a workflow's `on:` block without a YAML parser.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+PyYAML's BaseLoader is a test oracle; production has no YAML dependency.
+This reader handles trigger declarations and their path filters. Unsupported
+syntax raises: a plausible partial result could make a policy test pass.
 
-PyYAML is a test-only dependency for the BaseLoader oracle; production has no
-YAML parser dependency, so these workflow suites scan text. What they need
-from that text is one nesting level deep: which triggers an `on:` block
-declares, and which path filters each one carries. Both answers have to
-survive the spellings YAML allows for the same thing, which is why this is a
-module rather than a substring check at each call site.
+Keys must be unquoted lowercase letters, digits, `_`, or `-`. Plain paths
+must have a provable string type across YAML versions; quote ambiguous
+booleans, nulls, numbers, and timestamps. Quoted paths admit neither a
+backslash nor an embedded surrounding quote.
 
-The bounded grammar is an allow-list. Mapping keys are only unquoted plain
-keys made from lowercase letters, digits, `_`, and `-`; every quoted or other
-key is refused. Path values are either unquoted scalars whose string type this
-reader can prove, or single- or double-quoted scalars with no backslash and
-no embedded copy of their surrounding quote. The reader refuses a plain scalar
-depends on which YAML version resolves it rather than guessing one; quoting
-the value is the escape hatch. This deliberately chooses false refusal over
-false green, because the gate compares values for equality and cannot do that
-safely when the scalar's type is unknown. Implicit booleans in every case
-(`true`, `false`, `yes`, `no`, `on`, `off`, `y`, and `n`), nulls (`null`, `~`,
-and empty plain scalars), every core integer and float form (signs,
-underscores, bases, sexagesimals, `.inf`, and unsigned `.nan`), and timestamps
-are refused, as are tags, anchors, aliases, block scalars, continuations, flow
-mappings, tabs, duplicates, and non-empty inline trigger values. Empty trigger
-values (`{}`, `null`, and `~`) remain accepted as event declarations. Correct
-or refusing, never plausible: a construct this reader does not parse raises
-rather than returning an answer that reads like one, because a policy test
-cannot tell a wrong answer from a right one.
+Tags, anchors, aliases, block scalars, continuations, flow mappings, tabs,
+duplicates, and non-empty inline triggers are outside this grammar. Empty
+trigger values (`{}`, `null`, and `~`) remain event declarations.
 """
 import re
 
