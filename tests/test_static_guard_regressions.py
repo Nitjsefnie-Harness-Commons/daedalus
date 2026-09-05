@@ -113,6 +113,62 @@ launchers['sp'](['python3', 'child.py'], cwd=tmp)
     ]
 
 
+def test_inline_dict_receivers_refuse_hidden_launchers(tmp):
+    del tmp
+    unsafe_sources = (
+        ("""import os
+import subprocess
+os.chdir(tmp)
+{'sp': subprocess}['sp'].run(['python3', 'child.py'])
+""", 4),
+        ("""import os
+import subprocess
+os.chdir(tmp)
+for launcher in {'sp': subprocess}.values():
+    launcher.run(['python3', 'child.py'])
+""", 4),
+        ("""import os
+import subprocess
+os.chdir(tmp)
+for launcher in {'outer': {'sp': subprocess}}['outer'].values():
+    launcher.run(['python3', 'child.py'])
+""", 4),
+    )
+    for source, line in unsafe_sources:
+        assert _coverage_suite._synthetic_violations(source) == [
+            _coverage_suite._binding_violation(line)]
+
+    assert _coverage_suite._synthetic_violations(
+        """import os
+import subprocess
+os.chdir(tmp)
+{'sp': subprocess}['sp'].run(['python3', 'child.py'], cwd=ROOT)
+""") == []
+
+    assert _coverage_suite._synthetic_violations(
+        """import os
+import subprocess
+os.chdir(tmp)
+{'sp': subprocess}['sp'].run(['python3', 'child.py'], cwd=tmp)
+""") == [
+        "tests/synthetic.py:4: unresolved callee "
+        "{'sp': subprocess}['sp'].run cwd=tmp declares no env="
+    ]
+
+
+def test_inline_dict_receiver_keeps_unresolved_callee_diagnostic(tmp):
+    del tmp
+    source = """import os
+import mystery
+os.chdir(tmp)
+{'sp': mystery}['sp'](['python3', 'child.py'], cwd=tmp)
+"""
+    assert _coverage_suite._synthetic_violations(source) == [
+        "tests/synthetic.py:4: unresolved callee {'sp': mystery}['sp'] "
+        'cwd=tmp declares no env='
+    ]
+
+
 def test_nonlauncher_binding_controls_stay_clean(tmp):
     del tmp
     assert _coverage_suite._synthetic_violations(

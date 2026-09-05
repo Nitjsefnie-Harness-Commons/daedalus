@@ -96,8 +96,37 @@ def _carried_parts(value):
         yield value
 
 
+def _has_cwd_control(value):
+    """Whether a call spells a cwd keyword or a literal cwd spread."""
+    for keyword in value.keywords:
+        if keyword.arg == 'cwd':
+            return True
+        if keyword.arg is not None:
+            continue
+        spread = keyword.value
+        if (isinstance(spread, ast.Dict) and any(
+                isinstance(key, ast.Constant) and key.value == 'cwd'
+                for key in spread.keys)):
+            return True
+        if (isinstance(spread, ast.Call)
+                and isinstance(spread.func, ast.Name)
+                and spread.func.id == 'dict'
+                and any(item.arg == 'cwd' for item in spread.keywords)):
+            return True
+    return False
+
+
+def _call_receiver_parts(value):
+    """Carried elements in a dictionary-backed call receiver."""
+    callee = value.func
+    while isinstance(callee, (ast.Attribute, ast.Subscript)):
+        callee = callee.value
+    if isinstance(callee, ast.Dict):
+        yield from _carried_parts(callee)
+
+
 def _unfollowable_launcher_bindings(tree, facts):
-    """Lines binding a launcher where the alias walk cannot see it."""
+    """Lines binding or calling a launcher the alias walk cannot follow."""
     lines = []
     for node in memo_nodes(tree):
         for line, value in _bound_values(node, facts):
@@ -105,4 +134,10 @@ def _unfollowable_launcher_bindings(tree, facts):
                    or _is_launch_value(part, facts)
                    for part in _carried_parts(value)):
                 lines.append(line)
+        if (isinstance(node, ast.Call)
+                and not _has_cwd_control(node)
+                and any(_names_one_of(part, facts.subprocess_modules)
+                        or _is_launch_value(part, facts)
+                        for part in _call_receiver_parts(node))):
+            lines.append(node.lineno)
     return lines
