@@ -166,11 +166,11 @@ class _RenderedBodyParser(HTMLParser):
             if attributes.get('id') == _FOOTNOTE_LABEL:
                 # GitHub prefixes an author's id with user-content-, so
                 # a bare one is its own injected footnote label. The
-                # element holding it is a region belonging to no
-                # section; the section it interrupts resumes where that
-                # element closes.
+                # element holding it is a region no section owns; the
+                # one it interrupts resumes where that element ends.
                 self._label_depth = len(self._open_tags)
                 self._region_depth = self._label_depth - 1
+                self._break_closing_list()
                 return
             self._region_depth = None
             if self._heading_tag is not None:
@@ -240,9 +240,8 @@ class _RenderedBodyParser(HTMLParser):
             self._break_closing_list()
         self._end_run()
         if depth == self._label_depth:
-            # Handled ahead of the author heading's own close below: an
-            # author heading holding the label is also an h2, and it
-            # closes later, at the smaller depth this one is read at.
+            # Taken ahead of the author heading's close below: a heading
+            # holding the label is an h2 too, and closes after it.
             self._label_depth = None
             return
         if depth == self._region_depth:
@@ -282,7 +281,8 @@ class _RenderedBodyParser(HTMLParser):
             self._text.append(data)
 
     def _record_pending(self, data):
-        if self._anchor_depth:
+        # GitHub's own label text must not decide an author's list.
+        if self._anchor_depth or self._label_depth is not None:
             return
         self._gap.append(data)
 
