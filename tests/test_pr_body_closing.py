@@ -13,7 +13,8 @@ import _util  # noqa: E402
 from _prfootnotes import FOOTNOTE_HTML  # noqa: E402
 from _prgate import (  # noqa: E402
     GITHUB_FOOTNOTE_HTML, GITHUB_HTML, GITHUB_ISSUE_101, GITHUB_ISSUE_104,
-    PR_BODY, _html_body, _issue_html, _text_html, _valid_html,
+    PR_BODY, PR_BODY_CLOSING, _html_body, _issue_html, _text_html,
+    _valid_html,
 )
 
 
@@ -227,7 +228,7 @@ def test_every_closing_keyword_spelling_closes(tmp):
     spellings = (
         'close', 'closes', 'closed', 'fix', 'fixes', 'fixed',
         'resolve', 'resolves', 'resolved')
-    assert PR_BODY._CLOSING_KEYWORDS == frozenset(spellings)
+    assert PR_BODY_CLOSING._CLOSING_KEYWORDS == frozenset(spellings)
     for keyword in spellings:
         rendered = _valid_html(references=f'{keyword} {_issue_html(101)}')
         body = PR_BODY.parse_rendered(rendered, 'owner/repo')
