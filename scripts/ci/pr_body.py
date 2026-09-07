@@ -165,16 +165,17 @@ class _RenderedBodyParser(HTMLParser):
         if tag in _HEADING_TAGS:
             if attributes.get('id') == _FOOTNOTE_LABEL:
                 # GitHub prefixes an author's id with user-content-, so
-                # a bare one is its own injected footnote label. The
-                # element holding it is a region no section owns; the
-                # one it interrupts resumes where that element ends.
+                # a bare one is its own injected footnote label. Its
+                # element is a region no section owns, left only at
+                # that element's end: a heading inside opens no section.
                 self._label_depth = len(self._open_tags)
                 self._region_depth = self._label_depth - 1
                 self._break_closing_list()
                 return
-            self._region_depth = None
             if self._heading_tag is not None:
                 raise ValueError('rendered HTML contains nested headings')
+            if self._region_depth is not None:
+                return
             self._finish_section()
             self._heading_tag = tag
             self._heading_parts = []
