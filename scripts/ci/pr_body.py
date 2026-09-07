@@ -305,10 +305,12 @@ class _RenderedBodyParser(HTMLParser):
         if self.rawdata:
             raise ValueError('rendered HTML is structurally incomplete')
         super().close()
-        if self._heading_tag is not None or self._region_depth is not None:
+        if self._heading_tag is not None:
             raise ValueError('rendered HTML contains an unfinished heading')
         if any(tag not in _HEADING_TAGS for tag in self._open_tags):
             raise ValueError('rendered HTML contains an unfinished element')
+        if self._region_depth is not None:
+            raise ValueError('rendered HTML contains an unfinished region')
         self._finish_section()
 
     def _finish_section(self):
