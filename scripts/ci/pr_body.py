@@ -362,26 +362,26 @@ def _gap_closing(run, gap, previous_closing):
     or an explicit link, since it ends the run rather than interrupting
     it.
 
-    Both sides of the boundary follow: `**Fixes** #N` is inert because
-    the keyword falls outside the run, `*a*fixes #N` closes because the
-    `a` does, and `Fixes, #N` is inert because GitHub was measured not
-    to act on trailing punctuation rather than because nobody thought
-    of it.
+    Both sides of the boundary follow: `**Fixes** #N` is inert and
+    `*a*fixes #N` closes. So does the narrow side -- trailing
+    punctuation is refused because GitHub was measured not to act on
+    it.
 
     Folding is required rather than extra width: `fixeſ #N` closes on
     GitHub and folds to `fixes` here, so an ASCII-only or fold-free
     match would refuse a spelling it acts on. `FİXES #N` is the one
     measured spelling folding admits and GitHub ignores.
 
-    Three widths are deliberate: whitespace GitHub does not take, so a
-    no-break space closes; no separator at all or a colon with no
-    space, reachable as `Fixes[#N](url)` and `Fixes:#N`; and the
-    keyword-list continuation, past an anchor GitHub stops at. Matching
-    its separator exactly needs both halves -- the strip limited to
-    spaces and tabs, and one of them required between keyword and
-    reference. Failing closed is preferred, because the two directions
-    cost differently: a refusal GitHub would not have made, against a
-    bypass of the claim check this feeds.
+    The deliberate widths, all in the safe direction: whitespace
+    GitHub does not take, so a no-break space closes; no separator at
+    all or a colon with no space, reachable as `Fixes[#N](url)` and
+    `Fixes:#N`; an HTML comment, which is dropped without ending the
+    run; and the keyword-list continuation, past an anchor GitHub
+    stops at. Matching its separator exactly needs both halves -- the
+    strip limited to spaces and tabs, and one of them required between
+    keyword and reference. Failing closed is preferred, because the
+    two directions cost differently: a refusal GitHub would not have
+    made, against a bypass of the claim check this feeds.
     """
     before_separator = run.rstrip().removesuffix(':').rstrip()
     if _TRAILING_KEYWORD.search(before_separator):
