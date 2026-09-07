@@ -282,7 +282,7 @@ class _RenderedBodyParser(HTMLParser):
             self._text.append(data)
 
     def _record_pending(self, data):
-        if not self._anchor_depth:
+        if not self._anchor_depth and self._label_depth is None:
             self._gap.append(data)
 
     def _current_run(self):
