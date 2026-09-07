@@ -398,9 +398,19 @@ FOOTNOTE_CLOSING = (
     ('own_heading', [101, 104]),
     ('no_dataattr', [101, 104]),
     ('plain_div', [101, 104]),
+    ('forged_label_in_section', [101, 104]),
+    ('label_no_footnote', [101, 104]),
+    ('author_footnotes_heading', [101, 104]),
+    ('heading_wrapped_ref', [101, 104]),
+    ('two_sections', [101, 104, 105]),
     ('footnote_definition_bare', [101]),
     ('footnote_in_related', [101]),
     ('empty_testing_with_footnote', [101]),
+    ('heading_wrapped', [101]),
+    ('forged_label', [101]),
+    ('id_only', [101]),
+    ('class_only', [101]),
+    ('id_upper_attr', [101]),
 )
 
 
@@ -410,9 +420,11 @@ def test_a_footnote_section_closes_what_github_closes(tmp):
     The marker GitHub's generator writes is the marker /markdown echoes
     back from an author's own ``<section data-footnotes>``, normalised
     into the full spelling, so no attribute on the element separates
-    generated content from written content. The bare and in-related
-    rows are the negative controls: a reference under no keyword still
-    closes nothing.
+    generated content from written content. The heading GitHub injects
+    into it is the half an author cannot forge, and it governs section
+    boundaries only; this channel reads the whole document either way.
+    The bare and in-related rows are the negative controls: a reference
+    under no keyword still closes nothing.
     """
     del tmp
     assert {name for name, _ in FOOTNOTE_CLOSING} == set(FOOTNOTE_HTML)

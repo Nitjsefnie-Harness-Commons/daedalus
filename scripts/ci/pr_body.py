@@ -27,6 +27,7 @@ _TEMPLATE_COMMENT = re.compile(r'<!--.*?-->', re.DOTALL)
 _TEMPLATE_TAG = re.compile(
     r'<!--\s*(?P<tag>required|conditional|optional)\b')
 _HEADING_TAGS = frozenset(f'h{depth}' for depth in range(1, 7))
+_FOOTNOTE_LABEL = 'footnote-label'
 _VOID_TAGS = frozenset((
     'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
     'meta', 'param', 'source', 'track', 'wbr',
@@ -145,6 +146,7 @@ class _RenderedBodyParser(HTMLParser):
         self._run_start = 0
         self._anchor_depth = 0
         self._previous_closing = False
+        self._label_depth = None
 
     def handle_starttag(self, tag, attrs):
         self.saw_element = True
@@ -160,6 +162,14 @@ class _RenderedBodyParser(HTMLParser):
         run = self._current_run()
         self._end_run()
         if tag in _HEADING_TAGS:
+            if attributes.get('id') == _FOOTNOTE_LABEL:
+                # GitHub prefixes an author's id with user-content-, so
+                # a bare one is its own injected footnote label. It ends
+                # the section above it and opens none, leaving footnote
+                # content in no section, as a preamble is.
+                self._finish_section()
+                self._label_depth = len(self._open_tags)
+                return
             if self._heading_tag is not None:
                 raise ValueError('rendered HTML contains nested headings')
             self._finish_section()
@@ -217,12 +227,19 @@ class _RenderedBodyParser(HTMLParser):
         if not self._open_tags or self._open_tags[-1] != tag:
             raise ValueError(
                 'rendered HTML contains mismatched element boundaries')
+        depth = len(self._open_tags)
         self._open_tags.pop()
         if tag == 'a' and self._anchor_depth:
             self._anchor_depth -= 1
         if tag in _BLOCK_TAGS:
             self._break_closing_list()
         self._end_run()
+        if depth == self._label_depth:
+            # Matched by depth rather than by tag: the label is an h2
+            # and so is the heading it can be nested in, so a tag
+            # comparison would close the author's heading here.
+            self._label_depth = None
+            return
         if tag != self._heading_tag:
             return
         name = _heading_text(''.join(self._heading_parts))
@@ -250,6 +267,8 @@ class _RenderedBodyParser(HTMLParser):
         self._record_pending(data)
 
     def _record_text(self, data):
+        if self._label_depth is not None:
+            return
         if self._heading_tag is not None:
             self._heading_parts.append(data)
         elif self._key is not None:
@@ -412,14 +431,6 @@ def layout_errors(sections, template):
     for section in sections:
         rule = rules.get(section.key)
         if rule is None:
-            if section.key == 'footnotes':
-                # GitHub injects the label heading that opens this
-                # section into every rendered footnote section, so
-                # judging it would refuse a conforming body. It is not
-                # attributed to the section above either: footnote
-                # content lands under that injected heading, so it
-                # cannot fill a section the author left empty.
-                continue
             errors.append(
                 f'Section {code_span(section.name)} is not defined by '
                 'the template.')

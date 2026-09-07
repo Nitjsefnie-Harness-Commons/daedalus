@@ -39,12 +39,18 @@ def test_parser_accepts_heading_depth_emphasis_and_colon(tmp):
     assert [section.key for section in sections] == [RELATED]
 
 
-def test_parser_reads_a_github_footnote_section(tmp):
+def test_the_injected_footnote_label_opens_no_section(tmp):
+    """GitHub's own label ends the section above it and opens none.
+
+    An author cannot reach this branch: /markdown prefixes every
+    author-supplied id with user-content-, so a bare footnote-label
+    is the generator's.
+    """
     del tmp
     sections = PR_BODY.parse_rendered(
         GITHUB_FOOTNOTE_HTML, REPOSITORY).sections
     assert [section.key for section in sections] == [
-        'summary', RELATED, 'changes', 'testing', 'footnotes']
+        'summary', RELATED, 'changes', 'testing']
     assert PR_BODY.referenced_issues(sections) == [101]
 
 
@@ -348,22 +354,34 @@ def test_layout_reports_unknown_duplicate_and_out_of_order_sections(tmp):
 
 
 # What each capture's sections come to once its footnote section is
-# read like any other content. no_dataattr opens no footnotes section
-# because GitHub keys on data-footnotes: it normalises that attribute
-# up into the generated spelling and drops a footnotes class arriving
-# without it. own_heading opens a second one from the heading its
-# author hid inside the element.
+# read like any other content and GitHub's injected label heading opens
+# none of its own. no_dataattr carries no label at all, because GitHub
+# keys on data-footnotes: it normalises that attribute up into the
+# generated spelling and drops a footnotes class arriving without it.
+# Every trap row is an author heading GitHub rewrote the id of, so it
+# opens a section the way any other author heading does.
 _BASE_KEYS = ('summary', RELATED, 'changes', 'testing')
 FOOTNOTE_SECTIONS = (
-    ('footnote_definition_closing', _BASE_KEYS + ('footnotes',)),
-    ('footnote_definition_bare', _BASE_KEYS + ('footnotes',)),
-    ('raw_section', _BASE_KEYS + ('footnotes',)),
-    ('footnote_in_related', _BASE_KEYS + ('footnotes',)),
-    ('empty_testing_with_footnote', _BASE_KEYS + ('footnotes',)),
-    ('no_class', _BASE_KEYS + ('footnotes',)),
-    ('own_heading', _BASE_KEYS + ('footnotes', 'extra')),
+    ('footnote_definition_closing', _BASE_KEYS),
+    ('footnote_definition_bare', _BASE_KEYS),
+    ('raw_section', _BASE_KEYS),
+    ('footnote_in_related', _BASE_KEYS),
+    ('empty_testing_with_footnote', _BASE_KEYS),
+    ('no_class', _BASE_KEYS),
     ('no_dataattr', _BASE_KEYS),
     ('plain_div', _BASE_KEYS),
+    ('two_sections', _BASE_KEYS),
+    ('heading_wrapped', _BASE_KEYS),
+    ('own_heading', _BASE_KEYS + ('extra',)),
+    ('forged_label', _BASE_KEYS + ('trap',)),
+    ('forged_label_in_section', _BASE_KEYS + ('trap',)),
+    ('id_only', _BASE_KEYS + ('trap',)),
+    ('class_only', _BASE_KEYS + ('trap',)),
+    ('id_upper_attr', _BASE_KEYS + ('trap',)),
+    ('label_no_footnote', _BASE_KEYS + ('trap',)),
+    ('author_footnotes_heading', _BASE_KEYS + ('footnotes',)),
+    ('heading_wrapped_ref',
+     ('summary', RELATED, 'changes', 'testing fixes #104')),
 )
 
 # A footnote definition renders at the end of the document, so its
@@ -386,12 +404,34 @@ def test_a_footnote_section_splits_like_any_other_section(tmp):
     assert failures == [], failures
 
 
-# The template defines no Footnotes section, and GitHub's injected label
-# heading opens one in every body that carries a footnote. Judging it
-# would close a conforming pull request, so layout_errors passes over
-# it. Nothing else is excused: own_heading's Extra section is refused,
-# and the footnote content lands in the section its own label opened
-# rather than filling the empty Testing section above it.
+def test_a_keyword_free_footnote_reference_reaches_no_section(tmp):
+    """Both channels' answers for a reference no keyword governs.
+
+    The reference is collected from the rendered document, so nothing
+    hides it; it simply belongs to no section, because the label
+    heading that precedes it closes the last one and opens none.
+    """
+    del tmp
+    for name in ('footnote_definition_bare', 'footnote_in_related'):
+        body = PR_BODY.parse_rendered(FOOTNOTE_HTML[name], REPOSITORY)
+        assert PR_BODY.closing_issues(body) == [101], name
+        assert PR_BODY.referenced_issues(body.sections) == [101], name
+        collected = [
+            number for section in body.sections
+            for number in section.issues]
+        assert collected == [101], name
+
+
+def _undefined(name):
+    return f'Section `{name}` is not defined by the template.'
+
+
+# The template defines no Footnotes section and the parser opens none,
+# so a conforming body is judged exactly as it would be without its
+# footnotes. What an author writes is judged too: author_footnotes_
+# heading is a section the template does not define, and the trap rows
+# are the same refusal reached through a rewritten label id.
+_TRAP = [_undefined('Trap')]
 FOOTNOTE_LAYOUT = (
     ('footnote_definition_closing', []),
     ('footnote_definition_bare', []),
@@ -400,13 +440,24 @@ FOOTNOTE_LAYOUT = (
     ('no_class', []),
     ('no_dataattr', []),
     ('plain_div', []),
+    ('two_sections', []),
     ('empty_testing_with_footnote', ['Section "Testing" is empty.']),
-    ('own_heading',
-     ['Section `Extra` is not defined by the template.']),
+    ('heading_wrapped', ['Section "Testing" is empty.']),
+    ('own_heading', [_undefined('Extra')]),
+    ('author_footnotes_heading', [_undefined('Footnotes')]),
+    ('forged_label', _TRAP),
+    ('forged_label_in_section', _TRAP),
+    ('id_only', _TRAP),
+    ('class_only', _TRAP),
+    ('id_upper_attr', _TRAP),
+    ('label_no_footnote', _TRAP),
+    ('heading_wrapped_ref',
+     [_undefined('Testing Fixes #104'),
+      'Required section "Testing" is missing.']),
 )
 
 
-def test_layout_disregards_an_undefined_footnotes_section(tmp):
+def test_layout_judges_a_footnote_body_by_the_template_alone(tmp):
     del tmp
     assert {name for name, _ in FOOTNOTE_LAYOUT} == set(FOOTNOTE_HTML)
     failures = []
@@ -417,17 +468,6 @@ def test_layout_disregards_an_undefined_footnotes_section(tmp):
         if found != expected:
             failures.append((name, found, expected))
     assert failures == [], failures
-
-
-def test_layout_judges_a_footnotes_section_the_template_defines(tmp):
-    """The skip lasts only while no rule of that name exists."""
-    del tmp
-    template = TEMPLATE + '\n## Footnotes\n<!-- required: name them -->\n'
-    sections = PR_BODY.parse_rendered(
-        FOOTNOTE_HTML['own_heading'], REPOSITORY).sections
-    assert PR_BODY.layout_errors(sections, template) == [
-        'Section "Footnotes" is empty.',
-        'Section `Extra` is not defined by the template.']
 
 
 def test_layout_counts_rendered_code_as_content(tmp):
