@@ -421,6 +421,7 @@ FOOTNOTE_CLOSING = (
     ('definition_heading_text', [101]),
     ('two_definitions', [101]),
     ('wrapper_heading_then_resume', [101]),
+    ('definition_empty_heading_list', [101, 104]),
 )
 
 
