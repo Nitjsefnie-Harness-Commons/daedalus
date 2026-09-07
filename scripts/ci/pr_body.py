@@ -179,10 +179,9 @@ class _RenderedBodyParser(HTMLParser):
                 # GitHub leaves a heading line's raw element open until
                 # the line's own heading closes, so an author can nest
                 # one heading inside another. That is a verdict the gate
-                # reports rather than a shape it cannot read: the inner
-                # heading opens no section of its own. A body records
-                # the note once, because the gate's reasons are the
-                # distinct problems an author has to fix.
+                # reports rather than a shape it cannot read, and the
+                # gate's reasons are the distinct problems an author has
+                # to fix.
                 if _NESTED_HEADING_NOTE not in self.notes:
                     self.notes.append(_NESTED_HEADING_NOTE)
                 return

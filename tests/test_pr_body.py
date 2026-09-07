@@ -11,9 +11,9 @@ from _parser_guard import (  # noqa: E402
 from _prfootnotes import (  # noqa: E402
     FOOTNOTE_HTML, FOOTNOTE_LAYOUT, FOOTNOTE_REFERENCED,
     FOOTNOTE_REFERENCED_BY_ROW, FOOTNOTE_SECTIONS, NESTED_HEADING_HTML,
-    RELATED)
+    NESTED_HEADING_NOTE, RELATED)
 from _prgate import (  # noqa: E402
-    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, NESTED_HEADING_NOTE, PR_BODY,
+    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, PR_BODY,
     TEMPLATE, _html_body, _issue_html, _layout_body, _text_html,
     _valid_body, _valid_html,
 )
@@ -119,6 +119,7 @@ def test_parser_reports_a_nested_heading_as_a_layout_note(tmp):
                                         'testing'],
         'forged_label_in_heading': ['summary', RELATED, 'changes',
                                     'testing'],
+        'empty_heading_in_div': ['summary', RELATED, 'changes', 'testing'],
     }
     for name, rendered in NESTED_HEADING_HTML.items():
         body = PR_BODY.parse_rendered(rendered, REPOSITORY)

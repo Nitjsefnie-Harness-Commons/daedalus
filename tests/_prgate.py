@@ -184,9 +184,6 @@ def _valid_html(references=None, changes=None, repo='owner/repo'):
 BOT = 'github-actions[bot]'
 MARKER = '<!-- pr-gate -->'
 CLOSED_MARKER = '<!-- pr-gate: closed -->'
-NESTED_HEADING_NOTE = (
-    'A heading is nested inside another heading; remove the raw HTML '
-    'element from that heading line.')
 OPEN_FIRST = (
     '@alice — this pull request needs changes before it can be reviewed.')
 CLOSED_FIRST = (
