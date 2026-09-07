@@ -40,9 +40,9 @@ Each key names what its Markdown source did:
 
 NESTED_HEADING_HTML holds the captured renderings whose heading line
 wraps a raw element holding another heading, with or without a
-footnote section. The parser admits each and records one
-nested-heading note, which the gate reports among its refusal
-reasons.
+footnote section. The parser admits each and records the
+nested-heading note once however many headings nest, which the gate
+reports among its refusal reasons.
 """
 import sys
 from pathlib import Path
@@ -330,6 +330,10 @@ NESTED_HEADING_HTML = {
         _HEAD
         + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <div dir="'
         'auto"><h3 dir="auto">Inner</h3></div></h2>'),
+    'two_headings_in_div': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <div dir="'
+        'auto"><h3 dir="auto">a</h3><h3 dir="auto">b</h3></div></h2>'),
     'raw_section_in_heading': (
         _HEAD
         + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <section><h'
