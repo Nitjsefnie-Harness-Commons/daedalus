@@ -437,6 +437,12 @@ def test_a_footnote_section_closes_what_github_closes(tmp):
     boundaries only; this channel reads the whole document either way.
     The bare and in-related rows are the negative controls: a reference
     under no keyword still closes nothing.
+
+    heading_keyword_across_wrapper kills the label's list break only
+    while _record_pending withholds the label's own text. No rendering
+    GitHub emits distinguishes that guard, so dropping it moves no
+    answer here - and that silence is not evidence it is redundant:
+    with the guard gone this row stops catching the break's removal.
     """
     del tmp
     assert {name for name, _ in FOOTNOTE_CLOSING} == set(FOOTNOTE_HTML)
