@@ -17,6 +17,7 @@ from _prgate import (  # noqa: E402
 
 
 REPOSITORY = 'Nitjsefnie-Harness-Commons/daedalus'
+_ISSUE_URL = 'https://github.com/owner/repo/issues/101'
 RELATED = 'related issues and pull requests'
 
 # Captured from GitHub's /markdown endpoint in GFM mode with
@@ -157,6 +158,8 @@ NODE_BOUNDARY_CLOSING = (
     '<strong>a</strong>fixes ',
     '<code class="notranslate">x</code>fixes ',
     '<sup>a</sup>fixes ',
+    '<del>a</del>fixes ',
+    'a<wbr>fixes ',
 )
 NODE_BOUNDARY_INERT = (
     'a<strong>fixes</strong> ',
@@ -218,6 +221,8 @@ def test_closing_issues_includes_keyword_list_continuation(tmp):
          f'{_issue_html(101)}\n<ul dir="auto">\n<li>'
          f'{_issue_html(102)}</li>\n</ul>\n</li>\n</ul>', [101]),
         (f'Fixes {_issue_html(101)}\n<hr>\n{_issue_html(102)}', [101]),
+        (f'Fixes <a href="{_ISSUE_URL}"><code class="notranslate">#101'
+         f'</code></a>, {_issue_html(102)}', [101, 102]),
     )
     for references, closing in cases:
         rendered = _valid_html(references=references)
@@ -464,16 +469,16 @@ def test_case_folding_is_required_not_merely_extra_width(tmp):
 
 
 def test_recognition_stays_wider_than_github_by_choice(tmp):
-    """What is left of the width once the run is bounded.
+    """Every shape closing here that GitHub was measured to ignore.
 
-    Emphasis around the keyword used to be asserted here. It is a
-    measured agreement now, not deliberate width, and sits with the
-    other structural placements.
+    Each is a separator or a dropped node rather than an element
+    boundary, so bounding the run at elements does not reach them.
     """
     del tmp
     assert _gap_answers(WIDER_THAN_GITHUB) == [
         (gap, [101]) for gap in WIDER_THAN_GITHUB]
     cases = (
+        (f'<p dir="auto">Fixes <!-- c --> {_issue_html(101)}</p>', [101]),
         (f'Fixes {_issue_html(101)}, {_issue_html(102)}', [101, 102]),
         (f'Fixes {_issue_html(101)} and {_issue_html(102)}', [101, 102]),
     )
@@ -532,16 +537,22 @@ def test_structural_placements_close_as_github_measures_them(tmp):
         ('<p dir="auto">a<code class="notranslate">fixes</code> '
          f'{anchor}</p>', []),
         # Measured agreements, not deliberate width: the keyword falls
-        # outside the run that ends at the reference. The last two use
-        # elements no round measured, since the boundary is every
-        # element rather than the three that were.
+        # outside the run that ends at the reference.
         (f'<p dir="auto"><strong>Fixes</strong> {anchor}</p>', []),
         (f'<p dir="auto"><em>Fixes</em> {anchor}</p>', []),
         ('<p dir="auto"><code class="notranslate">Fixes</code> '
          f'{anchor}</p>', []),
         (f'<p dir="auto">Fixes<br>\n{anchor}</p>', []),
         (f'<p dir="auto">Fixes <img src="s" alt=""> {anchor}</p>', []),
-        (f'<p dir="auto">Fixes<sup>1</sup> {anchor}</p>', []),
+        ('<p dir="auto">Fixes<sup><a href="#user-content-fn-1">1</a>'
+         f'</sup> {anchor}</p>', []),
+        ('<p dir="auto">Fixes <a href="https://example.com" '
+         f'rel="nofollow">docs</a> {anchor}</p>', []),
+        # An element wrapping the reference is a boundary like any
+        # other, so the run never reaches it.
+        (f'<p dir="auto">Fixes <strong>{anchor}</strong></p>', []),
+        (f'<p dir="auto">Fixes <em>{anchor}</em></p>', []),
+        (f'<p dir="auto">Fixes <del>{anchor}</del></p>', []),
     )
     for references, closing in cases:
         body = PR_BODY.parse_rendered(
