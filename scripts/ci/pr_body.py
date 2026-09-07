@@ -325,7 +325,7 @@ class _RenderedBodyParser(HTMLParser):
         self._finish_section()
 
     def _finish_section(self):
-        if self._key is None:
+        if self._key is None or self._name is None:
             return
         self.sections.append(Section(
             self._name, self._key, ''.join(self._text),

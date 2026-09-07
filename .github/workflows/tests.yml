@@ -178,10 +178,14 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
-      - name: Install the type checker and the MCP server's dependencies
+      - name: Install the type checker and the dependencies it resolves
+        # scripts/ci is in the checker's scope, and two of its modules import
+        # coverage, so the measurement pins belong here as well as in the
+        # matrix that runs them. An unresolved import is a type error.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+          pip install -r requirements-test.txt
           pip install ".[mcp]"
 
       - name: pyright
