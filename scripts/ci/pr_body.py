@@ -343,26 +343,30 @@ def _gap_closing(gap, previous_closing):
     a keyword with no word character before it, at most one colon
     within a run of spaces or tabs, then the reference, all in that
     node. Every measured spelling follows, the refused ones included
-    -- `Fixes, #N` and `Fixes - #N` were measured inert, so refusing
+    -- `Fixes, #N` and `Fixes - #N` are inert there, so refusing
     trailing punctuation is relied on rather than overlooked.
+    (`a**fixes** #N` is inert on both sides: there by the node
+    boundary, here by the word character concatenation puts before the
+    keyword.)
 
-    Two different things make this wider. Rendered HTML has lost the
-    node boundaries once the parser concatenates its text, so an
-    inline element between keyword and reference is invisible and
-    `**Fixes** #N` and `` `Fixes` #N `` close; the keyword-list
-    continuation below carries a keyword past an anchor for the same
-    reason. Those are limits. (`a**fixes** #N` is inert on both sides:
-    there by the node boundary, here by the word character the
-    concatenation puts before the keyword.)
+    Folding is required rather than extra width: `fixeſ #N` closes on
+    GitHub and folds to `fixes` here, so an ASCII-only or fold-free
+    match would refuse a spelling it acts on. `FİXES #N` is the one
+    measured spelling folding admits and GitHub ignores.
 
-    The separator is a choice, not a limit: the strip below takes
-    whitespace GitHub does not and wants no space beside the colon, so
-    a soft break, a no-break space and `Fixes:#N` all close here.
-    Restricting that strip to spaces and tabs would match every
-    measured row exactly. Failing closed is preferred: its cost is
-    refusing a pull request GitHub would have let through, while the
-    other direction is the bypass this exists to close. Case folding
-    admits a few more spellings the same way.
+    Four widths beyond that model are decisions, not limits, since the
+    gap could break on an inline element exactly as it breaks on a
+    block: an inline element between keyword and reference
+    (`**Fixes** #N`); whitespace GitHub does not take (a soft break, a
+    no-break space); no separator at all or a colon with no space,
+    reachable as `Fixes[#N](url)` and `Fixes:#N`; and the keyword-list
+    continuation, past an anchor GitHub stops at.
+
+    Matching GitHub's separator exactly needs both halves: the strip
+    limited to spaces and tabs, and one of them required between
+    keyword and reference. Failing closed is preferred, because the
+    two directions cost differently -- a refusal GitHub would not have
+    made, against a bypass of the claim check this feeds.
     """
     before_separator = gap.rstrip().removesuffix(':').rstrip()
     if _TRAILING_KEYWORD.search(before_separator):
