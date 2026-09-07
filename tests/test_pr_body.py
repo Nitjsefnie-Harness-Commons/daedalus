@@ -349,9 +349,10 @@ def test_layout_reports_unknown_duplicate_and_out_of_order_sections(tmp):
 
 # What each capture's sections come to once its footnote section is
 # read like any other content. no_dataattr opens no footnotes section
-# because GitHub strips the class from a section it did not generate,
-# and own_heading opens a second one from the heading its author hid
-# inside the element.
+# because GitHub keys on data-footnotes: it normalises that attribute
+# up into the generated spelling and drops a footnotes class arriving
+# without it. own_heading opens a second one from the heading its
+# author hid inside the element.
 _BASE_KEYS = ('summary', RELATED, 'changes', 'testing')
 FOOTNOTE_SECTIONS = (
     ('footnote_definition_closing', _BASE_KEYS + ('footnotes',)),
