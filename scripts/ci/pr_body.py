@@ -282,10 +282,8 @@ class _RenderedBodyParser(HTMLParser):
             self._text.append(data)
 
     def _record_pending(self, data):
-        # GitHub's own label text must not decide an author's list.
-        if self._anchor_depth or self._label_depth is not None:
-            return
-        self._gap.append(data)
+        if not self._anchor_depth:
+            self._gap.append(data)
 
     def _current_run(self):
         return ''.join(self._gap[self._run_start:])
