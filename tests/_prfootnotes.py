@@ -42,7 +42,9 @@ NESTED_HEADING_HTML holds the captured renderings whose heading line
 wraps a raw element holding another heading, with or without a
 footnote section. The parser admits each and records the
 nested-heading note once however many headings nest, which the gate
-reports among its refusal reasons.
+reports among its refusal reasons. empty_heading_in_div is the row
+whose inner heading is empty and whose section carries text, so the
+note is the only fault its body has.
 """
 import sys
 from pathlib import Path
@@ -350,7 +352,17 @@ NESTED_HEADING_HTML = {
         'ta-footnotes="" class="footnotes"><h2 id="footnote-label" class='
         '"sr-only" dir="auto">Footnotes</h2><h2 id="user-content-footnote'
         '-label" dir="auto">Trap</h2></section></h2>'),
+    'empty_heading_in_div': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <div dir="a'
+        'uto"><h3 dir="auto"></h3></div></h2>\n<p dir="auto">Ran it.</p>'),
 }
+
+# Spelled out rather than imported from pr_body, so a flip of the
+# production string turns the assertions that read it red.
+NESTED_HEADING_NOTE = (
+    'A heading is nested inside another heading; remove the raw HTML '
+    'element from that heading line.')
 
 RELATED = PR_BODY.RELATED
 
