@@ -148,6 +148,33 @@ def _gap_answers(gaps):
     return answers
 
 
+# Fifth round: a word character in a DIFFERENT inline node must not hide
+# the keyword, since GitHub never sees the two adjacent. Each row is
+# paired with its mirror from the second round, where the keyword itself
+# is on the far side of the boundary and stays inert.
+NODE_BOUNDARY_CLOSING = (
+    '<em>a</em>fixes ',
+    '<strong>a</strong>fixes ',
+    '<code class="notranslate">x</code>fixes ',
+    '<sup>a</sup>fixes ',
+)
+NODE_BOUNDARY_INERT = (
+    'a<strong>fixes</strong> ',
+    '2<em>fixes</em> ',
+    'a<code class="notranslate">fixes</code> ',
+)
+
+
+def _markup_answers(markups):
+    answers = []
+    for markup in markups:
+        rendered = _valid_html(
+            references=f'<p dir="auto">{markup}{_issue_html(101)}</p>')
+        body = PR_BODY.parse_rendered(rendered, 'owner/repo')
+        answers.append((markup, PR_BODY.closing_issues(body)))
+    return answers
+
+
 def _assert_gaps(closing, inert):
     assert _gap_answers(closing) == [(gap, [101]) for gap in closing]
     assert _gap_answers(inert) == [(gap, []) for gap in inert]
@@ -423,22 +450,30 @@ def test_the_separator_takes_one_colon_and_no_other_punctuation(tmp):
     _assert_gaps(SEPARATOR_CLOSING, SEPARATOR_INERT)
 
 
+def test_a_word_character_in_another_node_does_not_hide_it(tmp):
+    del tmp
+    assert _markup_answers(NODE_BOUNDARY_CLOSING) == [
+        (markup, [101]) for markup in NODE_BOUNDARY_CLOSING]
+    assert _markup_answers(NODE_BOUNDARY_INERT) == [
+        (markup, []) for markup in NODE_BOUNDARY_INERT]
+
+
 def test_case_folding_is_required_not_merely_extra_width(tmp):
     del tmp
     _assert_gaps(FOLDED_CLOSING, FOLDED_INERT)
 
 
-def test_recognition_stays_wider_where_the_rendering_hides_it(tmp):
+def test_recognition_stays_wider_than_github_by_choice(tmp):
+    """What is left of the width once the run is bounded.
+
+    Emphasis around the keyword used to be asserted here. It is a
+    measured agreement now, not deliberate width, and sits with the
+    other structural placements.
+    """
     del tmp
     assert _gap_answers(WIDER_THAN_GITHUB) == [
         (gap, [101]) for gap in WIDER_THAN_GITHUB]
     cases = (
-        (f'<p dir="auto"><strong>Fixes</strong> {_issue_html(101)}</p>',
-         [101]),
-        (f'<p dir="auto"><em>Fixes</em> {_issue_html(101)}</p>', [101]),
-        ('<p dir="auto"><code class="notranslate">Fixes</code> '
-         f'{_issue_html(101)}</p>', [101]),
-        (f'<p dir="auto">Fixes<br>\n{_issue_html(101)}</p>', [101]),
         (f'Fixes {_issue_html(101)}, {_issue_html(102)}', [101, 102]),
         (f'Fixes {_issue_html(101)} and {_issue_html(102)}', [101, 102]),
     )
@@ -496,6 +531,17 @@ def test_structural_placements_close_as_github_measures_them(tmp):
         (f'<p dir="auto">2<em>fixes</em> {anchor}</p>', []),
         ('<p dir="auto">a<code class="notranslate">fixes</code> '
          f'{anchor}</p>', []),
+        # Measured agreements, not deliberate width: the keyword falls
+        # outside the run that ends at the reference. The last two use
+        # elements no round measured, since the boundary is every
+        # element rather than the three that were.
+        (f'<p dir="auto"><strong>Fixes</strong> {anchor}</p>', []),
+        (f'<p dir="auto"><em>Fixes</em> {anchor}</p>', []),
+        ('<p dir="auto"><code class="notranslate">Fixes</code> '
+         f'{anchor}</p>', []),
+        (f'<p dir="auto">Fixes<br>\n{anchor}</p>', []),
+        (f'<p dir="auto">Fixes <img src="s" alt=""> {anchor}</p>', []),
+        (f'<p dir="auto">Fixes<sup>1</sup> {anchor}</p>', []),
     )
     for references, closing in cases:
         body = PR_BODY.parse_rendered(
