@@ -35,9 +35,10 @@ _MAX_ISSUE_DIGITS = 19
 _CLOSING_KEYWORDS = frozenset((
     'close', 'closes', 'closed', 'fix', 'fixes', 'fixed',
     'resolve', 'resolves', 'resolved'))
-_CLOSING_TAIL = re.compile(
-    r'(?<!\w)(?:' + '|'.join(sorted(_CLOSING_KEYWORDS)) + r')\Z',
-    re.IGNORECASE)
+_TRAILING_KEYWORD = re.compile(
+    r'(?<!\w)(?:'
+    + '|'.join(re.escape(word) for word in sorted(_CLOSING_KEYWORDS))
+    + r')\Z', re.IGNORECASE)
 _LIST_SEPARATOR = re.compile(r'[\s,&]*(?:and[\s,&]*)*', re.IGNORECASE)
 _BLOCK_TAGS = frozenset((
     'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
@@ -338,20 +339,33 @@ def referenced_issues(sections):
 def _gap_closing(gap, previous_closing):
     """Whether the text before an anchor governs it as a closing one.
 
-    A keyword with no word character before it, separated from the
-    anchor by at most one colon within any run of whitespace. GitHub
-    reads the raw Markdown, so this stays deliberately wider wherever
-    the rendering keeps nothing of what makes a spelling inert there:
-    emphasis around the keyword, a soft line break or a no-break space
-    for the separator, no separator at all, and every anchor after the
-    first of a keyword list. Refusing a pull request GitHub would have
-    let through is the safe direction; the other one is the bypass this
-    recognition exists to close.
+    GitHub matches inside a single text node of the parsed document:
+    a keyword with no word character before it, at most one colon
+    within a run of spaces or tabs, then the reference, all in that
+    node. Every measured spelling follows, the refused ones included
+    -- `Fixes, #N` and `Fixes - #N` were measured inert, so refusing
+    trailing punctuation is relied on rather than overlooked.
+
+    Two different things make this wider. Rendered HTML has lost the
+    node boundaries once the parser concatenates its text, so an
+    inline element between keyword and reference is invisible and
+    `**Fixes** #N` and `` `Fixes` #N `` close; the keyword-list
+    continuation below carries a keyword past an anchor for the same
+    reason. Those are limits. (`a**fixes** #N` is inert on both sides:
+    there by the node boundary, here by the word character the
+    concatenation puts before the keyword.)
+
+    The separator is a choice, not a limit: the strip below takes
+    whitespace GitHub does not and wants no space beside the colon, so
+    a soft break, a no-break space and `Fixes:#N` all close here.
+    Restricting that strip to spaces and tabs would match every
+    measured row exactly. Failing closed is preferred: its cost is
+    refusing a pull request GitHub would have let through, while the
+    other direction is the bypass this exists to close. Case folding
+    admits a few more spellings the same way.
     """
-    head = gap.rstrip()
-    if head.endswith(':'):
-        head = head[:-1].rstrip()
-    if _CLOSING_TAIL.search(head):
+    before_separator = gap.rstrip().removesuffix(':').rstrip()
+    if _TRAILING_KEYWORD.search(before_separator):
         return True
     return (bool(previous_closing)
             and _LIST_SEPARATOR.fullmatch(gap) is not None)
