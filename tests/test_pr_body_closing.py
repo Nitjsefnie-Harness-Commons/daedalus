@@ -97,10 +97,12 @@ CAPTURED_CLOSING = (
 LEFT_CLOSING = (
     'Fixes ', '(Fixes ', '[Fixes ', '"Fixes ', "'Fixes ", '\u2014Fixes ',
     '\u00abFixes ', 'hot-fixes ', '/fixes ', 'x -fixes ',
-    '\U0001f527fixes ', 'FIXES ',
+    '\U0001f527fixes ', ')Fixes ', '`Fixes ', 'FIXES ',
 )
 LEFT_INERT = (
-    'unfixes ', '2fixes ', 'a_fixes ', '\u00e9fixes ', '\u4feefixes ')
+    'unfixes ', '2fixes ', 'a_fixes ', '\u00e9fixes ', '\u4feefixes ',
+    '\u00b2fixes ', '\u00bdfixes ', '\u2167fixes ',
+)
 SEPARATOR_CLOSING = (
     'Fixes ', 'Fixes  ', 'Fixes\t', 'Fixes: ', 'Fixes : ', 'Fixes:  ')
 SEPARATOR_INERT = (
@@ -108,9 +110,21 @@ SEPARATOR_INERT = (
     'Fixes - ', 'Fixes -> ', 'Fixes... ', 'Fixes \u2014 ', 'Fixes` ',
     'fixing ',
 )
-# Inert on GitHub, which matches the raw Markdown, and closing here: the
-# rendering keeps none of what makes them inert.
-WIDER_THAN_GITHUB = ('Fixes', 'Fixes:', 'Fixes\n', 'Fixes\u00a0')
+# Inert on GitHub, closing here. `Fixes#N` is not among them: GitHub
+# renders no anchor for it at all, so no body reaches the parser in that
+# shape.
+WIDER_THAN_GITHUB = ('Fixes:', 'Fixes\n', 'Fixes\u00a0')
+
+# A character reference is decoded before the boundary rule sees it, on
+# both sides: GitHub measured `a&#95;fixes #N` inert too. Each row turns
+# over when _record_pending is dropped from the handler delivering it,
+# so the two handlers are pinned in both directions.
+CHARACTER_REFERENCE_GAPS = (
+    ('&#95;fixes ', []),
+    ('a&#38;fixes ', [101]),
+    ('&eacute;fixes ', []),
+    ('a&amp;fixes ', [101]),
+)
 
 
 def _gap_html(gap):
@@ -412,8 +426,35 @@ def test_recognition_stays_wider_where_the_rendering_hides_it(tmp):
         (f'<p dir="auto"><strong>Fixes</strong> {_issue_html(101)}</p>',
          [101]),
         (f'<p dir="auto"><em>Fixes</em> {_issue_html(101)}</p>', [101]),
+        ('<p dir="auto"><code class="notranslate">Fixes</code> '
+         f'{_issue_html(101)}</p>', [101]),
         (f'Fixes {_issue_html(101)}, {_issue_html(102)}', [101, 102]),
         (f'Fixes {_issue_html(101)} and {_issue_html(102)}', [101, 102]),
+    )
+    for references, closing in cases:
+        body = PR_BODY.parse_rendered(
+            _valid_html(references=references), 'owner/repo')
+        assert PR_BODY.closing_issues(body) == closing, references
+
+
+def test_a_character_reference_reaches_the_boundary_rule(tmp):
+    del tmp
+    answers = []
+    for gap, _closing in CHARACTER_REFERENCE_GAPS:
+        rendered = _valid_html(
+            references=f'<p dir="auto">{gap}{_issue_html(101)}</p>')
+        body = PR_BODY.parse_rendered(rendered, 'owner/repo')
+        answers.append((gap, PR_BODY.closing_issues(body)))
+    assert answers == list(CHARACTER_REFERENCE_GAPS)
+
+
+def test_only_the_list_separator_carries_a_keyword_onward(tmp):
+    del tmp
+    cases = (
+        (f'Fixes {_issue_html(101)} &amp; {_issue_html(102)}', [101, 102]),
+        (f'Fixes {_issue_html(101)}; {_issue_html(102)}', [101]),
+        (f'Fixes {_issue_html(101)}. {_issue_html(102)}', [101]),
+        (f'Fixes {_issue_html(101)} or {_issue_html(102)}', [101]),
     )
     for references, closing in cases:
         body = PR_BODY.parse_rendered(
@@ -438,8 +479,11 @@ def test_structural_placements_close_as_github_measures_them(tmp):
         ('<p dir="auto"><a href="https://example.com" rel="nofollow">'
          f'Fixes</a> {anchor}</p>', []),
         (f'<p dir="auto"><!-- Fixes -->{anchor}</p>', []),
-        ('<p dir="auto"><code class="notranslate">Fixes #101</code></p>',
-         []),
+        (f'<p dir="auto"><a href="{url}">Fixes #101</a></p>', []),
+        (f'<p dir="auto">a<strong>fixes</strong> {anchor}</p>', []),
+        (f'<p dir="auto">2<em>fixes</em> {anchor}</p>', []),
+        ('<p dir="auto">a<code class="notranslate">fixes</code> '
+         f'{anchor}</p>', []),
     )
     for references, closing in cases:
         body = PR_BODY.parse_rendered(

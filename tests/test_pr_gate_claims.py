@@ -70,6 +70,7 @@ def test_a_punctuated_closing_keyword_still_needs_the_claim(tmp):
     issue assigned to somebody else.
     """
     del tmp
+    failures = []
     for spelling in ('(Fixes', 'hot-fixes', 'Fixes :'):
         rendered = _valid_html(references=(
             f'Fixes {_issue_html(101)}\n'
@@ -79,13 +80,17 @@ def test_a_punctuated_closing_keyword_still_needs_the_claim(tmp):
             rendered=rendered)
         code, writes, _output, _error = _execute(
             api, _valid_body(f'Fixes #101\n{spelling} #104'))
-        assert code == 0, spelling
-        assert _write_sequence(writes) == [
-            ('POST', 'repos/owner/repo/issues/99/comments')], spelling
-        _assert_gate_message(
-            writes[0], OPEN_FIRST,
-            ['Issue `#104` is not assigned to you.'])
-        _assert_numbers_code_spanned(_comment_body(writes[0]))
+        try:
+            assert code == 0
+            assert _write_sequence(writes) == [
+                ('POST', 'repos/owner/repo/issues/99/comments')]
+            _assert_gate_message(
+                writes[0], OPEN_FIRST,
+                ['Issue `#104` is not assigned to you.'])
+            _assert_numbers_code_spanned(_comment_body(writes[0]))
+        except AssertionError as error:
+            failures.append((spelling, error))
+    assert failures == [], failures
 
 
 def test_unassigned_mention_without_keyword_passes(tmp):
