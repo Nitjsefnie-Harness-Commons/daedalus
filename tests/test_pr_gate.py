@@ -10,7 +10,8 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSED_FIRST, MARKER, REOPEN_FIRST, RESOLVED_FIRST, TEMPLATE,
+    BOT, CLOSED_FIRST, MARKER, NESTED_HEADING_NOTE, REOPEN_FIRST,
+    RESOLVED_FIRST, TEMPLATE,
     _api, _assert_gate_message, _assert_no_writes, _assert_script_error,
     _assert_script_runs_through_gh_on_path,
     _capture, _closed_event, _comment_page_fields, _execute,
@@ -20,6 +21,7 @@ from _prgate import (  # noqa: E402
     _recorded_writes, _run_script, _runtime_error, _script_fixtures,
     _text_html, _valid_body, _valid_html, _write_gh_stub, _write_sequence,
 )
+from _prfootnotes import NESTED_HEADING_HTML  # noqa: E402
 from _prgate_race import (  # noqa: E402
     _assert_closed_admissible_reclose_aborts_state,
     _assert_closed_inadmissible_reclose_aborts,
@@ -304,6 +306,19 @@ def test_unknown_section_name_cannot_inject_a_live_reference(tmp):
     for match in re.finditer(r'#1', comment):
         assert any(start <= match.start() < end for start, end in spans), (
             match.start(), spans, comment)
+
+
+def test_a_nested_heading_comments_and_closes(tmp):
+    del tmp
+    rendered = NESTED_HEADING_HTML['footnote_section_in_heading']
+    code, writes, _output, _error = _execute(
+        _api(rendered=rendered), _valid_body())
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments'),
+        ('PATCH', 'repos/owner/repo/pulls/99')]
+    _assert_gate_message(
+        writes[0], CLOSED_FIRST, [NESTED_HEADING_NOTE], closed=True)
 
 
 def test_workflow_shape(tmp):

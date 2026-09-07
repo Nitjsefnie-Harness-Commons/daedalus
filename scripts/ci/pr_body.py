@@ -19,6 +19,7 @@ else:
 
 
 RELATED = 'related issues and pull requests'
+_NESTED_HEADING_NOTE = 'A heading is nested inside another heading.'
 _BACKTICKS = re.compile(r'`+')
 _HEADING_LINE = re.compile(
     r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.+?)[ \t]*#*[ \t]*$',
@@ -61,6 +62,7 @@ class Section(NamedTuple):
 class Body(NamedTuple):
     sections: tuple[Section, ...]
     closing: tuple[int, ...]
+    notes: tuple[str, ...] = ()
 
 
 class Rule(NamedTuple):
@@ -131,6 +133,7 @@ class _RenderedBodyParser(HTMLParser):
         self.repository = repository
         self.sections = []
         self.closing = []
+        self.notes = []
         self.saw_element = False
         self._open_tags = []
         self._heading_tag = None
@@ -171,7 +174,13 @@ class _RenderedBodyParser(HTMLParser):
                 self._break_closing_list()
                 return
             if self._heading_tag is not None:
-                raise ValueError('rendered HTML contains nested headings')
+                # GitHub leaves a heading line's raw element open until
+                # the line's own heading closes, so an author can nest
+                # one heading inside another. That is a verdict the gate
+                # reports rather than a shape it cannot read: the inner
+                # heading opens no section of its own.
+                self.notes.append(_NESTED_HEADING_NOTE)
+                return
             if self._region_depth is not None:
                 return
             self._finish_section()
@@ -328,7 +337,8 @@ def parse_rendered(rendered, repository):
     parser = _RenderedBodyParser(repository)
     parser.feed(rendered or '')
     parser.finish()
-    return Body(tuple(parser.sections), tuple(parser.closing))
+    return Body(
+        tuple(parser.sections), tuple(parser.closing), tuple(parser.notes))
 
 
 def closing_issues(body):
