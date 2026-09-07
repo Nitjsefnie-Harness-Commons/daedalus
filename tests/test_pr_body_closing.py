@@ -97,7 +97,7 @@ CAPTURED_CLOSING = (
 LEFT_CLOSING = (
     'Fixes ', '(Fixes ', '[Fixes ', '"Fixes ', "'Fixes ", '\u2014Fixes ',
     '\u00abFixes ', 'hot-fixes ', '/fixes ', 'x -fixes ',
-    '\U0001f527fixes ', ')Fixes ', '`Fixes ', 'FIXES ',
+    '\U0001f527fixes ', ')Fixes ', '`Fixes ',
 )
 LEFT_INERT = (
     'unfixes ', '2fixes ', 'a_fixes ', '\u00e9fixes ', '\u4feefixes ',
@@ -110,10 +110,17 @@ SEPARATOR_INERT = (
     'Fixes - ', 'Fixes -> ', 'Fixes... ', 'Fixes \u2014 ', 'Fixes` ',
     'fixing ',
 )
-# Inert on GitHub, closing here. `Fixes#N` is not among them: GitHub
-# renders no anchor for it at all, so no body reaches the parser in that
-# shape.
-WIDER_THAN_GITHUB = ('Fixes:', 'Fixes\n', 'Fixes\u00a0')
+# Inert on GitHub, closing here. The no-separator row is reachable
+# although `Fixes#N` renders no anchor: `Fixes[#N](<the issue's URL>)`
+# renders the keyword and the anchor with no character between them.
+WIDER_THAN_GITHUB = ('Fixes', 'Fixes:', 'Fixes\n', 'Fixes\u00a0')
+
+# Folding is required, not extra width: `fixeſ #N` closes on GitHub, so
+# an ASCII-only or fold-free match would refuse a spelling it acts on.
+# `FİXES ` is the one measured spelling folding admits and GitHub does
+# not; a ligature and the fullwidth letters fold on neither side.
+FOLDED_CLOSING = ('FIXES ', 'fixe\u017f ', 'F\u0130XES ')
+FOLDED_INERT = ('\ufb01xes ', '\uff26\uff29\uff38\uff25\uff33 ')
 
 # A character reference is decoded before the boundary rule sees it, on
 # both sides: GitHub measured `a&#95;fixes #N` inert too. Each row turns
@@ -180,8 +187,6 @@ def test_closing_issues_includes_keyword_list_continuation(tmp):
          f'{_issue_html(102)}</td></tr></tbody></table>', [101]),
         ('<p dir="auto">Fixes <code class="notranslate">x</code>'
          f'{_issue_html(101)}</p>', []),
-        ('<p dir="auto"><code class="notranslate">Fixes</code> '
-         f'{_issue_html(101)}</p>', [101]),
         ('<ul dir="auto">\n<li>Fixes '
          f'{_issue_html(101)}\n<ul dir="auto">\n<li>'
          f'{_issue_html(102)}</li>\n</ul>\n</li>\n</ul>', [101]),
@@ -418,6 +423,11 @@ def test_the_separator_takes_one_colon_and_no_other_punctuation(tmp):
     _assert_gaps(SEPARATOR_CLOSING, SEPARATOR_INERT)
 
 
+def test_case_folding_is_required_not_merely_extra_width(tmp):
+    del tmp
+    _assert_gaps(FOLDED_CLOSING, FOLDED_INERT)
+
+
 def test_recognition_stays_wider_where_the_rendering_hides_it(tmp):
     del tmp
     assert _gap_answers(WIDER_THAN_GITHUB) == [
@@ -477,6 +487,7 @@ def test_structural_placements_close_as_github_measures_them(tmp):
         (f'<p dir="auto">Fixes <a href="{url}">GH-101</a></p>', [101]),
         (f'<p dir="auto">Fixes <a href="{url}">owner/repo#101</a></p>',
          [101]),
+        (f'<p dir="auto">Fixes {anchor}</p>', [101]),
         ('<p dir="auto"><a href="https://example.com" rel="nofollow">'
          f'Fixes</a> {anchor}</p>', []),
         (f'<p dir="auto"><!-- Fixes -->{anchor}</p>', []),

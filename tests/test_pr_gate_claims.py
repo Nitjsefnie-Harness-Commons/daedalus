@@ -81,9 +81,10 @@ def test_a_punctuated_closing_keyword_still_needs_the_claim(tmp):
         code, writes, _output, _error = _execute(
             api, _valid_body(f'Fixes #101\n{spelling} #104'))
         try:
-            assert code == 0
+            assert code == 0, 'the gate exited nonzero'
             assert _write_sequence(writes) == [
-                ('POST', 'repos/owner/repo/issues/99/comments')]
+                ('POST', 'repos/owner/repo/issues/99/comments')], (
+                    'the gate did not comment exactly once')
             _assert_gate_message(
                 writes[0], OPEN_FIRST,
                 ['Issue `#104` is not assigned to you.'])
