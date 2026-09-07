@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _parser_guard import (  # noqa: E402
     assigned_state_names, base_state_names)
+from _prfootnotes import FOOTNOTE_HTML  # noqa: E402
 from _prgate import (  # noqa: E402
     GITHUB_FOOTNOTE_HTML, GITHUB_HTML, PR_BODY, TEMPLATE, _html_body,
     _issue_html, _layout_body, _text_html, _valid_body, _valid_html,
@@ -38,11 +39,12 @@ def test_parser_accepts_heading_depth_emphasis_and_colon(tmp):
     assert [section.key for section in sections] == [RELATED]
 
 
-def test_parser_ignores_github_footnotes(tmp):
+def test_parser_reads_a_github_footnote_section(tmp):
     del tmp
     sections = PR_BODY.parse_rendered(
         GITHUB_FOOTNOTE_HTML, REPOSITORY).sections
-    assert 'footnotes' not in [section.key for section in sections]
+    assert [section.key for section in sections] == [
+        'summary', RELATED, 'changes', 'testing', 'footnotes']
     assert PR_BODY.referenced_issues(sections) == [101]
 
 
@@ -343,6 +345,88 @@ def test_layout_reports_unknown_duplicate_and_out_of_order_sections(tmp):
     assert 'Section "Summary" appears more than once.' in errors
     assert ('Section "Related Issues and Pull Requests" is out of order.'
             in errors)
+
+
+# What each capture's sections come to once its footnote section is
+# read like any other content. no_dataattr opens no footnotes section
+# because GitHub strips the class from a section it did not generate,
+# and own_heading opens a second one from the heading its author hid
+# inside the element.
+_BASE_KEYS = ('summary', RELATED, 'changes', 'testing')
+FOOTNOTE_SECTIONS = (
+    ('footnote_definition_closing', _BASE_KEYS + ('footnotes',)),
+    ('footnote_definition_bare', _BASE_KEYS + ('footnotes',)),
+    ('raw_section', _BASE_KEYS + ('footnotes',)),
+    ('footnote_in_related', _BASE_KEYS + ('footnotes',)),
+    ('empty_testing_with_footnote', _BASE_KEYS + ('footnotes',)),
+    ('no_class', _BASE_KEYS + ('footnotes',)),
+    ('own_heading', _BASE_KEYS + ('footnotes', 'extra')),
+    ('no_dataattr', _BASE_KEYS),
+    ('plain_div', _BASE_KEYS),
+)
+
+# A footnote definition renders at the end of the document, so its
+# references sit outside Related Issues and Pull Requests. The
+# permissive channel therefore reads the same answer for every capture.
+FOOTNOTE_REFERENCED = [101]
+
+
+def test_a_footnote_section_splits_like_any_other_section(tmp):
+    del tmp
+    assert {name for name, _ in FOOTNOTE_SECTIONS} == set(FOOTNOTE_HTML)
+    failures = []
+    for name, expected in FOOTNOTE_SECTIONS:
+        sections = PR_BODY.parse_rendered(
+            FOOTNOTE_HTML[name], REPOSITORY).sections
+        found = tuple(section.key for section in sections)
+        referenced = PR_BODY.referenced_issues(sections)
+        if (found, referenced) != (expected, FOOTNOTE_REFERENCED):
+            failures.append((name, found, referenced))
+    assert failures == [], failures
+
+
+# The template defines no Footnotes section, and GitHub's injected label
+# heading opens one in every body that carries a footnote. Judging it
+# would close a conforming pull request, so layout_errors passes over
+# it. Nothing else is excused: own_heading's Extra section is refused,
+# and the footnote content lands in the section its own label opened
+# rather than filling the empty Testing section above it.
+FOOTNOTE_LAYOUT = (
+    ('footnote_definition_closing', []),
+    ('footnote_definition_bare', []),
+    ('raw_section', []),
+    ('footnote_in_related', []),
+    ('no_class', []),
+    ('no_dataattr', []),
+    ('plain_div', []),
+    ('empty_testing_with_footnote', ['Section "Testing" is empty.']),
+    ('own_heading',
+     ['Section `Extra` is not defined by the template.']),
+)
+
+
+def test_layout_disregards_an_undefined_footnotes_section(tmp):
+    del tmp
+    assert {name for name, _ in FOOTNOTE_LAYOUT} == set(FOOTNOTE_HTML)
+    failures = []
+    for name, expected in FOOTNOTE_LAYOUT:
+        sections = PR_BODY.parse_rendered(
+            FOOTNOTE_HTML[name], REPOSITORY).sections
+        found = PR_BODY.layout_errors(sections, TEMPLATE)
+        if found != expected:
+            failures.append((name, found, expected))
+    assert failures == [], failures
+
+
+def test_layout_judges_a_footnotes_section_the_template_defines(tmp):
+    """The skip lasts only while no rule of that name exists."""
+    del tmp
+    template = TEMPLATE + '\n## Footnotes\n<!-- required: name them -->\n'
+    sections = PR_BODY.parse_rendered(
+        FOOTNOTE_HTML['own_heading'], REPOSITORY).sections
+    assert PR_BODY.layout_errors(sections, template) == [
+        'Section "Footnotes" is empty.',
+        'Section `Extra` is not defined by the template.']
 
 
 def test_layout_counts_rendered_code_as_content(tmp):

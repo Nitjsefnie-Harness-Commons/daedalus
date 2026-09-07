@@ -10,9 +10,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _prfootnotes import FOOTNOTE_HTML  # noqa: E402
 from _prgate import (  # noqa: E402
-    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, GITHUB_ISSUE_101, PR_BODY, _html_body,
-    _issue_html, _text_html, _valid_html,
+    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, GITHUB_ISSUE_101, GITHUB_ISSUE_104,
+    PR_BODY, _html_body, _issue_html, _text_html, _valid_html,
 )
 
 
@@ -21,18 +22,7 @@ _ISSUE_URL = 'https://github.com/owner/repo/issues/101'
 RELATED = 'related issues and pull requests'
 
 # Captured from GitHub's /markdown endpoint in GFM mode with
-# Nitjsefnie-Harness-Commons/daedalus as the context.
-GITHUB_ISSUE_104 = (
-    '<a class="issue-link js-issue-link" data-error-text="Failed to load '
-    'title" data-id="5232205124" data-permission-text="Title is private" '
-    'data-url="https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues'
-    '/104" data-hovercard-type="issue" '
-    'data-hovercard-url="/Nitjsefnie-Harness-Commons/daedalus/issues/104/hov'
-    'ercard" '
-    'href="https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues/104'
-    '">#104</a>')
-
-# Captured from the same endpoint, in the same mode and context, for the
+# Nitjsefnie-Harness-Commons/daedalus as the context, for the
 # source "Fixes #104\n\n## Fixes #105\n\nRan the suite.".
 GITHUB_OUTSIDE_SECTIONS_HTML = (
     f'<p dir="auto">Fixes {GITHUB_ISSUE_104}</p>\n'
@@ -380,23 +370,59 @@ def test_captured_renderings_pin_the_closing_answer(tmp):
     assert failures == [], failures
 
 
-def test_a_footnote_definition_closes_nothing_a_section_would(tmp):
-    """Pin the footnote gap against the collection it suppresses.
+def test_a_footnote_definition_closes_what_a_section_would(tmp):
+    """Pin a footnote definition against its ordinary-section twin.
 
     The two captures differ only in where ``Fixes #104`` sits: a footnote
     definition in the first, an ordinary Changes item in the second. Both
-    close 101 from their Related section, so the ``[101]`` answer records
-    that suppressing a footnote leaves the rest of the body collecting,
-    and an anchor collected inside a footnote answers ``[101, 104]`` here
-    while leaving the twin unchanged.
+    answer the same, because the rendered document is read as one and a
+    footnote definition is rendered content like any other.
     """
     del tmp
     footnote = PR_BODY.parse_rendered(
         GITHUB_FOOTNOTE_CLOSING_HTML, REPOSITORY)
-    assert PR_BODY.closing_issues(footnote) == [101]
+    assert PR_BODY.closing_issues(footnote) == [101, 104]
     section = PR_BODY.parse_rendered(
         GITHUB_SECTION_CLOSING_HTML, REPOSITORY)
     assert PR_BODY.closing_issues(section) == [101, 104]
+
+
+# GitHub closes the issue every one of these bodies names under a
+# keyword, measured on live pull requests against a scratch repository.
+# no_dataattr and plain_div are the neighbours nothing ever suppressed,
+# so they are the controls: their answer is the one the rest must reach.
+FOOTNOTE_CLOSING = (
+    ('footnote_definition_closing', [101, 104]),
+    ('raw_section', [101, 104]),
+    ('no_class', [101, 104]),
+    ('own_heading', [101, 104]),
+    ('no_dataattr', [101, 104]),
+    ('plain_div', [101, 104]),
+    ('footnote_definition_bare', [101]),
+    ('footnote_in_related', [101]),
+    ('empty_testing_with_footnote', [101]),
+)
+
+
+def test_a_footnote_section_closes_what_github_closes(tmp):
+    """A rendered footnote section hides no closing reference.
+
+    The marker GitHub's generator writes is the marker /markdown echoes
+    back from an author's own ``<section data-footnotes>``, normalised
+    into the full spelling, so no attribute on the element separates
+    generated content from written content. The bare and in-related
+    rows are the negative controls: a reference under no keyword still
+    closes nothing.
+    """
+    del tmp
+    assert {name for name, _ in FOOTNOTE_CLOSING} == set(FOOTNOTE_HTML)
+    failures = []
+    for name, expected in FOOTNOTE_CLOSING:
+        body = PR_BODY.parse_rendered(FOOTNOTE_HTML[name], REPOSITORY)
+        found = PR_BODY.closing_issues(body)
+        if found != expected:
+            failures.append((name, found, expected))
+    assert failures == [], failures
 
 
 # A heading carries text of its own, and that text lands in the gap the
