@@ -21,8 +21,9 @@ def main(data_paths=()):
     # attribute while combine() quietly reverts to skipping by hash, the
     # exact silent-undercount shape this script exists to end.
     assert callable(coverage.data.DataFileClassifier.classify)
-    coverage.data.DataFileClassifier.classify = staticmethod(
-        lambda f: "combine")
+    classifier = coverage.data.DataFileClassifier
+    classifier.classify = (  # pyright: ignore[reportAttributeAccessIssue]
+        staticmethod(lambda f: "combine"))
 
     cov = coverage.Coverage()
     cov.combine(data_paths=data_paths or None, strict=True, keep=False)
