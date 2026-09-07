@@ -282,6 +282,7 @@
 !/tests/_overlap.py
 !/tests/_owned_writes.py
 !/tests/_parser_guard.py
+!/tests/_prfootnotes.py
 !/tests/_prgate.py
 !/tests/_prgate_race.py
 !/tests/_pyroute.py

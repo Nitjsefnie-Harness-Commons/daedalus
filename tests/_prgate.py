@@ -30,6 +30,18 @@ GITHUB_ISSUE_101 = (
     'issues/101/hovercard" href="https://github.com/'
     'Nitjsefnie-Harness-Commons/daedalus/issues/101">#101</a>')
 
+# Captured from GitHub's /markdown endpoint in GFM mode with
+# Nitjsefnie-Harness-Commons/daedalus as the context.
+GITHUB_ISSUE_104 = (
+    '<a class="issue-link js-issue-link" data-error-text="Failed to load '
+    'title" data-id="5232205124" data-permission-text="Title is private" '
+    'data-url="https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues'
+    '/104" data-hovercard-type="issue" '
+    'data-hovercard-url="/Nitjsefnie-Harness-Commons/daedalus/issues/104/hov'
+    'ercard" '
+    'href="https://github.com/Nitjsefnie-Harness-Commons/daedalus/issues/104'
+    '">#104</a>')
+
 GITHUB_FOOTNOTE_HTML = (
     '<h2 dir="auto">Summary</h2>\n'
     '<p dir="auto">One sentence.</p>\n'

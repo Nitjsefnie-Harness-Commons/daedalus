@@ -145,25 +145,14 @@ class _RenderedBodyParser(HTMLParser):
         self._run_start = 0
         self._anchor_depth = 0
         self._previous_closing = False
-        self._footnote_depth = 0
 
     def handle_starttag(self, tag, attrs):
         self.saw_element = True
         tag = tag.casefold()
         if tag not in _VOID_TAGS:
             self._open_tags.append(tag)
-        if self._footnote_depth:
-            if tag not in _VOID_TAGS:
-                self._footnote_depth += 1
-            return
         attributes = {
             name.casefold(): value or '' for name, value in attrs}
-        if (tag == 'section' and 'data-footnotes' in attributes
-                and 'footnotes' in attributes.get('class', '').split()):
-            # Closing references inside a footnote stay uncollected; the
-            # gap that leaves is tracked by issue 554.
-            self._footnote_depth = 1
-            return
         # Every element boundary ends the run a keyword must sit in, so
         # a character in another element is never adjacent to it. The
         # reference's own anchor ends the run too, so its decision reads
@@ -188,7 +177,7 @@ class _RenderedBodyParser(HTMLParser):
                 self._text.append('\ufffc')
             return
         if tag in _BLOCK_TAGS:
-            self._record_block()
+            self._break_closing_list()
         if tag == 'a':
             self._anchor_depth += 1
         if tag != 'a':
@@ -231,11 +220,8 @@ class _RenderedBodyParser(HTMLParser):
         self._open_tags.pop()
         if tag == 'a' and self._anchor_depth:
             self._anchor_depth -= 1
-        if self._footnote_depth:
-            self._footnote_depth -= 1
-            return
         if tag in _BLOCK_TAGS:
-            self._record_block()
+            self._break_closing_list()
         self._end_run()
         if tag != self._heading_tag:
             return
@@ -264,15 +250,13 @@ class _RenderedBodyParser(HTMLParser):
         self._record_pending(data)
 
     def _record_text(self, data):
-        if self._footnote_depth:
-            return
         if self._heading_tag is not None:
             self._heading_parts.append(data)
         elif self._key is not None:
             self._text.append(data)
 
     def _record_pending(self, data):
-        if self._footnote_depth or self._anchor_depth:
+        if self._anchor_depth:
             return
         self._gap.append(data)
 
@@ -281,11 +265,6 @@ class _RenderedBodyParser(HTMLParser):
 
     def _end_run(self):
         self._run_start = len(self._gap)
-
-    def _record_block(self):
-        if self._footnote_depth:
-            return
-        self._break_closing_list()
 
     def _break_closing_list(self):
         # A block or heading boundary breaks a closing-keyword list: a
@@ -433,6 +412,14 @@ def layout_errors(sections, template):
     for section in sections:
         rule = rules.get(section.key)
         if rule is None:
+            if section.key == 'footnotes':
+                # GitHub injects the label heading that opens this
+                # section into every rendered footnote section, so
+                # judging it would refuse a conforming body. It is not
+                # attributed to the section above either: footnote
+                # content lands under that injected heading, so it
+                # cannot fill a section the author left empty.
+                continue
             errors.append(
                 f'Section {code_span(section.name)} is not defined by '
                 'the template.')
