@@ -36,6 +36,7 @@ Each key names what its Markdown source did:
 - two_definitions               two definitions, the second after a block
 - wrapper_heading_then_resume   a heading inside a wrapper, prose after it
 - definition_empty_heading_list  an empty heading mid-list in a definition
+- wrapper_div_list             a block start mid-list in a wrapper
 
 NESTED_HEADING_HTML holds two more, kept out of that map because they
 are refused rather than parsed: a rendered body reaches the parser's
@@ -314,6 +315,13 @@ FOOTNOTE_HTML = {
         '-fnref-1-611d14517e47dce8af90a735c94444b1" data-footnote-backref=""'
         ' aria-label="Back to reference 1" class="data-footnote-backref">↩</'
         'a><p dir="auto"></p>\n</li>\n</ol>\n</section>'),
+    'wrapper_div_list': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing</h2>\n<sect'
+        'ion data-footnotes="" class="footnotes"><h2 id="footnote-label" '
+        'class="sr-only" dir="auto">Footnotes</h2>\nFixes '
+        f'{GITHUB_ISSUE_104}, <div dir="auto">{GITHUB_ISSUE_105}</div>\n</'
+        'section>\n<p dir="auto">Ran it.</p>'),
 }
 
 NESTED_HEADING_HTML = {
@@ -373,6 +381,7 @@ FOOTNOTE_SECTIONS = (
     ('two_definitions', _BASE_KEYS),
     ('wrapper_heading_then_resume', _BASE_KEYS),
     ('definition_empty_heading_list', _BASE_KEYS),
+    ('wrapper_div_list', _BASE_KEYS),
 )
 
 # A footnote definition renders at the end of the document, so its
@@ -427,4 +436,5 @@ FOOTNOTE_LAYOUT = (
     ('two_definitions', ['Section "Testing" is empty.']),
     ('wrapper_heading_then_resume', []),
     ('definition_empty_heading_list', []),
+    ('wrapper_div_list', []),
 )
