@@ -4,6 +4,7 @@
 Relocated from tests/test_pr_body.py so that suite stays under its size
 ceiling; the closing channel is one grammar and reads as one suite.
 """
+import html
 import sys
 from pathlib import Path
 
@@ -70,11 +71,13 @@ GITHUB_SECTION_CLOSING_HTML = (
 
 # The answer closing_issues gives for each captured rendering in
 # tests/_prgate.py that carries an anchor; its control pins that set.
+# escaped_backticks closes because a backtick is not a word character,
+# which is the boundary GitHub itself was measured on.
 CAPTURED_CLOSING = (
     ('angle_prose', []),
     ('balanced_destination', []),
     ('empty_image', []),
-    ('escaped_backticks', []),
+    ('escaped_backticks', [101]),
     ('html_attribute', []),
     ('image_destination', []),
     ('malformed_inline', []),
@@ -86,6 +89,47 @@ CAPTURED_CLOSING = (
     ('undefined_reference', []),
     ('zero_size_image', []),
 )
+
+
+# One gap text per spelling GitHub was measured on, placed before an
+# issue anchor in a rendered paragraph. A closing table without its
+# inert twin cannot see over-acceptance, so each half pins the other.
+LEFT_CLOSING = (
+    'Fixes ', '(Fixes ', '[Fixes ', '"Fixes ', "'Fixes ", '\u2014Fixes ',
+    '\u00abFixes ', 'hot-fixes ', '/fixes ', 'x -fixes ',
+    '\U0001f527fixes ', 'FIXES ',
+)
+LEFT_INERT = (
+    'unfixes ', '2fixes ', 'a_fixes ', '\u00e9fixes ', '\u4feefixes ')
+SEPARATOR_CLOSING = (
+    'Fixes ', 'Fixes  ', 'Fixes\t', 'Fixes: ', 'Fixes : ', 'Fixes:  ')
+SEPARATOR_INERT = (
+    'Fixes:: ', 'Fixes, ', 'Fixes; ', 'Fixes. ', 'Fixes! ', 'Fixes) ',
+    'Fixes - ', 'Fixes -> ', 'Fixes... ', 'Fixes \u2014 ', 'Fixes` ',
+    'fixing ',
+)
+# Inert on GitHub, which matches the raw Markdown, and closing here: the
+# rendering keeps none of what makes them inert.
+WIDER_THAN_GITHUB = ('Fixes', 'Fixes:', 'Fixes\n', 'Fixes\u00a0')
+
+
+def _gap_html(gap):
+    escaped = html.escape(gap, quote=False)
+    return f'<p dir="auto">{escaped}{_issue_html(101)}</p>'
+
+
+def _gap_answers(gaps):
+    answers = []
+    for gap in gaps:
+        body = PR_BODY.parse_rendered(
+            _valid_html(references=_gap_html(gap)), 'owner/repo')
+        answers.append((gap, PR_BODY.closing_issues(body)))
+    return answers
+
+
+def _assert_gaps(closing, inert):
+    assert _gap_answers(closing) == [(gap, [101]) for gap in closing]
+    assert _gap_answers(inert) == [(gap, []) for gap in inert]
 
 
 def test_closing_issues_reads_the_governing_keyword(tmp):
@@ -348,6 +392,59 @@ def test_paragraph_keyword_does_not_govern_a_heading_anchor(tmp):
             + f'<h2 dir="auto">{_issue_html(104)}</h2>\n')
         body = PR_BODY.parse_rendered(rendered, 'owner/repo')
         assert PR_BODY.closing_issues(body) == expected, content
+
+
+def test_only_a_non_word_character_may_precede_the_keyword(tmp):
+    del tmp
+    _assert_gaps(LEFT_CLOSING, LEFT_INERT)
+
+
+def test_the_separator_takes_one_colon_and_no_other_punctuation(tmp):
+    del tmp
+    _assert_gaps(SEPARATOR_CLOSING, SEPARATOR_INERT)
+
+
+def test_recognition_stays_wider_where_the_rendering_hides_it(tmp):
+    del tmp
+    assert _gap_answers(WIDER_THAN_GITHUB) == [
+        (gap, [101]) for gap in WIDER_THAN_GITHUB]
+    cases = (
+        (f'<p dir="auto"><strong>Fixes</strong> {_issue_html(101)}</p>',
+         [101]),
+        (f'<p dir="auto"><em>Fixes</em> {_issue_html(101)}</p>', [101]),
+        (f'Fixes {_issue_html(101)}, {_issue_html(102)}', [101, 102]),
+        (f'Fixes {_issue_html(101)} and {_issue_html(102)}', [101, 102]),
+    )
+    for references, closing in cases:
+        body = PR_BODY.parse_rendered(
+            _valid_html(references=references), 'owner/repo')
+        assert PR_BODY.closing_issues(body) == closing, references
+
+
+def test_structural_placements_close_as_github_measures_them(tmp):
+    del tmp
+    anchor = _issue_html(101)
+    url = 'https://github.com/owner/repo/issues/101'
+    cases = (
+        (f'<h3 dir="auto">Fixes {anchor}</h3>', [101]),
+        (f'<ul dir="auto">\n<li>Fixes {anchor}</li>\n</ul>', [101]),
+        (f'<blockquote>\n<p dir="auto">Fixes {anchor}</p>\n</blockquote>',
+         [101]),
+        ('<table dir="auto"><tbody><tr><td>Fixes '
+         f'{anchor}</td></tr></tbody></table>', [101]),
+        (f'<p dir="auto">Fixes <a href="{url}">GH-101</a></p>', [101]),
+        (f'<p dir="auto">Fixes <a href="{url}">owner/repo#101</a></p>',
+         [101]),
+        ('<p dir="auto"><a href="https://example.com" rel="nofollow">'
+         f'Fixes</a> {anchor}</p>', []),
+        (f'<p dir="auto"><!-- Fixes -->{anchor}</p>', []),
+        ('<p dir="auto"><code class="notranslate">Fixes #101</code></p>',
+         []),
+    )
+    for references, closing in cases:
+        body = PR_BODY.parse_rendered(
+            _valid_html(references=references), 'owner/repo')
+        assert PR_BODY.closing_issues(body) == closing, references
 
 
 def main():
