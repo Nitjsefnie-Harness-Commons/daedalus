@@ -27,6 +27,11 @@ Each key names what its Markdown source did:
 - id_upper_attr                the forgery in upper-case attribute names
 - two_sections                 a written section beside a definition
 - label_no_footnote            the forgery ahead of a closing reference
+
+NESTED_HEADING_HTML holds two more, kept out of that map because they
+are refused rather than parsed: a rendered body reaches the parser's
+nested-heading refusal whenever a heading line wraps a raw element
+holding another heading, with or without a footnote section.
 """
 import sys
 from pathlib import Path
@@ -212,4 +217,17 @@ FOOTNOTE_HTML = {
         + _RAN_IT
         + '<h2 id="user-content-footnote-label" dir="auto">Trap</h2>\n<p di'
         f'r="auto">Fixes {GITHUB_ISSUE_104}</p>'),
+}
+
+NESTED_HEADING_HTML = {
+    'raw_section_in_heading': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <section><h'
+        '2 dir="auto">Inner</h2></section></h2>'),
+    'forged_label_in_heading': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <section da'
+        'ta-footnotes="" class="footnotes"><h2 id="footnote-label" class='
+        '"sr-only" dir="auto">Footnotes</h2><h2 id="user-content-footnote'
+        '-label" dir="auto">Trap</h2></section></h2>'),
 }
