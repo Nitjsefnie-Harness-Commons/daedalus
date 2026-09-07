@@ -29,6 +29,7 @@ Each key names what its Markdown source did:
 - label_no_footnote            the forgery ahead of a closing reference
 - wrapper_then_text            a wrapper mid-section, prose after it
 - related_wrapper_then_ref     a wrapper inside Related, reference after
+- heading_keyword_across_wrapper  a heading-line keyword list broken by one
 
 NESTED_HEADING_HTML holds two more, kept out of that map because they
 are refused rather than parsed: a rendered body reaches the parser's
@@ -44,8 +45,8 @@ from _prgate import GITHUB_ISSUE_101, GITHUB_ISSUE_104  # noqa: E402
 
 # Captured from GitHub's /markdown endpoint in GFM mode with
 # Nitjsefnie-Harness-Commons/daedalus as the context. It sits here
-# rather than beside its 101 and 104 siblings in _prgate because
-# two_sections is the only fixture anywhere that names issue 105.
+# rather than beside its 101 and 104 siblings in _prgate because the
+# two fixtures naming issue 105 are both in this file.
 GITHUB_ISSUE_105 = (
     '<a class="issue-link js-issue-link" data-error-text="Failed to load '
     'title" data-id="5232282547" data-permission-text="Title is private" '
@@ -234,6 +235,12 @@ FOOTNOTE_HTML = {
         f'{GITHUB_ISSUE_104}</p>\n<h2 dir="auto">Changes</h2>\n<p dir="auto">O'
         'ne change</p>\n<h2 dir="auto">Testing</h2>\n<p dir="auto">Ran the sui'
         'te.</p>'),
+    'heading_keyword_across_wrapper': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing fixes '
+        f'{GITHUB_ISSUE_104}, <section data-footnotes="" class="footnotes"><h2'
+        ' id="footnote-label" class="sr-only" dir="auto">Footnotes</h2>'
+        f'{GITHUB_ISSUE_105}</section></h2>'),
 }
 
 NESTED_HEADING_HTML = {

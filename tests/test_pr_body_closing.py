@@ -413,6 +413,7 @@ FOOTNOTE_CLOSING = (
     ('id_upper_attr', [101]),
     ('wrapper_then_text', [101]),
     ('related_wrapper_then_ref', [101]),
+    ('heading_keyword_across_wrapper', [101, 104]),
 )
 
 

@@ -425,6 +425,8 @@ FOOTNOTE_SECTIONS = (
     ('heading_wrapped_ref', _BASE_KEYS),
     ('wrapper_then_text', _BASE_KEYS),
     ('related_wrapper_then_ref', _BASE_KEYS),
+    ('heading_keyword_across_wrapper',
+     ('summary', RELATED, 'changes', 'testing fixes #104,')),
 )
 
 # A footnote definition renders at the end of the document, so its
@@ -500,6 +502,9 @@ FOOTNOTE_LAYOUT = (
     ('heading_wrapped_ref', ['Section "Testing" is empty.']),
     ('wrapper_then_text', []),
     ('related_wrapper_then_ref', []),
+    ('heading_keyword_across_wrapper',
+     [_undefined('Testing fixes #104,'),
+      'Required section "Testing" is missing.']),
 )
 
 
