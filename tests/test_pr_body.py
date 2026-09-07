@@ -13,8 +13,9 @@ from _prfootnotes import (  # noqa: E402
     FOOTNOTE_REFERENCED_BY_ROW, FOOTNOTE_SECTIONS, NESTED_HEADING_HTML,
     RELATED)
 from _prgate import (  # noqa: E402
-    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, PR_BODY, TEMPLATE, _html_body,
-    _issue_html, _layout_body, _text_html, _valid_body, _valid_html,
+    GITHUB_FOOTNOTE_HTML, GITHUB_HTML, NESTED_HEADING_NOTE, PR_BODY,
+    TEMPLATE, _html_body, _issue_html, _layout_body, _text_html,
+    _valid_body, _valid_html,
 )
 
 
@@ -85,7 +86,6 @@ def test_parser_rejects_unusable_html(tmp):
         '<h2>Summary</h2><p>text',
         '<h2>Summary</h2><h2',
         '<p>a</b>',
-        '<h2>Summary<h3>x</h3></h2>',
         '<h2>Summary</h2><div/>',
     )
     accepted = []
@@ -99,24 +99,30 @@ def test_parser_rejects_unusable_html(tmp):
     assert accepted == [], accepted
 
 
-def test_parser_rejects_a_rendered_body_with_nested_headings(tmp):
-    """The nested-heading refusal is reachable from a real body.
+def test_parser_reports_a_nested_heading_as_a_layout_note(tmp):
+    """A nested heading is a verdict the gate reports, not a refusal.
 
     GitHub closes an open heading before another heading of its own,
     but not before a raw element, so a heading line wrapping one that
-    holds a heading renders as a genuine nesting. The footnote row is
-    the same shape reached through the label GitHub injects beside the
-    author id it rewrote.
+    holds a heading renders as a genuine nesting. The parser admits
+    the body, records the note once per nested heading, and reads the
+    sections the rendering leaves it; the gate folds the notes into
+    its refusal reasons.
     """
     del tmp
+    keys = {
+        'div_in_heading': ['summary', RELATED, 'changes', 'testing inner'],
+        'raw_section_in_heading': [
+            'summary', RELATED, 'changes', 'testing inner'],
+        'footnote_section_in_heading': ['summary', RELATED, 'changes',
+                                        'testing'],
+        'forged_label_in_heading': ['summary', RELATED, 'changes',
+                                    'testing'],
+    }
     for name, rendered in NESTED_HEADING_HTML.items():
-        try:
-            PR_BODY.parse_rendered(rendered, REPOSITORY)
-        except ValueError as error:
-            assert str(error) == (
-                'rendered HTML contains nested headings'), (name, error)
-        else:
-            raise AssertionError(f'{name} was accepted')
+        body = PR_BODY.parse_rendered(rendered, REPOSITORY)
+        assert body.notes == (NESTED_HEADING_NOTE,), name
+        assert [section.key for section in body.sections] == keys[name], name
 
 
 def test_parser_rejects_unfinished_heading(tmp):

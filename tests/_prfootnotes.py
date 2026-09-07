@@ -38,10 +38,11 @@ Each key names what its Markdown source did:
 - definition_empty_heading_list  an empty heading mid-list in a definition
 - wrapper_div_list             a block start mid-list in a wrapper
 
-NESTED_HEADING_HTML holds two more, kept out of that map because they
-are refused rather than parsed: a rendered body reaches the parser's
-nested-heading refusal whenever a heading line wraps a raw element
-holding another heading, with or without a footnote section.
+NESTED_HEADING_HTML holds the captured renderings whose heading line
+wraps a raw element holding another heading, with or without a
+footnote section. The parser admits each and records one
+nested-heading note, which the gate reports among its refusal
+reasons.
 """
 import sys
 from pathlib import Path
@@ -325,10 +326,20 @@ FOOTNOTE_HTML = {
 }
 
 NESTED_HEADING_HTML = {
+    'div_in_heading': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <div dir="'
+        'auto"><h3 dir="auto">Inner</h3></div></h2>'),
     'raw_section_in_heading': (
         _HEAD
         + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <section><h'
         '2 dir="auto">Inner</h2></section></h2>'),
+    'footnote_section_in_heading': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <section da'
+        'ta-footnotes="" class="footnotes"><h2 id="footnote-label" class='
+        '"sr-only" dir="auto">Footnotes</h2><h2 dir="auto">Inner</h2></se'
+        'ction></h2>'),
     'forged_label_in_heading': (
         _HEAD
         + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing <section da'
