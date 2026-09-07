@@ -62,6 +62,32 @@ def test_two_unassigned_closing_issues_are_named_together(tmp):
     _assert_numbers_code_spanned(_comment_body(writes[0]))
 
 
+def test_a_punctuated_closing_keyword_still_needs_the_claim(tmp):
+    """The bypass this recognition exists to close.
+
+    Each spelling closes its issue when the pull request merges, so a
+    gate reading it as an ordinary mention lets an author close an
+    issue assigned to somebody else.
+    """
+    del tmp
+    for spelling in ('(Fixes', 'hot-fixes', 'Fixes :'):
+        rendered = _valid_html(references=(
+            f'Fixes {_issue_html(101)}\n'
+            f'{spelling} {_issue_html(104)}'))
+        api = _api(
+            issues={'101': _issue('alice'), '104': _issue('bob')},
+            rendered=rendered)
+        code, writes, _output, _error = _execute(
+            api, _valid_body(f'Fixes #101\n{spelling} #104'))
+        assert code == 0, spelling
+        assert _write_sequence(writes) == [
+            ('POST', 'repos/owner/repo/issues/99/comments')], spelling
+        _assert_gate_message(
+            writes[0], OPEN_FIRST,
+            ['Issue `#104` is not assigned to you.'])
+        _assert_numbers_code_spanned(_comment_body(writes[0]))
+
+
 def test_unassigned_mention_without_keyword_passes(tmp):
     del tmp
     rendered = _valid_html(references=(
