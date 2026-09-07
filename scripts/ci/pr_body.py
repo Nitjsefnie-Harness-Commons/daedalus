@@ -142,6 +142,7 @@ class _RenderedBodyParser(HTMLParser):
         self._links = []
         self._issues = []
         self._gap = []
+        self._run_start = 0
         self._anchor_depth = 0
         self._previous_closing = False
         self._footnote_depth = 0
@@ -163,6 +164,12 @@ class _RenderedBodyParser(HTMLParser):
             # gap that leaves is tracked by issue 554.
             self._footnote_depth = 1
             return
+        # Every element boundary ends the run a keyword must sit in, so
+        # a character in another element is never adjacent to it. The
+        # reference's own anchor ends the run too, so its decision reads
+        # the run as it stood when that anchor opened.
+        run = self._current_run()
+        self._end_run()
         if tag in _HEADING_TAGS:
             if self._heading_tag is not None:
                 raise ValueError('rendered HTML contains nested headings')
@@ -200,7 +207,8 @@ class _RenderedBodyParser(HTMLParser):
         number = issue_number(href, self.repository)
         if number is None:
             return
-        closing = _gap_closing(''.join(self._gap), self._previous_closing)
+        closing = _gap_closing(
+            run, ''.join(self._gap), self._previous_closing)
         if inside:
             self._issues.append(number)
         if closing:
@@ -228,6 +236,7 @@ class _RenderedBodyParser(HTMLParser):
             return
         if tag in _BLOCK_TAGS:
             self._record_block()
+        self._end_run()
         if tag != self._heading_tag:
             return
         name = _heading_text(''.join(self._heading_parts))
@@ -267,6 +276,12 @@ class _RenderedBodyParser(HTMLParser):
             return
         self._gap.append(data)
 
+    def _current_run(self):
+        return ''.join(self._gap[self._run_start:])
+
+    def _end_run(self):
+        self._run_start = len(self._gap)
+
     def _record_block(self):
         if self._footnote_depth:
             return
@@ -277,6 +292,7 @@ class _RenderedBodyParser(HTMLParser):
         # keyword on one side governs no anchor on the other, so the gap
         # text and the running list state both restart across it.
         self._gap = []
+        self._run_start = 0
         self._previous_closing = False
 
     def finish(self):
@@ -336,39 +352,38 @@ def referenced_issues(sections):
     return found
 
 
-def _gap_closing(gap, previous_closing):
+def _gap_closing(run, gap, previous_closing):
     """Whether the text before an anchor governs it as a closing one.
 
-    GitHub matches inside a single text node of the parsed document:
-    a keyword with no word character before it, at most one colon
-    within a run of spaces or tabs, then the reference, all in that
-    node. Every measured spelling follows, the refused ones included
-    -- `Fixes, #N` and `Fixes - #N` are inert there, so refusing
-    trailing punctuation is relied on rather than overlooked.
-    (`a**fixes** #N` is inert on both sides: there by the node
-    boundary, here by the word character concatenation puts before the
-    keyword.)
+    GitHub matches on the run of text ending AT the reference, bounded
+    on its left by the nearest element boundary: that run ends with a
+    keyword, no word character before it, then at most one colon, then
+    spaces or tabs. The reference may equally be a `GH-N`, a bare URL
+    or an explicit link, since it ends the run rather than interrupting
+    it.
+
+    Both sides of the boundary follow: `**Fixes** #N` is inert because
+    the keyword falls outside the run, `*a*fixes #N` closes because the
+    `a` does, and `Fixes, #N` is inert because GitHub was measured not
+    to act on trailing punctuation rather than because nobody thought
+    of it.
 
     Folding is required rather than extra width: `fixeſ #N` closes on
     GitHub and folds to `fixes` here, so an ASCII-only or fold-free
     match would refuse a spelling it acts on. `FİXES #N` is the one
     measured spelling folding admits and GitHub ignores.
 
-    Four widths beyond that model are decisions, not limits, since the
-    gap could break on an inline element exactly as it breaks on a
-    block: an inline element between keyword and reference
-    (`**Fixes** #N`); whitespace GitHub does not take (a soft break, a
-    no-break space); no separator at all or a colon with no space,
-    reachable as `Fixes[#N](url)` and `Fixes:#N`; and the keyword-list
-    continuation, past an anchor GitHub stops at.
-
-    Matching GitHub's separator exactly needs both halves: the strip
-    limited to spaces and tabs, and one of them required between
-    keyword and reference. Failing closed is preferred, because the
-    two directions cost differently -- a refusal GitHub would not have
-    made, against a bypass of the claim check this feeds.
+    Three widths are deliberate: whitespace GitHub does not take, so a
+    no-break space closes; no separator at all or a colon with no
+    space, reachable as `Fixes[#N](url)` and `Fixes:#N`; and the
+    keyword-list continuation, past an anchor GitHub stops at. Matching
+    its separator exactly needs both halves -- the strip limited to
+    spaces and tabs, and one of them required between keyword and
+    reference. Failing closed is preferred, because the two directions
+    cost differently: a refusal GitHub would not have made, against a
+    bypass of the claim check this feeds.
     """
-    before_separator = gap.rstrip().removesuffix(':').rstrip()
+    before_separator = run.rstrip().removesuffix(':').rstrip()
     if _TRAILING_KEYWORD.search(before_separator):
         return True
     return (bool(previous_closing)
