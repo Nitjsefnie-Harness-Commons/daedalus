@@ -34,6 +34,7 @@ Each key names what its Markdown source did:
 - definition_heading            a heading inside a footnote definition
 - definition_heading_text       the same, with prose under the heading
 - two_definitions               two definitions, the second after a block
+- wrapper_heading_then_resume   a heading inside a wrapper, prose after it
 
 NESTED_HEADING_HTML holds two more, kept out of that map because they
 are refused rather than parsed: a rendered body reaches the parser's
@@ -292,6 +293,12 @@ FOOTNOTE_HTML = {
         'nref-2-f123cd04424734aa76b0af70f8c07b2d" data-footnote-backref="'
         '" aria-label="Back to reference 2" class="data-footnote-backref"'
         '>↩</a></p>\n</li>\n</ol>\n</section>'),
+    'wrapper_heading_then_resume': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing</h2>\n<section'
+        ' data-footnotes="" class="footnotes"><h2 id="footnote-label" class='
+        '"sr-only" dir="auto">Footnotes</h2>\n<h2 dir="auto">Extra</h2>\n</s'
+        'ection>\n<p dir="auto">Ran it.</p>'),
 }
 
 NESTED_HEADING_HTML = {
@@ -349,6 +356,7 @@ FOOTNOTE_SECTIONS = (
     ('definition_heading', ('summary', RELATED, 'changes')),
     ('definition_heading_text', ('summary', RELATED, 'changes')),
     ('two_definitions', _BASE_KEYS),
+    ('wrapper_heading_then_resume', _BASE_KEYS),
 )
 
 # A footnote definition renders at the end of the document, so its
@@ -401,4 +409,5 @@ FOOTNOTE_LAYOUT = (
     ('definition_heading', _MISSING_TESTING),
     ('definition_heading_text', _MISSING_TESTING),
     ('two_definitions', ['Section "Testing" is empty.']),
+    ('wrapper_heading_then_resume', []),
 )
