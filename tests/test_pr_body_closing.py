@@ -387,8 +387,11 @@ def test_a_footnote_definition_closes_what_a_section_would(tmp):
     assert PR_BODY.closing_issues(section) == [101, 104]
 
 
-# GitHub closes the issue every one of these bodies names under a
-# keyword, measured on live pull requests against a scratch repository.
+# Four spellings were merged live against a scratch repository, one
+# throwaway issue each, and GitHub closed on all four: a footnote
+# definition, a hand-written data-footnotes wrapper, a bare div, and a
+# details element. Issue 554's thread records them. The rows here are
+# those four's consistent extrapolation, not merges of their own.
 # no_dataattr and plain_div are the neighbours nothing ever suppressed,
 # so they are the controls: their answer is the one the rest must reach.
 FOOTNOTE_CLOSING = (

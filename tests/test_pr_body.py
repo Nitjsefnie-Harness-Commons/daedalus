@@ -417,8 +417,9 @@ def test_layout_reports_unknown_duplicate_and_out_of_order_sections(tmp):
 # none of its own. no_dataattr carries no label at all, because GitHub
 # keys on data-footnotes: it normalises that attribute up into the
 # generated spelling and drops a footnotes class arriving without it.
-# Every trap row is an author heading GitHub rewrote the id of, so it
-# opens a section the way any other author heading does.
+# Every trap row is an author heading whose forged attributes GitHub
+# rewrote or dropped - class_only carries neither - so it opens a
+# section the way any other author heading does.
 _BASE_KEYS = ('summary', RELATED, 'changes', 'testing')
 FOOTNOTE_SECTIONS = (
     ('footnote_definition_closing', _BASE_KEYS),
@@ -495,7 +496,8 @@ def _undefined(name):
 # so a conforming body is judged exactly as it would be without its
 # footnotes. What an author writes is judged too: author_footnotes_
 # heading is a section the template does not define, and the trap rows
-# are the same refusal reached through a rewritten label id.
+# are the same refusal reached through a forged label attribute GitHub
+# rewrote or dropped.
 _TRAP = [_undefined('Trap')]
 FOOTNOTE_LAYOUT = (
     ('footnote_definition_closing', []),
