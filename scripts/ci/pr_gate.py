@@ -331,7 +331,7 @@ def _run(api, repo, pr, actor, template):
             f'could not analyze rendered body: {error}') from error
     sections = parsed.sections
 
-    layout = layout_errors(sections, template)
+    layout = layout_errors(sections, template) + list(parsed.notes)
     if retains_instruction_comment(body, template):
         layout.append(INSTRUCTION_REASON)
     references = referenced_issues(sections)
