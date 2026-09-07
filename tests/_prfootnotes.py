@@ -44,7 +44,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _prgate import GITHUB_ISSUE_101, GITHUB_ISSUE_104  # noqa: E402
+from _prgate import (  # noqa: E402
+    GITHUB_ISSUE_101, GITHUB_ISSUE_104, PR_BODY)
 
 
 # Captured from GitHub's /markdown endpoint in GFM mode with
@@ -306,7 +307,7 @@ NESTED_HEADING_HTML = {
         '-label" dir="auto">Trap</h2></section></h2>'),
 }
 
-RELATED = 'related issues and pull requests'
+RELATED = PR_BODY.RELATED
 
 
 # What each capture's sections come to once its footnote section is
