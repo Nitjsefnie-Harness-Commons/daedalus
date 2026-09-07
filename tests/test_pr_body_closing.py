@@ -411,6 +411,8 @@ FOOTNOTE_CLOSING = (
     ('id_only', [101]),
     ('class_only', [101]),
     ('id_upper_attr', [101]),
+    ('wrapper_then_text', [101]),
+    ('related_wrapper_then_ref', [101]),
 )
 
 

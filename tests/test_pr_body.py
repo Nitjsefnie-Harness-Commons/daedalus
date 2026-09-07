@@ -41,7 +41,7 @@ def test_parser_accepts_heading_depth_emphasis_and_colon(tmp):
 
 
 def test_the_injected_footnote_label_opens_no_section(tmp):
-    """GitHub's own label ends the section above it and opens none.
+    """GitHub's own label opens no section of its own.
 
     An author cannot reach this branch: /markdown prefixes every
     author-supplied id with user-content-, so a bare footnote-label
@@ -53,6 +53,27 @@ def test_the_injected_footnote_label_opens_no_section(tmp):
     assert [section.key for section in sections] == [
         'summary', RELATED, 'changes', 'testing']
     assert PR_BODY.referenced_issues(sections) == [101]
+
+
+def test_content_inside_the_label_region_reaches_no_section(tmp):
+    """The element holding the label is attributed to no section.
+
+    The region it opens ends where that element ends, so the section
+    it interrupts keeps the text, links and images that are its own.
+    A footnote definition renders inside that element, and an image or
+    a link there belongs to the definition rather than to the section.
+    """
+    del tmp
+    rendered = (
+        '<h2>Testing</h2>\n<section data-footnotes="" class="footnotes">'
+        '<h2 id="footnote-label" class="sr-only">Footnotes</h2>\n'
+        '<p><img src="diagram.png" alt=""> <a href="notes.md">x</a>'
+        '</p>\n</section>')
+    sections = PR_BODY.parse_rendered(rendered, REPOSITORY).sections
+    assert [section.key for section in sections] == ['testing']
+    assert sections[0].links == ()
+    assert 'Section "Testing" is empty.' in PR_BODY.layout_errors(
+        sections, TEMPLATE)
 
 
 def test_parser_rejects_unusable_html(tmp):
@@ -401,14 +422,17 @@ FOOTNOTE_SECTIONS = (
     ('id_upper_attr', _BASE_KEYS + ('trap',)),
     ('label_no_footnote', _BASE_KEYS + ('trap',)),
     ('author_footnotes_heading', _BASE_KEYS + ('footnotes',)),
-    ('heading_wrapped_ref',
-     ('summary', RELATED, 'changes', 'testing fixes #104')),
+    ('heading_wrapped_ref', _BASE_KEYS),
+    ('wrapper_then_text', _BASE_KEYS),
+    ('related_wrapper_then_ref', _BASE_KEYS),
 )
 
 # A footnote definition renders at the end of the document, so its
-# references sit outside Related Issues and Pull Requests. The
-# permissive channel therefore reads the same answer for every capture.
+# references sit outside Related Issues and Pull Requests. A wrapper an
+# author writes can sit inside that section instead, where a reference
+# after it is the section's own again.
 FOOTNOTE_REFERENCED = [101]
+FOOTNOTE_REFERENCED_BY_ROW = {'related_wrapper_then_ref': [101, 104]}
 
 
 def test_a_footnote_section_splits_like_any_other_section(tmp):
@@ -420,7 +444,8 @@ def test_a_footnote_section_splits_like_any_other_section(tmp):
             FOOTNOTE_HTML[name], REPOSITORY).sections
         found = tuple(section.key for section in sections)
         referenced = PR_BODY.referenced_issues(sections)
-        if (found, referenced) != (expected, FOOTNOTE_REFERENCED):
+        wanted = FOOTNOTE_REFERENCED_BY_ROW.get(name, FOOTNOTE_REFERENCED)
+        if (found, referenced) != (expected, wanted):
             failures.append((name, found, referenced))
     assert failures == [], failures
 
@@ -429,8 +454,8 @@ def test_a_keyword_free_footnote_reference_reaches_no_section(tmp):
     """Both channels' answers for a reference no keyword governs.
 
     The reference is collected from the rendered document, so nothing
-    hides it; it simply belongs to no section, because the label
-    heading that precedes it closes the last one and opens none.
+    hides it; it simply belongs to no section, because the element
+    holding the label it follows is attributed to none.
     """
     del tmp
     for name in ('footnote_definition_bare', 'footnote_in_related'):
@@ -472,9 +497,9 @@ FOOTNOTE_LAYOUT = (
     ('class_only', _TRAP),
     ('id_upper_attr', _TRAP),
     ('label_no_footnote', _TRAP),
-    ('heading_wrapped_ref',
-     [_undefined('Testing Fixes #104'),
-      'Required section "Testing" is missing.']),
+    ('heading_wrapped_ref', ['Section "Testing" is empty.']),
+    ('wrapper_then_text', []),
+    ('related_wrapper_then_ref', []),
 )
 
 

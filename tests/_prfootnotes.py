@@ -27,6 +27,8 @@ Each key names what its Markdown source did:
 - id_upper_attr                the forgery in upper-case attribute names
 - two_sections                 a written section beside a definition
 - label_no_footnote            the forgery ahead of a closing reference
+- wrapper_then_text            a wrapper mid-section, prose after it
+- related_wrapper_then_ref     a wrapper inside Related, reference after
 
 NESTED_HEADING_HTML holds two more, kept out of that map because they
 are refused rather than parsed: a rendered body reaches the parser's
@@ -217,6 +219,21 @@ FOOTNOTE_HTML = {
         + _RAN_IT
         + '<h2 id="user-content-footnote-label" dir="auto">Trap</h2>\n<p di'
         f'r="auto">Fixes {GITHUB_ISSUE_104}</p>'),
+    'wrapper_then_text': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<h2 dir="auto">Testing</h2>\n<section'
+        ' data-footnotes="" class="footnotes"><h2 id="footnote-label" class="s'
+        'r-only" dir="auto">Footnotes</h2></section>\n<p dir="auto">Ran the su'
+        'ite.</p>'),
+    'related_wrapper_then_ref': (
+        '<h2 dir="auto">Summary</h2>\n<p dir="auto">One sentence.</p>\n<h2 dir'
+        '="auto">Related Issues and Pull Requests</h2>\n<p dir="auto">Fixes '
+        f'{GITHUB_ISSUE_101}</p>\n<section data-footnotes="" class="footnotes"'
+        '><h2 id="footnote-label" class="sr-only" dir="auto">Footnotes</h2>\n<'
+        'p dir="auto">note</p>\n</section>\n<p dir="auto">See '
+        f'{GITHUB_ISSUE_104}</p>\n<h2 dir="auto">Changes</h2>\n<p dir="auto">O'
+        'ne change</p>\n<h2 dir="auto">Testing</h2>\n<p dir="auto">Ran the sui'
+        'te.</p>'),
 }
 
 NESTED_HEADING_HTML = {
