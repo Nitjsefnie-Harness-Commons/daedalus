@@ -47,7 +47,7 @@ _SHIPPED_JAVASCRIPT_ROOTS = ('extension/', 'dashboard/')
 _LANGUAGES = ('Python', 'JavaScript')
 
 
-def _decode_git_path(value):
+def _decode_git_path(value: str) -> str:
     """Decode a quoted Git path and remove its diff-side prefix."""
     if not value.startswith('"'):
         value = value.split('\t', 1)[0]
