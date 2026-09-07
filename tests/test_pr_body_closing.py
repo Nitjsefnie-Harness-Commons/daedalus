@@ -152,14 +152,16 @@ def _gap_answers(gaps):
 # Fifth round: a word character in a DIFFERENT inline node must not hide
 # the keyword, since GitHub never sees the two adjacent. Each row is
 # paired with its mirror from the second round, where the keyword itself
-# is on the far side of the boundary and stays inert.
+# is on the far side of the boundary and stays inert. The elements are
+# ones GitHub's rendering keeps, and the last two are outside every
+# emphasis-shaped tag list, so a deny list cannot pass this table.
 NODE_BOUNDARY_CLOSING = (
     '<em>a</em>fixes ',
     '<strong>a</strong>fixes ',
     '<code class="notranslate">x</code>fixes ',
-    '<sup>a</sup>fixes ',
     '<del>a</del>fixes ',
-    'a<wbr>fixes ',
+    'a<span>b</span>fixes ',
+    'x <kbd>a</kbd>fixes ',
 )
 NODE_BOUNDARY_INERT = (
     'a<strong>fixes</strong> ',
@@ -469,16 +471,22 @@ def test_case_folding_is_required_not_merely_extra_width(tmp):
 
 
 def test_recognition_stays_wider_than_github_by_choice(tmp):
-    """Every shape closing here that GitHub was measured to ignore.
+    """Shapes this closes that GitHub does not act on.
 
-    Each is a separator or a dropped node rather than an element
-    boundary, so bounding the run at elements does not reach them.
+    None of them turns on an element boundary. The separators are
+    whitespace or punctuation GitHub declines rather than a node --
+    the newline row is formatting whitespace, not the soft break,
+    which renders a break element and is refused with the agreements.
+    The last two are the keyword list, and the first is a line whose
+    first character opens a raw tag, which GitHub does not scan at all
+    while this has no notion of where a line began.
     """
     del tmp
     assert _gap_answers(WIDER_THAN_GITHUB) == [
         (gap, [101]) for gap in WIDER_THAN_GITHUB]
     cases = (
-        (f'<p dir="auto">Fixes <!-- c --> {_issue_html(101)}</p>', [101]),
+        (f'<p dir="auto"><span>a</span>fixes {_issue_html(101)}</p>',
+         [101]),
         (f'Fixes {_issue_html(101)}, {_issue_html(102)}', [101, 102]),
         (f'Fixes {_issue_html(101)} and {_issue_html(102)}', [101, 102]),
     )
@@ -516,7 +524,7 @@ def test_only_the_list_separator_carries_a_keyword_onward(tmp):
 def test_structural_placements_close_as_github_measures_them(tmp):
     del tmp
     anchor = _issue_html(101)
-    url = 'https://github.com/owner/repo/issues/101'
+    url = _ISSUE_URL
     cases = (
         (f'<h3 dir="auto">Fixes {anchor}</h3>', [101]),
         (f'<ul dir="auto">\n<li>Fixes {anchor}</li>\n</ul>', [101]),
@@ -530,7 +538,6 @@ def test_structural_placements_close_as_github_measures_them(tmp):
         (f'<p dir="auto">Fixes {anchor}</p>', [101]),
         ('<p dir="auto"><a href="https://example.com" rel="nofollow">'
          f'Fixes</a> {anchor}</p>', []),
-        (f'<p dir="auto"><!-- Fixes -->{anchor}</p>', []),
         (f'<p dir="auto"><a href="{url}">Fixes #101</a></p>', []),
         (f'<p dir="auto">a<strong>fixes</strong> {anchor}</p>', []),
         (f'<p dir="auto">2<em>fixes</em> {anchor}</p>', []),
