@@ -18,6 +18,9 @@ from _repo import ROOT  # noqa: E402
 
 PR_BODY = _util.load(
     ROOT / 'scripts' / 'ci' / 'pr_body.py', 'scripts.ci.pr_body')
+PR_BODY_CLOSING = _util.load(
+    ROOT / 'scripts' / 'ci' / 'pr_body_closing.py',
+    'scripts.ci.pr_body_closing')
 TEMPLATE = (ROOT / '.github' / 'PULL_REQUEST_TEMPLATE.md').read_text(
     encoding='utf-8')
 GITHUB_ISSUE_101 = (
