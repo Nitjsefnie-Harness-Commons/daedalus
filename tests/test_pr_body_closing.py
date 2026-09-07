@@ -591,7 +591,7 @@ def test_structural_placements_close_as_github_measures_them(tmp):
     # Two rows below drive endpoint captures recorded for issue 627: a
     # same-repository cross reference renders the anchor text #N, in an
     # anchor byte-identical to GITHUB_ISSUE_101, and an image, markdown
-    # or raw, always renders inside a camo wrapper anchor, so a bare
+    # or raw, always renders inside a wrapper anchor, so a bare
     # <img> never sits between text and a reference. This suite's
     # owner/repo stands in for the repository path, and example.com for
     # the camo host, neither of which changes what the parser decides.
