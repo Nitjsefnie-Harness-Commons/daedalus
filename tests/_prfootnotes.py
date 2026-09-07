@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""GitHub renderings of pull-request bodies carrying a footnote section.
+"""GitHub renderings of bodies carrying a footnote section, and answers.
 
 Captured from GitHub's /markdown endpoint in GFM mode with
 Nitjsefnie-Harness-Commons/daedalus as the context. They live here
 rather than beside their assertions because the section suite and the
-closing suite both read them, and neither has room for the set.
+closing suite both read them, and neither has room for the set; the
+section and layout answers each capture must reach live here with them.
 
 Each key names what its Markdown source did:
 
@@ -255,3 +256,87 @@ NESTED_HEADING_HTML = {
         '"sr-only" dir="auto">Footnotes</h2><h2 id="user-content-footnote'
         '-label" dir="auto">Trap</h2></section></h2>'),
 }
+
+RELATED = 'related issues and pull requests'
+
+
+# What each capture's sections come to once its footnote section is
+# read like any other content and GitHub's injected label heading opens
+# none of its own. no_dataattr carries no label at all, because GitHub
+# keys on data-footnotes: it normalises that attribute up into the
+# generated spelling and drops a footnotes class arriving without it.
+# Every trap row is an author heading whose forged attributes GitHub
+# rewrote or dropped - class_only carries neither - so it opens a
+# section the way any other author heading does.
+_BASE_KEYS = ('summary', RELATED, 'changes', 'testing')
+FOOTNOTE_SECTIONS = (
+    ('footnote_definition_closing', _BASE_KEYS),
+    ('footnote_definition_bare', _BASE_KEYS),
+    ('raw_section', _BASE_KEYS),
+    ('footnote_in_related', _BASE_KEYS),
+    ('empty_testing_with_footnote', _BASE_KEYS),
+    ('no_class', _BASE_KEYS),
+    ('no_dataattr', _BASE_KEYS),
+    ('plain_div', _BASE_KEYS),
+    ('two_sections', _BASE_KEYS),
+    ('heading_wrapped', _BASE_KEYS),
+    ('own_heading', _BASE_KEYS + ('extra',)),
+    ('forged_label', _BASE_KEYS + ('trap',)),
+    ('forged_label_in_section', _BASE_KEYS + ('trap',)),
+    ('id_only', _BASE_KEYS + ('trap',)),
+    ('class_only', _BASE_KEYS + ('trap',)),
+    ('id_upper_attr', _BASE_KEYS + ('trap',)),
+    ('label_no_footnote', _BASE_KEYS + ('trap',)),
+    ('author_footnotes_heading', _BASE_KEYS + ('footnotes',)),
+    ('heading_wrapped_ref', _BASE_KEYS),
+    ('wrapper_then_text', _BASE_KEYS),
+    ('related_wrapper_then_ref', _BASE_KEYS),
+    ('heading_keyword_across_wrapper',
+     ('summary', RELATED, 'changes', 'testing fixes #104,')),
+)
+
+# A footnote definition renders at the end of the document, so its
+# references sit outside Related Issues and Pull Requests. A wrapper an
+# author writes can sit inside that section instead, where a reference
+# after it is the section's own again.
+FOOTNOTE_REFERENCED = [101]
+FOOTNOTE_REFERENCED_BY_ROW = {'related_wrapper_then_ref': [101, 104]}
+
+
+def _undefined(name):
+    return f'Section `{name}` is not defined by the template.'
+
+
+# The template defines no Footnotes section and the parser opens none,
+# so a conforming body is judged exactly as it would be without its
+# footnotes. What an author writes is judged too: author_footnotes_
+# heading is a section the template does not define, and the trap rows
+# are the same refusal reached through a forged label attribute GitHub
+# rewrote or dropped.
+_TRAP = [_undefined('Trap')]
+FOOTNOTE_LAYOUT = (
+    ('footnote_definition_closing', []),
+    ('footnote_definition_bare', []),
+    ('raw_section', []),
+    ('footnote_in_related', []),
+    ('no_class', []),
+    ('no_dataattr', []),
+    ('plain_div', []),
+    ('two_sections', []),
+    ('empty_testing_with_footnote', ['Section "Testing" is empty.']),
+    ('heading_wrapped', ['Section "Testing" is empty.']),
+    ('own_heading', [_undefined('Extra')]),
+    ('author_footnotes_heading', [_undefined('Footnotes')]),
+    ('forged_label', _TRAP),
+    ('forged_label_in_section', _TRAP),
+    ('id_only', _TRAP),
+    ('class_only', _TRAP),
+    ('id_upper_attr', _TRAP),
+    ('label_no_footnote', _TRAP),
+    ('heading_wrapped_ref', ['Section "Testing" is empty.']),
+    ('wrapper_then_text', []),
+    ('related_wrapper_then_ref', []),
+    ('heading_keyword_across_wrapper',
+     [_undefined('Testing fixes #104,'),
+      'Required section "Testing" is missing.']),
+)
