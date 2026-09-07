@@ -428,6 +428,7 @@ def test_recognition_stays_wider_where_the_rendering_hides_it(tmp):
         (f'<p dir="auto"><em>Fixes</em> {_issue_html(101)}</p>', [101]),
         ('<p dir="auto"><code class="notranslate">Fixes</code> '
          f'{_issue_html(101)}</p>', [101]),
+        (f'<p dir="auto">Fixes<br>\n{_issue_html(101)}</p>', [101]),
         (f'Fixes {_issue_html(101)}, {_issue_html(102)}', [101, 102]),
         (f'Fixes {_issue_html(101)} and {_issue_html(102)}', [101, 102]),
     )
