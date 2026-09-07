@@ -105,13 +105,14 @@ def test_parser_reports_a_nested_heading_as_a_layout_note(tmp):
     GitHub closes an open heading before another heading of its own,
     but not before a raw element, so a heading line wrapping one that
     holds a heading renders as a genuine nesting. The parser admits
-    the body, records the note once per nested heading, and reads the
-    sections the rendering leaves it; the gate folds the notes into
-    its refusal reasons.
+    the body, records the note once however many headings nest, and
+    reads the sections the rendering leaves it; the gate folds the
+    notes into its refusal reasons.
     """
     del tmp
     keys = {
         'div_in_heading': ['summary', RELATED, 'changes', 'testing inner'],
+        'two_headings_in_div': ['summary', RELATED, 'changes', 'testing ab'],
         'raw_section_in_heading': [
             'summary', RELATED, 'changes', 'testing inner'],
         'footnote_section_in_heading': ['summary', RELATED, 'changes',
