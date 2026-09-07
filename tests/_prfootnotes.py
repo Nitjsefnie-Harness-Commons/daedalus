@@ -31,6 +31,9 @@ Each key names what its Markdown source did:
 - wrapper_then_text            a wrapper mid-section, prose after it
 - related_wrapper_then_ref     a wrapper inside Related, reference after
 - heading_keyword_across_wrapper  a heading-line keyword list broken by one
+- definition_heading            a heading inside a footnote definition
+- definition_heading_text       the same, with prose under the heading
+- two_definitions               two definitions, the second after a block
 
 NESTED_HEADING_HTML holds two more, kept out of that map because they
 are refused rather than parsed: a rendered body reaches the parser's
@@ -242,6 +245,52 @@ FOOTNOTE_HTML = {
         f'{GITHUB_ISSUE_104}, <section data-footnotes="" class="footnotes"><h2'
         ' id="footnote-label" class="sr-only" dir="auto">Footnotes</h2>'
         f'{GITHUB_ISSUE_105}</section></h2>'),
+    'definition_heading': (
+        _HEAD
+        + '<p dir="auto">One change<sup><a href="#user-content-fn-1-78b771a'
+        'd2aa2098c7b5ba094abd57c48" id="user-content-fnref-1-78b771ad2aa2'
+        '098c7b5ba094abd57c48" data-footnote-ref="" aria-describedby="foo'
+        'tnote-label">1</a></sup></p>\n<section data-footnotes="" class="'
+        'footnotes"><h2 id="footnote-label" class="sr-only" dir="auto">Fo'
+        'otnotes</h2>\n<ol dir="auto">\n<li id="user-content-fn-1-78b771a'
+        'd2aa2098c7b5ba094abd57c48">\n<p dir="auto">A note</p>\n<h2 dir="'
+        'auto">Testing</h2>\n<a href="#user-content-fnref-1-78b771ad2aa20'
+        '98c7b5ba094abd57c48" data-footnote-backref="" aria-label="Back t'
+        'o reference 1" class="data-footnote-backref">↩</a>\n</li>\n</ol>'
+        '\n</section>'),
+    'definition_heading_text': (
+        _HEAD
+        + '<p dir="auto">One change<sup><a href="#user-content-fn-1-4e81328'
+        '27f8dfcc1826f2f864bd758ca" id="user-content-fnref-1-4e8132827f8d'
+        'fcc1826f2f864bd758ca" data-footnote-ref="" aria-describedby="foo'
+        'tnote-label">1</a></sup></p>\n<section data-footnotes="" class="'
+        'footnotes"><h2 id="footnote-label" class="sr-only" dir="auto">Fo'
+        'otnotes</h2>\n<ol dir="auto">\n<li id="user-content-fn-1-4e81328'
+        '27f8dfcc1826f2f864bd758ca">\n<p dir="auto">A note</p>\n<h2 dir="'
+        'auto">Testing</h2>\n<p dir="auto">Ran it. <a href="#user-content'
+        '-fnref-1-4e8132827f8dfcc1826f2f864bd758ca" data-footnote-backref'
+        '="" aria-label="Back to reference 1" class="data-footnote-backre'
+        'f">↩</a></p>\n</li>\n</ol>\n</section>'),
+    'two_definitions': (
+        _HEAD
+        + '<p dir="auto">One change<sup><a href="#user-content-fn-1-f123cd0'
+        '4424734aa76b0af70f8c07b2d" id="user-content-fnref-1-f123cd044247'
+        '34aa76b0af70f8c07b2d" data-footnote-ref="" aria-describedby="foo'
+        'tnote-label">1</a></sup><sup><a href="#user-content-fn-2-f123cd0'
+        '4424734aa76b0af70f8c07b2d" id="user-content-fnref-2-f123cd044247'
+        '34aa76b0af70f8c07b2d" data-footnote-ref="" aria-describedby="foo'
+        'tnote-label">2</a></sup></p>\n<h2 dir="auto">Testing</h2>\n<sect'
+        'ion data-footnotes="" class="footnotes"><h2 id="footnote-label" '
+        'class="sr-only" dir="auto">Footnotes</h2>\n<ol dir="auto">\n<li '
+        'id="user-content-fn-1-f123cd04424734aa76b0af70f8c07b2d">\n<p dir'
+        '="auto">Ran the suite. <a href="#user-content-fnref-1-f123cd0442'
+        '4734aa76b0af70f8c07b2d" data-footnote-backref="" aria-label="Bac'
+        'k to reference 1" class="data-footnote-backref">↩</a></p>\n</li>'
+        '\n<li id="user-content-fn-2-f123cd04424734aa76b0af70f8c07b2d">\n'
+        f'<p dir="auto">second {GITHUB_ISSUE_105} <a href="#user-content-f'
+        'nref-2-f123cd04424734aa76b0af70f8c07b2d" data-footnote-backref="'
+        '" aria-label="Back to reference 2" class="data-footnote-backref"'
+        '>↩</a></p>\n</li>\n</ol>\n</section>'),
 }
 
 NESTED_HEADING_HTML = {
@@ -267,7 +316,10 @@ RELATED = 'related issues and pull requests'
 # generated spelling and drops a footnotes class arriving without it.
 # Every trap row is an author heading whose forged attributes GitHub
 # rewrote or dropped - class_only carries neither - so it opens a
-# section the way any other author heading does.
+# section the way any other author heading does, unless it stands
+# inside a footnote section: own_heading and forged_label_in_section
+# open none, because nothing but its element's end leaves the region
+# the injected label opens.
 _BASE_KEYS = ('summary', RELATED, 'changes', 'testing')
 FOOTNOTE_SECTIONS = (
     ('footnote_definition_closing', _BASE_KEYS),
@@ -280,9 +332,9 @@ FOOTNOTE_SECTIONS = (
     ('plain_div', _BASE_KEYS),
     ('two_sections', _BASE_KEYS),
     ('heading_wrapped', _BASE_KEYS),
-    ('own_heading', _BASE_KEYS + ('extra',)),
+    ('own_heading', _BASE_KEYS),
     ('forged_label', _BASE_KEYS + ('trap',)),
-    ('forged_label_in_section', _BASE_KEYS + ('trap',)),
+    ('forged_label_in_section', _BASE_KEYS),
     ('id_only', _BASE_KEYS + ('trap',)),
     ('class_only', _BASE_KEYS + ('trap',)),
     ('id_upper_attr', _BASE_KEYS + ('trap',)),
@@ -293,6 +345,9 @@ FOOTNOTE_SECTIONS = (
     ('related_wrapper_then_ref', _BASE_KEYS),
     ('heading_keyword_across_wrapper',
      ('summary', RELATED, 'changes', 'testing fixes #104,')),
+    ('definition_heading', ('summary', RELATED, 'changes')),
+    ('definition_heading_text', ('summary', RELATED, 'changes')),
+    ('two_definitions', _BASE_KEYS),
 )
 
 # A footnote definition renders at the end of the document, so its
@@ -311,9 +366,12 @@ def _undefined(name):
 # so a conforming body is judged exactly as it would be without its
 # footnotes. What an author writes is judged too: author_footnotes_
 # heading is a section the template does not define, and the trap rows
-# are the same refusal reached through a forged label attribute GitHub
-# rewrote or dropped.
+# outside a footnote section are the same refusal reached through a
+# forged label attribute GitHub rewrote or dropped. A heading inside
+# one is judged not at all: definition_heading is missing its Testing
+# section rather than holding an undefined one.
 _TRAP = [_undefined('Trap')]
+_MISSING_TESTING = ['Required section "Testing" is missing.']
 FOOTNOTE_LAYOUT = (
     ('footnote_definition_closing', []),
     ('footnote_definition_bare', []),
@@ -323,12 +381,12 @@ FOOTNOTE_LAYOUT = (
     ('no_dataattr', []),
     ('plain_div', []),
     ('two_sections', []),
+    ('own_heading', []),
+    ('forged_label_in_section', []),
     ('empty_testing_with_footnote', ['Section "Testing" is empty.']),
     ('heading_wrapped', ['Section "Testing" is empty.']),
-    ('own_heading', [_undefined('Extra')]),
     ('author_footnotes_heading', [_undefined('Footnotes')]),
     ('forged_label', _TRAP),
-    ('forged_label_in_section', _TRAP),
     ('id_only', _TRAP),
     ('class_only', _TRAP),
     ('id_upper_attr', _TRAP),
@@ -339,4 +397,7 @@ FOOTNOTE_LAYOUT = (
     ('heading_keyword_across_wrapper',
      [_undefined('Testing fixes #104,'),
       'Required section "Testing" is missing.']),
+    ('definition_heading', _MISSING_TESTING),
+    ('definition_heading_text', _MISSING_TESTING),
+    ('two_definitions', ['Section "Testing" is empty.']),
 )
