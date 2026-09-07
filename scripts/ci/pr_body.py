@@ -19,7 +19,9 @@ else:
 
 
 RELATED = 'related issues and pull requests'
-_NESTED_HEADING_NOTE = 'A heading is nested inside another heading.'
+_NESTED_HEADING_NOTE = (
+    'A heading is nested inside another heading; remove the raw HTML '
+    'element from that heading line.')
 _BACKTICKS = re.compile(r'`+')
 _HEADING_LINE = re.compile(
     r'^[ \t]{0,3}#{1,6}[ \t]+(?P<text>.+?)[ \t]*#*[ \t]*$',
@@ -62,7 +64,7 @@ class Section(NamedTuple):
 class Body(NamedTuple):
     sections: tuple[Section, ...]
     closing: tuple[int, ...]
-    notes: tuple[str, ...] = ()
+    notes: tuple[str, ...]
 
 
 class Rule(NamedTuple):
@@ -178,8 +180,11 @@ class _RenderedBodyParser(HTMLParser):
                 # the line's own heading closes, so an author can nest
                 # one heading inside another. That is a verdict the gate
                 # reports rather than a shape it cannot read: the inner
-                # heading opens no section of its own.
-                self.notes.append(_NESTED_HEADING_NOTE)
+                # heading opens no section of its own. A body records
+                # the note once, because the gate's reasons are the
+                # distinct problems an author has to fix.
+                if _NESTED_HEADING_NOTE not in self.notes:
+                    self.notes.append(_NESTED_HEADING_NOTE)
                 return
             if self._region_depth is not None:
                 return
