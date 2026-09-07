@@ -147,6 +147,7 @@ class _RenderedBodyParser(HTMLParser):
         self._anchor_depth = 0
         self._previous_closing = False
         self._label_depth = None
+        self._region_depth = None
 
     def handle_starttag(self, tag, attrs):
         self.saw_element = True
@@ -164,12 +165,14 @@ class _RenderedBodyParser(HTMLParser):
         if tag in _HEADING_TAGS:
             if attributes.get('id') == _FOOTNOTE_LABEL:
                 # GitHub prefixes an author's id with user-content-, so
-                # a bare one is its own injected footnote label. It ends
-                # the section above it and opens none, leaving footnote
-                # content in no section, as a preamble is.
-                self._finish_section()
+                # a bare one is its own injected footnote label. The
+                # element holding it is a region belonging to no
+                # section; the section it interrupts resumes where that
+                # element closes.
                 self._label_depth = len(self._open_tags)
+                self._region_depth = self._label_depth - 1
                 return
+            self._region_depth = None
             if self._heading_tag is not None:
                 raise ValueError('rendered HTML contains nested headings')
             self._finish_section()
@@ -183,6 +186,7 @@ class _RenderedBodyParser(HTMLParser):
                 _zero_html_dimension(attributes.get(name, ''))
                 for name in ('width', 'height'))
             if (self._heading_tag is None and self._key is not None
+                    and self._region_depth is None
                     and attributes.get('src') and not zero_size):
                 self._text.append('\ufffc')
             return
@@ -200,7 +204,8 @@ class _RenderedBodyParser(HTMLParser):
         # Only the closing channel reads the whole body; a link or an issue
         # reference belongs to the section it sits in, and a preamble or
         # heading anchor is in none.
-        inside = self._heading_tag is None and self._key is not None
+        inside = (self._heading_tag is None and self._key is not None
+                  and self._region_depth is None)
         if href and inside:
             self._links.append(href)
         number = issue_number(href, self.repository)
@@ -235,11 +240,13 @@ class _RenderedBodyParser(HTMLParser):
             self._break_closing_list()
         self._end_run()
         if depth == self._label_depth:
-            # Matched by depth rather than by tag: the label is an h2
-            # and so is the heading it can be nested in, so a tag
-            # comparison would close the author's heading here.
+            # Handled ahead of the author heading's own close below: an
+            # author heading holding the label is also an h2, and it
+            # closes later, at the smaller depth this one is read at.
             self._label_depth = None
             return
+        if depth == self._region_depth:
+            self._region_depth = None
         if tag != self._heading_tag:
             return
         name = _heading_text(''.join(self._heading_parts))
@@ -267,7 +274,7 @@ class _RenderedBodyParser(HTMLParser):
         self._record_pending(data)
 
     def _record_text(self, data):
-        if self._label_depth is not None:
+        if self._region_depth is not None:
             return
         if self._heading_tag is not None:
             self._heading_parts.append(data)
