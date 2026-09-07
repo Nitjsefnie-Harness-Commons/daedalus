@@ -35,6 +35,9 @@ _MAX_ISSUE_DIGITS = 19
 _CLOSING_KEYWORDS = frozenset((
     'close', 'closes', 'closed', 'fix', 'fixes', 'fixed',
     'resolve', 'resolves', 'resolved'))
+_CLOSING_TAIL = re.compile(
+    r'(?<!\w)(?:' + '|'.join(sorted(_CLOSING_KEYWORDS)) + r')\Z',
+    re.IGNORECASE)
 _LIST_SEPARATOR = re.compile(r'[\s,&]*(?:and[\s,&]*)*', re.IGNORECASE)
 _BLOCK_TAGS = frozenset((
     'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
@@ -333,11 +336,23 @@ def referenced_issues(sections):
 
 
 def _gap_closing(gap, previous_closing):
-    tail = gap.rstrip().split()
-    if tail:
-        keyword = tail[-1].casefold().removesuffix(':')
-        if keyword in _CLOSING_KEYWORDS:
-            return True
+    """Whether the text before an anchor governs it as a closing one.
+
+    A keyword with no word character before it, separated from the
+    anchor by at most one colon within any run of whitespace. GitHub
+    reads the raw Markdown, so this stays deliberately wider wherever
+    the rendering keeps nothing of what makes a spelling inert there:
+    emphasis around the keyword, a soft line break or a no-break space
+    for the separator, no separator at all, and every anchor after the
+    first of a keyword list. Refusing a pull request GitHub would have
+    let through is the safe direction; the other one is the bypass this
+    recognition exists to close.
+    """
+    head = gap.rstrip()
+    if head.endswith(':'):
+        head = head[:-1].rstrip()
+    if _CLOSING_TAIL.search(head):
+        return True
     return (bool(previous_closing)
             and _LIST_SEPARATOR.fullmatch(gap) is not None)
 
