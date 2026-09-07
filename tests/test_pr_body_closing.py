@@ -594,7 +594,7 @@ def test_structural_placements_close_as_github_measures_them(tmp):
     # or raw, always renders inside a camo wrapper anchor, so a bare
     # <img> never sits between text and a reference. This suite's
     # owner/repo stands in for the repository path, and example.com for
-    # the camo host, neither of which the parser reads.
+    # the camo host, neither of which changes what the parser decides.
     same_repo = GITHUB_ISSUE_101.replace(
         'Nitjsefnie-Harness-Commons/daedalus', 'owner/repo')
     camo_image = (
