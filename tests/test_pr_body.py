@@ -130,20 +130,28 @@ def test_parser_rejects_unfinished_heading(tmp):
 
 
 def test_parser_rejects_an_unfinished_label_region(tmp):
-    """A region the input never closes is refused like a heading.
+    """A region the input never closes is refused, and named.
 
     GitHub closes every element it emits, so no rendered body reaches
     this; it keeps the module's answer to a structure it cannot finish
-    reading a refusal rather than a partial reading.
+    reading a refusal rather than a partial reading. The label holds
+    no heading open and the element holding it is refused as the
+    element it is, so neither shape borrows the heading's wording.
     """
     del tmp
-    unfinished = '<h2>Summary</h2><h2 id="footnote-label">Footnotes'
-    try:
-        PR_BODY.parse_rendered(unfinished, 'owner/repo')
-    except ValueError as error:
-        assert 'unfinished heading' in str(error), error
-    else:
-        raise AssertionError('an unfinished label region was accepted')
+    unfinished = {
+        '<h2>Summary</h2><h2 id="footnote-label">Footnotes':
+            'rendered HTML contains an unfinished region',
+        '<div><h2 id="footnote-label">Footnotes</h2>':
+            'rendered HTML contains an unfinished element',
+    }
+    for rendered, expected in unfinished.items():
+        try:
+            PR_BODY.parse_rendered(rendered, 'owner/repo')
+        except ValueError as error:
+            assert str(error) == expected, (rendered, error)
+        else:
+            raise AssertionError(f'{rendered} was accepted')
 
 
 def test_parser_rejects_malformed_repositories(tmp):
