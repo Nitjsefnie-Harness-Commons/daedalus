@@ -571,6 +571,12 @@ def test_only_the_list_separator_carries_a_keyword_onward(tmp):
         (f'Fixes {_issue_html(101)}; {_issue_html(102)}', [101]),
         (f'Fixes {_issue_html(101)}. {_issue_html(102)}', [101]),
         (f'Fixes {_issue_html(101)} or {_issue_html(102)}', [101]),
+        # Both gaps are measured shapes: two explicit issue links render
+        # adjacent, and `[#101](u)and #102` renders the bare `and ` the
+        # separator carries onward. Neither gap opens with a space, so
+        # both flip when the separator's leading `*` tightens to `+`.
+        (f'Fixes {_issue_html(101)}{_issue_html(102)}', [101, 102]),
+        (f'Fixes {_issue_html(101)}and {_issue_html(102)}', [101, 102]),
     )
     for references, closing in cases:
         body = PR_BODY.parse_rendered(
@@ -582,6 +588,25 @@ def test_structural_placements_close_as_github_measures_them(tmp):
     del tmp
     anchor = _issue_html(101)
     url = _ISSUE_URL
+    # Two rows below drive endpoint captures recorded for issue 627: a
+    # same-repository cross reference renders the anchor text #N, in an
+    # anchor byte-identical to GITHUB_ISSUE_101, and an image, markdown
+    # or raw, always renders inside a camo wrapper anchor, so a bare
+    # <img> never sits between text and a reference. This suite's
+    # owner/repo stands in for the repository path, and example.com for
+    # the camo host, neither of which the parser reads.
+    same_repo = GITHUB_ISSUE_101.replace(
+        'Nitjsefnie-Harness-Commons/daedalus', 'owner/repo')
+    camo_image = (
+        '<a target="_blank" rel="noopener noreferrer nofollow" '
+        'href="https://example.com/'
+        '5c7e6565b3f40cc1fe6675de6ac726f61e38c25df5a1846bf86904af7b14d030'
+        '/68747470733a2f2f6578616d706c652e636f6d2f612e706e67">'
+        '<img src="https://example.com/'
+        '5c7e6565b3f40cc1fe6675de6ac726f61e38c25df5a1846bf86904af7b14d030'
+        '/68747470733a2f2f6578616d706c652e636f6d2f612e706e67" alt="alt" '
+        'data-canonical-src="https://example.com/a.png" '
+        'style="max-width: 100%;"></a>')
     cases = (
         (f'<h3 dir="auto">Fixes {anchor}</h3>', [101]),
         (f'<ul dir="auto">\n<li>Fixes {anchor}</li>\n</ul>', [101]),
@@ -590,8 +615,7 @@ def test_structural_placements_close_as_github_measures_them(tmp):
         ('<table dir="auto"><tbody><tr><td>Fixes '
          f'{anchor}</td></tr></tbody></table>', [101]),
         (f'<p dir="auto">Fixes <a href="{url}">GH-101</a></p>', [101]),
-        (f'<p dir="auto">Fixes <a href="{url}">owner/repo#101</a></p>',
-         [101]),
+        (f'<p dir="auto">Fixes {same_repo}</p>', [101]),
         (f'<p dir="auto">Fixes {anchor}</p>', [101]),
         ('<p dir="auto"><a href="https://example.com" rel="nofollow">'
          f'Fixes</a> {anchor}</p>', []),
@@ -607,7 +631,7 @@ def test_structural_placements_close_as_github_measures_them(tmp):
         ('<p dir="auto"><code class="notranslate">Fixes</code> '
          f'{anchor}</p>', []),
         (f'<p dir="auto">Fixes<br>\n{anchor}</p>', []),
-        (f'<p dir="auto">Fixes <img src="s" alt=""> {anchor}</p>', []),
+        (f'<p dir="auto">Fixes {camo_image} {same_repo}</p>', []),
         ('<p dir="auto">Fixes<sup><a href="#user-content-fn-1">1</a>'
          f'</sup> {anchor}</p>', []),
         ('<p dir="auto">Fixes <a href="https://example.com" '
