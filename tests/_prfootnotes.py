@@ -35,6 +35,7 @@ Each key names what its Markdown source did:
 - definition_heading_text       the same, with prose under the heading
 - two_definitions               two definitions, the second after a block
 - wrapper_heading_then_resume   a heading inside a wrapper, prose after it
+- definition_empty_heading_list  an empty heading mid-list in a definition
 
 NESTED_HEADING_HTML holds two more, kept out of that map because they
 are refused rather than parsed: a rendered body reaches the parser's
@@ -299,6 +300,20 @@ FOOTNOTE_HTML = {
         ' data-footnotes="" class="footnotes"><h2 id="footnote-label" class='
         '"sr-only" dir="auto">Footnotes</h2>\n<h2 dir="auto">Extra</h2>\n</s'
         'ection>\n<p dir="auto">Ran it.</p>'),
+    'definition_empty_heading_list': (
+        _HEAD
+        + '<p dir="auto">One change</p>\n<p dir="auto">One more<sup><a href="#'
+        'user-content-fn-1-611d14517e47dce8af90a735c94444b1" id="user-conten'
+        't-fnref-1-611d14517e47dce8af90a735c94444b1" data-footnote-ref="" ar'
+        'ia-describedby="footnote-label">1</a></sup></p>\n<h2 dir="auto">Tes'
+        'ting</h2>\n<p dir="auto">Ran it.</p>\n<section data-footnotes="" cl'
+        'ass="footnotes"><h2 id="footnote-label" class="sr-only" dir="auto">'
+        'Footnotes</h2>\n<ol dir="auto">\n<li id="user-content-fn-1-611d1451'
+        f'7e47dce8af90a735c94444b1">\n<p dir="auto">Fixes {GITHUB_ISSUE_104},'
+        f' </p><h2 dir="auto"></h2> {GITHUB_ISSUE_105} <a href="#user-content'
+        '-fnref-1-611d14517e47dce8af90a735c94444b1" data-footnote-backref=""'
+        ' aria-label="Back to reference 1" class="data-footnote-backref">↩</'
+        'a><p dir="auto"></p>\n</li>\n</ol>\n</section>'),
 }
 
 NESTED_HEADING_HTML = {
@@ -357,6 +372,7 @@ FOOTNOTE_SECTIONS = (
     ('definition_heading_text', ('summary', RELATED, 'changes')),
     ('two_definitions', _BASE_KEYS),
     ('wrapper_heading_then_resume', _BASE_KEYS),
+    ('definition_empty_heading_list', _BASE_KEYS),
 )
 
 # A footnote definition renders at the end of the document, so its
@@ -410,4 +426,5 @@ FOOTNOTE_LAYOUT = (
     ('definition_heading_text', _MISSING_TESTING),
     ('two_definitions', ['Section "Testing" is empty.']),
     ('wrapper_heading_then_resume', []),
+    ('definition_empty_heading_list', []),
 )
