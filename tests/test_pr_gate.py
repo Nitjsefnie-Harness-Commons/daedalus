@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Pull-request gate state transitions and write ordering."""
+import itertools
 import os
 import re
 import subprocess
@@ -204,26 +205,31 @@ def test_a_bullet_spelled_with_a_star_is_read_as_a_bullet(tmp):
         raise AssertionError('a bullet spelled "* " went unseen')
 
 
-def test_every_list_marker_is_a_bullet_and_a_bare_marker_is_not(tmp):
-    """The bullet matcher is pinned in both directions.
+def test_the_bullet_matcher_decides_indent_marker_and_separator(tmp):
+    """Every decision the matcher makes, enumerated on its own axis.
 
-    It decides membership of the reason set, so a spelling it stops
-    seeing unpins that set with every suite still green. The bare
-    marker runs the other way: GitHub renders `-x` as text, and a
-    matcher reading it as a bullet would report one nobody wrote.
+    Indent, marker and separator are the three it reads, and the
+    separator is the only one whose answer is no, so the rows with no
+    separator are what keep the rest from passing vacuously. Taken as
+    the product rather than as spellings: a table drawn from the
+    spellings someone tried moves this boundary instead of closing it.
     """
     del tmp
-    for stray, bullet in (('- Stray.', True), ('* Stray.', True),
-                          ('+ Stray.', True), ('\t- Stray.', True),
-                          ('-Stray.', False)):
+    failures = []
+    for indent, marker, separator in itertools.product(
+            ('', ' ', '\t', '   ', ' \t '), '-*+', (' ', '\t', '')):
+        stray = f'{indent}{marker}{separator}Stray.'
         write = ('POST', 'url', {
             'body': '\n'.join((OPEN_FIRST, MARKER, stray))})
         try:
             _assert_gate_message(write, OPEN_FIRST)
         except AssertionError:
-            assert bullet, stray
+            seen = True
         else:
-            assert not bullet, stray
+            seen = False
+        if seen is not bool(separator):
+            failures.append((stray, seen))
+    assert failures == [], failures
 
 
 def test_gate_closed_admissible_pull_is_commented_then_reopened(tmp):
