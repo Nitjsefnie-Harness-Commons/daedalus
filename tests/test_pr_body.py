@@ -369,6 +369,37 @@ def test_layout_treats_empty_or_invisible_images_as_empty(tmp):
             rendered), image
 
 
+def test_layout_reads_an_image_alt_text_as_section_content(tmp):
+    """An image with no destination contributes only its alt text.
+
+    The object replacement marker needs a source, so the alt text is
+    all such an image gives the section.
+    """
+    del tmp
+    with_alt = (
+        '<p dir="auto"><a target="_blank" rel="noopener noreferrer" '
+        'href=""><img src="" alt="migration diagram" '
+        'style="max-width: 100%;"></a></p>')
+    assert _layout_errors(_valid_html(changes=with_alt)) == []
+    assert 'Section "Changes" is empty.' in _layout_errors(
+        _valid_html(changes=GITHUB_HTML['empty_image']))
+
+
+def test_layout_reads_an_image_alt_text_as_a_heading_name(tmp):
+    """An image in a heading names the section that heading opens."""
+    del tmp
+    rendered = _html_body(
+        ('Summary', _text_html('One sentence.')),
+        ('Related Issues and Pull Requests', f'Fixes {_issue_html(101)}'),
+        ('Changes', '<ul dir="auto">\n<li>One change</li>\n</ul>'),
+    ) + (
+        '\n<h2 dir="auto"><a target="_blank" rel="noopener noreferrer" '
+        'href="diagram.png"><img src="diagram.png" alt="Testing" '
+        'style="max-width: 100%;"></a></h2>\n'
+        '<p dir="auto">Ran the suite.</p>')
+    assert _layout_errors(rendered) == []
+
+
 def test_layout_parses_html_image_dimension_values(tmp):
     del tmp
     cases = (
