@@ -30,6 +30,24 @@ def test_parser_rejects_a_self_closing_content_element(tmp):
         raise AssertionError('a self-closing content element was accepted')
 
 
+def test_parser_rejects_an_end_tag_that_closes_nothing(tmp):
+    """An end tag arriving with nothing open is refused, as a ValueError.
+
+    The type is the point as much as the refusal: pr_gate converts a
+    ValueError from the parser into a gate error, so a boundary read
+    off an empty stack has to raise the same exception the tag-mismatch
+    half raises rather than an IndexError the gate never converts.
+    """
+    del tmp
+    try:
+        PR_BODY.parse_rendered('</p>', 'owner/repo')
+    except ValueError as error:
+        assert str(error) == (
+            'rendered HTML contains mismatched element boundaries'), error
+    else:
+        raise AssertionError('an end tag closing nothing was accepted')
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='prbodyelements_')
