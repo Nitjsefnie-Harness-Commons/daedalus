@@ -14,9 +14,9 @@ name: claim
 # The action handles the attacker-controlled comment body without
 # interpolating it into shell source. The `if:` below is only a cheap
 # prefilter; the exact match happens in the action, because expressions have
-# no trim(). The action re-checks the three issue/comment conditions itself
-# (not a pull request, open issue, not a bot), so the prefilter saves starting
-# a runner rather than being the only enforcement.
+# no trim(). The action itself requires an open issue that is not a pull
+# request and a `User` commenter, so the prefilter saves starting a runner
+# rather than being the only enforcement.
 
 on:
   issue_comment:

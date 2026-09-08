@@ -6,33 +6,39 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _wfjobs import jobs_mapping  # noqa: E402
+from _workflows import _trigger_names  # noqa: E402
+from _yamlsteps import workflow_mapping  # noqa: E402
 
 
 def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     del tmp
     workflow = (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
         encoding='utf-8')
-    # issues: write and nothing else — this job never reads the tree. Scoped
-    # to the permissions block: the surrounding comments name other scopes to
-    # say why they are absent, and a substring search would read those.
-    _, marker, after = workflow.partition('\npermissions:\n')
-    assert marker, workflow
-    granted = []
-    for line in after.splitlines():
-        if not line.startswith('  ') or line.lstrip().startswith('#'):
-            break
-        granted.append(line.strip())
-    assert granted == ['issues: write'], granted
+    decoded = workflow_mapping(workflow)
+    assert _trigger_names(workflow) == {'issue_comment'}
+    assert decoded.get('permissions') == {'issues': 'write'}, (
+        'claim token must grant exactly issues: write')
+    jobs = jobs_mapping(workflow)
+    assert jobs is not None and set(jobs) == {'claim'}
+    job = jobs['claim']
+    assert 'permissions' not in job, (
+        'claim job must inherit workflow permissions without an override')
     # Two claims racing must both be answered, so the group never cancels.
-    assert 'cancel-in-progress: false' in workflow, workflow
+    concurrency = decoded.get('concurrency')
+    assert isinstance(concurrency, dict), 'claim must declare concurrency'
+    assert concurrency.get('cancel-in-progress') == 'false', (
+        'claim concurrency must not cancel an in-progress run')
+    condition = job.get('if')
+    assert isinstance(condition, str), 'claim must declare an if scalar'
     for guard in ('github.event.issue.pull_request == null',
                   "github.event.issue.state == 'open'",
                   "github.event.comment.user.type != 'Bot'"):
-        assert guard in workflow, guard
+        assert guard in condition, f'claim if must contain guard: {guard}'
     # Both names for giving an issue up reach the action, not just one.
     for command in ('/claim', '/unclaim', '/release'):
         term = f"contains(github.event.comment.body, '{command}')"
-        assert term in workflow, command
+        assert term in condition, f'claim if must contain predicate: {term}'
     assert not re.search(r'^\s*(?:-\s+)?run:', workflow, re.MULTILINE), (
         'claim.yml must not contain a run block')
     _, marker, steps = workflow.partition('    steps:\n')
@@ -43,9 +49,9 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
         r'      - uses: Nitjsefnie-Actions/claim@[0-9a-fA-F]{40}'
         r'  # v[0-9]+\.[0-9]+\.[0-9]+', entries[0]), (
             'claim action must use a full SHA pin with a version comment')
-    assert '    runs-on: ubuntu-latest\n' in workflow, (
+    assert job.get('runs-on') == 'ubuntu-latest', (
         'claim must remain a runner job')
-    assert '    timeout-minutes: 5\n' in workflow, (
+    assert job.get('timeout-minutes') == '5', (
         'claim runner must keep its five-minute timeout')
 
 
