@@ -137,7 +137,7 @@ class _RenderedBodyParser(HTMLParser):
         self.closing = []
         self.notes = []
         self.saw_element = False
-        self.saw_data = False
+        self.saw_content = False
         self._open_tags = []
         self._heading_tag = None
         self._heading_parts = []
@@ -272,19 +272,19 @@ class _RenderedBodyParser(HTMLParser):
         self._break_closing_list()
 
     def handle_data(self, data):
-        self.saw_data = True
+        self.saw_content = self.saw_content or bool(data.strip())
         self._record_text(data)
         self._record_pending(data)
 
     def handle_entityref(self, name):
-        self.saw_data = True
         data = unescape(f'&{name};')
+        self.saw_content = self.saw_content or bool(data.strip())
         self._record_text(data)
         self._record_pending(data)
 
     def handle_charref(self, name):
-        self.saw_data = True
         data = unescape(f'&#{name};')
+        self.saw_content = self.saw_content or bool(data.strip())
         self._record_text(data)
         self._record_pending(data)
 
@@ -316,9 +316,10 @@ class _RenderedBodyParser(HTMLParser):
 
     def finish(self):
         # GitHub renders a body carrying no content to the empty
-        # string, so an answer with neither elements nor data is that
-        # rendering rather than an unusable one.
-        if self.saw_data and not self.saw_element:
+        # string or to newline padding, so an answer with neither
+        # elements nor non-whitespace text is that rendering rather
+        # than an unusable one.
+        if self.saw_content and not self.saw_element:
             raise ValueError('input is not usable rendered HTML')
         if self.rawdata:
             raise ValueError('rendered HTML is structurally incomplete')
