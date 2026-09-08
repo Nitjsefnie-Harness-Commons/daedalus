@@ -209,15 +209,17 @@ def test_the_bullet_matcher_decides_indent_marker_and_separator(tmp):
     """Every decision the matcher makes, on its own axis.
 
     The marker and separator alphabets are finite, so those two axes
-    are exhausted. The indent is unbounded repetition over a two-
-    character alphabet, so it is generated to a width instead: listing
-    indents puts the boundary at the longest one written down rather
-    than at anything the matcher does, and a bound at or above that
-    length then changes no verdict. The separator is the only axis
-    answering no, so its rows keep the rest from passing vacuously.
+    are exhausted. The indent is unbounded repetition, so it runs to
+    the width this comment can render: a stray bullet is still a list
+    item at the numbered item's content column of three plus
+    CommonMark's three-space allowance, so six is the domain and seven
+    is the near miss the table carries past it. A bound of seven or
+    wider survives here, outside what the comment can render rather
+    than merely further out. The separator is the only axis answering
+    no, so its rows keep the rest from passing vacuously.
     """
     del tmp
-    indents = [''.join(pad) for width in range(6)
+    indents = [''.join(pad) for width in range(8)
                for pad in itertools.product(' \t', repeat=width)]
     failures = []
     for indent, marker, separator in itertools.product(
