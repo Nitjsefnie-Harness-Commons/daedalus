@@ -26,11 +26,10 @@ def _comment_body(write):
 def _gate_reasons(body):
     """The reasons a gate comment lists, or None when it lists none.
 
-    The block is bounded by the marker paragraph above it and the fixed
-    instructions below it, so the numbered list those instructions
-    introduce is outside it however it is spelled. A comment that carries
-    the instructions without a well-formed block fails here rather than
-    reading as no reasons at all.
+    Bounding the block by the marker paragraph and the fixed instructions
+    keeps the numbered list out of it however it is spelled, and a comment
+    carrying those instructions without a well-formed block fails here
+    rather than reading as no reasons at all.
     """
     lines = body.splitlines()
     if REASONS_END not in lines:
@@ -53,11 +52,13 @@ def _assert_gate_message(write, first, reasons=(), closed=False):
     assert MARKER in lines, body
     assert (CLOSED_MARKER in lines) is closed, body
     found = _gate_reasons(body)
+    bullets = [line[2:] for line in lines if line.startswith('- ')]
     if reasons:
         assert found is not None, (reasons, body)
-        assert sorted(found) == sorted(reasons), (found, reasons, body)
+        assert found == list(reasons), (found, reasons, body)
     else:
         assert found is None, (found, body)
+    assert bullets == list(reasons), (bullets, reasons, body)
     return body
 
 
