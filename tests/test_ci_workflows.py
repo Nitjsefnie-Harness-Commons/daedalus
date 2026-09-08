@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Execute CI invariants that GitHub otherwise fails silently.
 
-These tests parse workflows and execute /claim instead of trusting source
-inspection.
+These tests parse workflow configuration and evaluate job conditions to
+check permissions, dependencies, release gates and action pins.
 """
 import fnmatch
 import os
