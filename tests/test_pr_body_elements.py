@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Element shapes the rendered-body parser refuses, and image alt text.
 
-What an element boundary refuses and what an element records are one
+They live here because tests/test_pr_body.py has no room for them:
+taking them back puts it within a line of the 700-line ceiling. What
+an element boundary refuses and what an element records are one
 reading of the parser, so every test of an image's alt text sits here.
-The image tests left in tests/test_pr_body.py read the marker a sourced
-image stands for, not its alt.
+The image tests left behind read the marker a sourced image stands
+for, not its alt.
 """
 import sys
 from pathlib import Path
