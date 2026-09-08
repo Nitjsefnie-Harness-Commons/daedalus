@@ -45,6 +45,23 @@ def _workflow():
         encoding='utf-8')
 
 
+# Each body paired with the rendering GitHub's /markdown returned for it
+# in GFM mode with this repository as the context: the empty string for
+# some, newline padding for others.
+RENDERS_TO_NOTHING = (
+    (None, ''),
+    ('', ''),
+    ('   \n\t\n', ''),
+    ('<!-- draft -->', ''),
+    ('<!-- a -->\n\n<!-- b -->', '\n'),
+    ('<!-- a -->\n\n<!-- b -->\n\n<!-- c -->', '\n\n'),
+)
+MISSING_SECTIONS = [
+    f'Required section "{name}" is missing.' for name in (
+        'Summary', 'Related Issues and Pull Requests', 'Changes',
+        'Testing')]
+
+
 def test_admissible_open_without_prior_comment_does_not_write(tmp):
     del tmp
     code, writes, output, _error = _execute(_api(), _valid_body())
@@ -112,40 +129,37 @@ def test_earliest_bot_marker_comment_is_selected(tmp):
         ('PATCH', 'repos/owner/repo/issues/comments/7')]
 
 
-def test_none_body_reports_all_required_sections_and_closes(tmp):
-    del tmp
-    code, writes, _output, _error = _execute(
-        _api(issues={}, rendered=''), None)
-    assert code == 0
-    assert _write_sequence(writes) == [
-        ('POST', 'repos/owner/repo/issues/99/comments'),
-        ('PATCH', 'repos/owner/repo/pulls/99')]
-    reasons = [
-        f'Required section "{name}" is missing.' for name in (
-            'Summary', 'Related Issues and Pull Requests', 'Changes',
-            'Testing')]
-    _assert_gate_message(
-        writes[0], CLOSED_FIRST,
-        [*reasons, 'No checked issue is assigned to you.'], closed=True)
-
-
 def test_bodies_github_renders_away_are_reported_and_closed(tmp):
-    """An empty, blank or comment-only body renders to the empty string."""
     del tmp
-    reasons = [
-        f'Required section "{name}" is missing.' for name in (
-            'Summary', 'Related Issues and Pull Requests', 'Changes',
-            'Testing')]
-    for body in ('', '   \n\t\n', '<!-- draft -->'):
+    for body, rendered in RENDERS_TO_NOTHING:
         code, writes, _output, _error = _execute(
-            _api(issues={}, rendered=''), body)
+            _api(issues={}, rendered=rendered), body)
         assert code == 0, body
         assert _write_sequence(writes) == [
             ('POST', 'repos/owner/repo/issues/99/comments'),
             ('PATCH', 'repos/owner/repo/pulls/99')], body
         _assert_gate_message(
             writes[0], CLOSED_FIRST,
-            [*reasons, 'No checked issue is assigned to you.'], closed=True)
+            [*MISSING_SECTIONS, 'No checked issue is assigned to you.'],
+            closed=True)
+
+
+def test_a_body_of_only_template_comments_is_reported_and_closed(tmp):
+    """The template with every heading deleted. Its ten instruction
+    comments render to nine newlines, measured against the endpoint.
+    """
+    del tmp
+    body = '\n\n'.join(re.findall(r'<!--.*?-->', TEMPLATE, re.DOTALL))
+    code, writes, _output, _error = _execute(
+        _api(issues={}, rendered='\n' * 9), body)
+    assert code == 0
+    assert _write_sequence(writes) == [
+        ('POST', 'repos/owner/repo/issues/99/comments'),
+        ('PATCH', 'repos/owner/repo/pulls/99')]
+    _assert_gate_message(
+        writes[0], CLOSED_FIRST,
+        [*MISSING_SECTIONS, 'Remove the template instruction comments.',
+         'No checked issue is assigned to you.'], closed=True)
 
 
 def test_retained_instruction_comment_closes(tmp):
