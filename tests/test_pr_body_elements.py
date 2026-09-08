@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Element shapes the rendered-body parser refuses, and image alt text.
 
-They live here because tests/test_pr_body.py has no room for them:
-taking them back puts it within a line of the 700-line ceiling. What
-an element boundary refuses and what an element records are one
-reading of the parser, so every test of an image's alt text sits here.
-The image tests left behind read the marker a sourced image stands
+What an element boundary refuses and what an element records are one
+reading of the parser, and the repository caps a module's length, so
+that reading grows here rather than in tests/test_pr_body.py. The
+image tests left behind there read the marker a sourced image stands
 for, not its alt.
 """
 import sys
