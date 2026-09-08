@@ -385,8 +385,8 @@ def test_layout_treats_empty_or_invisible_images_as_empty(tmp):
             rendered), image
 
 
-def test_layout_reads_an_image_alt_text_as_section_content(tmp):
-    """An image with no destination contributes only its alt text.
+def test_parser_records_an_image_alt_text_as_section_content(tmp):
+    """An image's alt text is the text its section records.
 
     The object replacement marker needs a source, so the alt text is
     all such an image gives the section.
@@ -396,9 +396,9 @@ def test_layout_reads_an_image_alt_text_as_section_content(tmp):
         '<p dir="auto"><a target="_blank" rel="noopener noreferrer" '
         'href=""><img src="" alt="migration diagram" '
         'style="max-width: 100%;"></a></p>')
-    assert _layout_errors(_valid_html(changes=with_alt)) == []
-    assert 'Section "Changes" is empty.' in _layout_errors(
-        _valid_html(changes=GITHUB_HTML['empty_image']))
+    sections = PR_BODY.parse_rendered(
+        _valid_html(changes=with_alt), 'owner/repo').sections
+    assert 'migration diagram' in sections[2].text
 
 
 def test_layout_reads_an_image_alt_text_as_a_heading_name(tmp):
