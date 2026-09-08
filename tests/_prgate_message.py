@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """The gate comment's fixed strings and the assertions over one it posts."""
+import re
 
 
 BOT = 'github-actions[bot]'
@@ -52,7 +53,10 @@ def _assert_gate_message(write, first, reasons=(), closed=False):
     assert MARKER in lines, body
     assert (CLOSED_MARKER in lines) is closed, body
     found = _gate_reasons(body)
-    bullets = [line[2:] for line in lines if line.startswith('- ')]
+    # GitHub renders '-', '*' and '+' as the same list marker, so a
+    # bullet the reasons do not name is caught however it is spelled.
+    bullets = [line[2:] for line in lines
+               if re.match(r'[ \t]*[-*+][ \t]', line)]
     if reasons:
         assert found is not None, (reasons, body)
         assert found == list(reasons), (found, reasons, body)

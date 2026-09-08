@@ -177,6 +177,33 @@ def test_retained_instruction_comment_closes(tmp):
         ['Remove the template instruction comments.'], closed=True)
 
 
+def test_a_bullet_spelled_with_a_star_is_read_as_a_bullet(tmp):
+    """The reason set is pinned against a marker class, not one spelling.
+
+    A gate comment growing an item spelled `* ` carries a bullet no
+    code path asked for, and GitHub renders it exactly as a `- ` item.
+    Collecting bullets by the `- ` spelling alone leaves that mutation
+    of the comment green at every call site here.
+    """
+    del tmp
+    instruction = re.search(r'<!--.*?-->', TEMPLATE, re.DOTALL).group(0)
+    body = _valid_body().replace(
+        '- One change', f'- One change\n{instruction}')
+    _code, writes, _output, _error = _execute(_api(), body)
+    method, path, payload = writes[0]
+    strayed = (
+        method, path,
+        {**payload, 'body': payload['body'] + '* Stray bullet.\n'})
+    try:
+        _assert_gate_message(
+            strayed, CLOSED_FIRST,
+            ['Remove the template instruction comments.'], closed=True)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('a bullet spelled "* " went unseen')
+
+
 def test_gate_closed_admissible_pull_is_commented_then_reopened(tmp):
     del tmp
     api = _api(
