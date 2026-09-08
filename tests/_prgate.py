@@ -13,6 +13,12 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+# pylint: disable-next=unused-import
+from _prgate_message import (  # noqa: E402
+    BOT, CLOSED_FIRST, CLOSED_MARKER, MARKER, OPEN_FIRST, REOPEN_FIRST,
+    RESOLVED_FIRST, _assert_gate_message, _assert_no_writes,
+    _comment_body,
+)
 from _repo import ROOT  # noqa: E402
 
 
@@ -180,20 +186,6 @@ def _valid_html(references=None, changes=None, repo='owner/repo'):
         ('Changes', changes),
         ('Testing', _text_html('Ran the suite.')))
 
-
-BOT = 'github-actions[bot]'
-MARKER = '<!-- pr-gate -->'
-CLOSED_MARKER = '<!-- pr-gate: closed -->'
-OPEN_FIRST = (
-    '@alice — this pull request needs changes before it can be reviewed.')
-CLOSED_FIRST = (
-    '@alice — closing this automatically; it is recoverable, read on.')
-RESOLVED_FIRST = (
-    '@alice — every condition now passes; nothing further is needed '
-    'from you.')
-REOPEN_FIRST = (
-    '@alice — the body now names a claimed issue and matches the pull '
-    'request')
 
 GH_STUB = r'''#!/usr/bin/env python3
 import json
@@ -507,17 +499,6 @@ def _write_sequence(writes):
     return [(method, endpoint) for method, endpoint, _payload in writes]
 
 
-def _assert_gate_message(write, first, reasons=(), closed=False):
-    body = _comment_body(write)
-    lines = body.splitlines()
-    assert lines[0] == first, body
-    assert MARKER in lines, body
-    assert (CLOSED_MARKER in lines) is closed, body
-    for reason in reasons:
-        assert f'- {reason}' in lines, (reason, body)
-    return body
-
-
 def _issue_gets(api):
     return [call for call in api.calls if re.fullmatch(
         r'repos/owner/repo/issues/[0-9]+', call[1])]
@@ -632,14 +613,6 @@ def _script_fixtures(**extra):
         'issues': {'101': _issue('alice')},
         **extra,
     }
-
-
-def _comment_body(write):
-    return write[2]['body']
-
-
-def _assert_no_writes(writes):
-    assert writes == [], writes
 
 
 def _assert_script_runs_through_gh_on_path(tmp):
