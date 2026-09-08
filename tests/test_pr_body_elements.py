@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Element shapes the rendered-body parser refuses, and image text.
+"""Element shapes the rendered-body parser refuses, and image alt text.
 
-Kept out of tests/test_pr_body.py, which is at its size ceiling. What
-an element boundary refuses and what an element records are one
-reading of the parser, so they sit in one suite.
+What an element boundary refuses and what an element records are one
+reading of the parser, so every test of an image's alt text sits here.
+The image tests left in tests/test_pr_body.py read the marker a sourced
+image stands for, not its alt.
 """
 import sys
 from pathlib import Path
@@ -19,9 +20,10 @@ from _prgate import (  # noqa: E402
 def test_parser_rejects_a_self_closing_content_element(tmp):
     """A non-void element written self-closing is refused as one.
 
-    The closing tag is what makes this input reach only that refusal:
-    without it the element is left open and the unfinished-element
-    refusal answers first, so the shape under test is never read.
+    The closing tag is what makes this fixture bite: were the refusal
+    removed, '<div/>' alone would be left open and refused as an
+    unfinished element, so the test would stay green over a parser that
+    had stopped reading the shape under test.
     """
     del tmp
     try:
