@@ -88,6 +88,9 @@ def test_parser_rejects_unusable_html(tmp):
         '<h2>Summary</h2><p>text',
         '<h2>Summary</h2><h2',
         '<p>a</b>',
+        # Pins the refusal, not its reason: with the self-closing guard
+        # removed the unfinished-element guard refuses this too, so the
+        # reason is pinned in tests/test_pr_body_elements.py instead.
         '<h2>Summary</h2><div/>',
     )
     accepted = []
