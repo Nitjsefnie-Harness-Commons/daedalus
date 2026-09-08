@@ -7,7 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _wfjobs import jobs_mapping  # noqa: E402
-from _workflows import _trigger_names  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
 
 
@@ -16,7 +15,9 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     workflow = (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
         encoding='utf-8')
     decoded = workflow_mapping(workflow)
-    assert _trigger_names(workflow) == {'issue_comment'}
+    assert decoded.get('on') == {
+        'issue_comment': {'types': ['created']},
+    }, 'claim must run only for newly created issue comments'
     assert decoded.get('permissions') == {'issues': 'write'}, (
         'claim token must grant exactly issues: write')
     jobs = jobs_mapping(workflow)
@@ -31,14 +32,16 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
         'claim concurrency must not cancel an in-progress run')
     condition = job.get('if')
     assert isinstance(condition, str), 'claim must declare an if scalar'
-    for guard in ('github.event.issue.pull_request == null',
-                  "github.event.issue.state == 'open'",
-                  "github.event.comment.user.type != 'Bot'"):
-        assert guard in condition, f'claim if must contain guard: {guard}'
-    # Both names for giving an issue up reach the action, not just one.
-    for command in ('/claim', '/unclaim', '/release'):
-        term = f"contains(github.event.comment.body, '{command}')"
-        assert term in condition, f'claim if must contain predicate: {term}'
+    expected_condition = (
+        'github.event.issue.pull_request == null '
+        "&& github.event.issue.state == 'open' "
+        "&& github.event.comment.user.type != 'Bot' "
+        "&& (contains(github.event.comment.body, '/claim') "
+        "|| contains(github.event.comment.body, '/unclaim') "
+        "|| contains(github.event.comment.body, '/release'))"
+    )
+    assert ' '.join(condition.split()) == expected_condition, (
+        'claim if must exactly match the guarded command prefilter')
     assert not re.search(r'^\s*(?:-\s+)?run:', workflow, re.MULTILINE), (
         'claim.yml must not contain a run block')
     _, marker, steps = workflow.partition('    steps:\n')
