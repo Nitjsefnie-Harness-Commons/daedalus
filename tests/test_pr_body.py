@@ -81,8 +81,8 @@ def test_content_inside_the_label_region_reaches_no_section(tmp):
 def test_parser_rejects_unusable_html(tmp):
     del tmp
     unusable = (
-        '',
         'plain text',
+        '<p',
         '<h2>Summary</h2><p>text',
         '<h2>Summary</h2><h2',
         '<p>a</b>',
@@ -97,6 +97,22 @@ def test_parser_rejects_unusable_html(tmp):
         else:
             accepted.append(rendered)
     assert accepted == [], accepted
+
+
+def test_parser_reads_an_empty_rendering_as_a_body_with_no_sections(tmp):
+    """An answer with neither elements nor data is GitHub's rendering of
+    a body that renders to nothing, and is usable; one carrying data but
+    no markup is not rendered HTML.
+    """
+    del tmp
+    empty = PR_BODY.parse_rendered('', 'owner/repo')
+    assert empty == PR_BODY.Body((), (), ())
+    try:
+        PR_BODY.parse_rendered('plain text', 'owner/repo')
+    except ValueError as error:
+        assert str(error) == 'input is not usable rendered HTML', error
+    else:
+        raise AssertionError('data without markup was accepted')
 
 
 def test_parser_reports_a_nested_heading_as_a_layout_note(tmp):
