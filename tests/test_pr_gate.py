@@ -319,7 +319,9 @@ def test_a_nested_heading_comments_and_closes(tmp):
         ('POST', 'repos/owner/repo/issues/99/comments'),
         ('PATCH', 'repos/owner/repo/pulls/99')]
     _assert_gate_message(
-        writes[0], CLOSED_FIRST, [NESTED_HEADING_NOTE], closed=True)
+        writes[0], CLOSED_FIRST,
+        ['Section "Testing" is empty.', NESTED_HEADING_NOTE,
+         'No checked issue is assigned to you.'], closed=True)
 
 
 def test_a_nested_heading_alone_closes(tmp):
@@ -332,7 +334,9 @@ def test_a_nested_heading_alone_closes(tmp):
         ('POST', 'repos/owner/repo/issues/99/comments'),
         ('PATCH', 'repos/owner/repo/pulls/99')]
     _assert_gate_message(
-        writes[0], CLOSED_FIRST, [NESTED_HEADING_NOTE], closed=True)
+        writes[0], CLOSED_FIRST,
+        [NESTED_HEADING_NOTE, 'No checked issue is assigned to you.'],
+        closed=True)
 
 
 def test_workflow_shape(tmp):
