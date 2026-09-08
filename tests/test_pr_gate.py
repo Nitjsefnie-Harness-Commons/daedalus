@@ -10,7 +10,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _prgate import (  # noqa: E402
-    BOT, CLOSED_FIRST, MARKER, REOPEN_FIRST,
+    BOT, CLOSED_FIRST, MARKER, OPEN_FIRST, REOPEN_FIRST,
     RESOLVED_FIRST, TEMPLATE,
     _api, _assert_gate_message, _assert_no_writes, _assert_script_error,
     _assert_script_runs_through_gh_on_path,
@@ -202,6 +202,28 @@ def test_a_bullet_spelled_with_a_star_is_read_as_a_bullet(tmp):
         pass
     else:
         raise AssertionError('a bullet spelled "* " went unseen')
+
+
+def test_every_list_marker_is_a_bullet_and_a_bare_marker_is_not(tmp):
+    """The bullet matcher is pinned in both directions.
+
+    It decides membership of the reason set, so a spelling it stops
+    seeing unpins that set with every suite still green. The bare
+    marker runs the other way: GitHub renders `-x` as text, and a
+    matcher reading it as a bullet would report one nobody wrote.
+    """
+    del tmp
+    for stray, bullet in (('- Stray.', True), ('* Stray.', True),
+                          ('+ Stray.', True), ('\t- Stray.', True),
+                          ('-Stray.', False)):
+        write = ('POST', 'url', {
+            'body': '\n'.join((OPEN_FIRST, MARKER, stray))})
+        try:
+            _assert_gate_message(write, OPEN_FIRST)
+        except AssertionError:
+            assert bullet, stray
+        else:
+            assert not bullet, stray
 
 
 def test_gate_closed_admissible_pull_is_commented_then_reopened(tmp):
