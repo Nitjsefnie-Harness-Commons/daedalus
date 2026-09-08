@@ -48,6 +48,21 @@ def test_parser_rejects_an_end_tag_that_closes_nothing(tmp):
         raise AssertionError('an end tag closing nothing was accepted')
 
 
+def test_parser_records_no_text_for_an_image_without_alt(tmp):
+    """An image carrying no alt contributes no text of its own.
+
+    The section then holds only the line break the rendering puts
+    before the paragraph and the object replacement marker a sourced
+    image stands for, so any spelling the parser reached for in place
+    of a missing alt would read here as section text.
+    """
+    del tmp
+    rendered = _html_body(
+        ('Changes', '<p dir="auto"><img src="diagram.png"></p>'))
+    section, = PR_BODY.parse_rendered(rendered, 'owner/repo').sections
+    assert section.text == '\n\ufffc', repr(section.text)
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='prbodyelements_')
