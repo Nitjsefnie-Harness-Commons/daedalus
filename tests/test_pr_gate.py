@@ -206,18 +206,22 @@ def test_a_bullet_spelled_with_a_star_is_read_as_a_bullet(tmp):
 
 
 def test_the_bullet_matcher_decides_indent_marker_and_separator(tmp):
-    """Every decision the matcher makes, enumerated on its own axis.
+    """Every decision the matcher makes, on its own axis.
 
-    Indent, marker and separator are the three it reads, and the
-    separator is the only one whose answer is no, so the rows with no
-    separator are what keep the rest from passing vacuously. Taken as
-    the product rather than as spellings: a table drawn from the
-    spellings someone tried moves this boundary instead of closing it.
+    The marker and separator alphabets are finite, so those two axes
+    are exhausted. The indent is unbounded repetition over a two-
+    character alphabet, so it is generated to a width instead: listing
+    indents puts the boundary at the longest one written down rather
+    than at anything the matcher does, and a bound at or above that
+    length then changes no verdict. The separator is the only axis
+    answering no, so its rows keep the rest from passing vacuously.
     """
     del tmp
+    indents = [''.join(pad) for width in range(6)
+               for pad in itertools.product(' \t', repeat=width)]
     failures = []
     for indent, marker, separator in itertools.product(
-            ('', ' ', '\t', '   ', ' \t '), '-*+', (' ', '\t', '')):
+            indents, '-*+', (' ', '\t', '')):
         stray = f'{indent}{marker}{separator}Stray.'
         write = ('POST', 'url', {
             'body': '\n'.join((OPEN_FIRST, MARKER, stray))})
