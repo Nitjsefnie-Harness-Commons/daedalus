@@ -13,17 +13,13 @@ import _util  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 
-# The three resolver call sites, each as (module, the spelling the site
+# The two resolver call sites, each as (module, the spelling the site
 # carries, the bypass to plant, and the launch that would run it).
 _SITES = (
     ('tests/_wfgraph.py',
      '        bash = _util.workflow_bash()',
      "        bash = 'bash'",
      '        return subprocess.run([bash'),
-    ('tests/test_claim_workflow.py',
-     '    bash = _util.workflow_bash()',
-     "    bash = 'bash'",
-     '    result = subprocess.run([bash'),
     ('tests/test_coverage_comment_workflow.py',
      '        [_util.workflow_bash(),',
      "        ['bash',",
@@ -476,10 +472,10 @@ def test_each_real_site_is_caught_when_it_bypasses(tmp):
 
 def test_copied_tree_tracks_a_comprehension_walrus(tmp):
     root = _tree_copy(tmp)
-    relative = 'tests/test_claim_workflow.py'
+    relative = 'tests/_wfgraph.py'
     target = root / relative
     source = target.read_text(encoding='utf-8')
-    anchor = '_GH_STUB = r"""'
+    anchor = 'def _tests_yml():'
     snippet = ("[(program := 'bash') for item in values]\n"
                "subprocess.run([program], cwd=tmp)\n")
     assert source.count(anchor) == 1

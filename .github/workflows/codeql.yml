@@ -59,7 +59,7 @@ jobs:
       # them unanalysed would exempt exactly the code with the widest
       # exposure. `actions` covers the other privileged half: a release that
       # attests provenance, a ratchet that pushes to `main` with a deploy
-      # key, and a `/claim` command driven by issue comments. actionlint and
+      # key, and an issue-comment caller of the claim action. actionlint and
       # zizmor already read those files for known-wrong shapes; CodeQL asks a
       # dataflow question of them instead, and the two find different things.
       fail-fast: false

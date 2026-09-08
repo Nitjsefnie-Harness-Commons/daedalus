@@ -207,6 +207,14 @@ Comment `/claim` on an open, unassigned issue and
 The assignment is the only thing telling anyone else the issue is taken.
 `/unclaim` — or `/release`, the same command — hands it back.
 
+The workflow calls the
+[`Nitjsefnie-Actions/claim`](https://github.com/Nitjsefnie-Actions/claim)
+action.
+Report defects in claim behaviour to
+[the action's tracker](https://github.com/Nitjsefnie-Actions/claim/issues).
+Defects in this repository's wiring — the trigger, token scope or prefilter —
+belong in this repository's tracker.
+
 The body must be exactly the command after trimming, so "I'll `/claim` this
 one" is ignored, as are a closed issue, a pull request, a bot, and an issue
 somebody already holds. Re-read the issue afterwards and confirm your login is
