@@ -115,7 +115,7 @@ def test_earliest_bot_marker_comment_is_selected(tmp):
 def test_none_body_reports_all_required_sections_and_closes(tmp):
     del tmp
     code, writes, _output, _error = _execute(
-        _api(issues={}, rendered='<p dir="auto"></p>'), None)
+        _api(issues={}, rendered=''), None)
     assert code == 0
     assert _write_sequence(writes) == [
         ('POST', 'repos/owner/repo/issues/99/comments'),
@@ -127,6 +127,25 @@ def test_none_body_reports_all_required_sections_and_closes(tmp):
     _assert_gate_message(
         writes[0], CLOSED_FIRST,
         [*reasons, 'No checked issue is assigned to you.'], closed=True)
+
+
+def test_bodies_github_renders_away_are_reported_and_closed(tmp):
+    """An empty, blank or comment-only body renders to the empty string."""
+    del tmp
+    reasons = [
+        f'Required section "{name}" is missing.' for name in (
+            'Summary', 'Related Issues and Pull Requests', 'Changes',
+            'Testing')]
+    for body in ('', '   \n\t\n', '<!-- draft -->'):
+        code, writes, _output, _error = _execute(
+            _api(issues={}, rendered=''), body)
+        assert code == 0, body
+        assert _write_sequence(writes) == [
+            ('POST', 'repos/owner/repo/issues/99/comments'),
+            ('PATCH', 'repos/owner/repo/pulls/99')], body
+        _assert_gate_message(
+            writes[0], CLOSED_FIRST,
+            [*reasons, 'No checked issue is assigned to you.'], closed=True)
 
 
 def test_retained_instruction_comment_closes(tmp):
