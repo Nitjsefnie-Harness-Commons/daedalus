@@ -234,10 +234,18 @@ Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. The gate checks the body when the
 pull request is opened, edited, or reopened and posts one comment naming every
 failing condition, updating that same comment after later edits. It closes the
-pull request only when the body's layout fails the template or the Related
-section names no issue. Fix the claim or body on that same pull request; once
-every condition passes, the gate reopens it automatically if it closed it, so
-there is no need to open a second one.
+pull request only when the body's layout or section content fails the template
+or the Related section names no issue. Fix the claim or body on that same pull
+request; once every condition passes, the gate reopens it automatically if it
+closed it, so there is no need to open a second one.
+
+The workflow calls the
+[`Nitjsefnie-Actions/pr-gate`](https://github.com/Nitjsefnie-Actions/pr-gate)
+action, which reads this repository's PR template at the pull request's base
+commit. Report defects in admission behaviour to
+[the action's tracker](https://github.com/Nitjsefnie-Actions/pr-gate/issues).
+Defects in this repository's caller wiring — its trigger, permissions, inputs,
+Bot exclusion or concurrency — belong in this repository's tracker.
 
 In the description, include what changed, why, and the actual output of the
 tests you ran. For a performance change, a before and after measurement rather

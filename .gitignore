@@ -220,9 +220,6 @@
 !/scripts/ci/diff_coverage.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
-!/scripts/ci/pr_body.py
-!/scripts/ci/pr_body_closing.py
-!/scripts/ci/pr_gate.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/speed_summary.py
@@ -282,11 +279,6 @@
 !/tests/_noglibc.py
 !/tests/_overlap.py
 !/tests/_owned_writes.py
-!/tests/_parser_guard.py
-!/tests/_prfootnotes.py
-!/tests/_prgate.py
-!/tests/_prgate_message.py
-!/tests/_prgate_race.py
 !/tests/_pyroute.py
 !/tests/_pyroute_live.py
 !/tests/_pyroute_state.py
@@ -401,11 +393,7 @@
 !/tests/test_owned_writes.py
 !/tests/test_parent_watch.py
 !/tests/test_path_safety.py
-!/tests/test_pr_body.py
-!/tests/test_pr_body_closing.py
-!/tests/test_pr_body_elements.py
 !/tests/test_pr_gate.py
-!/tests/test_pr_gate_claims.py
 !/tests/test_pyright_scope.py
 !/tests/test_queued_command.py
 !/tests/test_real_browser_boundary.py
