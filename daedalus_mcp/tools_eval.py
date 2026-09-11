@@ -47,9 +47,10 @@ def register(mcp, bridge):
     async def exec(cmd_id: str, code: str, tab_id: str = '',
                    broadcast: bool = False, wait: bool = True,
                    timeout: float = 15.0) -> dict | None:
-        """Evaluate JS in a tab. `tab_id=''` + `broadcast=True` fans out to all tabs.
-    Waited results retain the server's exact `world` marker, including
-    `page:<hostname>`."""
+        """Evaluate JS in a tab. `tab_id=''` + `broadcast=True` sends the
+    command with no tab; the extension runs it once, in the browser's
+    active tab. Waited results retain the server's exact `world` marker,
+    including `page:<hostname>`."""
         target = '' if broadcast else tab_id
         return await _send_eval(cmd_id, code.strip(), target, wait, timeout)
 
@@ -84,7 +85,8 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def ping(tab_id: str = '') -> dict:
-        """Round-trip a `document.title` eval to `tab_id` (or broadcast)."""
+        """Round-trip a `document.title` eval to `tab_id` (or, with no tab,
+    the browser's active tab)."""
         import time
         t0 = time.time()
         payload: dict = {'id': '_ping', 'code': 'document.title'}
@@ -108,7 +110,8 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def reload(tab_id: str = '', broadcast: bool = False) -> None:
-        """Call `location.reload()` in `tab_id` or broadcast."""
+        """Call `location.reload()` in `tab_id`, or with no tab in the
+    browser's active tab."""
         target = '' if broadcast else tab_id
         await _send_eval(
             '_reload', 'location.reload()', target, wait=False, timeout=0)
