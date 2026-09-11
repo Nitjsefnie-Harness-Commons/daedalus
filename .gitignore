@@ -333,6 +333,7 @@
 !/tests/test_cli.py
 !/tests/test_cli_arg_audit.py
 !/tests/test_cli_result_wait.py
+!/tests/test_cli_waits.py
 !/tests/test_cmdqueue.py
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py

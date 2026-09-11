@@ -167,13 +167,25 @@ class BridgeSession:
         if expect_delivery:
             peek['delivery'] = expect_delivery
         auth = self.auth()
-        deadline = time.time() + timeout
+        # Monotonic, not wall-clock: time.time() steps backwards under an
+        # NTP correction and the wait then outlives its timeout. Same
+        # clock the CLI waiter uses, for the same reason.
+        deadline = time.monotonic() + timeout
         wait = 0.02
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             await asyncio.sleep(wait)
             wait = min(wait * 2, interval)
-            r = await self.http_client().get(
-                '/result', params=peek, headers=auth)
+            try:
+                r = await self.http_client().get(
+                    '/result', params=peek, headers=auth)
+            except httpx.TransportError:
+                # The bridge answers /result at once, so a reset or a
+                # cut-off body on the peek is the proxy's. The command is
+                # already queued and the browser will run it; raising here
+                # reports a failure for work that goes on to happen. A
+                # failed peek is treated like a pending slot, and the
+                # deadline still bounds the wait. The PUT is never retried.
+                continue
             r.raise_for_status()
             data = r.json()
             if data.get('pending'):

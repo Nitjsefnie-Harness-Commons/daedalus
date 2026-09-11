@@ -611,4 +611,15 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_cli.transport', 'positive_timeout', 'seconds < 0',
      'tests/test_cli.py::'
      'test_a_negative_timeout_is_refused_before_the_command_is_sent'),
+    # Both raise sites are one guard: a request that got no complete answer.
+    # The named test met the read-side one as an IncompleteRead traceback
+    # before the sites existed.
+    ('daedalus_cli.transport', '_exchange',
+     'raise ConnectionFailed(e.reason) from e',
+     'tests/test_cli_waits.py::'
+     'test_a_truncated_answer_is_a_connection_failure_not_a_traceback'),
+    ('daedalus_cli.transport', '_exchange',
+     'raise ConnectionFailed(e) from e',
+     'tests/test_cli_waits.py::'
+     'test_a_truncated_answer_is_a_connection_failure_not_a_traceback'),
 }
