@@ -3,13 +3,19 @@
 
 def register(mcp, bridge):
     @mcp.tool()
-    async def store_hotfix(fix_id: str, code: str, permanent: bool = False) -> dict:
-        """Store inline JS as a persistent hotfix. Set `permanent=True` to mark the fix as surviving extension version bumps."""
+    async def store_hotfix(fix_id: str, code: str,
+                           permanent: bool | None = None) -> dict:
+        """Store inline JS as a persistent hotfix. `permanent=True` marks the
+    fix as surviving extension version bumps, `False` clears that mark, and
+    None (the default) keeps the flag a fix of this id already has stored."""
         if not code:
             raise ValueError('code required')
-        return await bridge.ext_cmd(
-            '_store_hf', 'store-hotfix', fixId=fix_id, code=code,
-            permanent=permanent)
+        fields: dict = {'fixId': fix_id, 'code': code}
+        # The extension keeps a re-stored fix's flag only when the field is
+        # absent, so an unstated choice must not travel as False.
+        if permanent is not None:
+            fields['permanent'] = permanent
+        return await bridge.ext_cmd('_store_hf', 'store-hotfix', **fields)
 
     @mcp.tool()
     async def clear_hotfix(fix_id: str) -> dict:
