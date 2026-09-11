@@ -1,4 +1,4 @@
-// §12 SETTINGS — token, server URL, extension reload, broadcast caveat.
+// §12 SETTINGS — token, server URL, extension reload, active-tab caveat.
 
 import { h, field, spacer, clear, toast, errMsg, armedAction } from './_util.js';
 import { getToken, setToken, getServer, setServer, extCmd, api } from '../api.js';
@@ -36,9 +36,9 @@ export function mount(container, bus) {
       h('p', {}, h('b', {}, 'Server:'), ' leave blank to hit the same origin that serves this page. Useful if you point the dashboard at a different host.'),
       h('p', { class: 'amber' }, h('b', {}, 'Caveat:'), ' the Daedalus extension injects ',
         h('code', {}, 'content.js + page.js'),
-        ' into every URL including this dashboard. Broadcast eval commands (',
+        ' into every URL including this dashboard. A command that names no tab (',
         h('code', {}, 'exec -b'),
-        ') run inside this tab too — use per-tab targeting or close the dashboard before broadcasting disruptive code (e.g. ',
+        ', or "run in active tab" above) runs once, in whichever tab is active — this one, if the dashboard is in front. Name a tab before sending disruptive code (e.g. ',
         h('code', {}, 'location.reload()'),
         ').'),
     ),
