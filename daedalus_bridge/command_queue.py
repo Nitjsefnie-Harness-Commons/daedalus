@@ -156,6 +156,35 @@ def remove_expired(path, now, ttl, legacy=False):
         pass
 
 
+# ─── Queue file publication ───
+def _publish(qdir, stem, document):
+    """Write `document` as `<stem>.json` in `qdir` through a hidden temp.
+
+    The drain decodes UTF-8 and skips dot-prefixed names, so the encoding is
+    fixed here rather than left to the locale -- a code-page file is
+    undecodable on Windows and stays queued until the TTL sweep -- and the
+    final name only ever appears complete. Called under `command_fs_lock`.
+    """
+    tmp, destination = qdir / f'.{stem}.tmp', qdir / f'{stem}.json'
+    try:
+        atomic_file.write_text_retrying(
+            tmp, json.dumps(document, ensure_ascii=False), encoding='utf-8')
+        atomic_file.replace_atomically(str(tmp), str(destination))
+    except (OSError, UnicodeEncodeError):
+        # A refused publish must not leave its hidden temp behind: the
+        # zero-byte artifact would sit in the queue until the background
+        # collector's TTL sweep; rollback as result_store's atomic write,
+        # plus the encode failure write_text raises after creating it.
+        try:
+            tmp.unlink()
+        except OSError:
+            # Best effort, and the publish failure re-raised below is the
+            # error the caller needs. A temp left behind is collected by
+            # the TTL sweep.
+            pass
+        raise
+
+
 # ─── Dashboard event queue ───
 # Directory-per-token queue: commands/{token}_dashboard/<ts>_<uuid>.json
 # Directory form (not single file) because concurrent writes to one file
@@ -173,9 +202,8 @@ def notify_dashboard(cmd_dir, token, payload):
         with command_fs_lock:
             dash_dir.mkdir(parents=True, exist_ok=True)
             event_id = f'{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}'
-            dashboard_event = {'id': event_id, 'kind': 'event', **payload}
-            (dash_dir / f'{event_id}.json').write_text(
-                json.dumps(dashboard_event, ensure_ascii=False))
+            _publish(dash_dir, event_id,
+                     {'id': event_id, 'kind': 'event', **payload})
         event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
         print(f'[DASH-NOTIFY-FAIL] {log_safe(e)}', flush=True)
@@ -219,25 +247,7 @@ def enqueue(cmd_dir, token, tab, cmd):
     with command_fs_lock:
         qdir.mkdir(parents=True, exist_ok=True)
         seq = next_seq()
-        cmd = {**cmd, '_did': seq}
-        tmp, destination = qdir / f'.{seq}.tmp', qdir / f'{seq}.json'
-        try:
-            atomic_file.write_text_retrying(
-                tmp, json.dumps(cmd, ensure_ascii=False), encoding='utf-8')
-            atomic_file.replace_atomically(str(tmp), str(destination))
-        except (OSError, UnicodeEncodeError):
-            # A refused enqueue must not leave its hidden temp behind: the
-            # zero-byte artifact would sit in the queue until the background
-            # collector's TTL sweep; rollback as result_store's atomic write,
-            # plus the encode failure write_text raises after creating it.
-            try:
-                tmp.unlink()
-            except OSError:
-                # Best effort, and the enqueue failure re-raised below is the
-                # error the caller needs. A temp left behind is collected by
-                # the TTL sweep.
-                pass
-            raise
+        _publish(qdir, seq, {**cmd, '_did': seq})
     event(token).set()
     return seq
 
