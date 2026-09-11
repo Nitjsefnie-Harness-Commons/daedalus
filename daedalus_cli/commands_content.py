@@ -179,7 +179,14 @@ def do_store_hotfix(args):
             code = f.read()
     else:
         code = args.code
-    result = ext_cmd('_store_hf', 'store-hotfix', fixId=args.fix_id, code=code, permanent=args.permanent)
+    fields: dict = {'fixId': args.fix_id, 'code': code}
+    # Only an asked-for flag travels. The extension keeps a re-stored fix's
+    # existing flag when the field is absent, and argparse's store_true is
+    # never absent: sending it as False demoted every permanent hotfix that
+    # was updated without restating --permanent.
+    if args.permanent:
+        fields['permanent'] = True
+    result = ext_cmd('_store_hf', 'store-hotfix', **fields)
     perm = ' [PERM]' if result.get('permanent') else ''
     print(f'Stored hotfix "{result.get("stored", "?")}"{perm} ({result.get("total", "?")} total)')
 
