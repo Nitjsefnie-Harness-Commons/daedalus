@@ -39,9 +39,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     let tBodyDecoded, tFetchDone, tEncoded;
     (async () => {
       try {
+        // Never the user's cookies. The extension holds host permission for
+        // every URL, which makes this fetch same-origin to every host for the
+        // credentials check — so the default mode sent the user's logged-in
+        // sessions along with whatever a matching page asked for. The page
+        // asking is the site itself, not a userscript the user installed,
+        // and there is no opt-in because a flag the page sets is no
+        // boundary.
         const opts = {
           method: msg.method || 'GET',
           headers: msg.headers || {},
+          credentials: 'omit',
           signal: controller.signal,
         };
         if (msg.body) {

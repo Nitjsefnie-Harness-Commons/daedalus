@@ -115,7 +115,7 @@ Matching pages receive a Tampermonkey-style `window.GM` subset from `page.js`:
 | `GM.setValue(key, value)` | Write a non-reserved extension storage key |
 | `GM.deleteValue(key)` | Delete a non-reserved extension storage key |
 | `GM.listValues()` | List non-reserved extension storage keys |
-| `GM.xmlhttpRequest(opts)` | Make a background-relayed HTTP request |
+| `GM.xmlhttpRequest(opts)` | Make a background-relayed HTTP request, without the user's cookies |
 | `GM.addStyle(css)` | Inject CSS into the page |
 | `GM.setClipboard(text, type)` | Write to the clipboard |
 | `GM.notification(opts)` | Show a desktop notification |
@@ -137,8 +137,9 @@ routing, and storage behavior, see the
 Read this before installing the extension.
 
 The manifest currently matches every URL. Each matching top-level page can use
-the page-facing shim to make cross-origin requests with
-`GM.xmlhttpRequest`, open tabs with `GM.openInTab`, start downloads with
+the page-facing shim to make cross-origin requests with `GM.xmlhttpRequest`
+(sent without the user's cookies, so a page cannot read or act on the user's
+sessions elsewhere), open tabs with `GM.openInTab`, start downloads with
 `GM.download`, show notifications with `GM.notification`, write the clipboard
 with `GM.setClipboard`, share non-reserved extension storage through
 `GM.getValue`, `GM.setValue`, `GM.deleteValue`, and `GM.listValues`, and inject
