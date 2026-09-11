@@ -4,9 +4,9 @@
 The shim is injected into every matching page, so the service worker's
 relay answers to any site the user visits, not to a userscript the user
 installed. What the worker does on the page's behalf is therefore bounded
-here: a relayed request goes out without the user's cookies. These run the
-shipped worker in a Node VM against a fake browser that records what the
-worker asked it to do.
+here: a relayed request goes out without the user's cookies, and a relayed
+tab open reaches only web URLs. These run the shipped worker in a Node VM
+against a fake browser that records what the worker asked it to do.
 """
 import json
 import shutil
@@ -27,6 +27,7 @@ const vm = require('vm');
 const [backgroundPath, mode] = process.argv.slice(1);
 const messageListeners = [];
 const fetches = [];
+const created = [];
 
 function eventTarget(listeners = null) {
   return {
@@ -61,6 +62,21 @@ const chrome = {
     },
     get: async (tabId) => ({ id: tabId, url: '', title: '' }),
     sendMessage: async () => {},
+    // Callback-style, as messaging.js calls it. Chrome reports a refused
+    // creation through lastError, with the callback invoked on no tab.
+    create(details, callback) {
+      created.push(details);
+      if (mode === 'create-refused') {
+        chrome.runtime.lastError = { message: 'Tabs cannot be edited' };
+        try {
+          callback(undefined);
+        } finally {
+          chrome.runtime.lastError = null;
+        }
+        return;
+      }
+      callback({ id: 100 + created.length });
+    },
   },
   scripting: {
     executeScript: async () => { throw new Error('unavailable'); },
@@ -146,7 +162,25 @@ async function run() {
       },
     };
   }
-  throw new Error('unknown mode: ' + mode);
+  const urls = mode === 'create-refused'
+    ? ['https://example.com/']
+    : ['chrome://settings', 'javascript:alert(1)', 'not a url',
+      'https://example.com/'];
+  const outcomes = [];
+  for (const url of urls) {
+    try {
+      const answer = await send({ type: 'openTab', url, active: true });
+      outcomes.push({
+        url,
+        tabId: answer.tabId === undefined ? null : answer.tabId,
+        error: answer.error || null,
+        threw: null,
+      });
+    } catch (error) {
+      outcomes.push({ url, tabId: null, error: null, threw: error.message });
+    }
+  }
+  return { outcomes, created: created.map((details) => details.url) };
 }
 
 run().then((result) => {
@@ -193,6 +227,47 @@ def test_a_relayed_page_request_carries_no_cookies(tmp):
     assert request['credentials'] == 'omit', request
     # Still a working relay: the request went out and its answer came back.
     assert outcome['answer'] == {'status': 200, 'error': None}, outcome
+
+
+def test_a_page_can_open_only_web_urls(tmp):
+    """`GM.openInTab` refuses anything but http: and https:.
+
+    `chrome.tabs.create` accepts URLs a page could never navigate to itself,
+    and the relay handed it the page's URL unread — so a page could open
+    `chrome://` pages, or a `javascript:` URL, with the extension's authority.
+    A refused URL is answered `{error}` and never reaches the browser.
+    """
+    del tmp
+    outcome = _run_relay_authority('open')
+    by_url = {item['url']: item for item in outcome['outcomes']}
+    for url in ('chrome://settings', 'javascript:alert(1)', 'not a url'):
+        refused = by_url[url]
+        assert refused['error'], refused
+        assert refused['tabId'] is None, refused
+        assert refused['threw'] is None, refused
+    opened = by_url['https://example.com/']
+    assert opened['error'] is None, opened
+    assert opened['tabId'] == 101, opened
+    assert outcome['created'] == ['https://example.com/'], outcome
+
+
+def test_a_refused_tab_creation_answers_an_error(tmp):
+    """A `tabs.create` that fails answers `{error}` rather than throwing.
+
+    Chrome reports a refused creation by setting `chrome.runtime.lastError`
+    and invoking the callback with no tab. The callback read `tab.id` off
+    that undefined, so it threw, `sendResponse` never fired, and the error
+    went unchecked — the page waited on an answer nothing would send.
+    """
+    del tmp
+    outcome = _run_relay_authority('create-refused')
+    assert outcome['outcomes'] == [{
+        'url': 'https://example.com/',
+        'tabId': None,
+        'error': 'Tabs cannot be edited',
+        'threw': None,
+    }], outcome
+    assert outcome['created'] == ['https://example.com/'], outcome
 
 
 def main():
