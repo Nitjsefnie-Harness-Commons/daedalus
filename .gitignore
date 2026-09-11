@@ -383,6 +383,7 @@
 !/tests/test_mcp_auth.py
 !/tests/test_mcp_entry_point.py
 !/tests/test_mcp_guard_floor.py
+!/tests/test_mcp_probe.py
 !/tests/test_mcp_refusal_drain.py
 !/tests/test_mcp_server.py
 !/tests/test_mcp_tools.py
