@@ -303,7 +303,7 @@ UNPINNED_PARAMETERS = {
         'timeout',
     },
     'put': {
-        # fan-out to every tab is exercised by no case
+        # a tabless send (the browser's active tab) is exercised by no case
         'broadcast',
         # only the waited path is pinned; put has no wait=False case
         'wait',
@@ -311,7 +311,7 @@ UNPINNED_PARAMETERS = {
         'timeout',
     },
     'reload': {
-        # fan-out to every tab is exercised by no case
+        # a tabless send (the browser's active tab) is exercised by no case
         'broadcast',
     },
     'screenshot': {
