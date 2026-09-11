@@ -18,7 +18,13 @@ export function mount(container, bus) {
     ),
     h('div', { class: 'toolbar', style: { marginTop: '10px' } },
       h('button', { class: 'primary', data: { role: 'run' } }, 'RUN ⏎'),
-      h('button', { class: 'ghost sm', data: { role: 'broadcast' } }, 'broadcast'),
+      // "Broadcast" does not fan out: a command that names no tab is run
+      // once by the extension, in the active tab of the current browser
+      // window. The label says where the code will run, not "all tabs".
+      h('button', {
+        class: 'ghost sm', data: { role: 'active-tab' },
+        title: 'send the code with no tab named: the extension runs it once, in the active tab of the current browser window',
+      }, 'run in active tab'),
       h('span', { style: { flex: '1' } }),
       h('span', { class: 'dim small', role: 'status', data: { role: 'meta' } }, ''),
     ),
@@ -43,7 +49,7 @@ export function mount(container, bus) {
   const codeEl = root.querySelector('[data-role=code]');
   const timeoutEl = root.querySelector('[data-role=timeout]');
   const runBtn = root.querySelector('[data-role=run]');
-  const bcastBtn = root.querySelector('[data-role=broadcast]');
+  const activeTabBtn = root.querySelector('[data-role=active-tab]');
   const resultEl = root.querySelector('[data-role=result]');
   const metaEl = root.querySelector('[data-role=meta]');
   const historyEl = root.querySelector('[data-role=history]');
@@ -55,7 +61,7 @@ export function mount(container, bus) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); run(); }
   });
   runBtn.addEventListener('click', () => run());
-  bcastBtn.addEventListener('click', () => run({ broadcast: true }));
+  activeTabBtn.addEventListener('click', () => run({ activeTab: true }));
   clearHBtn.addEventListener('click', () => { history = []; saveHistory(); renderHistory(); });
 
   // The 12s poll stays: this selector is the one an operator types into, and
@@ -65,14 +71,24 @@ export function mount(container, bus) {
     errorLabel: (e) => `(err: ${errMsg(e)})`,
   });
 
-  async function run({ broadcast = false } = {}) {
+  async function run({ activeTab = false } = {}) {
     const code = (codeEl.value || '').trim();
     if (!code) { toast('code is empty', 'warn'); return; }
-    const tabId = broadcast ? '' : sel.value;
+    // The selector's empty value is every "nothing to choose" state — tabs
+    // still loading, none registered, an error, or the chosen tab gone and
+    // reset by the controller — and the bridge reads an empty tab as "no
+    // tab named", which the extension runs in whatever tab is active. RUN
+    // after the target closed used to run the code on an unintended tab;
+    // only the button that says so sends a command with no tab.
+    if (!activeTab && !sel.value) {
+      metaEl.textContent = 'no target tab selected — choose one, or use "run in active tab"';
+      return;
+    }
+    const tabId = activeTab ? '' : sel.value;
     const timeout = Math.max(1000, Math.min(60000, Number(timeoutEl.value) || 10000));
     resultEl.textContent = 'running…';
     resultEl.className = 'pane';
-    metaEl.textContent = `tab=${tabId || 'broadcast'}  timeout=${timeout}ms`;
+    metaEl.textContent = `tab=${tabId || 'active tab'}  timeout=${timeout}ms`;
     const t0 = Date.now();
     try {
       const { envelope } = await runCommand({ tab: tabId, code, timeout });
@@ -88,7 +104,7 @@ export function mount(container, bus) {
       clear(metaEl);
       metaEl.append(
         'tab=',
-        h('span', { class: 'cyan' }, String(envelope && envelope.tabId || tabId || 'broadcast')),
+        h('span', { class: 'cyan' }, String(envelope && envelope.tabId || tabId || 'active tab')),
         '  ',
         h('span', { class: 'cyan' }, formatEvalWorld(world) || '—'),
         `  ${ms}ms`,
