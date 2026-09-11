@@ -151,9 +151,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       entry.controller.abort();
     }
   } else if (msg.type === 'openTab') {
+    // Web URLs only. tabs.create reaches targets a page can never navigate
+    // to itself — chrome: pages, javascript: — and the page asking is the
+    // site, not a userscript, so it does not borrow the extension's
+    // authority to get there.
+    let protocol = '';
+    try { protocol = new URL(msg.url).protocol; } catch { /* not a URL */ }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      sendResponse({ error: 'openInTab accepts http: and https: URLs only' });
+      return;
+    }
     chrome.tabs.create(
       { url: msg.url, active: msg.active !== false }, (tab) => {
-        sendResponse({ tabId: tab.id });
+        // A refused creation is reported only through lastError, with the
+        // callback invoked on no tab. Reading tab.id off that threw, so the
+        // page never got an answer and the error went unchecked.
+        const refused = chrome.runtime.lastError;
+        if (refused || !tab) {
+          sendResponse({ error: (refused && refused.message) || 'no tab' });
+        } else {
+          sendResponse({ tabId: tab.id });
+        }
       });
     return true;
   } else if (msg.type === 'notification') {
