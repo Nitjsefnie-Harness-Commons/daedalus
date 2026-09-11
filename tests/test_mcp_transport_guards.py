@@ -6,6 +6,7 @@ import sys
 import time
 from contextvars import ContextVar
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -55,7 +56,11 @@ class ClientProbe:
         self.calls.append(('get', path, kwargs))
         if not self.replies:
             raise RuntimeError('unexpected result poll')
-        return ResponseProbe(self.replies.pop(0))
+        reply = self.replies.pop(0)
+        # A scripted exception is what the transport raised on that GET.
+        if isinstance(reply, BaseException):
+            raise reply
+        return ResponseProbe(reply)
 
     async def post(self, path, **kwargs):
         self.calls.append(('post', path, kwargs))
@@ -255,6 +260,90 @@ def test_poll_retries_a_failed_conditional_consume(tmp):
         expect_delivery='wanted'))
 
     assert result == second, (result, second)
+
+
+def test_poll_survives_a_transport_failure_on_the_peek(tmp):
+    """A reset on the peek is retried while the deadline has time left.
+
+    The bridge answers /result at once, so a transport failure on that
+    GET is the proxy's, and the command it asks about is already queued.
+    Raising it out of the poll reported a failure for work the browser
+    went on to do; the poll now keeps going, like a pending slot.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    wanted = {
+        'id': 'command',
+        'deliveryId': 'wanted',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        transport.httpx.ReadError('connection reset by peer'),
+        wanted,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 1, interval=0, expect_id='command',
+        expect_delivery='wanted'))
+
+    assert result == wanted, (result, wanted)
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert len(peeks) == 3, client.calls
+
+
+def test_poll_reports_timeout_after_only_transport_failures(tmp):
+    """Retrying a failed peek is bounded by the same deadline."""
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    # Far more failures than the deadline admits at this interval, so the
+    # loop ends on the deadline rather than by running the script dry.
+    client = ClientProbe(
+        [transport.httpx.ReadError('connection reset by peer')] * 1000)
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 0.05, interval=0.01, expect_id='command',
+        expect_delivery='wanted'))
+
+    expected = 'raised TimeoutError: no result within 0.05s'
+    assert result == expected, (result, expected)
+    assert client.calls, 'the loop never polled, so this test proved nothing'
+
+
+def test_poll_deadline_is_not_the_wall_clock(tmp):
+    """A wall-clock step backwards must not extend the wait.
+
+    The deadline was time.time() based, so an NTP correction between two
+    polls put the clock before the deadline again and the wait outlived
+    its timeout; the CLI waiter was moved to time.monotonic() for the
+    same reason. The wall clock here reads once and then steps back an
+    hour; the script is far longer than the deadline admits, so a poll
+    that consulted the wall clock would run it dry instead of timing out.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    client = ClientProbe([{'pending': True}] * 1000)
+    session.http_client = lambda: client
+    first = time.time()
+    reads = []
+
+    def stepped_back():
+        reads.append(1)
+        return first if len(reads) == 1 else first - 3600
+
+    with mock.patch.object(time, 'time', stepped_back):
+        result = _capture(session.poll_result(
+            '', 0.05, interval=0.01, expect_id='command',
+            expect_delivery='wanted'))
+
+    expected = 'raised TimeoutError: no result within 0.05s'
+    assert result == expected, (result, expected)
 
 
 def test_poll_reports_timeout_when_no_attempt_is_admitted(tmp):

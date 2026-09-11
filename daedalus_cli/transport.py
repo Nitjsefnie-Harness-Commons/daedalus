@@ -13,6 +13,7 @@ values from its own store rather than the process environment. Nothing here
 depends on that: with no such module the environment is the only source.
 """
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -121,7 +122,51 @@ def _http_error_detail(e):
         return raw.decode(errors='replace')
 
 
-def api(method, path, body=None, timeout=30, headers=None):
+class ConnectionFailed(Exception):
+    """No complete answer: refused, reset, timed out, or cut off mid-body.
+
+    Every api* function turns this into `sys.exit('Connection failed: ...')`.
+    It exists as an exception so the one caller that can do better than
+    exit — the result wait, whose command is already queued and running —
+    can catch it on a peek and keep polling.
+    """
+
+
+def _json_body(response):
+    return json.loads(response.read())
+
+
+def _exchange(req, timeout, read):
+    """Send one request and return read(response).
+
+    Only HTTPError and URLError used to be caught, and both are raised by
+    urlopen itself. A reset, a timeout or an IncompleteRead raised while
+    the body was being READ — after urlopen returned — escaped as a
+    traceback. Those come from the proxy in front of the bridge, not from
+    the bridge, and they are the same class of failure as a refused
+    connection: no answer arrived. HTTPError is a URLError and URLError is
+    an OSError, so the order of the clauses is the order of specificity.
+    """
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return read(r)
+    except urllib.error.HTTPError as e:
+        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
+    except urllib.error.URLError as e:
+        raise ConnectionFailed(e.reason) from e
+    except (OSError, http.client.HTTPException) as e:
+        raise ConnectionFailed(e) from e
+
+
+def _exchange_or_exit(req, timeout, read):
+    try:
+        return _exchange(req, timeout, read)
+    except ConnectionFailed as e:
+        sys.exit(f'Connection failed: {e}')
+
+
+def _request(method, path, body=None, timeout=30, headers=None):
+    """api() that raises ConnectionFailed instead of exiting on it."""
     url = URL + path
     data = json.dumps(body).encode() if body else None
     # The bridge decides credentials before it reads a body, so the token goes
@@ -133,13 +178,14 @@ def api(method, path, body=None, timeout=30, headers=None):
     if data:
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    return _exchange(req, timeout, _json_body)
+
+
+def api(method, path, body=None, timeout=30, headers=None):
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
-    except urllib.error.URLError as e:
-        sys.exit(f'Connection failed: {e.reason}')
+        return _request(method, path, body, timeout, headers)
+    except ConnectionFailed as e:
+        sys.exit(f'Connection failed: {e}')
 
 
 def api_raw(method, path):
@@ -147,13 +193,7 @@ def api_raw(method, path):
     url = URL + path
     req = urllib.request.Request(
         url, method=method, headers={'Authorization': f'Bearer {token()}'})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.read()
-    except urllib.error.HTTPError as e:
-        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
-    except urllib.error.URLError as e:
-        sys.exit(f'Connection failed: {e.reason}')
+    return _exchange_or_exit(req, 30, lambda r: r.read())
 
 
 def api_delete(path, body):
@@ -164,13 +204,7 @@ def api_delete(path, body):
         url, data=data, method='DELETE',
         headers={'Content-Type': 'application/json',
                  'Authorization': f'Bearer {token()}'})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
-    except urllib.error.URLError as e:
-        sys.exit(f'Connection failed: {e.reason}')
+    return _exchange_or_exit(req, 30, _json_body)
 
 
 def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
@@ -209,7 +243,17 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
-        res = api('GET', _query_path('/result', params), timeout=remaining)
+        try:
+            res = _request('GET', _query_path('/result', params),
+                           timeout=remaining)
+        except ConnectionFailed:
+            # The bridge answers /result at once, so a reset or a cut-off
+            # body here is the proxy's. The command is already queued and
+            # the browser will run it; exiting now reports a failure for
+            # work that goes on to happen, and a retry runs it twice. A
+            # failed peek is treated like a pending slot: the deadline
+            # still says when to stop. The PUT is never retried.
+            continue
         if res.get('pending'):
             continue
         result_delivery_id = res.get('deliveryId')
