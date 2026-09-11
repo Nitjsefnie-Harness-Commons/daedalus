@@ -35,7 +35,9 @@ def build_parser():
     s.add_argument('id', help='Command ID')
     s.add_argument('file', help='JS file path (or - for stdin)')
     s.add_argument('--no-result', action='store_true', help="Don't wait for result")
-    s.add_argument('-b', '--broadcast', action='store_true', help='Send to all tabs (ignore ID)')
+    s.add_argument('-b', '--broadcast', action='store_true',
+                   help='Send with no tab (ignore ID): runs in the '
+                        "browser's active tab")
     s.add_argument('-t', '--timeout', type=positive_timeout, default=15, help='Result timeout seconds (default 15)')
 
     # exec
@@ -43,7 +45,9 @@ def build_parser():
     s.add_argument('id', help='Command ID')
     s.add_argument('code', help='JS code string')
     s.add_argument('--no-result', action='store_true', help="Don't wait for result")
-    s.add_argument('-b', '--broadcast', action='store_true', help='Send to all tabs (ignore ID)')
+    s.add_argument('-b', '--broadcast', action='store_true',
+                   help='Send with no tab (ignore ID): runs in the '
+                        "browser's active tab")
     s.add_argument('-t', '--timeout', type=positive_timeout, default=15, help='Result timeout seconds (default 15)')
 
     # result
@@ -60,7 +64,9 @@ def build_parser():
 
     # reload
     s = sub.add_parser('reload', help='Reload tab page')
-    s.add_argument('-b', '--broadcast', action='store_true', help='Send to all tabs (ignore ID)')
+    s.add_argument('-b', '--broadcast', action='store_true',
+                   help='Send with no tab (ignore ID): runs in the '
+                        "browser's active tab")
 
     # title
     sub.add_parser('title', help='Get tab document.title')

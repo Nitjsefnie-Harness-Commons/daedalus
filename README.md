@@ -102,8 +102,9 @@ The bridge serves a browser control surface with no separate build step:
 
 The dashboard can also drive the extension's tab, screenshot, cookie, hotfix,
 request-blocking, network-capture, CDP, CSS, timing, and upload capabilities.
-Avoid broadcast evaluations while the dashboard is open: the extension also
-runs in the dashboard tab.
+A broadcast evaluation (`-b`, `broadcast=True`) is sent with no tab and runs in
+the browser's active tab — with the dashboard focused, that is the dashboard
+itself. Select a tab in the dashboard, or set `ID`, to run it elsewhere.
 
 ## GM Bridge
 
