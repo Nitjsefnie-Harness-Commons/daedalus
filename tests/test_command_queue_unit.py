@@ -16,6 +16,11 @@ def _load_queue(name):
         _util.ROOT / 'daedalus_bridge' / 'command_queue.py', name=name)
 
 
+def _load_service(name):
+    return _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'stream_service.py', name=name)
+
+
 def test_command_queue_imports_without_daedalus_configuration(_tmp):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('DAEDALUS_') and key != 'TOKEN'}
@@ -104,6 +109,96 @@ def test_notify_dashboard_publishes_an_event_and_wakes_the_token(tmp):
     assert json.loads(published.read_text(encoding='utf-8')) == {
         'id': published.stem, 'kind': 'event', 'type': 'tabs-synced'}
     assert queue.event('tok').is_set()
+
+
+# Runs in a child whose preferred encoding is verified not to be UTF-8, then
+# publishes and drains two non-ASCII titles. In this process the check would
+# be decided by whatever locale the machine happens to have: on a UTF-8 host
+# the unfixed write_text is already UTF-8 and the defect is invisible. The
+# driver is a file rather than a -c argument, and spells its titles as code
+# points, because a C locale cannot carry either on the command line.
+_NON_UTF8_DRAIN = """
+import json, locale, sys
+sys.path.insert(0, sys.argv[1])
+import _util
+queue = _util.load(sys.argv[2], name='cq_probe')
+service = _util.load(sys.argv[3], name='ss_probe')
+from pathlib import Path
+report = {'encoding': locale.getpreferredencoding(False), 'titles': {}}
+cmd_dir = Path(sys.argv[4]) / 'commands'
+dash_dir = cmd_dir / 'tok_dashboard'
+for title in ('caf' + chr(0xE9), 'tab ' + chr(0x1F680)):
+    queue.notify_dashboard(
+        cmd_dir, 'tok', {'type': 'tab-registered', 'title': title})
+    names = sorted(path.name for path in dash_dir.iterdir())
+    raw = (dash_dir / names[0]).read_bytes() if names else b''
+    try:
+        decoded = json.loads(raw.decode('utf-8')).get('title')
+    except (UnicodeDecodeError, ValueError) as error:
+        decoded = 'undecodable: ' + type(error).__name__
+    frames = []
+    try:
+        delivered = service.drain_queue(
+            dash_dir, None, None, command_ttl=100,
+            frame_writer=frames.append)
+    except Exception as error:
+        delivered = 'raised: ' + type(error).__name__
+    report['titles'][title] = {
+        'names': names, 'bytes': len(raw), 'decoded': decoded,
+        'delivered': delivered, 'frames': frames,
+        'residue': sorted(path.name for path in dash_dir.iterdir())}
+    for path in dash_dir.iterdir():
+        path.unlink()
+print(json.dumps(report, ensure_ascii=True))
+"""
+
+
+def _drain_under_non_utf8_locale(tmp, queue_path, service_path):
+    env = {key: value for key, value in os.environ.items()
+           if key not in ('PYTHONIOENCODING', 'PYTHONUTF8', 'LC_ALL',
+                          'LANG', 'LC_CTYPE')}
+    env.update(PYTHONUTF8='0', PYTHONCOERCECLOCALE='0', LC_ALL='C',
+               LANG='C')
+    driver = Path(tmp) / 'drain_probe.py'
+    driver.write_text(_NON_UTF8_DRAIN, encoding='ascii')
+    run = subprocess.run(
+        [sys.executable, '-X', 'utf8=0', str(driver),
+         str(_util.ROOT / 'tests'), str(queue_path), str(service_path),
+         tmp],
+        cwd=str(_util.ROOT), env=env, capture_output=True, text=True,
+        encoding='utf-8', errors='replace', timeout=120)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    # The drain logs each delivery to stdout; the report is the last line.
+    report = json.loads(run.stdout.strip().splitlines()[-1])
+    if report['encoding'].lower().replace('-', '') == 'utf8':
+        _util.skip('the interpreter cannot be put in a non-UTF-8 locale here')
+    return report
+
+
+def test_notify_dashboard_delivers_non_ascii_titles_through_the_drain(tmp):
+    """A dashboard event must reach the drain whatever its title contains.
+
+    The drain decodes every entry as UTF-8, so an event written in the
+    locale code page is undecodable wherever that code page is not UTF-8:
+    `café` was left in place and re-read every tick until the TTL sweep,
+    and an emoji failed inside the write after a zero-byte file already
+    existed. Both lost the event. The child runs with a verified non-UTF-8
+    preferred encoding, because on a UTF-8 host the unfixed write was
+    already UTF-8 by accident and the defect cannot be seen.
+    """
+    report = _drain_under_non_utf8_locale(
+        tmp, _util.ROOT / 'daedalus_bridge' / 'command_queue.py',
+        _util.ROOT / 'daedalus_bridge' / 'stream_service.py')
+    for title, seen in report['titles'].items():
+        assert len(seen['names']) == 1, (title, seen)
+        assert seen['names'][0].endswith('.json'), (title, seen)
+        assert seen['bytes'] > 0, (title, seen)
+        assert seen['decoded'] == title, (title, seen)
+        assert seen['delivered'] == 1, (title, seen)
+        assert seen['frames'] == [{
+            'id': seen['names'][0][:-5], 'kind': 'event',
+            'type': 'tab-registered', 'title': title}], (title, seen)
+        assert seen['residue'] == [], (title, seen)
 
 
 def test_next_seq_is_lexically_increasing_and_well_formed(_tmp):
