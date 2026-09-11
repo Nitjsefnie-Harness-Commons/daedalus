@@ -166,11 +166,6 @@
 !/dashboard/sections/tabs.js
 !/dashboard/sections/uploads.js
 
-# ─── docs/guides ───
-!/docs/
-!/docs/guides/
-!/docs/guides/2026-09-10-comprehensive-repository-audit-guide.html
-
 # ─── examples ───
 !/examples/
 !/examples/hls-segment-relay.js
@@ -319,7 +314,6 @@
 !/tests/_yamlscalar.py
 !/tests/_yamlsteps.py
 !/tests/test_aggregate_needs.py
-!/tests/test_audit_guide.py
 !/tests/test_bash_resolver_scan.py
 !/tests/test_bridge_credentials.py
 !/tests/test_bridge_requests.py
