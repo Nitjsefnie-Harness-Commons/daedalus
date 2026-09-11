@@ -238,12 +238,17 @@ TOOL_COMMANDS = {
     'list_block_rules': [({}, [_ext('_list_rules', 'list-block-rules')])],
 
     # tools_hotfixes
+    # An unstated `permanent` is not sent: the extension keeps a re-stored
+    # fix's existing flag only when the field is absent, so sending False by
+    # default silently demoted every permanent hotfix that was updated.
     'store_hotfix': [
-        ({}, [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
-                   permanent=False)]),
+        ({}, [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1')]),
         ({'permanent': True},
          [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
                permanent=True)]),
+        ({'permanent': False},
+         [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
+               permanent=False)]),
     ],
     'clear_hotfix': [({}, [_ext('_clear_hf', 'clear-hotfix', fixId='fix')])],
     'clear_hotfixes': [
