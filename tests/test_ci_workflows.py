@@ -542,7 +542,7 @@ _PIP_CACHE_PATHS = (
 # The release the pinned actions/cache commit resolves to, as its tag spells
 # it on the `uses:` line; a Dependabot bump rewrites the SHA, the comment and
 # this constant together.
-_CACHE_ACTION_VERSION = 'v4.3.0'
+_CACHE_ACTION_VERSION = 'v6.1.0'
 
 
 def _cache_step(steps, action):
