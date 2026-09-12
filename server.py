@@ -167,6 +167,10 @@ class Handler(RequestMixin):
             token = self._bridge_token(params)
             if token is None:
                 return None
+            named = params.get('path', [''])[0]
+            if named:
+                return self.answer(
+                    upload_routes.named_file(UPLOAD_DIR, token, named))
             return self.answer(
                 upload_routes.list_uploads(UPLOAD_DIR, token, params))
 

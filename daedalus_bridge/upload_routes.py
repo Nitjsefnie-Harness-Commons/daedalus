@@ -232,8 +232,52 @@ def delete_upload(upload_dir, body):
     return 200, {'ok': True}
 
 
+def _format_of(path):
+    """The suffix a stored file's type is decided by, case folded."""
+    return path.suffix.lstrip('.').lower()
+
+
+def _stored_file(upload_dir, token, parts, missing):
+    """Serve `parts` from under the token's namespace, or say why not.
+
+    The callers have checked each component; this checks the join, the
+    way a delete does, because a symlink inside the namespace is made of
+    components that are individually harmless. The type comes from the
+    suffix, and a suffix the table does not know is served as bytes
+    rather than refused: this is what a browser downloads any upload by.
+    """
+    try:
+        target = path_safety.under(upload_dir, token, *parts)
+    except ValueError:
+        return 400, {'error': 'invalid path component'}
+    if not target.is_file():
+        return 404, {'error': missing}
+    return FileAnswer(target, screenshot_mime(_format_of(target)))
+
+
+def named_file(upload_dir, token, named):
+    """GET /upload?token=X&path=<id>/<file> — serve that stored file.
+
+    The selector is relative to the namespace the credential established,
+    and it is those two components exactly. The listing's `path` begins
+    with the token, and a request target is what a proxy access log
+    records whether or not a link on a page carried it, so the route a
+    browser fetches every upload by does not take that form: handed the
+    listed path back, token-led or not, it answers 400 like any other
+    shape rather than teaching a client to put the credential in a query.
+    `named_upload` keeps the token-led form for the path a screenshot
+    result carries.
+    """
+    parts = named.split('/')
+    if len(parts) != 2 or not all(parts):
+        return 400, {'error': 'path must be <id>/<file>'}
+    if any(path_safety.unsafe_component(part) for part in parts):
+        return 400, {'error': 'invalid path component'}
+    return _stored_file(upload_dir, token, parts, 'file not found')
+
+
 def named_upload(upload_dir, token, named):
-    """Serve exactly the file a result named, not whatever is newest.
+    """Serve exactly the screenshot a result named, not whatever is newest.
 
     `named` is the `path` POST /upload answered with and the result
     carries, token component included. Screenshot ids are reused — `_ss`
@@ -241,18 +285,20 @@ def named_upload(upload_dir, token, named):
     capture, and the newest file in it belongs to whichever invocation
     finished last. Every component is checked the way each was checked
     on the way in, and the leading one has to be the caller's own token:
-    one token's paths never name another's storage.
+    one token's paths never name another's storage. The rest is resolved
+    as any stored file is; only a screenshot type is answered here.
     """
     parts = named.split('/')
     if any(path_safety.unsafe_component(part) for part in parts):
         return 400, {'error': 'invalid path component'}
     if parts[0] != token:
         return 404, {'error': 'no screenshot'}
-    target = upload_dir.joinpath(*parts)
-    fmt = target.suffix.lstrip('.').lower()
-    if fmt not in SCREENSHOT_TYPES or not target.is_file():
+    answer = _stored_file(upload_dir, token, parts[1:], 'no screenshot')
+    if not isinstance(answer, FileAnswer):
+        return answer
+    if _format_of(answer.path) not in SCREENSHOT_TYPES:
         return 404, {'error': 'no screenshot'}
-    return FileAnswer(target, screenshot_mime(fmt))
+    return answer
 
 
 def latest_screenshot(upload_dir, token, params):
@@ -274,10 +320,9 @@ def latest_screenshot(upload_dir, token, params):
         if not d.is_dir():
             continue
         for f in d.iterdir():
-            if f.suffix.lower().lstrip('.') in SCREENSHOT_TYPES:
+            if _format_of(f) in SCREENSHOT_TYPES:
                 if not latest or f.stat().st_mtime > latest.stat().st_mtime:
                     latest = f
     if not latest:
         return 404, {'error': 'no screenshot'}
-    fmt = latest.suffix.lstrip('.').lower()
-    return FileAnswer(latest, screenshot_mime(fmt))
+    return FileAnswer(latest, screenshot_mime(_format_of(latest)))
