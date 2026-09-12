@@ -1,9 +1,11 @@
 // §11 UPLOADS — paged browser of $DAEDALUS_DIR/uploads/<token>/…
 
 import { h, clear, fmtSize, fmtDateTime, truncate, errMsg, toast, armedAction } from './_util.js';
-import { api, getToken, getServer } from '../api.js';
+import { api, getToken, objectUrl } from '../api.js';
 
 const PAGE_SIZE = 50;
+// The types the bridge stores as screenshots, which an <img> can show.
+const PREVIEWABLE = /\.(png|jpe?g|webp)$/i;
 
 export function mount(container) {
   const root = h('div', {},
@@ -30,8 +32,80 @@ export function mount(container) {
   let total = 0;
   let items = [];
 
+  // An <a href> cannot carry an Authorization header, so a file is fetched
+  // with one and handed to the browser as an object URL, the way §03 shows
+  // a screenshot. Links used to name /uploads/<path>, a route the bridge
+  // does not have, and since the listed path begins with the token every
+  // click both 404ed and wrote the credential into browser history and
+  // the proxy access log. Fetched on demand rather than with the listing:
+  // a page holds fifty arbitrary files, and fetching each one up front is
+  // a download of the page. One fetch per file serves both its preview and
+  // its download, and the page's URLs are revoked when its rows go.
+  let held = new Map();
+
+  function release() {
+    for (const pending of held.values()) {
+      pending.then((url) => URL.revokeObjectURL(url), () => {});
+    }
+    held = new Map();
+  }
+
+  function fileUrl(f) {
+    if (!held.has(f.path)) {
+      // `<id>/<file>`, relative to the namespace the Bearer header
+      // establishes, and never the listed path: that one begins with the
+      // token, and a request target reaches the proxy access log whether
+      // or not a link carried it. encodeURIComponent, because `#`, `%`
+      // and `&` are legal in a filename and each would end or split the
+      // query otherwise.
+      const selector = encodeURIComponent(f.id + '/' + f.filename);
+      const fetched = objectUrl('/upload?path=' + selector)
+        .catch((e) => {
+          // Only this fetch's own entry: a re-render may already hold a
+          // newer fetch for the same path, and deleting that one would
+          // leave its object URL out of every release() to come.
+          if (held.get(f.path) === fetched) held.delete(f.path);
+          throw e;
+        });
+      held.set(f.path, fetched);
+    }
+    return held.get(f.path);
+  }
+
+  async function download(f) {
+    try {
+      const url = await fileUrl(f);
+      // A synthesized anchor: the object URL exists only once the fetch
+      // has settled, so a rendered href could never have carried it.
+      const anchor = h('a', { href: url, download: f.filename });
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (e) { toast(errMsg(e), 'err'); }
+  }
+
+  async function preview(f, cell, button) {
+    button.disabled = true;
+    try {
+      const url = await fileUrl(f);
+      button.remove();
+      cell.appendChild(
+        h('a', { href: url, target: '_blank', rel: 'noopener', title: 'open full-size in new tab', style: { display: 'block', cursor: 'zoom-in', marginTop: '4px' } },
+          h('img', { src: url, alt: 'Preview of ' + f.filename, style: { maxWidth: '320px', border: '1px solid var(--border)', display: 'block' } }),
+        ),
+      );
+    } catch (e) {
+      button.disabled = false;
+      toast(errMsg(e), 'err');
+    }
+  }
+
   async function load() {
     const token = getToken();
+    // The rows go either way from here, so what they held goes first: a
+    // refresh with no token, or one whose listing failed, used to replace
+    // them with a notice and leave every object URL of the page alive.
+    release();
     if (!token) { listEl.innerHTML = '<div class="dim italic small">no token.</div>'; return; }
     listEl.innerHTML = '<div class="dim italic small">loading…</div>';
     try {
@@ -52,6 +126,7 @@ export function mount(container) {
     metaEl.textContent = `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`;
     prevBtn.disabled = offset === 0;
     nextBtn.disabled = offset + PAGE_SIZE >= total;
+    release();
     clear(listEl);
     if (visible.length === 0) { listEl.appendChild(h('div', { class: 'dim italic small' }, total === 0 ? 'no uploads.' : 'no matches on this page.')); return; }
     const table = h('table', { class: 't' },
@@ -68,15 +143,12 @@ export function mount(container) {
   }
 
   function fileRow(f) {
-    const server = getServer() || '';
-    // Served by the deployment's reverse proxy, not by the bridge:
-    // server.py has no /uploads/ route. See "Deployment" in README.md.
-    const dlUrl = `${server}/uploads/${f.path}`;
-    const isImage = /\.(png|jpe?g|gif|webp)$/i.test(f.filename);
-    // The proxy-served path, not /screenshot?token=…: a preview link is a URL
-    // the browser keeps in its history, and this one names the exact file the
-    // row describes rather than whichever capture under that id finished last.
-    const previewUrl = isImage ? dlUrl : '';
+    const nameCell = h('td', {}, h('span', { class: 'mono-sm' }, f.filename));
+    if (PREVIEWABLE.test(f.filename)) {
+      const button = h('button', { class: 'ghost sm', style: { marginLeft: '6px' } }, 'preview');
+      button.addEventListener('click', () => preview(f, nameCell, button));
+      nameCell.appendChild(button);
+    }
     return h('tr', {},
       h('td', {},
         h('span', { class: 'mono amber', title: f.id }, truncate(f.id, 32)),
@@ -92,14 +164,11 @@ export function mount(container) {
           }, { confirmLabel: 'clear id?' }),
         }, '× id'),
       ),
-      h('td', {},
-        h('a', { href: dlUrl, target: '_blank', rel: 'noopener', class: 'mono-sm' }, f.filename),
-        isImage && h('div', { class: 'dimmer small' }, h('a', { href: previewUrl, target: '_blank', rel: 'noopener' }, 'preview')),
-      ),
+      nameCell,
       h('td', { class: 'num' }, fmtSize(f.size)),
       h('td', { class: 'dimmer small' }, fmtDateTime(f.mtime)),
       h('td', { style: { textAlign: 'right' } },
-        h('a', { href: dlUrl, download: f.filename, class: 'btn sm ghost', style: { textDecoration: 'none' } }, 'download'),
+        h('button', { class: 'ghost sm', onclick: () => download(f) }, 'download'),
         h('button', {
           class: 'ghost sm danger',
           onclick: armedAction(async () => {
