@@ -26,6 +26,10 @@ os.environ.setdefault('DAEDALUS_MCP_PORT', '0')
 
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 
+# The result header's marker is whichever glyph the console can encode, so
+# what is pinned is that a marker immediately precedes the id (see
+# tests/test_cli.py).
+IN_MARKS = ('←', '<-')
 TOK = 'clitok'
 # The bridge child inherits its token from here, the way test_cli.py's does.
 os.environ['TOKEN'] = ''
@@ -186,6 +190,98 @@ def test_store_hotfix_sends_permanent_only_when_it_was_asked_for(tmp):
             stored)
         assert code == 0, (code, out, err)
         assert queued.get('permanent') is True, queued
+
+
+def _answer_eval(base, docroot, argv, env, tab, result):
+    """Run one eval subcommand and play the extension over HTTP.
+
+    Returns (returncode, stdout, stderr). The answer is posted as soon as
+    the command is queued, so a CLI that gives up before that is one that
+    gave up before the browser could possibly have answered.
+    """
+    # Nothing drains this queue — there is no extension here — so an
+    # earlier case's entry may remain; the entry answered must be this one.
+    qdir = Path(docroot) / 'commands' / f'{TOK}_{tab}'
+    survivors = clear_command_queue(qdir)
+    proc = subprocess.Popen(
+        CLI + argv, cwd=str(_util.ROOT), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding='utf-8')
+    try:
+        queued = queued_command(
+            qdir, 'the enqueued command file', exclude=survivors)
+        status, _ = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': tab, 'id': queued['id'],
+            'result': result, 'error': None, 'ts': 1,
+            'world': 'page:cdp', '_did': queued['_did']})
+        assert status == 200, status
+        out, err = proc.communicate(timeout=60)
+    finally:
+        _drain.kill_and_drain(proc)
+    return proc.returncode, out, err
+
+
+def test_a_zero_timeout_on_exec_and_put_reads_as_the_default(tmp):
+    """`-t 0` waits the documented default; it does not time out at once.
+
+    positive_timeout admits 0 on the promise that every call site reads it
+    as unset, the way screenshot and cookies do. put and exec handed it
+    straight to the waiter, whose deadline was now plus nothing, so the CLI
+    reported `Timeout (0s)` for a command the bridge had already queued and
+    the browser went on to run — and a retry ran the side effect twice.
+    """
+    source = Path(tmp) / 'job.js'
+    source.write_text('document.title', encoding='utf-8')
+    with _util.bridge(tmp) as (base, docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab0')
+        cases = (
+            ['exec', 'job0', 'document.title', '-t', '0'],
+            ['put', 'job1', str(source), '--timeout', '0'],
+        )
+        for argv in cases:
+            code, out, err = _answer_eval(
+                base, docroot, argv, env, 'tab0', 'Zero Title')
+            assert code == 0, (argv, code, out, err)
+            assert 'Timeout' not in err, (argv, err)
+            assert any(f'{m} {argv[1]}' in out for m in IN_MARKS), (argv, out)
+            assert 'Zero Title' in out, (argv, out)
+
+
+_RECORD_WAITER_TIMEOUTS = """
+import argparse, json, sys
+from daedalus_cli import commands_eval
+handed = []
+commands_eval.send_and_wait = (
+    lambda cmd_id, code, target_tab, wait, timeout:
+    handed.append([cmd_id, timeout]))
+for timeout in (0, 7):
+    commands_eval.do_exec(argparse.Namespace(
+        id='ex', code='1', broadcast=True, no_result=False,
+        timeout=timeout))
+    commands_eval.do_put(argparse.Namespace(
+        id='pt', file=sys.argv[1], broadcast=True, no_result=False,
+        timeout=timeout))
+print(json.dumps(handed))
+"""
+
+
+def test_exec_and_put_hand_the_waiter_exactly_fifteen_seconds_for_zero(
+        tmp):
+    """Zero means 15, the parser's documented default, and only zero does.
+
+    The bridge test above cannot tell 15 from any other positive fallback;
+    this one records what the two handlers hand send_and_wait and pins the
+    number, and that an explicit positive timeout travels unchanged. A
+    child with the repository root as its working directory, so the
+    package under test is this tree's and not an installed copy.
+    """
+    source = Path(tmp) / 'job.js'
+    source.write_text('document.title', encoding='utf-8')
+    run = _run([sys.executable, '-c', _RECORD_WAITER_TIMEOUTS, str(source)],
+               cli_env(DAEDALUS_TOKEN=TOK))
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    handed = json.loads(run.stdout.strip().splitlines()[-1])
+    assert handed == [['ex', 15], ['pt', 15], ['ex', 7], ['pt', 7]], handed
 
 
 def test_the_result_wait_outlives_a_truncated_peek(tmp):
