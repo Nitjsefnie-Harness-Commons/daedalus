@@ -25,6 +25,11 @@ def do_tabs(args):
         print(f'  {tid}  {age:>4}s  {title:<50}  {url}')
 
 
+# `-t 0` is "unset": positive_timeout admits zero on the promise that
+# every call site reads it as the subcommand's own default, the way
+# screenshot and cookies do. Handing it to the waiter as-is made the
+# deadline now plus nothing, so the CLI reported `Timeout (0s)` for a
+# command the browser then ran anyway.
 def do_put(args):
     if args.file == '-':
         code = sys.stdin.read()
@@ -35,13 +40,13 @@ def do_put(args):
             code = f.read()
     target_tab = '' if args.broadcast else tab()
     send_and_wait(args.id, code.strip(), target_tab,
-                  wait=not args.no_result, timeout=args.timeout)
+                  wait=not args.no_result, timeout=args.timeout or 15)
 
 
 def do_exec(args):
     target_tab = '' if args.broadcast else tab()
     send_and_wait(args.id, args.code.strip(), target_tab,
-                  wait=not args.no_result, timeout=args.timeout)
+                  wait=not args.no_result, timeout=args.timeout or 15)
 
 
 def do_result(args):
