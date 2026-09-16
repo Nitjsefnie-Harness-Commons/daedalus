@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
 ORIGINS_KEY = 'daedalus-segment-origins'
@@ -34,6 +35,7 @@ const messageListeners = [];
 const fetches = [];
 const resultPayloads = [];
 let storageBroken = false;
+let releaseWrite = null;
 const storageStore = Object.assign({
   'daedalus-token': '__TOKEN__',
   'daedalus-server': '__SERVER__',
@@ -76,6 +78,11 @@ const chrome = {
         return out;
       },
       set: async (entries) => {
+        // The first write parks until the harness releases it, so a read
+        // dispatched behind it observes either the lock or its absence.
+        if (plan.holdFirstWrite && releaseWrite === null) {
+          await new Promise((resolve) => { releaseWrite = resolve; });
+        }
         for (const key of Object.keys(entries)) {
           storageStore[key] = copy(entries[key]);
         }
@@ -101,27 +108,7 @@ const chrome = {
     sendMessage: async () => {},
     create(_details, callback) { callback({ id: 101 }); },
   },
-  scripting: {
-    executeScript: async () => { throw new Error('unavailable'); },
-  },
-  debugger: {
-    onEvent: eventTarget(),
-    onDetach: eventTarget(),
-    attach: async () => { throw new Error('unavailable'); },
-    detach: async () => {},
-    sendCommand: async () => ({}),
-  },
-  runtime: {
-    lastError: null,
-    onMessage: eventTarget(messageListeners),
-    onConnect: eventTarget(),
-    getPlatformInfo() {},
-    getManifest: () => ({ version: '0.0.0' }),
-  },
-  alarms: {
-    onAlarm: eventTarget(),
-    create() {},
-  },
+""" + INERT_WORKER_APIS + r"""
 };
 
 async function bridgeFetch(target, init = {}) {
@@ -204,6 +191,17 @@ async function run() {
   context.concurrentCommands = plan.concurrent || [];
   await vm.runInContext(
     'Promise.all(concurrentCommands.map(dispatchCommand))', context);
+  context.heldSequence = plan.heldSequence || [];
+  if (context.heldSequence.length > 0) {
+    const pending = vm.runInContext(
+      'heldSequence.map(dispatchCommand)', context);
+    for (let attempt = 0; releaseWrite === null; attempt++) {
+      if (attempt === 1000) throw new Error('no write was ever held');
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    releaseWrite();
+    await Promise.all(pending);
+  }
   const stored = storageStore['__ORIGINS_KEY__'];
   return {
     fetches,
@@ -303,6 +301,25 @@ def test_an_empty_or_absent_allowlist_refuses_every_origin(tmp):
         _refused(outcome, 'origin not allowed')
 
 
+def test_an_unlisted_origin_learns_nothing_else(tmp):
+    """The allowlist is checked before the job and the bridge config.
+
+    An unlisted page with a bad job or an unconfigured bridge hears
+    `origin not allowed`, never `Missing job` or `bridge not configured`.
+    """
+    del tmp
+    outcome = _run_mint(_mint_plan(
+        [ALLOWED], _sender(OTHER), {'type': 'segmentJob'}))
+    _refused(outcome, 'origin not allowed')
+    outcome = _run_mint(_mint_plan(
+        [ALLOWED], _sender(OTHER), {'type': 'segmentJob', 'job': ''}))
+    _refused(outcome, 'origin not allowed')
+    plan = _mint_plan(
+        [ALLOWED], _sender(OTHER), {'type': 'segmentJob', 'job': 'job_1'})
+    plan['store']['daedalus-server'] = ''
+    _refused(_run_mint(plan), 'origin not allowed')
+
+
 def test_a_sender_without_an_origin_is_refused(tmp):
     """No fallback to the sender's tab or URL: absent origin fails closed."""
     del tmp
@@ -383,9 +400,7 @@ def test_a_storage_failure_answers_an_error_not_silence(tmp):
     outcome = _run_mint(_mint_plan(
         [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'},
         storageThrows=True))
-    assert outcome['fetches'] == [], outcome
-    assert len(outcome['answers']) == 1, outcome
-    assert list(outcome['answers'][0]) == ['error'], outcome
+    _refused(outcome, 'storage unavailable')
 
 
 def _commands(commands, store=None, concurrent=None):
@@ -513,9 +528,36 @@ def test_two_allows_in_flight_at_once_both_land(tmp):
         _command('allow-segment-origin', origin=OTHER, id='b'),
     ])
     assert outcome['stored'] == [ALLOWED, OTHER], outcome
-    assert sorted(item['id'] for item in outcome['posted']) == ['a', 'b'], (
-        outcome)
-    assert all(item['error'] is None for item in outcome['posted']), outcome
+    by_id = {item['id']: item for item in outcome['posted']}
+    assert sorted(by_id) == ['a', 'b'], outcome
+    for item in by_id.values():
+        assert item['error'] is None, item
+        assert item['result']['added'] is True, item
+
+
+def test_a_list_behind_an_in_flight_allow_sees_the_write(tmp):
+    """A list dispatched while an allow's write is pending waits for it.
+
+    The stream dispatches frames without awaiting, so an operator's
+    allow-then-list arrives back to back. The fake parks the allow's
+    storage write until both commands are in flight; a list outside the
+    lock reads the store before that write and answers the old array.
+    """
+    del tmp
+    outcome = _run_mint({
+        'store': {},
+        'holdFirstWrite': True,
+        'heldSequence': [
+            _command('allow-segment-origin', origin=ALLOWED, id='allow'),
+            _command('list-segment-origins', id='list'),
+        ],
+    })
+    by_id = {item['id']: item for item in outcome['posted']}
+    assert by_id['allow']['result']['added'] is True, outcome
+    assert by_id['list'] == {
+        'id': 'list', 'error': None, 'result': {'origins': [ALLOWED]},
+    }, outcome
+    assert outcome['stored'] == [ALLOWED], outcome
 
 
 def main():

@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
 
@@ -78,27 +79,7 @@ const chrome = {
       callback({ id: 100 + created.length });
     },
   },
-  scripting: {
-    executeScript: async () => { throw new Error('unavailable'); },
-  },
-  debugger: {
-    onEvent: eventTarget(),
-    onDetach: eventTarget(),
-    attach: async () => { throw new Error('unavailable'); },
-    detach: async () => {},
-    sendCommand: async () => ({}),
-  },
-  runtime: {
-    lastError: null,
-    onMessage: eventTarget(messageListeners),
-    onConnect: eventTarget(),
-    getPlatformInfo() {},
-    getManifest: () => ({ version: '0.0.0' }),
-  },
-  alarms: {
-    onAlarm: eventTarget(),
-    create() {},
-  },
+""" + INERT_WORKER_APIS + r"""
 };
 
 const context = vm.createContext({

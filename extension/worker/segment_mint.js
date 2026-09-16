@@ -108,9 +108,11 @@ async function handleRevokeSegmentOrigin(cmd) {
   }
 }
 
+// Read under the same lock, because the stream dispatches without
+// awaiting: a list sent right behind an allow answers the settled store.
 async function handleListSegmentOrigins(cmd) {
   try {
-    const origins = await _storedOrigins();
+    const origins = await _withOriginLock(_storedOrigins);
     await postResult(cmd._execution, { origins }, null, 'extension');
   } catch (e) {
     await postResult(cmd._execution, null, e.message, 'extension');
