@@ -77,10 +77,11 @@ def test_allow_segment_origin_sends_the_extension_command(tmp):
 def test_allow_segment_origin_reports_an_origin_already_stored(tmp):
     del tmp
     canned = {'origin': ALLOWED, 'origins': [ALLOWED], 'added': False}
-    recorded, out = run_cli(['allow-segment-origin', ALLOWED], [canned])
+    recorded, out = run_cli(
+        ['allow-segment-origin', NON_CANONICAL], [canned])
     assert recorded.calls == [
         ('_allow_seg_origin', 'allow-segment-origin',
-         {'origin': ALLOWED})], recorded.calls
+         {'origin': NON_CANONICAL})], recorded.calls
     assert out == f'Already allowed {ALLOWED}\n{ALLOWED}\n', repr(out)
 
 
@@ -120,7 +121,7 @@ def test_revoke_segment_origin_exits_for_an_origin_never_stored(tmp):
     del tmp
     canned = {'origin': OTHER, 'origins': [ALLOWED], 'found': False}
     try:
-        run_cli(['revoke-segment-origin', OTHER], [canned])
+        run_cli(['revoke-segment-origin', OTHER + '/some/path'], [canned])
     except SystemExit as exit_request:
         expected = f'No such origin "{OTHER}"'
         assert exit_request.code == expected, exit_request.code

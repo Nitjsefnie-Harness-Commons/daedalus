@@ -330,10 +330,10 @@ def test_a_sender_without_an_origin_is_refused(tmp):
 def test_a_stored_entry_is_compared_verbatim_never_canonicalised(tmp):
     """The store is canonical by construction; the reader trusts it as is.
 
-    Chrome sends canonical origins, so a non-canonical spelling can only be
-    on the stored side. An entry with a path or an uppercase host is not
-    what the sender's origin will ever equal, and the reader must not
-    rescue it by canonicalising what it read.
+    The mint canonicalises the sender's origin, so a non-canonical spelling
+    can only be on the stored side. An entry with a path or an uppercase
+    host is not what the sender's origin will ever equal, and the reader
+    must not rescue it by canonicalising what it read.
     """
     del tmp
     for spelling in ('https://Allowed.example.com', ALLOWED + '/',
