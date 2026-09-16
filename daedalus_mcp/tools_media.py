@@ -69,6 +69,26 @@ def register(mcp, bridge):
         return data
 
     @mcp.tool()
+    async def allow_segment_origin(origin: str) -> dict:
+        """Allow `origin` to mint segment jobs. Returns {origin, origins,
+    added}; origins is the sorted allowlist after the change."""
+        return await bridge.ext_cmd(
+            '_allow_seg_origin', 'allow-segment-origin', origin=origin)
+
+    @mcp.tool()
+    async def revoke_segment_origin(origin: str) -> dict:
+        """Remove `origin` from the segment-mint allowlist. Returns {origin,
+    origins, found}."""
+        return await bridge.ext_cmd(
+            '_revoke_seg_origin', 'revoke-segment-origin', origin=origin)
+
+    @mcp.tool()
+    async def list_segment_origins() -> dict:
+        """List origins allowed to mint segment jobs. Returns {origins}."""
+        return await bridge.ext_cmd(
+            '_list_seg_origins', 'list-segment-origins')
+
+    @mcp.tool()
     async def uploads(upload_id: str = '', limit: int | None = None,
                       offset: int | None = None):
         """List uploaded files. When limit/offset given, returns {items,total,limit,offset}.
@@ -102,6 +122,9 @@ def register(mcp, bridge):
         'screenshot': screenshot,
         'segment_job': segment_job,
         'segment_status': segment_status,
+        'allow_segment_origin': allow_segment_origin,
+        'revoke_segment_origin': revoke_segment_origin,
+        'list_segment_origins': list_segment_origins,
         'uploads': uploads,
         'delete_upload': delete_upload,
     }

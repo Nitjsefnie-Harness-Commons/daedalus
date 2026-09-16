@@ -134,6 +134,7 @@ REQUIRED_ARGUMENTS = {
     'value': 'value',
     'css': 'body {}',
     'pattern': '*://example.com/*',
+    'origin': 'https://example.com',
     'fix_id': 'fix',
     'permanent': True,
     'method': 'Page.getFrameTree',
