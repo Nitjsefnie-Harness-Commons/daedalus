@@ -1,5 +1,6 @@
 /* global _takeEvalRelay, postResult, registerTab, handleHotfixReplay */
 /* global readBoundedBody, gmResponseLimit, bytesToBase64, _recordTiming */
+/* global mintSegmentSig */
 
 // ─── Message handler (from content scripts) ───
 
@@ -192,6 +193,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ downloadId });
         }
       });
+    return true;
+  } else if (msg.type === 'segmentJob') {
+    // A thrown failure still answers: a page waiting on a callback that
+    // never fires cannot tell a refusal from a dead worker.
+    mintSegmentSig(sender, msg.job).then(
+      sendResponse,
+      (e) => sendResponse({ error: (e && e.message) || String(e) }));
     return true;
   }
 });
