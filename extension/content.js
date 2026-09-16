@@ -165,6 +165,18 @@ window.addEventListener('message', (e) => {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'download', event: 'load' }, '*');
       }
     });
+  } else if (msg.handler === 'segmentJob') {
+    chrome.runtime.sendMessage({ type: 'segmentJob', job: msg.job }, (resp) => {
+      const err = chrome.runtime.lastError && chrome.runtime.lastError.message;
+      const failure = err || (resp && resp.error)
+        || (!resp && 'no response from background (service worker dead?)')
+        || ((typeof resp.sig !== 'string' || !resp.sig) && 'background returned no sig');
+      if (failure) {
+        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'segmentJob', error: failure }, '*');
+      } else {
+        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'segmentJob', sig: resp.sig }, '*');
+      }
+    });
   }
 });
 

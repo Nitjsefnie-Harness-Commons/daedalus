@@ -122,6 +122,7 @@ Matching pages receive a Tampermonkey-style `window.GM` subset from `page.js`:
 | `GM.notification(opts)` | Show a desktop notification |
 | `GM.openInTab(url, opts)` | Open a tab on a web URL (`http:` or `https:` only) |
 | `GM.download(opts)` | Start a download |
+| `GM.segmentJob(job)` | Mint this page's job-scoped segment capability through the extension (allowlisted origins only) |
 | `GM.info` | Read shim metadata |
 
 Cookie access is intentionally absent from the page-facing shim. It remains an
@@ -144,9 +145,11 @@ sessions elsewhere), open tabs on web URLs only with `GM.openInTab`, start
 downloads with `GM.download`, show notifications with `GM.notification`,
 write the clipboard
 with `GM.setClipboard`, share non-reserved extension storage through
-`GM.getValue`, `GM.setValue`, `GM.deleteValue`, and `GM.listValues`, and inject
-CSS with `GM.addStyle`. Narrow the `matches` entries in
-`extension/manifest.json` if that authority is too broad for your browser.
+`GM.getValue`, `GM.setValue`, `GM.deleteValue`, and `GM.listValues`, inject
+CSS with `GM.addStyle`, and — only from an origin an operator has allowlisted —
+mint a job-scoped segment capability with `GM.segmentJob`. Narrow the
+`matches` entries in `extension/manifest.json` if that authority is too broad
+for your browser.
 
 **The bridge token and server URL are not reachable through the page's GM
 storage methods.** Their reserved `daedalus-` keys are filtered out of reads,

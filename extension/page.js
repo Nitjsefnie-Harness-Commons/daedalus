@@ -64,6 +64,10 @@
       if (msg.error && cb.reject) cb.reject(new Error(msg.error));
       else if (cb.resolve) cb.resolve();
       delete _pending[msg.reqId];
+    } else if (msg.handler === 'segmentJob') {
+      if (msg.error && cb.reject) cb.reject(new Error(msg.error));
+      else if (cb.resolve) cb.resolve(msg.sig);
+      delete _pending[msg.reqId];
     } else {
       // notification, addStyle — fire and forget
       if (cb.resolve) cb.resolve();
@@ -338,6 +342,15 @@
         name: (typeof opts === 'object' ? opts.name : null) || 'download',
       });
       if (typeof opts === 'object') _pending[reqId] = opts;
+    },
+
+    segmentJob: function(job) {
+      // The job goes across as given: the worker is the one authority on
+      // what a job is and which origin may mint for it.
+      return new Promise((resolve, reject) => {
+        const reqId = gmPost('segmentJob', { job });
+        _pending[reqId] = { resolve, reject };
+      });
     },
 
     info: { script: { version: '0.25.1' }, scriptHandler: 'Daedalus' },
