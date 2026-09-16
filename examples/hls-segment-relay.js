@@ -10,12 +10,15 @@
 // pass arguments to `put`):
 //   __SERVER__   bridge base URL, e.g. http://127.0.0.1:8081
 //   __JOB__      server-safe path component, for example relay_job-1
-//   __SIG__      job capability — `daedalus segment-job <job>` prints it
+//   __SIG__      job capability — optional: `daedalus segment-job <job>`
+//                prints it; left unsubstituted, the script mints its own
+//                through the extension (see below)
 //   __PLAYLIST__ absolute URL of the media playlist (.m3u8) to download
 //   __CONC__     concurrent workers (default 3)
 //
-// Three endpoints do all the work; the first runs on the trusted side (CLI or
-// MCP), and this script only ever calls the other two:
+// Three endpoints do all the work. The first is reached from the trusted side
+// (CLI or MCP) or, through `GM.segmentJob`, by the extension on this page's
+// behalf; this script itself only ever calls the other two:
 //   POST /segment-job                        {token, job} -> {ok, sig}
 //   GET  /segment-status?job=J               -> {done:[1,2,...], count:N}
 //   POST /segment?job=J&seg=N&total=T        raw arraybuffer body
@@ -32,10 +35,19 @@
 // quotas, and stale temporary writes are cleared before another is admitted.
 // The sig cannot access browser-control or other jobs' routes.
 //
-// That mint — `daedalus segment-job <job>` or the MCP `segment_job` tool —
-// is the only path a page-side client has: the page never holds the bridge
-// token (the GM storage shim refuses `daedalus-` keys), and the extension
-// mediates no mint, or every visited site could mint jobs on the bridge.
+// Two ways to obtain it. Substitute __SIG__ with the output of
+// `daedalus segment-job <job>` (or the MCP `segment_job` tool), or leave the
+// placeholder alone and the script asks the extension to mint it with
+// `await window.GM.segmentJob(JOB)`. The extension answers only for an
+// origin the operator allowlisted beforehand, once per origin, before the
+// first run:
+//   daedalus allow-segment-origin https://<host>
+// Every other origin, and an empty allowlist, is refused without a bridge
+// request, and the page sees exactly the sig, never the bridge token (the
+// GM storage shim refuses `daedalus-` keys, the allowlist's own included).
+// Any script on an allowlisted origin can create jobs under the bridge
+// token until `daedalus revoke-segment-origin` removes it, so allowlist a
+// site you trust, not one you merely visit.
 //
 // `/segment-status` is what makes this resumable when its status GET is
 // available: the script asks which segments the bridge already holds and skips
@@ -49,7 +61,7 @@
 
 const SERVER = '__SERVER__';
 const JOB = '__JOB__';
-const SIG = '__SIG__';
+let SIG = '__SIG__';
 const PLAYLIST = '__PLAYLIST__';
 const CONCURRENCY = '__CONC__'.startsWith('__') ? 3 : parseInt('__CONC__', 10);
 
@@ -102,6 +114,15 @@ function badge(text, color) {
 }
 
 async function run() {
+  if (SIG.startsWith('__')) {
+    badge('relay: minting capability…');
+    try {
+      SIG = await window.GM.segmentJob(JOB);
+    } catch (e) {
+      badge('relay: mint refused: ' + e.message, '#dc2626');
+      return;
+    }
+  }
   badge('relay: reading playlist…', '#555');
   const segments = parsePlaylist(await gmGet(PLAYLIST, 'text'), PLAYLIST);
   const TOTAL = segments.length;

@@ -156,13 +156,25 @@ storage methods.** Their reserved `daedalus-` keys are filtered out of reads,
 writes, deletion, and enumeration. Treat the token as a credential anyway:
 anyone who has it can drive the browser through the bridge.
 
-A page cannot mint a segment capability either. `POST /segment-job` takes the
-bridge token, which the page never holds, and the extension deliberately
-mediates no mint: the page-to-extension relay is reachable by any page's
-script, so a mediated mint would let every visited site create jobs on the
-bridge. A page-side relay client such as `examples/hls-segment-relay.js`
-receives its job capability from the operator, minted with
-`daedalus segment-job <job>` or the MCP `segment_job` tool.
+A page mints a segment capability only through `GM.segmentJob`, and only
+from an origin an operator has allowlisted with
+`daedalus allow-segment-origin <origin>` (or the MCP `allow_segment_origin`
+tool). `POST /segment-job` takes the bridge token, which the page never
+holds; the extension makes that request on the page's behalf after comparing
+the sender's origin, as Chrome reports it, verbatim against the allowlist,
+and refuses every other origin — an empty allowlist refuses everything. The
+allowlist lives under a reserved `daedalus-` key, so a page can neither read
+nor extend it, and the page receives exactly the job-scoped sig, nothing
+else. Allowlisting is a trust decision about the whole origin: the bridge
+mint is idempotent for the token, so every script running on an allowlisted
+origin — third-party script included — can create jobs under the bridge
+token, and re-fetch the sig of any job the token already owns, until
+`daedalus revoke-segment-origin <origin>` (or `revoke_segment_origin`)
+removes it; `daedalus list-segment-origins` shows the current list. A
+page-side relay client such as `examples/hls-segment-relay.js` therefore
+runs either with a sig the operator minted through
+`daedalus segment-job <job>` or the MCP `segment_job` tool, or by minting
+its own from an allowlisted page.
 
 JavaScript results from a page you do not control are not integrity-protected.
 The reported execution channel describes how the source ran; it does not make
