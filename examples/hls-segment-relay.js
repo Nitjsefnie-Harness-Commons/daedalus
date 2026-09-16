@@ -32,6 +32,11 @@
 // quotas, and stale temporary writes are cleared before another is admitted.
 // The sig cannot access browser-control or other jobs' routes.
 //
+// That mint — `daedalus segment-job <job>` or the MCP `segment_job` tool —
+// is the only path a page-side client has: the page never holds the bridge
+// token (the GM storage shim refuses `daedalus-` keys), and the extension
+// mediates no mint, or every visited site could mint jobs on the bridge.
+//
 // `/segment-status` is what makes this resumable when its status GET is
 // available: the script asks which segments the bridge already holds and skips
 // them, so re-running after a crashed tab or reload costs only what is missing.

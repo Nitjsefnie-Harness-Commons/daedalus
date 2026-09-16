@@ -5,13 +5,10 @@
 
 // The bridge's own settings live in the same chrome.storage.local that the GM
 // shim exposes to page scripts, and the only thing gating that relay is a
-// message `direction` any page can spell. Without this, ordinary site
-// JavaScript reads the bridge token with
-// `GM.getValue('daedalus-token')`, or repoints the bridge with
-// `GM.setValue('daedalus-server', ...)`.
-//
-// So the relay owns a namespace: keys beginning `daedalus-` are the
-// extension's, and page context may not read or write them. Everything else
+// message `direction` any page can spell. Without this filter a page could
+// read the bridge token with `GM.getValue('daedalus-token')`, or repoint the
+// bridge with `GM.setValue('daedalus-server', ...)`. So the relay owns a
+// namespace: `daedalus-` keys are refused to page context; everything else
 // with a string key behaves as a userscript expects.
 const RESERVED_KEY = /^daedalus-/;
 
