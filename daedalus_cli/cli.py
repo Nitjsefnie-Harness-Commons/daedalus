@@ -14,13 +14,14 @@ from .commands_browser import (do_cdp, do_clear_cookies, do_close_tab,
                                do_ext_self_reload, do_fetch_timings,
                                do_focus_tab, do_open_tab, do_open_tabs,
                                do_remove_cookie, do_set_cookie)
-from .commands_content import (do_block_requests, do_clear_hotfix,
-                               do_clear_hotfixes, do_inject_css,
-                               do_list_block_rules, do_list_hotfixes,
+from .commands_content import (do_allow_segment_origin, do_block_requests,
+                               do_clear_hotfix, do_clear_hotfixes,
+                               do_inject_css, do_list_block_rules,
+                               do_list_hotfixes, do_list_segment_origins,
                                do_net_capture, do_net_capture_get,
                                do_net_capture_stop, do_remove_css,
-                               do_set_permanent, do_store_hotfix,
-                               do_unblock_requests)
+                               do_revoke_segment_origin, do_set_permanent,
+                               do_store_hotfix, do_unblock_requests)
 from .commands_eval import (do_exec, do_navigate, do_ping, do_put, do_reload,
                             do_result, do_tabs, do_title, do_url)
 from .commands_media import (do_screenshot, do_segment_job, do_segment_status,
@@ -66,6 +67,9 @@ DISPATCH = {
     'clear-hotfixes': do_clear_hotfixes,
     'list-hotfixes': do_list_hotfixes,
     'set-permanent': do_set_permanent,
+    'allow-segment-origin': do_allow_segment_origin,
+    'revoke-segment-origin': do_revoke_segment_origin,
+    'list-segment-origins': do_list_segment_origins,
     'uploads': do_uploads,
 }
 
