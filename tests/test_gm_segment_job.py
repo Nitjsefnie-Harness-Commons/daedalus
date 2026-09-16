@@ -99,13 +99,13 @@ function answer(index) {
   const callback = answerers[index];
   if (!callback) return;
   const given = plan.answers[index];
+  const resp = given.resp === null ? undefined : given.resp;
   if (given.lastError) {
-    // Chrome's shape for an undelivered message: lastError set for the
-    // duration of the callback, and no response at all.
+    // lastError is set only for the duration of the callback.
     chrome.runtime.lastError = { message: given.lastError };
-    try { callback(undefined); } finally { chrome.runtime.lastError = null; }
+    try { callback(resp); } finally { chrome.runtime.lastError = null; }
   } else {
-    callback(given.resp === null ? undefined : given.resp);
+    callback(resp);
   }
 }
 
@@ -215,6 +215,28 @@ def test_an_undelivered_message_rejects_with_last_error(tmp):
     del tmp
     outcome = _drive(
         ['job_1'], [{'lastError': 'Could not establish connection.'}])
+    assert outcome['settled'] == [
+        {'state': 'rejected', 'value': 'Could not establish connection.'}], (
+        outcome)
+
+
+def test_an_error_beside_a_sig_rejects_with_the_error(tmp):
+    """An answer carrying both `sig` and `error` is a refusal."""
+    del tmp
+    outcome = _drive(
+        ['job_1'], [{'resp': {'sig': 'S', 'error': 'origin not allowed'}}])
+    assert outcome['settled'] == [
+        {'state': 'rejected', 'value': 'origin not allowed'}], outcome
+    assert outcome['relayed'] == [
+        {'reqId': 1, 'sig': None, 'error': 'origin not allowed'}], outcome
+
+
+def test_last_error_outranks_a_response(tmp):
+    """lastError beside an answer wins over the answer, sig included."""
+    del tmp
+    outcome = _drive(['job_1'], [
+        {'lastError': 'Could not establish connection.',
+         'resp': {'sig': 'S'}}])
     assert outcome['settled'] == [
         {'state': 'rejected', 'value': 'Could not establish connection.'}], (
         outcome)
