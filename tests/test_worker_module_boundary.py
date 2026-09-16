@@ -29,6 +29,7 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
     ('worker/evaluate.js', ('_canUseMainWorldEval', '_executeMainWorldEval',
                             '_takeEvalRelay'), ()),
     ('worker/hotfixes.js', ('handleHotfixReplay',), ()),
+    ('worker/segment_mint.js', ('mintSegmentSig',), ()),
     ('worker/netcapture.js', ('_netCaptures',),
      ('chrome.tabs.onRemoved.addListener',)),
     ('worker/util.js', ('_fetchTimings', '_hasNativeToBase64', '_recordTiming',
@@ -254,6 +255,12 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
          'clear-all-hotfixes'),
         ('worker/hotfixes.js', 'handleListHotfixes', 'list-hotfixes'),
         ('worker/hotfixes.js', 'handleSetPermanent', 'set-permanent'),
+        ('worker/segment_mint.js', 'handleAllowSegmentOrigin',
+         'allow-segment-origin'),
+        ('worker/segment_mint.js', 'handleRevokeSegmentOrigin',
+         'revoke-segment-origin'),
+        ('worker/segment_mint.js', 'handleListSegmentOrigins',
+         'list-segment-origins'),
         ('worker/evaluate.js', 'handleEval', 'eval'),
     ]
     duplicate_routes = sorted(

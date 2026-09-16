@@ -14,6 +14,8 @@
 /* global handleStoreHotfix, handleClearHotfix */
 /* global handleClearAllHotfixes, handleSetPermanent */
 /* global handleListHotfixes */
+/* global handleAllowSegmentOrigin, handleRevokeSegmentOrigin */
+/* global handleListSegmentOrigins */
 /* global handleEval */
 /* global config, loadConfig, _executionContext, postResult */
 /* global registerAllTabs */
@@ -38,6 +40,7 @@ importScripts(
   'worker/cdp.js',
   'worker/netcapture.js',
   'worker/hotfixes.js',
+  'worker/segment_mint.js',
   'worker/evaluate.js',
   'worker/stream.js',
   'worker/messaging.js');
@@ -79,6 +82,9 @@ function dispatchCommand(receivedCommand) {
     case 'clear-all-hotfixes': return handleClearAllHotfixes(cmd);
     case 'list-hotfixes': return handleListHotfixes(cmd);
     case 'set-permanent': return handleSetPermanent(cmd);
+    case 'allow-segment-origin': return handleAllowSegmentOrigin(cmd);
+    case 'revoke-segment-origin': return handleRevokeSegmentOrigin(cmd);
+    case 'list-segment-origins': return handleListSegmentOrigins(cmd);
     case 'tabs': return handleExtTabs(cmd);
     case 'eval': return handleEval(cmd);
     default: return postResult(cmd._execution, null, 'Unknown command type: ' + type, 'extension');
