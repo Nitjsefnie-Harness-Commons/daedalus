@@ -103,6 +103,9 @@ uploads = media_tools['uploads']
 delete_upload = media_tools['delete_upload']
 segment_job = media_tools['segment_job']
 segment_status = media_tools['segment_status']
+allow_segment_origin = media_tools['allow_segment_origin']
+revoke_segment_origin = media_tools['revoke_segment_origin']
+list_segment_origins = media_tools['list_segment_origins']
 
 cookies_tools = _register_tool_module(tools_cookies)
 get_cookies = cookies_tools['get_cookies']

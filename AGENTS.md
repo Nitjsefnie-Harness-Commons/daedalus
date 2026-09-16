@@ -110,10 +110,10 @@ Before dispatch it requires `Authorization: Bearer <bridge-token>` to exactly ma
 
 The bridge listener is bound before MCP starts, and its actual loopback URL is passed into the MCP HTTP client, including for `DAEDALUS_PORT=0`; `DAEDALUS_LOCAL_URL` remains the explicit standalone override. Remotely callable MCP tools accept inline JavaScript and CSS only: `put`, `inject_css`, `remove_css`, and `store_hotfix` have no server-local path argument. CLI file arguments are read by the CLI process and sent as inline content.
 
-40 tools, registered by seven group modules:
+43 tools, registered by seven group modules:
 - **Tabs**: `list_tabs`, `open_tab`, `open_tabs`, `focus_tab`, `close_tab`, `ext_navigate`, `ext_reload`
 - **Eval / debug**: `exec`, `put`, `result`, `ping`, `navigate`, `reload`, `title`, `url`, `ext_self_reload`
-- **Media**: `screenshot` (optional `include_image=true` to inline bytes), `segment_job`, `segment_status`, `uploads`, `delete_upload`
+- **Media**: `screenshot` (optional `include_image=true` to inline bytes), `segment_job`, `segment_status`, `allow_segment_origin`, `revoke_segment_origin`, `list_segment_origins`, `uploads`, `delete_upload`
 - **Cookies**: `get_cookies`, `set_cookie`, `remove_cookie`, `clear_cookies`
 - **CSS / blocking**: `inject_css`, `remove_css`, `block_requests`, `unblock_requests`, `list_block_rules`
 - **Hotfixes**: `store_hotfix`, `clear_hotfix`, `clear_hotfixes`, `list_hotfixes`, `set_permanent`

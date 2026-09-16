@@ -183,6 +183,17 @@ TOOL_COMMANDS = {
         ({'upload_id': 'up', 'filename': 'shot.png'},
          [_delete('/upload', {'id': 'up', 'filename': 'shot.png'})]),
     ],
+    'allow_segment_origin': [
+        ({}, [_ext('_allow_seg_origin', 'allow-segment-origin',
+                   origin='https://example.com')]),
+    ],
+    'revoke_segment_origin': [
+        ({}, [_ext('_revoke_seg_origin', 'revoke-segment-origin',
+                   origin='https://example.com')]),
+    ],
+    'list_segment_origins': [
+        ({}, [_ext('_list_seg_origins', 'list-segment-origins')]),
+    ],
 
     # tools_cookies
     'get_cookies': [
