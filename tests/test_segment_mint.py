@@ -183,10 +183,9 @@ async function run() {
   for (const message of plan.messages || []) {
     answers.push(await send(message));
   }
-  context.plannedCommands = plan.commands || [];
-  for (let i = 0; i < context.plannedCommands.length; i++) {
-    await vm.runInContext(
-      'dispatchCommand(plannedCommands[' + i + '])', context);
+  for (const command of plan.commands || []) {
+    context.nextCommand = command;
+    await vm.runInContext('dispatchCommand(nextCommand)', context);
   }
   context.concurrentCommands = plan.concurrent || [];
   await vm.runInContext(
