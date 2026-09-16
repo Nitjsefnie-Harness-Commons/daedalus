@@ -337,6 +337,15 @@ def test_a_missing_empty_or_non_string_job_is_refused(tmp):
         _refused(outcome, 'Missing job')
 
 
+def test_an_unconfigured_bridge_is_reported_without_a_fetch(tmp):
+    """No server URL: say so rather than fetch a relative path."""
+    del tmp
+    plan = _mint_plan(
+        [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'})
+    plan['store']['daedalus-server'] = ''
+    _refused(_run_mint(plan), 'bridge not configured')
+
+
 def test_a_bridge_refusal_is_reported_with_its_status(tmp):
     del tmp
     outcome = _run_mint(_mint_plan(
