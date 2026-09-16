@@ -62,6 +62,8 @@
 const SERVER = '__SERVER__';
 const JOB = '__JOB__';
 let SIG = '__SIG__';
+// Split so the replace-all filling the placeholder above cannot reach it.
+const SIG_UNSET = '__SIG' + '__';
 const PLAYLIST = '__PLAYLIST__';
 const CONCURRENCY = '__CONC__'.startsWith('__') ? 3 : parseInt('__CONC__', 10);
 
@@ -114,7 +116,7 @@ function badge(text, color) {
 }
 
 async function run() {
-  if (SIG === '__SIG__') {
+  if (SIG === SIG_UNSET) {
     badge('relay: minting capability…');
     try {
       SIG = await window.GM.segmentJob(JOB);
