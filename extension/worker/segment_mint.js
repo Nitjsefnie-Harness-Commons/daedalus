@@ -8,9 +8,10 @@ const SEGMENT_ORIGINS_KEY = 'daedalus-segment-origins';
 const SEGMENT_ORIGIN_ERROR =
   'Missing or invalid origin (http(s) origin required)';
 
-// The only writer of allowlist entries. A stored entry is therefore always
-// `scheme://host[:port]` with a lowercase host, which is what Chrome puts
-// in a content script's `sender.origin` — so the reader compares verbatim.
+// The only writer of allowlist entries, so a stored entry is always
+// `scheme://host[:port]` with a lowercase host. The mint runs the sender's
+// `origin` through the same function and compares the result verbatim,
+// refusing an absent or non-http(s) origin.
 function canonicalOrigin(value) {
   if (typeof value !== 'string') return null;
   let parsed;
