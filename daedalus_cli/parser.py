@@ -249,6 +249,21 @@ def build_parser():
     s.add_argument('permanent', type=_boolean_argument,
                    help='true|1|yes|y|on or false|0|no|n|off')
 
+    # allow-segment-origin (extension)
+    s = sub.add_parser('allow-segment-origin',
+                       help='Allow a page origin to mint segment jobs')
+    s.add_argument('origin', help='Page origin (e.g. https://example.com)')
+
+    # revoke-segment-origin (extension)
+    s = sub.add_parser('revoke-segment-origin',
+                       help='Remove a page origin from the '
+                            'segment-job allowlist')
+    s.add_argument('origin', help='Page origin to revoke')
+
+    # list-segment-origins (extension)
+    sub.add_parser('list-segment-origins',
+                   help='List origins allowed to mint segment jobs')
+
     # uploads
     s = sub.add_parser('uploads', help='List or delete uploads')
     s.add_argument('--id', help='Filter by upload ID')

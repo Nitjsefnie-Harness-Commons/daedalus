@@ -257,3 +257,37 @@ def do_set_permanent(args):
     if not found:
         sys.exit(f'No hotfix with id "{args.fix_id}"')
     print(f'Set permanent={val} on "{args.fix_id}"')
+
+
+def do_allow_segment_origin(args):
+    """Allow a page origin to mint segment-job capabilities."""
+    result = ext_cmd(
+        '_allow_seg_origin', 'allow-segment-origin', origin=args.origin)
+    origin = result.get('origin', args.origin)
+    if result.get('added'):
+        print(f'Allowed {origin}')
+    else:
+        print(f'Already allowed {origin}')
+    for stored in result.get('origins', []):
+        print(stored)
+
+
+def do_revoke_segment_origin(args):
+    """Remove a page origin from the segment-job allowlist."""
+    result = ext_cmd(
+        '_revoke_seg_origin', 'revoke-segment-origin', origin=args.origin)
+    origin = result.get('origin', args.origin)
+    if not result.get('found', False):
+        sys.exit(f'No such origin "{origin}"')
+    print(f'Revoked {origin}')
+
+
+def do_list_segment_origins(args):
+    """List the origins allowed to mint segment-job capabilities."""
+    result = ext_cmd('_list_seg_origins', 'list-segment-origins')
+    origins = result.get('origins', [])
+    if not origins:
+        print('(no origins allowed)')
+        return
+    for origin in origins:
+        print(origin)
