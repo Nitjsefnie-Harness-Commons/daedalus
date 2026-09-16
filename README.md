@@ -153,6 +153,14 @@ storage methods.** Their reserved `daedalus-` keys are filtered out of reads,
 writes, deletion, and enumeration. Treat the token as a credential anyway:
 anyone who has it can drive the browser through the bridge.
 
+A page cannot mint a segment capability either. `POST /segment-job` takes the
+bridge token, which the page never holds, and the extension deliberately
+mediates no mint: the page-to-extension relay is reachable by any page's
+script, so a mediated mint would let every visited site create jobs on the
+bridge. A page-side relay client such as `examples/hls-segment-relay.js`
+receives its job capability from the operator, minted with
+`daedalus segment-job <job>` or the MCP `segment_job` tool.
+
 JavaScript results from a page you do not control are not integrity-protected.
 The reported execution channel describes how the source ran; it does not make
 the returned value trustworthy.
