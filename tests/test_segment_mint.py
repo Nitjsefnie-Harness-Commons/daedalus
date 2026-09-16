@@ -154,19 +154,27 @@ const context = vm.createContext({
 // One message, one answer, as content.js relays for a page. The sender is
 // the plan's, because what the worker trusts is exactly what Chrome puts
 // there — a test that supplied its own tab URL would be testing itself.
+//
+// Chrome keeps the reply channel open past the listener's return only
+// when the listener returned `true`; otherwise the channel closes as it
+// returns, a later sendResponse is dropped, and the sender gets
+// undefined. A branch that forgets `return true` is therefore dead in the
+// browser, and this harness answers exactly as the browser would.
 function send(message) {
   return new Promise((resolve, reject) => {
     try {
-      let answered = false;
+      let open = true;
+      let kept = false;
       for (const listener of messageListeners) {
-        listener(message, plan.sender, (answer) => {
-          answered = true;
-          resolve(answer);
+        const returned = listener(message, plan.sender, (answer) => {
+          if (open) resolve(answer);
         });
+        if (returned === true) kept = true;
       }
-      setImmediate(() => {
-        if (!answered) reject(new Error('no listener answered'));
-      });
+      if (!kept) {
+        open = false;
+        setImmediate(() => resolve(undefined));
+      }
     } catch (error) {
       reject(error);
     }
@@ -264,6 +272,7 @@ def _refused(outcome, message):
     assert outcome['fetches'] == [], outcome
     assert len(outcome['answers']) == 1, outcome
     answer = outcome['answers'][0]
+    assert isinstance(answer, dict), f'reply channel dropped: {answer!r}'
     assert list(answer) == ['error'], answer
     assert answer['error'] == message, answer
 
