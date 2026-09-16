@@ -197,6 +197,7 @@
 !/extension/worker/messaging.js
 !/extension/worker/netcapture.js
 !/extension/worker/registry.js
+!/extension/worker/segment_mint.js
 !/extension/worker/stream.js
 !/extension/worker/tabs.js
 !/extension/worker/util.js
@@ -415,6 +416,7 @@
 !/tests/test_run_tests.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
+!/tests/test_segment_mint.py
 !/tests/test_segment_routes.py
 !/tests/test_segment_storage.py
 !/tests/test_segment_store.py
