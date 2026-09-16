@@ -114,7 +114,7 @@ function badge(text, color) {
 }
 
 async function run() {
-  if (SIG.startsWith('__')) {
+  if (SIG === '__SIG__') {
     badge('relay: minting capability…');
     try {
       SIG = await window.GM.segmentJob(JOB);
