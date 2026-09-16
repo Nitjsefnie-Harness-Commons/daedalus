@@ -263,7 +263,7 @@ def do_allow_segment_origin(args):
     """Allow a page origin to mint segment-job capabilities."""
     result = ext_cmd(
         '_allow_seg_origin', 'allow-segment-origin', origin=args.origin)
-    origin = result.get('origin', args.origin)
+    origin = result['origin']
     if result.get('added'):
         print(f'Allowed {origin}')
     else:
@@ -276,7 +276,7 @@ def do_revoke_segment_origin(args):
     """Remove a page origin from the segment-job allowlist."""
     result = ext_cmd(
         '_revoke_seg_origin', 'revoke-segment-origin', origin=args.origin)
-    origin = result.get('origin', args.origin)
+    origin = result['origin']
     if not result.get('found', False):
         sys.exit(f'No such origin "{origin}"')
     print(f'Revoked {origin}')
