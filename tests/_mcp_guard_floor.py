@@ -163,8 +163,8 @@ def composition_scan_set(composition, root):
     """The repo-local modules the composition's SOURCE FILE can import.
 
     A static walk, not a runtime snapshot: every `import` and `from` at any
-    depth — function bodies, `try` blocks, dead branches — resolves to files
-    under the repository root or is provably elsewhere (stdlib, site
+    depth — function bodies, `try` blocks, dead branches — resolves to
+    files under the repository root or is provably elsewhere (stdlib, site
     packages), and the walk iterates to a fixed point. A target the walk
     cannot determine statically is unprovable and fails loudly, naming the
     module and the import site: a walk that silently omitted what it cannot
