@@ -182,6 +182,18 @@ def test_json_nests_deeper_than_counts_structure_outside_strings(_tmp):
     assert not json_body.json_nests_deeper_than(b'{"a": "\\"[[[["}', 2)
 
 
+def test_json_nests_deeper_than_accepts_a_wide_sequence_of_objects(_tmp):
+    """A wide body of objects rides the same closing arm as one of arrays.
+
+    `}` and `]` share the closing arm, so the array twin of this body stays
+    green even if the arm drops `}`: only the inner `]` would ever count.
+    Sixty `{}` pairs drive the `{` arm instead — cumulative `{` count past
+    the limit with the simultaneous depth never above it, which each `}`
+    must bring back down to keep the body acceptable.
+    """
+    assert not json_body.json_nests_deeper_than(b'[' + b'{}' * 60 + b']', 2)
+
+
 def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
     once = json_body.JSONObject([('token', 'a'), ('id', 'x')])
     twice = json_body.JSONObject([('token', 'a'), ('token', 'a')])
@@ -195,6 +207,24 @@ def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
         [('token', 'a'), ('id', 'x'), ('token', 'a')])
     assert not once == repeat
     assert once != repeat
+
+
+def test_json_object_ne_mirrors_eq_across_operand_classes(_tmp):
+    """`!=` answers the complement of `==` for every operand class.
+
+    `__eq__` declines the operand classes outside the dict family with
+    `NotImplemented`, which is truthy, so a `__ne__` that negates it
+    blindly reports not-equal as False. The plain dict pins the branch
+    `__eq__` answers itself; the unrelated classes pin the pass-through.
+    """
+    carrier = json_body.JSONObject([('token', 'a')])
+    for other in ({'token': 'a'}, {'token': 'b'}, 5, None, 'token', ['token']):
+        assert (carrier == other) != (carrier != other), other
+    assert carrier == {'token': 'a'}
+    assert carrier != {'token': 'b'}
+    for other in (5, None, 'token', ['token']):
+        assert not carrier == other, other
+        assert carrier != other, other
 
 
 def test_the_answer_types_import_without_daedalus_configuration(_tmp):
