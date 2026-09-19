@@ -210,39 +210,74 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     """A git subprocess here runs unbounded and fails loudly on failure.
 
     Dropping the bound also drops the only hang-guard on a wedged local
-    clone; the issue's remedy accepts a hang surfacing as a hung CI job
-    over any wall-clock margin.
+    clone; the issue's remedy accepts a hang surfacing as run_tests.py's
+    900-second suite bound ("SUITE TIMED OUT") instead of any wall-clock
+    margin here. The audit sees this file alone and accepts only a plain
+    `import subprocess`: an aliased or from-imported subprocess, a
+    launch reached any other way, or a keyword it cannot read is a
+    refusal, never an accept.
     """
     del tmp
     tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    refusals = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == 'subprocess' and alias.asname:
+                    refusals.append(
+                        f'tests/test_repo_layout.py:{node.lineno} aliases '
+                        f'the subprocess import as {alias.asname}')
+        elif isinstance(node, ast.ImportFrom) and node.module == \
+                'subprocess':
+            refusals.append(
+                f'tests/test_repo_layout.py:{node.lineno} from-imports '
+                'subprocess')
+    if not refusals and not any(
+            isinstance(node, ast.Import)
+            and any(alias.name == 'subprocess' and not alias.asname
+                    for alias in node.names)
+            for node in ast.walk(tree)):
+        refusals.append(
+            'tests/test_repo_layout.py declares no plain "import '
+            'subprocess"; the launch audit cannot vouch for any launch')
     launches = [
         node for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == 'run'
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == 'subprocess']
-    assert launches, 'the suite declares no subprocess launch to audit'
-    others = sorted({
-        node.func.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == 'subprocess'
-        and node.func.attr != 'run'})
-    assert not others, (
-        f'the suite launches subprocesses through {others}, '
-        'which the launch audit does not see')
+    if not launches:
+        refusals.append('the suite declares no subprocess launch to audit')
     for node in launches:
         keywords = {keyword.arg: keyword.value for keyword in node.keywords}
-        assert 'timeout' not in keywords, (
-            f'tests/test_repo_layout.py:{node.lineno} carries a '
-            f'timeout={ast.dump(keywords["timeout"])} argument')
+        if None in keywords:
+            refusals.append(
+                f'tests/test_repo_layout.py:{node.lineno} unpacks a '
+                'keyword mapping the audit cannot read')
+            continue
+        if 'timeout' in keywords:
+            refusals.append(
+                f'tests/test_repo_layout.py:{node.lineno} carries a '
+                f'timeout={ast.dump(keywords["timeout"])} argument')
         check = keywords.get('check')
-        assert isinstance(check, ast.Constant) and check.value is True, (
-            f'tests/test_repo_layout.py:{node.lineno} does not fail loudly '
-            'on a failed git command')
+        if not (isinstance(check, ast.Constant) and check.value is True):
+            refusals.append(
+                f'tests/test_repo_layout.py:{node.lineno} does not fail '
+                'loudly on a failed git command')
+        if node.func.attr != 'run':
+            refusals.append(
+                f'tests/test_repo_layout.py:{node.lineno} launches through '
+                f'subprocess.{node.func.attr}, which the audit does not '
+                'see')
+    hidden = sorted(
+        f'tests/test_repo_layout.py:{node.lineno}'
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, (ast.Call, ast.Subscript)))
+    refusals.extend(
+        f'{line} launches through a dynamic receiver, '
+        'which the audit does not see' for line in hidden)
+    assert not refusals, '\n'.join(refusals)
 
 
 if __name__ == '__main__':
