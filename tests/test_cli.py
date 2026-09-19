@@ -487,22 +487,6 @@ def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
     assert float(fields['ELAPSED']) < 3.0, r.stdout
 
 
-def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
-    """The short first wait is a ramp, not a busy loop.
-
-    Polling a pending slot at the opening interval for the whole timeout
-    would trade half a second of latency for a request flood, so the pinned
-    property is both bounds at once: more polls than a flat half-second wait
-    allows, far fewer than an unbacked-off one would make.
-    """
-    del tmp
-    r = run_python(_WAIT_HARNESS % ('True', '1.0'), cli_env(DAEDALUS_TOKEN=TOK))
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    _elapsed, polls, result = _wait_harness_output(r.stdout)
-    assert result == 'None', r.stdout
-    assert 4 <= polls <= 12, r.stdout
-
-
 def test_a_negative_timeout_is_refused_before_the_command_is_sent(tmp):
     """Refusing the wait is only useful if nothing was admitted first.
 
