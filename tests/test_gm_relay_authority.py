@@ -220,17 +220,20 @@ async function run() {
   }
   if (mode === 'download-guard' || mode === 'download-refused'
     || mode === 'download-sync-throw' || mode === 'download-scheme') {
-    const downloadUrls = mode === 'download-scheme'
-      ? ['file:///etc/passwd', 'javascript:alert(1)', 'not a url',
-        'https://example.com/f']
+    const downloadTargets = mode === 'download-scheme'
+      ? [['file:///etc/passwd', 'f.bin'],
+        ['javascript:alert(1)', 'f.bin'],
+        ['not a url', 'f.bin'],
+        ['https://example.com/f', 'f.bin'],
+        ['http://example.com/f', 'f-http.bin']]
       : mode === 'download-guard'
-        ? [['https://example.com/f'], 'https://example.com/f']
-        : ['https://example.com/f'];
+        ? [[['https://example.com/f'], 'f.bin'],
+          ['https://example.com/f', 'f.bin']]
+        : [['https://example.com/f', 'f.bin']];
     const outcomes = [];
-    for (const url of downloadUrls) {
+    for (const [url, filename] of downloadTargets) {
       try {
-        const relayed = await send(
-          { type: 'download', url, filename: 'f.bin' });
+        const relayed = await send({ type: 'download', url, filename });
         outcomes.push({
           url,
           downloadId: relayed.answer.downloadId === undefined
@@ -249,6 +252,7 @@ async function run() {
     return {
       outcomes,
       downloaded: downloaded.map((details) => details.url),
+      downloadedFilenames: downloaded.map((details) => details.filename),
       downloadCalls,
     };
   }
@@ -514,22 +518,34 @@ def test_a_download_url_outside_the_web_schemes_is_refused(tmp):
     page could not fetch itself borrows the extension's authority — the
     same authority the openTab twin already gates. A URL the parser refuses
     folds into the same refusal, the API is never invoked, and every
-    outcome answers exactly once.
+    outcome answers exactly once. Each accepted web scheme drives its own
+    control under a distinct filename, so a gate narrowed to `https:`
+    alone fails the suite.
     """
     del tmp
     outcome = _run_relay_authority('download-scheme')
-    file_refusal, script_refusal, unparseable, control = outcome['outcomes']
+    file_refusal, script_refusal, unparseable, https_control, http_control = (
+        outcome['outcomes'])
     for refused in (file_refusal, script_refusal, unparseable):
         assert refused['threw'] is None, refused
         assert refused['responses'] == 1, refused
         assert refused['error'] == (
             'download accepts http: and https: URLs only'), refused
         assert refused['downloadId'] is None, refused
-    assert outcome['downloaded'] == ['https://example.com/f'], outcome
-    assert outcome['downloadCalls'] == 1, outcome
-    assert control == {
+    assert outcome['downloaded'] == [
+        'https://example.com/f', 'http://example.com/f'], outcome
+    assert outcome['downloadedFilenames'] == ['f.bin', 'f-http.bin'], outcome
+    assert outcome['downloadCalls'] == 2, outcome
+    assert https_control == {
         'url': 'https://example.com/f',
         'downloadId': 5001,
+        'error': None,
+        'threw': None,
+        'responses': 1,
+    }, outcome
+    assert http_control == {
+        'url': 'http://example.com/f',
+        'downloadId': 5002,
         'error': None,
         'threw': None,
         'responses': 1,
