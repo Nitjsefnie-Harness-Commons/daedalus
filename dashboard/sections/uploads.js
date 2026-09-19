@@ -115,10 +115,10 @@ export function mount(container) {
         const r = await api.get(`/upload?limit=${PAGE_SIZE}&offset=${offset}`);
         items = r.items || [];
         total = r.total || 0;
-        const lastPage =
+        const lastPageStart =
           Math.max(0, Math.ceil(total / PAGE_SIZE) - 1) * PAGE_SIZE;
-        if (offset <= lastPage) break;
-        offset = lastPage;
+        if (offset <= lastPageStart) break;
+        offset = lastPageStart;
       }
       render();
     } catch (e) {
@@ -131,10 +131,10 @@ export function mount(container) {
     const q = (filterEl.value || '').toLowerCase();
     const visible = q ? items.filter(f => (f.id + '/' + f.filename).toLowerCase().includes(q)) : items;
     document.querySelector('#s11 [data-sub]').textContent = `${total} total`;
-    const last = Math.min(offset + PAGE_SIZE, total);
+    const rangeEnd = Math.min(offset + PAGE_SIZE, total);
     metaEl.textContent = total === 0
       ? '0 / 0'
-      : `${offset + 1}–${last} / ${total}`;
+      : `${offset + 1}–${rangeEnd} / ${total}`;
     prevBtn.disabled = offset === 0;
     nextBtn.disabled = offset + PAGE_SIZE >= total;
     release();

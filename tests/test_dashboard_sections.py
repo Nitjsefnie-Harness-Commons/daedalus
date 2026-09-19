@@ -396,6 +396,7 @@ globalThis.clearTimeout = (id) => { timers[id - 1] = null; };
 _PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(_PAGER_PREFIX + r"""
 (async () => {
 const fetched = [];
+const metaSnapshots = [];
 let total = 51;
 const file = (n) => ({ id: 'up' + n, filename: 'f' + n + '.txt', size: 1,
   mtime: 1, path: token + '/up' + n + '/f' + n + '.txt' });
@@ -403,6 +404,9 @@ globalThis.fetch = async (target, init) => {
   const where = String(target);
   if (where.startsWith('/upload?limit=')) {
     fetched.push(where);
+    // Whatever the previous round-trip painted is on screen when the next
+    // request goes out, so each listing fetch records the frame it saw.
+    metaSnapshots.push(container.find('[data-role=meta]').textContent);
     const query = new URLSearchParams(where.split('?')[1]);
     const offset = Number(query.get('offset'));
     const items = [];
@@ -427,14 +431,15 @@ await bounded(settle(), 'first listing render', _dashnodeStepTimeoutMs);
 const metaEl = container.find('[data-role=meta]');
 const prevBtn = container.find('[data-role=prev]');
 const nextBtn = container.find('[data-role=next]');
-nextBtn.click();
-await bounded(settle(), 'last page render', _dashnodeStepTimeoutMs);
 const pagerState = () => ({
   meta: metaEl.textContent,
   prevDisabled: prevBtn.disabled,
   nextDisabled: nextBtn.disabled,
   rows: container.all().filter((el) => el.tag === 'tr').length - 1,
 });
+const firstPage = pagerState();
+nextBtn.click();
+await bounded(settle(), 'last page render', _dashnodeStepTimeoutMs);
 const lastPage = pagerState();
 const delBtn = container.byText('delete');
 delBtn.click();
@@ -443,7 +448,7 @@ await bounded(settle(), 'delete settles', _dashnodeStepTimeoutMs);
 const afterDelete = pagerState();
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
-  lastPage, afterDelete, listingTargets: fetched,
+  firstPage, lastPage, afterDelete, listingTargets: fetched, metaSnapshots,
 }));
 phase('dashboard harness finished');
 })().catch(leave);
@@ -455,9 +460,14 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     """The issue's reproduction: the last page shows 51–51 / 51, the
     last-page file is deleted, and the pager must land on the last valid
     page of the shrunken total instead of an impossible range with rows
-    from a page the listing no longer has."""
+    from a page the listing no longer has. The mid-list page is pinned
+    with its exact range end, and the over-range frame must not exist
+    even transiently between the listing round-trips."""
     result = _dashnode.run_dashboard_node(_PAGER_CLAMP_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['firstPage'] == {
+        'meta': '1–50 / 51', 'prevDisabled': True, 'nextDisabled': False,
+        'rows': 50}, seen
     assert seen['lastPage'] == {
         'meta': '51–51 / 51', 'prevDisabled': False, 'nextDisabled': True,
         'rows': 1}, seen
@@ -467,6 +477,7 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     assert seen['listingTargets'] == [
         '/upload?limit=50&offset=0', '/upload?limit=50&offset=50',
         '/upload?limit=50&offset=50', '/upload?limit=50&offset=0'], seen
+    assert '51–50 / 50' not in seen['metaSnapshots'], seen['metaSnapshots']
 
 
 _PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(_PAGER_PREFIX + r"""
