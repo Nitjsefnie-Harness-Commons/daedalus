@@ -36,9 +36,9 @@ def _tracked_test_modules():
     }
 
 
-# The scan judges one module from its own text alone, so a pin over a tree
-# derived from the real site list reads the same verdicts as the full-tree
-# sweep: verified slice-by-slice against a full-tree scan, mutations planted.
+# The scan judges one module from its own text alone, so a tree derived
+# from the real site list reads the same verdicts as the full-tree sweep;
+# the two-module control below watches that hold at the tree level.
 def _derived_tree(tmp, relatives):
     """The named real modules, verbatim, as a minimal tree to scan."""
     root = Path(tmp) / 'repository'
@@ -479,7 +479,12 @@ def test_each_real_site_is_caught_when_it_bypasses(tmp):
 
 
 def test_a_two_module_tree_catches_the_later_site_bypass(tmp):
-    """The later module's bypass is judged on its own module's facts."""
+    """The later module's bypass is judged on its own module's facts.
+
+    The bypass must sit in the alphabetically-later module, which
+    `_test_modules` sorts: facts shared across the sweep would come from
+    the earlier, clean module and never reach the bypass's text.
+    """
     root = _derived_tree(tmp, [site[0] for site in _SITES])
     expected = _plant(_SITES[1], root)
     violations = _bash_resolver_scan._tree_violations(root)
