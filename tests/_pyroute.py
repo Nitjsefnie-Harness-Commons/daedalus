@@ -9,16 +9,16 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              bind_call_arguments, bind_deferred_states,
                              callable_candidates, consumer_results,
                              exposed_callables, exhaust_generators,
-                             expression_callables, expression_value,
-                             follow_callable_call,
+                             expression_callables, follow_callable_call,
                              generator_context, generator_for,
                              is_deferred_value, iterable_deferred,
                              iterable_nonempty, merge_yielded,
                              load_callable_cells, materialize_deferred,
                              new_deferred_callable, new_deferred_generator,
-                             payload_key, sender_value,
-                             store_deferred_value, sync_cells)
+                             payload_key, sender_value, sync_cells)
 from _pyroute_live import (clear_expression_cache, live_expression_value)
+from _pyroute_mapping import (apply_deferred_store as store_deferred_value,
+                              resolve_expression_value as expression_value)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
