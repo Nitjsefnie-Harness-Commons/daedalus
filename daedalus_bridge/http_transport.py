@@ -22,7 +22,7 @@ from daedalus_cli import SEGMENT_SIG_HEADER, ambiguous_request_carrier
 from daedalus_cli.transport import token as _configured_token
 from daedalus_bridge import path_safety
 from daedalus_bridge.route_answer import BytesAnswer, FileAnswer
-from daedalus_bridge.json_body import JSONObject, json_nests_deeper_than
+from daedalus_bridge import json_body as _json_body
 from daedalus_bridge.config import (
     MAX_BODY_SIZE, MAX_JSON_DEPTH, MAX_UNAUTHENTICATED_BODY,
 )
@@ -371,11 +371,11 @@ class RequestMixin(BaseHTTPRequestHandler):
         raw = self._read_body(clen)
         if raw is None:
             return None
-        if json_nests_deeper_than(raw, MAX_JSON_DEPTH):
+        if _json_body.json_nests_deeper_than(raw, MAX_JSON_DEPTH):
             self._json(400, {'error': 'JSON body too deeply nested'})
             return None
         try:
-            body = json.loads(raw, object_pairs_hook=JSONObject)
+            body = json.loads(raw, object_pairs_hook=_json_body.JSONObject)
         except RecursionError:
             # Unreachable through nesting now that the bound above decides it,
             # and kept for the case it never covered: an interpreter whose
@@ -386,7 +386,7 @@ class RequestMixin(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, ValueError):
             self._json(400, {'error': 'invalid JSON body'})
             return None
-        if not isinstance(body, JSONObject):
+        if not isinstance(body, _json_body.JSONObject):
             self._json(400, {'error': 'JSON body must be an object'})
             return None
         if body.duplicate_carrier is not None:
