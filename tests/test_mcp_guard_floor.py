@@ -273,6 +273,28 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     ], _util.ROOT) == [nested_function, absent_function, absent_suite]
 
 
+def test_module_level_class_citations_are_reported_missing(_tmp):
+    """A class is not a test function citation target."""
+    del _tmp
+    citation = 'tests/test_mcp_tools.py::ToolRegistry'
+    missing = _mcp_guard_floor.missing_citations([
+        *_mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE,
+        ('m', 'f', 'c', citation),
+    ], _util.ROOT)
+    assert citation in missing, missing
+
+
+def test_module_level_async_function_citations_are_accepted(_tmp):
+    """An async function is a valid test function citation target."""
+    del _tmp
+    citation = 'tests/test_mcp_tools.py::_bridge_interactions'
+    missing = _mcp_guard_floor.missing_citations([
+        *_mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE,
+        ('m', 'f', 'c', citation),
+    ], _util.ROOT)
+    assert citation not in missing, missing
+
+
 def test_a_stated_gap_is_data_the_suite_holds_true(_tmp):
     """The stated-gap class is data, and the data is held both ways.
 
