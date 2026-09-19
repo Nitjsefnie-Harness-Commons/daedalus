@@ -180,8 +180,7 @@ def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
 def test_the_suite_clone_is_silent_whatever_the_source_head_state(tmp):
     """Cloning a detached source creates an initial branch, and git advises
     about the name on stderr unless the clone names it — ten hint lines per
-    clone behind which a real stderr message would hide. Both source head
-    states must come back silent.
+    clone behind which a real stderr message would hide.
     """
     branch_source = Path(tmp) / 'branch-source'
     _clone(ROOT, branch_source)
