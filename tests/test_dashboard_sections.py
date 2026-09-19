@@ -64,9 +64,19 @@ const downloadFetches = fetched.slice(afterRender);
 container.byText('preview').click();
 await bounded(settle(), 'preview fetch', _dashnodeStepTimeoutMs);
 const previewFetches = fetched.slice(afterRender + downloadFetches.length);
+// Read the rendered preview anchor and its image once the preview fetch
+// has settled: these nodes carry whatever href/src the section rendered.
+const previewAnchor = container.all().find(
+  (el) => el.tag === 'a' && el.attrs.target === '_blank');
+const previewImage = previewAnchor &&
+  previewAnchor.all().find((el) => el.tag === 'img');
+const previewNode = {
+  anchorHref: previewAnchor ? previewAnchor.attrs.href || null : null,
+  imageSrc: previewImage ? previewImage.attrs.src || null : null,
+};
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
-  rendered, fetched, downloadFetches, previewFetches, clicks,
+  rendered, fetched, downloadFetches, previewFetches, previewNode, clicks,
 }));
 phase('dashboard harness finished');
 })().catch(leave);
@@ -78,7 +88,11 @@ def test_uploads_carry_the_token_in_a_header_and_never_in_a_link(_tmp):
     """Every file reaches the browser through the header-authenticated
     object-URL path, so no href on the page names the token or a route
     the bridge does not have, no request target names the token either,
-    and an operator-named filename survives the trip percent-encoded."""
+    and an operator-named filename survives the trip percent-encoded.
+
+    The preview anchor and its image render only once the preview fetch
+    has settled, so the harness reads them at that point and requires
+    each of them to carry that object URL rather than a web URL."""
     result = _dashnode.run_dashboard_node(_UPLOADS_HARNESS)
     seen = json.loads(result.stdout)
     token = 'dashboard-token'
@@ -102,6 +116,10 @@ def test_uploads_carry_the_token_in_a_header_and_never_in_a_link(_tmp):
     saved = [click for click in seen['clicks'] if click.get('download')]
     assert [click['download'] for click in saved] == ['a&b#c.txt'], seen
     assert all(click['href'].startswith('blob:') for click in saved), seen
+
+    preview = seen['previewNode']
+    assert preview['anchorHref'].startswith('blob:'), preview
+    assert preview['imageSrc'].startswith('blob:'), preview
 
 
 # A file fetch settles only when the test says so, so a stale fetch can be
