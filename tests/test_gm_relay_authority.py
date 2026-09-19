@@ -114,6 +114,9 @@ const chrome = {
         }
         return;
       }
+      if (mode !== 'download-guard') {
+        throw new Error('unmodeled download mode: ' + mode);
+      }
       callback(5000 + downloaded.length);
     },
   },
@@ -421,7 +424,7 @@ def test_a_non_string_url_is_refused_before_download(tmp):
     array_shape, control = outcome['outcomes']
     assert array_shape['threw'] is None, array_shape
     assert array_shape['responses'] == 1, array_shape
-    assert array_shape['error'], array_shape
+    assert array_shape['error'] == 'download requires a string URL', array_shape
     assert array_shape['downloadId'] is None, array_shape
     # Only the string control reached the API: the gate answers the array
     # before an invocation that cannot succeed.
