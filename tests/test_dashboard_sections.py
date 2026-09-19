@@ -508,12 +508,16 @@ mount(container);
 await bounded(settle(), 'listing with one row render', _dashnodeStepTimeoutMs);
 const metaEl = container.find('[data-role=meta]');
 const listEl = container.find('[data-role=list]');
-const oneRow = { meta: metaEl.textContent, list: listEl.textContent };
+const prevBtn = container.find('[data-role=prev]');
+const nextBtn = container.find('[data-role=next]');
+const oneRow = { meta: metaEl.textContent, list: listEl.textContent,
+  prevDisabled: prevBtn.disabled, nextDisabled: nextBtn.disabled };
 const delBtn = container.byText('delete');
 delBtn.click();
 delBtn.click();
 await bounded(settle(), 'delete settles', _dashnodeStepTimeoutMs);
-const afterEmpty = { meta: metaEl.textContent, list: listEl.textContent };
+const afterEmpty = { meta: metaEl.textContent, list: listEl.textContent,
+  prevDisabled: prevBtn.disabled, nextDisabled: nextBtn.disabled };
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({ oneRow, afterEmpty }));
 phase('dashboard harness finished');
@@ -523,13 +527,18 @@ phase('dashboard harness finished');
 
 
 def test_an_emptied_list_reads_zero_slash_zero(_tmp):
-    """A list with no rows cannot start at row 1: the header reads 0 / 0
-    and the list says there are no uploads, not no matches."""
+    """A list with no rows cannot start at row 1: the header reads 0 / 0,
+    the list says there are no uploads rather than no matches, and both
+    pager buttons are out of the picture — a clamped-away offset that
+    went negative would leave prev enabled over an impossible page."""
     result = _dashnode.run_dashboard_node(_PAGER_EMPTY_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['oneRow']['meta'] == '1–1 / 1', seen
+    assert seen['oneRow']['prevDisabled'] is True, seen
+    assert seen['oneRow']['nextDisabled'] is True, seen
     assert seen['afterEmpty'] == {
-        'meta': '0 / 0', 'list': 'no uploads.'}, seen
+        'meta': '0 / 0', 'list': 'no uploads.', 'prevDisabled': True,
+        'nextDisabled': True}, seen
 
 
 _EVAL_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
