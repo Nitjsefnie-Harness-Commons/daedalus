@@ -389,7 +389,7 @@ TOOL_REFUSALS = {
         ({'max_requests': 0}, ValueError,
          'max_requests must be an integer from 1 to 20000; got 0'),
         ({'max_requests': 20001}, ValueError,
-         'max_requests must be an integer from 1 to 20000'),
+         'max_requests must be an integer from 1 to 20000; got 20001'),
     ],
     'screenshot': [
         ({'quality': 'many'}, ValueError, 'quality must be an integer'),
