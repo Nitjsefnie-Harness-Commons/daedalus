@@ -73,6 +73,19 @@ MCP_OLD_NAMES = (
 )
 
 
+def _clone(root, target):
+    """The one clone invocation every fixture tree comes from.
+
+    A detached source leaves the initial branch name to init.defaultBranch
+    and advises about it on stderr; naming it keeps the clone silent
+    whatever the source's HEAD points at.
+    """
+    return subprocess.run(
+        ['git', '-c', 'init.defaultBranch=main', 'clone', '--quiet',
+         '--no-hardlinks', str(root), str(target)],
+        check=True, capture_output=True)
+
+
 def _tracked_python(root=ROOT):
     root = Path(root)
     listed = subprocess.run(
@@ -100,9 +113,7 @@ def _tracked_python(root=ROOT):
 def test_the_inventory_refuses_a_missing_tracked_python_file(tmp):
     """A tracked package module must also exist in the worktree."""
     tree = Path(tmp) / 'tree'
-    subprocess.run(
-        ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
-        check=True)
+    _clone(ROOT, tree)
     missing = tree / 'daedalus_bridge' / 'config.py'
     missing.unlink()
     try:
@@ -117,9 +128,7 @@ def test_the_inventory_refuses_a_missing_tracked_python_file(tmp):
 def test_the_inventory_refuses_a_tracked_symlink_blob(tmp):
     """A module recorded as a symlink is refused however it checks out."""
     tree = Path(tmp) / 'tree'
-    subprocess.run(
-        ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
-        check=True)
+    _clone(ROOT, tree)
     subprocess.run(
         ['git', '-C', str(tree), 'config', 'core.symlinks', 'false'],
         check=True)
@@ -149,9 +158,7 @@ def test_the_inventory_refuses_a_tracked_symlink_blob(tmp):
 def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
     """A tracked package module must be a regular worktree file."""
     tree = Path(tmp) / 'tree'
-    subprocess.run(
-        ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
-        check=True)
+    _clone(ROOT, tree)
     symlink = tree / 'daedalus_bridge' / 'config.py'
     symlink.unlink()
     symlink.symlink_to('__init__.py')
@@ -162,6 +169,31 @@ def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
     else:
         raise AssertionError(
             'the layout inventory accepted a symlinked Python file')
+
+
+def test_the_suite_clone_is_silent_whatever_the_source_head_state(tmp):
+    """Cloning a detached source creates an initial branch, and git advises
+    about the name on stderr unless the clone names it — ten hint lines per
+    clone behind which a real stderr message would hide. Both source head
+    states must come back silent.
+    """
+    branch_source = Path(tmp) / 'branch-source'
+    _clone(ROOT, branch_source)
+    subprocess.run(
+        ['git', '-C', str(branch_source), 'checkout', '-b', 'pin-branch'],
+        check=True, capture_output=True)
+    detached_source = Path(tmp) / 'detached-source'
+    _clone(ROOT, detached_source)
+    subprocess.run(
+        ['git', '-C', str(detached_source), 'checkout', '--detach'],
+        check=True, capture_output=True)
+    from_branch = _clone(branch_source, Path(tmp) / 'from-branch')
+    from_detached = _clone(detached_source, Path(tmp) / 'from-detached')
+    for label, completed in (('branch', from_branch),
+                             ('detached', from_detached)):
+        assert completed.stderr == b'', (
+            f'cloning a {label} source wrote to stderr: '
+            + completed.stderr.decode('utf-8', 'replace'))
 
 
 def test_the_bridge_modules_live_in_the_bridge_package(tmp):
