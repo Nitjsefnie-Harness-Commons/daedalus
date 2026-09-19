@@ -157,9 +157,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // site, not a userscript, so it does not borrow the extension's
     // authority to get there.
     if (typeof msg.url !== 'string') {
-      // `new URL` stringifies whatever it is handed, so the type gate has
-      // to come before the protocol check or a page-chosen object reaches
-      // tabs.create, which refuses a non-string url synchronously.
+      // `new URL` stringifies whatever it is handed, so the protocol check
+      // alone passes a page-chosen object through to tabs.create, whose API
+      // refuses a non-string url synchronously.
       sendResponse({ error: 'openInTab requires a string URL' });
       return;
     }
