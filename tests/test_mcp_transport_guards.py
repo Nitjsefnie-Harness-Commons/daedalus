@@ -334,9 +334,9 @@ def test_poll_deadline_is_not_the_wall_clock(tmp):
     The deadline was time.time() based, so an NTP correction between two
     polls put the clock before the deadline again and the wait outlived
     its timeout; the CLI waiter was moved to time.monotonic() for the
-    same reason. The wall clock here reads once and then steps back an
-    hour; the script is far longer than the deadline admits, so a poll
-    that consulted the wall clock would run it dry instead of timing out.
+    same reason. The wall clock reads once and then steps back an hour,
+    so a poll that consults it for the deadline runs the reply script
+    dry instead of timing out on the session clock.
     """
     del tmp
     transport = _transport()
@@ -350,12 +350,17 @@ def test_poll_deadline_is_not_the_wall_clock(tmp):
         reads.append(1)
         return first if len(reads) == 1 else first - 3600
 
+    # The session clock admits exactly one peek; a wall-clock deadline
+    # sits an epoch past every scripted read, so entry never ends.
+    session.monotonic = _clock_script(100.0, 100.0, 100.5)
     with mock.patch.object(time, 'time', stepped_back):
         result = _capture(session.poll_result(
-            '', 0.05, interval=0.01, expect_id='command',
+            '', 0.001, interval=0, expect_id='command',
             expect_delivery='wanted'))
 
-    expected = 'raised TimeoutError: no result within 0.05s'
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert len(peeks) == 1, client.calls
+    expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
 
 
@@ -414,7 +419,7 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    # 100.0009 is inside 100.001 but outside any shortened deadline.
+    # 100.0009 is inside 100.001 but outside a deadline shortened by 10%.
     session.monotonic = _clock_script(100.0, 100.0009, 100.5)
 
     result = _capture(session.poll_result(
@@ -422,6 +427,37 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
         expect_delivery='wanted'))
 
     assert result == wanted, (result, wanted)
+
+
+def test_poll_rejects_a_read_exactly_at_the_deadline(tmp):
+    """A read equal to the deadline no longer admits a poll.
+
+    The entry check is strict, so the clock stepping exactly onto the
+    deadline ends the wait with nothing polled; an inclusive check
+    would take the mismatched reply's peek.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    body = {
+        'id': 'other',
+        'deliveryId': 'stale',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((body,))
+    session.http_client = lambda: client
+    # The read equals 100.0 + timeout, so entry turns on < vs <=.
+    session.monotonic = _clock_script(100.0, 100.001, 100.5)
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command',
+        expect_delivery='wanted'))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert not peeks, client.calls
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
 
 
 def test_poll_rejects_a_body_without_a_delivery_id(tmp):
