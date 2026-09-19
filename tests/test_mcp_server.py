@@ -1606,8 +1606,9 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     box = {}
 
     def run():
-        # The token is a ContextVar and a thread starts with a fresh context,
-        # so a caller-thread set leaves the tool answering no token in context.
+        # The token is a ContextVar, and a thread starts with a fresh context:
+        # setting it on the caller's thread leaves the tool answering "no token
+        # in context". BearerAuth sets it per request for the same reason.
         mod._token.set(TOK)
         try:
             box['value'] = asyncio.run(call())

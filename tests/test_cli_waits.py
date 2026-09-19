@@ -40,8 +40,7 @@ def cli_env(**overrides):
     """A clean environment: none of the CLI's config vars leak in from ours."""
     env = {name: value for name, value in os.environ.items()
            if not name.startswith('DAEDALUS_')}
-    for k in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID',
-              'PYTHONIOENCODING'):
+    for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
         env.pop(k, None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     env.update(overrides)
