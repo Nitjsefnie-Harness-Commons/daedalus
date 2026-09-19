@@ -76,21 +76,28 @@ const chrome = {
     onCreated: eventTarget(),
     onRemoved: eventTarget(),
     query(_query, callback) {
+      if (plan.failQuery && _query.active) {
+        throw new Error('planned chrome.tabs.query rejection');
+      }
       if (callback) {
         callback([]);
         return undefined;
       }
       return Promise.resolve([]);
     },
-    get: async (tabId) => ({ id: tabId, url: '', title: '' }),
+    get: async () => {
+      throw new Error('unmodelled chrome.tabs.get');
+    },
     remove: async (tabId) => {
       removeCalls.push(tabId);
       const rejects = plan.reject || {};
       const message = rejects[String(tabId)];
       if (message !== undefined) throw new Error(message);
     },
-    sendMessage: async () => {},
-    create(_details, callback) { callback({ id: 101 }); },
+    sendMessage: async () => {
+      throw new Error('unmodelled chrome.tabs.sendMessage');
+    },
+    create() { throw new Error('unmodelled chrome.tabs.create'); },
   },
 """ + INERT_WORKER_APIS + r"""
 };
@@ -163,12 +170,14 @@ run().then((result) => {
 """).replace('__TOKEN__', TOKEN).replace('__SERVER__', SERVER)
 
 
-def _run_close_tab(command, reject=None):
+def _run_close_tab(command, reject=None, fail_query=False):
     node = shutil.which('node')
     assert node, 'node is required to execute the worker'
     plan = {'commands': [command]}
     if reject is not None:
         plan['reject'] = reject
+    if fail_query:
+        plan['failQuery'] = True
     result = run_node_program(
         node, _CLOSE_TAB_HARNESS,
         [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT, payload=plan)
@@ -240,82 +249,112 @@ def test_wrong_shape_tab_ids_is_rejected_even_with_tab_id(tmp):
     }], outcome
 
 
+def test_settlement_recorder_captures_rejected_eval_dispatch(tmp):
+    del tmp
+    outcome = _run_close_tab(
+        _command(type='eval', code='1'), fail_query=True)
+    assert outcome == {
+        'removes': [],
+        'posted': [],
+        'outcomes': [{
+            'settled': 'rejected',
+            'message': 'planned chrome.tabs.query rejection',
+        }],
+    }, outcome
+
+
 def test_mixed_type_tab_ids_are_parsed_and_closed_in_order(tmp):
     del tmp
     outcome = _run_close_tab(_command(tabIds=[1, '2']))
-    assert outcome['removes'] == [1, 2], outcome
-    assert outcome['outcomes'] == [{'settled': 'resolved'}], outcome
-    assert outcome['posted'] == [{
-        'id': 'close-1',
-        'tabId': 'extension',
-        'result': {'closed': [1, 2], 'errors': []},
-        'error': None,
-    }], outcome
+    assert outcome == {
+        'removes': [1, 2],
+        'posted': [{
+            'id': 'close-1',
+            'tabId': 'extension',
+            'result': {'closed': [1, 2], 'errors': []},
+            'error': None,
+        }],
+        'outcomes': [{'settled': 'resolved'}],
+    }, outcome
 
 
 def test_empty_tab_ids_answers_empty_close_result(tmp):
     del tmp
     outcome = _run_close_tab(_command(tabIds=[]))
-    assert outcome['removes'] == [], outcome
-    assert outcome['posted'] == [{
-        'id': 'close-1',
-        'tabId': 'extension',
-        'result': {'closed': [], 'errors': []},
-        'error': None,
-    }], outcome
+    assert outcome == {
+        'removes': [],
+        'posted': [{
+            'id': 'close-1',
+            'tabId': 'extension',
+            'result': {'closed': [], 'errors': []},
+            'error': None,
+        }],
+        'outcomes': [{'settled': 'resolved'}],
+    }, outcome
 
 
 def test_tab_id_alone_is_closed(tmp):
     del tmp
     outcome = _run_close_tab(_command(tabId=5))
-    assert outcome['removes'] == [5], outcome
-    assert outcome['posted'] == [{
-        'id': 'close-1',
-        'tabId': 'extension',
-        'result': {'closed': [5], 'errors': []},
-        'error': None,
-    }], outcome
+    assert outcome == {
+        'removes': [5],
+        'posted': [{
+            'id': 'close-1',
+            'tabId': 'extension',
+            'result': {'closed': [5], 'errors': []},
+            'error': None,
+        }],
+        'outcomes': [{'settled': 'resolved'}],
+    }, outcome
 
 
 def test_null_tab_ids_falls_back_to_tab_id(tmp):
     del tmp
     outcome = _run_close_tab(_command(tabId=5, tabIds=None))
-    assert outcome['removes'] == [5], outcome
-    assert outcome['posted'] == [{
-        'id': 'close-1',
-        'tabId': 'extension',
-        'result': {'closed': [5], 'errors': []},
-        'error': None,
-    }], outcome
+    assert outcome == {
+        'removes': [5],
+        'posted': [{
+            'id': 'close-1',
+            'tabId': 'extension',
+            'result': {'closed': [5], 'errors': []},
+            'error': None,
+        }],
+        'outcomes': [{'settled': 'resolved'}],
+    }, outcome
 
 
 def test_missing_tab_ids_and_tab_id_answers_missing_error(tmp):
     del tmp
     outcome = _run_close_tab(_command())
-    assert outcome['removes'] == [], outcome
-    assert outcome['posted'] == [{
-        'id': 'close-1',
-        'tabId': 'extension',
-        'result': None,
-        'error': 'Missing tabId or tabIds',
-    }], outcome
+    assert outcome == {
+        'removes': [],
+        'posted': [{
+            'id': 'close-1',
+            'tabId': 'extension',
+            'result': None,
+            'error': 'Missing tabId or tabIds',
+        }],
+        'outcomes': [{'settled': 'resolved'}],
+    }, outcome
 
 
 def test_one_remove_error_is_reported_while_other_tabs_close(tmp):
     del tmp
     outcome = _run_close_tab(
         _command(tabIds=[1, '2', 3]), reject={'2': 'cannot close 2'})
-    assert outcome['removes'] == [1, 2, 3], outcome
-    assert outcome['outcomes'] == [{'settled': 'resolved'}], outcome
-    assert outcome['posted'] == [{
-        'id': 'close-1',
-        'tabId': 'extension',
-        'result': {
-            'closed': [1, 3],
-            'errors': [{'id': 2, 'error': 'cannot close 2'}],
-        },
-        'error': None,
-    }], outcome
+    assert outcome == {
+        'removes': [1, 2, 3],
+        'posted': [{
+            'id': 'close-1',
+            'tabId': 'extension',
+            'result': {
+                'closed': [1, 3],
+                'errors': [{'id': 2, 'error': 'cannot close 2'}],
+            },
+            'error': None,
+        }],
+        'outcomes': [{'settled': 'resolved'}],
+    }, outcome
 
 
 def main():
