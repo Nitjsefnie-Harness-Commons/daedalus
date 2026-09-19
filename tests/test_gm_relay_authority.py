@@ -89,13 +89,20 @@ const chrome = {
         }
         return;
       }
+      if (mode !== 'open' && mode !== 'open-guard') {
+        throw new Error('unmodeled tab-create mode: ' + mode);
+      }
       callback({ id: 100 + created.length });
     },
   },
   downloads: {
-    // Callback-style, as messaging.js calls it. The real API validates its
-    // arguments before doing anything, so a non-string url is refused with
-    // a synchronous TypeError exactly as the shipped API refuses one.
+    // Callback-style, as messaging.js calls it. The callback is delivered
+    // one microtask after download() returns, as the shipped API delivers
+    // its callback asynchronously: a listener that returned before the
+    // callback fired only still holds the response channel if it returned
+    // true. The real API validates its arguments before doing anything, so
+    // a non-string url is refused with a synchronous TypeError exactly as
+    // the shipped API refuses one.
     download(details, callback) {
       downloadCalls += 1;
       if (typeof details.url !== 'string') {
@@ -106,18 +113,20 @@ const chrome = {
         throw new Error('synchronous refusal');
       }
       if (mode === 'download-refused') {
-        chrome.runtime.lastError = { message: 'Download refused' };
-        try {
-          callback(undefined);
-        } finally {
-          chrome.runtime.lastError = null;
-        }
+        queueMicrotask(() => {
+          chrome.runtime.lastError = { message: 'Download refused' };
+          try {
+            callback(undefined);
+          } finally {
+            chrome.runtime.lastError = null;
+          }
+        });
         return;
       }
       if (mode !== 'download-guard') {
         throw new Error('unmodeled download mode: ' + mode);
       }
-      callback(5000 + downloaded.length);
+      queueMicrotask(() => callback(5000 + downloaded.length));
     },
   },
 """ + INERT_WORKER_APIS + r"""
@@ -154,11 +163,18 @@ const context = vm.createContext({
 // One message, one answer, as content.js relays for a page. A handler that
 // throws instead of answering rejects here, and the rejection is recorded
 // rather than hidden: from the page, a callback that throws is
-// indistinguishable from an answer that never came.
+// indistinguishable from an answer that never came. The response channel
+// closes when the listener returns unless it kept it open with true, so a
+// callback that fires after a falsy return answers nothing — the shipped
+// runtime drops it, and here the send never settles.
 function send(message) {
   return new Promise((resolve, reject) => {
     const responses = [];
+    let open = true;
     const respond = (payload) => {
+      if (!open) {
+        return;
+      }
       responses.push(payload);
       if (responses.length === 1) {
         resolve({ answer: payload, responses });
@@ -166,7 +182,10 @@ function send(message) {
     };
     try {
       for (const listener of messageListeners) {
-        listener(message, { tab: { id: 7 } }, respond);
+        if (listener(message, { tab: { id: 7 } }, respond) !== true) {
+          open = false;
+          break;
+        }
       }
     } catch (error) {
       reject(error);
@@ -416,8 +435,8 @@ def test_a_non_string_url_is_refused_before_download(tmp):
     The worker handed `msg.url` to `chrome.downloads.download` unread, and
     the real API refuses a non-string url argument with a synchronous
     TypeError. The listener propagated that exception, so `sendResponse`
-    never fired and the page was left with no answer at all — the download
-    twin of the openTab hole issue 712 closed.
+    was never called — the download twin of the openTab hole issue 712
+    closed.
     """
     del tmp
     outcome = _run_relay_authority('download-guard')
@@ -444,8 +463,7 @@ def test_a_synchronous_download_refusal_answers_an_error(tmp):
 
     Chrome can refuse the call itself, before any callback is scheduled,
     so the callback that answers `lastError` refusals never runs. That
-    exception escaped the listener, `sendResponse` never fired, and the
-    page waited on an answer nothing would send.
+    exception escaped the listener, and `sendResponse` never fired.
     """
     del tmp
     outcome = _run_relay_authority('download-sync-throw')
