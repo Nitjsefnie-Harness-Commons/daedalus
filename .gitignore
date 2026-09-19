@@ -464,6 +464,7 @@
 !/tests/test_tab_routing_js_sweep.py
 !/tests/test_tab_routing_js_templates.py
 !/tests/test_tab_routing_performance.py
+!/tests/test_tab_routing_store_sweep.py
 !/tests/test_tab_routing_unprovable.py
 !/tests/test_tab_routing_yielded_sender.py
 !/tests/test_teardown_retry.py
