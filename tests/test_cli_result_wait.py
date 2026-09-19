@@ -68,7 +68,7 @@ _BACKOFF_HARNESS = (
     'from daedalus_cli import transport\n'
     'class _Clock:\n'
     '    def __init__(self):\n'
-    '        self.now = 0.0\n'
+    '        self.now = 1000.0\n'
     '        self.sleeps = []\n'
     '    def monotonic(self):\n'
     '        return self.now\n'
