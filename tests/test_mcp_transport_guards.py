@@ -393,6 +393,37 @@ def test_poll_honors_the_session_clock_for_loop_entry(tmp):
     assert result == expected, (result, expected)
 
 
+def test_poll_admits_a_read_just_inside_the_deadline(tmp):
+    """A read strictly inside the deadline must still admit the poll.
+
+    The clock steps from clearly before to just inside the boundary,
+    then past it, so a deadline computed short from the timeout rejects
+    the inside read and the hand-over never happens.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    wanted = {
+        'id': 'command',
+        'deliveryId': 'wanted',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        wanted,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+    # 100.0009 is inside 100.001 but outside any shortened deadline.
+    session.monotonic = _clock_script(100.0, 100.0009, 100.5)
+
+    result = _capture(session.poll_result(
+        '', 0.001, interval=0, expect_id='command',
+        expect_delivery='wanted'))
+
+    assert result == wanted, (result, wanted)
+
+
 def test_poll_rejects_a_body_without_a_delivery_id(tmp):
     del tmp
     transport = _transport()
