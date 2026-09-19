@@ -49,17 +49,22 @@ def _derived_tree(tmp, relatives):
     return root
 
 
-def _mutated_copy(tmp, site):
-    """A minimal tree with one site bypassing, and where its launch sits."""
+def _plant(site, root):
+    """One site's bypass planted in its copied module, launch located."""
     relative, needle, replacement, launch_needle = site
-    root = _derived_tree(tmp, (relative,))
     target = root / relative
     text = target.read_text(encoding='utf-8')
     assert text.count(needle) == 1, f'the {relative} site shape changed'
     assert launch_needle in text, f'the {relative} launch shape changed'
     launch_line = text[:text.index(launch_needle)].count('\n') + 1
     target.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
-    return root, f'{relative}:{launch_line}:'
+    return f'{relative}:{launch_line}:'
+
+
+def _mutated_copy(tmp, site):
+    """A minimal tree with one site bypassing, and where its launch sits."""
+    root = _derived_tree(tmp, (site[0],))
+    return root, _plant(site, root)
 
 
 def _synthetic(source):
@@ -466,11 +471,19 @@ subprocess.run(['bash', '-c', 'true'], cwd=tmp)
 
 
 def test_each_real_site_is_caught_when_it_bypasses(tmp):
-    for site in _SITES:
-        root, expected = _mutated_copy(tmp, site)
+    for index, site in enumerate(_SITES):
+        root, expected = _mutated_copy(Path(tmp, f'site{index}'), site)
         violations = _bash_resolver_scan._tree_violations(root)
         assert any(v.startswith(expected) for v in violations), (
             site[0], expected, violations)
+
+
+def test_a_two_module_tree_catches_the_later_site_bypass(tmp):
+    """The later module's bypass is judged on its own module's facts."""
+    root = _derived_tree(tmp, [site[0] for site in _SITES])
+    expected = _plant(_SITES[1], root)
+    violations = _bash_resolver_scan._tree_violations(root)
+    assert any(v.startswith(expected) for v in violations), violations
 
 
 def test_a_derived_tree_tracks_a_comprehension_walrus(tmp):
