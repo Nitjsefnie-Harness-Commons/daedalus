@@ -25,10 +25,12 @@ class _PublishSpy:
         self.calls = []
         self.states = []
 
-    def replace(self, src, dst):
-        self.states.append(dst.read_bytes() if dst.exists() else None)
-        self.calls.append((src, dst))
-        self._publish(src, dst)
+    def replace(self, *args, **kwargs):
+        handed = dict(zip(('src', 'dst'), args), **kwargs)
+        self.states.append(
+            handed['dst'].read_bytes() if handed['dst'].exists() else None)
+        self.calls.append((handed['src'], handed['dst']))
+        self._publish(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(os, name)
@@ -48,10 +50,7 @@ def test_publish_goes_through_os_replace_with_the_callers_own_arguments(tmp):
     spy = _PublishSpy(os.replace)
 
     module.os = spy
-    try:
-        module.replace_atomically(src, dst)
-    finally:
-        module.os = os
+    module.replace_atomically(src, dst)
 
     assert spy.calls == [(src, dst)], spy.calls
     assert dst.read_bytes() == payload
@@ -69,10 +68,7 @@ def test_publish_moment_sees_no_partial_destination(tmp):
     spy = _PublishSpy(os.replace)
 
     module.os = spy
-    try:
-        module.replace_atomically(src, dst)
-    finally:
-        module.os = os
+    module.replace_atomically(src, dst)
 
     assert spy.states == [already_there], spy.states
     assert dst.read_bytes() == payload
@@ -94,11 +90,13 @@ def test_transient_sharing_violation_is_retried_until_it_clears(tmp):
         os.replace(src, dst)
 
     module.os = _PublishSpy(sharing_violation_then_success)
+    raised = None
     try:
         module.replace_atomically(src, dst)
-    finally:
-        module.os = os
+    except PermissionError as error:
+        raised = error
 
+    assert raised is None, raised
     assert attempts == [(src, dst)] * 3, attempts
     assert dst.read_bytes() == payload
 
@@ -116,18 +114,28 @@ def test_errors_retrying_cannot_fix_surface_on_the_first_attempt(tmp):
         raise OSError(30, 'injected read-only refusal')
 
     module.os = _PublishSpy(read_only)
+    raised = None
     try:
         module.replace_atomically(src, dst)
     except OSError as error:
         raised = error
-    else:
-        raised = None
-    finally:
-        module.os = os
 
     assert isinstance(raised, OSError), raised
     assert attempts == [(src, dst)], attempts
     assert not dst.exists()
+
+
+def test_the_recorder_accepts_the_keyword_call_form(tmp):
+    spy = _PublishSpy(os.replace)
+    src = Path(tmp) / 'incoming'
+    dst = Path(tmp) / 'live.json'
+    payload = b'published through the keyword call form'
+    src.write_bytes(payload)
+
+    spy.replace(src, dst=dst)
+
+    assert spy.calls == [(src, dst)], spy.calls
+    assert dst.read_bytes() == payload
 
 
 if __name__ == '__main__':
