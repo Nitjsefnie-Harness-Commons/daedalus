@@ -212,6 +212,16 @@ def test_false_tab_ids_is_rejected_as_present_wrong_shape(tmp):
     _assert_wrong_shape(False)
 
 
+def test_true_tab_ids_is_rejected_as_present_wrong_shape(tmp):
+    del tmp
+    _assert_wrong_shape(True)
+
+
+def test_nonzero_tab_ids_is_rejected_as_present_wrong_shape(tmp):
+    del tmp
+    _assert_wrong_shape(7)
+
+
 def test_object_tab_ids_is_rejected_without_removing_tabs(tmp):
     del tmp
     _assert_wrong_shape({})
