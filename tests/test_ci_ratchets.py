@@ -22,6 +22,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / 'scripts' / 'ci')]
 THRESHOLDS_PATH = ROOT / '.github' / 'ci-thresholds.json'
 RATCHET_PATH = ROOT / 'scripts' / 'ci' / 'ratchet.py'
 SIZE_PATH = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
+LINES_PATH = ROOT / 'scripts' / 'ci' / 'line_lengths.py'
 
 
 def _thresholds():
@@ -45,6 +46,7 @@ def _document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
             'tests/test_mcp_server.py': 1706,
             'tests/test_cli.py': 1238,
         },
+        'long_line_baseline': {},
     }
 
 
@@ -73,14 +75,16 @@ def _value_error(call):
 def test_promoted_modules_import_by_package(tmp):
     command = '; '.join((
         'import scripts.ci.ratchet', 'import scripts.ci.size_baseline',
-        'import scripts.ci.thresholds', 'import scripts.ci.workflow_yaml'))
+        'import scripts.ci.line_lengths', 'import scripts.ci.thresholds',
+        'import scripts.ci.workflow_yaml'))
     imported = subprocess.run(
         [sys.executable, '-c', command], cwd=str(ROOT), capture_output=True,
         text=True, timeout=60)
     assert imported.returncode == 0, (imported.stdout, imported.stderr)
     assert all(__import__(name, fromlist=['*']) for name in (
         'scripts.ci.ratchet', 'scripts.ci.size_baseline',
-        'scripts.ci.thresholds', 'scripts.ci.workflow_yaml'))
+        'scripts.ci.line_lengths', 'scripts.ci.thresholds',
+        'scripts.ci.workflow_yaml'))
 
 
 def test_measurement_rejects_bool_bad_numeric_and_nonfinite(_tmp):
@@ -292,7 +296,7 @@ def _seed_publisher_tree(repo, data):
     (repo / 'scripts' / 'ci').mkdir(parents=True)
     (repo / 'tests').mkdir()
     _thresholds().write(repo / '.github' / 'ci-thresholds.json', data)
-    for path in (RATCHET_PATH, SIZE_PATH,
+    for path in (RATCHET_PATH, SIZE_PATH, LINES_PATH,
                  ROOT / 'scripts' / 'ci' / 'thresholds.py'):
         shutil.copy2(path, repo / 'scripts' / 'ci' / path.name)
     (repo / 'tests' / 'test_mcp_server.py').write_text(
@@ -490,8 +494,8 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     _repo, _path, _before, noop_output, noop_summary, done = noop
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
-    assert 'no raise; no module shrank.' in noop_summary.read_text(
-        encoding='utf-8')
+    assert ('no raise; no module shrank and no file lost an over-limit '
+            'line.') in noop_summary.read_text(encoding='utf-8')
 
 
 def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
