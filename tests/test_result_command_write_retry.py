@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import TOK, put_command  # noqa: E402
+from _bridge import BRIDGE_ENV, TOK, put_command  # noqa: E402
 
 # The sharing violation Windows reports when another process holds the
 # handle: the same shape the replace retry already treats as transient.
@@ -46,7 +46,8 @@ def _write_fault_dir(tmp, body):
 def _bridge_with(tmp, body):
     """A bridge whose child raises one injected PermissionError."""
     fault_dir = _write_fault_dir(tmp, body)
-    return _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)})
+    return _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'PYTHONPATH': str(fault_dir)})
 
 
 def _recorded_refusals(docroot):

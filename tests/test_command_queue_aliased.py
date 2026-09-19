@@ -18,7 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import TOK, framer, put_command, stream_response  # noqa: E402
+from _bridge import (BRIDGE_ENV, TOK, framer, put_command,  # noqa: E402
+                     stream_response)
 
 
 def _load_queue(name):
@@ -363,7 +364,8 @@ def test_sweep_leaves_an_aliased_legacy_pair_for_a_later_pass(tmp):
 def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
     """One extension stream, two names for one object, zero commands out."""
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served,
+                      env=BRIDGE_ENV) as (base, docroot):
         commands = Path(docroot) / 'commands'
         first = commands / f'{TOK}_dup.json'
         second = commands / f'{TOK}_other.json'
@@ -390,7 +392,8 @@ def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
 def test_a_stream_admitted_before_the_name_reads_nothing_outside(tmp):
     """The containment an admission checked cannot vouch for a later alias."""
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served,
+                      env=BRIDGE_ENV) as (base, docroot):
         outside = Path(docroot).parent / 'outside-payload.json'
         _write_command(outside, 'outside-payload')
         conn, response = stream_response(base, TOK, tab='dup')

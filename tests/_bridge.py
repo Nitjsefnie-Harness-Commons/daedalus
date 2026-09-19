@@ -2,10 +2,12 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-Importing this configures the bridge credential for the importing process:
-`_util.bridge()` hands its own environment to the child it starts, so the
-token these suites authenticate with has to be in `os.environ` before the
-first bridge exists, not passed per call.
+`BRIDGE_ENV` is the environment every bridge child of these suites carries:
+the credential the suites' requests present, applied per spawn, because
+`_util.bridge()` strips every inherited `DAEDALUS_*` variable before applying
+its own settings and the caller's `env=`, so a value in `os.environ` before
+the first bridge exists reaches no child. The `os.environ` writes below keep
+serving the suite process's own in-process consumers of the credential.
 """
 import http.client
 import json
@@ -30,6 +32,10 @@ PNG = b'\x89PNG\r\n\x1a\n' + b'not-really-a-png-but-the-bridge-does-not-care'
 # one-off override so an ambient shell value cannot shadow these suites' token.
 os.environ['TOKEN'] = ''
 os.environ['DAEDALUS_TOKEN'] = TOK
+
+# The child env applied at every bridge spawn of these suites. `TOKEN` stays
+# cleared so an ambient one-off override cannot shadow the suite's credential.
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
 
 
 def put_command(base, payload):

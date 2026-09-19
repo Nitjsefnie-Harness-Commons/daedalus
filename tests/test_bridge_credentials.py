@@ -16,8 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import (TOK, framer, put_command, queue_files,  # noqa: E402
-                     stream_response)
+from _bridge import (BRIDGE_ENV, TOK, framer, put_command,  # noqa: E402
+                     queue_files, stream_response)
 
 
 # Routes the bridge answers without the configured token, by design: the
@@ -30,7 +30,7 @@ _CAPABILITY_OR_PUBLIC_ROUTES = frozenset({
 
 
 def test_token_validation_across_endpoints(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for bad in ('a/b', 'a.b', '..', ''):
             status, _ = _util.get_json(base + f'/result?token={bad}')
             assert status == 400, ('result', bad, status)
@@ -113,7 +113,7 @@ def test_wrong_token_is_refused_on_every_bridge_control_route(tmp):
         'Origin': 'null',
         'Sec-Fetch-Site': 'cross-site',
     }
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         conn, response = stream_response(base, wrong, 'extension')
         try:
             replies = [('GET /stream', response.status)]
@@ -162,7 +162,7 @@ def test_wrong_token_is_refused_on_every_bridge_control_route(tmp):
 
 def test_repeated_wrong_tokens_create_no_storage_namespaces(tmp):
     """Repeated attacker-chosen names cannot allocate queue, upload, or job state."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         replies = []
         for index in range(8):
             wrong = f'attacker{index}'
@@ -193,7 +193,7 @@ def test_duplicate_query_credentials_are_rejected_without_parser_order(tmp):
         ('/stream', '&tab=..'),
     )
     orders = ((TOK, 'wrongtoken'), ('wrongtoken', TOK))
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
         for first, second in orders:
             for path, suffix in routes:
@@ -223,7 +223,7 @@ def test_duplicate_body_credentials_are_rejected_on_every_json_route(tmp):
         ('DELETE', '/upload', b'"id":"duplicate-delete"'),
     )
     orders = ((TOK, 'wrongtoken'), ('wrongtoken', TOK))
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/upload', {
             'token': TOK, 'id': 'duplicate-delete', 'data': 'QQ=='})
         assert status == 200 and body['ok'] is True, (status, body)
@@ -257,7 +257,7 @@ def test_query_token_duplicates_reject_blank_and_equal_values(tmp):
         ('/stream', '&tab=duplicate-token'),
     )
     duplicates = ((TOK, TOK), ('', TOK), (TOK, ''))
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
         port = int(base.rsplit(':', 1)[1])
         for first, second in duplicates:
@@ -300,7 +300,7 @@ def test_body_token_duplicates_reject_blank_and_equal_values(tmp):
         ('DELETE', '/upload', b'"id":"duplicate-delete"'),
     )
     duplicates = ((TOK, TOK), ('', TOK), (TOK, ''))
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/upload', {
             'token': TOK, 'id': 'duplicate-delete', 'data': 'QQ=='})
         assert status == 200 and body['ok'] is True, (status, body)
@@ -359,7 +359,7 @@ def test_an_unauthenticated_body_is_refused_before_it_arrives(tmp):
     concurrent worker could be made to do the same. The Bearer header is
     what makes the decision reachable first.
     """
-    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_REQUEST_TIMEOUT': '5'}
     with _util.bridge(tmp, env=env) as (base, _docroot):
         status, payload = _declared_post(
             base, '/result', 8 * 1024 * 1024, b'{' + b' ' * 65535, ())
@@ -369,7 +369,7 @@ def test_an_unauthenticated_body_is_refused_before_it_arrives(tmp):
 
 def test_a_bearer_header_admits_a_body_past_that_window(tmp):
     """The header is the carrier that lets a large body be authenticated."""
-    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_REQUEST_TIMEOUT': '5'}
     with _util.bridge(tmp, env=env) as (base, docroot):
         big = 'x' * (256 * 1024)
         status, payload = _util.post_json(
@@ -388,7 +388,7 @@ def test_a_bearer_header_admits_a_body_past_that_window(tmp):
 
 def test_a_small_body_still_authenticates_from_its_own_token(tmp):
     """The older form keeps working where its size was never the problem."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _util.post_json(
             base + '/result', {'token': TOK, 'id': 'small', 'result': 'ok'})
         assert status == 200, (status, payload)
@@ -399,7 +399,7 @@ def test_a_small_body_still_authenticates_from_its_own_token(tmp):
 
 def test_a_header_and_a_body_token_must_agree(tmp):
     """Two different tokens in one request is an ambiguous carrier."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _util.post_json(
             base + '/result', {'token': 'other', 'id': 'x', 'result': 'y'},
             headers={'Authorization': f'Bearer {TOK}'})
@@ -414,7 +414,7 @@ def test_a_header_and_a_body_token_must_agree(tmp):
 
 def test_an_ambiguous_authorization_header_is_refused(tmp):
     """Two Authorization headers are refused before either is selected."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _declared_post(
             base, '/result', 2, b'{}',
             (('Authorization', f'Bearer {TOK}'),
@@ -426,7 +426,7 @@ def test_an_ambiguous_authorization_header_is_refused(tmp):
 
 def test_an_authorization_that_is_not_bearer_is_refused(tmp):
     """A header that carries something else is not a fallback to the body."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _util.post_json(
             base + '/result', {'token': TOK, 'id': 'x', 'result': 'y'},
             headers={'Authorization': f'Basic {TOK}'})
@@ -436,7 +436,7 @@ def test_an_authorization_that_is_not_bearer_is_refused(tmp):
 
 def test_every_body_verb_settles_credentials_before_the_body(tmp):
     """PUT and DELETE take the same route as POST, not a private one."""
-    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_REQUEST_TIMEOUT': '5'}
     with _util.bridge(tmp, env=env) as (base, _docroot):
         port = int(base.rsplit(':', 1)[1])
         for method, path in (('PUT', '/command'), ('DELETE', '/upload')):
@@ -465,7 +465,7 @@ def test_authenticated_get_routes_accept_a_bearer_header(tmp):
     that keeps it out of all three.
     """
     auth = {'Authorization': f'Bearer {TOK}'}
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _util.get_json(base + '/tabs', headers=auth)
         assert status == 200 and payload == [], (status, payload)
         status, payload = _util.get_json(base + '/result', headers=auth)
@@ -486,7 +486,8 @@ def test_authenticated_get_routes_accept_a_bearer_header(tmp):
 def test_the_stream_accepts_a_bearer_header(tmp):
     """The extension's own stream carries no credential in its target."""
     served = []
-    with _util.bridge(tmp, output=served) as (base, _docroot):
+    with _util.bridge(tmp, output=served,
+                      env=BRIDGE_ENV) as (base, _docroot):
         conn, response = _util.header_stream(
             base, '/stream?tab=extension',
             (('Authorization', f'Bearer {TOK}'),))
@@ -505,7 +506,7 @@ def test_the_stream_accepts_a_bearer_header(tmp):
 
 def test_an_unauthorized_bearer_header_is_refused_on_a_get(tmp):
     """The header is a credential, not a hint: a wrong one is not ignored."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _util.get_json(
             base + '/tabs', headers={'Authorization': 'Bearer wrongtoken'})
         assert status == 401 and payload == {'error': 'unauthorized'}, (
@@ -518,7 +519,7 @@ def test_an_unauthorized_bearer_header_is_refused_on_a_get(tmp):
 
 def test_a_get_header_and_query_token_must_agree(tmp):
     """Two different tokens in one request is an ambiguous carrier."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _util.get_json(
             base + '/tabs?token=other',
             headers={'Authorization': f'Bearer {TOK}'})
@@ -533,7 +534,7 @@ def test_a_get_header_and_query_token_must_agree(tmp):
 
 def test_a_duplicate_authorization_header_is_refused_on_a_get(tmp):
     """Two Authorization headers are refused before either is selected."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         conn, response = _util.header_stream(
             base, '/tabs',
             (('Authorization', f'Bearer {TOK}'),
@@ -549,7 +550,7 @@ def test_a_duplicate_authorization_header_is_refused_on_a_get(tmp):
 
 def test_a_query_token_still_authorizes_a_get(tmp):
     """The older carrier keeps working; this removes a leak, not a route."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, payload = _util.get_json(base + f'/tabs?token={TOK}')
         assert status == 200 and payload == [], (status, payload)
         status, payload = _util.get_json(base + '/tabs?token=wrong')
