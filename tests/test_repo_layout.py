@@ -218,9 +218,11 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     def returns included), and follows functools/importlib under any
     alias: an aliased or from-imported subprocess, an eval-built
     launcher, an unresolvable callee or receiver, or a keyword it
-    cannot read is a refusal, never an accept. Residual within that
-    boundary: a name the resolver has not bound is provisionally safe,
-    so a shadowing re-import it cannot see would evade it.
+    cannot read is a refusal, never an accept. Called bare names are
+    censused against in-file definitions, tracked bindings, imports
+    and the runtime builtins table; what remains outside that census
+    is a builtin shadowed at runtime, which a static read of this
+    file cannot see.
     """
     del tmp
     import builtins
@@ -255,11 +257,28 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     def derives(value, bound):
         """Does this expression yield the module or one of its members?"""
         if isinstance(value, ast.Name):
-            return value.id == 'subprocess' or value.id in bound
+            return (value.id == 'subprocess' or value.id in bound
+                    or value.id in module_factories)
         if isinstance(value, (ast.Attribute, ast.NamedExpr)):
             return derives(value.value, bound)
-        if isinstance(value, (ast.Tuple, ast.List)):
+        if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
             return any(derives(elt, bound) for elt in value.elts)
+        if isinstance(value, ast.Dict):
+            return any(derives(item, bound)
+                       for item in value.values if item is not None)
+        if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            return (derives(value.elt, bound)
+                    or any(derives(g.iter, bound)
+                           for g in value.generators))
+        if isinstance(value, ast.DictComp):
+            return (derives(value.key, bound)
+                    or derives(value.value, bound)
+                    or any(derives(g.iter, bound)
+                           for g in value.generators))
+        if isinstance(value, ast.IfExp):
+            return derives(value.body, bound) or derives(value.orelse, bound)
+        if isinstance(value, ast.Lambda):
+            return derives(value.body, bound)
         if isinstance(value, ast.Subscript):
             base = value.value
             if isinstance(base, ast.Attribute) \
@@ -280,6 +299,19 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
             if called == 'getattr' and any(
                     derives(arg, bound) for arg in value.args):
                 return True
+            if isinstance(value.func, ast.Attribute):
+                if isinstance(value.func.value, ast.Name) \
+                        and value.func.value.id == 'subprocess':
+                    return False
+                return derives(value.func.value, bound)
+            if isinstance(value.func, ast.Name):
+                if (value.func.id in bound
+                        or value.func.id in module_factories):
+                    return True
+                if value.func.id in defined_names:
+                    return False
+                return any(derives(arg, bound) for arg in value.args)
+            return any(derives(arg, bound) for arg in value.args)
         return False
 
     def resolves_safe(expr):
@@ -319,6 +351,7 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
         return True
 
     refusals = []
+    defined_names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -326,8 +359,10 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                     refusals.append(
                         f'{here}:{node.lineno} aliases the subprocess '
                         f'import as {alias.asname}')
-                elif alias.name in machinery:
+                elif alias.name in machinery and '.' not in alias.name:
                     module_aliases[alias.asname or alias.name] = alias.name
+                elif '.' in alias.name and not alias.asname:
+                    safe_names.add(alias.name.split('.')[0])
                 else:
                     safe_names.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom):
@@ -339,9 +374,11 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                     imported = f'{node.module}.{alias.name}'
                     if imported in partial_aliases:
                         partial_aliases.add(alias.asname or alias.name)
+                        defined_names.add(alias.asname or alias.name)
                     elif imported in import_module_aliases:
                         import_module_aliases.add(alias.asname
                                                   or alias.name)
+                        defined_names.add(alias.asname or alias.name)
                     else:
                         safe_names.add(alias.asname or alias.name)
     if not refusals and not any(
@@ -354,6 +391,7 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
             'audit cannot vouch for any launch')
     bindings = []
     returns = []
+    yields = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             bindings.extend(
@@ -365,6 +403,7 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
         elif isinstance(node, ast.NamedExpr):
             bindings.append((node.target.id, node.value))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defined_names.add(node.name)
             args = node.args
             defaults = args.defaults[-len(args.args):] \
                 if args.defaults else []
@@ -377,13 +416,24 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                 (node.name, statement.value)
                 for statement in ast.walk(node)
                 if isinstance(statement, ast.Return) and statement.value)
+            yields.extend(
+                (node.name, statement.value)
+                for statement in ast.walk(node)
+                if isinstance(statement, (ast.Yield, ast.YieldFrom))
+                and statement.value)
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             if isinstance(node.target, ast.Name):
                 bindings.append((node.target.id, node.iter))
         elif isinstance(node, ast.ClassDef):
+            defined_names.add(node.name)
             for statement in node.body:
                 if isinstance(statement, ast.Assign):
                     bindings.append((node.name, statement.value))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if isinstance(item.optional_vars, ast.Name):
+                    bindings.append(
+                        (item.optional_vars.id, item.context_expr))
     bound = set()
     module_factories = set()
     launcher_factories = set()
@@ -394,7 +444,7 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
             if name not in bound and derives(value, bound):
                 bound.add(name)
                 changed = True
-        for name, value in returns:
+        for name, value in returns + yields:
             if name in module_factories or name in launcher_factories:
                 continue
             if derives(value, bound):
@@ -439,6 +489,15 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                 refusals.append(
                     f'{here}:{node.lineno} calls {called}, which the '
                     'audit cannot resolve')
+        if isinstance(func, ast.Name) \
+                and not (func.id in bound
+                         or func.id in module_factories
+                         or func.id in launcher_factories
+                         or func.id in defined_names
+                         or func.id in safe_names):
+            refusals.append(
+                f'{here}:{node.lineno} calls undefined name {func.id!r}, '
+                'which the audit cannot resolve')
         if isinstance(func, ast.Attribute) \
                 and isinstance(func.value, ast.Name) \
                 and (func.value.id == 'subprocess'
