@@ -588,9 +588,8 @@ def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
     """`cache: pip` saves in a post-job step that runs after untrusted code.
 
     That post step is the cache-poisoning shape issue #166 took out of the
-    speed cells: on a pull_request run it writes a cache a later main run
-    restores. These six jobs install the tools and code they then run, so
-    the cache is two steps and the event gate lives on the save half.
+    speed cells: a pull_request run would write what a later main run
+    restores. These six jobs take the cache as two steps instead.
     """
     del tmp
     workflow = _tests_yml()
@@ -607,16 +606,16 @@ def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
 def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
     """Restore is safe on every event: a pull request reads what main wrote.
 
-    The key names the platform, the interpreter and the requirements hash,
-    so a job restores only a cache a same-platform run of the same
-    dependency set wrote. Where the interpreter is 3.13 that is six jobs —
-    the three lint jobs and `coverage` fix it, the 3.13 legs of `suites`
-    and `coverage-matrix` land there too — one namespace rather than six,
-    because the cache holds fetched packages any such install reuses. Key
-    and restore-keys prefix are pinned exactly: neither a deleted fallback
-    nor a renamed prefix can silently fragment it. Gating a restore cannot
-    make it safer — a gate there would be the save gate wearing the wrong
-    step's name.
+    The key names the platform, the interpreter and the requirements hash.
+    An exact match restores what a same-platform run of the same
+    dependency set wrote; missing it, the restore-keys prefix falls back
+    to the newest cache sharing the prefix, possibly an older set's.
+    Where the interpreter is 3.13 that is six jobs on one namespace
+    rather than one apiece — the cache holds fetched packages any such
+    install reuses. Key and restore-keys prefix are pinned exactly:
+    neither a deleted fallback nor a renamed prefix can silently
+    fragment it. Gating a restore cannot make it safer — a gate there
+    would be the save gate wearing the wrong step's name.
     """
     del tmp
     workflow = _tests_yml()
@@ -648,8 +647,8 @@ def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
     repository itself produced, may. Evaluated as Actions would evaluate it
     rather than substring-matched, so an `||` or a widened ref reads as the
     defect it is, and a cancelled run writes nothing either way. The save
-    follows the step that runs the job's suites, measurement or lint, so
-    a later run restores only what a run that ran them put there.
+    follows the per-row recorded step: suites, measurement or lint — but
+    the install itself for `coverage`.
     """
     del tmp
     workflow = _tests_yml()
