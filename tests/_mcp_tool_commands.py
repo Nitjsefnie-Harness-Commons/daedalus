@@ -14,8 +14,8 @@ every site the tool surface spells is owed a case, an allowlist entry, or an
 off-surface declaration.
 
 That floor witnesses raises only. A refusal written as `return {'error': ...}`
-— the repo's own convention at daedalus_mcp/tools_css.py `unblock_requests` —
-never raises, so no case here can be asked to witness it, and rewriting a
+— the repo's own convention at daedalus_mcp/tools_css.py `unblock_requests`
+— never raises, so no case here can be asked to witness it, and rewriting a
 raise into such a return with its pins deleted ships green.
 """
 MARKER = 'pinned'

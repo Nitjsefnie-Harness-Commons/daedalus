@@ -162,9 +162,9 @@ def tool(value):
 def test_a_module_global_helper_site_is_reached(_tmp):
     """A tool reaches a guard through a module-global function.
 
-    The most ordinary refactor — moving a guard into a helper — used to take
-    the guard off the tool's reach, so declaring it off-surface then let its
-    pins be deleted (round 3's plant D2).
+    A guard moved into a module-global helper stays on the tool's reach;
+    otherwise the ordinary refactor could declare it off-surface and have
+    its pins deleted, with no refusal case.
     """
     sites, module = _mcp_guard_floor.guard_shape_probe(
         _tmp, HELPER_TREE, 'helper_tree')
@@ -348,9 +348,9 @@ def test_the_scan_set_includes_a_module_imported_under_a_dead_branch(_tmp):
     """The scan set is the composition's static import graph.
 
     A module imported only inside a function body, under a branch nothing
-    executes, is still a module the composition can import. The sys.modules
-    snapshot this replaces missed exactly this one: round 3's plant B2 sat
-    green at 13/13 with an undeclared raise.
+    executes, is still a module the composition can import. A runtime
+    sys.modules snapshot would miss it and leave its raise sites
+    undeclared and unwitnessed.
     """
     _write_tree(Path(_tmp), {
         'composition.py': LAZY_COMPOSITION,
@@ -377,9 +377,9 @@ def load(name):
 def test_a_computed_import_refuses_the_scan(_tmp):
     """An import the walk cannot read statically fails the scan loudly.
 
-    Naming the module and the import site is what makes the closure
-    bounded rather than bounded-looking; a walk that silently omitted what
-    it cannot resolve would be the fifth boundary variant.
+    A walk that silently omitted an import it cannot resolve statically
+    would be a blind spot rather than a closure, so the refusal names the
+    module and the import site.
     """
     _write_tree(Path(_tmp), {'composition.py': COMPUTED_IMPORT_COMPOSITION})
     try:
