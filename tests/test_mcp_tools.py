@@ -155,7 +155,8 @@ def _load_composition(marker):
             mock.patch.object(
                 mcp_transport, 'BridgeSession', bridge_session):
         return _util.load(
-            _util.ROOT / 'daedalus_mcp' / 'server.py', f'mcp_server_tools_{marker}')
+            _util.ROOT / 'daedalus_mcp' / 'server.py',
+            f'mcp_server_tools_{marker}')
 
 
 def _assert_inventory_matches_registry(composition):
@@ -437,7 +438,8 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         assert cases, f'{name}: registered with no pinned refusal'
         tool = registered[name]
         for overrides, exception, message in cases:
-            assert message, f'{name} {overrides}: refusal pinned with no message'
+            assert message, (
+                f'{name} {overrides}: refusal pinned with no message')
             composition.bridge.calls.clear()
             try:
                 asyncio.run(tool(**_tool_arguments(tool, overrides)))
@@ -473,6 +475,28 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         'the package raises where no tool reaches and nothing declares it: '
         f'undeclared={sorted(off_surface - declared)}; '
         f'declared but reached={sorted(declared - off_surface)}')
+
+
+def test_the_refusal_pass_refuses_an_unregistered_allowlist_entry(_tmp):
+    """An UNWITNESSED_GUARDS entry for an unregistered tool is refused.
+
+    Without that refusal an entry could outlive the tool it exempts, so a
+    renamed or removed tool's stale allowlist would stay in the table as
+    if it still covered a live guard.
+    """
+    with mock.patch.dict(
+            _mcp_guard_floor.UNWITNESSED_GUARDS,
+            {'no_such_tool': {('m', 'f', 'c')}}):
+        try:
+            test_every_registered_tool_command_is_pinned(_tmp)
+        except AssertionError as refused:
+            message = str(refused)
+            assert ('UNWITNESSED_GUARDS names tools that are not registered'
+                    in message), refused
+            assert "'no_such_tool'" in message, refused
+        else:
+            raise AssertionError(
+                'an unregistered UNWITNESSED_GUARDS entry was not refused')
 
 
 def test_the_parameter_floor_refuses_a_stranded_parameter(_tmp):
