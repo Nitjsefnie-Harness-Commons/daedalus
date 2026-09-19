@@ -407,13 +407,22 @@ def test_the_manifest_declares_the_lowest_chrome_the_code_needs(tmp):
     assert isinstance(floor, str) and floor, floor
     head = floor.split('.')[0]
     assert head.isdigit() and int(head) >= 120, floor
+    code = blank_js_comments(
+        (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8'))
+    heartbeat = re.search(
+        r"alarms\.create\(\s*'daedalus-heartbeat'\s*,\s*"
+        r'\{\s*periodInMinutes:\s*0\.5\s*\}\s*\)', code)
+    assert heartbeat, 'the sub-minute heartbeat the 120 floor needs is gone'
 
 
 def test_the_manifest_does_not_grant_activeTab_beside_all_urls(tmp):
     """<all_urls> already grants what activeTab could, so it is not held."""
     del tmp
-    permissions = _shipped_manifest().get('permissions', [])
+    manifest = _shipped_manifest()
+    permissions = manifest.get('permissions', [])
     assert 'activeTab' not in permissions, permissions
+    hosts = manifest.get('host_permissions', [])
+    assert '<all_urls>' in hosts, hosts
 
 
 def main():
