@@ -86,14 +86,9 @@ def bash_candidates(path, windows, exists=os.path.isfile,
 def workflow_bash():
     """Resolve Git-for-Windows Bash through PATH, not a bare WSL launcher.
 
-    On Windows, a bare program name can select the system WSL launcher ahead
-    of the Git-for-Windows Bash executable on PATH; `bash_candidates` owns the
-    ordering that prevents it, and the WSL launcher is still returned when it
-    is the only Bash there is, so the suite that needed it fails with its own
-    signal rather than a resolver error.
-
-    Relative executable candidates are made absolute without resolving
-    symlinks.
+    `bash_candidates` owns the ordering rationale and the WSL fallback; this
+    returns the first candidate that exists and is executable, made absolute
+    without resolving symlinks, and raises AssertionError when none is.
     """
     for candidate in bash_candidates(
             os.environ.get('PATH', ''), sys.platform.startswith('win'),
@@ -459,11 +454,11 @@ def bridge(tmp, env=None, output=None, proc_out=None):
     the point: every bug worth catching here lives in request parsing, path
     handling or the queue, none of which a mock would reproduce.
 
-    The child binds port 0 and announces the port it actually got on its
-    stdout Listening line, which a drain thread relays (and keeps the pipe
-    from ever filling) into `output` when the caller passes a list. There is
-    no drawn number for a concurrent process to take: the window between
-    choosing a port and binding it no longer exists.
+    The child binds port 0, so there is no drawn number for a concurrent
+    process to take: the window between choosing a port and binding it no
+    longer exists. A drain thread relays the child's combined output into
+    `output` when the caller passes a list, keeping the pipe from ever
+    filling.
 
     stdout and stderr are captured and, on a startup failure, raised with the
     output attached; a bridge that dies silently would otherwise show up as an
