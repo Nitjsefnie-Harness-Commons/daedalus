@@ -651,6 +651,29 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
     assert not failures, '\n'.join(failures)
 
 
+def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
+    """An invalid DAEDALUS_MCP_* value exported in the suite's own shell used
+    to refuse the in-process load before any test ran: the loader parsed the
+    suite process's environment. The load must see the caller's settings alone.
+    """
+    del tmp
+    _need_deps()
+    for name, value in (('DAEDALUS_MCP_PORT', 'abc'),
+                        ('DAEDALUS_MCP_MAX_BODY_SIZE', 'bad')):
+        previous = os.environ.get(name)
+        os.environ[name] = value
+        try:
+            plain = _load_mcp('http://127.0.0.1:1')
+            ported = _load_mcp_at_port('http://127.0.0.1:1', 0)
+            assert plain.MCP_PORT == 8086 and ported.MCP_PORT == 0
+            assert plain.MAX_BODY_SIZE == 64 * 1024 * 1024
+        finally:
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
+
+
 def test_mcp_and_bridge_config_use_one_env_parser(tmp):
     _need_deps()
     from daedalus_bridge import env_config
