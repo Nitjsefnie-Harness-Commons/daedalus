@@ -334,6 +334,7 @@
 !/tests/test_change_classifier_callers.py
 !/tests/test_checkout_pin.py
 !/tests/test_child_coverage.py
+!/tests/test_ci_pip_cache.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_thresholds.py
 !/tests/test_ci_workflows.py
