@@ -30,6 +30,8 @@ const messageListeners = [];
 const fetches = [];
 const created = [];
 let createCalls = 0;
+const downloaded = [];
+let downloadCalls = 0;
 
 function eventTarget(listeners = null) {
   return {
@@ -88,6 +90,31 @@ const chrome = {
         return;
       }
       callback({ id: 100 + created.length });
+    },
+  },
+  downloads: {
+    // Callback-style, as messaging.js calls it. The real API validates its
+    // arguments before doing anything, so a non-string url is refused with
+    // a synchronous TypeError exactly as the shipped API refuses one.
+    download(details, callback) {
+      downloadCalls += 1;
+      if (typeof details.url !== 'string') {
+        throw new TypeError('url: expected string');
+      }
+      downloaded.push(details);
+      if (mode === 'download-sync-throw') {
+        throw new Error('synchronous refusal');
+      }
+      if (mode === 'download-refused') {
+        chrome.runtime.lastError = { message: 'Download refused' };
+        try {
+          callback(undefined);
+        } finally {
+          chrome.runtime.lastError = null;
+        }
+        return;
+      }
+      callback(5000 + downloaded.length);
     },
   },
 """ + INERT_WORKER_APIS + r"""
@@ -160,6 +187,37 @@ async function run() {
           ? null : relayed.answer.status,
         error: relayed.answer.error || null,
       },
+    };
+  }
+  if (mode === 'download-guard' || mode === 'download-refused'
+    || mode === 'download-sync-throw') {
+    const downloadUrls = mode === 'download-guard'
+      ? [['https://example.com/f'], 'https://example.com/f']
+      : ['https://example.com/f'];
+    const outcomes = [];
+    for (const url of downloadUrls) {
+      try {
+        const relayed = await send(
+          { type: 'download', url, filename: 'f.bin' });
+        outcomes.push({
+          url,
+          downloadId: relayed.answer.downloadId === undefined
+            ? null : relayed.answer.downloadId,
+          error: relayed.answer.error || null,
+          threw: null,
+          responses: relayed.responses.length,
+        });
+      } catch (error) {
+        outcomes.push({
+          url, downloadId: null, error: null, threw: error.message,
+          responses: 0,
+        });
+      }
+    }
+    return {
+      outcomes,
+      downloaded: downloaded.map((details) => details.url),
+      downloadCalls,
     };
   }
   const urls = mode === 'open-guard'
@@ -347,6 +405,75 @@ def test_a_web_url_still_opens_with_one_answer(tmp):
     }, outcome
     assert outcome['created'] == ['https://example.com/guard'], outcome
     assert outcome['createCalls'] == 1, outcome
+
+
+def test_a_non_string_url_is_refused_before_download(tmp):
+    """A non-string `download` URL answers an error and never downloads.
+
+    The worker handed `msg.url` to `chrome.downloads.download` unread, and
+    the real API refuses a non-string url argument with a synchronous
+    TypeError. The listener propagated that exception, so `sendResponse`
+    never fired and the page was left with no answer at all — the download
+    twin of the openTab hole issue 712 closed.
+    """
+    del tmp
+    outcome = _run_relay_authority('download-guard')
+    array_shape, control = outcome['outcomes']
+    assert array_shape['threw'] is None, array_shape
+    assert array_shape['responses'] == 1, array_shape
+    assert array_shape['error'], array_shape
+    assert array_shape['downloadId'] is None, array_shape
+    # Only the string control reached the API: the gate answers the array
+    # before an invocation that cannot succeed.
+    assert outcome['downloaded'] == ['https://example.com/f'], outcome
+    assert outcome['downloadCalls'] == 1, outcome
+    assert control == {
+        'url': 'https://example.com/f',
+        'downloadId': 5001,
+        'error': None,
+        'threw': None,
+        'responses': 1,
+    }, outcome
+
+
+def test_a_synchronous_download_refusal_answers_an_error(tmp):
+    """A synchronous `downloads.download` refusal answers `{error}`.
+
+    Chrome can refuse the call itself, before any callback is scheduled,
+    so the callback that answers `lastError` refusals never runs. That
+    exception escaped the listener, `sendResponse` never fired, and the
+    page waited on an answer nothing would send.
+    """
+    del tmp
+    outcome = _run_relay_authority('download-sync-throw')
+    assert outcome['outcomes'] == [{
+        'url': 'https://example.com/f',
+        'downloadId': None,
+        'error': 'synchronous refusal',
+        'threw': None,
+        'responses': 1,
+    }], outcome
+    assert outcome['downloaded'] == ['https://example.com/f'], outcome
+
+
+def test_a_refused_download_answers_an_error(tmp):
+    """A `lastError` download refusal answers `{error}` exactly once.
+
+    The callback path already answered correctly before the fix; the fix
+    wraps its invocation in the try that answers synchronous refusals.
+    This pins the wrapped callback's answer so the guard cannot regress
+    it.
+    """
+    del tmp
+    outcome = _run_relay_authority('download-refused')
+    assert outcome['outcomes'] == [{
+        'url': 'https://example.com/f',
+        'downloadId': None,
+        'error': 'Download refused',
+        'threw': None,
+        'responses': 1,
+    }], outcome
+    assert outcome['downloaded'] == ['https://example.com/f'], outcome
 
 
 def main():

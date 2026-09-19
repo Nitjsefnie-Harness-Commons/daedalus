@@ -198,14 +198,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       message: msg.text || '',
     });
   } else if (msg.type === 'download') {
-    chrome.downloads.download(
-      { url: msg.url, filename: msg.filename }, (downloadId) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ error: chrome.runtime.lastError.message });
-        } else {
-          sendResponse({ downloadId });
-        }
-      });
+    if (typeof msg.url !== 'string') {
+      // downloads.download refuses a non-string url with a synchronous
+      // TypeError of its own; answered here, the refusal names the page's
+      // own contract instead.
+      sendResponse({ error: 'download requires a string URL' });
+      return;
+    }
+    try {
+      chrome.downloads.download(
+        { url: msg.url, filename: msg.filename }, (downloadId) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ error: chrome.runtime.lastError.message });
+          } else {
+            sendResponse({ downloadId });
+          }
+        });
+    } catch (e) {
+      // A synchronous refusal never reaches the callback, so it is answered
+      // here, with the same terminal {error} a callback refusal uses.
+      sendResponse({ error: (e && e.message) || String(e) });
+    }
     return true;
   } else if (msg.type === 'segmentJob') {
     // A thrown failure still answers: a page waiting on a callback that
