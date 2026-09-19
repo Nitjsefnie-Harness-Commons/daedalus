@@ -156,24 +156,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // to itself — chrome: pages, javascript: — and the page asking is the
     // site, not a userscript, so it does not borrow the extension's
     // authority to get there.
+    if (typeof msg.url !== 'string') {
+      // `new URL` stringifies whatever it is handed, so the type gate has
+      // to come before the protocol check or a page-chosen object reaches
+      // tabs.create, which refuses a non-string url synchronously.
+      sendResponse({ error: 'openInTab requires a string URL' });
+      return;
+    }
     let protocol = '';
     try { protocol = new URL(msg.url).protocol; } catch { /* not a URL */ }
     if (protocol !== 'http:' && protocol !== 'https:') {
       sendResponse({ error: 'openInTab accepts http: and https: URLs only' });
       return;
     }
-    chrome.tabs.create(
-      { url: msg.url, active: msg.active !== false }, (tab) => {
-        // A refused creation is reported only through lastError, with the
-        // callback invoked on no tab. Reading tab.id off that threw, so the
-        // page never got an answer and the error went unchecked.
-        const refused = chrome.runtime.lastError;
-        if (refused || !tab) {
-          sendResponse({ error: (refused && refused.message) || 'no tab' });
-        } else {
-          sendResponse({ tabId: tab.id });
-        }
-      });
+    try {
+      chrome.tabs.create(
+        { url: msg.url, active: msg.active !== false }, (tab) => {
+          // A refused creation is reported only through lastError, with the
+          // callback invoked on no tab. Reading tab.id off that threw, so
+          // the page never got an answer and the error went unchecked.
+          const refused = chrome.runtime.lastError;
+          if (refused || !tab) {
+            sendResponse({ error: (refused && refused.message) || 'no tab' });
+          } else {
+            sendResponse({ tabId: tab.id });
+          }
+        });
+    } catch (e) {
+      // A synchronous refusal never reaches the callback, so it is answered
+      // here, with the same terminal {error} a callback refusal uses.
+      sendResponse({ error: (e && e.message) || String(e) });
+    }
     return true;
   } else if (msg.type === 'notification') {
     chrome.notifications.create({
