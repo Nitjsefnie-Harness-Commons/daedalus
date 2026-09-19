@@ -113,10 +113,9 @@ def read_state(repo, pr):
 def fingerprint(item):
     """What must change for an item to count as edited.
 
-    Both halves are load-bearing. `updated_at` is absent on a review, so a
-    digest is the only thing that notices an edited review body; and a
-    timestamp can be touched without the text moving, which the digest filters
-    out. Taken together they catch an edit either one alone would miss.
+    A change in either half counts as an edit and neither half filters the
+    other: a timestamp-only bump is an edit too. The digest is what notices
+    an edited review body, since a review carries no `updated_at`.
     """
     body = item.get('body') or ''
     stamp = item.get('updated_at') or item.get('submitted_at') or ''
