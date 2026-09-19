@@ -509,7 +509,7 @@ def test_log_timing_reports_each_phase_under_the_mark_that_ends_it(tmp):
 
 
 def test_timing_stays_inert_without_the_debug_variable(tmp):
-    """`DAEDALUS_DEBUG_TIMING` unset means no marks and no printed line."""
+    """`DAEDALUS_DEBUG_TIMING` unset or `=0` means no marks and no line."""
     script = r'''
 import contextlib
 import io
@@ -525,6 +525,9 @@ out['printed'] = captured.getvalue()
 print(json.dumps(out, sort_keys=True))
 '''
     _root, answer = _probe(tmp, script)
+    assert answer == {'timing_marks': None, 'printed': ''}, answer
+    _root, answer = _probe(
+        tmp, script, extra_env={'DAEDALUS_DEBUG_TIMING': '0'})
     assert answer == {'timing_marks': None, 'printed': ''}, answer
 
 

@@ -2,8 +2,7 @@
 import os
 import pathlib
 
-from daedalus_bridge.env_config import (
-    debug_timing, env_int, env_positive_float)
+from daedalus_bridge.env_config import env_int, env_positive_float
 
 
 if 'DAEDALUS_DIR' not in os.environ:
@@ -56,12 +55,6 @@ MAX_JSON_DEPTH = env_int('DAEDALUS_MAX_JSON_DEPTH', 100, 1, 500)
 # request nobody has authenticated is never the expensive one.
 MAX_UNAUTHENTICATED_BODY = env_int(
     'DAEDALUS_MAX_UNAUTHENTICATED_BODY', 64 * 1024, 0)
-
-# Per-phase timing for the segment write path, read once at import and inert
-# when off. Committed with the fix rather than removed after measuring it: the
-# next regression on this path needs the same attribution, and rebuilding it by
-# hand in a REPL measures something other than what the bridge runs.
-DEBUG_TIMING = debug_timing()
 
 
 # Per-operation socket deadline for a request. A peer that declares a body and
