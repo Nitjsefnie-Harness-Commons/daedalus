@@ -477,7 +477,8 @@ def bridge(tmp, env=None, output=None, proc_out=None):
 
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
-    child_env = dict(os.environ)
+    child_env = {name: value for name, value in os.environ.items()
+                 if not name.startswith('DAEDALUS_')}
     child_env.update({
         'DAEDALUS_DIR': str(docroot),
         'DAEDALUS_PORT': '0',

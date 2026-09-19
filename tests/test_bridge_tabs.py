@@ -13,11 +13,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import TOK, put_command  # noqa: E402
+from _bridge import BRIDGE_ENV, TOK, put_command  # noqa: E402
 
 
 def test_sync_tabs_dashboard_event_lands_in_command_tree(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(
             base + '/sync-tabs', {'token': TOK, 'tabs': []})
         assert status == 200 and body == {'ok': True, 'count': 0}, (
@@ -33,7 +33,7 @@ def test_sync_tabs_dashboard_event_lands_in_command_tree(tmp):
 
 
 def test_tabs_registry(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         tabs = [{'tabId': '11', 'url': 'https://example.com/a', 'title': 'A'},
                 {'tabId': '22', 'url': 'https://example.com/b', 'title': 'B'}]
         status, body = _util.post_json(base + '/sync-tabs',
@@ -91,7 +91,7 @@ def test_register_says_whether_it_actually_updated_a_tab(tmp):
     fallen out of the registry was told its entry had been refreshed. Nothing
     in the answer let it notice it should re-sync.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/register', {
             'token': TOK, 'tabId': '404', 'url': 'http://example.com/a',
             'title': 'a'})
@@ -114,7 +114,7 @@ def test_register_says_whether_it_actually_updated_a_tab(tmp):
 
 def test_register_refuses_unhashable_tab_ids_and_stays_healthy(tmp):
     """JSON arrays and objects cannot reach the registry's dictionary lookup."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/sync-tabs', {
             'token': TOK,
             'tabs': [{'tabId': 'kept', 'url': 'about:blank'}],
@@ -144,7 +144,7 @@ def test_register_refuses_unhashable_tab_ids_and_stays_healthy(tmp):
 def test_sync_tabs_validates_the_list_and_every_member_before_mutation(tmp):
     """Wrong nested shapes receive 400 without clearing the existing registry."""
     wrong_tabs = (None, {}, 1, 'tabs', [1], [None], [[]], ['tab'])
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
         for tabs in wrong_tabs:
             seed = {
@@ -180,7 +180,7 @@ def test_a_browser_target_survives_routing_but_the_routing_fields_do_not(tmp):
     target over the routing value, so the command went to a queue nothing
     drains. This pins the separation both ways.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.request(
             base + '/command', 'PUT',
             body={'token': TOK, 'tab': 'extension', 'id': 'shot',
@@ -195,7 +195,7 @@ def test_a_browser_target_survives_routing_but_the_routing_fields_do_not(tmp):
 
 
 def test_poll_legacy_escape_hatch(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/poll', {'token': TOK})
         assert status == 200 and body == {}, (status, body)
 

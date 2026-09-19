@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import TOK, mint_job, seg_job  # noqa: E402
+from _segments import BRIDGE_ENV, TOK, mint_job, seg_job  # noqa: E402
 
 
 def test_looking_up_a_segment_job_creates_nothing(tmp):
@@ -30,7 +30,7 @@ def test_looking_up_a_segment_job_creates_nothing(tmp):
     segments directory, and answered zero segments as though the name had
     been right.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         record = docroot / 'segments' / f'{job}.json'
         query = urllib.parse.urlencode({'token': TOK, 'job': job})
@@ -54,14 +54,14 @@ def test_looking_up_a_segment_job_creates_nothing(tmp):
 
     # The lookup is token-gated, so it answers a wrong token before it
     # answers anything about the job.
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         query = urllib.parse.urlencode({'token': 'wrong', 'job': 'anything'})
         status, body = _util.get_json(f'{base}/segment-job?{query}')
         assert status == 401 and body == {'error': 'unauthorized'}, (status, body)
 
 
 def test_segment_job_mint_idempotent_and_owned(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         status, body = mint_job(base, TOK, job)
         assert status == 200 and body['ok'] is True and body['sig'], (status, body)
@@ -114,7 +114,7 @@ def test_a_mint_seeds_totals_from_a_directory_it_did_not_create(tmp):
     already spent. The mint counts instead, which is also where a temp left
     behind by a crashed write is swept -- off the per-segment path.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         seg_dir = Path(docroot) / 'segments' / job
         seg_dir.mkdir(parents=True)
@@ -139,7 +139,7 @@ def test_a_corrupt_job_record_is_not_replaced_by_a_fresh_mint(tmp):
     truncated record was overwritten with a fresh owner and capability — the
     job's resume identity destroyed, and the caller told the mint succeeded.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         status, minted = mint_job(base, TOK, job)
         assert status == 200, (status, minted)
@@ -163,7 +163,7 @@ def test_a_segment_job_that_escapes_through_a_symlink_is_refused(tmp):
     mint would otherwise create a record and a directory outside the bridge's
     own tree, under a name the caller chose.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         status, _ = mint_job(base, TOK, job)
         assert status == 200, status
@@ -198,7 +198,7 @@ def test_segment_job_dotted_name_collision_is_a_clean_409(tmp):
     nothing — not an uncaught IsADirectoryError that drops the connection,
     orphans the tmp record and half-creates the job directory.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         seg_root = Path(docroot) / 'segments'
 
         # Plain name first, then the dotted one.
@@ -231,7 +231,7 @@ def test_segment_job_dotted_name_collision_is_a_clean_409(tmp):
 
 
 def test_segment_resume_contract(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
         sig = minted['sig']
@@ -263,7 +263,7 @@ def test_segment_resume_contract(tmp):
 
 
 def test_segment_status_validation(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.get_json(base + '/segment-status?job=..')
         assert status == 400 and body['error'] == 'bad job', (status, body)
         status, _ = _util.get_json(base + '/segment-status?job=a/b')
@@ -283,7 +283,7 @@ def test_segment_status_validation(tmp):
 
 def test_segment_status_ignores_non_ascii_digit_filenames(tmp):
     """Only ASCII decimal segment stems are converted to result indices."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
         seg_dir = Path(docroot) / 'segments' / job
@@ -313,7 +313,8 @@ def test_segment_status_enumeration_error_is_answered(tmp):
         'pathlib.Path.iterdir = _fail_segment_status_iterdir\n',
         encoding='utf-8')
     with _util.bridge(
-            tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, _docroot):
+            tmp, env={**BRIDGE_ENV,
+                      'PYTHONPATH': str(fault_dir)}) as (base, _docroot):
         job = 'status-fault'
         status, minted = mint_job(base, TOK, job)
         assert status == 200, (status, minted)
@@ -392,7 +393,8 @@ def test_a_legacy_conversion_that_cannot_read_the_directory_is_answered(tmp):
         'pathlib.Path.iterdir = _fail_legacy_conversion_iterdir\n',
         encoding='utf-8')
     with _util.bridge(
-            tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, docroot):
+            tmp, env={**BRIDGE_ENV,
+                      'PYTHONPATH': str(fault_dir)}) as (base, docroot):
         job = 'legacy-fault'
         seg_root = Path(docroot) / 'segments'
         seg_dir = seg_root / job
@@ -434,7 +436,8 @@ def test_a_legacy_upgrade_that_cannot_write_its_record_answers_500(tmp):
         'pathlib.Path.write_text = _refuse_every_record_write\n',
         encoding='utf-8')
     with _util.bridge(
-            tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, docroot):
+            tmp, env={**BRIDGE_ENV,
+                      'PYTHONPATH': str(fault_dir)}) as (base, docroot):
         job = 'legacy-upgrade-fault'
         seg_root = Path(docroot) / 'segments'
         seg_dir = seg_root / job

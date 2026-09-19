@@ -17,11 +17,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import TOK  # noqa: E402
+from _bridge import BRIDGE_ENV, TOK  # noqa: E402
+
+
+def _patch_env(patch_dir, **extra):
+    """BRIDGE_ENV plus the sitecustomize PYTHONPATH a fault fixture injects."""
+    return {**BRIDGE_ENV, 'PYTHONPATH': str(patch_dir), **extra}
 
 
 def test_result_roundtrip_and_consume(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.get_json(base + f'/result?token={TOK}')
         assert status == 200 and body == {'pending': True}, (status, body)
 
@@ -44,7 +49,7 @@ def test_result_roundtrip_and_consume(tmp):
 
 
 def test_result_per_tab_and_broadcast_files(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         res = {'token': TOK, 'tabId': 'tab1', 'id': 'r2',
                'result': 'x', 'error': None, 'ts': 1}
         status, _ = _util.post_json(base + '/result', res)
@@ -73,7 +78,7 @@ def test_distinct_delivery_results_are_independently_consumable(tmp):
     """Each delivery id keeps its own result instead of sharing the slot."""
     first_did = '1700000000000_000001'
     second_did = '1700000000001_000002'
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for did, result_id, value in (
                 (first_did, 'first', 1), (second_did, 'second', 2)):
             status, body = _util.post_json(base + '/result', {
@@ -129,7 +134,7 @@ def test_distinct_delivery_results_are_independently_consumable(tmp):
 def test_delivery_namespace_cannot_collide_with_a_compatibility_slot(tmp):
     """A dotted tab target cannot turn a delivery directory into a slot."""
     did = '1700000000000_000099'
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': 'foo', 'id': 'slot-owner',
             'result': 'slot', 'error': None, 'ts': 1})
@@ -155,7 +160,7 @@ def test_compatibility_consume_ignores_invalid_legacy_delivery_metadata(tmp):
         'token': TOK, 'tabId': 'legacy-invalid', 'id': 'legacy-result',
         'result': 'kept', 'error': None, 'ts': 1,
         'resultGeneration': 'g-old', 'deliveryId': '../old'}
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         slot = Path(docroot) / 'results' / f'{TOK}_legacy-invalid.json'
         shared = Path(docroot) / 'results' / f'{TOK}.json'
         slot.parent.mkdir(parents=True, exist_ok=True)
@@ -203,7 +208,7 @@ def test_compatibility_consume_retries_are_bounded(tmp):
         '    (gate / "ready").write_text("ready", encoding="utf-8")\n'
         'threading.Thread(target=install, daemon=True).start()\n',
         encoding='utf-8')
-    env = {'PYTHONPATH': str(patch_dir), 'SPIN_GATE_DIR': str(patch_gate)}
+    env = _patch_env(patch_dir, SPIN_GATE_DIR=str(patch_gate))
     did = 'spin-delivery'
     tab = 'spin-target'
     with _util.bridge(tmp, env=env) as (base, docroot):
@@ -260,7 +265,7 @@ def test_bounded_consume_fallback_still_honours_expected(tmp):
         '    (gate / "ready").write_text("ready", encoding="utf-8")\n'
         'threading.Thread(target=install, daemon=True).start()\n',
         encoding='utf-8')
-    env = {'PYTHONPATH': str(patch_dir), 'SPIN_GATE_DIR': str(patch_gate)}
+    env = _patch_env(patch_dir, SPIN_GATE_DIR=str(patch_gate))
     tab = 'expected-target'
     with _util.bridge(tmp, env=env) as (base, docroot):
         deadline = time.time() + 10
@@ -287,8 +292,8 @@ def test_bounded_consume_fallback_still_honours_expected(tmp):
 def test_delivery_results_evict_oldest_per_tab(tmp):
     """The per-tab delivery store retains only its configured newest results."""
     dids = [f'170000000000{i}_00000{i}' for i in (1, 2, 3)]
-    with _util.bridge(
-            tmp, env={'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}) as (base, docroot):
+    env = {**BRIDGE_ENV, 'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
         for index, did in enumerate(dids, 1):
             status, body = _util.post_json(base + '/result', {
                 'token': TOK, 'tabId': 'bounded', 'id': f'r{index}',
@@ -316,8 +321,8 @@ def test_delivery_results_evict_oldest_per_tab(tmp):
 def test_delivery_results_evict_by_acceptance_order_not_filename(tmp):
     """A non-sortable delivery id still ages out in its actual order."""
     dids = ('zzzz-oldest', '1700000000001_000001', '1700000000002_000002')
-    with _util.bridge(
-            tmp, env={'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}) as (base, docroot):
+    env = {**BRIDGE_ENV, 'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
         for index, did in enumerate(dids, 1):
             status, body = _util.post_json(base + '/result', {
                 'token': TOK, 'tabId': 'ordered', 'id': f'r{index}',
@@ -346,7 +351,7 @@ def test_delivery_write_cannot_race_compatibility_cleanup(tmp):
     tab = 'cleanup-race'
     gate_dir = Path(tmp) / 'cleanup-gate'
     gate_dir.mkdir()
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': tab, 'id': 'old-result',
             'result': 'old-result', 'error': None, 'ts': 1, '_did': did})
@@ -373,8 +378,7 @@ def test_delivery_write_cannot_race_compatibility_cleanup(tmp):
         'pathlib.Path.unlink = gated_unlink\n',
         encoding='utf-8')
 
-    env = {'PYTHONPATH': str(patch_dir),
-           'CLEANUP_GATE_DIR': str(gate_dir)}
+    env = _patch_env(patch_dir, CLEANUP_GATE_DIR=str(gate_dir))
     with _util.bridge(tmp, env=env) as (base, _docroot):
         consume_box = {}
         post_box = {}
@@ -466,11 +470,8 @@ def _stripe_holder_setup(tmp, held_tab):
     gate_dir.mkdir()
     (patch_dir / 'sitecustomize.py').write_text(
         _STRIPE_SITE_CUSTOMIZE.lstrip(), encoding='utf-8')
-    return gate_dir, {
-        'PYTHONPATH': str(patch_dir),
-        'STRIPE_GATE_DIR': str(gate_dir),
-        'STRIPE_HELD_TAB': held_tab,
-    }
+    return gate_dir, _patch_env(
+        patch_dir, STRIPE_GATE_DIR=str(gate_dir), STRIPE_HELD_TAB=held_tab)
 
 
 def _stripe_lock_calls(gate_dir):
@@ -611,7 +612,7 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
 
 def _seed_delivery(tmp, tab, did):
     """Create one delivery before starting the in-process stripe holder."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': tab, 'id': 'seed', 'result': 'seed',
             'error': None, 'ts': 1, '_did': did})
@@ -768,8 +769,8 @@ def test_delivery_stamp_survives_restart_with_an_earlier_wall_clock(tmp):
     """A persisted future stamp keeps a new post from immediate eviction."""
     tab = 'restart-clock'
     dids = ('old-a', 'old-b')
-    with _util.bridge(
-            tmp, env={'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}) as (base, docroot):
+    env = {**BRIDGE_ENV, 'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
         for did in dids:
             status, body = _util.post_json(base + '/result', {
                 'token': TOK, 'tabId': tab, 'id': did, 'result': did,
@@ -781,8 +782,8 @@ def test_delivery_stamp_survives_restart_with_an_earlier_wall_clock(tmp):
         for index, path in enumerate(sorted(directory.glob('*.json'))):
             os.utime(path, ns=(future + index, future + index))
 
-    with _util.bridge(
-            tmp, env={'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}) as (base, _docroot):
+    env = {**BRIDGE_ENV, 'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
+    with _util.bridge(tmp, env=env) as (base, _docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': tab, 'id': 'new-after-restart',
             'result': 'new-after-restart', 'error': None, 'ts': 2,
@@ -819,9 +820,8 @@ def test_failed_delivery_stamp_skips_eviction_with_distinct_stamps(tmp):
         encoding='utf-8')
     tab = 'utime-distinct'
     dids = ('zzzz-oldest', 'normal-middle', 'normal-newest')
-    env = {'PYTHONPATH': str(patch_dir),
-           'UTIME_GATE_DIR': str(patch_gate),
-           'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
+    env = _patch_env(patch_dir, UTIME_GATE_DIR=str(patch_gate),
+                     DAEDALUS_MAX_DELIVERY_RESULTS='2')
     with _util.bridge(tmp, env=env) as (base, docroot):
         deadline = time.time() + 10
         while not (patch_gate / 'ready').exists():
@@ -885,8 +885,7 @@ def test_delivery_eviction_failure_still_returns_success(tmp):
         '    return real_unlink(path, *args, **kwargs)\n'
         'pathlib.Path.unlink = fail_oldest\n',
         encoding='utf-8')
-    env = {'PYTHONPATH': str(patch_dir),
-           'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
+    env = _patch_env(patch_dir, DAEDALUS_MAX_DELIVERY_RESULTS='2')
     with _util.bridge(tmp, env=env) as (base, _docroot):
         for did in ('zzzz-oldest', 'middle'):
             status, body = _util.post_json(base + '/result', {
@@ -945,7 +944,7 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
 
 def test_result_without_delivery_id_keeps_both_compatibility_slots(tmp):
     """Legacy results still write and consume the shared compatibility slots."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': 'legacy', 'id': 'legacy-result',
             'result': 'kept', 'error': None, 'ts': 1})
@@ -966,7 +965,7 @@ def test_result_without_delivery_id_keeps_both_compatibility_slots(tmp):
 def test_compatibility_consume_removes_the_same_delivery_result(tmp):
     """Consuming a slot does not leave its delivery copy behind."""
     did = '1700000000000_000007'
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': 'sync', 'id': 'synced',
             'result': 'value', 'error': None, 'ts': 1, '_did': did})
@@ -988,7 +987,7 @@ def test_compatibility_consume_removes_the_same_delivery_result(tmp):
 
 
 def test_result_did_becomes_roundtrip_ms(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         did = f'{int(time.time() * 1000) - 50}_000001'
         res = {'token': TOK, 'id': 'r3', 'result': 1, 'error': None,
                'ts': 1, '_did': did}
@@ -1002,7 +1001,7 @@ def test_result_did_becomes_roundtrip_ms(tmp):
 
 def test_conditional_consume_preserves_a_newer_waiters_result(tmp):
     """A waiter may consume only the exact result generation it peeked."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, _ = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': 'shared', 'id': 'waiter-a',
             'result': 'first', 'resultGeneration': 'generation-a'})
@@ -1042,7 +1041,7 @@ def test_a_retried_result_never_replaces_a_newer_one(tmp):
     one that never arrived. The retry carries the same delivery id, so the
     bridge can tell a repeat from a fresh result and leave both slots alone.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         first = {'token': TOK, 'tabId': 'extension', 'id': 'a',
                  'result': 'first', 'error': None, 'ts': 1,
                  '_did': '1700000000000_000001'}
@@ -1083,7 +1082,7 @@ def test_a_retried_result_never_replaces_a_newer_one(tmp):
 
 def test_a_result_without_a_delivery_id_still_replaces_the_slot(tmp):
     """Dedup keys on the delivery id, so a result that has none is never one."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for value in ('first', 'second'):
             status, body = _util.post_json(base + '/result', {
                 'token': TOK, 'tabId': 'extension', 'id': 'no-did',
@@ -1132,7 +1131,7 @@ def test_result_path_component_byte_boundaries(tmp):
 
 def test_malformed_result_slot_returns_a_storage_error(tmp):
     """Malformed local result data must answer without ending the request."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         result_file = Path(docroot) / 'results' / f'{TOK}.json'
         for stored in ('[]', '{not json'):
             result_file.write_text(stored, encoding='utf-8')
@@ -1151,7 +1150,7 @@ def test_malformed_result_slot_returns_a_storage_error(tmp):
 
 def test_unencodable_result_is_refused_without_poisoning_the_existing_slot(tmp):
     """A result that cannot become UTF-8 must not truncate the current slot."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK, 'id': 'kept', 'result': 'safe',
         })
@@ -1189,7 +1188,7 @@ def test_result_with_a_surrogate_id_is_answered_and_the_bridge_survives(tmp):
     any HTTP answer. The line now logs the value escaped, and the existing
     encoding guard below it answers 400.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         raw_result = b'{"token":"httptok","id":"\\ud800","result":1}'
         try:
             status, raw = _util.request(
@@ -1219,8 +1218,8 @@ def test_a_result_survives_a_data_root_read_under_any_locale(tmp):
     Forcing the child's locale reproduces the platform difference here
     rather than only on the runner that has it.
     """
-    ascii_locale = {'LC_ALL': 'C', 'LANG': 'C', 'PYTHONCOERCECLOCALE': '0',
-                    'PYTHONUTF8': '0'}
+    ascii_locale = {**BRIDGE_ENV, 'LC_ALL': 'C', 'LANG': 'C',
+                    'PYTHONCOERCECLOCALE': '0', 'PYTHONUTF8': '0'}
     wanted = 'shot&branch#caf\u00e9 \u4e16\u754c'
     with _util.bridge(tmp, env=ascii_locale) as (base, _docroot):
         status, _ = _util.post_json(base + '/result', {
@@ -1251,7 +1250,8 @@ def test_result_partial_temp_write_preserves_the_existing_slot(tmp):
         'pathlib.Path.write_bytes = _partial_result_write\n',
         encoding='utf-8')
 
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, docroot):
+    env = _patch_env(fault_dir)
+    with _util.bridge(tmp, env=env) as (base, docroot):
         result_dir = Path(docroot) / 'results'
         result_file = result_dir / f'{TOK}.json'
         original = json.dumps({
@@ -1298,7 +1298,7 @@ def _replace_fault(tmp, name, failures):
         '    return _real_replace(src, dst, **kw)\n'
         'os.replace = _sharing_violation\n',
         encoding='utf-8')
-    return {'PYTHONPATH': str(fault_dir)}
+    return {**BRIDGE_ENV, 'PYTHONPATH': str(fault_dir)}
 
 
 def test_a_result_write_survives_a_transient_replace_failure(tmp):

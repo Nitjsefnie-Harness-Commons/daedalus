@@ -18,8 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import (TOK, next_stream_data, put_command,  # noqa: E402
-                     read_stream_data, stream_response)
+from _bridge import (BRIDGE_ENV, TOK, next_stream_data,  # noqa: E402
+                     put_command, read_stream_data, stream_response)
 
 
 def _load_queue(name):
@@ -378,7 +378,7 @@ def _raise_broken_pipe(_data):
 
 
 def test_stream_queue_drain_forwards_ttl_for_a_fresh_command(tmp):
-    env = {'DAEDALUS_CMD_TTL': '3600'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '3600'}
     with _util.bridge(tmp, env=env) as (base, docroot):
         qdir = Path(docroot) / 'commands' / TOK
         qdir.mkdir()
@@ -393,7 +393,7 @@ def test_stream_queue_drain_forwards_ttl_for_a_fresh_command(tmp):
 
 
 def test_stream_queue_drain_forwards_ttl_for_an_expired_command(tmp):
-    env = {'DAEDALUS_CMD_TTL': '3600'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '3600'}
     with _util.bridge(tmp, env=env) as (base, docroot):
         qdir = Path(docroot) / 'commands' / TOK
         qdir.mkdir()
@@ -413,7 +413,7 @@ def test_stream_queue_drain_forwards_ttl_for_an_expired_command(tmp):
 
 
 def test_extension_legacy_drain_forwards_the_command_directory(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         command_dir = Path(docroot) / 'commands'
         legacy = command_dir / f'{TOK}_42.json'
         legacy.write_text('{"id":"legacy-forwarded"}', encoding='utf-8')
@@ -427,7 +427,8 @@ def test_extension_legacy_drain_forwards_the_command_directory(tmp):
 def test_two_streams_covering_one_queue_deliver_a_command_once(tmp):
     fault_dir, read_count = _slow_queue_read_dir(tmp)
     served = []
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)},
+    with _util.bridge(tmp, env={**BRIDGE_ENV,
+                                'PYTHONPATH': str(fault_dir)},
                       output=served) as (base, _docroot):
         ext_conn, ext_response = stream_response(base, TOK, tab='extension')
         tab_conn, tab_response = stream_response(base, TOK, tab='dup')
@@ -453,7 +454,8 @@ def test_two_streams_covering_one_queue_deliver_a_command_once(tmp):
 def test_two_streams_covering_one_legacy_file_deliver_a_command_once(tmp):
     fault_dir, read_count = _slow_queue_read_dir(tmp)
     served = []
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)},
+    with _util.bridge(tmp, env={**BRIDGE_ENV,
+                                'PYTHONPATH': str(fault_dir)},
                       output=served) as (base, docroot):
         ext_conn, ext_response = stream_response(base, TOK, tab='extension')
         tab_conn, tab_response = stream_response(base, TOK, tab='dup')
@@ -478,7 +480,8 @@ def test_two_streams_covering_one_legacy_file_deliver_a_command_once(tmp):
 def test_two_streams_covering_a_broadcast_queue_deliver_a_command_once(tmp):
     fault_dir, read_count = _slow_queue_read_dir(tmp)
     served = []
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)},
+    with _util.bridge(tmp, env={**BRIDGE_ENV,
+                                'PYTHONPATH': str(fault_dir)},
                       output=served) as (base, _docroot):
         ext_conn, ext_response = stream_response(base, TOK, tab='extension')
         tab_conn, tab_response = stream_response(base, TOK, tab='dup')
@@ -504,7 +507,8 @@ def test_two_streams_covering_a_broadcast_queue_deliver_a_command_once(tmp):
 def test_two_streams_covering_a_per_tab_legacy_file_deliver_once(tmp):
     fault_dir, read_count = _slow_queue_read_dir(tmp)
     served = []
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)},
+    with _util.bridge(tmp, env={**BRIDGE_ENV,
+                                'PYTHONPATH': str(fault_dir)},
                       output=served) as (base, docroot):
         ext_conn, ext_response = stream_response(base, TOK, tab='extension')
         tab_conn, tab_response = stream_response(base, TOK, tab='dup')
@@ -529,7 +533,8 @@ def test_two_streams_covering_a_per_tab_legacy_file_deliver_once(tmp):
 
 def test_symlinked_queue_directory_reaches_extension_stream(tmp):
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served,
+                      env=BRIDGE_ENV) as (base, docroot):
         commands = Path(docroot) / 'commands'
         target = commands / 'alias-target'
         alias = commands / f'{TOK}_dup'
@@ -555,7 +560,8 @@ def test_symlinked_queue_directory_reaches_extension_stream(tmp):
 def test_a_successful_legacy_delivery_releases_its_claim(tmp):
     fault_dir, trace = _claim_trace_dir(tmp)
     key = f'legacy:{TOK}.json'
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)}) as (
+    with _util.bridge(tmp, env={**BRIDGE_ENV,
+                                'PYTHONPATH': str(fault_dir)}) as (
             base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         legacy = Path(docroot) / 'commands' / f'{TOK}.json'
