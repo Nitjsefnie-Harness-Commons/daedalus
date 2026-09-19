@@ -632,6 +632,16 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
             refusals.append(
                 f'{here}:{node.lineno} builds an argv the audit '
                 'cannot read')
+        if words and words[0] != 'git':
+            head = argv.elts[0]
+            interpreter = (isinstance(head, ast.Attribute)
+                           and isinstance(head.value, ast.Name)
+                           and head.value.id == 'sys'
+                           and head.attr == 'executable')
+            if not interpreter:
+                refusals.append(
+                    f"{here}:{node.lineno} argv does not start with the "
+                    "constant 'git'")
         if words and words[0] == 'git' and 'clone' in words:
             declared = {words[i + 1]
                         for i, slot in enumerate(words[:-1])
