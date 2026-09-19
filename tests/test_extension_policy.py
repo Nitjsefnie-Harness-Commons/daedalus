@@ -6,6 +6,7 @@ load-bearing as what it does: no default server, no token in a log line, no
 capture limit spelled differently in two places, and no message type the
 content script sends that the background has no branch for.
 """
+import json
 import re
 import sys
 from pathlib import Path
@@ -392,6 +393,27 @@ def test_every_content_script_message_type_has_a_background_branch(tmp):
             f'not enforce:\ncontent: {content_mutation}\n'
             f'background: {background_mutation}\nviolations: {found}')
         assert all(listener_module in item for item in found), found
+
+
+def _shipped_manifest():
+    return json.loads(
+        (ROOT / 'extension' / 'manifest.json').read_text(encoding='utf-8'))
+
+
+def test_the_manifest_declares_the_lowest_chrome_the_code_needs(tmp):
+    """Sub-minute heartbeat alarms need Chrome 120, so the manifest says so."""
+    del tmp
+    floor = _shipped_manifest().get('minimum_chrome_version')
+    assert isinstance(floor, str) and floor, floor
+    head = floor.split('.')[0]
+    assert head.isdigit() and int(head) >= 120, floor
+
+
+def test_the_manifest_does_not_grant_activeTab_beside_all_urls(tmp):
+    """<all_urls> already grants what activeTab could, so it is not held."""
+    del tmp
+    permissions = _shipped_manifest().get('permissions', [])
+    assert 'activeTab' not in permissions, permissions
 
 
 def main():
