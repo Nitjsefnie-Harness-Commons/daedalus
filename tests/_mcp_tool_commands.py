@@ -397,6 +397,6 @@ TOOL_REFUSALS = {
         ({'quality': 0}, ValueError,
          'quality must be an integer from 1 to 100; got 0'),
         ({'quality': 101}, ValueError,
-         'quality must be an integer from 1 to 100'),
+         'quality must be an integer from 1 to 100; got 101'),
     ],
 }
