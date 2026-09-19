@@ -183,7 +183,8 @@ def test_the_bridge_modules_live_in_the_bridge_package(tmp):
 
 
 def test_the_transport_re_exports_no_json_body_helper(tmp):
-    """Neither JSON body helper is an attribute of the transport module.
+    """Neither JSON body helper nor the json_body module handle is an
+    attribute of the transport module.
 
     The helpers live in `daedalus_bridge/json_body.py`; the split that
     moved them there was required to re-export nothing, and a by-name
