@@ -360,7 +360,6 @@ print(json.dumps({
     'max_delivery_results': config.MAX_DELIVERY_RESULTS,
     'max_json_depth': config.MAX_JSON_DEPTH,
     'max_unauthenticated_body': config.MAX_UNAUTHENTICATED_BODY,
-    'debug_timing': config.DEBUG_TIMING,
     'request_timeout': config.REQUEST_TIMEOUT,
     'max_request_workers': config.MAX_REQUEST_WORKERS,
     'max_segment_index': config.MAX_SEGMENT_INDEX,
@@ -389,7 +388,6 @@ print(json.dumps({
         'max_delivery_results': 1024,
         'max_json_depth': 100,
         'max_unauthenticated_body': 64 * 1024,
-        'debug_timing': False,
         'request_timeout': 60.0,
         'max_request_workers': 256,
         'max_segment_index': 99999,
@@ -397,16 +395,6 @@ print(json.dumps({
         'max_segment_job_size': 4 * 1024 * 1024 * 1024,
         'cmd_ttl': 90.0,
     }
-
-    # A set-but-off value: a reader keyed on presence reports the switch
-    # on, and `debug_timing` decides the same switch for `segment_store`.
-    off_env = dict(env)
-    off_env['DAEDALUS_DEBUG_TIMING'] = '0'
-    off = subprocess.run(
-        [sys.executable, '-c', code], cwd=str(_util.ROOT), env=off_env,
-        capture_output=True, text=True, check=False)
-    assert off.returncode == 0, off.stderr
-    assert json.loads(off.stdout)['debug_timing'] is False, off.stdout
 
     missing_env = dict(env)
     del missing_env['DAEDALUS_DIR']
