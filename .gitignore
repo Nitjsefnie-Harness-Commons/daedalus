@@ -239,6 +239,7 @@
 !/tests/_bash_resolver_scan.py
 !/tests/_boundary.py
 !/tests/_boundary_env.py
+!/tests/_boundary_scenarios.py
 !/tests/_bridge.py
 !/tests/_cdpharness.py
 !/tests/_cli_arg_audit_resolver.py
