@@ -524,14 +524,18 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
 
 _CACHE_JOBS = (
     # (job, the key's python component, the step a save must follow, the
-    # step the restore must precede). `coverage` fixes its interpreter, the
-    # other two read it from the matrix.
+    # step the restore must precede). `coverage` and the three lint jobs
+    # fix their interpreter (3.13), the other two read it from the matrix.
     ('suites', '${{ matrix.python }}', 'Run every suite',
      'Install the test dependencies and project'),
     ('coverage-matrix', '${{ matrix.python }}', 'Measure',
      'Install the coverage toolchain and the project'),
     ('coverage', '3.13', 'Install the coverage toolchain and the project',
      'Install the coverage toolchain and the project'),
+    ('pycodestyle', '3.13', 'pycodestyle', 'Install linters'),
+    ('pylint', '3.13', 'pylint', 'Install linters and import dependencies'),
+    ('pyright', '3.13', 'pyright',
+     'Install the type checker and the dependencies it resolves'),
 )
 
 # Every platform pip cache directory, so one spelling warms all three OSes;
@@ -581,14 +585,14 @@ def test_threshold_push_comment_matches_current_trigger_policy(tmp):
     assert 'remeasures' not in comment
 
 
-def test_the_matrix_jobs_declare_no_pip_cache_on_setup_python(tmp):
+def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
     """`cache: pip` saves in a post-job step that runs after untrusted code.
 
     That post step is the cache-poisoning shape issue #166 took out of the
     speed cells: on a pull_request run it writes a cache a later main run
-    restores. These three jobs install the project and then run it, so they
-    take the cache as two separate steps instead, and the event gate lives
-    on the save half alone.
+    restores. These six jobs install the tools and code they then run, so
+    they take the cache as two separate steps instead, and the event gate
+    lives on the save half alone.
     """
     del tmp
     workflow = _tests_yml()
@@ -602,13 +606,16 @@ def test_the_matrix_jobs_declare_no_pip_cache_on_setup_python(tmp):
         assert declared == set(), (job, sorted(declared))
 
 
-def test_the_matrix_jobs_restore_the_pip_cache_before_they_install(tmp):
+def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
     """Restore is safe on every event: a pull request reads what main wrote.
 
     The key names the platform, the interpreter and the requirements hash,
-    so a cell restores only a cache a same-platform cell of the same
-    dependency set wrote, and the three jobs — which install the same
-    dependency set — share one namespace rather than three. The step stays
+    so a job restores only a cache a same-platform run of the same
+    dependency set wrote. Where the interpreter is 3.13 that is six jobs —
+    the three lint jobs and `coverage` fix it, the 3.13 legs of `suites`
+    and `coverage-matrix` land there too — sharing one namespace rather
+    than one apiece, because the cache holds fetched packages any job
+    installing from the hashed manifests reuses. The step stays
     unconditional: gating a restore cannot make it safer, and a gate there
     would be the save gate wearing the wrong step's name.
     """
@@ -632,7 +639,7 @@ def test_the_matrix_jobs_restore_the_pip_cache_before_they_install(tmp):
             job, restore_index, install)
 
 
-def test_the_matrix_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
+def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
     """The event gate between restore and save is the whole answer.
 
     A pull_request or workflow_dispatch run, or a push that is not main,
@@ -640,8 +647,9 @@ def test_the_matrix_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
     repository itself produced, may. Evaluated as Actions would evaluate it
     rather than substring-matched, so an `||` or a widened ref reads as the
     defect it is, and a cancelled run writes nothing either way. The save
-    also follows the step that runs the job's suites or measurement, so what
-    a later run restores was put there by a run that actually ran them.
+    also follows the step that runs the job's suites, measurement or lint,
+    so what a later run restores was put there by a run that actually ran
+    them.
     """
     del tmp
     workflow = _tests_yml()
