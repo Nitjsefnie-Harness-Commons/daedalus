@@ -161,6 +161,27 @@ def test_declared_body_length_rules_survive_the_move(_tmp):
     assert declared._declared_body_length() == 4
 
 
+def test_an_invalid_content_length_refusal_absorbs_the_declared_body(_tmp):
+    """An invalid Content-Length refusal absorbs the declared body first.
+
+    A close that leaves request bytes unread arrives as an RST rather than a
+    FIN, and an RST discards the answer the client has not read yet. The
+    oversize and undeclared refusals drain for exactly this reason; the two
+    invalid-value refusals answered and closed on a body still in flight.
+    Neither invalid value is a count the refused-body drain can count down,
+    so the absorption is the undeclared-body drain: bounded, and under a
+    short timeout, for a sender whose declaration cannot say how much is
+    coming.
+    """
+    for declared in ('nine', '-1'):
+        stub = _Stub(headers=[('Content-Length', declared)],
+                     body=b'x' * 4096)
+        assert stub._declared_body_length() is None
+        assert stub.status == 400, (declared, stub.status)
+        assert stub.rfile.read() == b'', (
+            declared, 'declared body left unread')
+
+
 def test_bridge_token_refuses_a_header_and_query_that_disagree(_tmp):
     stub = _Stub(headers=[('Authorization', 'Bearer headertoken')])
     assert stub._bridge_token({'token': ['querytoken']}) is None
