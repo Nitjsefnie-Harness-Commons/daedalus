@@ -27,6 +27,72 @@ SESSION = 'probe-session'
 TOOLS = [{'name': 'ping', 'description': 'Round-trip a document.title'}]
 
 
+def _rpc_mock(mode):
+    if importlib.util.find_spec('httpx') is None:
+        _util.skip('scripts/mcp_probe.py dependency (httpx) not installed')
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        seen.append({
+            'jsonrpc': payload.get('jsonrpc'),
+            'method': payload.get('method'),
+            'id': payload.get('id'),
+            'authorization': request.headers.get('Authorization'),
+            'session': request.headers.get('Mcp-Session-Id'),
+        })
+        if payload.get('method') != 'tools/list':
+            raise AssertionError('unexpected RPC method')
+        if mode == '202-with-body':
+            frame = {'jsonrpc': '2.0', 'id': payload['id'],
+                     'result': {'tools': TOOLS}}
+            return httpx.Response(
+                202,
+                headers={'Content-Type': 'application/json',
+                         'Mcp-Session-Id': SESSION},
+                json=frame,
+                request=request,
+            )
+        raise AssertionError(f'unrecognized stub mode: {mode}')
+
+    return httpx.MockTransport(handler), seen
+
+
+def test_202_with_a_body_is_still_no_answer(tmp):
+    del tmp
+    old_token = os.environ.get('TOKEN')
+    old_url = os.environ.get('DAEDALUS_MCP_URL')
+    os.environ['TOKEN'] = TOKEN
+    os.environ['DAEDALUS_MCP_URL'] = 'http://127.0.0.1:8086/mcp'
+    try:
+        probe = _util.load(PROBE, 'mcp_probe_rpc_test')
+    finally:
+        if old_token is None:
+            os.environ.pop('TOKEN', None)
+        else:
+            os.environ['TOKEN'] = old_token
+        if old_url is None:
+            os.environ.pop('DAEDALUS_MCP_URL', None)
+        else:
+            os.environ['DAEDALUS_MCP_URL'] = old_url
+
+    transport, seen = _rpc_mock('202-with-body')
+    import httpx
+    with httpx.Client(transport=transport) as client:
+        answer = probe.rpc(client, None, 'tools/list')
+
+    assert answer == (None, SESSION), answer
+    assert len(seen) == 1, seen
+    request = seen[0]
+    assert request['jsonrpc'] == '2.0', request
+    assert request['method'] == 'tools/list', request
+    assert request['id'], request
+    assert request['authorization'] == f'Bearer {TOKEN}', request
+    assert request['session'] is None, request
+
+
 class _McpStubHandler(http.server.BaseHTTPRequestHandler):
     """A streamable-HTTP MCP endpoint reduced to what the probe sends it.
 
