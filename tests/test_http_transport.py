@@ -23,9 +23,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _noglibc  # noqa: E402
 import _util  # noqa: E402
 
-# The module reads only the byte limits out of daedalus_bridge.config, which
-# still refuses to import without these two. Nothing is written under the
-# root, so the system temp directory serves and no fixture tree is left behind.
+# run_tests.py gives every suite its own process, so this process strips
+# inherited DAEDALUS_ exports at import; only the runner's summary channel
+# survives it. The module reads only the byte limits out of
+# daedalus_bridge.config, which still refuses to import without these two.
+# Nothing is written under the root, so the system temp directory serves and
+# no fixture tree is left behind.
+for name in [name for name in os.environ
+             if name.startswith('DAEDALUS_')
+             and name != 'DAEDALUS_TEST_SUMMARY']:
+    del os.environ[name]
 os.environ.setdefault('DAEDALUS_DIR', tempfile.gettempdir())
 os.environ.setdefault('DAEDALUS_PORT', '0')
 
@@ -289,6 +296,22 @@ def test_json_body_imports_without_daedalus_configuration(_tmp):
         [sys.executable, '-c', 'import daedalus_bridge.json_body'],
         env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def test_the_suite_process_starts_without_inherited_daedalus_names(_tmp):
+    """The suite process strips ambient `DAEDALUS_` exports at import.
+
+    run_tests.py hands each suite its own process and injects only
+    `DAEDALUS_TEST_SUMMARY`; any other `DAEDALUS_` name still in this
+    process's environment came around the suite, and the module-level strip
+    must have removed it before the in-process transport import validated
+    the settings.
+    """
+    leaked = [name for name in os.environ
+              if name.startswith('DAEDALUS_')
+              and name not in ('DAEDALUS_DIR', 'DAEDALUS_PORT',
+                               'DAEDALUS_TEST_SUMMARY')]
+    assert leaked == [], leaked
 
 
 def test_importing_the_transport_prints_nothing(tmp):

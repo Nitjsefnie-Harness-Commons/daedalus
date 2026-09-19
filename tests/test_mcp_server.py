@@ -30,9 +30,8 @@ import _util  # noqa: E402
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 from _queueread import queued_command, queued_commands  # noqa: E402
 
-# find_spec asks whether the dependency is installed without importing it --
-# an import kept only for its truthiness reads as dead code to every linter,
-# and pylint is right that it is.
+# find_spec asks whether the dependency is installed without importing it: an
+# import kept only for its truthiness reads as dead code to every linter.
 DEPS = all(importlib.util.find_spec(name) is not None
            for name in ('httpx', 'mcp', 'starlette'))
 if DEPS:
@@ -657,18 +656,19 @@ def test_mcp_and_bridge_config_use_one_env_parser(tmp):
     from daedalus_bridge import env_config
 
     mod = _load_mcp('http://127.0.0.1:1')
-    saved = {key: os.environ.get(key)
-             for key in ('DAEDALUS_DIR', 'DAEDALUS_PORT')}
+    saved = {key: os.environ[key] for key in os.environ
+             if key.startswith('DAEDALUS_')}
+    for key in saved:
+        del os.environ[key]
     os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
     os.environ['DAEDALUS_PORT'] = '0'
     try:
         bridge_config = _util.load(_util.ROOT / 'daedalus_bridge' / 'config.py')
     finally:
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        for key in ('DAEDALUS_DIR', 'DAEDALUS_PORT'):
+            if key not in saved:
+                del os.environ[key]
+        os.environ.update(saved)
 
     assert mod.env_int is bridge_config.env_int is env_config.env_int
     cases = (
@@ -1606,9 +1606,8 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     box = {}
 
     def run():
-        # The token is a ContextVar, and a thread starts with a fresh context:
-        # setting it on the caller's thread leaves the tool answering "no token
-        # in context". BearerAuth sets it per request for the same reason.
+        # The token is a ContextVar and a thread starts with a fresh context,
+        # so a caller-thread set leaves the tool answering no token in context.
         mod._token.set(TOK)
         try:
             box['value'] = asyncio.run(call())
