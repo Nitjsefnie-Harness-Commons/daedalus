@@ -200,6 +200,21 @@ def test_json_nests_deeper_than_counts_structure_outside_strings(_tmp):
     assert not json_body.json_nests_deeper_than(b'{"a": "\\"[[[["}', 2)
 
 
+def test_json_nests_deeper_than_ends_the_escape_before_the_quote(_tmp):
+    """A string whose value ends in an escaped backslash still closes.
+
+    A JSON literal ending in `\\` escapes the backslash itself, so the
+    scan must clear the escape after one character and let the next `"`
+    end the literal — an uncleared escape swallows that quote and with it
+    every container behind it. Pinned in both directions on the same
+    body: the two objects tip the depth past 1 once the string closes,
+    and sit shallow at a limit of 2.
+    """
+    body = b'["\\\\", {}, {}]'
+    assert json_body.json_nests_deeper_than(body, 1)
+    assert not json_body.json_nests_deeper_than(body, 2)
+
+
 def test_json_nests_deeper_than_accepts_a_wide_sequence_of_objects(_tmp):
     """A wide body of objects rides the same closing arm as one of arrays.
 
