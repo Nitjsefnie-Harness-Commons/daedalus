@@ -14,10 +14,13 @@ def _probe(tmp, script, extra_env=None):
     """Run a probe against a throwaway data root and return (root, verdict).
 
     Each probe prints one JSON object and nothing else, so the assertions
-    stay in this file where a reader can see them.
+    stay in this file where a reader can see them. The inherited
+    DAEDALUS_* variables are stripped so an unset arm means the variable
+    is absent, whatever the surrounding shell exports.
     """
     root = Path(tmp) / 'segment-store-root'
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'DAEDALUS_DIR': str(root),
         'DAEDALUS_PORT': '0',
