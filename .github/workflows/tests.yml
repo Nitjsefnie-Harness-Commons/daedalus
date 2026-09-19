@@ -100,14 +100,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      # The pip cache is restored on every event and saved only from a push of
-      # main, as in the matrix and coverage jobs — `cache: pip` would save in
-      # a post-job step that runs after this job has checked out and executed
-      # pull-request content, the cache-poisoning shape issues #166 and #185
-      # took out of those jobs. The key is the matrix jobs' 3.13 namespace
-      # rather than a private one: the cache holds fetched packages for the
-      # manifests the hash reads, so what one job warmed any other on this
-      # platform and interpreter reuses.
+      # The pip cache is restored on every event and saved only from a push
+      # of main, as in the matrix and coverage jobs — `cache: pip` saves in
+      # a post-job step running after the pull-request checkout, the
+      # poisoning shape those jobs dropped (issues #166, #185). The key
+      # shares the matrix jobs' 3.13 namespace: the cache holds fetched
+      # packages, so what one job warmed any of them reuses.
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -127,12 +125,10 @@ jobs:
       - name: pycodestyle
         run: git ls-files '*.py' | xargs pycodestyle
 
-      # The gate is the answer to the cache-poisoning findings: an untrusted
-      # event never writes cross-run state, and a push of main is the one
-      # trigger whose checkout this repository produced. No step between the
-      # install and here runs pip, so the save's position after the lint run
-      # does not change what the cache holds, only who writes one: a
-      # cancelled run never reaches this step.
+      # Only a push of main writes cross-run state, and a cancelled run
+      # never reaches this step; nothing between the install and here runs
+      # pip, so the position after the lint run decides who writes a cache,
+      # never what it holds.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -163,14 +159,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      # The pip cache is restored on every event and saved only from a push of
-      # main, as in the matrix and coverage jobs — `cache: pip` would save in
-      # a post-job step that runs after this job has checked out and executed
-      # pull-request content, the cache-poisoning shape issues #166 and #185
-      # took out of those jobs. The key is the matrix jobs' 3.13 namespace
-      # rather than a private one: the cache holds fetched packages for the
-      # manifests the hash reads, so what one job warmed any other on this
-      # platform and interpreter reuses.
+      # The pip cache is restored on every event and saved only from a push
+      # of main, as in the matrix and coverage jobs — `cache: pip` saves in
+      # a post-job step running after the pull-request checkout, the
+      # poisoning shape those jobs dropped (issues #166, #185). The key
+      # shares the matrix jobs' 3.13 namespace: the cache holds fetched
+      # packages, so what one job warmed any of them reuses.
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -197,12 +191,10 @@ jobs:
       - name: pylint
         run: git ls-files '*.py' | xargs pylint --rcfile=.pylintrc
 
-      # The gate is the answer to the cache-poisoning findings: an untrusted
-      # event never writes cross-run state, and a push of main is the one
-      # trigger whose checkout this repository produced. No step between the
-      # install and here runs pip, so the save's position after the lint run
-      # does not change what the cache holds, only who writes one: a
-      # cancelled run never reaches this step.
+      # Only a push of main writes cross-run state, and a cancelled run
+      # never reaches this step; nothing between the install and here runs
+      # pip, so the position after the lint run decides who writes a cache,
+      # never what it holds.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -244,14 +236,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      # The pip cache is restored on every event and saved only from a push of
-      # main, as in the matrix and coverage jobs — `cache: pip` would save in
-      # a post-job step that runs after this job has checked out and executed
-      # pull-request content, the cache-poisoning shape issues #166 and #185
-      # took out of those jobs. The key is the matrix jobs' 3.13 namespace
-      # rather than a private one: the cache holds fetched packages for the
-      # manifests the hash reads, so what one job warmed any other on this
-      # platform and interpreter reuses.
+      # The pip cache is restored on every event and saved only from a push
+      # of main, as in the matrix and coverage jobs — `cache: pip` saves in
+      # a post-job step running after the pull-request checkout, the
+      # poisoning shape those jobs dropped (issues #166, #185). The key
+      # shares the matrix jobs' 3.13 namespace: the cache holds fetched
+      # packages, so what one job warmed any of them reuses.
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -276,12 +266,10 @@ jobs:
       - name: pyright
         run: pyright
 
-      # The gate is the answer to the cache-poisoning findings: an untrusted
-      # event never writes cross-run state, and a push of main is the one
-      # trigger whose checkout this repository produced. No step between the
-      # install and here runs pip, so the save's position after the lint run
-      # does not change what the cache holds, only who writes one: a
-      # cancelled run never reaches this step.
+      # Only a push of main writes cross-run state, and a cancelled run
+      # never reaches this step; nothing between the install and here runs
+      # pip, so the position after the lint run decides who writes a cache,
+      # never what it holds.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
