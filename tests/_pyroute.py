@@ -719,8 +719,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
 
 def py_tab_routing_violations(path, rel):
-    """`tab` set to a non-'extension' value on a typed command sent from `path`.
-
+    """`tab` set to a non-'extension' value on a typed command sent from
+    `path`.
     Typed means routed through ext_cmd/_ext_cmd or sent to /command with a
     `type` key. Eval payloads carry `code` and legitimately route by tab;
     `_send_eval` is exempt by structure, not by naming convention.

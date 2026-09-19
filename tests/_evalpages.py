@@ -13,7 +13,8 @@ CDP_RESPONSE_DEADLINE_MS = 10000
 CDP_TIMEOUT_EXIT_CODE = 2
 
 
-CDP_CALL_HARNESS = r"""
+CDP_CALL_HARNESS = (
+    r"""
 const CDP_TIMEOUT_EXIT_CODE = 2;
 const [target, method, paramsText, deadlineText] = process.argv.slice(1);
 const socket = new WebSocket(target);
@@ -26,7 +27,8 @@ const timer = setTimeout(() => {
 }, Number(deadlineText));
 
 socket.addEventListener('open', () => {
-  socket.send(JSON.stringify({ id: 1, method, params: JSON.parse(paramsText) }));
+  socket.send(JSON.stringify({ id: 1, method, params:"""
+    r""" JSON.parse(paramsText) }));
 });
 socket.addEventListener('message', (event) => {
   const message = JSON.parse(String(event.data));
@@ -46,7 +48,7 @@ socket.addEventListener('error', () => {
   process.stderr.write('CDP websocket failed\n');
   process.exitCode = 1;
 });
-"""
+""")
 
 
 HOSTILE_EVAL_SCRIPT = r"""

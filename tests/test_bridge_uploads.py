@@ -29,7 +29,8 @@ def test_upload_list_screenshot_delete(tmp):
         status, body = _util.post_json(base + '/upload', payload)
         assert status == 200, (status, body)
         assert body['ok'] is True and body['size'] == len(PNG)
-        assert body['path'].startswith(f'{TOK}/up1/') and body['path'].endswith('.png')
+        assert (body['path'].startswith(f'{TOK}/up1/')
+                and body['path'].endswith('.png'))
         stored = Path(docroot) / 'uploads' / body['path']
         assert stored.is_file() and stored.read_bytes() == PNG
 
@@ -39,11 +40,13 @@ def test_upload_list_screenshot_delete(tmp):
                    'data': base64.b64encode(text).decode()}
         status, body = _util.post_json(base + '/upload', payload)
         assert status == 200, (status, body)
-        assert (Path(docroot) / 'uploads' / TOK / 'up1' / 'note.txt').read_bytes() == text
+        assert (Path(docroot) / 'uploads' / TOK / 'up1' / 'note.txt'
+                ).read_bytes() == text
 
         # Listing, bare-array back-compat form.
         status, body = _util.get_json(base + f'/upload?token={TOK}')
-        assert status == 200 and isinstance(body, list) and len(body) == 2, body
+        assert status == 200 and isinstance(body, list) and len(body) == 2, (
+            body)
         names = {e['filename'] for e in body}
         assert names == {'note.txt', stored.name}, names
         entry = next(e for e in body if e['filename'] == 'note.txt')
@@ -60,7 +63,8 @@ def test_upload_list_screenshot_delete(tmp):
         # Paginated form returns the envelope.
         status, body = _util.get_json(base + f'/upload?token={TOK}&limit=1')
         assert status == 200, (status, body)
-        assert body['total'] == 2 and body['limit'] == 1 and body['offset'] == 0
+        assert (body['total'] == 2 and body['limit'] == 1
+                and body['offset'] == 0)
         assert len(body['items']) == 1
         status, body = _util.get_json(base + f'/upload?token={TOK}&limit=x')
         assert status == 400, status
@@ -76,17 +80,20 @@ def test_upload_list_screenshot_delete(tmp):
                                      body={'token': TOK, 'id': 'up1',
                                            'filename': 'note.txt'})
         assert status == 200, (status, body)
-        assert not (Path(docroot) / 'uploads' / TOK / 'up1' / 'note.txt').exists()
+        assert not (Path(docroot) / 'uploads' / TOK / 'up1' / 'note.txt'
+                    ).exists()
         status, body = _util.request(base + '/upload', 'DELETE',
                                      body={'token': TOK, 'id': 'up1'})
         assert status == 200, (status, body)
         assert not (Path(docroot) / 'uploads' / TOK / 'up1').exists()
         status, body = _util.get_json(base + f'/screenshot?token={TOK}')
         assert status == 404, (status, body)
-        status, body = _util.request(base + '/upload', 'DELETE', body={'token': TOK})
+        status, body = _util.request(
+            base + '/upload', 'DELETE', body={'token': TOK})
         assert status == 200, (status, body)
         assert not (Path(docroot) / 'uploads' / TOK).exists()
-        status, body = _util.request(base + '/upload', 'DELETE', body={'token': TOK})
+        status, body = _util.request(
+            base + '/upload', 'DELETE', body={'token': TOK})
         assert status == 404, (status, body)
 
 
@@ -95,13 +102,17 @@ def test_upload_validation_and_traversal(tmp):
         docroot = Path(docroot)
         good = base64.b64encode(b'x').decode()
         # Missing parameters.
-        status, body = _util.post_json(base + '/upload', {'token': TOK, 'data': good})
+        status, body = _util.post_json(
+            base + '/upload', {'token': TOK, 'data': good})
         assert status == 400 and body['error'] == 'missing id', (status, body)
-        status, body = _util.post_json(base + '/upload', {'token': TOK, 'id': 'u'})
-        assert status == 400 and body['error'] == 'missing data', (status, body)
+        status, body = _util.post_json(
+            base + '/upload', {'token': TOK, 'id': 'u'})
+        assert status == 400 and body['error'] == 'missing data', (
+            status, body)
         status, body = _util.post_json(base + '/upload',
                                        {'token': TOK, 'id': 'u', 'data': 'a'})
-        assert status == 400 and body['error'] == 'invalid base64', (status, body)
+        assert status == 400 and body['error'] == 'invalid base64', (
+            status, body)
 
         # Path components containing .., / or \ are refused before any write.
         escapes = [
@@ -113,12 +124,14 @@ def test_upload_validation_and_traversal(tmp):
             {'id': 'u', 'data': good, 'filename': 'sub/f.txt'},
         ]
         for fields in escapes:
-            status, body = _util.post_json(base + '/upload', {'token': TOK, **fields})
+            status, body = _util.post_json(
+                base + '/upload', {'token': TOK, **fields})
             assert status == 400, (fields, status, body)
             assert body['error'] == 'invalid path component', body
         # Token traversal is caught earlier, at dispatch.
         status, body = _util.post_json(base + '/upload',
-                                       {'token': 'a/b', 'id': 'u', 'data': good})
+                                       {'token': 'a/b', 'id': 'u',
+                                        'data': good})
         assert status == 400 and body['error'] == 'bad token', (status, body)
 
         # The point of the exercise: nothing was written, inside or outside the
@@ -285,7 +298,8 @@ def test_an_upload_path_that_escapes_through_a_symlink_is_refused(tmp):
         secret.write_text('do not delete me', encoding='utf-8')
         token_dir = Path(docroot) / 'uploads' / TOK
         try:
-            (token_dir / 'escape').symlink_to(outside, target_is_directory=True)
+            (token_dir / 'escape').symlink_to(
+                outside, target_is_directory=True)
         except (OSError, NotImplementedError) as why:
             _util.skip(f'this filesystem will not hold a symlink: {why}')
 
@@ -379,10 +393,12 @@ def test_upload_pagination_is_validated_before_the_directory_is_looked_at(tmp):
         status, body = _util.get_json(malformed)
         assert status == 400, (status, body)
 
-        status, body = _util.get_json(base + '/upload?' + urllib.parse.urlencode(
-            {'token': TOK, 'limit': 17, 'offset': 9, 'id': 'absent'}))
+        status, body = _util.get_json(
+            base + '/upload?' + urllib.parse.urlencode(
+                {'token': TOK, 'limit': 17, 'offset': 9, 'id': 'absent'}))
         assert status == 200, (status, body)
-        assert body == {'items': [], 'total': 0, 'limit': 17, 'offset': 9}, body
+        assert body == {'items': [], 'total': 0, 'limit': 17, 'offset': 9}, (
+            body)
 
         # The same two answers once the directory exists.
         status, _ = _util.post_json(base + '/upload', {

@@ -237,7 +237,8 @@ def next_stream_data(response, timeout=10):
 
 
 def assert_oversize_stream_matches_enqueue(base):
-    """Both sides of an impossible target reject it without killing the bridge."""
+    """Both sides of an impossible target reject it without killing the
+    bridge."""
     token = '123e4567-e89b-12d3-a456-426614174000'
     tab = 't' * 240
     conn, response = stream_response(base, token, tab)
@@ -253,6 +254,8 @@ def assert_oversize_stream_matches_enqueue(base):
     health_status, health_body = _util.get_json(base + '/health')
     assert (stream_status, enqueue_status, health_status) == (400, 400, 200), (
         stream_status, enqueue_status, health_status)
-    assert json.loads(stream_body)['error'] == 'invalid path component', stream_body
-    assert json.loads(enqueue_body)['error'] == 'invalid path component', enqueue_body
+    assert json.loads(stream_body)['error'] == 'invalid path component', (
+        stream_body)
+    assert json.loads(enqueue_body)['error'] == 'invalid path component', (
+        enqueue_body)
     assert health_body['ok'] is True, health_body

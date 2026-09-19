@@ -38,7 +38,8 @@ def test_tabs_registry(tmp):
                 {'tabId': '22', 'url': 'https://example.com/b', 'title': 'B'}]
         status, body = _util.post_json(base + '/sync-tabs',
                                        {'token': TOK, 'tabs': tabs})
-        assert status == 200 and body == {'ok': True, 'count': 2}, (status, body)
+        assert status == 200 and body == {'ok': True, 'count': 2}, (
+            status, body)
 
         status, body = _util.get_json(base + f'/tabs?token={TOK}')
         assert status == 200 and len(body) == 2, body
@@ -69,7 +70,8 @@ def test_tabs_registry(tmp):
         assert len(body) == 2, body
 
         status, body = _util.post_json(base + '/register', {'token': TOK})
-        assert status == 400 and body['error'] == 'missing tabId', (status, body)
+        assert status == 400 and body['error'] == 'missing tabId', (
+            status, body)
 
         status, body = _util.post_json(base + '/unregister',
                                        {'token': TOK, 'tabId': '11'})
@@ -78,7 +80,8 @@ def test_tabs_registry(tmp):
         assert [t['tabId'] for t in body] == ['22'], body
 
         # sync-tabs replaces, it does not merge.
-        status, _ = _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': []})
+        status, _ = _util.post_json(
+            base + '/sync-tabs', {'token': TOK, 'tabs': []})
         assert status == 200, status
         status, body = _util.get_json(base + f'/tabs?token={TOK}')
         assert body == [], body
@@ -113,7 +116,8 @@ def test_register_says_whether_it_actually_updated_a_tab(tmp):
 
 
 def test_register_refuses_unhashable_tab_ids_and_stays_healthy(tmp):
-    """JSON arrays and objects cannot reach the registry's dictionary lookup."""
+    """JSON arrays and objects cannot reach the registry's dictionary
+    lookup."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/sync-tabs', {
             'token': TOK,
@@ -142,7 +146,8 @@ def test_register_refuses_unhashable_tab_ids_and_stays_healthy(tmp):
 
 
 def test_sync_tabs_validates_the_list_and_every_member_before_mutation(tmp):
-    """Wrong nested shapes receive 400 without clearing the existing registry."""
+    """Wrong nested shapes receive 400 without clearing the existing
+    registry."""
     wrong_tabs = (None, {}, 1, 'tabs', [1], [None], [[]], ['tab'])
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
@@ -186,11 +191,13 @@ def test_a_browser_target_survives_routing_but_the_routing_fields_do_not(tmp):
             body={'token': TOK, 'tab': 'extension', 'id': 'shot',
                   'type': 'screenshot', 'tabId': 42})
         assert status == 200, body
-        queued = list((docroot / 'commands' / f'{TOK}_extension').glob('*.json'))
+        queued = list(
+            (docroot / 'commands' / f'{TOK}_extension').glob('*.json'))
         assert len(queued) == 1, f'expected one queued command, got {queued}'
         cmd = json.loads(queued[0].read_text(encoding='utf-8'))
         assert cmd.get('tabId') == 42, f'the browser target was lost: {cmd}'
-        assert 'tab' not in cmd, f'the routing tab leaked into the command: {cmd}'
+        assert 'tab' not in cmd, (
+            f'the routing tab leaked into the command: {cmd}')
         assert 'token' not in cmd, f'the token leaked into the command: {cmd}'
 
 
@@ -210,7 +217,8 @@ def test_poll_legacy_escape_hatch(tmp):
         try:
             status, body = _util.post_json(base + '/poll', {'token': TOK})
         except http.client.RemoteDisconnected as exc:
-            raise AssertionError('a malformed legacy command ended /poll') from exc
+            raise AssertionError(
+                'a malformed legacy command ended /poll') from exc
         assert status == 200 and body == {}, (status, body)
         assert legacy.exists(), 'the malformed legacy command was deleted'
         legacy.write_text(
@@ -219,7 +227,8 @@ def test_poll_legacy_escape_hatch(tmp):
         status, body = _util.post_json(base + '/poll', {'token': TOK})
         assert status == 200 and body['id'] == 'legacy-after-partial', (
             status, body)
-        assert not legacy.exists(), 'the complete legacy command was not consumed'
+        assert not legacy.exists(), (
+            'the complete legacy command was not consumed')
 
         # A dir-queue command (PUT /command) is NOT visible to legacy /poll.
         status, _ = put_command(base, {'token': TOK, 'id': 'q1', 'code': '2'})
