@@ -37,20 +37,14 @@ class RecordingApi:
 
 
 def refused(argv):
-    """(calls, exit code, stderr): argparse refused argv, nothing sent."""
-    recorded = RecordingApi([])
-    original = commands_media.api
-    commands_media.api = recorded
+    """(exit code, stderr): argparse refused argv at parse time."""
     err = io.StringIO()
     try:
-        try:
-            with contextlib.redirect_stderr(err):
-                build_parser().parse_args(argv)
-        except SystemExit as exit_request:
-            return recorded.calls, exit_request.code, err.getvalue()
-        raise AssertionError(f'{argv} parsed instead of being refused')
-    finally:
-        commands_media.api = original
+        with contextlib.redirect_stderr(err):
+            build_parser().parse_args(argv)
+    except SystemExit as exit_request:
+        return exit_request.code, err.getvalue()
+    raise AssertionError(f'{argv} parsed instead of being refused')
 
 
 def run_cli(argv, answers):
@@ -74,7 +68,7 @@ def run_cli(argv, answers):
 
 
 def put_quality(recorded):
-    """The quality field of the one command the handler sent, or None."""
+    """The quality field of the one command the handler sent."""
     method, path, body = recorded.calls[0]
     assert (method, path) == ('PUT', '/command'), recorded.calls
     return body.get('quality')
@@ -83,22 +77,20 @@ def put_quality(recorded):
 def test_screenshot_refuses_a_quality_outside_one_to_hundred(tmp):
     del tmp
     for value in ('0', '101', '-5', '500'):
-        calls, code, message = refused(['screenshot', '-q', value])
+        code, message = refused(['screenshot', '-q', value])
         assert code != 0, (value, code, message)
         assert 'usage:' in message, (value, message)
         assert 'argument -q/--quality:' in message, (value, message)
         assert value in message, (value, message)
-        assert calls == [], (value, calls)
 
 
 def test_screenshot_still_refuses_a_non_integer_quality(tmp):
     del tmp
-    calls, code, message = refused(['screenshot', '-q', 'soon'])
+    code, message = refused(['screenshot', '-q', 'soon'])
     assert code != 0, (code, message)
     assert 'argument -q/--quality:' in message, message
     assert 'quality must be a whole number' in message, message
     assert "'soon'" in message, message
-    assert calls == [], calls
 
 
 def test_screenshot_accepts_the_documented_range_ends(tmp):
@@ -117,7 +109,9 @@ def test_screenshot_without_q_sends_no_quality(tmp):
         ['screenshot'],
         [{'ok': True, 'did': 'd1', 'target': 'tab=extension'}])
     assert out != '', out
-    assert put_quality(recorded) is None, recorded.calls
+    method, path, body = recorded.calls[0]
+    assert (method, path) == ('PUT', '/command'), recorded.calls
+    assert 'quality' not in body, recorded.calls
 
 
 if __name__ == '__main__':
