@@ -62,16 +62,11 @@ def _dict_value(node, state):
                 items.update(nested.items)
             continue
         value = _known_value(item, state)
-        if isinstance(item, ast.Call) and (
-                value is None
-                or not isinstance(value, DeferredContainer)
-                or value.kind != 'dict'):
+        if value is None or not isinstance(value, DeferredContainer) \
+                or value.kind != 'dict':
             return DeferredContainer(
                 {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
-        if value is None:
-            continue
-        if not isinstance(value, DeferredContainer) or value.kind != 'dict':
-            continue
+        items.update(value.items)
         items.update(value.items)
     return DeferredContainer(
         items, len(node.values), 'dict') if items else None
@@ -103,6 +98,9 @@ def _dict_call_value(node, state):
         if isinstance(known, DeferredContainer) and known.kind == 'dict':
             return DeferredContainer(
                 dict(known.items), known.length, 'dict')
+        if known is None and isinstance(node.args[0], ast.Call):
+            return DeferredContainer(
+                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
         return None
     if node.args:
         return UNPROVABLE_SENDER
@@ -283,7 +281,10 @@ def _apply_setdefault(state, call, owner_name):
     key = call.args[0] if call.args else None
     default = _known_value(call.args[1], state) if len(call.args) > 1 \
         else None
-    if default is None: return
+    if default is None:
+        if len(call.args) > 1 and isinstance(call.args[1], ast.Call):
+            _mark_unprovable(state, owner_name)
+        return
     if (isinstance(key, ast.Constant) and isinstance(key.value, str)
             and (owner is None or isinstance(owner, DeferredContainer))):
         if owner is None:
@@ -351,7 +352,8 @@ def apply_deferred_store(statement, state):
             dynamic = not isinstance(target.slice, ast.Constant)
             removing = isinstance(statement, ast.Delete)
             unknown_call = (value is None and raw is None
-                            and isinstance(statement, ast.Assign)
+                            and isinstance(statement,
+                                           (ast.Assign, ast.AnnAssign))
                             and isinstance(statement.value, ast.Call))
             if owner is None:
                 if value is None and (removing or not unknown_call):
