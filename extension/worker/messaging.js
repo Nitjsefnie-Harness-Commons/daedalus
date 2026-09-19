@@ -205,6 +205,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ error: 'download requires a string URL' });
       return;
     }
+    // Web URLs only. A download runs with the profile's cookies, so a
+    // page-chosen URL reaches content the page could never fetch itself —
+    // the same gate, and the same reason, as the openTab twin above.
+    let protocol = '';
+    try { protocol = new URL(msg.url).protocol; } catch { /* not a URL */ }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      sendResponse({ error: 'download accepts http: and https: URLs only' });
+      return;
+    }
     try {
       chrome.downloads.download(
         { url: msg.url, filename: msg.filename }, (downloadId) => {
