@@ -10,7 +10,8 @@ import argparse
 from . import __version__
 from .commands_content import (_boolean_argument,  # noqa: F401
                                _positive_rule_id)
-from .transport import NET_CAPTURE_MAX, capture_limit, positive_timeout
+from .transport import (NET_CAPTURE_MAX, capture_limit, positive_count,
+                        positive_timeout)
 
 
 def build_parser():
@@ -134,7 +135,8 @@ def build_parser():
 
     # fetch-timings (extension diagnostics)
     s = sub.add_parser('fetch-timings', help='Fetch background fetch-relay timing ring buffer')
-    s.add_argument('-n', type=int, default=30, help='Show last N entries (default 30)')
+    s.add_argument('-n', type=positive_count, default=30,
+                   help='Show last N entries (default 30)')
     s.add_argument('--reset', action='store_true', help='Clear ring buffer after reading')
     s.add_argument('--raw', action='store_true', help='Print raw JSON')
 
