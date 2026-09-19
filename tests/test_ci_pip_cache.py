@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Execute CI invariants that GitHub otherwise fails silently.
+"""Execute the tests workflow's pip-cache invariants that GitHub
+otherwise fails silently.
 
 These tests parse the tests workflow's pip cache steps: what the six
 cached jobs restore and save, gated on which events, and pinned to

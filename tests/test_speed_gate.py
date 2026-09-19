@@ -6,7 +6,7 @@ tests workflow's aggregate job instead of polling it, the matrix cells
 partition the suites and carry a static name, and the final job keeps the
 check name and reads the cells' own verdict records. The steps' runtime
 behaviour is executed here; other invariants over the merged workflow stay in
-`test_ci_workflows.py`.
+`test_ci_workflows.py` and `test_ci_pip_cache.py`.
 """
 import fnmatch
 import re
