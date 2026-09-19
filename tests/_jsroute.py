@@ -68,7 +68,8 @@ def js_tab_routing_violations(path, rel, work=None):
     line_of = source_index.line_of
 
     def is_extension_literal(value):
-        return value is not None and re.fullmatch(r'["\']extension["\']', value)
+        return value is not None and re.fullmatch(
+            r'["\']extension["\']', value)
 
     def object_state(obj_start, named, depth):
         """Resolve relevant state from a literal and tracked object spreads."""
@@ -128,8 +129,9 @@ def js_tab_routing_violations(path, rel, work=None):
         if not expr:
             return None
         if expr.startswith('{'):
-            return object_state(span_start + mask[span_start:span_end].index('{'),
-                                named, depth)
+            return object_state(
+                span_start + mask[span_start:span_end].index('{'),
+                named, depth)
         if re.fullmatch(r'[\w$]+', expr):
             if raw in ('null', 'undefined'):
                 return None

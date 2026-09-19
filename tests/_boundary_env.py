@@ -35,7 +35,8 @@ def run_node_program(node, program, arguments, *, cwd, payload=None,
             text=True, encoding='utf-8', timeout=timeout)
 
 
-ENVIRONMENT = r"""
+ENVIRONMENT = (
+    r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -149,7 +150,8 @@ const chrome = {
         return windowTabs
           .filter((tab) =>
             (query.active === undefined || tab.active === query.active)
-            && (query.windowId === undefined || tab.windowId === query.windowId))
+            && (query.windowId === undefined || tab.windowId ==="""
+    r""" query.windowId))
           .map((tab) => ({ ...tab }));
       }
       if (scenario === 'route' && Object.keys(query).length === 0) {
@@ -185,7 +187,8 @@ const chrome = {
         // A capture returns whatever is ACTIVE in the window, which is the
         // whole point: naming a tab does not select it.
         const active = windowTabs.find((tab) => tab.active);
-        return 'data:image/png;base64,' + btoa('captured:' + (active && active.id));
+        return 'data:image/png;base64,' + btoa('captured:' +"""
+    r""" (active && active.id));
       }
       if (scenario !== 'route') return 'data:image/png;base64,AA==';
       return new Promise((resolve) => {
@@ -208,7 +211,8 @@ const chrome = {
       }
       // Attempt 1 models a tab another client already owns; attempt 2 attaches
       // but fails to enable the domain.
-      if (attachCalls === 1) throw new Error('Another debugger is already attached');
+      if (attachCalls === 1) throw new Error('Another debugger"""
+    r""" is already attached');
     },
     detach: async () => {
       detachCalls++;
@@ -333,7 +337,8 @@ async function bridgeFetch(target, init = {}) {
 let relaySequence = 0;
 
 // One contextified worker. A second one models the service worker Chrome
-// restarts after idle suspension: fresh script state, same browser-side stores.
+// restarts after idle suspension: fresh script state, same"""
+    r""" browser-side stores.
 function makeContext() {
   const workerContext = vm.createContext({
     chrome,
@@ -350,7 +355,7 @@ function makeContext() {
     clearInterval: clearScheduled,
     console: { log() {}, warn() {}, error() {} },
   });
-""" + import_scripts_stub('workerContext', 'workerSourcePaths') + r"""
+""") + import_scripts_stub('workerContext', 'workerSourcePaths') + r"""
   return workerContext;
 }
 

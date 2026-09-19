@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _boundary_env import ENVIRONMENT, run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
-SCENARIOS = r"""
+SCENARIOS = (
+    r"""
 async function runCapabilityRoutes() {
   const routes = JSON.parse(commandText);
   const sameDescriptor = (left, right) => {
@@ -331,7 +332,8 @@ async function runNetCapture() {
   };
   await vm.runInContext('dispatchCommand(captureCommand)', context);
   const posted = resultPayloads[resultPayloads.length - 1];
-  outcomes.push({ step: 'after-detach', result: posted.result, error: posted.error });
+  outcomes.push({ step: 'after-detach', result: posted.result,"""
+    r""" error: posted.error });
   return { outcomes, attachCalls, detachCalls };
 }
 
@@ -570,8 +572,10 @@ async function runFetchBound() {
     { name: 'at the default', chunks: 8 },
     { name: 'over the default', chunks: 9 },
     // The opt-in raises the default for a caller that asks for more.
-    { name: 'raised by opt-in', chunks: 12, maxResponseBytes: 16 * 1024 * 1024 },
-    { name: 'binary under the default', chunks: 1, responseType: 'arraybuffer' },
+    { name: 'raised by opt-in', chunks: 12, maxResponseBytes: 16"""
+    r""" * 1024 * 1024 },
+    { name: 'binary under the default', chunks: 1, responseType:"""
+    r""" 'arraybuffer' },
   ];
   for (const item of cases) {
     const request = Object.assign({}, item);
@@ -637,7 +641,7 @@ run().then((result) => {
   process.stderr.write((error.stack || String(error)) + '\n');
   process.exitCode = 1;
 });
-"""
+""")
 
 HARNESS = ENVIRONMENT + SCENARIOS
 
