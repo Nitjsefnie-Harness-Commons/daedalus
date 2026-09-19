@@ -18,7 +18,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
 
-_CDP_HANDLE_LIFECYCLE_HARNESS = r"""
+_CDP_HANDLE_LIFECYCLE_HARNESS = (
+    r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -80,7 +81,8 @@ const chrome = {
         if (params.objectId === 'pending-original' && pendingResolve) {
           const resolve = pendingResolve;
           pendingResolve = null;
-          setImmediate(() => resolve({ result: { objectId: 'pending-late' } }));
+          setImmediate(() => resolve({ result: { objectId:"""
+    r""" 'pending-late' } }));
         }
         return {};
       }
@@ -186,7 +188,7 @@ const context = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
-""" + import_scripts_stub('context') + r"""
+""") + import_scripts_stub('context') + r"""
 
 function delay() {
   return new Promise((resolve) => setImmediate(resolve));

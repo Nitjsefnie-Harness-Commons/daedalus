@@ -18,7 +18,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
 
-_EVAL_RELAY_OVERLAP_HARNESS = r"""
+_EVAL_RELAY_OVERLAP_HARNESS = (
+    r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -110,9 +111,11 @@ const backgroundChrome = {
       }
       try {
         // vm-load-exempt: evaluates the CDP expression handed in
-        return { result: { value: await vm.runInNewContext(params.expression, {}) } };
+        return { result: { value: await vm.runInNewContext("""
+    r"""params.expression, {}) } };
       } catch (error) {
-        return { exceptionDetails: { exception: { description: String(error) } } };
+        return { exceptionDetails: { exception: { description:"""
+    r""" String(error) } } };
       }
     },
   },
@@ -203,7 +206,8 @@ const backgroundContext = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
-""" + import_scripts_stub('backgroundContext') + r"""
+""") + import_scripts_stub('backgroundContext') + (
+    r"""
 
 const windowObject = {
   addEventListener(type, listener) {
@@ -418,8 +422,10 @@ async function run() {
       + ' ontimeout: function() { abortProbe.timeout = true; },'
       + ' onabort: function() { abortProbe.abort = true; },'
       + '})', relayContext);
-    await waitFor(() => slowSignals.length === 1, 'the relayed fetch to start');
-    const inFlight = vm.runInContext('_fetchControllers.size', backgroundContext);
+    await waitFor(() => slowSignals.length === 1, 'the relayed"""
+    r""" fetch to start');
+    const inFlight = vm.runInContext('_fetchControllers.size',"""
+    r""" backgroundContext);
     vm.runInContext('abortProbe.handle.abort()', relayContext);
     vm.runInContext('abortProbe.handle.abort()', relayContext);
     await waitFor(() => slowSignals[0].aborted, 'the fetch to be cancelled');
@@ -434,7 +440,8 @@ async function run() {
       ontimeout: Boolean(relayContext.abortProbe.timeout),
       abortMessages: windowMessages.filter(
         (message) => message.handler === 'abortRequest').length,
-      controllers: vm.runInContext('_fetchControllers.size', backgroundContext),
+      controllers: vm.runInContext('_fetchControllers.size',"""
+    r""" backgroundContext),
     };
   }
 
@@ -529,7 +536,7 @@ run().then((result) => {
   process.stderr.write((error.stack || String(error)) + '\n');
   process.exitCode = 1;
 });
-"""
+""")
 
 
 def run_eval_relay_overlap(order):

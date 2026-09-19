@@ -27,12 +27,15 @@ def test_unknown_paths_404(tmp):
         assert status == 404 and body['error'] == 'not found', (status, body)
         status, body = _util.post_json(base + '/nope', {'token': TOK})
         assert status == 404, (status, body)
-        status, body = _util.request(base + '/nope', 'PUT', body={'token': TOK})
+        status, body = _util.request(
+            base + '/nope', 'PUT', body={'token': TOK})
         assert status == 404, status
-        status, body = _util.request(base + '/nope', 'DELETE', body={'token': TOK})
+        status, body = _util.request(
+            base + '/nope', 'DELETE', body={'token': TOK})
         assert status == 404, status
         # Malformed JSON on POST is a 400, not a crash.
-        status, body = _util.request(base + '/result', 'POST', body=b'{not json')
+        status, body = _util.request(
+            base + '/result', 'POST', body=b'{not json')
         assert status == 400, status
         assert json.loads(body)['error'] == 'invalid JSON body'
 
@@ -95,7 +98,8 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
         over_cap = b'x' * 8192
         resp = raw_request(
             base,
-            (f'POST /segment?job={job}&seg=1&total=1&sig={minted["sig"]} HTTP/1.0\r\n'
+            (f'POST /segment?job={job}&seg=1&total=1'
+             f'&sig={minted["sig"]} HTTP/1.0\r\n'
              'Host: x\r\nContent-Type: application/octet-stream\r\n'
              'Content-Length: -1\r\n\r\n').encode() + over_cap)
         assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
@@ -103,12 +107,14 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
             'error': 'invalid Content-Length'
         }, resp
         written = list((Path(docroot) / 'segments' / job).rglob('*'))
-        assert written == [], f'a negative Content-Length still wrote: {written}'
+        assert written == [], (
+            f'a negative Content-Length still wrote: {written}')
         # The JSON verbs share the one guard: a well-formed body behind a
         # negative length must never reach a handler either.
         resp = raw_request(
             base,
-            b'POST /result HTTP/1.0\r\nHost: x\r\nContent-Type: application/json\r\n'
+            b'POST /result HTTP/1.0\r\nHost: x\r\n'
+            b'Content-Type: application/json\r\n'
             b'Content-Length: -1\r\n\r\n'
             b'{"token": "httptok", "id": "x", "result": 1}')
         assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
@@ -329,14 +335,17 @@ def test_the_json_depth_bound_is_the_bridges_and_is_configurable(tmp):
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
     ) as (base, _d):
         # depth 4 counting the object itself: {"token": [[[0]]]}
-        at_limit = b'{"token":"wrongtoken","value":' + b'[' * 3 + b'0' + b']' * 3 + b'}'
+        at_limit = (b'{"token":"wrongtoken","value":'
+                    + b'[' * 3 + b'0' + b']' * 3 + b'}')
         status, raw = _util.request(
             base + '/result', 'POST', body=at_limit,
             headers={'Content-Type': 'application/json'})
-        assert (status, json.loads(raw).get('error')) == (401, 'unauthorized'), (
+        assert (status, json.loads(raw).get('error')) == (
+            401, 'unauthorized'), (
             status, raw)
 
-        past_limit = b'{"token":"wrongtoken","value":' + b'[' * 4 + b'0' + b']' * 4 + b'}'
+        past_limit = (b'{"token":"wrongtoken","value":'
+                      + b'[' * 4 + b'0' + b']' * 4 + b'}')
         status, raw = _util.request(
             base + '/result', 'POST', body=past_limit,
             headers={'Content-Type': 'application/json'})
@@ -360,7 +369,8 @@ def test_a_brace_inside_a_json_string_opens_nothing(tmp):
         status, raw = _util.request(
             base + '/result', 'POST', body=literal,
             headers={'Content-Type': 'application/json'})
-        assert (status, json.loads(raw).get('error')) == (401, 'unauthorized'), (
+        assert (status, json.loads(raw).get('error')) == (
+            401, 'unauthorized'), (
             status, raw)
 
 
@@ -404,7 +414,8 @@ def test_a_wide_body_of_objects_is_accepted(tmp):
             401, 'unauthorized'), (status, raw)
 
 
-def test_recursive_json_is_refused_on_every_body_verb_before_authentication(tmp):
+def test_recursive_json_is_refused_on_every_body_verb_before_authentication(
+        tmp):
     """A deeply nested body is refused, before the token is looked at.
 
     The answer used to depend on the interpreter, because the depth bound was

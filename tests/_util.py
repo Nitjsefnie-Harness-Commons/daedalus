@@ -209,7 +209,8 @@ def log_safe_cases():
             raise RuntimeError('broken __str__')
 
     class EvilStr(str):
-        """str() returns this subclass unchanged, so .encode() dispatches to it."""
+        """str() returns this subclass unchanged, so .encode() dispatches to
+        it."""
         # The invalid shape is the point: handing self back so the caller's
         # .encode() runs this subclass's code outside any guard.
         def __str__(self):  # pylint: disable=invalid-str-returned

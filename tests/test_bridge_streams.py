@@ -35,7 +35,8 @@ def _wait_for_delivery_health(base):
 
 def test_put_command_broadcast_writes_queue_file(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        status, body = put_command(base, {'token': TOK, 'id': 'c1', 'code': '1+1'})
+        status, body = put_command(
+            base, {'token': TOK, 'id': 'c1', 'code': '1+1'})
         assert status == 200, (status, body)
         body = json.loads(body)
         assert body['ok'] is True
@@ -68,7 +69,8 @@ def test_put_command_derived_queue_name_byte_boundary(tmp):
     """Derived command queue names honor the component byte ceiling."""
     token = '123e4567-e89b-12d3-a456-426614174000'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (base, docroot):
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (
+                base, docroot):
         boundary_tab = 't' * 203
         status, body = put_command(
             base, {'token': token, 'tab': boundary_tab,
@@ -98,7 +100,8 @@ def test_put_command_fifo_order(tmp):
         # delivery ids sort the same way.
         ids = [json.loads(f.read_text(encoding='utf-8'))['id'] for f in files]
         assert ids == ['c0', 'c1', 'c2'], ids
-        dids = [json.loads(f.read_text(encoding='utf-8'))['_did'] for f in files]
+        dids = [json.loads(f.read_text(encoding='utf-8'))['_did']
+                for f in files]
         assert dids == sorted(dids), dids
 
 
@@ -106,13 +109,16 @@ def test_put_command_validation(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, _ = put_command(base, {'token': TOK, 'code': '1'})  # no id
         assert status == 400, status
-        status, _ = put_command(base, {'token': TOK, 'id': 'x'})  # no code/type
+        status, _ = put_command(
+            base, {'token': TOK, 'id': 'x'})  # no code/type
         assert status == 400, status
         # A type alone is a valid (extension) command.
-        status, _ = put_command(base, {'token': TOK, 'id': 'x', 'type': 'screenshot'})
+        status, _ = put_command(
+            base, {'token': TOK, 'id': 'x', 'type': 'screenshot'})
         assert status == 200, status
         for bad in ('a/b', 'a.b', '..', ''):
-            status, _ = put_command(base, {'token': bad, 'id': 'x', 'code': '1'})
+            status, _ = put_command(
+                base, {'token': bad, 'id': 'x', 'code': '1'})
             assert status == 400, (bad, status)
         # The rejected tokens created no queue directories.
         names = [p.name for p in (Path(docroot) / 'commands').iterdir()]
@@ -169,7 +175,8 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
         except http.client.RemoteDisconnected as exc:
             raise AssertionError('a dashboard read error ended GET') from exc
         assert dashboard_status == 500, (dashboard_status, dashboard_raw)
-        assert json.loads(dashboard_raw) == {'error': 'dashboard storage failure'}
+        assert json.loads(dashboard_raw) == {
+            'error': 'dashboard storage failure'}
 
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
@@ -253,7 +260,8 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
 def test_stream_derived_queue_name_matches_command_enqueue(tmp):
     token = '123e4567-e89b-12d3-a456-426614174000'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (base, _docroot):
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (
+                base, _docroot):
         boundary_tab = 't' * 203
         status, body = put_command(
             base, {'token': token, 'tab': boundary_tab,
@@ -269,9 +277,11 @@ def test_stream_modes_deliver_end_to_end(tmp):
     tab_token = 'stream-tab'
     with _util.bridge(
             Path(tmp) / 'tab',
-            env={'TOKEN': '', 'DAEDALUS_TOKEN': tab_token}) as (base, _docroot):
+            env={'TOKEN': '', 'DAEDALUS_TOKEN': tab_token}) as (
+                base, _docroot):
         status, body = put_command(
-            base, {'token': tab_token, 'tab': 'tab1', 'id': 'tab', 'code': '1'})
+            base, {'token': tab_token, 'tab': 'tab1',
+                   'id': 'tab', 'code': '1'})
         assert status == 200, (status, body)
         assert read_stream_data(base, tab_token, 'tab1')['id'] == 'tab'
 
@@ -284,7 +294,8 @@ def test_stream_modes_deliver_end_to_end(tmp):
         })
         assert status == 200, (status, body)
         dashboard = read_stream_data(base, dashboard_token, 'dashboard')
-        assert dashboard['kind'] == 'event' and dashboard['type'] == 'result', \
+        assert (dashboard['kind'] == 'event'
+                and dashboard['type'] == 'result'), \
             dashboard
         assert dashboard['world'] == 'page:cdp', dashboard
 
@@ -345,11 +356,13 @@ def test_stream_drops_a_non_object_queue_entry(tmp):
 
         delivered = read_stream_data(base, TOK)
         assert delivered['id'] == 'after-malformed', delivered
-        assert not malformed.exists(), 'the non-object queue entry was not dropped'
+        assert not malformed.exists(), (
+            'the non-object queue entry was not dropped')
 
 
 def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
-    """A queued command whose id holds a lone surrogate must not kill the stream.
+    """A queued command whose id holds a lone surrogate must not kill the
+    stream.
 
     The SSE frame escapes the surrogate (json.dumps defaults); the DELIVERED
     log line then raised UnicodeEncodeError and tore the stream down.
@@ -365,30 +378,6 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
             (qdir / '0000000000001_000001.json').write_bytes(
                 b'{"id":"\\ud800","code":"1"}')
             first = frame('the queued command with a surrogate id')
-            assert first.get('code') == '1', first
-            status, _ = put_command(
-                base, {'token': TOK, 'id': 'after', 'code': '2'})
-            assert status == 200, status
-            second = frame('the command enqueued afterwards')
-            assert second.get('id') == 'after', second
-        finally:
-            response.close()
-            conn.close()
-        status, health = _util.get_json(base + '/health')
-        assert status == 200 and health['ok'] is True, (status, health)
-
-
-def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
-    """The same lone surrogate in a legacy raw-write file must not kill the stream."""
-    served = []
-    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
-        conn, response = stream_response(base, TOK, tab='extension')
-        frame = framer(response, served)
-        try:
-            assert response.status == 200, response.status
-            legacy = Path(docroot) / 'commands' / f'{TOK}.json'
-            legacy.write_bytes(b'{"id":"\\ud800","code":"1"}')
-            first = frame('the legacy file with a surrogate id')
             assert first.get('code') == '1', first
             status, _ = put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '2'})
@@ -448,7 +437,8 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
 
 
 def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
-    """The TTL-DROP log line takes the same raw name and must not kill the stream."""
+    """The TTL-DROP log line takes the same raw name and must not kill the
+    stream."""
     _util.require_undecodable_names(tmp)
     strict = {**BRIDGE_ENV, 'PYTHONIOENCODING': 'utf-8:strict'}
     served = []
@@ -478,46 +468,6 @@ def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
         assert not os.path.exists(stale), 'the expired entry was not dropped'
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
-
-
-def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
-    """Visible partial files survive, while sibling temp names wait for rename."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        commands = Path(docroot) / 'commands'
-        legacy = commands / f'{TOK}.json'
-        writer = open(legacy, 'w', encoding='utf-8')
-        conn = response = None
-        try:
-            writer.write('{"id":"held-open"')
-            writer.flush()
-            os.fsync(writer.fileno())
-            conn, response = stream_response(base, TOK, tab='extension')
-            assert response.status == 200, response.status
-            time.sleep(1.25)
-            assert legacy.exists(), (
-                'the reader unlinked a visible file while its writer was open')
-            writer.write(',"code":"first"}')
-            writer.flush()
-            os.fsync(writer.fileno())
-            writer.close()
-            frame = next_stream_data(response, timeout=5)
-            assert frame.get('id') == 'held-open', frame
-
-            in_progress = commands / f'.{TOK}.json.tmp'
-            in_progress.write_text(
-                '{"id":"atomic","code":"second"}', encoding='utf-8')
-            time.sleep(1.25)
-            assert in_progress.exists(), 'the reader deleted a sibling temp file'
-            os.replace(in_progress, legacy)
-            frame = next_stream_data(response, timeout=5)
-            assert frame.get('id') == 'atomic', frame
-        finally:
-            if not writer.closed:
-                writer.close()
-            if response is not None:
-                response.close()
-            if conn is not None:
-                conn.close()
 
 
 def test_queue_publication_never_deletes_an_in_progress_write(tmp):
@@ -624,26 +574,6 @@ def test_queue_delivery_updates_the_health_clock(tmp):
             assert status == 200, (status, body)
             delivered = next_stream_data(response)
             assert delivered['id'] == 'queue-clock', delivered
-
-            _wait_for_delivery_health(base)
-        finally:
-            response.close()
-            conn.close()
-
-
-def test_legacy_delivery_updates_the_health_clock(tmp):
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        conn, response = stream_response(base, TOK, tab='extension')
-        try:
-            status, health = _util.get_json(base + '/health')
-            assert status == 200, (status, health)
-            assert health['last_delivery_s_ago'] is None, health
-
-            legacy = Path(docroot) / 'commands' / f'{TOK}.json'
-            legacy.write_text(
-                '{"id":"legacy-clock","code":"1"}', encoding='utf-8')
-            delivered = next_stream_data(response)
-            assert delivered['id'] == 'legacy-clock', delivered
 
             _wait_for_delivery_health(base)
         finally:

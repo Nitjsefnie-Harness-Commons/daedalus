@@ -161,7 +161,8 @@ def test_wrong_token_is_refused_on_every_bridge_control_route(tmp):
 
 
 def test_repeated_wrong_tokens_create_no_storage_namespaces(tmp):
-    """Repeated attacker-chosen names cannot allocate queue, upload, or job state."""
+    """Repeated attacker-chosen names cannot allocate queue, upload, or job
+    state."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         replies = []
         for index in range(8):
@@ -200,7 +201,8 @@ def test_duplicate_query_credentials_are_rejected_without_parser_order(tmp):
                 status, raw = _util.get(
                     f'{base}{path}?token={first}&token={second}{suffix}')
                 parsed = json.loads(raw)
-                error = parsed.get('error') if isinstance(parsed, dict) else None
+                error = (parsed.get('error')
+                         if isinstance(parsed, dict) else None)
                 replies.append((path, first, status, error))
 
         assert all(status == 400 and error == 'duplicate token'
@@ -237,11 +239,13 @@ def test_duplicate_body_credentials_are_rejected_on_every_json_route(tmp):
                     base + path, method, body=raw_body,
                     headers={'Content-Type': 'application/json'})
                 parsed = json.loads(raw)
-                error = parsed.get('error') if isinstance(parsed, dict) else None
+                error = (parsed.get('error')
+                         if isinstance(parsed, dict) else None)
                 replies.append((method, path, first, status, error))
 
         assert all(status == 400 and error == 'duplicate token'
-                   for _method, _path, _first, status, error in replies), replies
+                   for _method, _path, _first, status, error in replies), (
+                       replies)
         health_status, health = _util.get_json(base + '/health')
         assert health_status == 200 and health['ok'] is True, (
             health_status, health)
@@ -276,18 +280,21 @@ def test_query_token_duplicates_reject_blank_and_equal_values(tmp):
                 else:
                     status, raw = _util.get(base + request_path)
                 parsed = json.loads(raw)
-                error = parsed.get('error') if isinstance(parsed, dict) else None
+                error = (parsed.get('error')
+                         if isinstance(parsed, dict) else None)
                 replies.append((path, first, second, status, error))
 
         assert all(status == 400 and error == 'duplicate token'
-                   for _path, _first, _second, status, error in replies), replies
+                   for _path, _first, _second, status, error in replies), (
+                       replies)
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['active_streams'] == 0, (
             status, health)
 
 
 def test_body_token_duplicates_reject_blank_and_equal_values(tmp):
-    """All JSON routes reject repeated tokens without inspecting their values."""
+    """All JSON routes reject repeated tokens without inspecting their
+    values."""
     routes = (
         ('POST', '/register', b'"tabId":"duplicate-tab"'),
         ('POST', '/sync-tabs', b'"tabs":[]'),
@@ -315,11 +322,13 @@ def test_body_token_duplicates_reject_blank_and_equal_values(tmp):
                     base + path, method, body=raw_body,
                     headers={'Content-Type': 'application/json'})
                 parsed = json.loads(raw)
-                error = parsed.get('error') if isinstance(parsed, dict) else None
+                error = (parsed.get('error')
+                         if isinstance(parsed, dict) else None)
                 replies.append((method, path, first, second, status, error))
 
         assert all(status == 400 and error == 'duplicate token'
-                   for _method, _path, _first, _second, status, error in replies), replies
+                   for _method, _path, _first, _second, status, error
+                   in replies), replies
         assert not queue_files(docroot, TOK)
         assert not list((Path(docroot) / 'results').iterdir())
         assert not list((Path(docroot) / 'segments').iterdir())
@@ -469,7 +478,8 @@ def test_authenticated_get_routes_accept_a_bearer_header(tmp):
         status, payload = _util.get_json(base + '/tabs', headers=auth)
         assert status == 200 and payload == [], (status, payload)
         status, payload = _util.get_json(base + '/result', headers=auth)
-        assert status == 200 and payload == {'pending': True}, (status, payload)
+        assert status == 200 and payload == {'pending': True}, (
+            status, payload)
         status, payload = _util.get_json(base + '/upload', headers=auth)
         assert status == 200 and payload == [], (status, payload)
         # Reached its handler rather than the credential check: an
@@ -562,7 +572,8 @@ def test_a_query_token_still_authorizes_a_get(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='bridgecredentials_')
+    return _util.runner(
+        _util.collect(globals()), tmp_prefix='bridgecredentials_')
 
 
 if __name__ == '__main__':
