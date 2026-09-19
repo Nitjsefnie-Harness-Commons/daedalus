@@ -179,6 +179,13 @@ async function runCapabilityRoutes() {
   return observations;
 }
 
+async function runUnknownCommand() {
+  context.unknownCommand = JSON.parse(commandText);
+  await vm.runInContext('dispatchCommand(unknownCommand)', context);
+  return { posted: resultPayloads.map(({ result, error }) => ({
+    result: result === undefined ? '<absent>' : result, error })) };
+}
+
 async function runCapacity() {
   context.prefill = Array.from({ length: 1000 }, (_unused, index) => ({
     id: 'existing-' + index,
@@ -607,6 +614,7 @@ async function run() {
   if (scenario === 'worker-sources') return workerSourcePaths.get(context);
   await vm.runInContext('loadConfig()', context);
   if (scenario === 'capability-routes') return runCapabilityRoutes();
+  if (scenario === 'unknown-command') return runUnknownCommand();
   if (scenario === 'capacity') return runCapacity();
   if (scenario === 'expiry') return runExpiry();
   if (scenario === 'route') return runRouteSnapshot();
@@ -655,6 +663,19 @@ def run_extension_capability_routes(routes, background_path=None):
         node, HARNESS,
         [str(background_path), 'capability-routes'], cwd=ROOT,
         payload=json.dumps(routes))
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def run_extension_command_result(command):
+    """Dispatch one command and return every result the worker posted."""
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension command route'
+    result = run_node_program(
+        node, HARNESS,
+        [str(EXTENSION_ROOT / 'background.js'), 'unknown-command'], cwd=ROOT,
+        payload=json.dumps(command))
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
