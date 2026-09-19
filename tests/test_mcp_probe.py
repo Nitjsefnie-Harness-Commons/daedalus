@@ -5,7 +5,8 @@ The probe is run as a subprocess against a stub that answers the way the
 pinned MCP transport does, because the defect it pins was invisible to any
 test that spoke to the probe's functions directly: the transport answers a
 notification with 202 and no body, and the probe's helper read that body
-as JSON.
+as JSON. The rpc() response-guard controls instead call rpc() in-process
+over httpx.MockTransport.
 """
 import contextlib
 import http.server
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -45,44 +47,37 @@ def _rpc_mock(mode):
         })
         if payload.get('method') != 'tools/list':
             raise AssertionError('unexpected RPC method')
+        headers = {'Content-Type': 'application/json',
+                   'Mcp-Session-Id': SESSION}
         if mode == '202-with-body':
-            frame = {'jsonrpc': '2.0', 'id': payload['id'],
+            frame = {'jsonrpc': '2.0', 'id': payload.get('id'),
                      'result': {'tools': TOOLS}}
             return httpx.Response(
-                202,
-                headers={'Content-Type': 'application/json',
-                         'Mcp-Session-Id': SESSION},
-                json=frame,
-                request=request,
-            )
+                202, headers=headers, json=frame, request=request)
+        if mode == 'whitespace-body':
+            return httpx.Response(
+                200, headers=headers, content=b'\n', request=request)
         raise AssertionError(f'unrecognized stub mode: {mode}')
 
     return httpx.MockTransport(handler), seen
 
 
-def test_202_with_a_body_is_still_no_answer(tmp):
-    del tmp
-    transport, seen = _rpc_mock('202-with-body')
-    old_token = os.environ.get('TOKEN')
-    old_url = os.environ.get('DAEDALUS_MCP_URL')
-    os.environ['TOKEN'] = TOKEN
-    os.environ['DAEDALUS_MCP_URL'] = 'http://127.0.0.1:8086/mcp'
-    try:
+def _rpc_answer(mode):
+    transport, seen = _rpc_mock(mode)
+    with mock.patch.dict(os.environ, {
+            'TOKEN': TOKEN, 'DAEDALUS_MCP_URL': 'http://127.0.0.1:8086/mcp'}):
         probe = _util.load(PROBE, 'mcp_probe_rpc_test')
-    finally:
-        if old_token is None:
-            os.environ.pop('TOKEN', None)
-        else:
-            os.environ['TOKEN'] = old_token
-        if old_url is None:
-            os.environ.pop('DAEDALUS_MCP_URL', None)
-        else:
-            os.environ['DAEDALUS_MCP_URL'] = old_url
-
     import httpx
     with httpx.Client(transport=transport) as client:
-        answer = probe.rpc(client, None, 'tools/list')
+        try:
+            return probe.rpc(client, None, 'tools/list'), seen
+        except ValueError as exc:  # a guard that fell through to r.json()
+            return exc, seen
 
+
+def test_202_with_a_body_is_still_no_answer(tmp):
+    del tmp
+    answer, seen = _rpc_answer('202-with-body')
     assert answer == (None, SESSION), answer
     assert len(seen) == 1, seen
     request = seen[0]
@@ -91,6 +86,14 @@ def test_202_with_a_body_is_still_no_answer(tmp):
     assert request['id'], request
     assert request['authorization'] == f'Bearer {TOKEN}', request
     assert request['session'] is None, request
+
+
+def test_a_whitespace_only_body_is_still_no_answer(tmp):
+    del tmp
+    answer, seen = _rpc_answer('whitespace-body')
+    assert answer == (None, SESSION), answer
+    assert len(seen) == 1, seen
+    assert seen[0]['method'] == 'tools/list', seen
 
 
 class _McpStubHandler(http.server.BaseHTTPRequestHandler):
