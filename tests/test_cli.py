@@ -46,10 +46,10 @@ os.environ.update(BRIDGE_ENV)
 
 def cli_env(**overrides):
     """A clean environment: none of the CLI's config vars leak in from ours."""
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     # PYTHONIOENCODING goes too, so the CLI applies its own rule for a piped
-    # stream instead of inheriting whatever this runner was started with. A
-    # test that wants a specific one passes it back through overrides.
+    # stream instead of inheriting whatever this runner was started with.
     for k in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID',
               'PYTHONIOENCODING'):
         env.pop(k, None)
