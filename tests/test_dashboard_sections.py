@@ -477,7 +477,8 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     assert seen['listingTargets'] == [
         '/upload?limit=50&offset=0', '/upload?limit=50&offset=50',
         '/upload?limit=50&offset=50', '/upload?limit=50&offset=0'], seen
-    assert '51–50 / 50' not in seen['metaSnapshots'], seen['metaSnapshots']
+    assert seen['metaSnapshots'] == [
+        '', '1–50 / 51', '51–51 / 51', '51–51 / 51'], seen['metaSnapshots']
 
 
 _PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(_PAGER_PREFIX + r"""
