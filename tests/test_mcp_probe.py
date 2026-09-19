@@ -71,7 +71,8 @@ def _rpc_answer(mode):
     with httpx.Client(transport=transport) as client:
         try:
             return probe.rpc(client, None, 'tools/list'), seen
-        except ValueError as exc:  # a guard that fell through to r.json()
+        # so the assertion, not the runner, reports it
+        except ValueError as exc:
             return exc, seen
 
 
