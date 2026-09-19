@@ -99,8 +99,25 @@ jobs:
           actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+
+      # The pip cache is restored on every event and saved only from a push of
+      # main, as in the matrix and coverage jobs — `cache: pip` would save in
+      # a post-job step that runs after this job has checked out and executed
+      # pull-request content, the cache-poisoning shape issues #166 and #185
+      # took out of those jobs. The key is the matrix jobs' 3.13 namespace
+      # rather than a private one: the cache holds fetched packages for the
+      # manifests the hash reads, so what one job warmed any other on this
+      # platform and interpreter reuses.
+      - name: Restore the pip cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-3.13-
 
       - name: Install linters
         run: |
@@ -109,6 +126,23 @@ jobs:
 
       - name: pycodestyle
         run: git ls-files '*.py' | xargs pycodestyle
+
+      # The gate is the answer to the cache-poisoning findings: an untrusted
+      # event never writes cross-run state, and a push of main is the one
+      # trigger whose checkout this repository produced. No step between the
+      # install and here runs pip, so the save's position after the lint run
+      # does not change what the cache holds, only who writes one: a
+      # cancelled run never reaches this step.
+      - name: Save the pip cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: ${{ !cancelled() && github.event_name == 'push'
+                && github.ref == 'refs/heads/main' }}
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
 
   pylint:
     runs-on: ubuntu-latest
@@ -128,8 +162,25 @@ jobs:
           actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+
+      # The pip cache is restored on every event and saved only from a push of
+      # main, as in the matrix and coverage jobs — `cache: pip` would save in
+      # a post-job step that runs after this job has checked out and executed
+      # pull-request content, the cache-poisoning shape issues #166 and #185
+      # took out of those jobs. The key is the matrix jobs' 3.13 namespace
+      # rather than a private one: the cache holds fetched packages for the
+      # manifests the hash reads, so what one job warmed any other on this
+      # platform and interpreter reuses.
+      - name: Restore the pip cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-3.13-
 
       # The MCP server's dependencies are installed for the same reason as in
       # the pyright job: pylint resolves imports, so without them every httpx,
@@ -145,6 +196,23 @@ jobs:
 
       - name: pylint
         run: git ls-files '*.py' | xargs pylint --rcfile=.pylintrc
+
+      # The gate is the answer to the cache-poisoning findings: an untrusted
+      # event never writes cross-run state, and a push of main is the one
+      # trigger whose checkout this repository produced. No step between the
+      # install and here runs pip, so the save's position after the lint run
+      # does not change what the cache holds, only who writes one: a
+      # cancelled run never reaches this step.
+      - name: Save the pip cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: ${{ !cancelled() && github.event_name == 'push'
+                && github.ref == 'refs/heads/main' }}
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
 
   # pyright over the bridge, the CLI and the scripts. The suites are excluded
   # in pyrightconfig.json: they load their target by path and reach into module
@@ -175,8 +243,25 @@ jobs:
           actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+
+      # The pip cache is restored on every event and saved only from a push of
+      # main, as in the matrix and coverage jobs — `cache: pip` would save in
+      # a post-job step that runs after this job has checked out and executed
+      # pull-request content, the cache-poisoning shape issues #166 and #185
+      # took out of those jobs. The key is the matrix jobs' 3.13 namespace
+      # rather than a private one: the cache holds fetched packages for the
+      # manifests the hash reads, so what one job warmed any other on this
+      # platform and interpreter reuses.
+      - name: Restore the pip cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-3.13-
 
       - name: Install the type checker and the dependencies it resolves
         # scripts/ci is in the checker's scope, and two of its modules import
@@ -190,6 +275,23 @@ jobs:
 
       - name: pyright
         run: pyright
+
+      # The gate is the answer to the cache-poisoning findings: an untrusted
+      # event never writes cross-run state, and a push of main is the one
+      # trigger whose checkout this repository produced. No step between the
+      # install and here runs pip, so the save's position after the lint run
+      # does not change what the cache holds, only who writes one: a
+      # cancelled run never reaches this step.
+      - name: Save the pip cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: ${{ !cancelled() && github.event_name == 'push'
+                && github.ref == 'refs/heads/main' }}
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
 
   # The JavaScript half of the tree had no static analysis at all:
   # pycodestyle and pylint run over *.py and pyright checks types, while the
