@@ -46,8 +46,7 @@ def _write_fault_dir(tmp, body):
 def _bridge_with(tmp, body):
     """A bridge whose child raises one injected PermissionError."""
     fault_dir = _write_fault_dir(tmp, body)
-    return _util.bridge(
-            tmp, env={**BRIDGE_ENV, 'PYTHONPATH': str(fault_dir)})
+    return _util.bridge(tmp, env={**BRIDGE_ENV, 'PYTHONPATH': str(fault_dir)})
 
 
 def _recorded_refusals(docroot):
