@@ -64,8 +64,6 @@ const downloadFetches = fetched.slice(afterRender);
 container.byText('preview').click();
 await bounded(settle(), 'preview fetch', _dashnodeStepTimeoutMs);
 const previewFetches = fetched.slice(afterRender + downloadFetches.length);
-// Read the rendered preview anchor and its image once the preview fetch
-// has settled: these nodes carry whatever href/src the section rendered.
 const previewAnchor = container.all().find(
   (el) => el.tag === 'a' && el.attrs.target === '_blank');
 const previewImage = previewAnchor &&
