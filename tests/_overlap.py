@@ -585,7 +585,7 @@ def client_env():
     """A client environment, minus any bridge coordinates this process has."""
     env = {name: value for name, value in os.environ.items()
            if not name.startswith('DAEDALUS_')}
-    for key in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID'):
+    for key in ('TOKEN', 'ID'):
         env.pop(key, None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     return env
