@@ -1,8 +1,9 @@
 """The synthetic snippets that red-exercise the repo-layout audit's
-per-launch refusal limbs, one row per limb; the source-tier limbs
-(import aliases, from-imports, unpack-derived names, eval/exec,
-machinery members, undefined names, receiver resolution, no visible
-launch) are outside this table's scope."""
+per-launch refusal limbs, at least one row per limb; the source-tier
+limbs (import aliases, from-imports, the no-plain-import-subprocess
+gate, unpack-derived names, eval/exec, machinery members, undefined
+names, receiver resolution, no visible launch) are outside this
+table's scope."""
 LAUNCH_REFUSAL_ROWS = (
     ('clone-without-init.defaultBranch',
      "import subprocess\n"
