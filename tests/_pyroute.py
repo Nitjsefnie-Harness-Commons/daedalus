@@ -363,7 +363,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     for argument in node.args:
                         current, yielded = consume_iterable(
                             argument, current, exhaust=True)
-                        yielded = materialize_deferred(consumer, yielded)
+                        yielded = materialize_deferred(consumer, yielded, node)
                         append_deferred(consumed_values, yielded)
                 elif consumer in _PARTIAL_ITERABLE_CALLS and node.args:
                     current, yielded = consume_iterable(

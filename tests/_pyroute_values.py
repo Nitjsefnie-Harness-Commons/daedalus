@@ -12,6 +12,46 @@ EAGER_ITERABLE_CALLS = frozenset({
 PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
 UNPROVABLE_SENDER = '?ext_cmd'
 DYNAMIC_KEY = object()
+_IDENTITY_TOKENS = {}
+_IDENTITY_ANCHORS = []
+_SIGNATURE_MEMO = {}
+_SIGNATURE_ANCHORS = []
+
+
+def identity_token(value):
+    """A process-stable integer for one container's program-point identity."""
+    identity = value.identity
+    token = _IDENTITY_TOKENS.get(id(identity))
+    if token is None:
+        token = len(_IDENTITY_TOKENS) + 1
+        _IDENTITY_TOKENS[id(identity)] = token
+        _IDENTITY_ANCHORS.append(identity)
+    return token
+
+
+def deferred_signature(value):
+    """Dedupe signature of a deferred value; None for plain values."""
+    signature = _SIGNATURE_MEMO.get(id(value))
+    if signature is not None:
+        return signature
+    signature = _deferred_signature(value)
+    if signature is not None:
+        _SIGNATURE_MEMO[id(value)] = signature
+        _SIGNATURE_ANCHORS.append(value)
+    return signature
+
+
+def _deferred_signature(value):
+    if isinstance(value, (DeferredContainer, DeferredInstance)):
+        return ('container', identity_token(value))
+    if isinstance(value, DeferredCallable):
+        return ('callable', id(value.scope))
+    if isinstance(value, DeferredAlternatives):
+        return ('alternatives', tuple(
+            deferred_signature(item) for item in value.values))
+    if is_deferred_value(value):
+        return ('callable', id(value))
+    return None
 
 
 @dataclass(frozen=True)
@@ -454,11 +494,12 @@ def consumer_results(consumer, arguments, states):
     return [value] if value is not None else []
 
 
-def materialize_deferred(consumer, value):
+def materialize_deferred(consumer, value, node=None):
     if value is None: return None
     if isinstance(value, DeferredAlternatives):
         return merge_yielded(
-            materialize_deferred(consumer, item) for item in value.values)
+            materialize_deferred(consumer, item, node)
+            for item in value.values)
     if consumer in ('max', 'min'):
         return value
     if consumer == 'sum':
@@ -471,8 +512,8 @@ def materialize_deferred(consumer, value):
         if not (is_deferred_value(item) or sender_value(item) is not None):
             return None
         if key is None:
-            return DeferredContainer({DYNAMIC_KEY: item}, 1, 'dict')
-        return DeferredContainer({key: item}, 1, 'dict')
+            return DeferredContainer({DYNAMIC_KEY: item}, 1, 'dict', node)
+        return DeferredContainer({key: item}, 1, 'dict', node)
     kind = 'list' if consumer == 'sorted' else consumer
     return DeferredContainer({0: value}, 1, kind)
 
