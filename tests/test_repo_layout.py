@@ -214,15 +214,17 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     900-second suite bound ("SUITE TIMED OUT") instead of any wall-clock
     margin here. The audit sees this file alone, accepts only a plain
     `import subprocess`, resolves every binding derived from the module
-    to a fixpoint (parameter defaults, for-targets, class bodies and
-    def returns included), and follows functools/importlib under any
-    alias: an aliased or from-imported subprocess, an eval-built
-    launcher, an unresolvable callee or receiver, or a keyword it
-    cannot read is a refusal, never an accept. Called bare names are
-    censused against in-file definitions, tracked bindings, imports
-    and the runtime builtins table; what remains outside that census
-    is a builtin shadowed at runtime, which a static read of this
-    file cannot see.
+    to a fixpoint (parameter defaults, for-targets, class bodies,
+    with-targets and def returns included), and follows
+    functools/importlib under any alias: an aliased or from-imported
+    subprocess, an eval-built launcher, an unresolvable callee or
+    receiver, or a keyword it cannot read is a refusal, never an
+    accept. Called bare names are censused against in-file
+    definitions, tracked bindings, imports and the runtime builtins
+    table; what remains outside that census is a builtin shadowed at
+    runtime, which a static read of this file cannot see, and a
+    decorated definition, which is trusted as its own callee — a
+    decorator returning a launcher sits outside the census by design.
     """
     del tmp
     import builtins
