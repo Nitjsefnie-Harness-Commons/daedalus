@@ -29,7 +29,9 @@ _STATUS = 'dashboard status line'
 
 # Spellings of one element that are equally valid HTML and were equally
 # invisible. `uppercase_tag` and `uppercase_attribute` split the uppercase
-# case so each scoped `(?i:...)` flag is pinned on its own.
+# case so each scoped `(?i:...)` flag is pinned on its own. The `unquoted_*`
+# rows combine the unquoted value with a further axis, so an intersection
+# cannot break silently behind the single-axis row it shares an arm with.
 _RAIL_SPELLINGS = {
     'unquoted': '<div class=rail-foot>v9.9.9</div>',
     'uppercase_names': "<DIV CLASS='rail-foot'>v9.9.9</DIV>",
@@ -37,6 +39,11 @@ _RAIL_SPELLINGS = {
     'uppercase_attribute': "<div CLASS='rail-foot'>v9.9.9</div>",
     'trailing_attribute': "<div class='rail-foot' id='x'>v9.9.9</div>",
     'space_before_gt': "<div class='rail-foot' >v9.9.9</div>",
+    'unquoted_uppercase_names': '<DIV CLASS=rail-foot>v9.9.9</DIV>',
+    'unquoted_trailing_attribute': '<div class=rail-foot id=x>v9.9.9</div>',
+    'unquoted_space_before_gt': '<div class=rail-foot >v9.9.9</div>',
+    'unquoted_gt_in_earlier_attribute': (
+        "<div title='a>b' class=rail-foot>v9.9.9</div>"),
 }
 _STATUS_SPELLINGS = {
     'unquoted': '<span class=sl-v>9.9.9</span>',
@@ -44,6 +51,10 @@ _STATUS_SPELLINGS = {
     'uppercase_tag': "<SPAN class='sl-v'>9.9.9</span>",
     'uppercase_attribute': "<span CLASS='sl-v'>9.9.9</span>",
     'space_before_gt': "<span class='sl-v' >9.9.9</span>",
+    'unquoted_uppercase_names': '<SPAN CLASS=sl-v>9.9.9</SPAN>',
+    'unquoted_space_before_gt': '<span class=sl-v >9.9.9</span>',
+    'unquoted_gt_in_earlier_attribute': (
+        "<span title='a>b' class=sl-v>9.9.9</span>"),
 }
 
 
@@ -120,6 +131,44 @@ def test_space_before_gt_status_line_duplicate_is_refused(tmp_path):
         tmp_path, _STATUS_SPELLINGS['space_before_gt'], _STATUS)
 
 
+def test_unquoted_uppercase_names_rail_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _RAIL_SPELLINGS['unquoted_uppercase_names'], _RAIL)
+
+
+def test_unquoted_uppercase_names_status_line_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['unquoted_uppercase_names'], _STATUS)
+
+
+def test_unquoted_trailing_attribute_rail_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _RAIL_SPELLINGS['unquoted_trailing_attribute'], _RAIL)
+
+
+def test_unquoted_space_before_gt_rail_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _RAIL_SPELLINGS['unquoted_space_before_gt'], _RAIL)
+
+
+def test_unquoted_space_before_gt_status_line_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['unquoted_space_before_gt'], _STATUS)
+
+
+def test_unquoted_gt_in_earlier_attribute_rail_duplicate_is_refused(
+        tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _RAIL_SPELLINGS['unquoted_gt_in_earlier_attribute'], _RAIL)
+
+
+def test_unquoted_gt_in_earlier_attribute_status_line_duplicate_is_refused(
+        tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['unquoted_gt_in_earlier_attribute'],
+        _STATUS)
+
+
 def test_trailing_region_reads_a_quoted_gt_whole(tmp_path):
     """A `>` inside a later attribute value does not end the tag early."""
     _assert_duplicate_spelling_refused(
@@ -148,6 +197,17 @@ def test_uppercase_rail_class_value_is_not_a_site(tmp_path):
 def test_uppercase_status_line_class_value_is_not_a_site(tmp_path):
     _assert_markup_is_not_a_site(
         tmp_path, "<span class='SL-V'>9.9.9</span>", _STATUS)
+
+
+def test_uppercase_unquoted_rail_class_value_is_not_a_site(tmp_path):
+    """The unquoted arm carries its own case-sensitive value rule."""
+    _assert_markup_is_not_a_site(
+        tmp_path, '<div CLASS=RAIL-FOOT>v9.9.9</div>', _RAIL)
+
+
+def test_uppercase_unquoted_status_line_class_value_is_not_a_site(tmp_path):
+    _assert_markup_is_not_a_site(
+        tmp_path, '<span CLASS=SL-V>9.9.9</span>', _STATUS)
 
 
 def test_unquoted_rail_class_token_suffix_is_not_a_site(tmp_path):
