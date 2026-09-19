@@ -148,9 +148,8 @@ def _refused_exchange(base, request_bytes):
             sock.sendall(request_bytes)
             sock.shutdown(socket.SHUT_WR)
         except OSError:
-            # The refusal is what this exchange invites, so a reset during
-            # the send is part of the traffic it measures; whatever arrived
-            # is still readable below.
+            # A reset during the send is traffic this exchange invites; what
+            # arrived is still readable below.
             pass
         sock.settimeout(3)
         while True:
@@ -171,9 +170,8 @@ def test_a_refused_body_length_is_answered_in_full(tmp):
     """A refusal of an invalid Content-Length survives a body in flight.
 
     The client sends its declared body and must still read the complete
-    refusal, whatever the close does behind it — the user-visible property,
-    on both invalid-value branches. The deterministic kill for the missing
-    drain is the stub pin
+    refusal, whatever the close does behind it. The deterministic kill for a
+    missing drain is the stub pin
     test_an_invalid_content_length_refusal_absorbs_the_declared_body in
     tests/test_http_transport.py: in this client shape on Linux loopback no
     reset is observable, because the close's FIN precedes the RST the
