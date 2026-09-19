@@ -5,6 +5,7 @@ Generic module names at the repository root occupy the top-level import
 namespace of every process started there. The bridge's modules live in the
 `daedalus_bridge/` package instead; this suite is what keeps them there.
 """
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -75,7 +76,7 @@ def _tracked_python(root=ROOT):
     root = Path(root)
     listed = subprocess.run(
         ['git', '-C', str(root), 'ls-files', '-sz', '*.py'],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     entries = [entry for entry in listed.stdout.decode(
         'utf-8', 'surrogateescape').split('\0') if entry]
     assert entries, 'Git returned no tracked Python files'
@@ -100,7 +101,7 @@ def test_the_inventory_refuses_a_missing_tracked_python_file(tmp):
     tree = Path(tmp) / 'tree'
     subprocess.run(
         ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
-        check=True, timeout=30)
+        check=True)
     missing = tree / 'daedalus_bridge' / 'config.py'
     missing.unlink()
     try:
@@ -117,24 +118,24 @@ def test_the_inventory_refuses_a_tracked_symlink_blob(tmp):
     tree = Path(tmp) / 'tree'
     subprocess.run(
         ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
-        check=True, timeout=30)
+        check=True)
     subprocess.run(
         ['git', '-C', str(tree), 'config', 'core.symlinks', 'false'],
-        check=True, timeout=30)
+        check=True)
     target = tree / 'symlink-target'
     target.write_text('auth.py')
     blob = subprocess.run(
         ['git', '-C', str(tree), 'hash-object', '-w', str(target)],
-        capture_output=True, check=True, text=True, timeout=30).stdout.strip()
+        capture_output=True, check=True, text=True).stdout.strip()
     target.unlink()
     module = 'daedalus_mcp/server.py'
     subprocess.run(
         ['git', '-C', str(tree), 'update-index', '--add', '--cacheinfo',
-         f'120000,{blob},{module}'], check=True, timeout=30)
+         f'120000,{blob},{module}'], check=True)
     (tree / module).unlink()
     subprocess.run(
         ['git', '-C', str(tree), 'checkout-index', '-f', '--', module],
-        check=True, timeout=30)
+        check=True)
     try:
         _tracked_python(tree)
     except AssertionError as exc:
@@ -149,7 +150,7 @@ def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
     tree = Path(tmp) / 'tree'
     subprocess.run(
         ['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(tree)],
-        check=True, timeout=30)
+        check=True)
     symlink = tree / 'daedalus_bridge' / 'config.py'
     symlink.unlink()
     symlink.symlink_to('__init__.py')
@@ -203,6 +204,40 @@ def test_the_root_holds_no_python_module_but_the_entry_points(tmp):
     assert root_modules == ['run_tests.py', 'server.py'], (
         f'the repository root holds {root_modules}, '
         "expected ['run_tests.py', 'server.py']")
+
+
+def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
+    """A git subprocess here runs unbounded and fails loudly on failure."""
+    del tmp
+    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    launches = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == 'run'
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == 'subprocess']
+    assert launches, 'the suite declares no subprocess launch to audit'
+    others = sorted({
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == 'subprocess'
+        and node.func.attr != 'run'})
+    assert not others, (
+        f'the suite launches subprocesses through {others}, '
+        'which the launch audit does not see')
+    for node in launches:
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+        assert 'timeout' not in keywords, (
+            f'tests/test_repo_layout.py:{node.lineno} carries a wall-clock '
+            'bound')
+        check = keywords.get('check')
+        assert isinstance(check, ast.Constant) and check.value is True, (
+            f'tests/test_repo_layout.py:{node.lineno} does not fail loudly '
+            'on a failed git command')
 
 
 if __name__ == '__main__':
