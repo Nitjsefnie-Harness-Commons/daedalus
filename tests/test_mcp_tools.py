@@ -431,7 +431,7 @@ def test_every_registered_tool_command_is_pinned(_tmp):
         name: _mcp_guard_floor.reachable_guards(
             sites, _mcp_guard_floor.tool_code_objects(tool, _util.ROOT))
         for name, tool in registered.items()}
-    witnessed = set()
+    witnessed = []
     for name, cases in refusals.items():
         assert name in registered, (
             f'{name}: refusal pinned for a tool that is not registered')
@@ -452,11 +452,14 @@ def test_every_registered_tool_command_is_pinned(_tmp):
                     'lexically visible (a closure cell, a default, '
                     '__wrapped__, or a module-global function) or the site '
                     'declared')
-                witnessed.add((name, fired))
+                witnessed.append((name, fired))
             else:
                 raise AssertionError(f'{name} {overrides}: nothing refused')
             assert composition.bridge.calls == [], (
                 f'{name} {overrides}: refused after a bridge call')
+    duplicates = _mcp_guard_floor.duplicate_witness_gaps(witnessed)
+    assert not duplicates, (
+        'one witness per site: ' + '; '.join(duplicates))
     orphans = set(_mcp_guard_floor.UNWITNESSED_GUARDS) - set(registered)
     assert not orphans, (
         'UNWITNESSED_GUARDS names tools that are not registered: '
@@ -497,6 +500,29 @@ def test_the_refusal_pass_refuses_an_unregistered_allowlist_entry(_tmp):
         else:
             raise AssertionError(
                 'an unregistered UNWITNESSED_GUARDS entry was not refused')
+
+
+def test_the_refusal_pass_refuses_a_second_witness_of_one_site(_tmp):
+    """Two refusal cases landing on one raise site are refused.
+
+    The refusal pass accumulated its (tool, site) pairs into a set, so a
+    case whose site another case already witnessed was deletable without
+    any test noticing.
+    """
+    duplicated = _mcp_tool_commands.TOOL_REFUSALS['net_capture'] + [
+        ({'max_requests': 99999}, ValueError,
+         'max_requests must be an integer from 1 to 20000; got 99999')]
+    with mock.patch.dict(
+            _mcp_tool_commands.TOOL_REFUSALS, {'net_capture': duplicated}):
+        try:
+            test_every_registered_tool_command_is_pinned(_tmp)
+        except AssertionError as refused:
+            message = str(refused)
+            assert 'one witness per site' in message, refused
+            assert 'net_capture: 2 refusal cases witness' in message, refused
+        else:
+            raise AssertionError('a second witness of one site was not '
+                                 'refused')
 
 
 def test_the_parameter_floor_refuses_a_stranded_parameter(_tmp):
