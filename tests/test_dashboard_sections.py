@@ -116,8 +116,8 @@ def test_uploads_carry_the_token_in_a_header_and_never_in_a_link(_tmp):
     assert all(click['href'].startswith('blob:') for click in saved), seen
 
     preview = seen['previewNode']
-    assert preview['anchorHref'].startswith('blob:'), preview
-    assert preview['imageSrc'].startswith('blob:'), preview
+    assert preview['anchorHref'] == 'blob:held-2', preview
+    assert preview['imageSrc'] == 'blob:held-2', preview
 
 
 # A file fetch settles only when the test says so, so a stale fetch can be
