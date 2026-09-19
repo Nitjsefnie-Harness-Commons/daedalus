@@ -49,20 +49,14 @@ class RecordingExtCmd:
 
 
 def refused(argv):
-    """(calls, exit code, stderr): argparse refused argv, nothing sent."""
-    recorded = RecordingExtCmd([])
-    original = commands_browser.ext_cmd
-    commands_browser.ext_cmd = recorded
+    """(exit code, stderr): argparse refused argv at parse time."""
     err = io.StringIO()
     try:
-        try:
-            with contextlib.redirect_stderr(err):
-                build_parser().parse_args(argv)
-        except SystemExit as exit_request:
-            return recorded.calls, exit_request.code, err.getvalue()
-        raise AssertionError(f'{argv} parsed instead of being refused')
-    finally:
-        commands_browser.ext_cmd = original
+        with contextlib.redirect_stderr(err):
+            build_parser().parse_args(argv)
+    except SystemExit as exit_request:
+        return exit_request.code, err.getvalue()
+    raise AssertionError(f'{argv} parsed instead of being refused')
 
 
 def run_cli(argv, answers):
@@ -83,22 +77,20 @@ def run_cli(argv, answers):
 def test_fetch_timings_refuses_a_count_below_one(tmp):
     del tmp
     for value in ('0', '-1', '-5'):
-        calls, code, message = refused(['fetch-timings', '-n', value])
+        code, message = refused(['fetch-timings', '-n', value])
         assert code != 0, (value, code, message)
         assert 'usage:' in message, (value, message)
         assert 'argument -n:' in message, (value, message)
         assert value in message, (value, message)
-        assert calls == [], (value, calls)
 
 
 def test_fetch_timings_still_refuses_a_non_integer_count(tmp):
     del tmp
-    calls, code, message = refused(['fetch-timings', '-n', 'soon'])
+    code, message = refused(['fetch-timings', '-n', 'soon'])
     assert code != 0, (code, message)
     assert 'argument -n:' in message, message
     assert 'count must be a whole number' in message, message
     assert "'soon'" in message, message
-    assert calls == [], calls
 
 
 def test_fetch_timings_one_selects_exactly_the_last_entry(tmp):
