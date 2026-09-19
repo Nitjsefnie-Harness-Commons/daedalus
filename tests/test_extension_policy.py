@@ -411,11 +411,11 @@ def test_the_manifest_declares_the_lowest_chrome_the_code_needs(tmp):
     source = background.read_text(encoding='utf-8')
     masked = js_mask(source)
     heartbeat = re.search(
-        r'alarms\.create\(\s*?([^,]*?),\s*'
+        r'alarms\.create\(([^,]*?),\s*'
         r'\{\s*periodInMinutes:\s*0\.5\s*\}\s*\)', masked)
     assert heartbeat, 'the sub-minute heartbeat the 120 floor needs is gone'
     name = source[heartbeat.start(1):heartbeat.end(1)]
-    assert name == "'daedalus-heartbeat'", name
+    assert name.strip() == "'daedalus-heartbeat'", name
 
 
 def test_the_manifest_does_not_grant_activeTab_beside_all_urls(tmp):
@@ -425,7 +425,9 @@ def test_the_manifest_does_not_grant_activeTab_beside_all_urls(tmp):
     permissions = manifest.get('permissions', [])
     assert 'activeTab' not in permissions, permissions
     hosts = manifest.get('host_permissions', [])
-    assert '<all_urls>' in hosts, hosts
+    assert '<all_urls>' in hosts, (
+        'the <all_urls> host permission the activeTab removal leans on '
+        'is gone')
 
 
 def main():
