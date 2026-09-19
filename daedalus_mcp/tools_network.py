@@ -7,8 +7,10 @@ NET_CAPTURE_MAX = 20000
 
 def register(mcp, bridge):
     @mcp.tool()
-    async def net_capture(chrome_tab: int | None = None, max_requests: int = 1000) -> dict:
-        """Start CDP network capture on a tab. Returns {tabId, already?, buffered?}."""
+    async def net_capture(chrome_tab: int | None = None,
+                          max_requests: int = 1000) -> dict:
+        """Start CDP network capture on a tab. Returns {tabId, already?,
+        buffered?}."""
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
@@ -33,8 +35,10 @@ def register(mcp, bridge):
             '_net_cap', 'net-capture', timeout=15, **fields)
 
     @mcp.tool()
-    async def net_capture_stop(chrome_tab: int | None = None, bodies: bool = False) -> dict:
-        """Stop capture and return buffered requests. `bodies=True` fetches response bodies."""
+    async def net_capture_stop(chrome_tab: int | None = None,
+                               bodies: bool = False) -> dict:
+        """Stop capture and return buffered requests. `bodies=True` fetches
+        response bodies."""
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
@@ -44,9 +48,11 @@ def register(mcp, bridge):
             '_net_stop', 'net-capture-stop', timeout=30, **fields)
 
     @mcp.tool()
-    async def net_capture_get(chrome_tab: int | None = None, url_filter: str = '',
+    async def net_capture_get(chrome_tab: int | None = None,
+                              url_filter: str = '',
                               bodies: bool = False) -> dict:
-        """Return current capture buffer (does not stop). Optional regex `url_filter` on URL or type."""
+        """Return current capture buffer (does not stop). Optional regex
+        `url_filter` on URL or type."""
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
@@ -58,13 +64,15 @@ def register(mcp, bridge):
             '_net_get', 'net-capture-get', timeout=30, **fields)
 
     @mcp.tool()
-    async def cdp(method: str, params: dict | None = None, chrome_tab: int | None = None,
+    async def cdp(method: str, params: dict | None = None,
+                  chrome_tab: int | None = None,
                   keep_session: bool = False) -> dict:
         """Send a raw CDP command. Example: method='Page.captureScreenshot'.
 
-    Pass keep_session=True to keep the chrome.debugger session attached after the
-    call returns — required for CDP domains that hold state across calls
-    (Profiler.enable → Profiler.start → … → Profiler.stop, HeapProfiler, Tracing).
+    Pass keep_session=True to keep the chrome.debugger session attached after
+    the call returns — required for CDP domains that hold state across calls
+    (Profiler.enable → Profiler.start → … → Profiler.stop, HeapProfiler,
+    Tracing).
     The next call without keep_session=True detaches.
     """
         fields: dict = {'method': method, 'params': params or {}}
@@ -76,7 +84,8 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def fetch_timings(reset: bool = False) -> dict:
-        """Fetch the background fetch-relay timing ring buffer. `reset=True` clears it after."""
+        """Fetch the background fetch-relay timing ring buffer. `reset=True`
+        clears it after."""
         fields: dict = {}
         if reset:
             fields['reset'] = True

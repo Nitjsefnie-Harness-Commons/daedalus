@@ -4,13 +4,16 @@
 def register(mcp, bridge):
     @mcp.tool()
     async def list_tabs() -> list[dict]:
-        """List active Daedalus-registered Chrome tabs, each with the age of its last registration. Entries are not pruned by age: a tab persists until it is unregistered or replaced by a sync."""
+        """List active Daedalus-registered Chrome tabs, each with the age of
+        its last registration. Entries are not pruned by age: a tab persists
+        until it is unregistered or replaced by a sync."""
         return await bridge.get('/tabs')
 
     @mcp.tool()
     async def open_tab(url: str, background: bool = False,
                        pinned: bool = False) -> dict:
-        """Open a new Chrome tab at `url`. Returns {tabId, windowId, roundtrip_ms, ...}."""
+        """Open a new Chrome tab at `url`. Returns {tabId, windowId,
+        roundtrip_ms, ...}."""
         fields: dict = {'url': url}
         if background:
             fields['active'] = False
@@ -22,7 +25,8 @@ def register(mcp, bridge):
     @mcp.tool()
     async def open_tabs(urls: list[str], background: bool = False,
                         pinned: bool = False) -> dict:
-        """Open multiple Chrome tabs in one call. Returns {opened:[{tabId,url,windowId}], errors:[{url,error}], roundtrip_ms}."""
+        """Open multiple Chrome tabs in one call. Returns
+        {opened:[{tabId,url,windowId}], errors:[{url,error}], roundtrip_ms}."""
         fields: dict = {'urls': list(urls)}
         if background:
             fields['active'] = False
@@ -52,7 +56,8 @@ def register(mcp, bridge):
     @mcp.tool()
     async def ext_navigate(url: str,
                            chrome_tab: int | None = None) -> dict:
-        """Navigate `chrome_tab` (or active tab) to `url`. Works on chrome:// pages."""
+        """Navigate `chrome_tab` (or active tab) to `url`. Works on chrome://
+        pages."""
         fields: dict = {'url': url}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
@@ -61,7 +66,8 @@ def register(mcp, bridge):
     @mcp.tool()
     async def ext_reload(chrome_tab: int | None = None,
                          bypass_cache: bool = False) -> dict:
-        """Reload `chrome_tab` (or active tab). `bypass_cache=True` forces no-cache."""
+        """Reload `chrome_tab` (or active tab). `bypass_cache=True` forces
+        no-cache."""
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)

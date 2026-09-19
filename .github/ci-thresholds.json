@@ -19,16 +19,6 @@
     "tests/test_tab_routing.py": 793
   },
   "long_line_baseline": {
-    "daedalus_mcp/auth.py": 1,
-    "daedalus_mcp/server.py": 2,
-    "daedalus_mcp/tools_cookies.py": 4,
-    "daedalus_mcp/tools_css.py": 4,
-    "daedalus_mcp/tools_eval.py": 12,
-    "daedalus_mcp/tools_hotfixes.py": 3,
-    "daedalus_mcp/tools_media.py": 5,
-    "daedalus_mcp/tools_network.py": 10,
-    "daedalus_mcp/tools_tabs.py": 5,
-    "daedalus_mcp/transport.py": 14,
     "scripts/check_versions.py": 9,
     "tests/_boundary.py": 3,
     "tests/_boundary_env.py": 4,

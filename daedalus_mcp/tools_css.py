@@ -18,7 +18,8 @@ def register(mcp, bridge):
     @mcp.tool()
     async def remove_css(css: str, chrome_tab: int | None = None,
                          all_frames: bool = False) -> dict:
-        """Remove previously-injected inline CSS (must match the injected text)."""
+        """Remove previously-injected inline CSS (must match the injected
+        text)."""
         if not css:
             raise ValueError('css required')
         fields: dict = {'css': css}
@@ -29,8 +30,10 @@ def register(mcp, bridge):
         return await bridge.ext_cmd('_remove_css', 'remove-css', **fields)
 
     @mcp.tool()
-    async def block_requests(pattern: str, chrome_tab: int | None = None) -> dict:
-        """Block requests matching a declarativeNetRequest URL pattern. Returns {ruleId, pattern, tabIds}."""
+    async def block_requests(pattern: str,
+                             chrome_tab: int | None = None) -> dict:
+        """Block requests matching a declarativeNetRequest URL pattern.
+        Returns {ruleId, pattern, tabIds}."""
         fields: dict = {'pattern': pattern}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
@@ -41,8 +44,8 @@ def register(mcp, bridge):
         """Remove a block rule by id, or all rules if `rule_id` is None."""
         fields: dict = {}
         if rule_id is not None:
-            # Zero is not "no id": it reached the extension as a present-but-false
-            # value and widened into removing every rule.
+            # Zero is not "no id": it reached the extension as a
+            # present-but-false value and widened into removing every rule.
             if int(rule_id) <= 0:
                 return {'error': 'rule_id must be a positive integer'}
             fields['ruleId'] = int(rule_id)

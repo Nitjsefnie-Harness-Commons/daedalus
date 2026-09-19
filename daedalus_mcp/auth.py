@@ -80,7 +80,8 @@ def job_carrier_names(request_body):
     for key, params in request_body.pairs:
         if (key != 'params'
                 or not isinstance(params, CarrierJSONObject)
-                or params.get('name') not in ('segment_job', 'segment_status')):
+                or params.get('name') not in (
+                    'segment_job', 'segment_status')):
             continue
         for param_key, arguments in params.pairs:
             if (param_key == 'arguments'

@@ -5,12 +5,13 @@ import json
 
 def register(mcp, bridge):
     def _flatten_eval(body: dict | None) -> dict | None:
-        """The MCP client renders a tool's dict return under a top-level `result` key,
-    and an eval body carries its own `result` field (the JS return value), so callers
-    would see a confusing `result.result`. Surface it as `value` — same info, no
-    double nesting. If the value is a JSON string (e.g. JSON.stringify output),
-    parse it so the structure surfaces directly; non-JSON strings stay untouched.
-    The `world` marker stays unchanged, including a `page:<hostname>` prefix."""
+        """The MCP client renders a tool's dict return under a top-level
+    `result` key, and an eval body carries its own `result` field (the JS
+    return value), so callers would see a confusing `result.result`. Surface
+    it as `value` — same info, no double nesting. If the value is a JSON string
+    (e.g. JSON.stringify output), parse it so the structure surfaces directly;
+    non-JSON strings stay untouched. The `world` marker stays unchanged,
+    including a `page:<hostname>` prefix."""
         if isinstance(body, dict) and 'result' in body:
             v = body.pop('result')
             if isinstance(v, str):
@@ -58,17 +59,18 @@ def register(mcp, bridge):
     async def put(cmd_id: str, code: str, tab_id: str = '',
                   broadcast: bool = False, wait: bool = True,
                   timeout: float = 15.0) -> dict | None:
-        """Evaluate inline JS source in the tab. MCP callers read their own files;
-    the bridge server does not open caller-named paths. Waited results retain
-    the server's exact `world` marker, including `page:<hostname>`."""
+        """Evaluate inline JS source in the tab. MCP callers read their own
+    files; the bridge server does not open caller-named paths. Waited results
+    retain the server's exact `world` marker, including `page:<hostname>`."""
         target = '' if broadcast else tab_id
         return await _send_eval(cmd_id, code.strip(), target, wait, timeout)
 
     @mcp.tool()
     async def result(tab_id: str = '', consume: bool = False) -> dict:
-        """Fetch the newest unconsumed result for `tab_id` (or the broadcast slot).
-    A waited exec/put consumes its own result, so this only finds one after
-    `wait=False` (or a raw command-file drop). `consume=True` deletes after read.
+        """Fetch the newest unconsumed result for `tab_id` (or the broadcast
+    slot). A waited exec/put consumes its own result, so this only finds one
+    after `wait=False` (or a raw command-file drop). `consume=True` deletes
+    after read.
     The returned result retains the server's exact `world` marker, including
     `page:<hostname>`."""
         params: dict = {}
@@ -79,8 +81,9 @@ def register(mcp, bridge):
         body = await bridge.get('/result', **params)
         if isinstance(body, dict) and body.get('pending'):
             return {'no_result': True,
-                    'note': 'no unconsumed result for this target — a waited exec/put '
-                            'consumes its own result; send with wait=false to leave one readable'}
+                    'note': 'no unconsumed result for this target — '
+                            'a waited exec/put consumes its own result; '
+                            'send with wait=false to leave one readable'}
         return _flatten_eval(body) or {}
 
     @mcp.tool()
@@ -104,7 +107,8 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def navigate(url: str, tab_id: str = '') -> None:
-        """Set `location.href = url` in `tab_id` (via eval, does not wait for result)."""
+        """Set `location.href = url` in `tab_id` (via eval, does not wait for
+        result)."""
         code = f'location.href = {json.dumps(url)}'
         await _send_eval('_nav', code, tab_id, wait=False, timeout=0)
 
@@ -134,7 +138,8 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def ext_self_reload() -> dict:
-        """Reload the Chrome extension from disk via chrome.runtime.reload()."""
+        """Reload the Chrome extension from disk via
+        chrome.runtime.reload()."""
         return await bridge.ext_cmd('_ext_reload', 'ext-reload')
 
     return {
