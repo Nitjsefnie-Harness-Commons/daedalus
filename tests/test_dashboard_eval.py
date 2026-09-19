@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Where an untargeted eval command runs, pinned at every surface.
 
-This suite holds the eval-section Node harness and the three
-untargeted-command pins: the explicit active-tab action sends no tab
-even with a tab selected (the selected-tab run beside it is the
-control), both Eval status surfaces - the pre-flight line and the
-post-run line - name the active tab, and the Settings caveat says the
+This suite holds the eval-section Node harness and the pins around
+untargeted commands: the explicit active-tab action sends no tab even
+with a tab selected (the selected-tab run beside it is the control),
+both Eval status surfaces - the pre-flight line and the post-run line
+- name the active tab, the settled status prefers the tab a result
+envelope names, the refusal sentence and the pre-flight label render
+whole, the timeout renders clamped, and the Settings caveat says the
 command runs once, in whichever tab is active. The eval harness drives
 dashboard/sections/eval.js through its own buttons in a small Node
 DOM; the settings harness mounts dashboard/sections/settings.js for
@@ -29,6 +31,7 @@ _EVAL_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
 let tabs = [];
 const puts = [];
 const listeners = [];
+let resultTabId = '';
 const bus = { on: (fn) => listeners.push(fn) };
 globalThis.fetch = async (target, init) => {
   const options = init || {};
@@ -45,6 +48,7 @@ globalThis.fetch = async (target, init) => {
     return jsonResponse({
       id: puts[puts.length - 1].id, deliveryId: 'delivery',
       resultGeneration: 'gen', result: 'ran', world: 'page',
+      tabId: resultTabId,
     });
   }
   throw new Error('unexpected fetch ' + where);
@@ -61,6 +65,7 @@ mount(container, bus);
 await bounded(settle(), 'eval tab selector render', _dashnodeStepTimeoutMs);
 const sel = container.find('[data-role=tab-select]');
 const runBtn = container.find('[data-role=run]');
+const timeoutEl = container.find('[data-role=timeout]');
 const metaEl = container.find('[data-role=meta]');
 const untargeted = container.all().find(
   (el) => el.tag === 'button' && el !== runBtn
@@ -85,37 +90,57 @@ for (const fn of listeners) fn({ type: 'tabs-synced' });
 await bounded(settle(), 'tab sync refresh', _dashnodeStepTimeoutMs);
 sel.value = '11';
 runBtn.click();
+const targetedLabel = metaEl.textContent;
 await bounded(settle(), 'run against a chosen tab', _dashnodeStepTimeoutMs);
 const targeted = {
   puts: puts.length, tab: puts.length ? puts[puts.length - 1].tab : null,
 };
+resultTabId = '11';
 untargeted.click();
 await bounded(settle(), 'active-tab run with a tab selected',
   _dashnodeStepTimeoutMs);
+const chosenStatusAfter = metaEl.textContent;
 const chosen = puts[puts.length - 1] || {};
 const activeTabChosen = {
   puts: puts.length, tab: chosen.tab, token: chosen.token, code: chosen.code,
   id: typeof chosen.id === 'string' && chosen.id.length > 0,
   keys: Object.keys(chosen).sort(),
 };
+timeoutEl.value = '999999';
+runBtn.click();
+const highTimeout = metaEl.textContent;
+await bounded(settle(), 'run with an over-range timeout',
+  _dashnodeStepTimeoutMs);
+timeoutEl.value = '500';
+runBtn.click();
+const lowTimeout = metaEl.textContent;
+await bounded(settle(), 'run with an under-range timeout',
+  _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify(
-  { refused, activeTab, targeted, activeTabChosen }));
+  { refused, activeTab, targeted, activeTabChosen, targetedLabel,
+    chosenStatusAfter, highTimeout, lowTimeout }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=7, module=True, arguments=(
+""", bounded_steps=9, module=True, arguments=(
     ROOT / 'dashboard' / 'sections' / 'eval.js',))
 
 
 def test_run_refuses_an_empty_target_and_names_where_untargeted_code_runs(
         _tmp):
     """An empty selection is not a target; only the explicit button sends
-    none, and it says the code runs in the browser's active tab."""
+    none, and it says the code runs in the browser's active tab. The
+    refusal sentence is asserted whole, so rewriting it (the review
+    mutation that replaced the message with 'nope') fails here and not
+    merely at the non-empty check kept beside it."""
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['refused']['selected'] == '', seen
     assert seen['refused']['puts'] == 0, seen
     assert seen['refused']['status'].strip(), seen
+    refusal = (
+        'no target tab selected — choose one, or use "run in active tab"')
+    assert seen['refused']['status'] == refusal, seen
     assert seen['activeTab']['puts'] == 1, seen
     assert seen['activeTab']['tab'] == '', seen
     for text in (seen['activeTab']['label'], seen['activeTab']['title']):
@@ -154,6 +179,44 @@ def test_eval_status_names_the_active_tab_on_both_untargeted_surfaces(_tmp):
         'tab=active tab  timeout=10000ms'), seen
     assert re.fullmatch(r'tab=active tab  channel=page  \d+ms',
                         seen['activeTab']['statusAfter']), seen
+
+
+def test_the_settled_status_names_where_the_broadcast_ran(_tmp):
+    """An untargeted command's result carries the tab it really ran in:
+    the stub answers the second untargeted run with tabId '11', and the
+    post-run line must read tab=11. The envelope preference is the only
+    spelling that gets there, because the submitted target was empty;
+    reducing the expression to the submitted tabId (`String(tabId ||
+    'active tab')`, the review mutation) reads 'active tab' and fails
+    here. The first untargeted run keeps an empty envelope, so the
+    'active tab' fallback stays held by the status test beside this."""
+    result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
+    seen = json.loads(result.stdout)
+    assert re.fullmatch(r'tab=11  channel=page  \d+ms',
+                        seen['chosenStatusAfter']), seen
+
+
+def test_the_pre_flight_label_names_the_chosen_tab(_tmp):
+    """With 11 selected the pre-flight line reads tab=11 before any
+    result exists — the label tracks the selection, so hard-coding the
+    active-tab spelling into it (the review mutation that stopped the
+    line following the target) fails here; the untargeted run's
+    identical-looking label remains the status test's to hold."""
+    result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['targetedLabel'] == 'tab=11  timeout=10000ms', seen
+
+
+def test_the_timeout_renders_clamped_to_the_section_bounds(_tmp):
+    """The pre-flight line cannot carry a raw field value: 999999 clamps
+    to 60000 and 500 to 1000, so dropping the clamp (the review mutation
+    that rendered the field bare) reads the raw numbers and fails here.
+    Only the timeout suffix is asserted, leaving the tab prefix to the
+    label pin beside it."""
+    result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['highTimeout'].endswith('  timeout=60000ms'), seen
+    assert seen['lowTimeout'].endswith('  timeout=1000ms'), seen
 
 
 _SETTINGS_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
