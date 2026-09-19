@@ -48,13 +48,12 @@ def _need_deps():
         _util.skip('daedalus_mcp.server dependencies (httpx/mcp/starlette) not installed')
 
 
-def _load_mcp(base_url, mcp_port=None):
+def _load_mcp(base_url, mcp_port=None, max_body_size=None):
     """Import daedalus_mcp/server.py seeing only the settings the caller holds.
 
     Every DAEDALUS_* name in the suite process's own environment is saved and
     stripped around the load, the fixed seeds and the caller's settings are
-    applied in its place, and the saved environment returns in a finally —
-    the shell's own exports used to refuse the load before any test ran.
+    applied in its place, and the saved environment returns in a finally.
     """
     saved = {key: os.environ[key] for key in os.environ
              if key.startswith('DAEDALUS_')}
@@ -63,6 +62,8 @@ def _load_mcp(base_url, mcp_port=None):
     applied = dict(BRIDGE_ENV, DAEDALUS_LOCAL_URL=base_url)
     if mcp_port is not None:
         applied['DAEDALUS_MCP_PORT'] = str(mcp_port)
+    if max_body_size is not None:
+        applied['DAEDALUS_MCP_MAX_BODY_SIZE'] = str(max_body_size)
     os.environ.update(applied)
     try:
         return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
@@ -107,18 +108,17 @@ def _wait_for_mcp(port, deadline=20):
             f'server: {status} {raw[:200]!r}')
 
 
-def _load_mcp_at_port(base_url, port):
+def _load_mcp_at_port(base_url, port, max_body_size=None):
     """Load the MCP front end with one explicit listener port."""
-    return _load_mcp(base_url, mcp_port=port)
+    return _load_mcp(base_url, mcp_port=port, max_body_size=max_body_size)
 
 
-def _start_mcp_in_process(base):
+def _start_mcp_in_process(base, max_body_size=None):
     """Load and start the MCP listener on port 0; return (mod, port).
 
-    No draw, no retry: the module announces its bound port through its
-    readiness event and a startup crash through startup_error, verbatim.
+    No draw, no retry: the bound port and any startup crash arrive verbatim.
     """
-    mod = _load_mcp_at_port(base, 0)
+    mod = _load_mcp_at_port(base, 0, max_body_size=max_body_size)
     mod.start_in_thread()
     deadline = time.time() + 10
     while time.time() < deadline:
