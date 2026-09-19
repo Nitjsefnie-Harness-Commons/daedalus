@@ -7,7 +7,7 @@
 /* global handleListBlockRules */
 /* global handleCloseTab, handleOpenTab, handleOpenTabs, handleFocusTab */
 /* global handleNavigate, handleReload, handleInjectCss, handleRemoveCss */
-/* global handleExtReload, handleFetchTimings, handleExtTabs */
+/* global handleExtReload, handleFetchTimings */
 /* global handleCdp */
 /* global handleNetCapture, handleNetCaptureStop */
 /* global handleNetCaptureGet */
@@ -85,7 +85,6 @@ function dispatchCommand(receivedCommand) {
     case 'allow-segment-origin': return handleAllowSegmentOrigin(cmd);
     case 'revoke-segment-origin': return handleRevokeSegmentOrigin(cmd);
     case 'list-segment-origins': return handleListSegmentOrigins(cmd);
-    case 'tabs': return handleExtTabs(cmd);
     case 'eval': return handleEval(cmd);
     default: return postResult(cmd._execution, null, 'Unknown command type: ' + type, 'extension');
   }
