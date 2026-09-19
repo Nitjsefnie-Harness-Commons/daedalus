@@ -66,33 +66,37 @@ const chrome = {
     },
     get: async (tabId) => ({ id: tabId, url: '', title: '' }),
     sendMessage: async () => {},
-    // Callback-style, as messaging.js calls it. Chrome reports a refused
-    // creation through lastError, with the callback invoked on no tab. The
+    // Callback-style, as messaging.js calls it. The callback is delivered
+    // one microtask after create() returns, as the shipped API delivers its
+    // callback asynchronously: a listener that returned before the callback
+    // fired only still holds the response channel if it returned true. The
     // real API validates argument types before doing anything, so a
-    // non-string url is refused exactly as the shipped API refuses it.
+    // non-string url is refused with a synchronous TypeError exactly as the
+    // shipped API refuses one.
     create(details, callback) {
       createCalls += 1;
       if (typeof details.url !== 'string') {
         throw new TypeError('url: expected string');
       }
+      created.push(details);
       if (mode === 'create-sync-throw') {
-        created.push(details);
         throw new Error('synchronous refusal');
       }
-      created.push(details);
       if (mode === 'create-refused') {
-        chrome.runtime.lastError = { message: 'Tabs cannot be edited' };
-        try {
-          callback(undefined);
-        } finally {
-          chrome.runtime.lastError = null;
-        }
+        queueMicrotask(() => {
+          chrome.runtime.lastError = { message: 'Tabs cannot be edited' };
+          try {
+            callback(undefined);
+          } finally {
+            chrome.runtime.lastError = null;
+          }
+        });
         return;
       }
       if (mode !== 'open' && mode !== 'open-guard') {
         throw new Error('unmodeled tab-create mode: ' + mode);
       }
-      callback({ id: 100 + created.length });
+      queueMicrotask(() => callback({ id: 100 + created.length }));
     },
   },
   downloads: {
@@ -166,13 +170,16 @@ const context = vm.createContext({
 // indistinguishable from an answer that never came. The response channel
 // closes when the listener returns unless it kept it open with true, so a
 // callback that fires after a falsy return answers nothing — the shipped
-// runtime drops it, and here the send never settles.
+// runtime drops it and content.js surfaces a port-closed error, which is
+// the rejection the send answers with.
 function send(message) {
   return new Promise((resolve, reject) => {
     const responses = [];
     let open = true;
     const respond = (payload) => {
       if (!open) {
+        reject(new Error(
+          'The message port closed before a response was received'));
         return;
       }
       responses.push(payload);
