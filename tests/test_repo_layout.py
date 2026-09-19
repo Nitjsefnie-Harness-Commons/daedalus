@@ -72,16 +72,22 @@ MCP_OLD_NAMES = (
     'mcp_transport.py',
 )
 
+CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
+                          'advice.detachedHead=false')
+
 
 def _clone(root, target):
     """The one clone invocation every fixture tree comes from.
 
     A detached source leaves the initial branch name to init.defaultBranch
     and advises about it on stderr; naming it keeps the clone silent
-    whatever the source's HEAD points at.
+    whatever the source's HEAD points at. Git 2.48 also advises about the
+    detached checkout its internal clone performs, so that advice is
+    silenced by its own key.
     """
     return subprocess.run(
-        ['git', '-c', 'init.defaultBranch=main', 'clone', '--quiet',
+        ['git', '-c', 'init.defaultBranch=main',
+         '-c', 'advice.detachedHead=false', 'clone', '--quiet',
          '--no-hardlinks', str(root), str(target)],
         check=True, capture_output=True)
 
@@ -286,6 +292,11 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     runtime, which a static read of this file cannot see, and a
     decorated definition, which is trusted as its own callee — a
     decorator returning a launcher sits outside the census by design.
+    Every `git clone` launch must carry each config in
+    CLONE_SILENCING_CONFIG through `-c`, so the helper's silencing
+    cannot be drifted back by a hand-spelled fixture clone; the missing
+    configs are named, and an argv that is not a list literal is a
+    refusal.
     """
     del tmp
     import builtins
@@ -611,6 +622,26 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                 f'{here}:{node.lineno} launches through '
                 f'{node.func.value.id}.{node.func.attr}, '
                 'which the audit does not see')
+        argv = node.args[0] if node.args else None
+        words = []
+        if isinstance(argv, ast.List):
+            words = [elt.value if isinstance(elt, ast.Constant)
+                     and isinstance(elt.value, str) else None
+                     for elt in argv.elts]
+        else:
+            refusals.append(
+                f'{here}:{node.lineno} builds an argv the audit '
+                'cannot read')
+        if words and words[0] == 'git' and 'clone' in words:
+            declared = {words[i + 1]
+                        for i, slot in enumerate(words[:-1])
+                        if slot == '-c' and words[i + 1] is not None}
+            missing = [name for name in CLONE_SILENCING_CONFIG
+                       if name not in declared]
+            if missing:
+                refusals.append(
+                    f'{here}:{node.lineno} clones without the silencing '
+                    + ', '.join(f'-c {name}' for name in missing))
     assert not refusals, '\n'.join(refusals)
 
 
