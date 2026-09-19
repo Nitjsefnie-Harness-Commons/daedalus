@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 
 ROOT = _util.ROOT
 
@@ -295,12 +296,31 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     CLONE_SILENCING_CONFIG through `-c`, so the helper's silencing
     cannot be drifted back by a hand-spelled fixture clone; the missing
     configs are named, and an argv that is not a list literal is a
-    refusal.
+    refusal. A launch whose argv does not start with the constant 'git'
+    is refused; the one accepted non-git head is the literally spelled
+    sys.executable, whose spelling proves the launch runs the
+    interpreter rather than git. Matching the bare token `clone`
+    anywhere in a git argv is deliberate over-approximation: a
+    non-clone git command carrying that word must carry the silencing
+    configs too.
     """
     del tmp
+    refusals = _launch_refusals(
+        Path(__file__).read_text(encoding='utf-8'),
+        'tests/test_repo_layout.py')
+    assert not refusals, '\n'.join(refusals)
+    for label, snippet, limb in LAUNCH_REFUSAL_ROWS:
+        row_refusals = _launch_refusals(snippet, label)
+        assert len(row_refusals) == 1 and limb in row_refusals[0], (
+            f'{label}: expected one refusal naming {limb!r}, '
+            f'got {row_refusals}')
+
+
+def _launch_refusals(source, here):
+    """Every refusal limb one Python source's launches trip, naming its
+    limb."""
     import builtins
-    here = 'tests/test_repo_layout.py'
-    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    tree = ast.parse(source)
     safe_names = set(dir(builtins))
     partial_aliases = {'functools.partial', 'partial'}
     import_module_aliases = {'importlib.import_module', 'import_module'}
@@ -651,7 +671,7 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                 refusals.append(
                     f'{here}:{node.lineno} clones without the silencing '
                     + ', '.join(f'-c {name}' for name in missing))
-    assert not refusals, '\n'.join(refusals)
+    return refusals
 
 
 if __name__ == '__main__':
