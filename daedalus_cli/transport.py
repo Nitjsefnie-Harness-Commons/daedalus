@@ -120,6 +120,24 @@ def positive_count(value):
     return count
 
 
+def quality_limit(value):
+    """argparse type for a JPEG quality: the documented 1-100 range.
+
+    The worker reads `quality || 80`, so an admitted 0 silently captured at
+    the default instead of refusing, and anything past 100 reached Chrome's
+    capture call unvalidated.
+    """
+    try:
+        quality = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'quality must be a whole number; got {value!r}') from None
+    if quality < 1 or quality > 100:
+        raise argparse.ArgumentTypeError(
+            f'quality must be from 1 to 100; got {quality}')
+    return quality
+
+
 def _query_path(path, params):
     """Build one bridge path with every query value percent-encoded."""
     query = urllib.parse.urlencode(params)

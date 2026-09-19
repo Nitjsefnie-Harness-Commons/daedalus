@@ -11,7 +11,7 @@ from . import __version__
 from .commands_content import (_boolean_argument,  # noqa: F401
                                _positive_rule_id)
 from .transport import (NET_CAPTURE_MAX, capture_limit, positive_count,
-                        positive_timeout)
+                        positive_timeout, quality_limit)
 
 
 def build_parser():
@@ -88,7 +88,8 @@ def build_parser():
     s.add_argument('--id', default='_ss', help='Command ID (default _ss)')
     s.add_argument('-o', '--output', help='Save screenshot to local file')
     s.add_argument('-f', '--format', choices=['png', 'jpeg'], help='Image format (default png)')
-    s.add_argument('-q', '--quality', type=int, help='JPEG quality (1-100)')
+    s.add_argument('-q', '--quality', type=quality_limit,
+                   help='JPEG quality (1-100)')
     s.add_argument('--chrome-tab', help='Chrome tab ID (default: active tab)')
     s.add_argument('-t', '--timeout', type=positive_timeout, default=15, help='Timeout seconds')
 
