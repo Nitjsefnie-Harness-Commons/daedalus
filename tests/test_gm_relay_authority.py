@@ -123,7 +123,7 @@ const chrome = {
         });
         return;
       }
-      if (mode !== 'download-guard') {
+      if (mode !== 'download-guard' && mode !== 'download-scheme') {
         throw new Error('unmodeled download mode: ' + mode);
       }
       queueMicrotask(() => callback(5000 + downloaded.length));
@@ -212,10 +212,13 @@ async function run() {
     };
   }
   if (mode === 'download-guard' || mode === 'download-refused'
-    || mode === 'download-sync-throw') {
-    const downloadUrls = mode === 'download-guard'
-      ? [['https://example.com/f'], 'https://example.com/f']
-      : ['https://example.com/f'];
+    || mode === 'download-sync-throw' || mode === 'download-scheme') {
+    const downloadUrls = mode === 'download-scheme'
+      ? ['file:///etc/passwd', 'javascript:alert(1)', 'not a url',
+        'https://example.com/f']
+      : mode === 'download-guard'
+        ? [['https://example.com/f'], 'https://example.com/f']
+        : ['https://example.com/f'];
     const outcomes = [];
     for (const url of downloadUrls) {
       try {
@@ -495,6 +498,35 @@ def test_a_refused_download_answers_an_error(tmp):
         'responses': 1,
     }], outcome
     assert outcome['downloaded'] == ['https://example.com/f'], outcome
+
+
+def test_a_download_url_outside_the_web_schemes_is_refused(tmp):
+    """`GM.download` refuses anything but http: and https:.
+
+    A download runs with the profile's cookies, so a page-chosen URL the
+    page could not fetch itself borrows the extension's authority — the
+    same authority the openTab twin already gates. A URL the parser refuses
+    folds into the same refusal, the API is never invoked, and every
+    outcome answers exactly once.
+    """
+    del tmp
+    outcome = _run_relay_authority('download-scheme')
+    file_refusal, script_refusal, unparseable, control = outcome['outcomes']
+    for refused in (file_refusal, script_refusal, unparseable):
+        assert refused['threw'] is None, refused
+        assert refused['responses'] == 1, refused
+        assert refused['error'] == (
+            'download accepts http: and https: URLs only'), refused
+        assert refused['downloadId'] is None, refused
+    assert outcome['downloaded'] == ['https://example.com/f'], outcome
+    assert outcome['downloadCalls'] == 1, outcome
+    assert control == {
+        'url': 'https://example.com/f',
+        'downloadId': 5001,
+        'error': None,
+        'threw': None,
+        'responses': 1,
+    }, outcome
 
 
 def main():
