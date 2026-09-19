@@ -308,6 +308,40 @@ def test_unwatched_bridge_survives_its_parent(tmp):
             child.close()
 
 
+def test_inherited_daedalus_exports_do_not_reach_the_unwatched_bridge(tmp):
+    """A directly spawned bridge starts clean whatever the shell exported.
+
+    `_unwatched_parent` builds the bridge child's environment from the
+    spawning process's own `os.environ`, so a `DAEDALUS_`-prefixed export
+    around the suite used to reach `server.py` and kill it at startup.
+    """
+    prior = os.environ.get('DAEDALUS_STREAM_KEEPALIVE')
+    os.environ['DAEDALUS_STREAM_KEEPALIVE'] = '0'
+    try:
+        parent = None
+        child = None
+        info = None
+        try:
+            parent, info = _start_parent(tmp, watched=False)
+            child = _PidProcess(info['pid'])
+            parent.kill()
+            _wait_for_exit(parent)
+            assert child.poll() is None
+            status, health = _util.get_json(info['base'] + '/health')
+            assert status == 200 and health['ok'] is True, (status, health)
+        finally:
+            _stop(parent)
+            _stop(child, info)
+            if child is not None:
+                child.close()
+    finally:
+        if prior is None:
+            del os.environ['DAEDALUS_STREAM_KEEPALIVE']
+        else:
+            os.environ['DAEDALUS_STREAM_KEEPALIVE'] = prior
+    assert os.environ.get('DAEDALUS_STREAM_KEEPALIVE') == prior
+
+
 def test_bounded_wait_reports_live_child_port_and_watch_state(tmp):
     class LiveProcess:
         pid = 424242
@@ -513,7 +547,8 @@ def _watched_parent(tmp):
 def _unwatched_parent(tmp):
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.pop(WATCH_ENV, None)
     env.update({
         'DAEDALUS_DIR': str(docroot),
