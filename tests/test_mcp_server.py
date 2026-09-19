@@ -48,31 +48,41 @@ def _need_deps():
         _util.skip('daedalus_mcp.server dependencies (httpx/mcp/starlette) not installed')
 
 
-def _load_mcp(base_url):
-    """Import daedalus_mcp/server.py with a private bridge session bound at import."""
-    prev = os.environ.get('DAEDALUS_LOCAL_URL')
-    os.environ['DAEDALUS_LOCAL_URL'] = base_url
+def _load_mcp(base_url, mcp_port=None):
+    """Import daedalus_mcp/server.py seeing only the settings the caller holds.
+
+    Every DAEDALUS_* name in the suite process's own environment is saved and
+    stripped around the load, the fixed seeds and the caller's settings are
+    applied in its place, and the saved environment returns in a finally —
+    the shell's own exports used to refuse the load before any test ran.
+    """
+    saved = {key: os.environ[key] for key in os.environ
+             if key.startswith('DAEDALUS_')}
+    for key in saved:
+        del os.environ[key]
+    applied = dict(BRIDGE_ENV, DAEDALUS_LOCAL_URL=base_url)
+    if mcp_port is not None:
+        applied['DAEDALUS_MCP_PORT'] = str(mcp_port)
+    os.environ.update(applied)
     try:
         return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
                           'mcp_server_under_test_' + str(time.time_ns()))
     finally:
-        if prev is None:
-            os.environ.pop('DAEDALUS_LOCAL_URL', None)
-        else:
-            os.environ['DAEDALUS_LOCAL_URL'] = prev
+        for key in applied:
+            if key.startswith('DAEDALUS_') and key not in saved:
+                del os.environ[key]
+        os.environ.update(saved)
 
 
 def _wait_for_mcp(port, deadline=20):
     """Wait until the live MCP listener answers — and refuse any other listener.
 
-    A bare TCP accept proves only that SOMETHING bound the port. These tests
-    reserve the MCP port and then start a bridge, so a collision between the
-    two allocations used to put the bridge itself on this port; every MCP
-    request then failed 'authentication' with the bridge's 400 bad-token
-    answer, which reads like a security regression. Probe with an
-    unauthenticated POST /mcp instead: the real MCP middleware answers 401
-    'missing Bearer token', and any other answer fails the test with the
-    listener's actual response as the diagnosis.
+    A bare TCP accept proves only that SOMETHING bound the port: a collision
+    between the two port allocations used to put the bridge itself on this
+    port, and every request then failed with the bridge's bad-token 400.
+    Probe with an unauthenticated POST /mcp instead: the real MCP middleware
+    answers 401 'missing Bearer token', and any other answer fails the test
+    with the listener's actual response as the diagnosis.
     """
     probe = {'jsonrpc': '2.0', 'id': 'wait-for-mcp',
              'method': 'initialize', 'params': {}}
@@ -99,29 +109,14 @@ def _wait_for_mcp(port, deadline=20):
 
 def _load_mcp_at_port(base_url, port):
     """Load the MCP front end with one explicit listener port."""
-    previous = os.environ.get('DAEDALUS_MCP_PORT')
-    os.environ['DAEDALUS_MCP_PORT'] = str(port)
-    try:
-        return _load_mcp(base_url)
-    finally:
-        if previous is None:
-            os.environ.pop('DAEDALUS_MCP_PORT', None)
-        else:
-            os.environ['DAEDALUS_MCP_PORT'] = previous
-
-
-# The MCP listener binds port 0 everywhere in this suite: the kernel picks the
-# number, so no drawn port exists for a concurrent process to take. The actual
-# port arrives through an explicit readiness channel — the module's readiness
-# event in-process, or the child's startup line on its drained stdout.
+    return _load_mcp(base_url, mcp_port=port)
 
 
 def _start_mcp_in_process(base):
-    """Load and start the MCP listener on an ephemeral port; return (mod, port).
+    """Load and start the MCP listener on port 0; return (mod, port).
 
-    No draw, no retry: the module announces the port it actually bound
-    through its readiness event, and a startup crash through startup_error,
-    so the original error is what surfaces.
+    No draw, no retry: the module announces its bound port through its
+    readiness event and a startup crash through startup_error, verbatim.
     """
     mod = _load_mcp_at_port(base, 0)
     mod.start_in_thread()
@@ -170,9 +165,8 @@ def _await_mcp_line(output, proc):
 def _bridge_with_live_mcp(tmp, env):
     """Yield (base, mcp_port) with the bridge child's MCP listener live.
 
-    The child binds its MCP listener to port 0 and prints the actual port on
-    its stdout, which the bridge fixture's drain thread relays here. No drawn
-    number, no retry: a startup crash arrives as its own line, verbatim.
+    The child binds MCP to port 0 and prints the actual port, which the
+    fixture's drain thread relays here; a crash arrives as its own line.
     """
     output, child = [], []
     with _util.bridge(tmp, env={**env, 'DAEDALUS_MCP_PORT': '0'},
@@ -314,26 +308,23 @@ def test_local_url_derives_from_the_bridge_port(tmp):
     """
     del tmp
     _need_deps()
-    saved = {key: os.environ.get(key)
-             for key in ('DAEDALUS_PORT', 'DAEDALUS_LOCAL_URL')}
+    saved = {key: os.environ[key] for key in os.environ
+             if key.startswith('DAEDALUS_')}
+    for key in saved:
+        del os.environ[key]
     try:
         def fresh(tag):
             return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
                               'mcp_server_url_' + tag + str(time.time_ns()))
-        os.environ.pop('DAEDALUS_LOCAL_URL', None)
         os.environ['DAEDALUS_PORT'] = '54321'
         assert fresh('derived').LOCAL_URL == 'http://127.0.0.1:54321'
         os.environ['DAEDALUS_LOCAL_URL'] = 'http://127.0.0.1:9999'
         assert fresh('override').LOCAL_URL == 'http://127.0.0.1:9999'
-        os.environ.pop('DAEDALUS_LOCAL_URL', None)
-        os.environ.pop('DAEDALUS_PORT', None)
+        del os.environ['DAEDALUS_LOCAL_URL']
+        del os.environ['DAEDALUS_PORT']
         assert fresh('fallback').LOCAL_URL == 'http://127.0.0.1:8081'
     finally:
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        os.environ.update(saved)
 
 
 def _module_list_tabs(mod):
@@ -617,10 +608,8 @@ def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
 def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
     """A bad MCP setting names itself instead of raising a bare ValueError.
 
-    Both were parsed with bare int(), so a malformed value arrived as an
-    import-time traceback and a negative body size was accepted — which made
-    every non-negative Content-Length exceed the configured maximum and
-    refused every request the front end received.
+    Both were parsed with bare int(): a malformed value arrived as an
+    import-time traceback and a negative body size refused every request.
     """
     _need_deps()
     cases = (
@@ -1118,16 +1107,11 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
 def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):
     """Credentials are decided before the body is parsed, and it is capped.
 
-    The middleware read and JSON-parsed the whole POST body looking for
-    repeated tool arguments, and only then looked at the Authorization header
-    — so an unauthenticated caller could make the process materialize an
-    arbitrarily large request before being told 401, and got body-level
-    diagnostics it had no business seeing.
-
-    The order is observable through that diagnostic: a body carrying a
-    duplicate `job` argument answered 400 without any credentials, and now
-    answers 401. Size is pinned separately, since an authenticated caller is
-    the only one that ever reaches the cap.
+    The middleware used to parse the whole POST body before the Authorization
+    header was read. The order is observable through the diagnostic: a
+    duplicate-`job` body answered 400 without credentials, now answers 401.
+    Size is pinned separately, since only an authenticated caller reaches
+    the cap.
     """
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1544,14 +1528,10 @@ def test_the_mcp_fixture_ignores_a_squatted_draw(tmp):
 def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
     """An explicit squatted MCP port surfaces the original bind error itself.
 
-    Pre-fix the child-env helper retried five times and then raised a generic
-    'lost the port race' assertion; EADDRINUSE never reached the operator.
     What is pinned is the OS bind text surfacing in the child's drained
-    output, never how soon it arrives (issue 503).
-
-    The deadline is a reporting bound, not a margin: the child outlives its
-    crashed MCP serve, so a lost crash line would wait forever — expiry
-    turns that into a failure naming the line and attaching the output.
+    output, never how soon it arrives (issue 503). The deadline is a
+    reporting bound, not a margin: the child outlives its crashed serve, so
+    expiry turns a lost crash line into a failure carrying the output.
     """
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1585,10 +1565,8 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
 def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
     """A startup crash naming the bind text surfaces that text itself.
 
-    The deleted retry read 'address already in use' ANYWHERE as a lost draw
-    and retried it five times into a generic assertion. There is no retry
-    left to fool: the raised failure carries the crash prefix and the bind
-    text verbatim, so what it says is the pin — not how soon it arrived.
+    No retry remains to fool: the raised failure carries the crash prefix
+    and the bind text verbatim — what it says is the pin.
     """
     del tmp
     _need_deps()
@@ -1662,10 +1640,9 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
 def test_every_mcp_command_tool_sends_its_documented_command(tmp):
     """Each MCP tool reaches the extension as the command it claims.
 
-    The MCP surface is a second sender of the same wire protocol the CLI
-    speaks, written separately, so the two can disagree about a `type` or a
-    field name without anything noticing. This pins what the tools put on the
-    wire, read back out of the queue the bridge routed it into.
+    The MCP surface is a second sender of the CLI's wire protocol and can
+    disagree about a `type` or field name unnoticed; this pins the wire,
+    read back from the queue the bridge routed it into.
     """
     _need_deps()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
@@ -1717,9 +1694,8 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
         for call, cmd_type, fields in cases:
             _value, queued = _answer_mcp_command(base, docroot, mod, call, {})
             assert queued.get('type') == cmd_type, (cmd_type, queued)
-            # Routing is consumed by the bridge when it enqueues, so what
-            # proves the command addressed the extension worker is the queue
-            # it was read from.
+            # Routing is consumed at enqueue time, so the queue a command was
+            # read from is what proves it addressed the extension worker.
             assert 'tab' not in queued, (cmd_type, queued)
             for key, value in fields.items():
                 assert queued.get(key) == value, (cmd_type, key, queued)
