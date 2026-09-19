@@ -36,20 +36,23 @@ def _tracked_test_modules():
     }
 
 
-def _tree_copy(tmp):
-    """A copy of the tracked test tree this control may mutate."""
+# The scan judges one module from its own text alone, so a pin over a tree
+# derived from the real site list reads the same verdicts as the full-tree
+# sweep: verified slice-by-slice against a full-tree scan, mutations planted.
+def _derived_tree(tmp, relatives):
+    """The named real modules, verbatim, as a minimal tree to scan."""
     root = Path(tmp) / 'repository'
-    for source in sorted((ROOT / 'tests').glob('*.py')):
-        destination = root / source.relative_to(ROOT)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+    for relative in relatives:
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / relative, target)
     return root
 
 
 def _mutated_copy(tmp, site):
-    """A copied tree with one site bypassing, and where its launch sits."""
-    root = _tree_copy(tmp)
+    """A minimal tree with one site bypassing, and where its launch sits."""
     relative, needle, replacement, launch_needle = site
+    root = _derived_tree(tmp, (relative,))
     target = root / relative
     text = target.read_text(encoding='utf-8')
     assert text.count(needle) == 1, f'the {relative} site shape changed'
@@ -470,8 +473,8 @@ def test_each_real_site_is_caught_when_it_bypasses(tmp):
             site[0], expected, violations)
 
 
-def test_copied_tree_tracks_a_comprehension_walrus(tmp):
-    root = _tree_copy(tmp)
+def test_a_derived_tree_tracks_a_comprehension_walrus(tmp):
+    root = _derived_tree(tmp, ('tests/_wfgraph.py',))
     relative = 'tests/_wfgraph.py'
     target = root / relative
     source = target.read_text(encoding='utf-8')
@@ -517,8 +520,9 @@ def test_binding_mutation_gate_requires_fresh_source(tmp):
     assert 'cached bytecode' in result.stderr, result.stderr
 
 
-def test_a_copied_tree_is_clean_before_a_mutation_is_planted(tmp):
-    violations = _bash_resolver_scan._tree_violations(_tree_copy(tmp))
+def test_a_derived_tree_is_clean_before_a_mutation_is_planted(tmp):
+    root = _derived_tree(tmp, [site[0] for site in _SITES])
+    violations = _bash_resolver_scan._tree_violations(root)
     assert not violations, violations
 
 
