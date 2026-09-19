@@ -524,8 +524,7 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
 
 _CACHE_JOBS = (
     # (job, the key's python component, the step a save must follow, the
-    # step the restore must precede). `coverage` and the three lint jobs
-    # fix their interpreter (3.13), the other two read it from the matrix.
+    # step the restore must precede). Rows carrying a literal 3.13 fix it.
     ('suites', '${{ matrix.python }}', 'Run every suite',
      'Install the test dependencies and project'),
     ('coverage-matrix', '${{ matrix.python }}', 'Measure',
@@ -591,8 +590,7 @@ def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
     That post step is the cache-poisoning shape issue #166 took out of the
     speed cells: on a pull_request run it writes a cache a later main run
     restores. These six jobs install the tools and code they then run, so
-    they take the cache as two separate steps instead, and the event gate
-    lives on the save half alone.
+    the cache is two steps and the event gate lives on the save half.
     """
     del tmp
     workflow = _tests_yml()
@@ -613,11 +611,12 @@ def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
     so a job restores only a cache a same-platform run of the same
     dependency set wrote. Where the interpreter is 3.13 that is six jobs —
     the three lint jobs and `coverage` fix it, the 3.13 legs of `suites`
-    and `coverage-matrix` land there too — sharing one namespace rather
-    than one apiece, because the cache holds fetched packages any job
-    installing from the hashed manifests reuses. The step stays
-    unconditional: gating a restore cannot make it safer, and a gate there
-    would be the save gate wearing the wrong step's name.
+    and `coverage-matrix` land there too — one namespace rather than six,
+    because the cache holds fetched packages any such install reuses. Key
+    and restore-keys prefix are pinned exactly: neither a deleted fallback
+    nor a renamed prefix can silently fragment it. Gating a restore cannot
+    make it safer — a gate there would be the save gate wearing the wrong
+    step's name.
     """
     del tmp
     workflow = _tests_yml()
@@ -631,10 +630,12 @@ def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
         assert 'if' not in restore, (job, restore.get('if'))
         assert set(restore['with']['path'].splitlines()) == set(
             _PIP_CACHE_PATHS), (job, restore['with']['path'])
+        expected = 'pip-${{ runner.os }}-' + python
         key = restore['with']['key']
-        for component in ('runner.os', python,
-                          "hashFiles('requirements-*.txt')"):
-            assert component in key, (job, component, key)
+        assert key == expected + "-${{ hashFiles('requirements-*.txt') }}", (
+            job, key)
+        assert restore['with'].get('restore-keys') == expected + '-\n', (
+            job, restore['with'].get('restore-keys'))
         assert restore_index < _named_step_index(steps, install), (
             job, restore_index, install)
 
@@ -647,9 +648,8 @@ def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
     repository itself produced, may. Evaluated as Actions would evaluate it
     rather than substring-matched, so an `||` or a widened ref reads as the
     defect it is, and a cancelled run writes nothing either way. The save
-    also follows the step that runs the job's suites, measurement or lint,
-    so what a later run restores was put there by a run that actually ran
-    them.
+    follows the step that runs the job's suites, measurement or lint, so
+    a later run restores only what a run that ran them put there.
     """
     del tmp
     workflow = _tests_yml()
@@ -663,7 +663,8 @@ def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
         assert comment == _CACHE_ACTION_VERSION, (job, comment)
         assert save['with']['key'] == restore['with']['key'], (job, save)
         assert save['with']['path'] == restore['with']['path'], (job, save)
-        gate = save['if']
+        gate = save.get('if')
+        assert gate is not None, (job, save)
         for conjunct in ('!cancelled()',
                          "github.event_name == 'push'",
                          "github.ref == 'refs/heads/main'"):
