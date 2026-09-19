@@ -3,7 +3,6 @@
 import asyncio
 import importlib.util
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -21,15 +20,8 @@ def _auth_module():
 
 
 def _start_listener(base, max_body_size):
-    previous = os.environ.get('DAEDALUS_MCP_MAX_BODY_SIZE')
-    os.environ['DAEDALUS_MCP_MAX_BODY_SIZE'] = str(max_body_size)
-    try:
-        return test_mcp_server._start_mcp_in_process(base)
-    finally:
-        if previous is None:
-            os.environ.pop('DAEDALUS_MCP_MAX_BODY_SIZE', None)
-        else:
-            os.environ['DAEDALUS_MCP_MAX_BODY_SIZE'] = previous
+    return test_mcp_server._start_mcp_in_process(
+        base, max_body_size=max_body_size)
 
 
 def _initialize_body(padding=0):
