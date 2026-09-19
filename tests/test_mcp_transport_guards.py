@@ -78,6 +78,18 @@ def _capture(coroutine):
         return f'raised {type(failure).__name__}: {failure}'
 
 
+def _clock_script(*values):
+    """Stands in for the poll clock: values replay in order, last repeats."""
+    remaining = list(values)
+
+    def read():
+        if len(remaining) > 1:
+            return remaining.pop(0)
+        return remaining[0]
+
+    return read
+
+
 def test_explicit_http_client_uses_the_explicit_url(tmp):
     del tmp
     transport = _transport()
@@ -300,19 +312,20 @@ def test_poll_reports_timeout_after_only_transport_failures(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    # Far more failures than the deadline admits at this interval, so the
-    # loop ends on the deadline rather than by running the script dry.
     client = ClientProbe(
-        [transport.httpx.ReadError('connection reset by peer')] * 1000)
+        [transport.httpx.ReadError('connection reset by peer')] * 3)
     session.http_client = lambda: client
+    # Three admitted peeks, then the clock steps past the deadline.
+    session.monotonic = _clock_script(100.0, 100.0, 100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
-        '', 0.05, interval=0.01, expect_id='command',
+        '', 0.001, interval=0, expect_id='command',
         expect_delivery='wanted'))
 
-    expected = 'raised TimeoutError: no result within 0.05s'
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert len(peeks) == 3, client.calls
+    expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
-    assert client.calls, 'the loop never polled, so this test proved nothing'
 
 
 def test_poll_deadline_is_not_the_wall_clock(tmp):
@@ -357,6 +370,29 @@ def test_poll_reports_timeout_when_no_attempt_is_admitted(tmp):
     assert result == expected, (result, expected)
 
 
+def test_poll_honors_the_session_clock_for_loop_entry(tmp):
+    """A clock already past the deadline admits zero peeks.
+
+    Both of the loop's clock reads go through the session, so a clock
+    scripted past the deadline before the first entry check ends the
+    wait with no poll at all.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    client = ClientProbe(({'pending': True},))
+    session.http_client = lambda: client
+    # The deadline read sees 100.0; every later read is 100.5, past it.
+    session.monotonic = _clock_script(100.0, 100.5)
+
+    result = _capture(session.poll_result('', 0.001, interval=0))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert not peeks, client.calls
+    expected = 'raised TimeoutError: no result within 0.001s'
+    assert result == expected, (result, expected)
+
+
 def test_poll_rejects_a_body_without_a_delivery_id(tmp):
     del tmp
     transport = _transport()
@@ -368,19 +404,19 @@ def test_poll_rejects_a_body_without_a_delivery_id(tmp):
     }
     # The receipt after the body proves the only thing that stopped the
     # hand-over is the matching rule: the consume itself would have succeeded.
-    # timeout is under the loop's first 20ms ramp sleep, so exactly one peek
-    # happens before the deadline expires.
+    # The clock script admits exactly one peek, then steps past the deadline.
     client = ClientProbe((
         body,
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
+    session.monotonic = _clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
-    assert peeks, 'the loop never polled, so this test proved nothing'
+    assert len(peeks) == 1, client.calls
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
 
@@ -400,12 +436,13 @@ def test_poll_rejects_an_empty_delivery_id(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
+    session.monotonic = _clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
-    assert peeks, 'the loop never polled, so this test proved nothing'
+    assert len(peeks) == 1, client.calls
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
 
@@ -425,12 +462,13 @@ def test_poll_rejects_a_delivery_id_when_none_is_expected(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
+    session.monotonic = _clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
-    assert peeks, 'the loop never polled, so this test proved nothing'
+    assert len(peeks) == 1, client.calls
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
 
@@ -450,13 +488,14 @@ def test_poll_rejects_a_matching_delivery_with_a_foreign_command_id(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
+    session.monotonic = _clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
         expect_delivery='wanted'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
-    assert peeks, 'the loop never polled, so this test proved nothing'
+    assert len(peeks) == 1, client.calls
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
 
@@ -476,13 +515,14 @@ def test_poll_rejects_a_matching_command_id_with_a_foreign_delivery_id(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
+    session.monotonic = _clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
         expect_delivery='wanted'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
-    assert peeks, 'the loop never polled, so this test proved nothing'
+    assert len(peeks) == 1, client.calls
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
 
@@ -505,12 +545,13 @@ def test_poll_rejects_an_empty_delivery_expectation(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
+    session.monotonic = _clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command', expect_delivery=''))
 
     peeks = [call for call in client.calls if call[1] == '/result']
-    assert peeks, 'the loop never polled, so this test proved nothing'
+    assert len(peeks) == 1, client.calls
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
 
