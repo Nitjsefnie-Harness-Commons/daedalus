@@ -181,12 +181,7 @@ def mark_delivery_result(path, entries):
 
 
 def evict_delivery_results(delivery_dir, entries, max_results):
-    """Drop files older than the caller's stamp boundary.
-
-    A cap of 0 keeps everything, though not because of the falsy clause:
-    `ordered[-0]` is `ordered[0]`, so the boundary would be the oldest
-    stamp and nothing is below it. That clause only skips the sort.
-    """
+    """Drop files older than the caller's stamp boundary."""
     if not max_results or len(entries) <= max_results:
         return
     ordered = sorted(entries, key=lambda item: item[0])
