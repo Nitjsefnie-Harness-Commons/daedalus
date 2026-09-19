@@ -255,7 +255,8 @@ def test_the_results_root_governs_where_a_delivery_lands(tmp):
     token, did = 'roottok', 'root-1'
     status, payload = routes.accept_result(
         root, tmp, token,
-        {'tabId': '8', 'id': 'cmd-8', 'value': 'redirected', '_did': did}, 4)
+        {'tabId': '8', 'id': 'cmd-8', 'value': 'redirected', '_did': did},
+        DELIVERY_CAP)
     assert (status, payload) == (200, {'ok': True})
     moved = root / 'deliveries' / f'{token}_8' / f'{did}.json'
     assert _read(moved)['value'] == 'redirected'
@@ -300,7 +301,8 @@ def test_the_results_root_governs_the_delivery_read(tmp):
     empty.mkdir(parents=True)
     token, did = 'readroottok', 'read-1'
     routes.accept_result(
-        root, tmp, token, {'tabId': '2', 'value': 'found', '_did': did}, 4)
+        root, tmp, token, {'tabId': '2', 'value': 'found', '_did': did},
+        DELIVERY_CAP)
     status, payload = routes.fetch_result(root, token, {'delivery': [did]})
     assert status == 200, (status, payload)
     assert payload['value'] == 'found', payload
@@ -323,12 +325,11 @@ def test_the_passed_delivery_cap_is_the_one_enforced(tmp):
 
 
 def test_a_zero_delivery_cap_evicts_nothing(tmp):
-    """A cap of 0 evicts nothing.
-
-    Not evidence for the guard's falsy clause: `ordered[-0]` is
-    `ordered[0]`, so with 0 the boundary is the oldest stamp anyway and
-    nothing is below it.
-    """
+    """Proves: cap 0 — the minimum `DAEDALUS_MAX_DELIVERY_RESULTS` admits —
+    retains every delivery rather than evicting all of them. Does not prove the
+    guard's `not max_results` clause, which is a no-op by arithmetic:
+    `ordered[-0]` is `ordered[0]`, so the boundary is the oldest stamp;
+    nothing is below it, and deleting that clause leaves this test green."""
     routes = _load('fixture_result_routes_nocap')
     root = Path(tmp) / 'nocap-results'
     root.mkdir(parents=True)
