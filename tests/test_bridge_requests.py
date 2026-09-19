@@ -137,9 +137,8 @@ def _refused_exchange(base, request_bytes):
     """One raw exchange that records how the connection ended.
 
     raw_request cannot tell a clean close from a reset — it treats the reset
-    as the end of the answer — but which of the two a refused connection
-    ends with is the property under test here, so the reset is recorded
-    rather than swallowed.
+    as the end of the answer — so this records the close kind instead of
+    swallowing it, for the tests to read as failure context.
     """
     port = int(base.rsplit(':', 1)[1])
     chunks = []
@@ -168,18 +167,21 @@ def _refused_exchange(base, request_bytes):
     return b''.join(chunks), reset
 
 
-def test_a_refused_body_length_absorbs_the_body_so_the_answer_survives(tmp):
-    """An invalid Content-Length refusal must absorb the declared body.
+def test_a_refused_body_length_is_answered_in_full(tmp):
+    """A refusal of an invalid Content-Length survives a body in flight.
 
-    A close that leaves request bytes unread arrives as an RST, and an RST
-    discards the answer the client has not read yet — the refusal then
-    reaches the caller as a connection reset or abort. The two invalid-length
-    branches answered and closed on a body still in flight; the drain the
-    oversize and undeclared refusals already apply must absorb it here too.
+    The client sends its declared body and must still read the complete
+    refusal, whatever the close does behind it — the user-visible property,
+    on both invalid-value branches. The deterministic kill for the missing
+    drain is the stub pin
+    test_an_invalid_content_length_refusal_absorbs_the_declared_body in
+    tests/test_http_transport.py: in this client shape on Linux loopback no
+    reset is observable, because the close's FIN precedes the RST the
+    in-flight body triggers later, which is why the issue's sighting was a
+    one-off flake on windows-latest rather than a reliable red here.
 
-    The payload stays inside the drain bound on purpose, and is larger than
-    one buffered read swallows, so the close of an undrained refusal lands
-    on real unread traffic rather than a buffer's leftovers.
+    The payload stays inside the drain bound, so the drained refusal closes
+    clean.
     """
     payload = b'x' * 16384
     with _util.bridge(tmp) as (base, _docroot):
@@ -189,10 +191,10 @@ def test_a_refused_body_length_absorbs_the_body_so_the_answer_survives(tmp):
                 (f'POST /result HTTP/1.0\r\nHost: x\r\n'
                  'Content-Type: application/json\r\n'
                  f'Content-Length: {declared}\r\n\r\n').encode() + payload)
-            assert resp.startswith(b'HTTP/1.0 400'), (declared, resp[:120])
+            assert resp.startswith(b'HTTP/1.0 400'), (
+                declared, reset, resp[:120])
             assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
-                'error': 'invalid Content-Length'}, (declared, resp)
-            assert reset is None, (declared, reset, resp[:120])
+                'error': 'invalid Content-Length'}, (declared, reset, resp)
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
 
