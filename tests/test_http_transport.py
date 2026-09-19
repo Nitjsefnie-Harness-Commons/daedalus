@@ -299,7 +299,12 @@ def test_importing_the_transport_prints_nothing(tmp):
     the line too, and a tool parsing its own stdout gets it in the middle
     of the answer. The message survives as a value the entry point prints.
     """
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
+    env.update({
+        'DAEDALUS_DIR': os.environ['DAEDALUS_DIR'],
+        'DAEDALUS_PORT': os.environ['DAEDALUS_PORT'],
+    })
     env['PYTHONPATH'] = os.pathsep.join(
         [_noglibc.no_glibc_pythonpath(tmp), str(_util.ROOT)])
     program = ('import daedalus_bridge.http_transport as t\n'

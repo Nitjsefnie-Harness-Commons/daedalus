@@ -515,7 +515,8 @@ def test_a_lost_draw_no_longer_kills_the_bridge_fixture(tmp):
 
 def _refusal_child(docroot, port):
     """Run one second-bridge child to completion against a held root."""
-    child_env = dict(os.environ)
+    child_env = {name: value for name, value in os.environ.items()
+                 if not name.startswith('DAEDALUS_')}
     child_env.update({
         'DAEDALUS_DIR': str(docroot),
         'DAEDALUS_PORT': port,
