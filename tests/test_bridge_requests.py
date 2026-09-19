@@ -371,6 +371,24 @@ def test_a_wide_but_shallow_body_is_accepted(tmp):
             401, 'unauthorized'), (status, raw)
 
 
+def test_a_wide_body_of_objects_is_accepted(tmp):
+    """The object closer counts in the bridge's own scan, not only `]`.
+
+    The array twin of this control stays green if the closing arm loses
+    `}`: its inner `]` does the decrementing, so depth never climbs. An
+    array of many small objects is the body a lost `}` arm reports as too
+    deep — through the bridge, the 400 it would invent replaces the 401
+    authentication owes this shallow body.
+    """
+    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '4'}) as (base, _d):
+        wide = b'{"token":"wrongtoken","value":[' + b'{},' * 60 + b'{}]}'
+        status, raw = _util.request(
+            base + '/result', 'POST', body=wide,
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (
+            401, 'unauthorized'), (status, raw)
+
+
 def test_recursive_json_is_refused_on_every_body_verb_before_authentication(tmp):
     """A deeply nested body is refused, before the token is looked at.
 
