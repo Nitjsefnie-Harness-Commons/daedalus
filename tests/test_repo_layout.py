@@ -207,7 +207,12 @@ def test_the_root_holds_no_python_module_but_the_entry_points(tmp):
 
 
 def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
-    """A git subprocess here runs unbounded and fails loudly on failure."""
+    """A git subprocess here runs unbounded and fails loudly on failure.
+
+    Dropping the bound also drops the only hang-guard on a wedged local
+    clone; the issue's remedy accepts a hang surfacing as a hung CI job
+    over any wall-clock margin.
+    """
     del tmp
     tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
     launches = [
@@ -232,8 +237,8 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     for node in launches:
         keywords = {keyword.arg: keyword.value for keyword in node.keywords}
         assert 'timeout' not in keywords, (
-            f'tests/test_repo_layout.py:{node.lineno} carries a wall-clock '
-            'bound')
+            f'tests/test_repo_layout.py:{node.lineno} carries a '
+            f'timeout={ast.dump(keywords["timeout"])} argument')
         check = keywords.get('check')
         assert isinstance(check, ast.Constant) and check.value is True, (
             f'tests/test_repo_layout.py:{node.lineno} does not fail loudly '
