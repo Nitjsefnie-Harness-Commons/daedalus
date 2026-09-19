@@ -360,17 +360,39 @@ def _wait_for_delivery(trace, key, after=0):
 def _load_server_for_drain(tmp, name):
     root = Path(tmp) / name
     root.mkdir()
-    settings = {'DAEDALUS_DIR': str(root), 'DAEDALUS_PORT': '0'}
-    saved = {key: os.environ.get(key) for key in settings}
-    os.environ.update(settings)
+    saved = {key: os.environ[key] for key in os.environ
+             if key.startswith('DAEDALUS_')}
+    for key in saved:
+        del os.environ[key]
+    os.environ.update({'DAEDALUS_DIR': str(root), 'DAEDALUS_PORT': '0'})
     try:
         return _util.load(_util.ROOT / 'server.py', name=name)
     finally:
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        for key in ('DAEDALUS_DIR', 'DAEDALUS_PORT'):
+            if key not in saved:
+                del os.environ[key]
+        os.environ.update(saved)
+
+
+def test_an_inherited_export_cannot_kill_the_in_process_server_load(tmp):
+    """A poisoned shell export cannot kill this process's server import.
+
+    `_load_server_for_drain` imports `server.py` in the suite's own process,
+    where an inherited `DAEDALUS_` value would be validated; the loader
+    strips every inherited `DAEDALUS_` name and applies its own settings
+    before the import.
+    """
+    prior = os.environ.get('DAEDALUS_STREAM_KEEPALIVE')
+    os.environ['DAEDALUS_STREAM_KEEPALIVE'] = '0'
+    try:
+        mod = _load_server_for_drain(tmp, 'poisoned-server-import')
+        assert mod is not None
+    finally:
+        if prior is None:
+            del os.environ['DAEDALUS_STREAM_KEEPALIVE']
+        else:
+            os.environ['DAEDALUS_STREAM_KEEPALIVE'] = prior
+    assert os.environ.get('DAEDALUS_STREAM_KEEPALIVE') == prior
 
 
 def _raise_broken_pipe(_data):
