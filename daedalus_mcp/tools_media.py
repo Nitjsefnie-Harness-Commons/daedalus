@@ -19,6 +19,22 @@ def register(mcp, bridge):
         if format:
             fields['format'] = format
         if quality is not None:
+            # The extension reads quality || 80, so 0 and a negative
+            # silently capture at the default and an enormous one reaches
+            # Chrome unvalidated; 1-100 is the CLI's own -q range. One raise
+            # per condition: each refusal case witnesses exactly one site.
+            if not isinstance(quality, int):
+                raise ValueError('quality must be an integer')
+            if isinstance(quality, bool):
+                raise ValueError('quality must be an integer')
+            if quality < 1:
+                raise ValueError(
+                    f'quality must be an integer from 1 to 100; got '
+                    f'{quality}')
+            if quality > 100:
+                raise ValueError(
+                    f'quality must be an integer from 1 to 100; got '
+                    f'{quality}')
             fields['quality'] = quality
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
