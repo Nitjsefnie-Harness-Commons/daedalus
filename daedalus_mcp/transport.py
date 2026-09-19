@@ -4,6 +4,7 @@ from contextvars import ContextVar
 import math
 import os
 import threading
+import time
 from typing import Any
 import weakref
 
@@ -145,6 +146,15 @@ class BridgeSession:
         r.raise_for_status()
         return r.content
 
+    def monotonic(self) -> float:
+        """The clock the poll loop waits on, injectable for the tests.
+
+        Monotonic, not wall-clock: time.time() steps backwards under an
+        NTP correction and the wait then outlives its timeout. Same
+        clock the CLI waiter uses, for the same reason.
+        """
+        return time.monotonic()
+
     async def poll_result(self, tab: str, timeout: float,
                           interval: float = 0.5,
                           expect_id: str | None = None,
@@ -160,19 +170,15 @@ class BridgeSession:
         The wait ramps 20ms -> `interval` instead of sleeping a flat `interval` up
         front: most commands finish in tens of milliseconds, and the fixed first
         sleep was adding half a second of dead time to every single tool call."""
-        import time
         peek = {}
         if tab:
             peek['tab'] = tab
         if expect_delivery:
             peek['delivery'] = expect_delivery
         auth = self.auth()
-        # Monotonic, not wall-clock: time.time() steps backwards under an
-        # NTP correction and the wait then outlives its timeout. Same
-        # clock the CLI waiter uses, for the same reason.
-        deadline = time.monotonic() + timeout
+        deadline = self.monotonic() + timeout
         wait = 0.02
-        while time.monotonic() < deadline:
+        while self.monotonic() < deadline:
             await asyncio.sleep(wait)
             wait = min(wait * 2, interval)
             try:
