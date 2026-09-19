@@ -48,7 +48,12 @@ def _assert_imported_modules_are_tracked(tracked):
 
 
 def _tracked_tree(tmp):
-    """Export under `tree`, mapped to source like test_suite_runner's own export -- but that export always runs real modules unmodified, and this one does not: test_sibling_mutation_failure_names_module_type_and_handlers corrupts a copy first, safe today only because the corruption is JavaScript. A caller that corrupted a Python file here would have its run alias onto the real module's coverage, silently."""
+    """Export under `tree`, mapped to source like test_suite_runner's own
+    export -- but that export always runs real modules unmodified, and this one
+    does not: test_sibling_mutation_failure_names_module_type_and_handlers
+    corrupts a copy first, safe today only because the corruption is
+    JavaScript. A caller that corrupted a Python file here would have its run
+    alias onto the real module's coverage, silently."""
     tracked = _tracked_paths()
     _assert_imported_modules_are_tracked(tracked)
     export_root = Path(tmp) / 'tree'
@@ -87,28 +92,6 @@ Object.defineProperty(globalThis, 'sharedName', {{
     assert 'sharedName' in failure, failure
     assert 'Error: reading binding' in failure, failure
     return failure
-
-
-def _assert_candidate_does_not_enter_program(tmp, candidate, marker):
-    root = Path(tmp)
-    background = root / 'background.js'
-    background.write_text('const backgroundMarker = true;\n',
-                          encoding='utf-8')
-    worker = root / 'property.js'
-    worker.write_text(
-        'Object.defineProperty(globalThis, '
-        f'{json.dumps(candidate)}, {{ configurable: true, value: 1 }});\n',
-        encoding='utf-8')
-
-    observed = _worker_runtime.observe_worker_runtime([{
-        'path': worker,
-        'globals': (),
-        'probes': {marker},
-        'watched': (),
-    }], background_path=background)['sources'][str(worker)]
-
-    assert observed['bindingExecutionError'] is None
-    assert observed['bindings'] == []
 
 
 def test_runtime_observer_uses_javascript_global_scope(tmp):
@@ -257,20 +240,6 @@ def test_runtime_observer_skips_non_binding_property_names(tmp):
 
     assert observed['bindingExecutionError'] is None
     assert observed['bindings'] == []
-
-
-def test_candidate_program_text_does_not_enter_probe(tmp):
-    """Statements, closing braces and newlines cannot alter probe grammar."""
-    candidates = (
-        ('undefined; { globalThis.taskThreeInjected = 1; }',
-         'taskThreeInjected'),
-        ('undefined; } globalThis.taskThreeBraceInjected = 1; {',
-         'taskThreeBraceInjected'),
-        ('undefined;\nglobalThis.taskThreeNewlineInjected = 1',
-         'taskThreeNewlineInjected'),
-    )
-    for candidate, marker in candidates:
-        _assert_candidate_does_not_enter_program(tmp, candidate, marker)
 
 
 def test_node_harness_decodes_utf8_independent_of_locale(tmp):

@@ -125,8 +125,9 @@ def test_a_line_printed_before_the_announcement_does_not_hide_it(tmp):
     noise = ('print("[Daedalus] malloc tuning unavailable: '
              'dlsym(0x0, mallopt): symbol not found", flush=True)\n')
     output = []
-    with _util.bridge(tmp, env={'PYTHONPATH': _noise_path(tmp, 'noise', noise)},
-                      output=output) as (base, _docroot):
+    with _util.bridge(
+            tmp, env={'PYTHONPATH': _noise_path(tmp, 'noise', noise)},
+            output=output) as (base, _docroot):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
     noise_at = next((index for index, line in enumerate(output)
@@ -405,7 +406,8 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
         started = time.time()
         failure = ''
         try:
-            _util.await_listening_line(proc, _util.drain_lines(proc), timeout=1)
+            _util.await_listening_line(
+                proc, _util.drain_lines(proc), timeout=1)
         except RuntimeError as e:
             failure = str(e)
         elapsed = time.time() - started
@@ -667,7 +669,8 @@ def test_the_stream_expires_a_command_by_the_ttl_not_the_max_age(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='streamlifecycle_')
+    return _util.runner(
+        _util.collect(globals()), tmp_prefix='streamlifecycle_')
 
 
 if __name__ == '__main__':

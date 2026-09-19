@@ -37,12 +37,14 @@ def test_release_scanners_reject_empty_git_enumeration(tmp):
                 scanner(tmp)
             except AssertionError as failure:
                 message = str(failure)
-                assert 'Git returned no tracked release paths' in message, failure
+                assert 'Git returned no tracked release paths' in message, (
+                    failure)
             else:
                 accepted.append(scanner.__name__)
     finally:
         ROOT = real_root
-    assert not accepted, f'scanners accepted an empty Git enumeration: {accepted}'
+    assert not accepted, (
+        f'scanners accepted an empty Git enumeration: {accepted}')
 
 
 def test_release_enumeration_control_does_not_pin_repository_file_count(tmp):
@@ -100,8 +102,10 @@ def test_no_deployment_strings_in_tree(tmp):
     # scanners still catch something by planting a host under it.
     reserved = re.compile(r'(?:^|\.)(?:example\.(?:com|org|net)|test)$')
     # Absolute paths that describe one machine's layout rather than a standard
-    # location. /srv and /tmp are generic; a home directory or a webroot is not.
-    private_roots = re.compile(r'(?<![\w.])/(?:var/www|root|home/[a-z])[\w./-]*')
+    # location. /srv and /tmp are generic; a home directory or a webroot is
+    # not.
+    private_roots = re.compile(
+        r'(?<![\w.])/(?:var/www|root|home/[a-z])[\w./-]*')
     url_host = re.compile(r'https?://([a-zA-Z0-9._-]+(?::\d+)?)')
 
     violations = []
@@ -117,8 +121,10 @@ def test_no_deployment_strings_in_tree(tmp):
             if host not in allowed_hosts and not reserved.search(host):
                 violations.append(f'{path}: non-allowlisted host {host}')
         for match in private_roots.finditer(text):
-            violations.append(f'{path}: machine-specific path {match.group(0)}')
-    assert not violations, 'deployment strings in the release tree:\n' + '\n'.join(violations)
+            violations.append(
+                f'{path}: machine-specific path {match.group(0)}')
+    assert not violations, (
+        'deployment strings in the release tree:\n' + '\n'.join(violations))
 
 
 def test_no_hardcoded_deployment_urls(tmp):
@@ -181,7 +187,8 @@ def test_release_scanners_ignore_caches_and_scan_published_files(tmp):
 
         for path in (unmanifested, published):
             path.write_text(
-                'https://' + 'tracked-violation' + '.invalid', encoding='utf-8')
+                'https://' + 'tracked-violation' + '.invalid',
+                encoding='utf-8')
             for scanner in scanners:
                 try:
                     scanner(tmp)

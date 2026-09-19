@@ -351,7 +351,8 @@ def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
     result = subprocess.run(
         [sys.executable, str(ROOT / 'scripts' / 'gen_gitignore.py')],
         capture_output=True, text=True, timeout=60)
-    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert result.returncode == 2, (
+        result.returncode, result.stdout, result.stderr)
     assert 'ValueError' not in result.stderr, result.stderr
     assert 'usage' in result.stderr.lower(), result.stderr
 
