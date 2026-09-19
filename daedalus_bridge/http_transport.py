@@ -334,9 +334,11 @@ class RequestMixin(BaseHTTPRequestHandler):
         try:
             clen = int(declared)
         except ValueError:
+            self._drain_undeclared_body()
             self._json(400, {'error': 'invalid Content-Length'})
             return None
         if clen < 0:
+            self._drain_undeclared_body()
             self._json(400, {'error': 'invalid Content-Length'})
             return None
         if clen > MAX_BODY_SIZE:
