@@ -6,6 +6,7 @@ namespace of every process started there. The bridge's modules live in the
 `daedalus_bridge/` package instead; this suite is what keeps them there.
 """
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -164,7 +165,9 @@ def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
 
 
 def test_the_bridge_modules_live_in_the_bridge_package(tmp):
-    """The package holds exactly its thirteen modules; the root holds none."""
+    """The package holds exactly the modules named in BRIDGE_PACKAGE;
+    the root holds none.
+    """
     del tmp
     tracked = _tracked_python()
     packaged = sorted(
@@ -177,6 +180,30 @@ def test_the_bridge_modules_live_in_the_bridge_package(tmp):
         and path in set(BRIDGE_PACKAGE) | {'bridge_config.py'})
     assert not stray, (
         f'these bridge modules are still tracked at the repository root: {stray}')
+
+
+def test_the_transport_re_exports_no_json_body_helper(tmp):
+    """Neither JSON body helper is an attribute of the transport module.
+
+    The helpers live in `daedalus_bridge/json_body.py`; the split that
+    moved them there was required to re-export nothing, and a by-name
+    import quietly keeps both names on the importing module.
+    """
+    program = (
+        'import daedalus_bridge.http_transport as transport\n'
+        'for name in ("JSONObject", "json_nests_deeper_than"):\n'
+        '    assert not hasattr(transport, name), name\n')
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': tmp, 'DAEDALUS_PORT': '0',
+        'PYTHONPATH': str(ROOT), 'PYTHONDONTWRITEBYTECODE': '1',
+    })
+    try:
+        subprocess.run(
+            [sys.executable, '-c', program], env=env, check=True,
+            capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise AssertionError(exc.stderr) from exc
 
 
 def test_the_mcp_modules_live_in_the_mcp_package(tmp):
