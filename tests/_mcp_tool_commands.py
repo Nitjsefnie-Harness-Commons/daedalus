@@ -325,7 +325,7 @@ UNPINNED_PARAMETERS = {
         'timeout',
     },
     'put': {
-        # a tabless send (the browser's active tab) is exercised by no case
+        # no case applies the explicit broadcast=True override
         'broadcast',
         # only the waited path is pinned; put has no wait=False case
         'wait',
@@ -333,7 +333,7 @@ UNPINNED_PARAMETERS = {
         'timeout',
     },
     'reload': {
-        # a tabless send (the browser's active tab) is exercised by no case
+        # no case applies the explicit broadcast=True override
         'broadcast',
     },
     'screenshot': {
