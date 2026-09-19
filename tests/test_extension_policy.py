@@ -407,12 +407,15 @@ def test_the_manifest_declares_the_lowest_chrome_the_code_needs(tmp):
     assert isinstance(floor, str) and floor, floor
     head = floor.split('.')[0]
     assert head.isdigit() and int(head) >= 120, floor
-    code = blank_js_comments(
-        (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8'))
+    background = ROOT / 'extension' / 'background.js'
+    source = background.read_text(encoding='utf-8')
+    masked = js_mask(source)
     heartbeat = re.search(
-        r"alarms\.create\(\s*'daedalus-heartbeat'\s*,\s*"
-        r'\{\s*periodInMinutes:\s*0\.5\s*\}\s*\)', code)
+        r'alarms\.create\(\s*?([^,]*?),\s*'
+        r'\{\s*periodInMinutes:\s*0\.5\s*\}\s*\)', masked)
     assert heartbeat, 'the sub-minute heartbeat the 120 floor needs is gone'
+    name = source[heartbeat.start(1):heartbeat.end(1)]
+    assert name == "'daedalus-heartbeat'", name
 
 
 def test_the_manifest_does_not_grant_activeTab_beside_all_urls(tmp):
