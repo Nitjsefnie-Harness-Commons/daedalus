@@ -51,17 +51,28 @@ def _display_value(node, state):
 def _dict_value(node, state):
     items = {}
     for key, item in zip(node.keys, node.values):
+        if key is not None:
+            value = _known_value(item, state)
+            if isinstance(key, ast.Constant) and value is not None:
+                items[key.value] = value
+            continue
+        if isinstance(item, ast.Dict):
+            nested = _dict_value(item, state)
+            if nested is not None:
+                items.update(nested.items)
+            continue
         value = _known_value(item, state)
-        if key is None:
-            if value is None:
-                continue
-            if not isinstance(value, DeferredContainer) \
-                    or value.kind != 'dict':
-                return DeferredContainer(
-                    {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
-            items.update(value.items)
-        elif isinstance(key, ast.Constant) and value is not None:
-            items[key.value] = value
+        if isinstance(item, ast.Call) and (
+                value is None
+                or not isinstance(value, DeferredContainer)
+                or value.kind != 'dict'):
+            return DeferredContainer(
+                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
+        if value is None:
+            continue
+        if not isinstance(value, DeferredContainer) or value.kind != 'dict':
+            continue
+        items.update(value.items)
     return DeferredContainer(
         items, len(node.values), 'dict') if items else None
 
@@ -74,6 +85,9 @@ def _merge_or_value(node, state):
             known = _dict_value(side, state)
         else:
             known = _known_value(side, state)
+            if known is None and isinstance(side, ast.Call):
+                return DeferredContainer(
+                    {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
         if isinstance(known, str) and sender_value(known) is not None:
             return UNPROVABLE_SENDER
         if isinstance(known, DeferredContainer) and known.kind == 'dict':
@@ -213,8 +227,10 @@ def _source_items(source, state):
     if known.kind not in ('list', 'tuple'): return None
     items = {}
     for pair in known.items.values():
-        if not isinstance(pair, DeferredContainer) \
-                or pair.kind not in ('list', 'tuple'): return None
+        if not isinstance(pair, DeferredContainer):
+            return None
+        if pair.kind not in ('list', 'tuple'):
+            return None
         key = pair.items.get(0)
         items[DYNAMIC_KEY if key is None else key] = pair.items.get(1)
     return items
@@ -242,7 +258,15 @@ def _apply_mapping_store(state, owner_name, sources, keywords):
         items.update(merged)
     for key, value in keywords.items():
         known = _known_value(value, state)
-        if known is not None: items[key] = known
+        if known is not None:
+            items[key] = known
+        elif state.evaluated.get(id(value)) is not None:
+            items.pop(key, None)
+        elif isinstance(value, ast.Call):
+            _mark_unprovable(state, owner_name)
+            return
+        else:
+            items.pop(key, None)
     owner = state.callables.get(owner_name)
     if items:
         if owner is None:
@@ -276,20 +300,22 @@ def apply_deferred_store(statement, state):
     if isinstance(statement, ast.Expr) \
             and isinstance(statement.value, ast.Call):
         call = statement.value
-        owner_name = getattr(getattr(call.func, 'value', None), 'id', None)
+        if not isinstance(call.func, ast.Attribute) \
+                or not isinstance(call.func.value, ast.Name):
+            return
+        owner_name = call.func.value.id
         owner = state.callables.get(owner_name)
-        if getattr(call.func, 'attr', None) == 'clear' \
-                and isinstance(owner, DeferredContainer):
+        if call.func.attr == 'clear' and isinstance(owner, DeferredContainer):
             replacement = DeferredContainer(
                 {}, 0, owner.kind, owner.identity)
             replace_deferred_storage(state, owner, replacement)
             sync_cells(state, {owner_name})
-        elif getattr(call.func, 'attr', None) == 'update':
+        elif call.func.attr == 'update':
             _apply_mapping_store(
                 state, owner_name, call.args, {
                     keyword.arg: keyword.value for keyword in call.keywords
                     if keyword.arg is not None})
-        elif getattr(call.func, 'attr', None) == 'setdefault':
+        elif call.func.attr == 'setdefault':
             _apply_setdefault(state, call, owner_name)
         return
     if isinstance(statement, ast.AugAssign):
@@ -302,6 +328,8 @@ def apply_deferred_store(statement, state):
         return
     value = (_known_value(statement.value, state)
              if not isinstance(statement, ast.Delete) else None)
+    raw = (state.evaluated.get(id(statement.value))
+           if not isinstance(statement, ast.Delete) else None)
     targets = (statement.targets if isinstance(statement, ast.Assign)
                else [statement.target] if not isinstance(
                    statement, ast.Delete) else statement.targets)
@@ -321,19 +349,27 @@ def apply_deferred_store(statement, state):
         elif isinstance(target, ast.Subscript) \
                 and isinstance(target.value, ast.Name):
             dynamic = not isinstance(target.slice, ast.Constant)
+            removing = isinstance(statement, ast.Delete)
+            unknown_call = (value is None and raw is None
+                            and isinstance(statement, ast.Assign)
+                            and isinstance(statement.value, ast.Call))
             if owner is None:
-                if value is None:
+                if value is None and (removing or not unknown_call):
                     continue
                 owner = DeferredContainer({}, None, 'dict')
                 state.callables[owner_name] = owner
             elif not isinstance(owner, DeferredContainer):
                 continue
             items = dict(owner.items)
-            if value is None:
-                if dynamic: continue
-                items.pop(target.slice.value, None)
+            if value is not None:
+                items[DYNAMIC_KEY if dynamic else target.slice.value] = value
+            elif unknown_call:
+                if dynamic:
+                    items.setdefault(DYNAMIC_KEY, UNPROVABLE_SENDER)
+                elif items.get(target.slice.value) is None:
+                    items[target.slice.value] = UNPROVABLE_SENDER
             elif dynamic:
-                items[DYNAMIC_KEY] = value
+                continue
             else:
-                items[target.slice.value] = value
+                items.pop(target.slice.value, None)
             _replace_container(state, owner_name, owner, items)
