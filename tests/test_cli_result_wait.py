@@ -81,7 +81,8 @@ _BACKOFF_HARNESS = (
     '    calls.append(path)\n'
     '    return {"pending": True}\n'
     'transport._request = fake_api\n'
-    'result = transport.wait_for_result("c1", "extension", "d1", %s)\n'
+    'result = transport.wait_for_result(\n'
+    '    "c1", "extension", "d1", %s, interval=%s)\n'
     'print(json.dumps({"sleeps": transport.time.sleeps,\n'
     '                  "polls": len(calls),\n'
     '                  "result": result}, sort_keys=True))\n')
@@ -140,30 +141,38 @@ def test_result_wait_rejects_receipt_for_different_generation(tmp):
 def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
     """A pending result is polled on a ramp that saturates, never a flood.
 
-    The ramp opens at 20ms and doubles to the caller's interval, so a slot
-    that stays pending is neither polled flat-out nor left half a second
-    behind each turn. A virtual clock stands in for time.sleep and records
-    each requested interval, so the test asserts the schedule the loop
-    REQUESTS — identical on every machine — rather than how many polls a
-    real scheduler happened to grant a real 1.0-second wait, which is what
-    made the original form a wall-clock margin: it failed a macOS leg with
-    3 polls.
+    The ramp opens at 20ms and doubles to the CALLER'S interval, then
+    saturates there. Two cases drive a different interval each, so a cap
+    hardcoded to either value cannot survive. A virtual clock stands in
+    for time.sleep and records each requested interval, so the test
+    asserts the schedule the loop REQUESTS — identical on every machine —
+    rather than how many polls a real scheduler happened to grant a real
+    1.0-second wait, which is what made the original form a wall-clock
+    margin: it failed a macOS leg with 3 polls.
     """
     del tmp
-    run = subprocess.run(
-        [sys.executable, '-c', _BACKOFF_HARNESS % 3.0], cwd=str(_util.ROOT),
-        env=_cli_env(), capture_output=True, text=True, encoding='utf-8',
-        timeout=10)
-    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-    outcome = json.loads(run.stdout)
-    assert outcome['result'] is None, outcome
-    sleeps = outcome['sleeps']
-    assert sleeps[:5] == [0.02, 0.04, 0.08, 0.16, 0.32], outcome
-    assert sleeps[5:-1] == [0.5, 0.5, 0.5, 0.5], outcome
-    # The last lap is cut to what is left of the budget, so the requested
-    # record alone spends it exactly.
-    assert abs(sum(sleeps) - 3.0) < 1e-9, outcome
-    assert outcome['polls'] == len(sleeps) - 1, outcome
+    cases = (
+        (3.0, 0.5, [0.02, 0.04, 0.08, 0.16, 0.32]),
+        (3.0, 0.3, [0.02, 0.04, 0.08, 0.16, 0.3]),
+    )
+    for timeout, interval, ramp in cases:
+        run = subprocess.run(
+            [sys.executable, '-c', _BACKOFF_HARNESS % (timeout, interval)],
+            cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
+            text=True, encoding='utf-8', timeout=10)
+        assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+        outcome = json.loads(run.stdout)
+        sleeps = outcome['sleeps']
+        # Bounded failure message: a pathological record can be long.
+        brief = {'polls': outcome['polls'], 'result': outcome['result'],
+                 'sleep_n': len(sleeps), 'sleep_head': sleeps[:6]}
+        assert outcome['result'] is None, brief
+        assert sleeps[:len(ramp)] == ramp, brief
+        assert set(sleeps[len(ramp):-1]) == {interval}, brief
+        # The last lap is cut to what is left of the budget, so the
+        # requested record alone spends it exactly.
+        assert abs(sum(sleeps) - timeout) < 1e-9, brief
+        assert outcome['polls'] == len(sleeps) - 1, brief
 
 
 if __name__ == '__main__':
