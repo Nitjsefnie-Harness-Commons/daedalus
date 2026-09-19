@@ -106,8 +106,7 @@ def positive_count(value):
     """argparse type for the number of tail entries to display.
 
     The display slices with `[-n:]`, where n = 0 is the whole buffer and a
-    negative n a longer tail than the one asked for, so anything below 1 is
-    refused at parse time — before the buffer is fetched.
+    negative n a longer tail than the one asked for.
     """
     try:
         count = int(value)
@@ -121,7 +120,7 @@ def positive_count(value):
 
 
 def quality_limit(value):
-    """argparse type for a JPEG quality: the documented 1-100 range.
+    """argparse type for a JPEG quality.
 
     The worker reads `quality || 80`, so an admitted 0 silently captured at
     the default instead of refusing, and anything past 100 reached Chrome's
