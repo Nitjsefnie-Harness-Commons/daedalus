@@ -102,6 +102,24 @@ def positive_timeout(value):
     return seconds
 
 
+def positive_count(value):
+    """argparse type for the number of tail entries to display.
+
+    The display slices with `[-n:]`, where n = 0 is the whole buffer and a
+    negative n a longer tail than the one asked for, so anything below 1 is
+    refused at parse time — before the buffer is fetched.
+    """
+    try:
+        count = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'count must be a whole number; got {value!r}') from None
+    if count < 1:
+        raise argparse.ArgumentTypeError(
+            f'count must be at least 1; got {count}')
+    return count
+
+
 def _query_path(path, params):
     """Build one bridge path with every query value percent-encoded."""
     query = urllib.parse.urlencode(params)
