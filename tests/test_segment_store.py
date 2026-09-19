@@ -512,7 +512,12 @@ def test_log_timing_reports_each_phase_under_the_mark_that_ends_it(tmp):
 
 
 def test_timing_stays_inert_without_the_debug_variable(tmp):
-    """`DAEDALUS_DEBUG_TIMING` unset or `=0` means no marks and no line."""
+    """`DAEDALUS_DEBUG_TIMING` unset or `=0` means no marks and no line.
+
+    The last arm exports the variable in this parent process around one
+    probe, so the strip `_probe` applies is watched by the suite itself,
+    not only by a shell that happens to export it.
+    """
     script = r'''
 import contextlib
 import io
@@ -531,6 +536,16 @@ print(json.dumps(out, sort_keys=True))
     assert answer == {'timing_marks': None, 'printed': ''}, answer
     _root, answer = _probe(
         tmp, script, extra_env={'DAEDALUS_DEBUG_TIMING': '0'})
+    assert answer == {'timing_marks': None, 'printed': ''}, answer
+    prior = os.environ.get('DAEDALUS_DEBUG_TIMING')
+    os.environ['DAEDALUS_DEBUG_TIMING'] = '1'
+    try:
+        _root, answer = _probe(tmp, script)
+    finally:
+        if prior is None:
+            del os.environ['DAEDALUS_DEBUG_TIMING']
+        else:
+            os.environ['DAEDALUS_DEBUG_TIMING'] = prior
     assert answer == {'timing_marks': None, 'printed': ''}, answer
 
 
