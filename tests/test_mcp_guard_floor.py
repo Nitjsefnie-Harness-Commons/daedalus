@@ -375,12 +375,7 @@ def load(name):
 
 
 def test_a_computed_import_refuses_the_scan(_tmp):
-    """An import the walk cannot read statically fails the scan loudly.
-
-    A walk that silently omitted an import it cannot resolve statically
-    would be a blind spot rather than a closure, so the refusal names the
-    module and the import site.
-    """
+    """An import the walk cannot read statically fails the scan loudly."""
     _write_tree(Path(_tmp), {'composition.py': COMPUTED_IMPORT_COMPOSITION})
     try:
         _mcp_guard_floor.composition_scan_set(

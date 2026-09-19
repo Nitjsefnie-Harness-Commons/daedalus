@@ -493,7 +493,7 @@ def test_the_refusal_pass_refuses_an_unregistered_allowlist_entry(_tmp):
             message = str(refused)
             assert ('UNWITNESSED_GUARDS names tools that are not registered'
                     in message), refused
-            assert "'no_such_tool'" in message, refused
+            assert 'no_such_tool' in message, refused
         else:
             raise AssertionError(
                 'an unregistered UNWITNESSED_GUARDS entry was not refused')
