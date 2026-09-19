@@ -78,12 +78,10 @@ def _load_mcp(base_url, mcp_port=None, max_body_size=None):
 def _wait_for_mcp(port, deadline=20):
     """Wait until the live MCP listener answers — and refuse any other listener.
 
-    A bare TCP accept proves only that SOMETHING bound the port: a collision
-    between the two port allocations used to put the bridge itself on this
-    port, and every request then failed with the bridge's bad-token 400.
-    Probe with an unauthenticated POST /mcp instead: the real MCP middleware
-    answers 401 'missing Bearer token', and any other answer fails the test
-    with the listener's actual response as the diagnosis.
+    A bare TCP accept proves only that SOMETHING bound the port, and a port
+    collision then failed every request with the bridge's bad-token 400.
+    Probe with an unauthenticated POST /mcp: the real middleware answers 401
+    'missing Bearer token'; any other answer fails with the response attached.
     """
     probe = {'jsonrpc': '2.0', 'id': 'wait-for-mcp',
              'method': 'initialize', 'params': {}}
@@ -300,11 +298,10 @@ def test_module_imports_and_exposes_tools(tmp):
 def test_local_url_derives_from_the_bridge_port(tmp):
     """The MCP bridge client follows DAEDALUS_PORT unless explicitly overridden.
 
-    The module used to hard-default its in-process bridge URL to
-    127.0.0.1:8081, so on any other documented DAEDALUS_PORT the MCP server
-    started, authenticated clients, and then sent every tool call to the
-    wrong local port. DAEDALUS_LOCAL_URL remains the explicit override for
-    a standalone deployment.
+    The module once hard-defaulted 127.0.0.1:8081 and sent every tool call to
+    the wrong local port on any other documented DAEDALUS_PORT.
+    DAEDALUS_LOCAL_URL remains the explicit override for a standalone
+    deployment.
     """
     del tmp
     _need_deps()
@@ -324,6 +321,9 @@ def test_local_url_derives_from_the_bridge_port(tmp):
         del os.environ['DAEDALUS_PORT']
         assert fresh('fallback').LOCAL_URL == 'http://127.0.0.1:8081'
     finally:
+        for key in ('DAEDALUS_PORT', 'DAEDALUS_LOCAL_URL'):
+            if key not in saved and key in os.environ:
+                del os.environ[key]
         os.environ.update(saved)
 
 
@@ -652,8 +652,10 @@ def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
         previous = os.environ.get(name)
         os.environ[name] = value
         try:
+            expected_env = dict(os.environ)
             plain = _load_mcp('http://127.0.0.1:1')
             ported = _load_mcp_at_port('http://127.0.0.1:1', 0)
+            assert os.environ == expected_env, 'environment leaked'
             assert plain.MCP_PORT == 8086 and ported.MCP_PORT == 0
             assert plain.MAX_BODY_SIZE == 64 * 1024 * 1024
         finally:
@@ -1108,10 +1110,9 @@ def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):
     """Credentials are decided before the body is parsed, and it is capped.
 
     The middleware used to parse the whole POST body before the Authorization
-    header was read. The order is observable through the diagnostic: a
-    duplicate-`job` body answered 400 without credentials, now answers 401.
-    Size is pinned separately, since only an authenticated caller reaches
-    the cap.
+    header was read; observable through the diagnostic: a duplicate-`job`
+    body answered 400 without credentials, now answers 401. Size is pinned
+    separately, since only an authenticated caller reaches the cap.
     """
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1479,9 +1480,8 @@ def test_bearer_middleware_fails_closed_without_configured_token(tmp):
 def test_mcp_port_zero_announces_the_actual_bound_port(tmp):
     """DAEDALUS_MCP_PORT=0 must print the bound port, not the configured one.
 
-    The startup line used to interpolate the configured value and print
-    '127.0.0.1:0', so an operator choosing port 0 could not discover the
-    listener. The line now follows the bind and names the bound socket.
+    The line used to interpolate the configured value and print '127.0.0.1:0';
+    it now follows the bind and names the bound socket.
     """
     del tmp
     _need_deps()
