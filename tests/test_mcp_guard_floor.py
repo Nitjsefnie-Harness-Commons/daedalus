@@ -230,6 +230,29 @@ def test_the_refusal_floor_refuses_a_stranded_guard(_tmp):
             'y': [f'no refusal case of its own witnesses {a!r}']}
 
 
+def test_a_site_two_refusal_cases_witness_is_a_duplicate_gap(_tmp):
+    """duplicate_witness_gaps reports each pair's surplus witnesses.
+
+    A count above one means a case has no condition of its own to refuse,
+    and deleting it used to ship green.
+    """
+    del _tmp
+    site, other = ('m', 'f', 'c'), ('m', 'f', 'd')
+    gaps = _mcp_guard_floor.duplicate_witness_gaps
+    assert gaps([]) == []
+    # A shared guard owes one case per tool that reaches it, so u's
+    # witness of the same site is no surplus.
+    assert gaps([('t', site), ('t', other), ('u', site)]) == []
+    assert gaps([('t', site), ('t', site), ('u', site)]) == [
+        f't: 2 refusal cases witness {site!r}; one witness per site, so '
+        'delete the surplus case or split the raise so each case has its '
+        'own site']
+    assert gaps([('t', site)] * 3 + [('u', site)]) == [
+        f't: 3 refusal cases witness {site!r}; one witness per site, so '
+        'delete the surplus case or split the raise so each case has its '
+        'own site']
+
+
 def test_a_guard_outside_the_tool_surface_is_not_covered_by_reachability(_tmp):
     """A guard no tool reaches is surfaced, wherever its module sits."""
     del _tmp

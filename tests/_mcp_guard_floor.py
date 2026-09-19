@@ -18,6 +18,7 @@ convention at daedalus_mcp/tools_css.py `unblock_requests` — never raises and
 is off this floor.
 """
 import ast
+import collections
 import dis
 import importlib.util
 import inspect
@@ -495,6 +496,20 @@ def stranded_guards(reached, witnessed):
         if gaps:
             stranded[tool] = gaps
     return stranded
+
+
+def duplicate_witness_gaps(pairs):
+    """The (tool, site) pairs more than one refusal case witnesses.
+
+    A count above one means a case has no condition of its own to refuse,
+    and deleting it ships green — the silence this reports.
+    """
+    counts = collections.Counter(pairs)
+    return [
+        f'{tool}: {count} refusal cases witness {key!r}; one witness per '
+        'site, so delete the surplus case or split the raise so each case '
+        'has its own site'
+        for (tool, key), count in sorted(counts.items()) if count > 1]
 
 
 def guard_shape_probe(directory, source=GUARD_SHAPES, name='guard_shapes'):
