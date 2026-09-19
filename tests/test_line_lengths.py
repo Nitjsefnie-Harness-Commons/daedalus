@@ -361,19 +361,21 @@ def test_real_cli_tighten_noop_writes_nothing(tmp):
         tmp, {'a.py': _over(2), 'b.py': _over(1)},
         {'a.py': 2, 'gone.py': 1}, 'noop')
     before = target.read_bytes()
+    untouched = target.stat()
     result = _run_cli(repo, '--tighten')
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == 'no file lost an over-limit line\n'
     assert result.stderr == ''
     assert target.read_bytes() == before
-    assert target.stat().st_ino == (
-        repo / '.github' / 'ci-thresholds.json').stat().st_ino
+    after = target.stat()
+    assert after.st_ino == untouched.st_ino
+    assert after.st_mtime_ns == untouched.st_mtime_ns
 
 
 def test_real_cli_tighten_shrink_rewrites_only_the_lowered_member(tmp):
     thresholds = _thresholds()
     repo, target = _line_fixture(
-        tmp, {'a.py': _over(1), 'b.py': _over(2), 'c.py': _over(0)},
+        tmp, {'a.py': _over(1), 'b.py': _over(3), 'c.py': _over(0)},
         {'a.py': 3, 'b.py': 2, 'c.py': 1, 'gone.py': 4}, 'shrink')
     before = thresholds.load(target)
     result = _run_cli(repo, '--tighten')
@@ -419,12 +421,16 @@ def test_real_cli_names_an_undecodable_file_without_traceback(tmp):
 
 
 def _skill_decisions(path=SKILL_SOURCE):
-    text = _normalised(path.read_text(encoding='utf-8'))
+    source = path.read_text(encoding='utf-8')
+    text = _normalised(source)
+    paragraph = _normalised(''.join(
+        block for block in source.split('\n\n')
+        if 'long_line_baseline' in block))
     return {
         'owner': '.github/ci-thresholds.json' in text
         and 'long_line_baseline' in text,
         'command': 'python3 scripts/ci/line_lengths.py --tighten' in text,
-        'remedy': 'wrap' in text and 'never raised' in text,
+        'remedy': 'wrap' in paragraph and 'never raised' in paragraph,
         'reads_skill': 'tests/test_line_lengths.py' in text,
     }
 
@@ -442,6 +448,8 @@ def test_skill_mutations_are_caught_independently(tmp):
         ('command', 'python3 scripts/ci/line_lengths.py --tighten',
          'python3 scripts/ci/line_lengths.py --raise'),
         ('reads_skill', 'tests/test_line_lengths.py', 'no suite'),
+        ('remedy', 'a number is never raised by hand',
+         'a number may be raised by hand'),
     )
     for name, old, new in mutations:
         path = Path(tmp) / f'{name}.md'
