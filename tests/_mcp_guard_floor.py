@@ -628,13 +628,11 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'quality < 1 or quality > 100',
      'tests/test_screenshot_quality.py::'
      'test_screenshot_refuses_a_quality_outside_one_to_hundred'),
-    # Both raise sites are one guard: a request that got no complete answer.
-    # The named test met the read-side one as an IncompleteRead traceback
-    # before the sites existed.
+    # The URLError site is met by a refused connect; the HTTPException site by
+    # a cut-off read.
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e.reason) from e',
-     'tests/test_cli_waits.py::'
-     'test_a_truncated_answer_is_a_connection_failure_not_a_traceback'),
+     'tests/test_cli.py::test_connection_failure_is_a_clean_error'),
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e) from e',
      'tests/test_cli_waits.py::'
