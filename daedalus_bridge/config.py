@@ -77,6 +77,6 @@ MAX_SEGMENTS_PER_JOB = env_int(
 MAX_SEGMENT_JOB_SIZE = env_int(
     'DAEDALUS_MAX_SEGMENT_JOB_SIZE', 4 * 1024 * 1024 * 1024, 0)
 
-# Command files expire when no SSE reader claims them. The queue itself lives
-# in server.py; this value is shared by its producer and expiry worker.
+# Command files expire when no SSE reader claims them. Queue lifecycle:
+# daedalus_bridge.command_queue; TTL consumers: stream delivery and GC.
 CMD_TTL = env_positive_float('DAEDALUS_CMD_TTL', 90)
