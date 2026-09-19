@@ -1,9 +1,9 @@
 """The synthetic snippets that red-exercise the repo-layout audit's
-per-launch refusal limbs, at least one row per limb; the source-tier
-limbs (import aliases, from-imports, the no-plain-import-subprocess
-gate, unpack-derived names, eval/exec, machinery members, undefined
-names, receiver resolution, no visible launch) are outside this
-table's scope."""
+refusal limbs, at least one row per refusal site in both tiers: the
+per-launch limbs, and the source-tier limbs (import aliases,
+from-imports, the no-plain-import gate, unpack-derived names,
+eval/exec, machinery members, undefined names, receiver resolution,
+no visible launch)."""
 LAUNCH_REFUSAL_ROWS = (
     ('clone-without-init.defaultBranch',
      "import subprocess\n"
@@ -48,4 +48,59 @@ LAUNCH_REFUSAL_ROWS = (
      "subprocess.check_output(['git', 'status'], check=True)\n",
      'launches through subprocess.check_output, which the audit does '
      'not see'),
+    ('import-alias',
+     "import subprocess as sp\n"
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n",
+     'aliases the subprocess import'),
+    ('from-import',
+     "import subprocess\n"
+     "from subprocess import run\n"
+     "subprocess.run(['git', 'status'], check=True)\n",
+     'from-imports subprocess'),
+    ('no-plain-import',
+     "subprocess.run(['git', 'status'], check=True)\n",
+     'declares no plain "import subprocess"'),
+    ('unpack-derived-name-assignment',
+     "import subprocess\n"
+     "launcher = subprocess.run\n"
+     "a, b = launcher(['git', 'status'], check=True)\n",
+     'unpacks subprocess-derived values the audit cannot follow'),
+    ('unpack-derived-name-for-target',
+     "import subprocess\n"
+     "launcher = subprocess.run\n"
+     "for word, flag in launcher(['git', 'status'], check=True):\n"
+     "    pass\n",
+     'unpacks subprocess-derived values the audit cannot follow'),
+    ('eval-call',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "eval('subprocess.run([\"git\", \"status\"], check=True)')\n",
+     'calls eval, which the audit cannot resolve'),
+    ('machinery-member-call',
+     "import subprocess\n"
+     "import functools\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "functools.reduce(subprocess.run, [])\n",
+     'calls functools.reduce, which the audit cannot resolve'),
+    ('undefined-callee-name',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "unknown_launcher(['git', 'status'], check=True)\n",
+     "calls undefined name 'unknown_launcher'"),
+    ('receiver-through-call',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "getattr(subprocess, 'run')(['git', 'status'], check=True)\n",
+     'calls through a receiver the audit cannot resolve'),
+    ('receiver-through-subscript',
+     "import subprocess\n"
+     "import sys\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "sys.modules['subprocess'].run(['git', 'status'], check=True)\n",
+     'calls through a receiver the audit cannot resolve'),
+    ('no-visible-launch',
+     "import subprocess\n"
+     "print('git status')\n",
+     'declares no launch the audit can see through'),
 )
