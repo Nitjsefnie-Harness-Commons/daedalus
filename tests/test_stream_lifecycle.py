@@ -514,6 +514,7 @@ def test_inherited_daedalus_variables_do_not_reach_a_bridge_child(tmp):
             del os.environ['DAEDALUS_STREAM_KEEPALIVE']
         else:
             os.environ['DAEDALUS_STREAM_KEEPALIVE'] = prior
+    assert os.environ.get('DAEDALUS_STREAM_KEEPALIVE') == prior
 
 
 def test_numeric_environment_settings_fail_cleanly_at_startup(tmp):
