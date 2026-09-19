@@ -16,7 +16,8 @@ CALIBRATION_GAP = Decimal('1.5')
 _ONE_DECIMAL = Decimal('0.1')
 _SCHEMA_VERSION = 1
 _COVERAGE_LANGUAGES = ('python', 'javascript')
-_TOP_LEVEL_FIELDS = ('schema_version', 'coverage', 'module_size_baseline')
+_BASELINE_FIELDS = ('module_size_baseline', 'long_line_baseline')
+_TOP_LEVEL_FIELDS = ('schema_version', 'coverage', *_BASELINE_FIELDS)
 _COVERAGE_FIELDS = ('measured', 'floor')
 _FIELD_LABELS = {
     'thresholds': 'field: {field}',
@@ -159,22 +160,27 @@ def normalise(data):
             'floor': floor,
         }
 
-    baseline = data['module_size_baseline']
-    if not isinstance(baseline, dict):
-        raise ValueError('module_size_baseline must be an object')
-    normalised_baseline = {}
-    for path, value in baseline.items():
-        safe_path = _module_path(path)
-        count = _number(value, f'module_size_baseline.{safe_path}')
-        if count <= 0 or count != count.to_integral_value():
-            raise ValueError(
-                f'module_size_baseline.{safe_path} must be a positive integer')
-        normalised_baseline[safe_path] = int(count)
-    return {
+    normalised = {
         'schema_version': _SCHEMA_VERSION,
         'coverage': normalised_coverage,
-        'module_size_baseline': dict(sorted(normalised_baseline.items())),
     }
+    for member in _BASELINE_FIELDS:
+        normalised[member] = _baseline(data[member], member)
+    return normalised
+
+
+def _baseline(baseline, member):
+    if not isinstance(baseline, dict):
+        raise ValueError(f'{member} must be an object')
+    normalised = {}
+    for path, value in baseline.items():
+        safe_path = _module_path(path)
+        count = _number(value, f'{member}.{safe_path}')
+        if count <= 0 or count != count.to_integral_value():
+            raise ValueError(
+                f'{member}.{safe_path} must be a positive integer')
+        normalised[safe_path] = int(count)
+    return dict(sorted(normalised.items()))
 
 
 def load(path=THRESHOLDS):
@@ -196,6 +202,10 @@ def coverage(data, language):
 
 def module_size_baseline(data):
     return dict(normalise(data)['module_size_baseline'])
+
+
+def long_line_baseline(data):
+    return dict(normalise(data)['long_line_baseline'])
 
 
 def _json_ready(value):

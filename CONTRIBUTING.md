@@ -124,7 +124,8 @@ npx --no-install eslint $(git ls-files '*.js' ':!:examples/*')
 
 `pip install -r requirements-dev.txt -r requirements-test.txt` gets the pinned
 toolchain. Formatting opinions are switched off on purpose (`max-line-length =
-10000`), so treat anything the linters *do* flag as a real finding.
+10000`), so treat anything the linters *do* flag as a real finding; the
+79-column limit is gated by `python3 tests/test_line_lengths.py` instead.
 
 Some tests need `node` or Chromium and skip cleanly without them. **A skip is
 not a pass** — the extension-relay and real-page tests are where the browser
