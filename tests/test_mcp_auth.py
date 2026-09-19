@@ -134,7 +134,8 @@ def test_carrier_json_object_equality_reflects_duplicate_keys(tmp):
     only one of them repeated a key — that repeat is otherwise invisible."""
     del tmp
     auth = _auth_module()
-    single = json.loads('{"job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
+    single = json.loads(
+        '{"job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
     duplicated = json.loads(
         '{"job": "a", "job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
     assert dict(single) == dict(duplicated), (dict(single), dict(duplicated))
@@ -148,7 +149,8 @@ def test_carrier_json_object_inequality_against_a_non_dict_stays_true(tmp):
     truthy, so a `__ne__` that just negated it would report these as equal."""
     del tmp
     auth = _auth_module()
-    carrier = json.loads('{"job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
+    carrier = json.loads(
+        '{"job": "b"}', object_pairs_hook=auth.CarrierJSONObject)
     for other in (5, None, 'job', [1]):
         assert carrier != other, (carrier, other)
         assert not (carrier == other), (carrier, other)

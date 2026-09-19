@@ -201,7 +201,7 @@ def test_the_background_relays_the_response_url_and_status_text(tmp):
         assert field in response, (field, response)
 
 
-_CLIPBOARD_RELAY_HARNESS = r"""
+_CLIPBOARD_RELAY_HARNESS = (r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -287,7 +287,8 @@ function flushMessages() {
   const isPromise = !!(returned && typeof returned.then === 'function');
   if (isPromise) {
     returned.then(() => { settled = 'resolved'; },
-      (error) => { settled = 'rejected'; reported = String(error && error.message); });
+      (error) => { settled = 'rejected'; reported = String(error &&"""
+                            r""" error.message); });
   }
   // Let the clipboard promise settle, then deliver whatever the content
   // script posted back in response to it.
@@ -305,7 +306,7 @@ function flushMessages() {
       .map((m) => ({ error: m.error || null })),
   }), () => process.exit(0));
 })();
-"""
+""")
 
 
 def _run_clipboard_relay_harness(mode):
@@ -350,7 +351,7 @@ def test_the_extension_declares_the_permission_its_clipboard_write_needs(tmp):
     assert 'clipboardWrite' in manifest.get('permissions', []), manifest
 
 
-_DOWNLOAD_RELAY_HARNESS = r"""
+_DOWNLOAD_RELAY_HARNESS = (r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -387,8 +388,10 @@ const chrome = {
       if (mode === 'lastError') {
         // Chrome's shape for an undelivered message: lastError set, and the
         // callback invoked with no response at all.
-        chrome.runtime.lastError = { message: 'Could not establish connection.' };
-        try { callback(undefined); } finally { chrome.runtime.lastError = null; }
+        chrome.runtime.lastError = { message: 'Could not establish"""
+                           r""" connection.' };
+        try { callback(undefined); } finally { chrome.runtime.lastError"""
+                           r""" = null; }
         return;
       }
       if (mode === 'empty') return callback({});
@@ -434,7 +437,7 @@ windowObject.GM.download({
 flushMessages();
 
 process.stdout.write(JSON.stringify({ events }), () => process.exit(0));
-"""
+""")
 
 
 def _run_download_relay_harness(mode):
@@ -445,7 +448,8 @@ def _run_download_relay_harness(mode):
          str(ROOT / 'extension' / 'content.js'),
          str(ROOT / 'extension' / 'page.js'), mode],
         cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
 
 

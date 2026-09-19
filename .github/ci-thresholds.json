@@ -21,31 +21,10 @@
   "long_line_baseline": {
     "scripts/check_versions.py": 9,
     "tests/test_bridge_startup.py": 2,
-    "tests/test_ci_workflows.py": 4,
     "tests/test_cli.py": 16,
-    "tests/test_dashboard_accessibility.py": 4,
-    "tests/test_dashboard_behaviour.py": 4,
-    "tests/test_eval_relay.py": 1,
-    "tests/test_extension_boundary.py": 1,
-    "tests/test_extension_policy.py": 6,
-    "tests/test_gitignore_generator.py": 1,
-    "tests/test_gm_relay_authority.py": 1,
-    "tests/test_gm_storage.py": 11,
-    "tests/test_gm_transfers.py": 4,
-    "tests/test_mcp_auth.py": 2,
-    "tests/test_mcp_refusal_drain.py": 1,
     "tests/test_mcp_server.py": 24,
-    "tests/test_path_safety.py": 22,
-    "tests/test_real_browser_eval.py": 1,
-    "tests/test_release_scan.py": 7,
     "tests/test_repo_layout.py": 5,
-    "tests/test_segment_capability.py": 4,
     "tests/test_segment_jobs.py": 14,
-    "tests/test_segment_storage.py": 12,
-    "tests/test_speed_measurement.py": 2,
-    "tests/test_stream_lifecycle.py": 3,
-    "tests/test_version_contract.py": 22,
-    "tests/test_worker_runtime.py": 1,
-    "tests/test_workflow_bash.py": 1
+    "tests/test_version_contract.py": 22
   }
 }

@@ -48,7 +48,8 @@ def test_legacy_segment_job_migrates_with_existing_usage(tmp):
         record_path.write_text(json.dumps(legacy))
 
         status, body = mint_job(base, 'othertok', job)
-        assert status == 401 and json.loads(record_path.read_text(encoding='utf-8')) == legacy, (
+        assert status == 401 and json.loads(
+            record_path.read_text(encoding='utf-8')) == legacy, (
             status, body)
 
         status, body = mint_job(base, TOK, job)
@@ -167,7 +168,8 @@ def test_segment_replacement_reuses_count_and_byte_quota(tmp):
 
 
 def test_segment_index_is_bound_by_minted_job_quota(tmp):
-    """A page cannot turn a small trusted job quota into a sparse huge index."""
+    """A page cannot turn a small trusted job quota into a sparse huge
+    index."""
     env = {
         **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
@@ -188,14 +190,16 @@ def test_segment_index_is_bound_by_minted_job_quota(tmp):
         assert not list((Path(docroot) / 'segments' / job).glob('*.ts'))
 
         record = json.loads(
-            (Path(docroot) / 'segments' / f'{job}.json').read_text(encoding='utf-8'))
+            (Path(docroot) / 'segments' / f'{job}.json').read_text(
+                encoding='utf-8'))
         assert record['max_segment_index'] == 10, record
         assert record['max_segment_count'] == 1, record
         assert record['max_bytes'] == 16, record
 
 
 def test_segment_count_is_bound_by_minted_job_quota(tmp):
-    """Distinct files stop at the record's count even if request totals vary."""
+    """Distinct files stop at the record's count even if request totals
+    vary."""
     env = {
         **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
@@ -214,13 +218,15 @@ def test_segment_count_is_bound_by_minted_job_quota(tmp):
         status, body = post_segment(
             base, job, sig, '1', payload=b'x', total='999999')
         assert status == 413, (status, body)
-        assert json.loads(body)['error'] == 'segment count limit exceeded', body
+        assert json.loads(body)['error'] == 'segment count limit exceeded', (
+            body)
         stored = list((Path(docroot) / 'segments' / job).glob('*.ts'))
         assert len(stored) == 2, stored
 
 
 def test_segment_bytes_are_bound_by_minted_job_quota(tmp):
-    """Individually small bodies cannot cross the aggregate per-job byte cap."""
+    """Individually small bodies cannot cross the aggregate per-job byte
+    cap."""
     env = {
         **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
@@ -265,7 +271,8 @@ def test_concurrent_segment_writes_share_one_quota_snapshot(tmp):
             barrier.wait(timeout=5)
             replies = [future.result(timeout=10) for future in futures]
 
-        assert sorted(status for status, _body in replies) == [200, 413], replies
+        assert sorted(status for status, _body in replies) == [200, 413], (
+            replies)
         stored = list((Path(docroot) / 'segments' / job).glob('*.ts'))
         assert len(stored) == 1 and stored[0].read_bytes() == b'abc', stored
 
@@ -344,7 +351,8 @@ def test_a_stale_temp_never_enters_the_accounting_and_is_swept_on_resume(tmp):
         assert (seg_dir / '000000.ts').read_bytes() == b'abc'
         record_path = Path(docroot) / 'segments' / (job + '.json')
         record = json.loads(record_path.read_text(encoding='utf-8'))
-        assert (record['stored_count'], record['stored_bytes']) == (1, 3), record
+        assert (record['stored_count'], record['stored_bytes']) == (1, 3), (
+            record)
 
         # The owner's re-mint is the resume path, and it sweeps.
         status, again = mint_job(base, TOK, job)
@@ -404,14 +412,18 @@ def test_segment_storage_never_touches_the_old_tmp_root(tmp):
         sig = minted['sig']
         status, _ = _util.request(
             base + f'/segment?job={job}&seg=1&total=1&sig={sig}', 'POST',
-            body=b'bytes', headers={'Content-Type': 'application/octet-stream'})
+            body=b'bytes',
+            headers={'Content-Type': 'application/octet-stream'})
         assert status == 200, status
-        status, body = _util.get_json(base + f'/segment-status?job={job}&sig={sig}')
+        status, body = _util.get_json(
+            base + f'/segment-status?job={job}&sig={sig}')
         assert status == 200 and body['count'] == 1, (status, body)
         # Everything landed under the bridge's own data root.
-        assert (Path(docroot) / 'segments' / job / '000001.ts').read_bytes() == b'bytes'
+        assert (Path(docroot) / 'segments' / job
+                / '000001.ts').read_bytes() == b'bytes'
     after = set(TMP_SEG_ROOT.iterdir()) if TMP_SEG_ROOT.is_dir() else set()
-    assert after == before, f'the old world-shared root changed: {after - before}'
+    assert after == before, (
+        f'the old world-shared root changed: {after - before}')
 
 
 def test_a_failing_accounting_write_still_leaves_the_quota_enforced(tmp):
