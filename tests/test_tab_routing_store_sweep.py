@@ -20,7 +20,7 @@ def _flow(*lines, invoke=None):
     body = ['send = ordinary', *lines]
     if invoke is not None:
         body.extend(('send = ext_cmd', f'return {invoke}'))
-    return '\n'.join(body).replace('_CALL', _CALL)
+    return '\n'.join(body)
 
 
 CASES = [
@@ -96,6 +96,22 @@ CASES = [
     ('update-keyword-unknown', _flow(
         'box = {}', _UNKNOWN, f'pool.append({_FORWARD})',
         'box.update(k=unknown())', invoke=_TABCALL), (1, 1)),
+    ('setdefault-unknown', _flow(
+        'box = {}', _UNKNOWN, f'pool.append({_FORWARD})',
+        'box.setdefault("k", unknown())', invoke=_TABCALL), (1, 1)),
+    ('dict-unknown', _flow(
+        _UNKNOWN, "pool.append({'k': " + _FORWARD + '})',
+        'd = dict(unknown())',
+        invoke="d['k']('_focus', 'focus-tab', tab=int(args.chrome_tab))"),
+     (1, 1)),
+    ('annassign-unknown', _flow(
+        'box = {}', _UNKNOWN, f'pool.append({_FORWARD})',
+        'box["k"]: object = unknown()', invoke=_TABCALL), (1, 1)),
+    ('spread-unknown-name', _flow(
+        _UNKNOWN, "pool.append({'j': " + _FORWARD + '})',
+        'box = unknown()', 'd = {**box}',
+        invoke="d['j']('_focus', 'focus-tab', tab=int(args.chrome_tab))"),
+     (1, 1)),
     ('iteration-of-copy', _flow(
         'box = {}', f'box["k"] = {_LAMBDA}', 'copy = dict(box)',
         'list(copy)', 'list(box)'), (0, 0)),
@@ -109,11 +125,12 @@ CASES = [
 
 
 def test_store_form_verdicts(tmp):
-    observed = []
+    bad = []
     for label, body, expected in CASES:
         actual = _tracked_focus_verdict(tmp, body, counts=True)
-        assert actual == expected, (label, actual, expected)
-        observed.append((label, actual))
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
 
 
 def main():
