@@ -109,9 +109,17 @@ export function mount(container) {
     if (!token) { listEl.innerHTML = '<div class="dim italic small">no token.</div>'; return; }
     listEl.innerHTML = '<div class="dim italic small">loading…</div>';
     try {
-      const r = await api.get(`/upload?limit=${PAGE_SIZE}&offset=${offset}`);
-      items = r.items || [];
-      total = r.total || 0;
+      // A delete can shrink total below this load's offset; keep reading
+      // until the offset names a page the total still has.
+      for (;;) {
+        const r = await api.get(`/upload?limit=${PAGE_SIZE}&offset=${offset}`);
+        items = r.items || [];
+        total = r.total || 0;
+        const lastPage =
+          Math.max(0, Math.ceil(total / PAGE_SIZE) - 1) * PAGE_SIZE;
+        if (offset <= lastPage) break;
+        offset = lastPage;
+      }
       render();
     } catch (e) {
       clear(listEl);
@@ -123,7 +131,10 @@ export function mount(container) {
     const q = (filterEl.value || '').toLowerCase();
     const visible = q ? items.filter(f => (f.id + '/' + f.filename).toLowerCase().includes(q)) : items;
     document.querySelector('#s11 [data-sub]').textContent = `${total} total`;
-    metaEl.textContent = `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`;
+    const last = Math.min(offset + PAGE_SIZE, total);
+    metaEl.textContent = total === 0
+      ? '0 / 0'
+      : `${offset + 1}–${last} / ${total}`;
     prevBtn.disabled = offset === 0;
     nextBtn.disabled = offset + PAGE_SIZE >= total;
     release();
