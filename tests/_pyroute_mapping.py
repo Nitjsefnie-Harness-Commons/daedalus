@@ -67,7 +67,6 @@ def _dict_value(node, state):
             return DeferredContainer(
                 {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
         items.update(value.items)
-        items.update(value.items)
     return DeferredContainer(
         items, len(node.values), 'dict') if items else None
 
