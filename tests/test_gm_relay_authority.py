@@ -124,8 +124,7 @@ const context = vm.createContext({
 // One message, one answer, as content.js relays for a page. A handler that
 // throws instead of answering rejects here, and the rejection is recorded
 // rather than hidden: from the page, a callback that throws is
-// indistinguishable from an answer that never came. Every sendResponse call
-// is pushed onto `responses`, so a test asserts the answer count.
+// indistinguishable from an answer that never came.
 function send(message) {
   return new Promise((resolve, reject) => {
     const responses = [];
@@ -250,7 +249,8 @@ def test_a_page_can_open_only_web_urls(tmp):
     `chrome.tabs.create` accepts URLs a page could never navigate to itself,
     and the relay handed it the page's URL unread — so a page could open
     `chrome://` pages, or a `javascript:` URL, with the extension's authority.
-    A refused URL is answered `{error}` and never reaches the browser.
+    A refused URL is answered `{error}` and never reaches the browser, and
+    every outcome answers exactly once.
     """
     del tmp
     outcome = _run_relay_authority('open')
@@ -260,9 +260,11 @@ def test_a_page_can_open_only_web_urls(tmp):
         assert refused['error'], refused
         assert refused['tabId'] is None, refused
         assert refused['threw'] is None, refused
+        assert refused['responses'] == 1, refused
     opened = by_url['https://example.com/']
     assert opened['error'] is None, opened
     assert opened['tabId'] == 101, opened
+    assert opened['responses'] == 1, opened
     assert outcome['created'] == ['https://example.com/'], outcome
 
 
