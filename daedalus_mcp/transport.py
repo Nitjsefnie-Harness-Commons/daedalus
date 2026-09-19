@@ -102,10 +102,11 @@ class BridgeSession:
     def auth(self) -> dict[str, str]:
         """The bridge's pre-body credential carrier.
 
-        The bridge settles credentials before it reads a request body, so a body
-        token alone caps what this client may send at the unauthenticated window.
-        It is also what keeps a reusable credential out of a request target, which
-        a reverse-proxy access log retains and a query parameter cannot avoid.
+        The bridge settles credentials before it reads a request body, so a
+        body token alone caps what this client may send at the unauthenticated
+        window. It is also what keeps a reusable credential out of a request
+        target, which a reverse-proxy access log retains and a query parameter
+        cannot avoid.
         Same header, same value the MCP listener itself required to get here.
         """
         return {'Authorization': f'Bearer {self.token()}'}
@@ -138,9 +139,9 @@ class BridgeSession:
         return r.json()
 
     async def get_raw(self, route: str, **params) -> bytes:
-        """Fetch one bridge route as raw bytes. The route is named `route` rather
-        than `path` so a caller can pass a `path` query parameter, which the
-        screenshot download does."""
+        """Fetch one bridge route as raw bytes. The route is named `route`
+        rather than `path` so a caller can pass a `path` query parameter,
+        which the screenshot download does."""
         r = await self.http_client().get(
             route, params=params, headers=self.auth())
         r.raise_for_status()
@@ -161,15 +162,17 @@ class BridgeSession:
                           expect_delivery: str | None = None) -> dict:
         """Poll until the named command delivery is conditionally consumed.
 
-        The delivery id rejects stale results from an earlier invocation even when
-        its command id is reused. The result generation makes peek then consume
-        safe when another caller replaces the shared slot between those requests.
+        The delivery id rejects stale results from an earlier invocation even
+        when its command id is reused. The result generation makes peek then
+        consume safe when another caller replaces the shared slot between
+        those requests.
         An absent or empty delivery id on either side never matches, so a poll
         sent without an expectation admits nothing and always times out.
 
-        The wait ramps 20ms -> `interval` instead of sleeping a flat `interval` up
-        front: most commands finish in tens of milliseconds, and the fixed first
-        sleep was adding half a second of dead time to every single tool call."""
+        The wait ramps 20ms -> `interval` instead of sleeping a flat `interval`
+        up front: most commands finish in tens of milliseconds, and the fixed
+        first sleep was adding half a second of dead time to every single tool
+        call."""
         peek = {}
         if tab:
             peek['tab'] = tab
@@ -219,23 +222,26 @@ class BridgeSession:
         """Refuse a wait that cannot wait, BEFORE the command is submitted.
 
         The command is PUT first and the deadline evaluated afterwards, so a
-        non-positive or non-finite timeout polls zero times and raises a timeout
-        for a command the browser has already been handed. The caller is told
-        nothing ran; retrying then runs the side effect a second time.
+        non-positive or non-finite timeout polls zero times and raises a
+        timeout for a command the browser has already been handed. The caller
+        is told nothing ran; retrying then runs the side effect a second time.
         """
         if not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError(f'timeout must be a finite positive number of seconds; got {timeout!r}')
+            raise ValueError(
+                'timeout must be a finite positive number of seconds; '
+                f'got {timeout!r}')
         return timeout
 
     async def ext_cmd(self, cmd_id: str, cmd_type: str,
                       timeout: float = 10.0,
                       include_roundtrip: bool = False, **fields) -> Any:
-        """Send a typed extension command (tab=extension) and return result.result.
+        """Send a typed extension command (tab=extension) and return
+        result.result.
 
-        The server computes `roundtrip_ms` (enqueue -> result arrival) as a sibling of
-        `result` in the body, so returning result.result alone drops it.
-        include_roundtrip merges it back in, for tools where how long the extension
-        took is part of the answer."""
+        The server computes `roundtrip_ms` (enqueue -> result arrival) as a
+        sibling of `result` in the body, so returning result.result alone drops
+        it. include_roundtrip merges it back in, for tools where how long the
+        extension took is part of the answer."""
         self.checked_timeout(timeout)
         payload = {
             'id': cmd_id, 'type': cmd_type, 'tab': 'extension', **fields}

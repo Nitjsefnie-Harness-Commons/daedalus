@@ -40,7 +40,8 @@ def register(mcp, bridge):
             fields['tabId'] = int(chrome_tab)
         result_blob = await bridge.ext_cmd(
             cmd_id, 'screenshot', timeout=timeout, **fields)
-        meta = {'path': result_blob.get('path', ''), 'size': result_blob.get('size', 0)}
+        meta = {'path': result_blob.get('path', ''),
+                'size': result_blob.get('size', 0)}
         if not include_image:
             return meta
         # By path, not by id: ids are reused, so an id names a directory rather
@@ -52,10 +53,11 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def segment_job(job: str) -> dict:
-        """Create (or re-fetch) the HLS segment job `job` and return its job-scoped
-    capability as {ok, sig}. The sig is what examples/hls-segment-relay.js
-    substitutes for __SIG__; minting is idempotent for the owning token, so a
-    resumed run gets the same one back."""
+        """Create (or re-fetch) the HLS segment job `job` and return its
+    job-scoped capability as {ok, sig}. The sig is what
+    examples/hls-segment-relay.js substitutes for __SIG__; minting is
+    idempotent for the owning token, so a resumed run gets the same one
+    back."""
         return await bridge.post('/segment-job', {'job': job})
 
     @mcp.tool()
@@ -72,7 +74,8 @@ def register(mcp, bridge):
         if found.status_code == 404:
             raise RuntimeError(f'segment_status: no job named {job!r}')
         if found.status_code == 409:
-            raise RuntimeError(f'segment_status: job {job!r} is owned by a different token')
+            raise RuntimeError(
+                f'segment_status: job {job!r} is owned by a different token')
         found.raise_for_status()
         sig = found.json()['sig']
         r = await client.get('/segment-status', params={'job': job},
@@ -107,7 +110,8 @@ def register(mcp, bridge):
     @mcp.tool()
     async def uploads(upload_id: str = '', limit: int | None = None,
                       offset: int | None = None):
-        """List uploaded files. When limit/offset given, returns {items,total,limit,offset}.
+        """List uploaded files. When limit/offset given, returns
+    {items,total,limit,offset}.
     Without paging, returns a bare array (back-compat with the server surface).
     """
         params: dict = {}
@@ -121,8 +125,8 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def delete_upload(upload_id: str = '', filename: str = '') -> dict:
-        """Delete uploads. No args → all for token; id only → all files under that id;
-    id+filename → single file. Returns the server response."""
+        """Delete uploads. No args → all for token; id only → all files under
+    that id; id+filename → single file. Returns the server response."""
         # A filename alone has no narrower target than the whole token, so it
         # would delete every upload rather than the one file it names.
         if filename and not upload_id:

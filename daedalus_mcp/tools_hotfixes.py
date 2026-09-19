@@ -25,19 +25,22 @@ def register(mcp, bridge):
 
     @mcp.tool()
     async def clear_hotfixes(include_permanent: bool = False) -> dict:
-        """Remove stored hotfixes. By default, permanent fixes are preserved; set `include_permanent=True` to nuke everything."""
+        """Remove stored hotfixes. By default, permanent fixes are preserved;
+        set `include_permanent=True` to nuke everything."""
         return await bridge.ext_cmd(
             '_clear_all_hf', 'clear-all-hotfixes',
             includePermanent=include_permanent)
 
     @mcp.tool()
     async def list_hotfixes() -> dict:
-        """List stored hotfixes. Returns {version, fixes:[{id,ts,code},...]}."""
+        """List stored hotfixes. Returns
+        {version, fixes:[{id,ts,code},...]}."""
         return await bridge.ext_cmd('_list_hf', 'list-hotfixes')
 
     @mcp.tool()
     async def set_permanent(fix_id: str, permanent: bool) -> dict:
-        """Toggle the permanent flag on an existing hotfix. Permanent fixes survive extension version bumps. Returns {id, permanent, found}."""
+        """Toggle the permanent flag on an existing hotfix. Permanent fixes
+        survive extension version bumps. Returns {id, permanent, found}."""
         return await bridge.ext_cmd(
             '_set_perm', 'set-permanent', fixId=fix_id,
             permanent=permanent)
