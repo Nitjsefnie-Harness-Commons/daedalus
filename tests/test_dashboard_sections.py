@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""What two dashboard sections put on the wire, run rather than read.
+"""What three dashboard sections put on the wire, run rather than read.
 
-The uploads browser and the eval panel are the sections whose mistakes
-leave the page: a link or a request target that carries the token into
-browser history and the proxy access log, an object URL that is never
-revoked, or a command aimed at a tab the operator never chose. Each
-shipped module is mounted into a small DOM in Node, driven through its
-own buttons, and judged on the fetches it makes, the hrefs it renders,
-the object URLs it lets go of and the commands it sends.
+The uploads browser, the eval panel and the settings pane are the
+sections whose mistakes leave the page: a link or a request target that
+carries the token into browser history and the proxy access log, an
+object URL that is never revoked, a command aimed at a tab the operator
+never chose, or a caveat that stops saying where an untargeted command
+runs. Each shipped module is mounted into a small DOM in Node, driven
+through its own buttons, and judged on the fetches it makes, the hrefs
+it renders, the object URLs it lets go of, the commands it sends and
+the status lines it paints about them.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -589,10 +592,13 @@ const refused = {
   selected: sel.value, puts: puts.length, status: metaEl.textContent,
 };
 untargeted.click();
+// The pre-flight status stands only between the click and the await.
+const statusBefore = metaEl.textContent;
 await bounded(settle(), 'run in the active tab', _dashnodeStepTimeoutMs);
 const activeTab = {
   puts: puts.length, tab: puts.length ? puts[puts.length - 1].tab : null,
   label: untargeted.textContent, title: untargeted.attrs.title || '',
+  statusBefore, statusAfter: metaEl.textContent,
 };
 tabs = [{ tabId: '11', title: 'first' }];
 for (const fn of listeners) fn({ type: 'tabs-synced' });
@@ -603,11 +609,21 @@ await bounded(settle(), 'run against a chosen tab', _dashnodeStepTimeoutMs);
 const targeted = {
   puts: puts.length, tab: puts.length ? puts[puts.length - 1].tab : null,
 };
+untargeted.click();
+await bounded(settle(), 'active-tab run with a tab selected',
+  _dashnodeStepTimeoutMs);
+const chosen = puts[puts.length - 1] || {};
+const activeTabChosen = {
+  puts: puts.length, tab: chosen.tab, token: chosen.token, code: chosen.code,
+  id: typeof chosen.id === 'string' && chosen.id.length > 0,
+  keys: Object.keys(chosen).sort(),
+};
 phase('dashboard call settled');
-process.stdout.write(JSON.stringify({ refused, activeTab, targeted }));
+process.stdout.write(JSON.stringify(
+  { refused, activeTab, targeted, activeTabChosen }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=6, module=True, arguments=(
+""", bounded_steps=7, module=True, arguments=(
     ROOT / 'dashboard' / 'sections' / 'eval.js',))
 
 
@@ -626,6 +642,77 @@ def test_run_refuses_an_empty_target_and_names_where_untargeted_code_runs(
         assert 'active tab' in text.lower(), seen
         assert 'all tabs' not in text.lower(), seen
     assert seen['targeted'] == {'puts': 2, 'tab': '11'}, seen
+
+
+def test_an_active_tab_run_sends_no_tab_even_with_a_tab_selected(_tmp):
+    """Selecting tab 11 changes nothing for the explicit active-tab
+    button: its command still names no tab and carries every field the
+    section always sends, while plain RUN driven with the same selection
+    sends '11' — the control that holds the selected half of the
+    targeting conditional. The repro mutation that drops the
+    conditional (`const tabId = sel.value`) turns the empty-target
+    assertion below into tab '11' and fails here."""
+    result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['targeted'] == {'puts': 2, 'tab': '11'}, seen
+    assert seen['activeTabChosen'] == {
+        'puts': 3, 'tab': '', 'token': 'dashboard-token',
+        'code': 'document.title', 'id': True,
+        'keys': ['code', 'id', 'tab', 'token']}, seen
+
+
+def test_eval_status_names_the_active_tab_on_both_untargeted_surfaces(_tmp):
+    """The two status surfaces of an untargeted run both name the active
+    tab: the pre-flight line the section paints the moment the run
+    starts, and the post-run line the settled envelope repaints. The two
+    fallbacks are separate strings in the section, so each is asserted,
+    and either regressing to the old 'broadcast' reading fails its own
+    assertion."""
+    result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['activeTab']['statusBefore'] == (
+        'tab=active tab  timeout=10000ms'), seen
+    assert re.fullmatch(r'tab=active tab  channel=page  \d+ms',
+                        seen['activeTab']['statusAfter']), seen
+
+
+_SETTINGS_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
+(async () => {
+globalThis.window = { addEventListener() {} };
+phase('dashboard module import started');
+const { mount } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
+phase('dashboard module imported');
+phase('dashboard call started');
+const container = new El('div');
+mount(container);
+const caveat = container.all().find(
+  (el) => el.tag === 'p' && el.textContent.startsWith('Caveat:'));
+if (!caveat) throw new Error('settings caveat paragraph not found');
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({ caveat: caveat.textContent }));
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=1, module=True, arguments=(
+    ROOT / 'dashboard' / 'sections' / 'settings.js',))
+
+
+def test_settings_caveat_says_where_an_untargeted_command_runs(_tmp):
+    """The settings caveat must keep saying an untargeted command runs
+    once, in whichever tab is active — the sentence the issue's
+    mutation replaced with an all-tabs claim, which would tell an
+    operator that one command fans out over every tab. The sentence is
+    asserted whole, and both all-tabs spellings are refused beside it."""
+    result = _dashnode.run_dashboard_node(_SETTINGS_HARNESS)
+    seen = json.loads(result.stdout)
+    assert ('A command that names no tab (exec -b, or "run in active tab"'
+            ' above) runs once, in whichever tab is active — this one, if'
+            ' the dashboard is in front.') in seen['caveat'], seen
+    lowered = seen['caveat'].lower()
+    assert 'all tabs' not in lowered, seen
+    assert 'every tab' not in lowered, seen
 
 
 def main():
