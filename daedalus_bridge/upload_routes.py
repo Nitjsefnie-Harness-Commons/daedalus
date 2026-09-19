@@ -258,7 +258,7 @@ def _stored_file(upload_dir, token, parts, missing):
 def named_file(upload_dir, token, named):
     """GET /upload?path=<id>/<file> — serve that stored file.
 
-    The credential travels in the Authorization: Bearer header.
+    The canonical credential carrier is the Authorization: Bearer header.
     The selector is relative to the namespace the credential established,
     and it is those two components exactly. The listing's `path` begins
     with the token, and a request target is what a proxy access log
