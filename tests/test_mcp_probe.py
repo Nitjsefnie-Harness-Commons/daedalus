@@ -62,6 +62,7 @@ def _rpc_mock(mode):
 
 def test_202_with_a_body_is_still_no_answer(tmp):
     del tmp
+    transport, seen = _rpc_mock('202-with-body')
     old_token = os.environ.get('TOKEN')
     old_url = os.environ.get('DAEDALUS_MCP_URL')
     os.environ['TOKEN'] = TOKEN
@@ -78,7 +79,6 @@ def test_202_with_a_body_is_still_no_answer(tmp):
         else:
             os.environ['DAEDALUS_MCP_URL'] = old_url
 
-    transport, seen = _rpc_mock('202-with-body')
     import httpx
     with httpx.Client(transport=transport) as client:
         answer = probe.rpc(client, None, 'tools/list')
