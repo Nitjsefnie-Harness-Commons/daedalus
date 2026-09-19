@@ -9,7 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary import (observe_extension_worker_paths,  # noqa: E402
-                       run_extension_capability_routes)
+                       run_extension_capability_routes,
+                       run_extension_command_result)
 from _jsread import js_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_runtime import observe_worker_runtime  # noqa: E402
@@ -151,17 +152,18 @@ def test_background_has_only_the_residual_worker_surface(tmp):
 
 
 def test_typed_tabs_command_is_not_served(tmp):
-    """The worker serves no typed tabs command.
+    """Dispatching a typed tabs command posts the unknown-command error.
 
     Every shipped client lists tabs through the bridge's GET /tabs route,
-    so the dispatch arm and its handler are removed rather than
-    maintained.
+    so the dispatched command must reach the default arm and post its
+    error, whatever spelling or shape a reintroduced arm uses.
     """
     del tmp
-    background_path = ROOT / 'extension' / 'background.js'
-    assert "case 'tabs':" not in background_path.read_text(
-        encoding='utf-8')
-    for path in [background_path] + sorted(
+    posted = run_extension_command_result(
+        {'id': 'tabs-command-pin', 'type': 'tabs'})['posted']
+    assert posted == [
+        {'result': None, 'error': 'Unknown command type: tabs'}]
+    for path in [ROOT / 'extension' / 'background.js'] + sorted(
             (ROOT / 'extension' / 'worker').glob('*.js')):
         assert 'handleExtTabs' not in path.read_text(encoding='utf-8'), (
             path)
