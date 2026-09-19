@@ -619,6 +619,15 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_cli.transport', 'positive_count', 'count < 1',
      'tests/test_fetch_timings_count.py::'
      'test_fetch_timings_refuses_a_count_below_one'),
+    ('daedalus_cli.transport', 'quality_limit',
+     "raise argparse.ArgumentTypeError(f'quality must be a whole number; "
+     "got {value!r}') from None",
+     'tests/test_screenshot_quality.py::'
+     'test_screenshot_still_refuses_a_non_integer_quality'),
+    ('daedalus_cli.transport', 'quality_limit',
+     'quality < 1 or quality > 100',
+     'tests/test_screenshot_quality.py::'
+     'test_screenshot_refuses_a_quality_outside_one_to_hundred'),
     # Both raise sites are one guard: a request that got no complete answer.
     # The named test met the read-side one as an IncompleteRead traceback
     # before the sites existed.
