@@ -9,6 +9,7 @@ machinery, so a failure here is a failure on every route at once.
 import http.client
 import json
 import select
+import socket
 import sys
 import time
 import uuid
@@ -130,6 +131,70 @@ def test_a_malformed_content_length_is_refused_not_dropped(tmp):
             assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
                 'error': 'invalid Content-Length'
             }, resp
+
+
+def _refused_exchange(base, request_bytes):
+    """One raw exchange that records how the connection ended.
+
+    raw_request cannot tell a clean close from a reset — it treats the reset
+    as the end of the answer — but which of the two a refused connection
+    ends with is the property under test here, so the reset is recorded
+    rather than swallowed.
+    """
+    port = int(base.rsplit(':', 1)[1])
+    chunks = []
+    reset = None
+    with socket.create_connection(('127.0.0.1', port), timeout=10) as sock:
+        try:
+            sock.sendall(request_bytes)
+            sock.shutdown(socket.SHUT_WR)
+        except OSError:
+            # The refusal is what this exchange invites, so a reset during
+            # the send is part of the traffic it measures; whatever arrived
+            # is still readable below.
+            pass
+        sock.settimeout(3)
+        while True:
+            try:
+                chunk = sock.recv(65536)
+            except socket.timeout:
+                break
+            except ConnectionError as exc:
+                reset = exc
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+    return b''.join(chunks), reset
+
+
+def test_a_refused_body_length_absorbs_the_body_so_the_answer_survives(tmp):
+    """An invalid Content-Length refusal must absorb the declared body.
+
+    A close that leaves request bytes unread arrives as an RST, and an RST
+    discards the answer the client has not read yet — the refusal then
+    reaches the caller as a connection reset or abort. The two invalid-length
+    branches answered and closed on a body still in flight; the drain the
+    oversize and undeclared refusals already apply must absorb it here too.
+
+    The payload stays inside the drain bound on purpose, and is larger than
+    one buffered read swallows, so the close of an undrained refusal lands
+    on real unread traffic rather than a buffer's leftovers.
+    """
+    payload = b'x' * 16384
+    with _util.bridge(tmp) as (base, _docroot):
+        for declared in ('notanumber', '-1'):
+            resp, reset = _refused_exchange(
+                base,
+                (f'POST /result HTTP/1.0\r\nHost: x\r\n'
+                 'Content-Type: application/json\r\n'
+                 f'Content-Length: {declared}\r\n\r\n').encode() + payload)
+            assert resp.startswith(b'HTTP/1.0 400'), (declared, resp[:120])
+            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
+                'error': 'invalid Content-Length'}, (declared, resp)
+            assert reset is None, (declared, reset, resp[:120])
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_a_refused_put_absorbs_its_body_so_the_answer_survives(tmp):
