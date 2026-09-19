@@ -592,5 +592,39 @@ def test_screenshot_fetches_by_id_when_the_extension_names_no_path(_tmp):
         '/screenshot', id='_ss')
 
 
+def test_store_hotfix_schema_pins_nullable_permanent(_tmp):
+    from mcp.server.mcpserver import MCPServer
+    from daedalus_mcp import tools_hotfixes
+
+    server = MCPServer('store-hotfix-schema')
+    tools_hotfixes.register(server, object())
+    tools = asyncio.run(server.list_tools())
+    store_hotfix = next(
+        (tool for tool in tools if tool.name == 'store_hotfix'), None)
+    assert store_hotfix is not None, (
+        'real MCPServer did not return store_hotfix')
+
+    schema = store_hotfix.input_schema
+    permanent = schema['properties']['permanent']
+    assert 'anyOf' in permanent, (
+        'store_hotfix permanent schema lost its nullable anyOf')
+    any_of = [tuple(sorted(member.items()))
+              for member in permanent['anyOf']]
+    assert sorted(any_of) == [
+        (('type', 'boolean'),),
+        (('type', 'null'),),
+    ], (
+        'store_hotfix permanent schema anyOf members are not exactly '
+        'boolean and null')
+
+    required = schema['required']
+    assert 'permanent' not in required, (
+        'store_hotfix permanent must remain optional')
+    assert {'fix_id', 'code'} <= set(required), (
+        'store_hotfix required schema must include fix_id and code')
+    assert 'default' in permanent and permanent['default'] is None, (
+        'store_hotfix permanent schema default must be null')
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
