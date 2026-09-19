@@ -65,10 +65,10 @@ def _dict_value(node, state):
         if value is None or not isinstance(value, DeferredContainer) \
                 or value.kind != 'dict':
             return DeferredContainer(
-                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
+                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
         items.update(value.items)
     return DeferredContainer(
-        items, len(node.values), 'dict') if items else None
+        items, len(node.values), 'dict', node) if items else None
 
 
 def _merge_or_value(node, state):
@@ -83,11 +83,12 @@ def _merge_or_value(node, state):
                 return DeferredContainer(
                     {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
         if isinstance(known, str) and sender_value(known) is not None:
-            return UNPROVABLE_SENDER
+            return DeferredContainer(
+                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
         if isinstance(known, DeferredContainer) and known.kind == 'dict':
             items.update(known.items)
     if not items: return None
-    return DeferredContainer(items, None, 'dict')
+    return DeferredContainer(items, None, 'dict', node)
 
 
 def _dict_call_value(node, state):
@@ -96,21 +97,23 @@ def _dict_call_value(node, state):
         known = _known_value(node.args[0], state)
         if isinstance(known, DeferredContainer) and known.kind == 'dict':
             return DeferredContainer(
-                dict(known.items), known.length, 'dict')
+                dict(known.items), known.length, 'dict', node)
         if known is None and isinstance(node.args[0], ast.Call):
             return DeferredContainer(
-                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
+                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
         return None
     if node.args:
-        return UNPROVABLE_SENDER
+        return DeferredContainer(
+            {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
     items = {}
     for keyword in node.keywords:
         if keyword.arg is None:
-            return UNPROVABLE_SENDER
+            return DeferredContainer(
+                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
         known = _known_value(keyword.value, state)
         if known is not None: items[keyword.arg] = known
     if not items: return None
-    return DeferredContainer(items, len(node.keywords), 'dict')
+    return DeferredContainer(items, len(node.keywords), 'dict', node)
 
 
 def _setdefault_value(node, state):
@@ -167,7 +170,8 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
     if isinstance(node, ast.DictComp):
         value = state.evaluated.get(id(node.value))
         if is_deferred_value(value) or sender_value(value) is not None:
-            return DeferredContainer({DYNAMIC_KEY: value}, None, 'dict')
+            return DeferredContainer(
+                {DYNAMIC_KEY: value}, None, 'dict', node)
     if isinstance(node, ast.Subscript):
         owner = _known_value(node.value, state)
         key = (node.slice.value
@@ -204,7 +208,8 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
             known = _known_value(node.args[1], state) \
                 if len(node.args) > 1 else None
             if static_dict and known is not None:
-                return DeferredContainer({DYNAMIC_KEY: known}, 1, 'dict')
+                return DeferredContainer(
+                    {DYNAMIC_KEY: known}, 1, 'dict', node)
     return sender_resolver(node, state.aliases)
 
 
@@ -244,7 +249,7 @@ def _replace_container(state, owner_name, owner, items):
     sync_cells(state, {owner_name})
 
 
-def _apply_mapping_store(state, owner_name, sources, keywords):
+def _apply_mapping_store(state, owner_name, sources, keywords, node):
     """Merge provable items into the owner; unknown sources fail closed."""
     items = {}
     for source in sources:
@@ -267,7 +272,7 @@ def _apply_mapping_store(state, owner_name, sources, keywords):
     owner = state.callables.get(owner_name)
     if items:
         if owner is None:
-            owner = DeferredContainer({}, None, 'dict')
+            owner = DeferredContainer({}, None, 'dict', node)
             state.callables[owner_name] = owner
         elif not isinstance(owner, DeferredContainer):
             return
@@ -287,7 +292,7 @@ def _apply_setdefault(state, call, owner_name):
     if (isinstance(key, ast.Constant) and isinstance(key.value, str)
             and (owner is None or isinstance(owner, DeferredContainer))):
         if owner is None:
-            owner = DeferredContainer({}, None, 'dict')
+            owner = DeferredContainer({}, None, 'dict', call)
             state.callables[owner_name] = owner
         if key.value not in owner.items:
             _replace_container(state, owner_name, owner,
@@ -314,7 +319,7 @@ def apply_deferred_store(statement, state):
             _apply_mapping_store(
                 state, owner_name, call.args, {
                     keyword.arg: keyword.value for keyword in call.keywords
-                    if keyword.arg is not None})
+                    if keyword.arg is not None}, call)
         elif call.func.attr == 'setdefault':
             _apply_setdefault(state, call, owner_name)
         return
@@ -322,7 +327,8 @@ def apply_deferred_store(statement, state):
         if isinstance(statement.op, ast.BitOr) \
                 and isinstance(statement.target, ast.Name):
             _apply_mapping_store(
-                state, statement.target.id, [statement.value], {})
+                state, statement.target.id, [statement.value], {},
+                statement)
         return
     if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Delete)):
         return
@@ -357,7 +363,7 @@ def apply_deferred_store(statement, state):
             if owner is None:
                 if value is None and (removing or not unknown_call):
                     continue
-                owner = DeferredContainer({}, None, 'dict')
+                owner = DeferredContainer({}, None, 'dict', target)
                 state.callables[owner_name] = owner
             elif not isinstance(owner, DeferredContainer):
                 continue

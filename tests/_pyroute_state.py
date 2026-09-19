@@ -4,8 +4,9 @@ import operator
 from dataclasses import dataclass, field
 
 from _pyroute_values import (CellState, DeferredGenerator,
-                             cell_state_signature, is_deferred_value,
-                             merge_cell_states, sender_value, sync_cells)
+                             cell_state_signature, deferred_signature,
+                             is_deferred_value, merge_cell_states,
+                             sender_value, sync_cells)
 
 OPAQUE_TAB_SPREAD = object()
 UNPROVABLE_SENDER = '?ext_cmd'
@@ -517,9 +518,7 @@ def value_signature(value):
         expr = value.expression
         return ('generator', expr.lineno, expr.col_offset, value.remaining,
                 value.evaluate_zero)
-    if is_deferred_value(value):
-        return ('callable', id(value))
-    return value
+    return deferred_signature(value) or value
 
 
 def payload_state_signature(keys):
