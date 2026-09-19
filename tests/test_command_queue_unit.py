@@ -116,10 +116,9 @@ def test_notify_dashboard_publishes_no_final_name_before_the_replace(tmp):
 
     The SSE drain delivers queue files by name, so a publisher that created
     `<stem>.json` and filled it in place hands the dashboard stream a torn
-    frame -- a staged run observed the final file at five bytes. Pause the
-    writer at exactly the atomic replacement and inspect the queue directory:
-    while the writer holds the document, only the dot-prefixed temp may
-    exist there.
+    frame -- a staged run observed the final file at five bytes. While the
+    writer holds the document, only the dot-prefixed temp may exist in the
+    queue directory.
     """
     queue = _load_queue('command_queue_dashboard_publish_pause')
     cmd_dir = Path(tmp) / 'commands'
