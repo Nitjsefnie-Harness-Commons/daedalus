@@ -49,9 +49,9 @@ def cli_env(**overrides):
     env = {name: value for name, value in os.environ.items()
            if not name.startswith('DAEDALUS_')}
     # PYTHONIOENCODING goes too, so the CLI applies its own rule for a piped
-    # stream instead of inheriting whatever this runner was started with.
-    for k in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID',
-              'PYTHONIOENCODING'):
+    # stream instead of inheriting whatever this runner was started with. A
+    # test that wants a specific one passes it back through overrides.
+    for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
         env.pop(k, None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     env.update(overrides)
