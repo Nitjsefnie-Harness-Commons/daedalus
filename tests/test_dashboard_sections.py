@@ -403,8 +403,8 @@ globalThis.fetch = async (target, init) => {
   const where = String(target);
   if (where.startsWith('/upload?limit=')) {
     fetched.push(where);
-    const params = new URL(where, 'http://d/').searchParams;
-    const offset = Number(params.get('offset'));
+    const query = new URLSearchParams(where.split('?')[1]);
+    const offset = Number(query.get('offset'));
     const items = [];
     for (let n = offset + 1; n <= offset + 50 && n <= total; n++) {
       items.push(file(n));
