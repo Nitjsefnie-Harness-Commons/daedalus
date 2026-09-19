@@ -1,6 +1,6 @@
 /* exported handleCloseTab, handleOpenTab, handleOpenTabs, handleFocusTab */
 /* exported handleNavigate, handleReload, handleInjectCss, handleRemoveCss */
-/* exported handleExtReload, handleFetchTimings, handleExtTabs */
+/* exported handleExtReload, handleFetchTimings */
 /* global VERSION, _fetchTimings, _hasNativeToBase64, postResult */
 
 async function handleCloseTab(cmd) {
@@ -173,19 +173,6 @@ async function handleRemoveCss(cmd) {
       css: cmd.css,
     });
     await postResult(cmd._execution, { tabId, removed: cmd.css.length }, null, 'extension');
-  } catch (e) {
-    await postResult(cmd._execution, null, e.message, 'extension');
-  }
-}
-
-async function handleExtTabs(cmd) {
-  try {
-    const tabs = await chrome.tabs.query({});
-    const result = tabs.map(t => ({
-      id: t.id, url: t.url, title: t.title,
-      active: t.active, windowId: t.windowId,
-    }));
-    await postResult(cmd._execution, result, null, 'extension');
   } catch (e) {
     await postResult(cmd._execution, null, e.message, 'extension');
   }

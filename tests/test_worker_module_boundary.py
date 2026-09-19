@@ -150,6 +150,23 @@ def test_background_has_only_the_residual_worker_surface(tmp):
     assert observed == expected, f'background top-level residual: {observed}'
 
 
+def test_typed_tabs_command_is_not_served(tmp):
+    """The worker serves no typed tabs command.
+
+    Every shipped client lists tabs through the bridge's GET /tabs route,
+    so the dispatch arm and its handler are removed rather than
+    maintained.
+    """
+    del tmp
+    background_path = ROOT / 'extension' / 'background.js'
+    assert "case 'tabs':" not in background_path.read_text(
+        encoding='utf-8')
+    for path in [background_path] + sorted(
+            (ROOT / 'extension' / 'worker').glob('*.js')):
+        assert 'handleExtTabs' not in path.read_text(encoding='utf-8'), (
+            path)
+
+
 def test_non_command_worker_ownership_is_structural(tmp):
     """Non-command exports and listener sites have declared owners."""
     del tmp
@@ -244,7 +261,6 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
         ('worker/tabs.js', 'handleRemoveCss', 'remove-css'),
         ('worker/tabs.js', 'handleExtReload', 'ext-reload'),
         ('worker/tabs.js', 'handleFetchTimings', 'fetch-timings'),
-        ('worker/tabs.js', 'handleExtTabs', 'tabs'),
         ('worker/cdp.js', 'handleCdp', 'cdp'),
         ('worker/netcapture.js', 'handleNetCapture', 'net-capture'),
         ('worker/netcapture.js', 'handleNetCaptureStop', 'net-capture-stop'),
