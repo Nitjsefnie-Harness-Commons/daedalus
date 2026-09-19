@@ -54,7 +54,8 @@ alarm manufactured by the filter.
 cross-file duplicate check is silently skipped.
 
 **Check added lines against 79 characters yourself.** `setup.cfg` sets
-`max-line-length = 10000`, so pycodestyle will not catch a long line.
+`max-line-length = 10000`, so pycodestyle will not catch a long line;
+`python3 tests/test_line_lengths.py` does, against the recorded baseline.
 
 ## Choosing which suites to run
 
@@ -156,6 +157,14 @@ hand. `tests/test_file_sizes.py` gates the policy, pins the script's docstring
 to the remedy a refusal prints, pins the whole policy source to the rule
 above, and reads this paragraph so the named state owner and tightening
 command cannot drift from the implementation.
+
+**The same file's `long_line_baseline` holds the 79-column policy on the same
+terms.** It records how many over-limit lines each tracked Python file still
+carries; a number is never raised by hand and no entry is ever added by hand.
+The remedy for a refusal is to wrap the line, and the shrink is recorded with
+`python3 scripts/ci/line_lengths.py --tighten`, which also drops an entry
+whose file has no over-limit line left. `tests/test_line_lengths.py` gates
+the policy and reads this paragraph the same way.
 
 ## Git and CI
 

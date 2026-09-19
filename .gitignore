@@ -221,6 +221,7 @@
 !/scripts/ci/diff_coverage.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
+!/scripts/ci/line_lengths.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/speed_summary.py
@@ -390,6 +391,7 @@
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
 !/tests/test_jsread_mask.py
+!/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py
 !/tests/test_mcp_entry_point.py
 !/tests/test_mcp_guard_floor.py

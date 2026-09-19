@@ -960,19 +960,23 @@ jobs:
           python scripts/ci/ratchet.py --language javascript \
             --measured "$javascript_measured" \
             --thresholds .github/ci-thresholds.json
-          # The size baseline ratchets the other way: it follows a file down
-          # when it shrinks, so the lines cannot come back for free. Growth is
-          # never written here — that stays a decision a reviewer sees.
+          # The size and long-line baselines ratchet the other way: each
+          # follows a file down when it shrinks, so the lines cannot come back
+          # for free. Growth is never written here — that stays a decision a
+          # reviewer sees.
           python scripts/ci/size_baseline.py --tighten \
+            --thresholds .github/ci-thresholds.json
+          python scripts/ci/line_lengths.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/thresholds.py --check \
             --thresholds .github/ci-thresholds.json
           paths='.github/ci-thresholds.json'
           if git diff --quiet -- $paths; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            printf '%s %s\n' \
+            printf '%s %s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
-              "${javascript_measured}% justified no raise; no module shrank." \
+              "${javascript_measured}% justified no raise; no module shrank" \
+              "and no file lost an over-limit line." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {
