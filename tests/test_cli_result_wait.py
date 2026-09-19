@@ -63,6 +63,30 @@ _GENERATION_HARNESS = (
     '                 sort_keys=True))\n')
 
 
+_BACKOFF_HARNESS = (
+    'import json\n'
+    'from daedalus_cli import transport\n'
+    'class _Clock:\n'
+    '    def __init__(self):\n'
+    '        self.now = 0.0\n'
+    '        self.sleeps = []\n'
+    '    def monotonic(self):\n'
+    '        return self.now\n'
+    '    def sleep(self, seconds):\n'
+    '        self.sleeps.append(seconds)\n'
+    '        self.now += seconds\n'
+    'transport.time = _Clock()\n'
+    'calls = []\n'
+    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
+    '    calls.append(path)\n'
+    '    return {"pending": True}\n'
+    'transport._request = fake_api\n'
+    'result = transport.wait_for_result("c1", "extension", "d1", %s)\n'
+    'print(json.dumps({"sleeps": transport.time.sleeps,\n'
+    '                  "polls": len(calls),\n'
+    '                  "result": result}, sort_keys=True))\n')
+
+
 def _cli_env():
     """Environment with the durable token selected for the subprocess."""
     env = dict(os.environ)
@@ -111,6 +135,35 @@ def test_result_wait_rejects_receipt_for_different_generation(tmp):
     assert set(consumes) == {
         '/result?tab=extension&delivery=d1&consume=1&expected=g1'
     }, outcome
+
+
+def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
+    """A pending result is polled on a ramp that saturates, never a flood.
+
+    The ramp opens at 20ms and doubles to the caller's interval, so a slot
+    that stays pending is neither polled flat-out nor left half a second
+    behind each turn. A virtual clock stands in for time.sleep and records
+    each requested interval, so the test asserts the schedule the loop
+    REQUESTS — identical on every machine — rather than how many polls a
+    real scheduler happened to grant a real 1.0-second wait, which is what
+    made the original form a wall-clock margin: it failed a macOS leg with
+    3 polls.
+    """
+    del tmp
+    run = subprocess.run(
+        [sys.executable, '-c', _BACKOFF_HARNESS % 3.0], cwd=str(_util.ROOT),
+        env=_cli_env(), capture_output=True, text=True, encoding='utf-8',
+        timeout=10)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    outcome = json.loads(run.stdout)
+    assert outcome['result'] is None, outcome
+    sleeps = outcome['sleeps']
+    assert sleeps[:5] == [0.02, 0.04, 0.08, 0.16, 0.32], outcome
+    assert sleeps[5:-1] == [0.5, 0.5, 0.5, 0.5], outcome
+    # The last lap is cut to what is left of the budget, so the requested
+    # record alone spends it exactly.
+    assert abs(sum(sleeps) - 3.0) < 1e-9, outcome
+    assert outcome['polls'] == len(sleeps) - 1, outcome
 
 
 if __name__ == '__main__':
