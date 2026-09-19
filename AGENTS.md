@@ -90,7 +90,7 @@ Filesystem-backed caller values share `_unsafe_component`: reject `..`, C0/C1 co
 
 Every newly minted segment job records fixed values from `DAEDALUS_MAX_SEGMENT_INDEX` (default `99999`), `DAEDALUS_MAX_SEGMENTS_PER_JOB` (default `10000`), and `DAEDALUS_MAX_SEGMENT_JOB_SIZE` (default `4 * 1024 * 1024 * 1024` bytes). Existing jobs with valid quota fields continue to use their recorded values; the request-body limit separately caps each segment POST.
 
-The dashboard subscribes to `/stream?tab=dashboard`. Events (not commands) are enqueued into `commands/{token}_dashboard/<ts>_<uuid>.json` by `_notify_dashboard` in server.py; the SSE loop drains that directory per tick. Emitted from: `/register` (`tab-updated`), `/sync-tabs` (`tabs-synced`), `/unregister` (`tab-unregistered`), `/result` (`result`). Dashboard frames carry `kind: 'event'`; broadcast eval frames that also reach the dashboard stream are ignored client-side.
+The dashboard subscribes to `/stream?tab=dashboard`. Events (not commands) are enqueued into `commands/{token}_dashboard/<ts>_<uuid>.json` by `_notify_dashboard` in server.py; the SSE loop drains that directory per tick. Emitted from: `/register` (`tab-updated`), `/sync-tabs` (`tabs-synced`), `/unregister` (`tab-unregistered`), `/result` (`result`). Dashboard frames carry `kind: 'event'`; the dashboard stream consumes its event queue only, broadcast eval frames do not reach it, and the token's broadcast queue and legacy broadcast file are left for the extension and specific-tab streams that drain them.
 </endpoints>
 
 <directories>
