@@ -49,12 +49,7 @@ def _need_deps():
 
 
 def _load_mcp(base_url, mcp_port=None, max_body_size=None):
-    """Import daedalus_mcp/server.py seeing only the settings the caller holds.
-
-    Every DAEDALUS_* name in the suite process's own environment is saved and
-    stripped around the load, the fixed seeds and the caller's settings are
-    applied in its place, and the saved environment returns in a finally.
-    """
+    """Load daedalus_mcp/server.py seeing only the caller's own settings."""
     saved = {key: os.environ[key] for key in os.environ
              if key.startswith('DAEDALUS_')}
     for key in saved:
