@@ -384,7 +384,7 @@ def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
 # An armed delete fires on its second click only while its confirm timer is
 # still pending, and the DOM above runs setTimeout immediately, so the pager
 # harnesses park that timer in a queue the harness never runs.
-_PAGER_HARNESS_SETUP = r"""
+_PAGER_PREFIX = _DOM + r"""
 const timers = [];
 globalThis.setTimeout = (callback) => {
   timers.push(callback);
@@ -393,8 +393,7 @@ globalThis.setTimeout = (callback) => {
 globalThis.clearTimeout = (id) => { timers[id - 1] = null; };
 """
 
-_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(
-    _DOM + _PAGER_HARNESS_SETUP + r"""
+_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(_PAGER_PREFIX + r"""
 (async () => {
 const fetched = [];
 let total = 51;
@@ -470,8 +469,7 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
         '/upload?limit=50&offset=50', '/upload?limit=50&offset=0'], seen
 
 
-_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(
-    _DOM + _PAGER_HARNESS_SETUP + r"""
+_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(_PAGER_PREFIX + r"""
 (async () => {
 const fetched = [];
 let total = 1;
