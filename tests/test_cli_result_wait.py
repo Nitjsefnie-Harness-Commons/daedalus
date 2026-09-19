@@ -90,7 +90,8 @@ _BACKOFF_HARNESS = (
 
 def _cli_env():
     """Environment with the durable token selected for the subprocess."""
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.pop('TOKEN', None)
     env['DAEDALUS_TOKEN'] = TOK
     env['PYTHONDONTWRITEBYTECODE'] = '1'

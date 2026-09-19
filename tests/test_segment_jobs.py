@@ -355,7 +355,8 @@ def test_the_record_loader_answers_a_collision_and_a_corruption_apart(tmp):
         'except segment_store.SegmentRecordError:\n'
         '    print("corrupt: raised")\n'
         'print("absent:", segment_store.load_record(root, "nothing"))\n')
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
         'DAEDALUS_PORT': '0',
@@ -497,7 +498,8 @@ def _mint_root_probe(tmp):
     `DAEDALUS_DIR` is set, so `config.SEG_DIR` is a real second tree the
     probe can report on.
     """
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
         'DAEDALUS_PORT': '0',

@@ -282,9 +282,8 @@ function ownerPosted(owner) {
 
 _OVERLAP_INNER_WAIT_S = 15
 
-# Publication and healthy exits may move together. A killed client's pipes get
-# enough time that expiry means a broken drain, not a busy runner; the explicit
-# parameter exists only to force that diagnostic branch deterministically.
+# Publication and healthy exits may move together: expiry on a killed client's
+# pipes means a broken drain, not a busy runner; the parameter only forces it.
 _CLIENT_COMMAND_WAIT_S = 15
 _FAILED_CLIENT_GRACE_S = 1
 _KILLED_CLIENT_PIPE_RELEASE_S = 20
@@ -584,7 +583,8 @@ def _assert_step_trace(failure, labels):
 
 def client_env():
     """A client environment, minus any bridge coordinates this process has."""
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     for key in ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN', 'ID'):
         env.pop(key, None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'

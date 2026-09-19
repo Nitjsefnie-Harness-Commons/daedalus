@@ -194,7 +194,8 @@ def test_the_transport_re_exports_no_json_body_helper(tmp):
         'import daedalus_bridge.http_transport as transport\n'
         'for name in ("JSONObject", "json_nests_deeper_than", "json_body"):\n'
         '    assert not hasattr(transport, name), name\n')
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'DAEDALUS_DIR': tmp, 'DAEDALUS_PORT': '0',
         'PYTHONPATH': str(ROOT), 'PYTHONDONTWRITEBYTECODE': '1',

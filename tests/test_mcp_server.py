@@ -632,7 +632,8 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
     )
     failures = []
     for name, value, requirement in cases:
-        env = dict(os.environ)
+        env = {name: value for name, value in os.environ.items()
+               if not name.startswith('DAEDALUS_')}
         env.update({
             'DAEDALUS_DIR': str(Path(tmp) / name.lower()),
             'DAEDALUS_PORT': '0',
@@ -1029,9 +1030,8 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
         assert status == 200, status
         res = asyncio.run(mod.segment_status('mcpjob'))
         assert res == {'done': [], 'count': 0, 'gaps': []}, res
-        # A record left by an earlier configured token is a foreign job after
-        # token rotation. Plant that persisted state directly; the live bridge
-        # no longer lets an unauthorized request mint it.
+        # A record left by an earlier token is a foreign job after rotation.
+        # Plant it directly: the live bridge no longer lets a request mint one.
         segment_root = Path(_docroot) / 'segments'
         (segment_root / 'mcpjob2').mkdir()
         (segment_root / 'mcpjob2.json').write_text(json.dumps({

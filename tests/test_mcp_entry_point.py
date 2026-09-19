@@ -44,7 +44,8 @@ def _cleanup_mcp(proc):
 
 def test_the_mcp_server_runs_by_absolute_file_path(tmp):
     """Direct-file execution must bootstrap package imports from any cwd."""
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.pop('PYTHONPATH', None)
     env.update({
         'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:1',
@@ -68,7 +69,8 @@ def test_the_mcp_server_runs_by_absolute_file_path(tmp):
 
 def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
     """A direct symlink launch must resolve package imports from the target."""
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.pop('PYTHONPATH', None)
     env.update({
         'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:1',
@@ -107,7 +109,8 @@ def test_the_mcp_server_runs_by_symlinked_file_path(tmp):
 
 def test_flat_loading_the_mcp_server_does_not_change_sys_path(tmp):
     """The test loader must not trigger direct-execution bootstrapping."""
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.pop('PYTHONPATH', None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     probe = '''
