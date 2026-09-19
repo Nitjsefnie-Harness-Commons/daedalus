@@ -40,8 +40,8 @@ if DEPS:
     logging.getLogger('httpx').setLevel(logging.WARNING)  # quiet per-request logs
 
 TOK = 'mcptok'
-os.environ['TOKEN'] = ''
-os.environ['DAEDALUS_TOKEN'] = TOK
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+os.environ.update(BRIDGE_ENV)
 
 
 def _need_deps():
@@ -282,7 +282,7 @@ def test_wait_for_mcp_refuses_a_non_mcp_listener(tmp):
     the port race made every later MCP request fail 'authentication' with the
     bridge's bad-token 400 — a misleading diagnosis for a port collision.
     """
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         port = int(base.rsplit(':', 1)[1])
         try:
             _wait_for_mcp(port)
@@ -349,16 +349,16 @@ def _module_list_tabs(mod):
 def test_fresh_mcp_modules_keep_distinct_bound_transports(tmp):
     """Fresh callers share the transport class but retain their own bridges."""
     _need_deps()
-    with _util.bridge(Path(tmp) / 'first') as (first_base, _first_docroot):
-        _util.post_json(first_base + '/sync-tabs', {'token': TOK, 'tabs': [
+    with _util.bridge(Path(tmp) / 'first', env=BRIDGE_ENV) as (first, _):
+        _util.post_json(first + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': 'first', 'url': 'https://first.example.com',
              'title': 'first'}]})
-        with _util.bridge(Path(tmp) / 'second') as (second_base, _second_docroot):
-            _util.post_json(second_base + '/sync-tabs', {'token': TOK, 'tabs': [
+        with _util.bridge(Path(tmp) / 'second', env=BRIDGE_ENV) as (second, _):
+            _util.post_json(second + '/sync-tabs', {'token': TOK, 'tabs': [
                 {'tabId': 'second', 'url': 'https://second.example.com',
                  'title': 'second'}]})
-            first_mod = _load_mcp(first_base)
-            second_mod = _load_mcp(second_base)
+            first_mod = _load_mcp(first)
+            second_mod = _load_mcp(second)
             assert first_mod.BridgeTransport is second_mod.BridgeTransport
             assert first_mod.bridge.transport is not (
                 second_mod.bridge.transport)
@@ -371,16 +371,16 @@ def test_fresh_mcp_modules_keep_distinct_bound_transports(tmp):
 def test_two_module_routing_regression_is_sensitive_to_url_blind_singleton(tmp):
     """The observed second marker proves the URL-blind mutant is active."""
     _need_deps()
-    with _util.bridge(Path(tmp) / 'first') as (first_base, _first_docroot):
-        _util.post_json(first_base + '/sync-tabs', {'token': TOK, 'tabs': [
+    with _util.bridge(Path(tmp) / 'first', env=BRIDGE_ENV) as (first, _):
+        _util.post_json(first + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': 'first', 'url': 'https://first.example.com',
              'title': 'first'}]})
-        with _util.bridge(Path(tmp) / 'second') as (second_base, _second_docroot):
-            _util.post_json(second_base + '/sync-tabs', {'token': TOK, 'tabs': [
+        with _util.bridge(Path(tmp) / 'second', env=BRIDGE_ENV) as (second, _):
+            _util.post_json(second + '/sync-tabs', {'token': TOK, 'tabs': [
                 {'tabId': 'second', 'url': 'https://second.example.com',
                  'title': 'second'}]})
-            first_mod = _load_mcp(first_base)
-            second_mod = _load_mcp(second_base)
+            first_mod = _load_mcp(first)
+            second_mod = _load_mcp(second)
             old_client = {'value': None}
 
             def url_blind_client(_local_url=None):
@@ -598,7 +598,7 @@ def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
     believing nothing ran.
     """
     _need_deps()
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
         for timeout in (0, -1.0, float('nan'), float('inf')):
@@ -741,7 +741,7 @@ def test_the_shared_contract_catches_a_divergent_copy(tmp):
 
 def test_list_tabs_tool_against_real_bridge(tmp):
     _need_deps()
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': '7', 'url': 'https://example.com/mcp', 'title': 'M'}]})
         mod = _load_mcp(base)
@@ -798,7 +798,7 @@ def test_live_mcp_has_no_server_path_authority(tmp):
     traversal = _relative_or_synthetic(traversal_secret)
     symlink_escape = _relative_or_synthetic(link)
     attempted_paths = (str(absolute_secret), traversal, symlink_escape)
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         _, port = _start_mcp_in_process(base)
         session_id = _open_mcp_session(port)
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
@@ -912,7 +912,7 @@ def test_port_zero_bridge_mcp_list_tabs_round_trip(tmp):
 def test_ping_tool_round_trip(tmp):
     """ping() PUTs a command and correlates the extension's result delivery."""
     _need_deps()
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
 
@@ -953,7 +953,7 @@ def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
     """MCP waiters stay correlated when both results land before either consumes."""
     _need_deps()
     owners = ('owner-a', 'owner-b')
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
         release_waiters = threading.Event()
@@ -1020,7 +1020,7 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
     """segment_status obtains the job capability itself; a job owned by another
     token used to surface as a bare httpx 409 through raise_for_status."""
     _need_deps()
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
         # Own job: the tool re-fetches the minted sig and reads status back.
@@ -1052,7 +1052,7 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
 def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
     """Inline this capture, not a later file sharing its `_ss` directory."""
     _need_deps()
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
@@ -1233,7 +1233,7 @@ def test_mcp_authority_carriers_reject_blank_equal_and_scoped_duplicates(tmp):
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
     with _util.bridge(
-            tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+            tmp, env=BRIDGE_ENV) as (base, docroot):
         _mod, port = _start_mcp_in_process(base)
 
         initialize = {
@@ -1372,7 +1372,7 @@ def test_mcp_host_and_origin_repeated_headers_are_rejected(tmp):
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _mod, port = _start_mcp_in_process(base)
         initialize = {
             'jsonrpc': '2.0',
@@ -1428,7 +1428,7 @@ def test_mcp_initialize_accepts_nested_application_token_members(tmp):
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _mod, port = _start_mcp_in_process(base)
         initialize = {
             'jsonrpc': '2.0',
@@ -1645,7 +1645,7 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
     wire, read back out of the queue the bridge routed it into.
     """
     _need_deps()
-    with _util.bridge(tmp, env={'DAEDALUS_MCP_PORT': '0'}) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)  # what daedalus_mcp.auth.BearerAuth does per request
         cases = (

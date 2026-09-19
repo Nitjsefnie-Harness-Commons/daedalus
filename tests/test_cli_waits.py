@@ -31,9 +31,9 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 # tests/test_cli.py).
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
-# The bridge child inherits its token from here, the way test_cli.py's does.
 os.environ['TOKEN'] = ''
 os.environ['DAEDALUS_TOKEN'] = TOK
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
 
 
 def cli_env(**overrides):
@@ -173,7 +173,7 @@ def test_store_hotfix_sends_permanent_only_when_it_was_asked_for(tmp):
     hotfix that did not restate --permanent silently demoted it to
     version-gated.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         stored = {'stored': 'fx', 'total': 1, 'permanent': True}
         code, out, err, queued = _answer_ext(
@@ -232,7 +232,7 @@ def test_a_zero_timeout_on_exec_and_put_reads_as_the_default(tmp):
     """
     source = Path(tmp) / 'job.js'
     source.write_text('document.title', encoding='utf-8')
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab0')
         cases = (
             ['exec', 'job0', 'document.title', '-t', '0'],

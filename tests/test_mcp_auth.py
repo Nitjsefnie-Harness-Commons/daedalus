@@ -161,14 +161,16 @@ def test_live_listeners_keep_auth_state_and_body_limits_separate(tmp):
 
     first_tmp = Path(tmp) / 'first'
     second_tmp = Path(tmp) / 'second'
-    with _util.bridge(first_tmp) as (first_base, _first_docroot):
+    with _util.bridge(first_tmp, env=test_mcp_server.BRIDGE_ENV) as (
+            first_base, _first_docroot):
         status, body = _util.post_json(first_base + '/sync-tabs', {
             'token': test_mcp_server.TOK,
             'tabs': [{'tabId': 'first', 'url': 'https://first.example.com',
                       'title': 'first'}],
         })
         assert status == 200, (status, body)
-        with _util.bridge(second_tmp) as (second_base, _second_docroot):
+        with _util.bridge(second_tmp, env=test_mcp_server.BRIDGE_ENV) as (
+                second_base, _second_docroot):
             status, body = _util.post_json(second_base + '/sync-tabs', {
                 'token': test_mcp_server.TOK,
                 'tabs': [{'tabId': 'second',

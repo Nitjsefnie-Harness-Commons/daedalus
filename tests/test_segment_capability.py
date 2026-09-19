@@ -15,11 +15,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import TOK, mint_job, post_segment, seg_job  # noqa: E402
+from _segments import (BRIDGE_ENV, TOK, mint_job, post_segment,  # noqa: E402
+                       seg_job)
 
 
 def test_segment_post_and_status_require_capability(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
         sig = minted['sig']
@@ -65,7 +66,7 @@ def test_a_bad_segment_capability_is_refused_before_the_body_arrives(tmp):
     without the remaining megabytes. Before the fix this request produced no
     answer at all until the socket deadline expired.
     """
-    env = {'DAEDALUS_REQUEST_TIMEOUT': '5'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_REQUEST_TIMEOUT': '5'}
     with _util.bridge(tmp, env=env) as (base, docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
@@ -101,7 +102,7 @@ def test_a_segment_body_without_a_declared_length_is_refused(tmp):
     sender's segment was discarded, an empty .ts was written in its place,
     and the answer was success.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
         sig = minted['sig']
@@ -125,7 +126,7 @@ def test_a_segment_body_without_a_declared_length_is_refused(tmp):
 
 def test_segment_authority_carriers_reject_every_duplicate_shape(tmp):
     """Segment authority never selects a job or sig from repeated carriers."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = 'duplicate-scope'
         other_job = 'duplicate-other-scope'
         status, minted = mint_job(base, TOK, job)
@@ -186,7 +187,7 @@ def test_segment_job_rejects_duplicate_job_before_minting(tmp):
         ('', 'body-job-d'),
         ('body-job-e', ''),
     )
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         replies = []
         for first, second in duplicates:
             raw_body = (b'{"token":' + json.dumps(TOK).encode()
@@ -211,7 +212,7 @@ def test_segment_routes_accept_a_capability_header(tmp):
     tooling a bridge token would be, with no expiry to bound the exposure.
     """
     job = seg_job()
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = mint_job(base, TOK, job)
         assert status == 200, (status, body)
         sig = body['sig']
@@ -233,7 +234,7 @@ def test_segment_routes_accept_a_capability_header(tmp):
 def test_a_wrong_segment_capability_header_is_refused(tmp):
     """The header is checked, not trusted, on both segment routes."""
     job = seg_job()
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = mint_job(base, TOK, job)
         assert status == 200, (status, body)
         status, raw = _util.request(
@@ -251,7 +252,7 @@ def test_a_wrong_segment_capability_header_is_refused(tmp):
 def test_a_segment_header_and_query_sig_must_agree(tmp):
     """Two different capabilities in one request is an ambiguous carrier."""
     job = seg_job()
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = mint_job(base, TOK, job)
         assert status == 200, (status, body)
         sig = body['sig']
@@ -271,7 +272,7 @@ def test_a_segment_header_and_query_sig_must_agree(tmp):
 def test_a_duplicate_segment_capability_header_is_refused(tmp):
     """Two capability headers are refused before either is selected."""
     job = seg_job()
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = mint_job(base, TOK, job)
         assert status == 200, (status, body)
         sig = body['sig']
@@ -291,7 +292,7 @@ def test_a_duplicate_segment_capability_header_is_refused(tmp):
 def test_a_query_sig_still_authorizes_a_segment_route(tmp):
     """The older carrier keeps working; every deployed relay script uses it."""
     job = seg_job()
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = mint_job(base, TOK, job)
         assert status == 200, (status, body)
         sig = body['sig']

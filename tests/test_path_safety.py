@@ -26,8 +26,8 @@ sys.path.insert(0, str(_util.ROOT))
 from daedalus_bridge import path_safety  # noqa: E402
 
 TOKEN = 'toksafety'
-os.environ['TOKEN'] = ''
-os.environ['DAEDALUS_TOKEN'] = TOKEN
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOKEN, 'TOKEN': ''}
+os.environ.update(BRIDGE_ENV)
 # One component up from the docroot, plus a name no legitimate handler writes.
 ESCAPES = ('../escaped', '..', 'a/b', 'a\\b')
 WINDOWS_UNSAFE = (
@@ -44,7 +44,7 @@ def _outside(docroot):
 
 
 def test_a_tab_id_cannot_escape_the_results_directory(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         before = set(_outside(docroot))
         for tab in ESCAPES:
             status, _ = _util.post_json(
@@ -62,7 +62,7 @@ def test_a_tab_id_cannot_escape_the_results_directory(tmp):
 
 def test_an_embedded_nul_tab_id_is_answered_not_dropped(tmp):
     """A NUL must be refused before pathlib passes it to the filesystem."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(
             base + '/result',
             {'token': TOKEN, 'tabId': 'tab\x00suffix', 'id': 'x', 'result': 'y'})
@@ -84,7 +84,7 @@ def test_an_embedded_nul_tab_id_is_answered_not_dropped(tmp):
 
 
 def test_a_tab_query_cannot_read_outside_the_results_directory(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         # Plant a file one level up that a traversal would reach.
         planted = os.path.join(os.path.dirname(str(docroot)), 'escaped.json')
         with open(planted, 'w', encoding='utf-8') as fh:
@@ -99,7 +99,7 @@ def test_a_tab_query_cannot_read_outside_the_results_directory(tmp):
 
 
 def test_an_upload_id_cannot_escape_on_read(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for path in ('/upload', '/screenshot'):
             for bad in ('..', '../..', 'a/b', 'a\\b'):
                 status, _ = _util.get(
@@ -114,7 +114,7 @@ def test_a_token_may_not_contain_a_backslash(tmp):
     The check listed `/` and `.` and not `\\`, which meant the same token was a
     plain name on one platform and a directory separator on another.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, _ = _util.post_json(
             base + '/result', {'token': 'a\\b', 'id': 'x', 'result': 'y'})
         assert status == 400, f'a backslash token was accepted: {status}'
@@ -124,7 +124,7 @@ def test_a_token_may_not_contain_a_backslash(tmp):
 
 def test_an_ascii_letter_segment_is_answered_not_dropped(tmp):
     """The ordinary non-decimal syntax branch answers 400 before conversion."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.request(
             base + '/segment?job=j&seg=notanumber&total=1',
             'POST', body=b'\x00\x01',
@@ -149,7 +149,7 @@ def _post_segment(base, job, sig, segment):
 
 def test_a_superscript_digit_segment_is_answered_not_dropped(tmp):
     """Unicode digits outside ASCII must not reach integer conversion."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = 'superscript-segment'
         sig = _mint_segment_capability(base, job)
         status, body = _post_segment(base, job, sig, '²')
@@ -160,7 +160,7 @@ def test_a_superscript_digit_segment_is_answered_not_dropped(tmp):
 
 def test_a_five_thousand_digit_segment_is_answered_not_dropped(tmp):
     """An overlong ASCII decimal must be bounded before integer conversion."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = 'overlong-segment'
         sig = _mint_segment_capability(base, job)
         status, body = _post_segment(base, job, sig, '9' * 5000)
@@ -171,7 +171,7 @@ def test_a_five_thousand_digit_segment_is_answered_not_dropped(tmp):
 
 def test_a_malformed_body_is_refused_on_every_verb(tmp):
     """PUT and DELETE parsed the body unguarded; POST already answered 400."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for verb, path in (('PUT', '/command'), ('DELETE', '/upload'),
                            ('POST', '/result')):
             status, _ = _util.request(base + path, verb, body=b'{not json',
@@ -186,7 +186,7 @@ def test_non_alphabet_base64_is_refused_not_stored_empty(tmp):
     A 200 and a zero-byte file is the worst answer available: the caller
     believes the upload succeeded and the bytes are simply gone.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, _ = _util.post_json(
             base + '/upload',
             # Four non-alphabet characters: a valid LENGTH, so the lenient
@@ -207,7 +207,7 @@ def test_a_command_tab_cannot_escape_the_queue_directory(tmp):
     side is worse than the write — `/stream` drains that queue and UNLINKS what
     it serves, so the same value deletes files it reached.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         before = set(_outside(docroot))
         for tab in ('q/../../../escaped', '..', 'a/b', 'a\\b'):
             status, _ = _util.request(
@@ -221,7 +221,7 @@ def test_a_command_tab_cannot_escape_the_queue_directory(tmp):
 
 
 def test_a_stream_tab_cannot_select_a_queue_outside_the_docroot(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, _ = _util.get(
             base + f'/stream?token={TOKEN}&tab=../../escaped', timeout=15)
         assert status == 400, f'GET /stream accepted a traversing tab: {status}'
@@ -229,7 +229,7 @@ def test_a_stream_tab_cannot_select_a_queue_outside_the_docroot(tmp):
 
 def test_a_screenshot_format_cannot_become_a_path_fragment(tmp):
     """`format` was appended to the stored filename with nothing checked."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for fmt in ('../../escaped', 'png/../..', 'a\\b'):
             status, _ = _util.post_json(
                 base + '/upload',
@@ -245,7 +245,7 @@ def test_a_windows_drive_component_cannot_escape_the_data_root(tmp):
     Inert on POSIX, which is why it survived three passes: the check listed
     `..`, `/` and `\\` and stopped there.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for value in ('C:escape', 'D:', 'x:y'):
             status, _ = _util.post_json(
                 base + '/result',
@@ -259,7 +259,7 @@ def test_a_windows_drive_component_cannot_escape_the_data_root(tmp):
 
 def test_upload_path_components_reject_windows_aliases(tmp):
     """Upload and delete reject drive, device, and Windows-normalized names."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         good = 'eA=='
         for bad in WINDOWS_UNSAFE:
             status, body = _util.post_json(
@@ -303,7 +303,7 @@ def test_upload_path_components_reject_windows_aliases(tmp):
 def test_segment_job_rejects_windows_aliases(tmp):
     """Job names are validated before the capability check, so a Windows
     alias is a 400 even from a request that carries no sig — never a write."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for job in ('bad:job', 'CON', 'alias.', 'alias '):
             status, body = _util.request(
                 base + '/segment?job=' + quote(job, safe='') + '&seg=1&total=2', 'POST',
@@ -319,7 +319,7 @@ def test_one_token_cannot_read_another_tokens_results(tmp):
     so one principal's result is readable by another and both write the same
     command queue. Reproduced against the real server before the fix.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, _ = _util.post_json(
             base + '/result', {'token': 'victim_x', 'id': 'x', 'result': 'SECRET'})
         assert status == 400, f'an underscored token was accepted with {status}'
@@ -339,7 +339,7 @@ def test_delivery_alias_is_refused_but_a_missing_target_is_accepted(tmp):
     except (OSError, NotImplementedError) as why:
         _util.skip(f'this filesystem will not hold a symlink: {why}')
 
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOKEN, 'tabId': 'alias', 'id': 'alias-result',
             'result': 'must-refuse', 'error': None, 'ts': 1,

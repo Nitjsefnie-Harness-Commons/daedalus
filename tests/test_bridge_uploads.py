@@ -18,11 +18,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import PNG, TOK  # noqa: E402
+from _bridge import BRIDGE_ENV, PNG, TOK  # noqa: E402
 
 
 def test_upload_list_screenshot_delete(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         # Screenshot form: no filename, stored as <ts>.png
         payload = {'token': TOK, 'id': 'up1',
                    'data': base64.b64encode(PNG).decode()}
@@ -91,7 +91,7 @@ def test_upload_list_screenshot_delete(tmp):
 
 
 def test_upload_validation_and_traversal(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         docroot = Path(docroot)
         good = base64.b64encode(b'x').decode()
         # Missing parameters.
@@ -133,7 +133,7 @@ def test_upload_validation_and_traversal(tmp):
 def test_upload_path_component_byte_boundaries(tmp):
     """Upload ids and filenames are capped by encoded bytes, not characters."""
     data = base64.b64encode(b'edge').decode()
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(
             base + '/upload', {'token': TOK, 'id': 'i' * 256,
                                'filename': 'edge.bin', 'data': data})
@@ -165,7 +165,7 @@ def test_upload_path_component_byte_boundaries(tmp):
 def test_delete_upload_path_component_byte_boundaries(tmp):
     """Delete accepts the encoded ceiling and refuses longer components."""
     data = base64.b64encode(b'edge').decode()
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.request(
             base + '/upload', 'DELETE',
             body={'token': TOK, 'id': 'i' * 256})
@@ -201,7 +201,7 @@ def test_delete_upload_path_component_byte_boundaries(tmp):
 
 
 def test_delete_upload_validation(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for fields in ({'id': '../x'}, {'id': 'u', 'filename': 'a\\b'},
                        {'id': 'u', 'filename': 'a/b'}):
             status, body = _util.request(base + '/upload', 'DELETE',
@@ -226,7 +226,7 @@ def test_a_filename_without_an_id_deletes_nothing(tmp):
     naming a single file deleted every upload the token had — and answered
     that as a success.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for upload_id, name in (('alpha', 'one.txt'), ('beta', 'two.txt')):
             status, body = _util.post_json(base + '/upload', {
                 'token': TOK, 'id': upload_id, 'filename': name,
@@ -250,7 +250,7 @@ def test_an_unhashable_upload_format_is_refused_not_dropped(tmp):
     the exception killed the request thread — so an authenticated caller got a
     dropped connection where the same line already knew how to write a 400.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for value in ([], {}, ['png'], 5, None, True):
             status, body = _util.post_json(base + '/upload', {
                 'token': TOK, 'id': 'fmt', 'filename': 'shot.png',
@@ -273,7 +273,7 @@ def test_an_upload_path_that_escapes_through_a_symlink_is_refused(tmp):
     The containment check asks the other question, about the result rather
     than the parts, so the delete is refused and the file outside survives.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, _ = _util.post_json(base + '/upload', {
             'token': TOK, 'id': 'real', 'filename': 'keep.txt',
             'data': base64.b64encode(b'inside').decode()})
@@ -337,7 +337,8 @@ def test_upload_pagination_bounds_the_work_not_only_the_answer(tmp):
         '    return _real(path, *args, **kwargs)\n'
         'os.stat = _counted\n',
         encoding='utf-8')
-    env = {'PYTHONPATH': str(fault_dir), 'STAT_LOG': str(counts)}
+    env = {**BRIDGE_ENV,
+           'PYTHONPATH': str(fault_dir), 'STAT_LOG': str(counts)}
     ids, per_id = 4, 15
     with _util.bridge(tmp, env=env) as (base, _docroot):
         for id_index in range(ids):
@@ -372,7 +373,7 @@ def test_upload_pagination_is_validated_before_the_directory_is_looked_at(tmp):
     depended on unrelated filesystem state. The empty page also reported
     limit 0 and offset 0 rather than what was asked for.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         malformed = base + '/upload?' + urllib.parse.urlencode(
             {'token': TOK, 'limit': 'not-an-int'})
         status, body = _util.get_json(malformed)
@@ -400,7 +401,7 @@ def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
     own result and then fetched by id downloaded whichever file was newest
     at that moment, which is the next invocation's whenever one overlapped.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for name, payload in (('capture-a.png', PNG + b'-A'),
                               ('capture-b.png', PNG + b'-B')):
             status, body = _util.post_json(base + '/upload', {
@@ -428,7 +429,7 @@ def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
 
 def test_a_screenshot_path_cannot_leave_its_own_token(tmp):
     """The named path is a component list, checked the way every other is."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/upload', {
             'token': TOK, 'id': 'mine', 'filename': 'shot.png',
             'data': base64.b64encode(PNG).decode()})
@@ -458,7 +459,7 @@ def test_every_accepted_screenshot_format_can_be_served_back(tmp):
     this walks every accepted format rather than naming the one that was
     missing.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for index, fmt in enumerate(('png', 'jpeg', 'jpg', 'webp')):
             upload_id = f'shot{index}'
             status, body = _util.post_json(base + '/upload', {
@@ -498,7 +499,9 @@ def test_result_upload_delete_filesystem_errors_are_answered(tmp):
         'shutil.rmtree = _fail_upload_delete\n',
         encoding='utf-8')
     data = base64.b64encode(b'edge').decode()
-    with _util.bridge(tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, docroot):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV,
+                      'PYTHONPATH': str(fault_dir)}) as (base, docroot):
         delete_dir = docroot / 'uploads' / TOK / 'delete-fault'
         delete_dir.mkdir(parents=True)
         (delete_dir / 'kept.bin').write_bytes(b'kept')
@@ -556,7 +559,7 @@ def test_an_upload_path_serves_that_file_to_a_header_credential(tmp):
     the same `<id>/<file>` answers from the caller's namespace and no
     other. Each component is checked the way /screenshot checks a path.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         text = b'plain words'
         files = (('note.txt', text, 'text/plain'),
                  ('shot.png', PNG, 'image/png'),

@@ -75,7 +75,8 @@ def test_port_zero_binds_an_ephemeral_port_and_announces_it(tmp):
     test-chosen number there is no release/rebind window for a concurrent
     process to win.
     """
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
         'DAEDALUS_PORT': '0',
@@ -292,7 +293,8 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
     entered = Path(tmp) / 'mcp-import-entered'
     release = Path(tmp) / 'mcp-import-released'
     left = Path(tmp) / 'mcp-import-left'
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
         'DAEDALUS_PORT': '0',
@@ -371,7 +373,8 @@ def test_a_unix_socket_subclass_binds_the_way_the_stdlib_binds_it(tmp):
         'finally:\n'
         '    srv.server_close()\n'
     )
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
     env.update({
         'DAEDALUS_DIR': str(docroot),
         # The probe binds its own AF_UNIX socket; this one is never bound.
@@ -491,6 +494,28 @@ def test_the_bridge_refuses_to_start_without_its_docroot(tmp):
             f'{(proc.stdout + proc.stderr).strip()[:200]}')
 
 
+def test_inherited_daedalus_variables_do_not_reach_a_bridge_child(tmp):
+    """A bridge starts clean whatever the surrounding shell has exported.
+
+    `bridge()` strips every inherited `DAEDALUS_*` variable before applying
+    its own settings and the caller's `env=`, so a poisoned export around
+    the suite cannot kill the child at startup the way it kills an
+    unstripped spawn — the spurious suite failures this suite's own
+    environment-dependent arms exist to prevent.
+    """
+    prior = os.environ.get('DAEDALUS_STREAM_KEEPALIVE')
+    os.environ['DAEDALUS_STREAM_KEEPALIVE'] = '0'
+    try:
+        with _util.bridge(tmp) as (base, _docroot):
+            status, health = _util.get_json(base + '/health')
+            assert status == 200, (status, health)
+    finally:
+        if prior is None:
+            del os.environ['DAEDALUS_STREAM_KEEPALIVE']
+        else:
+            os.environ['DAEDALUS_STREAM_KEEPALIVE'] = prior
+
+
 def test_numeric_environment_settings_fail_cleanly_at_startup(tmp):
     """Invalid numeric settings stop startup with a setting-specific error."""
     cases = (
@@ -508,7 +533,8 @@ def test_numeric_environment_settings_fail_cleanly_at_startup(tmp):
     )
     failures = []
     for name, value, requirement in cases:
-        env = dict(os.environ)
+        env = {name: value for name, value in os.environ.items()
+               if not name.startswith('DAEDALUS_')}
         env.update({
             'DAEDALUS_DIR': str(Path(tmp) / name.lower()),
             # Overridden by the DAEDALUS_PORT cases below; never bound, so 0.
@@ -542,7 +568,8 @@ def test_an_invalid_mcp_setting_stops_the_bridge_naming_it(tmp):
     for name, value, requirement in (
             ('DAEDALUS_MCP_PORT', 'abc', 'integer from 0 to 65535'),
             ('DAEDALUS_MCP_MAX_BODY_SIZE', '-1', 'non-negative integer')):
-        env = dict(os.environ)
+        env = {name: value for name, value in os.environ.items()
+               if not name.startswith('DAEDALUS_')}
         env.update({
             'DAEDALUS_DIR': str(Path(tmp) / name.lower()),
             'DAEDALUS_PORT': '0',
@@ -572,7 +599,8 @@ def test_non_finite_command_ttl_cannot_disable_the_collector(tmp):
         queued.parent.mkdir(parents=True)
         queued.write_text('{"id":"old"}', encoding='utf-8')
         os.utime(queued, (0, 0))
-        env = dict(os.environ)
+        env = {name: value for name, value in os.environ.items()
+               if not name.startswith('DAEDALUS_')}
         env.update({
             'DAEDALUS_DIR': str(docroot),
             # Never bound (TTL validation fails at import), so 0.

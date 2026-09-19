@@ -40,8 +40,8 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 OUT_MARKS = ('\u2192', '->')
 IN_MARKS = ('\u2190', '<-')
 TOK = 'clitok'
-os.environ['TOKEN'] = ''
-os.environ['DAEDALUS_TOKEN'] = TOK
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+os.environ.update(BRIDGE_ENV)
 
 
 def cli_env(**overrides):
@@ -154,7 +154,7 @@ def test_the_entry_point_leaves_an_explicit_encoding_alone(tmp):
     caller received were UTF-8 whatever they asked for. Raw bytes, because
     decoding them here with the encoding under test would pass either way.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': '11', 'url': 'https://example.com/a',
              'title': 'caf\u00e9'}]})
@@ -170,7 +170,7 @@ def test_the_entry_point_leaves_an_explicit_encoding_alone(tmp):
 
 def test_uploads_delete_refuses_a_filename_without_an_id(tmp):
     """Naming one file must not become deleting the token's whole namespace."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, _ = _util.post_json(base + '/upload', {
             'token': TOK, 'id': 'alpha', 'filename': 'one.txt',
             'data': base64.b64encode(b'keep me').decode()})
@@ -188,7 +188,7 @@ def test_unblock_refuses_rule_id_zero_before_sending_it(tmp):
     The extension read a present-but-false ruleId as absent and removed every
     session rule, so the CLI refusing it here is the outer half of that fix.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         r = run_cli(['unblock-requests', '--rule-id', '0'],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode != 0, (r.returncode, r.stdout)
@@ -205,7 +205,7 @@ def test_set_permanent_refuses_a_value_it_cannot_read(tmp):
     permanent hotfix version-gated and reported success while doing it. The
     refusal has to come before the mutation is sent, not after.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         r = run_cli(['set-permanent', 'critical-fix', 'ture'],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode != 0, (r.returncode, r.stdout)
@@ -261,7 +261,7 @@ def test_imports_cleanly_without_settings_module(tmp):
 
 
 def test_tabs_against_real_bridge(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': '11', 'url': 'https://example.com/a', 'title': 'A'}]})
         r = run_cli(['tabs'], cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
@@ -298,7 +298,7 @@ def test_tabs_encodes_every_accepted_custom_token(tmp):
 
 
 def test_token_one_off_override_wins(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': '11', 'url': 'https://example.com/override',
              'title': 'O'}]})
@@ -311,7 +311,7 @@ def test_token_one_off_override_wins(tmp):
 
 
 def test_exec_no_result_enqueues_broadcast(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         r = run_cli(['exec', 'job1', 'return 1+1', '--no-result', '-b'],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode == 0, (r.returncode, r.stderr)
@@ -326,7 +326,7 @@ def test_exec_no_result_enqueues_broadcast(tmp):
 
 def test_exec_full_round_trip(tmp):
     """exec without --no-result waits; we play the extension over HTTP."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab9')
         proc = subprocess.Popen(
             CLI + ['exec', 'job7', 'document.title', '-t', '20'],
@@ -362,7 +362,7 @@ def test_waiter_leaves_a_foreign_result_in_place(tmp):
     afterwards. Driven through `cookies` because typed extension commands use
     the shared extension result slot.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
             CLI + ['cookies'],
@@ -495,7 +495,7 @@ def test_a_negative_timeout_is_refused_before_the_command_is_sent(tmp):
     command the browser was still free to execute. Retrying after that
     report runs the side effect twice.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         r = run_cli(['screenshot', '--timeout', '-1'], env)
         assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
@@ -514,7 +514,7 @@ def test_a_negative_timeout_is_refused_before_the_command_is_sent(tmp):
 def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
     """A foreign result seen mid-wait is neither returned as ours nor fatal:
     the waiter keeps polling and completes when its own result arrives."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
             CLI + ['cookies'],
@@ -549,7 +549,7 @@ def test_waiter_skips_a_foreign_result_and_finds_its_own(tmp):
 
 def test_typed_command_does_not_return_a_stale_fixed_id_result(tmp):
     """A prior `_cookies` result cannot satisfy a new cookies invocation."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, _ = _util.post_json(base + '/result', {
             'token': TOK, 'tabId': 'extension', 'id': '_cookies',
             'result': [{'domain': 'stale.invalid', 'name': 'stale',
@@ -622,7 +622,7 @@ def test_two_same_id_clients_receive_only_their_own_results(tmp):
 def test_put_reads_code_from_file(tmp):
     src = Path(tmp) / 'snippet.js'
     src.write_text('  1 + 2;\n')
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         r = run_cli(['put', 'pid1', str(src), '--no-result', '-b'],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode == 0, (r.returncode, r.stderr)
@@ -659,7 +659,7 @@ def test_store_hotfix_refuses_a_file_that_is_not_there(tmp):
     string as persistent page code and reported success.
     """
     missing = Path(tmp) / 'not-here.js'
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         r = run_cli(['store-hotfix', 'typo', '--file', str(missing)],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode != 0, (r.returncode, r.stdout)
@@ -671,7 +671,7 @@ def test_store_hotfix_refuses_a_file_that_is_not_there(tmp):
 
 def test_store_hotfix_refuses_the_positional_that_meant_either(tmp):
     """The ambiguous form fails loudly rather than picking a meaning."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         r = run_cli(['store-hotfix', 'legacy', 'console.log(1)'],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode != 0, (r.returncode, r.stdout)
@@ -684,7 +684,7 @@ def test_store_hotfix_sends_a_code_value_verbatim(tmp):
     """`--code` is source even when the string names a file that exists."""
     decoy = Path(tmp) / 'decoy.js'
     decoy.write_text('/* FROM THE FILE */\n', encoding='utf-8')
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         queued = _queued_extension_command(
             base, docroot,
             ['store-hotfix', 'ambiguous', '--code', str(decoy)],
@@ -697,7 +697,7 @@ def test_store_hotfix_reads_the_file_it_was_given(tmp):
     """`--file` sends the contents, not the path."""
     src = Path(tmp) / 'fix.js'
     src.write_text('/* real hotfix */\n', encoding='utf-8')
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         queued = _queued_extension_command(
             base, docroot, ['store-hotfix', 'realfix', '--file', str(src)],
             'the store-hotfix command')
@@ -706,7 +706,7 @@ def test_store_hotfix_reads_the_file_it_was_given(tmp):
 
 
 def test_navigate_constructs_location_href(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         r = run_cli(['navigate', 'https://example.com/x?a="b"'],
                     cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
         assert r.returncode == 0, (r.returncode, r.stderr)
@@ -726,7 +726,7 @@ def test_reload_dispatches_to_the_tab_and_to_every_tab(tmp):
     caught it because no test dispatched `reload`: the eval-style commands are
     tested one at a time, and this was the one nobody wrote.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab-7')
         r = run_cli(['reload'], env)
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
@@ -754,7 +754,7 @@ def test_reload_dispatches_to_the_tab_and_to_every_tab(tmp):
 
 
 def test_result_subcommand_fetch_and_consume(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         _util.post_json(base + '/result', {
             'token': TOK, 'id': 'r9', 'result': {'a': 1}, 'error': None,
             'ts': 1})
@@ -774,7 +774,7 @@ def test_result_subcommand_fetch_and_consume(tmp):
 def test_result_encodes_delimiter_and_unicode_tab_id(tmp):
     """The result query addresses the exact tab rather than splitting its id."""
     tab_id = 'tab&branch#café'
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/result', {
             'token': TOK,
             'tabId': tab_id,
@@ -793,7 +793,7 @@ def test_result_encodes_delimiter_and_unicode_tab_id(tmp):
 
 
 def test_uploads_list_and_delete(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         _util.post_json(base + '/upload', {
             'token': TOK, 'id': 'up9', 'filename': 'f.txt',
             'data': base64.b64encode(b'data').decode()})
@@ -811,7 +811,7 @@ def test_uploads_list_and_delete(tmp):
 def test_upload_listing_encodes_delimiter_and_unicode_id(tmp):
     """An upload filter reaches the exact delimiter-bearing upload id."""
     upload_id = 'upload&branch#café'
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/upload', {
             'token': TOK,
             'id': upload_id,
@@ -837,7 +837,7 @@ def test_screenshot_download_encodes_delimiter_and_unicode_id(tmp):
     # where it passes there is no way to tell whether the bridge stored the
     # result, stored it somewhere else, or never saw the request at all.
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
             CLI + ['screenshot', '--id', screenshot_id,
@@ -886,7 +886,7 @@ def test_a_screenshot_download_ignores_a_later_capture_under_its_id(tmp):
     """
     output = Path(tmp) / 'captured.png'
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
             CLI + ['screenshot', '--output', str(output), '--timeout', '20'],
@@ -934,7 +934,7 @@ def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
     screenshot_id = 'shot-' + uuid.uuid4().hex[:8]
     output = Path(tmp) / 'captured.png'
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
             CLI + ['screenshot', '--id', screenshot_id,
@@ -968,7 +968,7 @@ def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
 
 def test_segment_job_subcommand_prints_a_working_capability(tmp):
     job = 'clijob-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         r = run_cli(['segment-job', job], env)
         assert r.returncode == 0, (r.returncode, r.stderr)
@@ -986,7 +986,7 @@ def test_segment_job_subcommand_prints_a_working_capability(tmp):
 
 def test_segment_status_subcommand(tmp):
     job = 'cliseg-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.post_json(base + '/segment-job',
                                        {'token': TOK, 'job': job})
         assert status == 200, (status, body)
@@ -1003,7 +1003,7 @@ def test_segment_status_subcommand(tmp):
 def test_segment_status_subcommand_encodes_job_and_capability(tmp):
     job = 'cliseg & hash# caf\u00e9-' + uuid.uuid4().hex[:12]
     sig = 'sig&part#tail'
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/segment-job',
                                        {'token': TOK, 'job': job})
         assert status == 200, (status, body)
@@ -1024,7 +1024,7 @@ def test_segment_status_subcommand_reports_a_foreign_job_cleanly(tmp):
     'HTTP 409: ...' that the generic api() error path would have exited with.
     """
     job = 'cliforeign-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         segment_root = Path(docroot) / 'segments'
         (segment_root / job).mkdir()
         (segment_root / f'{job}.json').write_text(json.dumps({
@@ -1202,7 +1202,7 @@ def test_every_typed_subcommand_sends_its_documented_command(tmp):
          {'fixId': 'fix1', 'permanent': True}, {'found': True}),
         (['fetch-timings'], 'fetch-timings', {}, {}),
     )
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         for argv, cmd_type, fields, result in cases:
             code, out, err, queued = _answer_one_ext_command(

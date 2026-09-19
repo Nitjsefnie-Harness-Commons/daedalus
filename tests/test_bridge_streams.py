@@ -16,7 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import (TOK, assert_oversize_stream_matches_enqueue,  # noqa: E402
+from _bridge import (BRIDGE_ENV, TOK,  # noqa: E402
+                     assert_oversize_stream_matches_enqueue,
                      framer, next_stream_data, put_command, queue_files,
                      read_stream_data, stream_response)
 
@@ -33,7 +34,7 @@ def _wait_for_delivery_health(base):
 
 
 def test_put_command_broadcast_writes_queue_file(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = put_command(base, {'token': TOK, 'id': 'c1', 'code': '1+1'})
         assert status == 200, (status, body)
         body = json.loads(body)
@@ -48,7 +49,7 @@ def test_put_command_broadcast_writes_queue_file(tmp):
 
 
 def test_put_command_per_tab_goes_to_tab_queue(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = put_command(
             base, {'token': TOK, 'id': 'c2', 'code': '2+2', 'tab': 'tab1'})
         assert status == 200, (status, body)
@@ -86,7 +87,7 @@ def test_put_command_derived_queue_name_byte_boundary(tmp):
 
 
 def test_put_command_fifo_order(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for i in range(3):
             status, _ = put_command(
                 base, {'token': TOK, 'id': f'c{i}', 'code': str(i)})
@@ -102,7 +103,7 @@ def test_put_command_fifo_order(tmp):
 
 
 def test_put_command_validation(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, _ = put_command(base, {'token': TOK, 'code': '1'})  # no id
         assert status == 400, status
         status, _ = put_command(base, {'token': TOK, 'id': 'x'})  # no code/type
@@ -121,7 +122,7 @@ def test_put_command_validation(tmp):
 def test_unencodable_command_body_names_the_body_not_the_path(tmp):
     """A surrogate in a queued command's body is an encoding failure, not a
     path one; the refused enqueue leaves no artifact, hidden temp included."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, raw = put_command(
             base, {'token': TOK, 'id': 'enc', 'code': '\ud800'})
         assert status == 400, (status, raw)
@@ -153,7 +154,8 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
         'pathlib.Path.read_bytes = _fail_dashboard_read\n',
         encoding='utf-8')
     with _util.bridge(
-            tmp, env={'PYTHONPATH': str(fault_dir)}) as (base, _docroot):
+            tmp, env={**BRIDGE_ENV,
+                      'PYTHONPATH': str(fault_dir)}) as (base, _docroot):
         try:
             command_status, command_raw = put_command(
                 base, {'token': TOK, 'id': 'fault', 'code': '1'})
@@ -179,7 +181,7 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
 
 def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
     """The command TTL applies even when no SSE stream ever drains a queue."""
-    env = {'DAEDALUS_CMD_TTL': '1'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '1'}
     with _util.bridge(tmp, env=env) as (base, docroot):
         for index in range(4):
             status, body = put_command(
@@ -222,10 +224,8 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
         '        time.sleep(60)\n'
         'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
-    env = {
-        'DAEDALUS_CMD_TTL': '10',
-        'PYTHONPATH': str(fault_dir),
-    }
+    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '10',
+           'PYTHONPATH': str(fault_dir)}
     served = []
     with _util.bridge(tmp, env=env, output=served) as (_base, docroot):
         command_root = Path(docroot) / 'commands'
@@ -316,7 +316,8 @@ def test_a_lost_command_ends_the_read_instead_of_riding_keepalives(tmp):
     """
     outcome = []
     with _util.bridge(
-            tmp, env={'DAEDALUS_STREAM_KEEPALIVE': '1'}) as (base, _docroot):
+            tmp, env={**BRIDGE_ENV,
+                      'DAEDALUS_STREAM_KEEPALIVE': '1'}) as (base, _docroot):
         def read():
             try:
                 read_stream_data(base, TOK, 'nothing-is-sent-here', timeout=3)
@@ -333,7 +334,7 @@ def test_a_lost_command_ends_the_read_instead_of_riding_keepalives(tmp):
 
 def test_stream_drops_a_non_object_queue_entry(tmp):
     """A JSON value without command fields cannot terminate queue draining."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         qdir = Path(docroot) / 'commands' / TOK
         qdir.mkdir()
         malformed = qdir / '0000000000000_000000.json'
@@ -354,7 +355,7 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
     log line then raised UnicodeEncodeError and tore the stream down.
     """
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         frame = framer(response, served)
         try:
@@ -380,7 +381,7 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
 def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
     """The same lone surrogate in a legacy raw-write file must not kill the stream."""
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         frame = framer(response, served)
         try:
@@ -411,7 +412,7 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
     log line used to raise UnicodeEncodeError and tear the stream down.
     """
     _util.require_undecodable_names(tmp)
-    strict = {'PYTHONIOENCODING': 'utf-8:strict'}
+    strict = {**BRIDGE_ENV, 'PYTHONIOENCODING': 'utf-8:strict'}
     # The bridge's own log goes into every failure here, and its DELIVERED
     # lines are the only direct evidence of whether the drain saw the file.
     served = []
@@ -449,7 +450,7 @@ def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
 def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
     """The TTL-DROP log line takes the same raw name and must not kill the stream."""
     _util.require_undecodable_names(tmp)
-    strict = {'PYTHONIOENCODING': 'utf-8:strict'}
+    strict = {**BRIDGE_ENV, 'PYTHONIOENCODING': 'utf-8:strict'}
     served = []
     with _util.bridge(tmp, env=strict, output=served) as (base, docroot):
         qdir = Path(docroot) / 'commands' / TOK
@@ -481,7 +482,7 @@ def test_stream_survives_an_undecodable_byte_in_an_expired_queue_entry(tmp):
 
 def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
     """Visible partial files survive, while sibling temp names wait for rename."""
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         commands = Path(docroot) / 'commands'
         legacy = commands / f'{TOK}.json'
         writer = open(legacy, 'w', encoding='utf-8')
@@ -522,7 +523,7 @@ def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
 def test_queue_publication_never_deletes_an_in_progress_write(tmp):
     """A queue scan must not unlink the pathname from under its writer."""
     served = []
-    with _util.bridge(tmp, output=served) as (base, docroot):
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         queue = Path(docroot) / 'commands' / TOK
         queue.mkdir(parents=True)
         partial = queue / '0000000000001_000001.json'
@@ -568,7 +569,7 @@ def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
     so this drives a real timeout and reads what comes out.
     """
     served = []
-    with _util.bridge(tmp, output=served) as (base, _docroot):
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, _docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         read = framer(response, served)
         message = ''
@@ -591,7 +592,7 @@ def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
 
 def test_a_replaced_stream_reports_its_own_end(tmp):
     """The closure diagnosis survives the cleanup that runs after it."""
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         first_conn, first = stream_response(base, TOK, tab='samet')
         second_conn, second = stream_response(base, TOK, tab='samet')
         try:
@@ -610,7 +611,7 @@ def test_a_replaced_stream_reports_its_own_end(tmp):
 
 
 def test_queue_delivery_updates_the_health_clock(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         try:
             status, health = _util.get_json(base + '/health')
@@ -631,7 +632,7 @@ def test_queue_delivery_updates_the_health_clock(tmp):
 
 
 def test_legacy_delivery_updates_the_health_clock(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         try:
             status, health = _util.get_json(base + '/health')
@@ -657,7 +658,7 @@ def test_health_counts_a_stream_that_named_no_tab(tmp):
     while /health reported zero — and the count it reported was the number of
     distinct tab NAMES, so two streams sharing a name counted once.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['active_streams'] == 0, health
 

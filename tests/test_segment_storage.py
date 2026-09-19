@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import (TMP_SEG_ROOT, TOK, mint_job, post_segment,  # noqa: E402
-                       seg_job)
+from _segments import (BRIDGE_ENV, TMP_SEG_ROOT, TOK, mint_job,  # noqa: E402
+                       post_segment, seg_job)
 
 # `[SEGMENT-TIMING] <job> stored=<n> <phase>=<ms>... parts=<ms> total=<ms>`
 TIMING_LINE = re.compile(
@@ -31,6 +31,7 @@ TIMING_LINE = re.compile(
 def test_legacy_segment_job_migrates_with_existing_usage(tmp):
     """An owner re-mint upgrades a legacy record and counts stored segments."""
     env = {
+        **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '3',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '5',
@@ -87,7 +88,7 @@ def test_a_segment_write_reads_its_totals_instead_of_recounting(tmp):
     admits the write, and one that reads the record refuses it. The two
     answers are opposite, so the mechanism is what is being measured.
     """
-    env = {'DAEDALUS_MAX_SEGMENTS_PER_JOB': '4'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_MAX_SEGMENTS_PER_JOB': '4'}
     with _util.bridge(tmp, env=env) as (base, docroot):
         job = seg_job()
         status, body = mint_job(base, TOK, job)
@@ -117,7 +118,7 @@ def test_segment_totals_follow_writes_and_overwrites(tmp):
     and an overwrite of the first -- which must move bytes without moving the
     count, the case a naive increment gets wrong.
     """
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         status, body = mint_job(base, TOK, job)
         assert status == 200, (status, body)
@@ -147,6 +148,7 @@ def test_segment_totals_follow_writes_and_overwrites(tmp):
 def test_segment_replacement_reuses_count_and_byte_quota(tmp):
     """Replacing one index subtracts its old bytes and adds no file count."""
     env = {
+        **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '1',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '5',
@@ -167,6 +169,7 @@ def test_segment_replacement_reuses_count_and_byte_quota(tmp):
 def test_segment_index_is_bound_by_minted_job_quota(tmp):
     """A page cannot turn a small trusted job quota into a sparse huge index."""
     env = {
+        **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '1',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '16',
@@ -194,6 +197,7 @@ def test_segment_index_is_bound_by_minted_job_quota(tmp):
 def test_segment_count_is_bound_by_minted_job_quota(tmp):
     """Distinct files stop at the record's count even if request totals vary."""
     env = {
+        **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '2',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '100',
@@ -218,6 +222,7 @@ def test_segment_count_is_bound_by_minted_job_quota(tmp):
 def test_segment_bytes_are_bound_by_minted_job_quota(tmp):
     """Individually small bodies cannot cross the aggregate per-job byte cap."""
     env = {
+        **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '10',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '5',
@@ -240,6 +245,7 @@ def test_segment_bytes_are_bound_by_minted_job_quota(tmp):
 def test_concurrent_segment_writes_share_one_quota_snapshot(tmp):
     """Two barrier-released requests cannot both spend the same byte budget."""
     env = {
+        **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '2',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '5',
@@ -280,6 +286,7 @@ def test_segment_write_failure_removes_temp_and_answers(tmp):
         'pathlib.Path.write_bytes = _partial_segment_write\n',
         encoding='utf-8')
     env = {
+        **BRIDGE_ENV,
         'PYTHONPATH': str(fault_dir),
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '2',
@@ -316,6 +323,7 @@ def test_a_stale_temp_never_enters_the_accounting_and_is_swept_on_resume(tmp):
     documented resume -- a re-mint by the owner -- is where the file goes.
     """
     env = {
+        **BRIDGE_ENV,
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '2',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '3',
@@ -346,7 +354,7 @@ def test_a_stale_temp_never_enters_the_accounting_and_is_swept_on_resume(tmp):
 
 
 def test_segment_rejection_writes_nothing(tmp):
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         docroot = Path(docroot)
 
         def post(query):
@@ -390,7 +398,7 @@ def test_segment_storage_never_touches_the_old_tmp_root(tmp):
     if os.name == 'nt':
         _util.skip('/tmp means something else on Windows')
     before = set(TMP_SEG_ROOT.iterdir()) if TMP_SEG_ROOT.is_dir() else set()
-    with _util.bridge(tmp) as (base, docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
         sig = minted['sig']
@@ -431,6 +439,7 @@ def test_a_failing_accounting_write_still_leaves_the_quota_enforced(tmp):
         'os.replace = _fail_record_replace\n',
         encoding='utf-8')
     env = {
+        **BRIDGE_ENV,
         'PYTHONPATH': str(fault_dir),
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '2',
@@ -468,7 +477,7 @@ def test_a_write_that_cannot_mark_itself_dirty_is_refused_not_published(tmp):
         '    return _real_write_text(self, *a, **kw)\n'
         'pathlib.Path.write_text = _fail_dirty_write\n',
         encoding='utf-8')
-    env = {'PYTHONPATH': str(fault_dir)}
+    env = {**BRIDGE_ENV, 'PYTHONPATH': str(fault_dir)}
     with _util.bridge(tmp, env=env) as (base, docroot):
         job = seg_job()
         _, minted = mint_job(base, TOK, job)
@@ -503,6 +512,7 @@ def test_a_recount_reconciles_and_clears_the_mark_before_a_rejection(tmp):
         'os.replace = _fail_one_record_replace\n',
         encoding='utf-8')
     env = {
+        **BRIDGE_ENV,
         'PYTHONPATH': str(fault_dir),
         'DAEDALUS_MAX_SEGMENT_INDEX': '10',
         'DAEDALUS_MAX_SEGMENTS_PER_JOB': '1',
@@ -548,7 +558,7 @@ def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
     unit contract for `log_timing` pins.
     """
     lines, child = [], []
-    env = {'DAEDALUS_DEBUG_TIMING': '1'}
+    env = {**BRIDGE_ENV, 'DAEDALUS_DEBUG_TIMING': '1'}
     with _util.bridge(
             tmp, env=env, output=lines, proc_out=child) as (base, _docroot):
         job = seg_job()

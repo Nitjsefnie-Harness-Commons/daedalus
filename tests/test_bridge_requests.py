@@ -17,11 +17,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import TOK, raw_request, read_answer, stalled_request  # noqa: E402
+from _bridge import (BRIDGE_ENV, TOK, raw_request, read_answer,  # noqa: E402
+                     stalled_request)
 
 
 def test_unknown_paths_404(tmp):
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, body = _util.get_json(base + '/nope')
         assert status == 404 and body['error'] == 'not found', (status, body)
         status, body = _util.post_json(base + '/nope', {'token': TOK})
@@ -42,7 +43,7 @@ def test_a_malformed_absolute_form_target_is_refused_not_dropped(tmp):
     saw the connection close with zero response bytes. A garbled target is a
     client error — every parsing verb answers a deterministic 400 for it.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for method in ('GET', 'POST', 'PUT'):
             resp = raw_request(
                 base,
@@ -62,7 +63,9 @@ def test_a_malformed_absolute_form_target_is_refused_not_dropped(tmp):
 def test_request_body_cap_applies_to_every_body_reader(tmp):
     """Oversized POST, DELETE, and PUT bodies are refused before parsing."""
     segment_job = 'tt-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp, env={'DAEDALUS_MAX_BODY_SIZE': '8'}) as (base, docroot):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_BODY_SIZE': '8'}
+            ) as (base, docroot):
         cases = (
             ('POST', '/result', {'Content-Type': 'application/json'}),
             ('POST', f'/segment?job={segment_job}&seg=1&total=1',
@@ -84,7 +87,9 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
     body-reading path: the guard must reject the sign, not test `clen > MAX`.
     """
     job = 'tt-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp, env={'DAEDALUS_MAX_BODY_SIZE': '4096'}) as (base, docroot):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_BODY_SIZE': '4096'}
+            ) as (base, docroot):
         _, minted = _util.post_json(
             base + '/segment-job', {'token': TOK, 'job': job})
         over_cap = b'x' * 8192
@@ -118,7 +123,7 @@ def test_a_malformed_content_length_is_refused_not_dropped(tmp):
     connection close with no answer at all. A garbled header is a client
     error — every verb answers 400 for it.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for method, path in (('POST', '/result'), ('PUT', '/command'),
                              ('DELETE', '/upload')):
             resp = raw_request(
@@ -182,7 +187,7 @@ def test_a_refused_body_length_is_answered_in_full(tmp):
     clean.
     """
     payload = b'x' * 16384
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for declared in ('notanumber', '-1'):
             resp, reset = _refused_exchange(
                 base,
@@ -210,7 +215,7 @@ def test_a_refused_put_absorbs_its_body_so_the_answer_survives(tmp):
     404 there would be asserting against the design rather than for it, and
     on macOS it duly reported the reset.
     """
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         payload = b'x' * 8192
         status, body = _util.request(
             base + '/nope', 'PUT', body=payload,
@@ -232,7 +237,8 @@ def test_an_incomplete_body_never_holds_a_request_worker(tmp):
     all, so this deadline is what still bounds the case that does.
     """
     with _util.bridge(
-            tmp, env={'DAEDALUS_REQUEST_TIMEOUT': '2'}) as (base, _docroot):
+            tmp, env={**BRIDGE_ENV,
+                      'DAEDALUS_REQUEST_TIMEOUT': '2'}) as (base, _docroot):
         sock = stalled_request(base)
         try:
             started = time.time()
@@ -286,9 +292,10 @@ def test_request_workers_are_capped_rather_than_grown_per_connection(tmp):
     rest; reading it per connection rather than per position is what keeps an
     unrelated worker's lifetime from deciding the verdict.
     """
-    with _util.bridge(tmp, env={'DAEDALUS_MAX_REQUEST_WORKERS': '2',
-                                'DAEDALUS_REQUEST_TIMEOUT': '30'}) as (
-                                    base, _docroot):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_REQUEST_WORKERS': '2',
+                      'DAEDALUS_REQUEST_TIMEOUT': '30'}) as (
+                          base, _docroot):
         opened = [stalled_request(base) for _ in range(3)]
         try:
             closed, answered, held = _settled(opened, 10)
@@ -318,7 +325,9 @@ def test_the_json_depth_bound_is_the_bridges_and_is_configurable(tmp):
     body to exactly the configured depth and one past it, so the refusal is
     shown to be the number's doing rather than the interpreter's.
     """
-    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '4'}) as (base, _d):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
+            ) as (base, _d):
         # depth 4 counting the object itself: {"token": [[[0]]]}
         at_limit = b'{"token":"wrongtoken","value":' + b'[' * 3 + b'0' + b']' * 3 + b'}'
         status, raw = _util.request(
@@ -343,7 +352,9 @@ def test_a_brace_inside_a_json_string_opens_nothing(tmp):
     would end the string early, so the rest of a hostile value would be read
     as structure.
     """
-    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '3'}) as (base, _d):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '3'}
+            ) as (base, _d):
         literal = json.dumps({'token': 'wrongtoken',
                               'value': '[' * 50 + '\\"' + '{' * 50}).encode()
         status, raw = _util.request(
@@ -362,7 +373,9 @@ def test_a_wide_but_shallow_body_is_accepted(tmp):
     arm of the scan is what keeps those apart, so this body must clear the
     bound the way any small one does.
     """
-    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '4'}) as (base, _d):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
+            ) as (base, _d):
         wide = b'{"token":"wrongtoken","value":[' + b'[0],' * 60 + b'[0]]}'
         status, raw = _util.request(
             base + '/result', 'POST', body=wide,
@@ -380,7 +393,9 @@ def test_a_wide_body_of_objects_is_accepted(tmp):
     deep — through the bridge, the 400 it would invent replaces the 401
     authentication owes this shallow body.
     """
-    with _util.bridge(tmp, env={'DAEDALUS_MAX_JSON_DEPTH': '4'}) as (base, _d):
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
+            ) as (base, _d):
         wide = b'{"token":"wrongtoken","value":[' + b'{},' * 60 + b'{}]}'
         status, raw = _util.request(
             base + '/result', 'POST', body=wide,
@@ -406,7 +421,7 @@ def test_recursive_json_is_refused_on_every_body_verb_before_authentication(tmp)
     assert len(payload) == 20032
     routes = (('POST', '/result'), ('PUT', '/command'),
               ('DELETE', '/upload'))
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
         for method, path in routes:
             try:
@@ -431,7 +446,7 @@ def test_json_scalars_arrays_and_null_are_refused_on_every_body_verb(tmp):
     routes = (('POST', '/result'), ('PUT', '/command'),
               ('DELETE', '/upload'))
     values = (('scalar', 1), ('array', []), ('null', None))
-    with _util.bridge(tmp) as (base, _docroot):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
         for shape, value in values:
             encoded = json.dumps(value).encode()
