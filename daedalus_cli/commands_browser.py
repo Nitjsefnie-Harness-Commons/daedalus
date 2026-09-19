@@ -9,7 +9,8 @@ from .transport import api, token, wait_for_result
 
 def do_cookies(args):
     """Get cookies for a domain via extension."""
-    cmd = {'id': '_cookies', 'type': 'cookies', 'token': token(), 'tab': 'extension'}
+    cmd = {'id': '_cookies', 'type': 'cookies', 'token': token(),
+           'tab': 'extension'}
     if args.domain:
         cmd['domain'] = args.domain
     if args.url:
@@ -26,13 +27,15 @@ def do_cookies(args):
         print(json.dumps(cookies, indent=2, ensure_ascii=False))
     else:
         for c in cookies:
-            print(f'  {c.get("domain", "")}  {c.get("name", "")}={c.get("value", "")}')
+            print(f'  {c.get("domain", "")}  '
+                  f'{c.get("name", "")}={c.get("value", "")}')
     print(f'{len(cookies)} cookies')
 
 
 def do_set_cookie(args):
     """Set a cookie via extension."""
-    cmd = {'id': '_set_cookie', 'type': 'set-cookie', 'token': token(), 'tab': 'extension',
+    cmd = {'id': '_set_cookie', 'type': 'set-cookie', 'token': token(),
+           'tab': 'extension',
            'url': args.url, 'name': args.name, 'value': args.value}
     if args.domain: cmd['domain'] = args.domain
     if args.path: cmd['path'] = args.path
@@ -52,7 +55,8 @@ def do_set_cookie(args):
 
 def do_remove_cookie(args):
     """Remove a specific cookie via extension."""
-    cmd = {'id': '_rm_cookie', 'type': 'remove-cookie', 'token': token(), 'tab': 'extension',
+    cmd = {'id': '_rm_cookie', 'type': 'remove-cookie', 'token': token(),
+           'tab': 'extension',
            'url': args.url, 'name': args.name}
     sent = api('PUT', '/command', cmd)
     res = wait_for_result(
@@ -66,7 +70,8 @@ def do_remove_cookie(args):
 
 def do_clear_cookies(args):
     """Clear all cookies for a domain via extension."""
-    cmd = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': token(), 'tab': 'extension'}
+    cmd = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': token(),
+           'tab': 'extension'}
     if args.domain: cmd['domain'] = args.domain
     if args.url: cmd['url'] = args.url
     sent = api('PUT', '/command', cmd)
@@ -89,7 +94,8 @@ def do_clear_cookies(args):
 def do_cdp(args):
     """Send raw CDP command via extension."""
     params = json.loads(args.params) if args.params else {}
-    cmd = {'id': '_cdp', 'type': 'cdp', 'method': args.method, 'params': params,
+    cmd = {'id': '_cdp', 'type': 'cdp', 'method': args.method,
+           'params': params,
            'token': token(), 'tab': 'extension'}
     if args.chrome_tab:
         cmd['tabId'] = args.chrome_tab
@@ -105,7 +111,8 @@ def do_cdp(args):
 def do_close_tab(args):
     """Close one or more Chrome tabs via extension."""
     ids = [int(x) for x in args.chrome_tabs]
-    cmd: dict = {'id': '_close_tab', 'type': 'close-tab', 'token': token(), 'tab': 'extension'}
+    cmd: dict = {'id': '_close_tab', 'type': 'close-tab', 'token': token(),
+                 'tab': 'extension'}
     if len(ids) == 1:
         cmd['tabId'] = ids[0]
     else:
@@ -146,13 +153,19 @@ def do_fetch_timings(args):
         return
     # Print tail of N entries with columns
     tail = timings[-args.n:]
-    print(f'{"method":6} {"status":6} {"size":>10} {"decode":>8} {"fetch":>8} {"encode":>8} {"total":>8}  url')
+    print(f'{"method":6} {"status":6} {"size":>10} {"decode":>8} '
+          f'{"fetch":>8} {"encode":>8} {"total":>8}  url')
     for t in tail:
         if 'error' in t:
-            print(f'{t.get("method", ""):6} {"ERR":6} {"":>10} {"":>8} {"":>8} {"":>8} {t.get("ms_total", ""):>8}  {t.get("url", "")[:80]} ({t["error"]})')
+            print(f'{t.get("method", ""):6} {"ERR":6} {"":>10} {"":>8} '
+                  f'{"":>8} {"":>8} {t.get("ms_total", ""):>8}  '
+                  f'{t.get("url", "")[:80]} ({t["error"]})')
         else:
             size_mb = t.get('bodySize', 0) / 1024 / 1024
-            print(f'{t.get("method", ""):6} {t.get("status", ""):6} {size_mb:>9.2f}M {t.get("ms_bodyDecode", ""):>8} {t.get("ms_fetch", ""):>8} {t.get("ms_encode", ""):>8} {t.get("ms_total", ""):>8}  {t.get("url", "")[:80]}')
+            print(f'{t.get("method", ""):6} {t.get("status", ""):6} '
+                  f'{size_mb:>9.2f}M {t.get("ms_bodyDecode", ""):>8} '
+                  f'{t.get("ms_fetch", ""):>8} {t.get("ms_encode", ""):>8} '
+                  f'{t.get("ms_total", ""):>8}  {t.get("url", "")[:80]}')
     # Summary stats
     completed = [t for t in timings if 'error' not in t]
     if completed:
@@ -160,14 +173,18 @@ def do_fetch_timings(args):
         totals = [t['ms_total'] for t in completed]
         fetches = [t['ms_fetch'] for t in completed]
         encodes = [t['ms_encode'] for t in completed]
-        print(f'\n{len(completed)} successful: total median={statistics.median(totals):.0f}ms mean={statistics.mean(totals):.0f}ms '
-              f'fetch median={statistics.median(fetches):.0f}ms encode median={statistics.median(encodes):.0f}ms')
+        print(f'\n{len(completed)} successful: '
+              f'total median={statistics.median(totals):.0f}ms '
+              f'mean={statistics.mean(totals):.0f}ms '
+              f'fetch median={statistics.median(fetches):.0f}ms '
+              f'encode median={statistics.median(encodes):.0f}ms')
 
 
 def do_ext_self_reload(args):
     """Reload the extension from disk via chrome.runtime.reload()."""
     result = ext_cmd('_ext_reload', 'ext-reload')
-    print(f'Extension reloading from v{result.get("version", "?")} — will reconnect SSE automatically')
+    print(f'Extension reloading from v{result.get("version", "?")} '
+          '— will reconnect SSE automatically')
 
 
 def do_open_tab(args):
@@ -192,7 +209,8 @@ def do_open_tabs(args):
     opened = result.get('opened', [])
     errors = result.get('errors', [])
     for o in opened:
-        print(f'Opened tab {o.get("tabId", "?")} {MARK["out"]} {o.get("url", "")}')
+        print(f'Opened tab {o.get("tabId", "?")} '
+              f'{MARK["out"]} {o.get("url", "")}')
     for e in errors:
         print(f'FAILED {e.get("url", "?")}: {e.get("error", "")}')
     print(f'{len(opened)} opened, {len(errors)} failed')
@@ -201,11 +219,14 @@ def do_open_tabs(args):
 def do_focus_tab(args):
     """Focus a Chrome tab via extension."""
     result = ext_cmd('_focus', 'focus-tab', tabId=int(args.chrome_tab))
-    print(f'Focused tab {result.get("tabId", "?")} window={result.get("windowId", "?")}')
+    print(f'Focused tab {result.get("tabId", "?")} '
+          f'window={result.get("windowId", "?")}')
 
 
 def do_ext_navigate(args):
-    """Navigate a tab to URL via extension (works on any page including chrome://)."""
+    """Navigate a tab to URL via extension (works on any page including
+    chrome://).
+    """
     fields = {'url': args.url}
     if args.chrome_tab:
         fields['tabId'] = int(args.chrome_tab)
@@ -221,4 +242,5 @@ def do_ext_reload(args):
     if args.bypass_cache:
         fields['bypassCache'] = True
     result = ext_cmd('_reload', 'reload', **fields)
-    print(f'Reloaded tab {result.get("tabId", "?")}' + (' (bypass cache)' if args.bypass_cache else ''))
+    print(f'Reloaded tab {result.get("tabId", "?")}'
+          + (' (bypass cache)' if args.bypass_cache else ''))

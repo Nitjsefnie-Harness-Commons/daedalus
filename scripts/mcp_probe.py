@@ -4,7 +4,8 @@
 Usage:
   TOKEN=<bridge-token> python3 scripts/mcp_probe.py list
   TOKEN=<bridge-token> python3 scripts/mcp_probe.py call <tool> [json-args]
-  TOKEN=<bridge-token> DAEDALUS_MCP_URL=http://127.0.0.1:8086/mcp python3 scripts/mcp_probe.py ...
+  TOKEN=<bridge-token> DAEDALUS_MCP_URL=http://127.0.0.1:8086/mcp
+    python3 scripts/mcp_probe.py ...
 """
 import json, os, sys, uuid
 import httpx
@@ -73,7 +74,8 @@ def main():
             args = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
             data, _ = answer(
                 c, sid, 'tools/call', {'name': tool, 'arguments': args})
-            print(json.dumps(data.get('result', data), indent=2, ensure_ascii=False))
+            print(json.dumps(data.get('result', data), indent=2,
+                             ensure_ascii=False))
         else:
             sys.exit(f'unknown action: {action}')
 

@@ -76,8 +76,8 @@ DISPATCH = {
 
 def main():
     # Stdio is configured by output.configure_stdio(), which runs when that
-    # module is imported and which server.py and daedalus_mcp/server.py also call
-    # explicitly. Repeating it HERE pinned UTF-8 unconditionally and so
+    # module is imported and which server.py and daedalus_mcp/server.py also
+    # call explicitly. Repeating it HERE pinned UTF-8 unconditionally and so
     # overrode the one case that function exists to respect: an explicit
     # PYTHONIOENCODING. The call is idempotent; this omission is deliberate.
     args = build_parser().parse_args()

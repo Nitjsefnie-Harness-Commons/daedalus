@@ -22,7 +22,8 @@ def do_inject_css(args):
     if args.all_frames:
         fields['allFrames'] = True
     result = ext_cmd('_inject_css', 'inject-css', **fields)
-    print(f'Injected {result.get("injected", "?")} chars CSS into tab {result.get("tabId", "?")}')
+    print(f'Injected {result.get("injected", "?")} chars CSS into tab '
+          f'{result.get("tabId", "?")}')
 
 
 def do_remove_css(args):
@@ -38,12 +39,14 @@ def do_remove_css(args):
     if args.all_frames:
         fields['allFrames'] = True
     result = ext_cmd('_remove_css', 'remove-css', **fields)
-    print(f'Removed {result.get("removed", "?")} chars CSS from tab {result.get("tabId", "?")}')
+    print(f'Removed {result.get("removed", "?")} chars CSS from tab '
+          f'{result.get("tabId", "?")}')
 
 
 def do_block_requests(args):
     """Block page requests matching a URL pattern via extension."""
-    cmd = {'id': '_block', 'type': 'block-requests', 'token': token(), 'tab': 'extension',
+    cmd = {'id': '_block', 'type': 'block-requests', 'token': token(),
+           'tab': 'extension',
            'pattern': args.pattern}
     if args.chrome_tab:
         cmd['tabId'] = int(args.chrome_tab)
@@ -54,7 +57,9 @@ def do_block_requests(args):
     if res.get('error'):
         sys.exit(f'Error: {res["error"]}')
     result = res.get('result', {})
-    print(f'Blocked: {result.get("pattern", "")}  ruleId={result.get("ruleId", "")}  tabs={result.get("tabIds", [])}')
+    print(f'Blocked: {result.get("pattern", "")}  '
+          f'ruleId={result.get("ruleId", "")}  '
+          f'tabs={result.get("tabIds", [])}')
 
 
 def _positive_rule_id(value):
@@ -76,7 +81,8 @@ def _positive_rule_id(value):
 
 def do_unblock_requests(args):
     """Remove block rules via extension."""
-    cmd: dict = {'id': '_unblock', 'type': 'unblock-requests', 'token': token(), 'tab': 'extension'}
+    cmd: dict = {'id': '_unblock', 'type': 'unblock-requests',
+                 'token': token(), 'tab': 'extension'}
     if args.rule_id is not None:
         cmd['ruleId'] = args.rule_id
     sent = api('PUT', '/command', cmd)
@@ -91,7 +97,8 @@ def do_unblock_requests(args):
 
 def do_list_block_rules(args):
     """List active block rules via extension."""
-    cmd = {'id': '_list_rules', 'type': 'list-block-rules', 'token': token(), 'tab': 'extension'}
+    cmd = {'id': '_list_rules', 'type': 'list-block-rules', 'token': token(),
+           'tab': 'extension'}
     sent = api('PUT', '/command', cmd)
     res = wait_for_result(
         '_list_rules', 'extension', sent.get('did'), 10)
@@ -105,7 +112,8 @@ def do_list_block_rules(args):
         return
     for r in rules:
         cond = r.get('condition', {})
-        print(f'  id={r["id"]}  pattern={cond.get("urlFilter", "")}  tabs={cond.get("tabIds", "all")}')
+        print(f'  id={r["id"]}  pattern={cond.get("urlFilter", "")}  '
+              f'tabs={cond.get("tabIds", "all")}')
     print(f'{len(rules)} rule(s)')
 
 
@@ -118,7 +126,8 @@ def do_net_capture(args):
         fields['maxRequests'] = args.max
     result = ext_cmd('_net_cap', 'net-capture', timeout=15, **fields)
     if result.get('already'):
-        print(f'Already capturing on tab {result.get("tabId")} ({result.get("buffered", 0)} requests buffered)')
+        print(f'Already capturing on tab {result.get("tabId")} '
+              f'({result.get("buffered", 0)} requests buffered)')
     else:
         print(f'Capturing network on tab {result.get("tabId")}')
 
@@ -188,19 +197,22 @@ def do_store_hotfix(args):
         fields['permanent'] = True
     result = ext_cmd('_store_hf', 'store-hotfix', **fields)
     perm = ' [PERM]' if result.get('permanent') else ''
-    print(f'Stored hotfix "{result.get("stored", "?")}"{perm} ({result.get("total", "?")} total)')
+    print(f'Stored hotfix "{result.get("stored", "?")}"{perm} '
+          f'({result.get("total", "?")} total)')
 
 
 def do_clear_hotfix(args):
     """Clear a specific hotfix from the extension."""
     result = ext_cmd('_clear_hf', 'clear-hotfix', fixId=args.fix_id)
     found = result.get('found', False)
-    print(f'Cleared hotfix "{result.get("cleared", "?")}" (found={found}, remaining={result.get("remaining", 0)})')
+    print(f'Cleared hotfix "{result.get("cleared", "?")}" '
+          f'(found={found}, remaining={result.get("remaining", 0)})')
 
 
 def do_clear_hotfixes(args):
     """Clear all hotfixes from the extension."""
-    result = ext_cmd('_clear_all_hf', 'clear-all-hotfixes', includePermanent=args.include_permanent)
+    result = ext_cmd('_clear_all_hf', 'clear-all-hotfixes',
+                     includePermanent=args.include_permanent)
     if args.include_permanent:
         print('All hotfixes cleared (incl. permanent)')
     else:
@@ -218,7 +230,8 @@ def do_list_hotfixes(args):
         return
     print(f'Version: {result.get("version", "?")}')
     for hf in fixes:
-        ts = time.strftime('%Y-%m-%d %H:%M', time.localtime(hf.get('ts', 0) / 1000))
+        ts = time.strftime('%Y-%m-%d %H:%M',
+                           time.localtime(hf.get('ts', 0) / 1000))
         code_preview = hf['code'][:80].replace('\n', '\\n')
         marker = '[PERM]' if hf.get('permanent') else '      '
         print(f'  {marker} {hf["id"]}  {ts}  {code_preview}')
@@ -252,7 +265,8 @@ def _boolean_argument(value):
 def do_set_permanent(args):
     """Toggle the permanent flag on an existing hotfix."""
     val = args.permanent
-    result = ext_cmd('_set_perm', 'set-permanent', fixId=args.fix_id, permanent=val)
+    result = ext_cmd('_set_perm', 'set-permanent', fixId=args.fix_id,
+                     permanent=val)
     found = result.get('found', False)
     if not found:
         sys.exit(f'No hotfix with id "{args.fix_id}"')
