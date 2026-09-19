@@ -381,6 +381,145 @@ def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
     assert seen['revoked'] == ['blob:held-1', 'blob:held-2'], seen
 
 
+# An armed delete fires on its second click only while its confirm timer is
+# still pending, and the DOM above runs setTimeout immediately, so the pager
+# harnesses park that timer in a queue the harness never runs.
+_PAGER_HARNESS_SETUP = r"""
+const timers = [];
+globalThis.setTimeout = (callback) => {
+  timers.push(callback);
+  return timers.length;
+};
+globalThis.clearTimeout = (id) => { timers[id - 1] = null; };
+"""
+
+_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(_DOM + _PAGER_HARNESS_SETUP + r"""
+(async () => {
+const fetched = [];
+let total = 51;
+const file = (n) => ({ id: 'up' + n, filename: 'f' + n + '.txt', size: 1,
+  mtime: 1, path: token + '/up' + n + '/f' + n + '.txt' });
+globalThis.fetch = async (target, init) => {
+  const where = String(target);
+  if (where.startsWith('/upload?limit=')) {
+    fetched.push(where);
+    const params = new URL(where, 'http://d/').searchParams;
+    const offset = Number(params.get('offset'));
+    const items = [];
+    for (let n = offset + 1; n <= offset + 50 && n <= total; n++) {
+      items.push(file(n));
+    }
+    return jsonResponse({ total, items });
+  }
+  if (init && init.method === 'DELETE') total = 50;
+  return jsonResponse({});
+};
+phase('dashboard module import started');
+const { mount } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
+phase('dashboard module imported');
+phase('dashboard call started');
+const container = new El('div');
+mount(container);
+await bounded(settle(), 'first listing render', _dashnodeStepTimeoutMs);
+const metaEl = container.find('[data-role=meta]');
+const prevBtn = container.find('[data-role=prev]');
+const nextBtn = container.find('[data-role=next]');
+nextBtn.click();
+await bounded(settle(), 'last page render', _dashnodeStepTimeoutMs);
+const pagerState = () => ({
+  meta: metaEl.textContent,
+  prevDisabled: prevBtn.disabled,
+  nextDisabled: nextBtn.disabled,
+  rows: container.all().filter((el) => el.tag === 'tr').length - 1,
+});
+const lastPage = pagerState();
+const delBtn = container.byText('delete');
+delBtn.click();
+delBtn.click();
+await bounded(settle(), 'delete settles', _dashnodeStepTimeoutMs);
+const afterDelete = pagerState();
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({
+  lastPage, afterDelete, listingTargets: fetched,
+}));
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=4, module=True, arguments=(
+    ROOT / 'dashboard' / 'sections' / 'uploads.js',))
+
+
+def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
+    """The issue's reproduction: the last page shows 51–51 / 51, the
+    last-page file is deleted, and the pager must land on the last valid
+    page of the shrunken total instead of an impossible range with rows
+    from a page the listing no longer has."""
+    result = _dashnode.run_dashboard_node(_PAGER_CLAMP_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['lastPage'] == {
+        'meta': '51–51 / 51', 'prevDisabled': False, 'nextDisabled': True,
+        'rows': 1}, seen
+    assert seen['afterDelete'] == {
+        'meta': '1–50 / 50', 'prevDisabled': True, 'nextDisabled': True,
+        'rows': 50}, seen
+    assert seen['listingTargets'] == [
+        '/upload?limit=50&offset=0', '/upload?limit=50&offset=50',
+        '/upload?limit=50&offset=50', '/upload?limit=50&offset=0'], seen
+
+
+_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(_DOM + _PAGER_HARNESS_SETUP + r"""
+(async () => {
+const fetched = [];
+let total = 1;
+globalThis.fetch = async (target, init) => {
+  const where = String(target);
+  if (where.startsWith('/upload?limit=')) {
+    fetched.push(where);
+    return jsonResponse({ total,
+      items: total ? [{ id: 'up1', filename: 'a.txt', size: 1, mtime: 1,
+        path: token + '/up1/a.txt' }] : [] });
+  }
+  if (init && init.method === 'DELETE') total = 0;
+  return jsonResponse({});
+};
+phase('dashboard module import started');
+const { mount } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
+phase('dashboard module imported');
+phase('dashboard call started');
+const container = new El('div');
+mount(container);
+await bounded(settle(), 'listing with one row render', _dashnodeStepTimeoutMs);
+const metaEl = container.find('[data-role=meta]');
+const listEl = container.find('[data-role=list]');
+const oneRow = { meta: metaEl.textContent, list: listEl.textContent };
+const delBtn = container.byText('delete');
+delBtn.click();
+delBtn.click();
+await bounded(settle(), 'delete settles', _dashnodeStepTimeoutMs);
+const afterEmpty = { meta: metaEl.textContent, list: listEl.textContent };
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({ oneRow, afterEmpty }));
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=3, module=True, arguments=(
+    ROOT / 'dashboard' / 'sections' / 'uploads.js',))
+
+
+def test_an_emptied_list_reads_zero_slash_zero(_tmp):
+    """A list with no rows cannot start at row 1: the header reads 0 / 0
+    and the list says there are no uploads, not no matches."""
+    result = _dashnode.run_dashboard_node(_PAGER_EMPTY_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['oneRow']['meta'] == '1–1 / 1', seen
+    assert seen['afterEmpty'] == {
+        'meta': '0 / 0', 'list': 'no uploads.'}, seen
+
+
 _EVAL_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
 (async () => {
 let tabs = [];
