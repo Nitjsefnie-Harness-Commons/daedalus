@@ -488,8 +488,6 @@ def iterable_deferred(value):
     return None
 
 
-
-
 def expression_callables(node, state):
     values = [_known_value(child, state) for child in ast.walk(node)]
     return tuple(candidate for value in values if value is not None
@@ -541,7 +539,6 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver,
     if literals:
         literals = [item for item in literals if item[0] not in rebound]
     return tuple(literals)
-
 
 
 def payload_key(dicts):
