@@ -191,7 +191,7 @@ def test_the_transport_re_exports_no_json_body_helper(tmp):
     """
     program = (
         'import daedalus_bridge.http_transport as transport\n'
-        'for name in ("JSONObject", "json_nests_deeper_than"):\n'
+        'for name in ("JSONObject", "json_nests_deeper_than", "json_body"):\n'
         '    assert not hasattr(transport, name), name\n')
     env = dict(os.environ)
     env.update({
