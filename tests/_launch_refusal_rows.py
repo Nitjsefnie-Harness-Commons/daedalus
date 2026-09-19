@@ -1,4 +1,8 @@
-"""The synthetic snippets the repo-layout audit exercises its limbs with."""
+"""The synthetic snippets that red-exercise the repo-layout audit's
+per-launch refusal limbs, one row per limb; the source-tier limbs
+(import aliases, from-imports, unpack-derived names, eval/exec,
+machinery members, undefined names, receiver resolution, no visible
+launch) are outside this table's scope."""
 LAUNCH_REFUSAL_ROWS = (
     ('clone-without-init.defaultBranch',
      "import subprocess\n"
@@ -34,4 +38,13 @@ LAUNCH_REFUSAL_ROWS = (
      "import subprocess\n"
      "subprocess.run(['git', 'status'])\n",
      'does not fail loudly on a failed git command'),
+    ('keyword-mapping-unpack',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True, **opts)\n",
+     'unpacks a keyword mapping the audit cannot read'),
+    ('launch-through-check-output',
+     "import subprocess\n"
+     "subprocess.check_output(['git', 'status'], check=True)\n",
+     'launches through subprocess.check_output, which the audit does '
+     'not see'),
 )
