@@ -1574,8 +1574,8 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
         _util.skip('uvicorn not installed — MCP thread cannot serve')
     real_loader = _load_mcp_at_port
 
-    def crashing_loader(base, port):
-        mod = real_loader(base, port)
+    def crashing_loader(base, port, **kwargs):
+        mod = real_loader(base, port, **kwargs)
 
         def crash(**_settings):
             raise RuntimeError('address already in use')
