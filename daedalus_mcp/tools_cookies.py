@@ -3,7 +3,8 @@
 
 def register(mcp, bridge):
     @mcp.tool()
-    async def get_cookies(domain: str = '', target_url: str = '') -> list[dict]:
+    async def get_cookies(domain: str = '',
+                          target_url: str = '') -> list[dict]:
         """List cookies via extension. Filter by domain or URL."""
         fields: dict = {}
         if domain:
@@ -13,9 +14,11 @@ def register(mcp, bridge):
         return await bridge.ext_cmd('_cookies', 'cookies', **fields)
 
     @mcp.tool()
-    async def set_cookie(target_url: str, name: str, value: str, domain: str = '',
-                         path: str = '', http_only: bool = False, secure: bool = False,
-                         same_site: str = '', expires: float | None = None) -> dict:
+    async def set_cookie(target_url: str, name: str, value: str,
+                         domain: str = '', path: str = '',
+                         http_only: bool = False, secure: bool = False,
+                         same_site: str = '',
+                         expires: float | None = None) -> dict:
         """Set a cookie on `target_url`."""
         fields: dict = {'url': target_url, 'name': name, 'value': value}
         if domain:

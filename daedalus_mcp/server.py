@@ -37,9 +37,10 @@ from daedalus_bridge.log_safe import log_safe
 configure_stdio()
 
 # The standalone MCP entry point derives its bridge URL from DAEDALUS_PORT.
-# The in-process server passes the bridge's actual bound URL to start_in_thread,
-# which matters when DAEDALUS_PORT=0. DAEDALUS_LOCAL_URL remains the explicit
-# override for a standalone MCP deployment fronting a bridge that runs elsewhere.
+# The in-process server passes the bridge's actual bound URL to
+# start_in_thread, which matters when DAEDALUS_PORT=0. DAEDALUS_LOCAL_URL
+# remains the explicit override for a standalone MCP deployment fronting
+# a bridge that runs elsewhere.
 LOCAL_URL = os.environ.get(
     'DAEDALUS_LOCAL_URL',
     f'http://127.0.0.1:{os.environ.get("DAEDALUS_PORT", "8081")}')
