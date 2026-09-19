@@ -115,17 +115,18 @@ SITES = [
     # carries any attribute as the residual.
     #
     # Well-formed markup walks linearly. A malformed tag (an unclosed quote)
-    # makes every anchor walk to that quote -- quadratic: 0.25 s at 2000,
-    # 1.7 s at 5000. The rail lookahead's trailing region is a second
-    # unbounded walk -- cubic: k anchors over k `class='rail-foot' ` runs
-    # with no `>v` after them cost 23.7 s at k=400 without it, 0.071 s
-    # with. A capped walk (36-69 ms at 5000, earlier measurement) was
-    # declined: a cap re-introduces a silent false negative beyond the
-    # cap. The lookahead asserts only what the rest already requires --
-    # the tag's first `>` outside a quoted value carries the `v` -- so it
-    # prunes without matching less. No test can catch its removal, the
-    # cost returns silently, and a later cleanup must not drop it as dead
-    # weight.
+    # makes every anchor walk to that quote — quadratic. The rail lookahead's
+    # trailing region is a second unbounded walk — cubic in k: k anchors over
+    # k `class='rail-foot' ` runs with no `>v` after them. The shape
+    # `'<div ' * k + "class='rail-foot' " * k + 'a' * k` reproduces it —
+    # catastrophic without the lookahead, bounded with it — and where the
+    # cost detonates depends on the interpreter, so no timings are recorded
+    # here. A capped walk was declined: a cap re-introduces a silent false
+    # negative beyond the cap. The lookahead asserts only what the rest
+    # already requires — the tag's first `>` outside a quoted value carries
+    # the `v` — so it prunes without matching less. No test can catch its
+    # removal, the cost returns silently, and a later cleanup must not drop
+    # it as dead weight.
     ('dashboard/index.html', 'dashboard rail footer',
      r'''<(?i:div)(?=(?:[^>'"]|'[^']*'|"[^"]*")*>v)'''
      r'''[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
