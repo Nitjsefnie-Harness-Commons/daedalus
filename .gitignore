@@ -373,6 +373,7 @@
 !/tests/test_extension_boundary.py
 !/tests/test_extension_manifest.py
 !/tests/test_extension_policy.py
+!/tests/test_fetch_timings_count.py
 !/tests/test_file_sizes.py
 !/tests/test_generator_second_consumption.py
 !/tests/test_ghexpr.py
