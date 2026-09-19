@@ -37,7 +37,8 @@ def do_segment_status(args):
         if e.code == 404:
             sys.exit(f'segment-status: no job named "{args.job}"')
         if e.code == 409:
-            sys.exit(f'segment-status: job "{args.job}" is owned by a different token')
+            sys.exit(f'segment-status: job "{args.job}" '
+                     'is owned by a different token')
         sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
@@ -50,14 +51,18 @@ def do_segment_status(args):
         full = set(range(min(done), max(done) + 1))
         gaps = sorted(full - set(done))
         if gaps:
-            print(f'Gaps ({len(gaps)}): {gaps[:30]}{"..." if len(gaps) > 30 else ""}')
+            print(f'Gaps ({len(gaps)}): {gaps[:30]}'
+                  f'{"..." if len(gaps) > 30 else ""}')
         else:
             print(f'Complete: {min(done)}–{max(done)}')
 
 
 def do_screenshot(args):
-    """Send screenshot command to extension, wait for upload, optionally save to local file."""
-    cmd = {'token': token(), 'id': args.id or '_ss', 'code': '', 'tab': 'extension'}
+    """Send screenshot command to extension, wait for upload, optionally save
+    to local file.
+    """
+    cmd = {'token': token(), 'id': args.id or '_ss', 'code': '',
+           'tab': 'extension'}
     cmd_payload = {'id': cmd['id'], 'type': 'screenshot'}
     if args.format:
         cmd_payload['format'] = args.format
@@ -66,7 +71,8 @@ def do_screenshot(args):
     if args.chrome_tab:
         cmd_payload['tabId'] = int(args.chrome_tab)
 
-    resp = api('PUT', '/command', {**cmd_payload, 'token': token(), 'tab': 'extension'})
+    resp = api('PUT', '/command',
+               {**cmd_payload, 'token': token(), 'tab': 'extension'})
     print(f'{MARK["out"]} screenshot {MARK["out"]} {resp.get("target", "?")}')
 
     timeout = args.timeout or 15

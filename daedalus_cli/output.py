@@ -75,9 +75,11 @@ def validate_result(res):
     expected = {'id', 'result', 'error', 'ts', 'token'}
     missing = expected - set(res.keys())
     if missing:
-        print(f'{MARK["warn"]} Missing fields: {", ".join(sorted(missing))}', file=sys.stderr)
+        print(f'{MARK["warn"]} Missing fields: {", ".join(sorted(missing))}',
+              file=sys.stderr)
     if 'id' in res and not isinstance(res['id'], str):
-        print(f'{MARK["warn"]} id is {type(res["id"]).__name__}, expected str', file=sys.stderr)
+        print(f'{MARK["warn"]} id is {type(res["id"]).__name__}, expected str',
+              file=sys.stderr)
 
 
 def _format_eval_world(world):

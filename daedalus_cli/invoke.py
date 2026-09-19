@@ -26,7 +26,8 @@ def send_and_wait(cmd_id, code, target_tab, wait, timeout):
 
     resp = api('PUT', '/command', payload)
     target = resp.get('target', '?')
-    print(f'{MARK["out"]} {cmd_id} {MARK["out"]} {target}  ({len(code)} bytes)')
+    print(f'{MARK["out"]} {cmd_id} {MARK["out"]} {target}  '
+          f'({len(code)} bytes)')
 
     if not wait:
         return
@@ -38,8 +39,11 @@ def send_and_wait(cmd_id, code, target_tab, wait, timeout):
 
 
 def ext_cmd(cmd_id, cmd_type, timeout=10, **fields):
-    """Send an extension command and wait for result. Returns result dict or exits on error."""
-    cmd = {'id': cmd_id, 'type': cmd_type, 'token': token(), 'tab': 'extension', **fields}
+    """Send an extension command and wait for result. Returns result dict or
+    exits on error.
+    """
+    cmd = {'id': cmd_id, 'type': cmd_type, 'token': token(),
+           'tab': 'extension', **fields}
     sent = api('PUT', '/command', cmd)
     res = wait_for_result(cmd_id, 'extension', sent.get('did'), timeout)
     if res is None:
