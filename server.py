@@ -197,7 +197,8 @@ class Handler(RequestMixin):
         if parsed.path == '/health':
             return self._handle_health()
 
-        if parsed.path == '/dashboard' or parsed.path.startswith('/dashboard/'):
+        if (parsed.path == '/dashboard'
+                or parsed.path.startswith('/dashboard/')):
             return self.answer(static_routes.dashboard_asset(
                 DASHBOARD_DIR, parsed.path))
 
@@ -222,12 +223,13 @@ class Handler(RequestMixin):
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         # MUST be 'close', not 'keep-alive'. BaseHTTPRequestHandler.send_header
-        # reads this value: 'keep-alive' sets close_connection=False, so when the
-        # stream loop below ends the handler returns and the socket is held open
-        # for a next request that never comes. The client then sees silence, not
-        # EOF — its reconnect waits out a watchdog instead of firing immediately
-        # (measured: ~25s direct, and several times that through a proxy). A stream response
-        # is the connection's last, so say so.
+        # reads this value: 'keep-alive' sets close_connection=False, so when
+        # the stream loop below ends the handler returns and the socket is
+        # held open for a next request that never comes. The client then sees
+        # silence, not EOF — its reconnect waits out a watchdog instead of
+        # firing immediately (measured: ~25s direct, and several times that
+        # through a proxy). A stream response is the connection's last, so
+        # say so.
         self.send_header('Connection', 'close')
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
@@ -401,7 +403,8 @@ class Handler(RequestMixin):
         return self._json(200, {'ok': True, 'target': target, 'did': did})
 
     def _handle_health(self):
-        """GET /health — bridge liveness for detecting a silently-dead stream."""
+        """GET /health — bridge liveness for detecting a silently-dead stream.
+        """
         now = time.time()
         live_streams, stream_tabs = stream_service.snapshot()
         tokens, tabs = tab_registry.counts()

@@ -48,7 +48,8 @@ def _log_safe(value):
     deliberate: KeyboardInterrupt and SystemExit still propagate.
     """
     try:
-        rendered = str(value).encode('utf-8', 'backslashreplace').decode('utf-8')
+        rendered = (str(value).encode('utf-8', 'backslashreplace')
+                    .decode('utf-8'))
     except Exception:
         return '<unprintable value>'
     # Exact type, not isinstance: a str subclass is itself the hostile shape.
@@ -57,7 +58,7 @@ def _log_safe(value):
     return rendered
 
 
-HEAD = """# Deny by default; nothing is tracked unless a rule below names it.
+HEAD = ("""# Deny by default; nothing is tracked unless a rule below names it.
 #
 # The usual shape of this file is the opposite -- list the junk, let everything
 # else through -- and that shape has two failures this one does not. A new kind
@@ -71,7 +72,8 @@ HEAD = """# Deny by default; nothing is tracked unless a rule below names it.
 #
 # The keep list names FILES, not extensions. This repository keeps its two
 # Markdown documents at the root; a `!/**/*.md` rule would also re-admit any
-# note dropped into a different directory. Naming files individually has no gap.
+# note dropped into a different directory. Naming files individually """
+        """has no gap.
 #
 # Git will not look inside a directory it has ignored, so each directory below
 # is re-opened before its files are named back.
@@ -84,7 +86,7 @@ HEAD = """# Deny by default; nothing is tracked unless a rule below names it.
 # in the commit.
 
 *
-"""
+""")
 
 
 def _git_failure(repo, command, failure):
@@ -100,7 +102,8 @@ def main(repo):
         listed = subprocess.run(
             ['git', '-C', str(root), 'ls-files', '-z'], capture_output=True,
             text=True, check=True, timeout=GIT_TIMEOUT)
-    except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as failure:
+    except (OSError, subprocess.SubprocessError,
+            UnicodeDecodeError) as failure:
         return _git_failure(repo, 'ls-files', failure)
     # -z + NUL split: without it a tracked path containing a space arrives as
     # two tokens, and the generator would name and postcondition-check the
@@ -127,7 +130,8 @@ def main(repo):
              '--stdin'],
             input='\0'.join(tracked), capture_output=True, text=True,
             timeout=GIT_TIMEOUT)
-    except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as failure:
+    except (OSError, subprocess.SubprocessError,
+            UnicodeDecodeError) as failure:
         return _git_failure(repo, 'check-ignore', failure)
     if ignored.returncode not in (0, 1):
         detail = ignored.stderr.strip()
@@ -145,7 +149,8 @@ def main(repo):
                   'naming paths', file=sys.stderr)
         return 1
     if matched:
-        print(f'{shown}: FAIL — git check-ignore reported no matches but named '
+        print(f'{shown}: FAIL — git check-ignore reported no matches '
+              'but named '
               f'paths:\n{_log_safe(matched)}', file=sys.stderr)
         return 1
     print(f'{shown}: ok — {len(tracked)} tracked files named, none ignored')

@@ -342,7 +342,8 @@ def main(argv=None):
     if len(base_rounds) != len(head_rounds):
         lines.append('### Test speed')
         lines.append('')
-        lines.append(f'Skipped: the baseline ran {len(base_rounds)} rounds and '
+        lines.append(f'Skipped: the baseline ran {len(base_rounds)} rounds '
+                     'and '
                      f'this commit ran {len(head_rounds)}, so the rounds '
                      'cannot be paired.')
         _render_acceptances(

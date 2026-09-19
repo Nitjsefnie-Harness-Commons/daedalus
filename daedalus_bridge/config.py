@@ -23,9 +23,10 @@ DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent.parent / 'dashboard'
 PORT = env_int('DAEDALUS_PORT', 0, 0, 65535)
 
 
-# Stream lifetime ceiling. A stream's liveness is policed by the keepalive write
-# (a dead peer raises on the next one) and by replacement-on-reconnect, so this
-# is only a last-resort ceiling on a wedged connection — not a rollover timer.
+# Stream lifetime ceiling. A stream's liveness is policed by the keepalive
+# write (a dead peer raises on the next one) and by replacement-on-reconnect,
+# so this is only a last-resort ceiling on a wedged connection — not a
+# rollover timer.
 STREAM_MAX_AGE = env_positive_float('DAEDALUS_STREAM_MAX_AGE', 3600)
 STREAM_KEEPALIVE = env_positive_float('DAEDALUS_STREAM_KEEPALIVE', 15)
 # Maximum bytes read from any HTTP request body; override for larger relays.

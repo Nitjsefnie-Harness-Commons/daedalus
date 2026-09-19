@@ -28,7 +28,8 @@ try:
     # Optional embedding hook: an application may put a `_settings` module on
     # sys.path to serve configuration from its own store. It is absent by
     # design in a plain install, which is exactly what the except covers.
-    from _settings import setting, required  # pyright: ignore[reportMissingImports]
+    from _settings import (  # pyright: ignore[reportMissingImports]
+        setting, required)
 except ImportError:                       # bundle not installed — env only
     def setting(name, default=None):
         return os.environ.get(name) or default
@@ -44,9 +45,10 @@ URL = setting('DAEDALUS_URL', 'http://127.0.0.1:8081')
 
 def token():
     # TOKEN is the one-off override; DAEDALUS_TOKEN is the durable one, and it
-    # goes through `required` so an embedding _settings module can serve it from
-    # a store instead. Resolving it here rather than at import time is what lets
-    # a shell, a scheduled job and a long-lived session all work the same way.
+    # goes through `required` so an embedding _settings module can serve it
+    # from a store instead. Resolving it here rather than at import time is
+    # what lets a shell, a scheduled job and a long-lived session all work
+    # the same way.
     return os.environ.get('TOKEN') or required('DAEDALUS_TOKEN')
 
 
@@ -74,7 +76,8 @@ def capture_limit(value):
             f'got {value!r}') from None
     if limit < 1 or limit > NET_CAPTURE_MAX:
         raise argparse.ArgumentTypeError(
-            f'--max must be an integer from 1 to {NET_CAPTURE_MAX}; got {limit}')
+            f'--max must be an integer from 1 to {NET_CAPTURE_MAX}; '
+            f'got {limit}')
     return limit
 
 
@@ -95,7 +98,8 @@ def positive_timeout(value):
         seconds = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(
-            f'timeout must be a whole number of seconds; got {value!r}') from None
+            f'timeout must be a whole number of seconds; '
+            f'got {value!r}') from None
     if seconds < 0:
         raise argparse.ArgumentTypeError(
             f'timeout must not be negative; got {seconds}')
@@ -213,7 +217,8 @@ def _request(method, path, body=None, timeout=30, headers=None):
     headers = dict(headers or {}, **{'Authorization': f'Bearer {token()}'})
     if data:
         headers['Content-Type'] = 'application/json'
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    req = urllib.request.Request(
+        url, data=data, headers=headers, method=method)
     return _exchange(req, timeout, _json_body)
 
 
