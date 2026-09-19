@@ -65,7 +65,7 @@ def test_request_body_cap_applies_to_every_body_reader(tmp):
     segment_job = 'tt-' + uuid.uuid4().hex[:12]
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_BODY_SIZE': '8'}
-            ) as (base, docroot):
+    ) as (base, docroot):
         cases = (
             ('POST', '/result', {'Content-Type': 'application/json'}),
             ('POST', f'/segment?job={segment_job}&seg=1&total=1',
@@ -89,7 +89,7 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
     job = 'tt-' + uuid.uuid4().hex[:12]
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_BODY_SIZE': '4096'}
-            ) as (base, docroot):
+    ) as (base, docroot):
         _, minted = _util.post_json(
             base + '/segment-job', {'token': TOK, 'job': job})
         over_cap = b'x' * 8192
@@ -327,7 +327,7 @@ def test_the_json_depth_bound_is_the_bridges_and_is_configurable(tmp):
     """
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
-            ) as (base, _d):
+    ) as (base, _d):
         # depth 4 counting the object itself: {"token": [[[0]]]}
         at_limit = b'{"token":"wrongtoken","value":' + b'[' * 3 + b'0' + b']' * 3 + b'}'
         status, raw = _util.request(
@@ -354,7 +354,7 @@ def test_a_brace_inside_a_json_string_opens_nothing(tmp):
     """
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '3'}
-            ) as (base, _d):
+    ) as (base, _d):
         literal = json.dumps({'token': 'wrongtoken',
                               'value': '[' * 50 + '\\"' + '{' * 50}).encode()
         status, raw = _util.request(
@@ -375,7 +375,7 @@ def test_a_wide_but_shallow_body_is_accepted(tmp):
     """
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
-            ) as (base, _d):
+    ) as (base, _d):
         wide = b'{"token":"wrongtoken","value":[' + b'[0],' * 60 + b'[0]]}'
         status, raw = _util.request(
             base + '/result', 'POST', body=wide,
@@ -395,7 +395,7 @@ def test_a_wide_body_of_objects_is_accepted(tmp):
     """
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
-            ) as (base, _d):
+    ) as (base, _d):
         wide = b'{"token":"wrongtoken","value":[' + b'{},' * 60 + b'{}]}'
         status, raw = _util.request(
             base + '/result', 'POST', body=wide,
