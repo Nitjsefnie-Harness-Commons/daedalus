@@ -5,6 +5,10 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 The dashboard behaviour suite runs shipped JavaScript modules in short Node
 processes. This helper keeps process setup and captured failures consistent.
 
+The shared DOM scaffold the section harnesses mount shipped modules into
+lives here as `DOM`, so the suites driving dashboard sections share one
+copy of it.
+
 The JavaScript `bounded` helper races settlement but cannot cancel the losing
 work or any handles that work owns. A caller that recovers from its timeout
 must cancel those handles itself. The shipped asynchronous harnesses instead
@@ -29,6 +33,117 @@ from pathlib import Path
 
 from _jsread import blank_js_comments
 from _repo import ROOT
+
+
+# Enough DOM for `h`, `field`, `clear` and the selectors each section uses.
+# Every click on an element is recorded with the href it carried, so a
+# synthesized download anchor is seen the same way a rendered one is.
+DOM = r"""
+import { pathToFileURL } from 'node:url';
+phase('dashboard harness started');
+const clicks = [];
+class El {
+  constructor(tag) {
+    this.tag = tag;
+    this.children = [];
+    this.text = '';
+    this.attrs = {};
+    this.listeners = {};
+    this.style = {};
+    this.dataset = {};
+    this.className = '';
+    this.id = '';
+    this.disabled = false;
+    this._value = '';
+    this.classList = { add() {}, remove() {} };
+  }
+  get firstChild() { return this.children[0] || null; }
+  get options() { return this.children.filter((c) => c.tag === 'option'); }
+  get value() { return this._value; }
+  set value(v) { this._value = String(v); }
+  get textContent() {
+    return this.text + this.children.map((c) => c.textContent).join('');
+  }
+  set textContent(v) { this.children = v === '' ? [] : [textNode(v)]; }
+  set innerHTML(v) { this.children = []; this.text = ''; }
+  appendChild(child) { this.children.push(child); return child; }
+  append(...items) {
+    for (const item of items) {
+      this.children.push(item instanceof El ? item : textNode(item));
+    }
+  }
+  removeChild(child) {
+    this.children.splice(this.children.indexOf(child), 1);
+    if (child.tag === 'option' && child.value === this._value) {
+      this._value = '';
+    }
+    return child;
+  }
+  remove() {}
+  focus() {}
+  setAttribute(name, v) {
+    this.attrs[name] = String(v);
+    if (name === 'value') this._value = String(v);
+  }
+  getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
+  addEventListener(type, fn) {
+    (this.listeners[type] = this.listeners[type] || []).push(fn);
+  }
+  click() {
+    clicks.push({ tag: this.tag, text: this.textContent,
+                  href: this.attrs.href, download: this.attrs.download });
+    for (const fn of this.listeners.click || []) {
+      fn({ currentTarget: this, preventDefault() {} });
+    }
+  }
+  all() {
+    const out = [];
+    for (const c of this.children) out.push(c, ...c.all());
+    return out;
+  }
+  find(selector) {
+    if (!selector.startsWith('[data-role=')) {
+      throw new Error('unsupported selector ' + selector);
+    }
+    const role = selector.slice(11, -1);
+    return this.all().find((el) => el.dataset.role === role) || null;
+  }
+  querySelector(selector) { return this.find(selector); }
+  byText(text) {
+    return this.all().find(
+      (el) => el.tag !== '#text' && el.textContent === text) || null;
+  }
+}
+function textNode(value) {
+  const node = new El('#text');
+  node.text = String(value);
+  return node;
+}
+globalThis.Node = El;
+globalThis.document = {
+  body: new El('body'),
+  createElement: (tag) => new El(tag),
+  createTextNode: textNode,
+  getElementById: () => null,
+  querySelector: () => new El('span'),
+};
+function jsonResponse(data) {
+  return {
+    ok: true, status: 200,
+    headers: { get: () => 'application/json' },
+    json: async () => data, text: async () => JSON.stringify(data),
+  };
+}
+let token = 'dashboard-token';
+globalThis.localStorage = {
+  getItem: (key) => key === 'daedalus-token' ? token : '',
+  setItem() {},
+};
+globalThis.setTimeout = (callback) => { callback(); return 0; };
+globalThis.clearTimeout = () => {};
+globalThis.setInterval = () => 0;
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+"""
 
 
 _DASHBOARD_STEP_TIMEOUT_S = 5
