@@ -29,6 +29,7 @@ const [backgroundPath, mode] = process.argv.slice(1);
 const messageListeners = [];
 const fetches = [];
 const created = [];
+let createCalls = 0;
 
 function eventTarget(listeners = null) {
   return {
@@ -64,8 +65,18 @@ const chrome = {
     get: async (tabId) => ({ id: tabId, url: '', title: '' }),
     sendMessage: async () => {},
     // Callback-style, as messaging.js calls it. Chrome reports a refused
-    // creation through lastError, with the callback invoked on no tab.
+    // creation through lastError, with the callback invoked on no tab. The
+    // real API validates argument types before doing anything, so a
+    // non-string url is refused exactly as the shipped API refuses it.
     create(details, callback) {
+      createCalls += 1;
+      if (typeof details.url !== 'string') {
+        throw new TypeError('url: expected string');
+      }
+      if (mode === 'create-sync-throw') {
+        created.push(details);
+        throw new Error('synchronous refusal');
+      }
       created.push(details);
       if (mode === 'create-refused') {
         chrome.runtime.lastError = { message: 'Tabs cannot be edited' };
@@ -113,12 +124,20 @@ const context = vm.createContext({
 // One message, one answer, as content.js relays for a page. A handler that
 // throws instead of answering rejects here, and the rejection is recorded
 // rather than hidden: from the page, a callback that throws is
-// indistinguishable from an answer that never came.
+// indistinguishable from an answer that never came. Every sendResponse call
+// is pushed onto `responses`, so a test asserts the answer count.
 function send(message) {
   return new Promise((resolve, reject) => {
+    const responses = [];
+    const respond = (payload) => {
+      responses.push(payload);
+      if (responses.length === 1) {
+        resolve({ answer: payload, responses });
+      }
+    };
     try {
       for (const listener of messageListeners) {
-        listener(message, { tab: { id: 7 } }, resolve);
+        listener(message, { tab: { id: 7 } }, respond);
       }
     } catch (error) {
       reject(error);
@@ -131,37 +150,52 @@ async function run() {
     fs.readFileSync(backgroundPath, 'utf8'), context,
     { filename: backgroundPath });
   if (mode === 'fetch') {
-    const answer = await send({
+    const relayed = await send({
       type: 'fetch', fetchId: 'page-1', url: 'https://example.com/account',
       method: 'POST', headers: {}, body: '{}', responseType: 'text',
     });
     return {
       fetches,
       answer: {
-        status: answer.status === undefined ? null : answer.status,
-        error: answer.error || null,
+        status: relayed.answer.status === undefined
+          ? null : relayed.answer.status,
+        error: relayed.answer.error || null,
       },
     };
   }
-  const urls = mode === 'create-refused'
-    ? ['https://example.com/']
-    : ['chrome://settings', 'javascript:alert(1)', 'not a url',
-      'https://example.com/'];
+  const urls = mode === 'open-guard'
+    ? [
+        ['https://example.com/'],
+        { toString: () => 'https://example.com/toString' },
+        'https://example.com/guard',
+      ]
+    : mode === 'create-refused' || mode === 'create-sync-throw'
+      ? ['https://example.com/']
+      : ['chrome://settings', 'javascript:alert(1)', 'not a url',
+        'https://example.com/'];
   const outcomes = [];
   for (const url of urls) {
     try {
-      const answer = await send({ type: 'openTab', url, active: true });
+      const relayed = await send({ type: 'openTab', url, active: true });
       outcomes.push({
         url,
-        tabId: answer.tabId === undefined ? null : answer.tabId,
-        error: answer.error || null,
+        tabId: relayed.answer.tabId === undefined
+          ? null : relayed.answer.tabId,
+        error: relayed.answer.error || null,
         threw: null,
+        responses: relayed.responses.length,
       });
     } catch (error) {
-      outcomes.push({ url, tabId: null, error: null, threw: error.message });
+      outcomes.push({
+        url, tabId: null, error: null, threw: error.message, responses: 0,
+      });
     }
   }
-  return { outcomes, created: created.map((details) => details.url) };
+  return {
+    outcomes,
+    created: created.map((details) => details.url),
+    createCalls,
+  };
 }
 
 run().then((result) => {
@@ -247,8 +281,70 @@ def test_a_refused_tab_creation_answers_an_error(tmp):
         'tabId': None,
         'error': 'Tabs cannot be edited',
         'threw': None,
+        'responses': 1,
     }], outcome
     assert outcome['created'] == ['https://example.com/'], outcome
+
+
+def test_a_non_string_url_is_refused_before_tab_creation(tmp):
+    """A non-string `openTab` URL answers an error and never reaches create.
+
+    `new URL` stringifies whatever it is handed, so the protocol gate read
+    the issue's one-element array as a web URL and handed that array itself
+    to `chrome.tabs.create`. The real API refuses a non-string url argument
+    with a synchronous TypeError, the listener propagated it, and the page
+    was left with no answer at all.
+    """
+    del tmp
+    outcome = _run_relay_authority('open-guard')
+    array_shape, object_shape = outcome['outcomes'][:2]
+    for refused in (array_shape, object_shape):
+        assert refused['threw'] is None, refused
+        assert refused['responses'] == 1, refused
+        assert refused['error'], refused
+        assert refused['tabId'] is None, refused
+    assert outcome['created'] == ['https://example.com/guard'], outcome
+    assert outcome['createCalls'] == 1, outcome
+
+
+def test_a_synchronous_tab_create_refusal_answers_an_error(tmp):
+    """A synchronous `tabs.create` refusal answers `{error}`, not a throw.
+
+    Chrome can refuse the call itself, before any callback is scheduled.
+    That exception escaped the listener, so `sendResponse` never fired and
+    the page waited on an answer nothing would send — the same zero-answer
+    outcome the callback refusal path had already been fixed not to produce.
+    """
+    del tmp
+    outcome = _run_relay_authority('create-sync-throw')
+    assert outcome['outcomes'] == [{
+        'url': 'https://example.com/',
+        'tabId': None,
+        'error': 'synchronous refusal',
+        'threw': None,
+        'responses': 1,
+    }], outcome
+    assert outcome['created'] == ['https://example.com/'], outcome
+
+
+def test_a_web_url_still_opens_with_one_answer(tmp):
+    """A valid web URL opens exactly as before: one create, one answer.
+
+    Guards the success path while the failure paths around it gain the
+    string gate and the invocation guard: the URL travels to create as the
+    string the page sent, and the success shape stays `{tabId}`.
+    """
+    del tmp
+    outcome = _run_relay_authority('open-guard')
+    assert outcome['outcomes'][2] == {
+        'url': 'https://example.com/guard',
+        'tabId': 101,
+        'error': None,
+        'threw': None,
+        'responses': 1,
+    }, outcome
+    assert outcome['created'] == ['https://example.com/guard'], outcome
+    assert outcome['createCalls'] == 1, outcome
 
 
 def main():
