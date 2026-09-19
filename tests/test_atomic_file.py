@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression pin for the atomic publication behind bridge storage writes."""
+"""Regression pin for replace_atomically's publication."""
 import os
 import sys
 from pathlib import Path
@@ -12,13 +12,13 @@ _MODULE = _util.ROOT / 'daedalus_bridge' / 'atomic_file.py'
 
 
 def _fresh_module():
-    """A private instance per test, so an os stand-in never leaks."""
+    """A private instance per test; stand-ins cannot leak."""
     return _util.load(_MODULE, name='atomic_file_under_test')
 
 
 class _PublishSpy:
-    """`replace` records what it was handed; other names pass through to os,
-    so a mutated publication fails on the pins, not on an AttributeError."""
+    """`replace` records what it was handed; other names pass through to os.
+    A bypass dies on the pins; a wrong-typed argument on this probe."""
 
     def __init__(self, publish):
         self._publish = publish
