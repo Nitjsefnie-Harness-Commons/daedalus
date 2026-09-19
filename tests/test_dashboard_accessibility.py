@@ -45,7 +45,8 @@ def _js_call_stack(text, pos):
             while head >= 0 and text[head].isspace():
                 head -= 1
             start = head
-            while start >= 0 and (text[start].isalnum() or text[start] in '_$'):
+            while start >= 0 and (
+                    text[start].isalnum() or text[start] in '_$'):
                 start -= 1
             name = text[start + 1:head + 1]
             tag = None
@@ -133,7 +134,8 @@ def test_every_dashboard_control_carries_an_accessible_name(tmp):
                     continue
                 unnamed.append(f'{rel}:{line}: <{tag}> has no accessible name')
     assert not misparsed, misparsed
-    assert seen >= 30, f'only {seen} controls found — the scan stopped seeing them'
+    assert seen >= 30, (
+        f'only {seen} controls found — the scan stopped seeing them')
     assert not unnamed, '\n'.join(unnamed)
 
 
@@ -146,7 +148,8 @@ def test_the_control_name_scan_still_catches_an_unnamed_control(tmp):
     assert [name for name, _ in stack[:-1]] == ['h'], stack
     assert [t for _, t in stack[:-1]] == ['div'], stack
 
-    named = "const x = h('div', {}, field('url', h('input', { type: 'text' })));"
+    named = ("const x = h('div', {}, field('url', "
+             "h('input', { type: 'text' })));")
     stack, problem = _js_call_stack(named, named.index("h('input'"))
     assert problem is None, problem
     assert 'field' in [name for name, _ in stack[:-1]], stack
@@ -299,7 +302,8 @@ def test_every_static_label_names_a_control(tmp):
     assert not dangling, '\n'.join(dangling)
 
 
-_FIELD_HARNESS = _dashnode.DashboardNodeHarness(r"""
+_FIELD_HARNESS = _dashnode.DashboardNodeHarness(
+    r"""
 import { pathToFileURL } from 'node:url';
 
 phase('dashboard harness started');
@@ -350,7 +354,8 @@ phase('dashboard call started');
 const first = describe(field('url', h('input', { type: 'text' })));
 const second = describe(field('name', h('select', {})));
 const preset = describe(field('code', h('textarea', { id: 'chosen-id' })));
-const styled = describe(field('css', h('input', {}), { style: { margin: '0' } }));
+const styled = describe(field('css', h('input', {}), { style: { margin:"""
+    r""" '0' } }));
 const blank = spacer();
 phase('dashboard call settled');
 
@@ -364,7 +369,7 @@ process.stdout.write(JSON.stringify({
 phase('dashboard harness finished');
 })().catch(leave);
 """, bounded_steps=1, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / '_util.js',))
+        ROOT / 'dashboard' / 'sections' / '_util.js',))
 
 
 def test_field_associates_every_label_with_its_control(tmp):

@@ -228,7 +228,8 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
     del tmp
     workflow = _tests_yml()
     _, marker, after = workflow.partition('- name: actionlint\n')
-    assert marker, 'the actionlint step is not named the way this test finds it'
+    assert marker, (
+        'the actionlint step is not named the way this test finds it')
     step, _, _ = after.partition('- name: zizmor')
     for pattern in ('.github/workflows/*.yml', '.github/workflows/*.yaml'):
         assert pattern in step, (pattern, step)
@@ -265,7 +266,8 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert "['optional-dependencies'].values()" in workflow, workflow
     generated = re.search(r'> (\S+-requirements\.txt)', workflow)
     assert generated, 'the workflow generates no extras file'
-    assert f'--requirement {generated.group(1)}' in workflow, generated.group(1)
+    assert f'--requirement {generated.group(1)}' in workflow, (
+        generated.group(1))
     # An empty generated file narrows the gate in silence: pip-audit accepts
     # it, the other surfaces still report clean, and the only third-party code
     # that runs in production goes unaudited.
@@ -457,7 +459,8 @@ def test_one_action_family_is_pinned_to_one_version(tmp):
         for sha, workflows in by_sha.items():
             families.setdefault(f'{owner}/{repo}', {}).setdefault(
                 sha, []).extend(f'{name}:{action}' for name in workflows)
-    assert families, 'no hash-pinned action found; has the pin convention moved?'
+    assert families, (
+        'no hash-pinned action found; has the pin convention moved?')
     for family, by_sha in sorted(families.items()):
         assert len(by_sha) == 1, (
             f'{family} is pinned to {len(by_sha)} different commits: '
@@ -510,7 +513,8 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
         check=True, timeout=30)
-    tracked = {os.fsdecode(path) for path in listed.stdout.split(b'\0') if path}
+    tracked = {os.fsdecode(path)
+               for path in listed.stdout.split(b'\0') if path}
     required = {'github-actions'} if any(
         name.startswith('.github/workflows/') for name in tracked) else set()
     for name in tracked:

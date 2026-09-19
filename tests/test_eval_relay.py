@@ -123,7 +123,8 @@ def test_cdp_failure_after_dispatch_never_reruns_the_source(tmp):
     assert actual['result'] is None, actual
     # The error still names the channel that executed the command.
     assert actual['world'] == 'cdp', actual
-    assert 'inspector detached mid-evaluation' in (actual['error'] or ''), actual
+    assert 'inspector detached mid-evaluation' in (actual['error'] or ''), (
+        actual)
 
 
 def test_cdp_eval_releases_every_remote_handle_in_held_sessions(tmp):

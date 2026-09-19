@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""GM.setValue and its neighbours: what the page may store, and what it may not.
+"""GM.setValue and its neighbours: what the page may store, and what it may
+not.
 
 The storage relay is the one GM surface a page can drive with arbitrary keys,
 so these run the shipped content and page scripts in a Node VM and pin what
@@ -18,7 +19,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-_STORAGE_RELAY_HARNESS = r"""
+_STORAGE_RELAY_HARNESS = (r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -42,7 +43,8 @@ const windowObject = {
 function storedValues(keys) {
   const values = {};
   for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(store, key)) values[key] = store[key];
+    if (Object.prototype.hasOwnProperty.call(store, key)) values[key] ="""
+                          r""" store[key];
   }
   return values;
 }
@@ -169,7 +171,8 @@ async function gmSet(label, key) {
 
 async function main() {
   const gmSetCases = [];
-  for (const key of ['daedalus-server', 'daedalus-hotfixes', 'daedalus-token']) {
+  for (const key of ['daedalus-server', 'daedalus-hotfixes',"""
+                          r""" 'daedalus-token']) {
     gmSetCases.push(await gmSet(`array:${key}`, [key]));
   }
   gmSetCases.push(await gmSet('string:daedalus-server', 'daedalus-server'));
@@ -196,7 +199,8 @@ async function main() {
   const ordinaryHandlers = {
     getValue: dispatch('getValue', 'ordinary', { ordinary: 'kept' }),
     setValue: dispatch('setValue', 'ordinary'),
-    deleteValue: dispatch('deleteValue', 'ordinary', { ordinary: 'remove-me' }),
+    deleteValue: dispatch('deleteValue', 'ordinary', { ordinary:"""
+                          r""" 'remove-me' }),
   };
 
   reset({
@@ -222,10 +226,10 @@ main().catch((error) => {
   process.stderr.write(`${error.stack || error}\n`);
   process.exitCode = 1;
 });
-"""
+""")
 
 
-_STORAGE_FAILURE_HARNESS = r"""
+_STORAGE_FAILURE_HARNESS = (r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -314,8 +318,10 @@ for (const [name, call] of [
   ['listValues', () => windowObject.GM.listValues()],
 ]) {
   settled.push(call().then(
-    (value) => { outcomes[name] = { settled: 'resolved', value: value ?? null }; },
-    (error) => { outcomes[name] = { settled: 'rejected', error: String(error && error.message) }; },
+    (value) => { outcomes[name] = { settled: 'resolved', value: value ??"""
+                            r""" null }; },
+    (error) => { outcomes[name] = { settled: 'rejected', error:"""
+                            r""" String(error && error.message) }; },
   ));
 }
 flushMessages();
@@ -323,7 +329,7 @@ flushMessages();
 Promise.all(settled).then(() => {
   process.stdout.write(JSON.stringify(outcomes), () => process.exit(0));
 });
-"""
+""")
 
 
 def _run_storage_failure_harness():
@@ -334,7 +340,8 @@ def _run_storage_failure_harness():
          str(ROOT / 'extension' / 'content.js'),
          str(ROOT / 'extension' / 'page.js')],
         cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
 
 
@@ -352,7 +359,8 @@ def test_a_failed_storage_write_rejects_instead_of_resolving(tmp):
         'getValue', 'setValue', 'deleteValue', 'listValues'}, outcomes
     for name, outcome in sorted(outcomes.items()):
         assert outcome['settled'] == 'rejected', (name, outcome)
-        assert 'QUOTA_BYTES quota exceeded' in outcome['error'], (name, outcome)
+        assert 'QUOTA_BYTES quota exceeded' in outcome['error'], (
+            name, outcome)
 
 
 def _run_storage_relay_harness():
@@ -363,7 +371,8 @@ def _run_storage_relay_harness():
          str(ROOT / 'extension' / 'content.js'),
          str(ROOT / 'extension' / 'page.js')],
         cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
 
 
@@ -416,10 +425,12 @@ def test_page_storage_allows_string_keys_and_filters_list_values(tmp):
     handlers = result['ordinaryHandlers']
     assert handlers['getValue']['value'] == 'kept', handlers['getValue']
     assert handlers['getValue']['calls'] == ['get'], handlers['getValue']
-    assert handlers['setValue']['storedKeys'] == ['ordinary'], handlers['setValue']
+    assert handlers['setValue']['storedKeys'] == ['ordinary'], (
+        handlers['setValue'])
     assert handlers['setValue']['calls'] == ['set'], handlers['setValue']
     assert handlers['deleteValue']['storedKeys'] == [], handlers['deleteValue']
-    assert handlers['deleteValue']['calls'] == ['remove'], handlers['deleteValue']
+    assert handlers['deleteValue']['calls'] == ['remove'], (
+        handlers['deleteValue'])
     assert result['listValues'] == {
         'keys': ['ordinary'],
         'calls': ['get'],

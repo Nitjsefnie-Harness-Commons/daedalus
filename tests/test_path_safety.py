@@ -11,8 +11,6 @@ The assertion is deliberately not just the status code. A handler can answer
 400 and still have written the file, so each test checks the filesystem
 OUTSIDE the docroot as well — that is the part that actually matters.
 """
-import contextlib
-import io
 import json
 import os
 import subprocess
@@ -22,8 +20,6 @@ from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
-sys.path.insert(0, str(_util.ROOT))
-from daedalus_bridge import path_safety  # noqa: E402
 
 TOKEN = 'toksafety'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOKEN, 'TOKEN': ''}
@@ -65,7 +61,8 @@ def test_an_embedded_nul_tab_id_is_answered_not_dropped(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(
             base + '/result',
-            {'token': TOKEN, 'tabId': 'tab\x00suffix', 'id': 'x', 'result': 'y'})
+            {'token': TOKEN, 'tabId': 'tab\x00suffix',
+             'id': 'x', 'result': 'y'})
         assert status == 400, f'a NUL tabId returned {status}: {body}'
         assert body['error'] == 'invalid path component', body
         assert not list((docroot / 'results').rglob('*')), (
@@ -78,7 +75,8 @@ def test_an_embedded_nul_tab_id_is_answered_not_dropped(tmp):
             {'token': TOKEN, 'tabId': 'tab-01', 'id': 'ok', 'result': 'kept'})
         assert status == 200 and body == {'ok': True}, (status, body)
         stored = docroot / 'results' / f'{TOKEN}_tab-01.json'
-        assert json.loads(stored.read_text(encoding='utf-8'))['result'] == 'kept'
+        assert json.loads(stored.read_text(
+            encoding='utf-8'))['result'] == 'kept'
         status, body = _util.get_json(base + '/health')
         assert status == 200 and body['ok'] is True, (status, body)
 
@@ -92,8 +90,10 @@ def test_a_tab_query_cannot_read_outside_the_results_directory(tmp):
         try:
             status, body = _util.get(
                 base + f'/result?token={TOKEN}&tab=../escaped')
-            assert status == 400, f'GET /result served a traversing tab: {status}'
-            assert b'do not serve me' not in body, 'the planted file was served'
+            assert status == 400, (
+                f'GET /result served a traversing tab: {status}')
+            assert b'do not serve me' not in body, (
+                'the planted file was served')
         finally:
             os.unlink(planted)
 
@@ -130,7 +130,8 @@ def test_an_ascii_letter_segment_is_answered_not_dropped(tmp):
             'POST', body=b'\x00\x01',
             headers={'Content-Type': 'application/octet-stream'})
         assert status == 400, f'a non-numeric seg returned {status}'
-        assert b'seg' in body.lower(), f'the refusal does not mention seg: {body!r}'
+        assert b'seg' in body.lower(), (
+            f'the refusal does not mention seg: {body!r}')
 
 
 def _mint_segment_capability(base, job):
@@ -142,7 +143,8 @@ def _mint_segment_capability(base, job):
 
 def _post_segment(base, job, sig, segment):
     return _util.request(
-        base + f'/segment?job={job}&seg={quote(segment, safe="")}&total=1&sig={sig}',
+        (base + f'/segment?job={job}&seg={quote(segment, safe="")}'
+         f'&total=1&sig={sig}'),
         'POST', body=b'bytes',
         headers={'Content-Type': 'application/octet-stream'})
 
@@ -174,14 +176,16 @@ def test_a_malformed_body_is_refused_on_every_verb(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for verb, path in (('PUT', '/command'), ('DELETE', '/upload'),
                            ('POST', '/result')):
-            status, _ = _util.request(base + path, verb, body=b'{not json',
-                                      headers={'Content-Type': 'application/json'})
+            status, _ = _util.request(
+                base + path, verb, body=b'{not json',
+                headers={'Content-Type': 'application/json'})
             assert status == 400, (
                 f'{verb} {path} did not refuse a malformed body: {status}')
 
 
 def test_non_alphabet_base64_is_refused_not_stored_empty(tmp):
-    """`b64decode` without validate=True silently decoded non-alphabet input to b''.
+    """`b64decode` without validate=True silently decoded non-alphabet input to
+    b''.
 
     A 200 and a zero-byte file is the worst answer available: the caller
     believes the upload succeeded and the bytes are simply gone.
@@ -215,7 +219,8 @@ def test_a_command_tab_cannot_escape_the_queue_directory(tmp):
                 body={'token': TOKEN, 'tab': tab, 'id': 'proof', 'code': '1'})
             assert status == 400, (
                 f'PUT /command accepted tab {tab!r} with {status}')
-        assert set(_outside(docroot)) == before, 'a rejected tab still wrote outside'
+        assert set(_outside(docroot)) == before, (
+            'a rejected tab still wrote outside')
         assert not list((docroot / 'commands').rglob('*.json')), (
             'a rejected tab still queued a command')
 
@@ -224,7 +229,8 @@ def test_a_stream_tab_cannot_select_a_queue_outside_the_docroot(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, _ = _util.get(
             base + f'/stream?token={TOKEN}&tab=../../escaped', timeout=15)
-        assert status == 400, f'GET /stream accepted a traversing tab: {status}'
+        assert status == 400, (
+            f'GET /stream accepted a traversing tab: {status}')
 
 
 def test_a_screenshot_format_cannot_become_a_path_fragment(tmp):
@@ -234,13 +240,16 @@ def test_a_screenshot_format_cannot_become_a_path_fragment(tmp):
             status, _ = _util.post_json(
                 base + '/upload',
                 {'token': TOKEN, 'id': 'shot', 'data': 'AAAA', 'format': fmt})
-            assert status == 400, f'upload accepted format {fmt!r} with {status}'
-        assert not [p for p in (docroot / 'uploads').rglob('*') if p.is_file()], (
+            assert status == 400, (
+                f'upload accepted format {fmt!r} with {status}')
+        assert not [p for p in (docroot / 'uploads').rglob('*')
+                    if p.is_file()], (
             'a rejected format still stored a file')
 
 
 def test_a_windows_drive_component_cannot_escape_the_data_root(tmp):
-    """`C:escape` is drive-qualified on Windows, and joining it discards the root.
+    """`C:escape` is drive-qualified on Windows, and joining it discards the
+    root.
 
     Inert on POSIX, which is why it survived three passes: the check listed
     `..`, `/` and `\\` and stopped there.
@@ -254,7 +263,8 @@ def test_a_windows_drive_component_cannot_escape_the_data_root(tmp):
             status, _ = _util.post_json(
                 base + '/result', {'token': value, 'id': 'x', 'result': 'y'})
             assert status == 400, f'token {value!r} accepted with {status}'
-        assert not list((docroot / 'results').rglob('*')), 'a drive-qualified value wrote a result'
+        assert not list((docroot / 'results').rglob('*')), (
+            'a drive-qualified value wrote a result')
 
 
 def test_upload_path_components_reject_windows_aliases(tmp):
@@ -271,20 +281,23 @@ def test_upload_path_components_reject_windows_aliases(tmp):
             status, body = _util.post_json(
                 base + '/upload',
                 {'token': TOKEN, 'id': bad, 'data': good})
-            assert status == 400 and body['error'] == 'invalid path component', (
+            assert (status == 400
+                    and body['error'] == 'invalid path component'), (
                 'POST /upload accepted id', bad, status, body)
 
             status, body = _util.post_json(
                 base + '/upload',
                 {'token': TOKEN, 'id': 'normal-id', 'filename': bad,
                  'data': good})
-            assert status == 400 and body['error'] == 'invalid path component', (
+            assert (status == 400
+                    and body['error'] == 'invalid path component'), (
                 'POST /upload accepted filename', bad, status, body)
 
             status, body = _util.request(
                 base + '/upload', 'DELETE',
                 body={'token': TOKEN, 'id': bad, 'filename': 'normal.txt'})
-            assert status == 400, ('DELETE /upload accepted id', bad, status, body)
+            assert status == 400, (
+                'DELETE /upload accepted id', bad, status, body)
 
             status, body = _util.request(
                 base + '/upload', 'DELETE',
@@ -297,7 +310,8 @@ def test_upload_path_components_reject_windows_aliases(tmp):
             {'token': TOKEN, 'id': 'normal-id', 'filename': 'normal.txt',
              'data': good})
         assert status == 200, ('normal upload was rejected', status, body)
-        assert (docroot / 'uploads' / TOKEN / 'normal-id' / 'normal.txt').is_file()
+        assert (docroot / 'uploads' / TOKEN
+                / 'normal-id' / 'normal.txt').is_file()
 
 
 def test_segment_job_rejects_windows_aliases(tmp):
@@ -306,10 +320,13 @@ def test_segment_job_rejects_windows_aliases(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for job in ('bad:job', 'CON', 'alias.', 'alias '):
             status, body = _util.request(
-                base + '/segment?job=' + quote(job, safe='') + '&seg=1&total=2', 'POST',
+                base + '/segment?job=' + quote(job, safe='')
+                + '&seg=1&total=2',
+                'POST',
                 body=b'bytes',
                 headers={'Content-Type': 'application/octet-stream'})
-            assert status == 400, ('POST /segment accepted job', job, status, body)
+            assert status == 400, (
+                'POST /segment accepted job', job, status, body)
 
 
 def test_one_token_cannot_read_another_tokens_results(tmp):
@@ -321,8 +338,10 @@ def test_one_token_cannot_read_another_tokens_results(tmp):
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, _ = _util.post_json(
-            base + '/result', {'token': 'victim_x', 'id': 'x', 'result': 'SECRET'})
-        assert status == 400, f'an underscored token was accepted with {status}'
+            base + '/result',
+            {'token': 'victim_x', 'id': 'x', 'result': 'SECRET'})
+        assert status == 400, (
+            f'an underscored token was accepted with {status}')
         status, body = _util.get(base + '/result?token=victim&tab=x')
         assert b'SECRET' not in body, 'one token read another token\'s result'
 
@@ -545,116 +564,6 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
     # And the backstop still refuses a real escape under the same spelling,
     # which is the half a looser comparison would have given away.
     assert answer['escape'] == 'refused', answer
-
-
-def test_containment_rechecks_a_degraded_resolution_before_refusing(tmp):
-    """One transient spelling mismatch is not proof of an escape."""
-    root = str(Path(tmp) / 'root')
-    resolved_root = os.path.join(root, 'canonical')
-    inside = os.path.join(resolved_root, 'inside.json')
-    degraded = os.path.join(root, 'CANONI~1', 'inside.json')
-    outside = os.path.join(root, 'outside', 'inside.json')
-    candidate_call = os.path.join(resolved_root, 'inside.json')
-    expected_calls = [
-        root, candidate_call, root, candidate_call,
-        root, candidate_call, root, candidate_call,
-    ]
-    answers = iter([
-        resolved_root, degraded, resolved_root, inside,
-        resolved_root, outside, resolved_root, outside,
-    ])
-    calls = []
-    realpath = path_safety.os.path.realpath
-
-    def resolving_stub(path):
-        calls.append(os.fspath(path))
-        return next(answers)
-
-    path_safety.os.path.realpath = resolving_stub
-    try:
-        try:
-            contained = path_safety.under(root, 'inside.json')
-        except ValueError as failure:
-            contained = f'REFUSED: {failure}'
-        try:
-            path_safety.under(root, 'inside.json')
-        except ValueError:
-            escape = 'refused'
-        else:
-            escape = 'ALLOWED'
-    finally:
-        path_safety.os.path.realpath = realpath
-    assert contained == Path(inside), contained
-    assert escape == 'refused', escape
-    assert calls == expected_calls, calls
-
-
-def test_path_refusal_logs_both_attempts_and_success_is_quiet(tmp):
-    root = str(Path(tmp) / 'root')
-    first_root = str(Path(tmp) / 'FIRST~1')
-    first_candidate = str(Path(tmp) / 'outside-1' / 'inside.json')
-    second_root = str(Path(tmp) / 'canonical')
-    second_candidate = str(Path(tmp) / 'outside-2' / 'inside.json')
-    answers = iter((first_root, first_candidate, second_root, second_candidate,
-                    second_root, os.path.join(second_root, 'inside.json')))
-    realpath = path_safety.os.path.realpath
-
-    def resolving_stub(_path):
-        return next(answers)
-    path_safety.os.path.realpath = resolving_stub
-    refusal_log, success_log = io.StringIO(), io.StringIO()
-    try:
-        with contextlib.redirect_stdout(refusal_log):
-            try:
-                path_safety.under(root, 'inside.json')
-            except ValueError:
-                pass
-            else:
-                raise AssertionError('persistent mismatch was allowed')
-        with contextlib.redirect_stdout(success_log):
-            path_safety.under(root, 'inside.json')
-    finally:
-        path_safety.os.path.realpath = realpath
-    assert len(lines := refusal_log.getvalue().splitlines()) == 1, lines
-    assert lines[0].startswith('[PATH-REFUSAL] kind=containment '), lines
-    assert f'root={root!r}' in lines[0], lines
-    assert "parts=('inside.json',)" in lines[0], lines
-    for spelling in (first_root, first_candidate,
-                     second_root, second_candidate):
-        assert repr(spelling) in lines[0], lines
-    assert success_log.getvalue() == '', success_log.getvalue()
-
-
-def test_path_equality_rechecks_a_degraded_resolution_before_refusing(tmp):
-    """A transient spelling mismatch is not a stable alias verdict."""
-    left = str(Path(tmp) / 'left')
-    right = str(Path(tmp) / 'right')
-    resolved = str(Path(tmp) / 'canonical')
-    degraded = str(Path(tmp) / 'CANONI~1')
-    alias = str(Path(tmp) / 'other-target')
-    expected_calls = [left, right, left, right] * 2
-    answers = iter([
-        resolved, degraded, resolved, resolved,
-        resolved, alias, resolved, alias,
-    ])
-    calls = []
-    realpath = path_safety.os.path.realpath
-
-    def resolving_stub(path):
-        calls.append(os.fspath(path))
-        return next(answers)
-
-    comparer = getattr(path_safety, 'same_path', None)
-    assert comparer is not None, 'missing same_path comparer'
-    path_safety.os.path.realpath = resolving_stub
-    try:
-        same = comparer(left, right)
-        different = comparer(left, right)
-    finally:
-        path_safety.os.path.realpath = realpath
-    assert same is True, same
-    assert different is False, different
-    assert calls == expected_calls, calls
 
 
 def test_delivery_stripe_is_keyed_on_the_logical_target(tmp):

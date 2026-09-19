@@ -71,7 +71,8 @@ def test_main_world_transport_failure_and_genuine_null_are_distinct(tmp):
 
     poisoned = actual['performance-poison']
     assert poisoned.get('result') is None, poisoned
-    assert 'page killed performance.now' in (poisoned.get('error') or ''), poisoned
+    assert 'page killed performance.now' in (poisoned.get('error') or ''), (
+        poisoned)
     assert poisoned.get('world') == 'page-main', poisoned
 
     genuine_null = actual['genuine-null']

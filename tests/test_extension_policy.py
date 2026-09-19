@@ -78,8 +78,10 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
                 for path in package
                 for m in re.finditer(r'NET_CAPTURE_MAX = (\d+)',
                                      path.read_text(encoding='utf-8'))]
-    assert len(declared) == 1, f'expected one CLI declaration, found {declared}'
-    mcp = (_util.ROOT / 'daedalus_mcp' / 'tools_network.py').read_text(encoding='utf-8')
+    assert len(declared) == 1, (
+        f'expected one CLI declaration, found {declared}')
+    mcp = (_util.ROOT / 'daedalus_mcp' / 'tools_network.py').read_text(
+        encoding='utf-8')
 
     declaration_pattern = re.compile(
         r'\b(?:const|let|var)\s+NET_CAPTURE_MAX\b')
@@ -102,7 +104,8 @@ def test_every_capture_limit_boundary_agrees_on_one_range(tmp):
         'literal')
     extension_declared = (extension_name, int(literal.group(1)))
     mcp_match = re.search(r'NET_CAPTURE_MAX = (\d+)', mcp)
-    assert mcp_match, 'no capture ceiling declared in daedalus_mcp/tools_network.py'
+    assert mcp_match, (
+        'no capture ceiling declared in daedalus_mcp/tools_network.py')
     values = {
         extension_declared[0]: extension_declared[1],
         'daedalus_mcp/tools_network.py': int(mcp_match.group(1)),
@@ -301,7 +304,8 @@ def _relay_handled_types(background):
 
 
 def _relay_coverage_violations(content, listener, listener_module):
-    """Return relay message types that the background listener cannot answer."""
+    """Return relay message types that the background listener cannot
+    answer."""
     # One result per call makes an unreadable type fail closed. Object entries
     # are processed in source order, so a duplicate later `type` is the value
     # JavaScript sends at runtime.
@@ -384,7 +388,8 @@ def test_every_content_script_message_type_has_a_background_branch(tmp):
             'commentOnly',
         ),
     ]
-    for label, content_mutation, background_mutation, missing_type in reversions:
+    for (label, content_mutation,
+         background_mutation, missing_type) in reversions:
         listener_module = 'extension/worker/runtime.js'
         found = _relay_coverage_violations(
             content_mutation, background_mutation, listener_module)
@@ -431,7 +436,8 @@ def test_the_manifest_does_not_grant_activeTab_beside_all_urls(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='extensionpolicy_')
+    return _util.runner(
+        _util.collect(globals()), tmp_prefix='extensionpolicy_')
 
 
 if __name__ == '__main__':

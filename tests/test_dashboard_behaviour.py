@@ -119,7 +119,8 @@ def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(_tmp):
     }, actual
 
 
-_DASHBOARD_CONSUME_HARNESS = _dashnode.DashboardNodeHarness(r"""
+_DASHBOARD_CONSUME_HARNESS = _dashnode.DashboardNodeHarness(
+    r"""
 phase('dashboard harness started');
 const fs = require('fs');
 function response(status, data) {
@@ -178,7 +179,8 @@ function response(status, data) {
     rejected = true;
     if (!String(error.message).includes('HTTP 500')) throw error;
   }
-  if (!rejected) throw new Error('failed consume surfaced as a successful read');
+  if (!rejected) throw new Error('failed consume surfaced as a"""
+    r""" successful read');
   phase('dashboard call settled');
   phase('dashboard harness finished');
 })().catch(leave);
@@ -276,7 +278,8 @@ def test_dashboard_never_builds_markup_from_a_value(_tmp):
     assert not violations, '\n'.join(violations)
 
 
-_TAB_SELECTOR_HARNESS = _dashnode.DashboardNodeHarness(r"""
+_TAB_SELECTOR_HARNESS = _dashnode.DashboardNodeHarness(
+    r"""
 import { pathToFileURL } from 'node:url';
 phase('dashboard harness started');
 (async () => {
@@ -299,7 +302,8 @@ class El {
   removeChild(child) {
     this.children.splice(this.children.indexOf(child), 1);
     // A real select drops its value when the selected option goes away.
-    if (child.tag === 'option' && child.value === this._value) this._value = '';
+    if (child.tag === 'option' && child.value === this._value)"""
+    r""" this._value = '';
     return child;
   }
   setAttribute(name, v) { if (name === 'value') this._value = String(v); }
@@ -363,7 +367,7 @@ process.stdout.write(JSON.stringify({
 phase('dashboard harness finished');
 })().catch(leave);
 """, bounded_steps=5, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / '_util.js',))
+        ROOT / 'dashboard' / 'sections' / '_util.js',))
 
 
 def _run_tab_selector_harness():
@@ -375,7 +379,8 @@ def test_a_tab_selector_follows_every_lifecycle_event(_tmp):
     seen = _run_tab_selector_harness()
     assert seen['initial'] == ['', '11', '22'], seen
     assert '11  RETITLED' not in seen['afterUpdate']['labels'], seen
-    assert any('RETITLED' in label for label in seen['afterUpdate']['labels']), seen
+    assert any('RETITLED' in label
+               for label in seen['afterUpdate']['labels']), seen
     assert seen['afterUpdate']['selected'] == '22', seen
     assert seen['afterUnregister']['offered'] == ['', '11'], seen
     assert seen['afterUnregister']['selected'] != '22', seen
@@ -407,7 +412,8 @@ def test_no_dashboard_export_is_unreferenced(_tmp):
             referenced = any(
                 re.search(r'\b' + re.escape(name) + r'\b', other)
                 for other_path, other in sources.items() if other_path != path)
-            if referenced or re.search(r'\b' + re.escape(name) + r'\b', markup):
+            if referenced or re.search(
+                    r'\b' + re.escape(name) + r'\b', markup):
                 continue
             unused.append(f'{path.relative_to(ROOT).as_posix()}: {name}')
     assert not unused, f'exported but referenced nowhere: {unused}'

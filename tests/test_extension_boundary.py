@@ -297,7 +297,8 @@ def test_rule_id_zero_is_refused_rather_than_removing_everything(tmp):
 
 
 def test_block_rule_ids_survive_a_worker_restart(tmp):
-    """Session rules outlive the worker, so ids must not restart at the base."""
+    """Session rules outlive the worker, so ids must not restart at the
+    base."""
     del tmp
     actual = run_extension_result_boundary('block-rule-restart')
     assert actual == {

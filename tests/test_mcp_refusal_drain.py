@@ -21,7 +21,8 @@ os.environ['DAEDALUS_TOKEN'] = TOK
 def _need_deps():
     if not DEPS:
         _util.skip(
-            'daedalus_mcp.server dependencies (httpx/mcp/starlette) not installed')
+            'daedalus_mcp.server dependencies (httpx/mcp/starlette) '
+            'not installed')
 
 
 def _request_contains_payload(request, payload):

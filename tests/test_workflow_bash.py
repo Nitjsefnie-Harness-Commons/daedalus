@@ -50,7 +50,8 @@ def test_workflow_bash_takes_the_first_existing_candidate(tmp):
         try:
             _util.workflow_bash()
         except AssertionError as error:
-            assert str(error) == 'bash is required to execute the workflow shell'
+            assert str(error) == (
+                'bash is required to execute the workflow shell')
         else:
             raise AssertionError('missing Bash must fail loudly')
     finally:

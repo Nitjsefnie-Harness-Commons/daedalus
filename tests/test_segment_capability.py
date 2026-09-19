@@ -27,8 +27,9 @@ def test_segment_post_and_status_require_capability(tmp):
         seg_dir = Path(docroot) / 'segments' / job
 
         def post_seg(query):
-            return _util.request(base + '/segment?' + query, 'POST', body=b'\x47',
-                                 headers={'Content-Type': 'application/octet-stream'})
+            return _util.request(
+                base + '/segment?' + query, 'POST', body=b'\x47',
+                headers={'Content-Type': 'application/octet-stream'})
 
         # No sig and wrong sig: 403, and no file written.
         status, _ = post_seg(f'job={job}&seg=1&total=2')
@@ -47,10 +48,12 @@ def test_segment_post_and_status_require_capability(tmp):
         # Status answers the same way.
         status, _ = _util.get_json(base + f'/segment-status?job={job}')
         assert status == 403, status
-        status, _ = _util.get_json(base + f'/segment-status?job={job}&sig=wrong')
+        status, _ = _util.get_json(
+            base + f'/segment-status?job={job}&sig=wrong')
         assert status == 403, status
         # An unknown job is indistinguishable from a wrong sig (no oracle).
-        status, _ = _util.get_json(base + f'/segment-status?job={seg_job()}&sig={sig}')
+        status, _ = _util.get_json(
+            base + f'/segment-status?job={seg_job()}&sig={sig}')
         assert status == 403, status
 
 
