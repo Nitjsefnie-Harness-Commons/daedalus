@@ -1195,11 +1195,11 @@ jobs:
           - group: repo-ci
             suites: >-
               test_ci_*.py test_workflow_*.py test_yamlread*.py
-              test_wf*.py test_ghexpr.py test_speed_gate.py
-              test_speed_measurement.py
+              test_wf*.py test_ghexpr.py test_speed*.py
               test_suite_runner.py test_child_coverage.py
               test_worker_runtime.py test_worker_module_boundary.py
               test_change_classifier.py test_version_contract.py
+              test_version_contract_*.py
               test_release_scan.py test_repo_layout.py test_file_sizes.py
               test_gitignore_*.py test_checkout_pin.py
           - group: coverage
@@ -1215,9 +1215,16 @@ jobs:
             suites: >-
               test_dashboard_*.py test_js_lines.py
           - group: overlap
-            suites: test_overlap_harness.py
+            suites: test_overlap_*.py
           - group: tab-routing
             suites: test_tab_routing.py
+          - group: tab-routing-js
+            suites: >-
+              test_tab_routing_js*.py
+          - group: tab-routing-variants
+            suites: >-
+              test_tab_routing_unprovable.py test_tab_routing_performance.py
+              test_tab_routing_yielded_sender.py test_unresolved_routes.py
           - group: catchall
             suites: '*'
             except: >-
@@ -1231,11 +1238,11 @@ jobs:
               test_mcp_*.py
               test_cli*.py test_pr_*.py
               test_ci_*.py test_workflow_*.py test_yamlread*.py
-              test_wf*.py test_ghexpr.py test_speed_gate.py
-              test_speed_measurement.py
+              test_wf*.py test_ghexpr.py test_speed*.py
               test_suite_runner.py test_child_coverage.py
               test_worker_runtime.py test_worker_module_boundary.py
               test_change_classifier.py test_version_contract.py
+              test_version_contract_*.py
               test_release_scan.py test_repo_layout.py test_file_sizes.py
               test_gitignore_*.py test_checkout_pin.py
               test_coverage_*.py test_diff_coverage.py
@@ -1243,8 +1250,10 @@ jobs:
               test_real_browser_*.py test_eval_relay.py test_gm_*.py
               test_vm_file_load_guard.py test_extension_*.py
               test_worker_route_guard.py
-              test_dashboard_*.py test_overlap_harness.py test_js_lines.py
-              test_tab_routing.py
+              test_dashboard_*.py test_overlap_*.py test_js_lines.py
+              test_tab_routing.py test_tab_routing_js*.py
+              test_tab_routing_unprovable.py test_tab_routing_performance.py
+              test_tab_routing_yielded_sender.py test_unresolved_routes.py
 
     env:
       # Fractional slowdown that fails the job.
