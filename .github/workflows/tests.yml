@@ -1221,6 +1221,8 @@ jobs:
           - group: tab-routing-js
             suites: >-
               test_tab_routing_js*.py
+# Bucketed by measured runtime rather than topic: test_unresolved_routes.py
+# pins checker routes, so a future tab-routing sibling falls to the catchall.
           - group: tab-routing-variants
             suites: >-
               test_tab_routing_unprovable.py test_tab_routing_performance.py
