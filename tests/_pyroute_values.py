@@ -10,6 +10,8 @@ EAGER_ITERABLE_CALLS = frozenset({
     'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
 })
 PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
+UNPROVABLE_SENDER = '?ext_cmd'
+DYNAMIC_KEY = object()
 
 
 @dataclass(frozen=True)
@@ -296,7 +298,7 @@ def merge_deferred_values(values):
 
 
 def sender_value(value):
-    if value in ('ext_cmd', '_ext_cmd', '?ext_cmd'): return value
+    if value in ('ext_cmd', '_ext_cmd', UNPROVABLE_SENDER): return value
     if isinstance(value, DeferredAlternatives):
         return next(filter(None, map(sender_value, value.values)), None)
     return None
@@ -306,7 +308,8 @@ def merge_yielded(values):
     values = list(values)  # Duplicate senders become unprovable; no weakening.
     deferred = merge_deferred_values(values)
     sender = next(filter(None, map(sender_value, values)), None)
-    sender = '?ext_cmd' if sender and values.count(sender) > 1 else sender
+    sender = (UNPROVABLE_SENDER if sender and values.count(sender) > 1
+              else sender)
     if deferred is None or sender is None: return sender or deferred
     alternatives = (deferred.values if isinstance(deferred,
                     DeferredAlternatives) else (deferred,))
@@ -467,10 +470,8 @@ def materialize_deferred(consumer, value):
         item = value.items.get(1)
         if not (is_deferred_value(item) or sender_value(item) is not None):
             return None
-        try:
-            hash(key)
-        except TypeError:
-            return None
+        if key is None:
+            return DeferredContainer({DYNAMIC_KEY: item}, 1, 'dict')
         return DeferredContainer({key: item}, 1, 'dict')
     kind = 'list' if consumer == 'sorted' else consumer
     return DeferredContainer({0: value}, 1, kind)
@@ -485,110 +486,6 @@ def iterable_deferred(value):
             return merge_yielded(value.items.keys())
         return merge_yielded(value.items.values())
     return None
-
-
-def _selected_values(value, key, attribute=False):
-    if isinstance(value, DeferredAlternatives):
-        return [selected for item in value.values
-                for selected in _selected_values(item, key, attribute)]
-    if attribute and isinstance(value, DeferredInstance):
-        return [value.attributes.get(key)]
-    if attribute and isinstance(value, DeferredClass):
-        return [value.methods.get(key)]
-    if not attribute and isinstance(value, DeferredContainer):
-        return [value.items.get(key)]
-    return []
-
-
-def _display_value(node, state):
-    items = {}
-    index = 0
-    for item in node.elts:
-        value = _known_value(item.value if isinstance(item, ast.Starred)
-                             else item, state)
-        if isinstance(item, ast.Starred):
-            if isinstance(value, DeferredContainer):
-                for nested_index in range(value.length or 0):
-                    nested = value.items.get(nested_index)
-                    if nested is not None:
-                        items[index + nested_index] = nested
-                index += value.length or 0
-            else:
-                return merge_yielded(items.values())
-        else:
-            if value is not None:
-                items[index] = value
-            index += 1
-    if items or isinstance(node, ast.List):
-        return DeferredContainer(items, index, type(node).__name__.lower())
-    return None
-
-
-def _dict_value(node, state):
-    items = {}
-    for key, item in zip(node.keys, node.values):
-        value = _known_value(item, state)
-        if key is not None and isinstance(key, ast.Constant) \
-                and value is not None:
-            items[key.value] = value
-    return DeferredContainer(
-        items, len(node.values), 'dict') if items else None
-
-
-def expression_value(node, state, generator_factory, sender_resolver,
-                     unprovable_sender):
-    known = _known_value(node, state)
-    if known is not None: return known
-    if isinstance(node, ast.GeneratorExp):
-        return generator_factory(node)
-    if isinstance(node, ast.Name) and node.id in state.generators:
-        return state.generators[node.id]
-    if isinstance(node, ast.Name) and node.id in state.callables:
-        return state.callables[node.id]
-    if isinstance(node, (ast.NamedExpr, ast.Starred)):
-        value = state.evaluated.get(id(node.value))
-        if value is not None:
-            return value
-    if isinstance(node, (ast.IfExp, ast.BoolOp)):
-        value = merge_yielded((sender_resolver(node, state.aliases),
-                               *(state.evaluated.get(id(child))
-                                 for child in ast.iter_child_nodes(node))))
-        if value is not None:
-            return value
-    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
-        value = _display_value(node, state)
-        if value is not None:
-            return value
-        values = [state.evaluated.get(id(item)) for item in node.elts]
-        if any(item is not None and not isinstance(item, DeferredGenerator)
-               for item in values):
-            return unprovable_sender
-    if isinstance(node, ast.Dict):
-        return _dict_value(node, state) or sender_resolver(
-            node, state.aliases)
-    if isinstance(node, (ast.ListComp, ast.SetComp)):
-        value = state.evaluated.get(id(node.elt))
-        if is_deferred_value(value):
-            return DeferredContainer(
-                {0: value}, 1, type(node).__name__[:-4].lower())
-    if isinstance(node, ast.Subscript):
-        owner = _known_value(node.value, state)
-        key = (node.slice.value
-               if isinstance(node.slice, ast.Constant) else None)
-        value = merge_yielded(_selected_values(owner, key))
-        if value is not None:
-            return value
-    if isinstance(node, ast.Attribute):
-        owner = _known_value(node.value, state)
-        value = merge_yielded(
-            _selected_values(owner, node.attr, attribute=True))
-        if value is not None:
-            return value
-    if isinstance(node, ast.Call):
-        owner = _known_value(node.func, state)
-        if isinstance(owner, DeferredClass):
-            return DeferredInstance(dict(owner.methods))
-    return sender_resolver(node, state.aliases)
 
 
 def expression_callables(node, state):
@@ -642,55 +539,6 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver,
     if literals:
         literals = [item for item in literals if item[0] not in rebound]
     return tuple(literals)
-
-
-def store_deferred_value(statement, state):
-    # pylint: disable-next=import-outside-toplevel
-    from _pyroute_storage import replace_deferred_storage
-    if isinstance(statement, ast.Expr) \
-            and isinstance(statement.value, ast.Call):
-        call = statement.value
-        owner_name = getattr(getattr(call.func, 'value', None), 'id', None)
-        owner = state.callables.get(owner_name)
-        if getattr(call.func, 'attr', None) == 'clear' \
-                and isinstance(owner, DeferredContainer):
-            replacement = DeferredContainer(
-                {}, 0, owner.kind, owner.identity)
-            replace_deferred_storage(state, owner, replacement)
-            sync_cells(state, {owner_name})
-        return
-    if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Delete)):
-        return
-    value = (_known_value(statement.value, state)
-             if not isinstance(statement, ast.Delete) else None)
-    targets = (statement.targets if isinstance(statement, ast.Assign)
-               else [statement.target] if not isinstance(
-                   statement, ast.Delete) else statement.targets)
-    for target in targets:
-        owner_name = getattr(getattr(target, 'value', None), 'id', None)
-        owner = state.callables.get(owner_name)
-        if isinstance(target, ast.Attribute) \
-                and isinstance(owner, DeferredInstance):
-            attributes = dict(owner.attributes)
-            if value is None:
-                attributes.pop(target.attr, None)
-            else:
-                attributes[target.attr] = value
-            replacement = DeferredInstance(attributes, owner.identity)
-            replace_deferred_storage(state, owner, replacement)
-            sync_cells(state, {owner_name})
-        elif isinstance(target, ast.Subscript) \
-                and isinstance(owner, DeferredContainer) \
-                and isinstance(target.slice, ast.Constant):
-            items = dict(owner.items)
-            if value is None:
-                items.pop(target.slice.value, None)
-            else:
-                items[target.slice.value] = value
-            replacement = DeferredContainer(
-                items, owner.length, owner.kind, owner.identity)
-            replace_deferred_storage(state, owner, replacement)
-            sync_cells(state, {owner_name})
 
 
 def payload_key(dicts):

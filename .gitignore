@@ -285,6 +285,7 @@
 !/tests/_owned_writes.py
 !/tests/_pyroute.py
 !/tests/_pyroute_live.py
+!/tests/_pyroute_mapping.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
 !/tests/_pyroute_values.py
@@ -451,6 +452,7 @@
 !/tests/test_suite_runner.py
 !/tests/test_tab_registry.py
 !/tests/test_tab_routing.py
+!/tests/test_tab_routing_dict_stores.py
 !/tests/test_tab_routing_js.py
 !/tests/test_tab_routing_js_bodies.py
 !/tests/test_tab_routing_js_closure.py
@@ -461,6 +463,7 @@
 !/tests/test_tab_routing_js_sweep.py
 !/tests/test_tab_routing_js_templates.py
 !/tests/test_tab_routing_performance.py
+!/tests/test_tab_routing_store_sweep.py
 !/tests/test_tab_routing_unprovable.py
 !/tests/test_tab_routing_yielded_sender.py
 !/tests/test_teardown_retry.py
