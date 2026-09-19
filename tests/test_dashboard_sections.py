@@ -393,7 +393,8 @@ globalThis.setTimeout = (callback) => {
 globalThis.clearTimeout = (id) => { timers[id - 1] = null; };
 """
 
-_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(_DOM + _PAGER_HARNESS_SETUP + r"""
+_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _PAGER_HARNESS_SETUP + r"""
 (async () => {
 const fetched = [];
 let total = 51;
@@ -469,7 +470,8 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
         '/upload?limit=50&offset=50', '/upload?limit=50&offset=0'], seen
 
 
-_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(_DOM + _PAGER_HARNESS_SETUP + r"""
+_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _PAGER_HARNESS_SETUP + r"""
 (async () => {
 const fetched = [];
 let total = 1;
