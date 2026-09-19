@@ -4,6 +4,11 @@
 /* global VERSION, _fetchTimings, _hasNativeToBase64, postResult */
 
 async function handleCloseTab(cmd) {
+  if (cmd.tabIds !== undefined && cmd.tabIds !== null
+      && !Array.isArray(cmd.tabIds)) {
+    return postResult(
+      cmd._execution, null, 'tabIds must be an array', 'extension');
+  }
   if (!cmd.tabId && !cmd.tabIds) return postResult(cmd._execution, null, 'Missing tabId or tabIds', 'extension');
   let ids = cmd.tabIds || [cmd.tabId];
   ids = ids.map(id => typeof id === 'number' ? id : parseInt(id));
