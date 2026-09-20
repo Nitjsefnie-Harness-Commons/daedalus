@@ -303,10 +303,10 @@ What the aggregator does, and why each part is load-bearing:
 - **A success-only batch is held longer**, because a filling matrix goes quiet
   between cells and every partial tally is superseded by the next. A batch
   holding nothing but settled, actionless conclusions waits until something
-  worth reading lands or until every check on that head has concluded,
+  worth reading lands or until every workflow run on that head has concluded,
   `speed` included. An
-  unanswerable check-runs query keeps it holding rather than flushing: a failed
-  query must never look like a settled matrix.
+  unanswerable workflow-runs query keeps it holding rather than flushing: a
+  failed query must never look like a settled matrix.
 - **The hold is bounded** by `--max-hold` (default 600s). A push supersedes the
   SHA a batch names, and that SHA's runs may then never all reach `completed` -
   so without the cap a batch held across a force-push waits forever on a matrix
