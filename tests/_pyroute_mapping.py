@@ -1,4 +1,5 @@
-"""Mapping stores and expression resolution for deferred routing values."""
+"""Mapping stores, assignment binders and expression resolution for deferred
+routing values."""
 import ast
 
 from _pyroute_storage import replace_deferred_storage
@@ -233,6 +234,8 @@ def _mapping_item_value(node, owner, state):
 
 def resolve_expression_value(node, state, generator_factory, sender_resolver,
                              unprovable_sender):
+    """A pop's removal is applied here, at evaluation, once per node per
+    state; every other resolution leaves the state as it found it."""
     known = _known_value(node, state)
     if known is not None: return known
     if isinstance(node, ast.GeneratorExp):
