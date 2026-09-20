@@ -18,6 +18,13 @@ rejects it, an intentional oracle divergence.
 Only `!!str` is supported. Bare `!` requires schema/tag resolution outside
 this reader. Malformed properties, undefined aliases, and unsupported scalar
 syntax are refused; `actionlint` remains the full workflow YAML oracle.
+
+The complete readers (`workflow_mapping`, `complete_job_mapping`, the jobs
+readers, and mappings inside block sequences) read a bare-empty mapping value
+(`key:` with no inline value and no nested block) as `None`, matching
+`yaml.safe_load` and diverging from `yaml.BaseLoader`'s `''`; `key: ''` stays
+`''`. Spelled nulls (`null`, `~`) read as their spelling, and the step reader
+still refuses an empty field.
 """
 import re
 
