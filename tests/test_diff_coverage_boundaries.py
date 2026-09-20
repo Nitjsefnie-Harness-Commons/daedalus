@@ -13,6 +13,38 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 import diff_coverage  # noqa: E402
 
 
+def test_cli_stdin_preserves_cr_under_universal_newlines(tmp):
+    coverage_xml = Path(tmp) / 'coverage.xml'
+    coverage_xml.write_text(
+        '<coverage><class filename="extension/content.js"><lines>'
+        '<line number="1" hits="1"/>'
+        '<line number="2" hits="0"/>'
+        '</lines></class></coverage>\n', encoding='utf-8')
+    diff = (
+        b'--- /dev/null\n'
+        b'+++ b/extension/content.js\n'
+        b'@@ -0,0 +1,2 @@\n'
+        b'+first();\r second();\n'
+        b'+missed();\n')
+    script = (
+        'import io, runpy, sys\n'
+        'sys.stdin = io.TextIOWrapper(\n'
+        f'    io.BytesIO({diff!r}), encoding="utf-8", newline=None)\n'
+        'sys.argv = sys.argv[1:]\n'
+        'runpy.run_path(sys.argv[0], run_name="__main__")\n')
+    done = subprocess.run(
+        [sys.executable, '-c', script,
+         str(ROOT / 'scripts/ci/diff_coverage.py'),
+         '--coverage', str(coverage_xml), '--diff', '-'],
+        cwd=tmp, env=_util.child_coverage('scrub'),
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '**50.0%** of added lines covered (1/2).' in done.stdout, (
+        done.stdout)
+    assert '| `extension/content.js` | 1 | 2 | 2 |' in done.stdout, (
+        done.stdout)
+
+
 def test_cli_diff_file_preserves_internal_bare_cr(tmp):
     coverage_xml = Path(tmp) / 'coverage.xml'
     coverage_xml.write_text(
@@ -37,6 +69,45 @@ def test_cli_diff_file_preserves_internal_bare_cr(tmp):
         done.stdout)
     assert '| `extension/content.js` | 1 | 2 | 2 |' in done.stdout, (
         done.stdout)
+
+
+def test_cli_diff_file_accepts_crlf_structure(tmp):
+    coverage_xml = Path(tmp) / 'coverage.xml'
+    coverage_xml.write_text(
+        '<coverage><class filename="extension/content.js"><lines>'
+        '<line number="1" hits="1"/>'
+        '<line number="2" hits="0"/>'
+        '</lines></class></coverage>\n', encoding='utf-8')
+    expected = (
+        '### Coverage of this change\n\n'
+        '**50.0%** of added lines covered (1/2).\n\n'
+        '| File | Covered | Added | Missed lines |\n'
+        '| --- | ---: | ---: | --- |\n'
+        '| `extension/content.js` | 1 | 2 | 2 |\n\n'
+        'Only the JavaScript report was given, '
+        'so added Python lines are not measured.\n')
+    headers = (
+        b'--- /dev/null\n+++ b/extension/content.js\n',
+        b'--- /dev/null\t1970-01-01\n'
+        b'+++ b/extension/content.js\t1970-01-01\n',
+        b'diff --git "a/extension/content.js" "b/extension/content.js"\n'
+        b'--- /dev/null\n+++ "b/extension/content.js"\n')
+    diff = Path(tmp) / 'patch.diff'
+    for header in headers:
+        patch = (header + b'@@ -0,0 +1,2 @@\n'
+                 b'+first();\r second();\n+missed();\n')
+        for newline in (b'\n', b'\r\n'):
+            diff.write_bytes(patch.replace(b'\n', newline))
+            done = subprocess.run(
+                [sys.executable, str(ROOT / 'scripts/ci/diff_coverage.py'),
+                 '--coverage', str(coverage_xml), '--diff', str(diff)],
+                cwd=tmp, env=_util.child_coverage('scrub'),
+                capture_output=True, timeout=60)
+            assert done.returncode == 0, (
+                done.returncode, done.stdout, done.stderr)
+            body = done.stdout.decode('utf-8').replace('\r\n', '\n')
+            assert body == expected, (header, newline, body)
+            assert '\r' not in body, body
 
 
 def test_added_lines_split_only_on_git_newlines(tmp):

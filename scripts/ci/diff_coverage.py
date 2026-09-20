@@ -151,6 +151,7 @@ def added_lines(diff_text):
     in_hunk = False
     old_remaining = new_remaining = 0
     for line in diff_text.split('\n'):
+        header = line.removesuffix('\r')
         if line.startswith('Binary files '):
             raise ValueError(
                 f'binary diff record is not measurable: {line}')
@@ -158,17 +159,17 @@ def added_lines(diff_text):
         # REMOVED line whose content begins `-- ` as `--- ...`, and taking
         # that for a header clears the path and silently drops every later
         # hunk of the file. The `+++` match below is guarded the same way.
-        if line.startswith('diff --git ') or (
-                not in_hunk and line.startswith('--- ')):
+        if header.startswith('diff --git ') or (
+                not in_hunk and header.startswith('--- ')):
             path = None
             in_hunk = False
             continue
-        target = _TARGET.match(line) if not in_hunk else None
+        target = _TARGET.match(header) if not in_hunk else None
         if target is not None:
             name = _decode_git_path(target.group(1))
             path = None if name == '/dev/null' else name
             continue
-        hunk = _HUNK.match(line)
+        hunk = _HUNK.match(header)
         if hunk is not None:
             old_remaining = int(hunk.group(1) or 1)
             line_number = int(hunk.group(2))
@@ -399,8 +400,9 @@ def main():
                         help='unified diff to read, or - for stdin')
     args = parser.parse_args()
 
-    diff_text = (sys.stdin.read() if args.diff == '-'
-                 else Path(args.diff).read_bytes().decode('utf-8'))
+    diff_bytes = (sys.stdin.buffer.read() if args.diff == '-'
+                  else Path(args.diff).read_bytes())
+    diff_text = diff_bytes.decode('utf-8')
     try:
         # Inside the guard with its sibling: a git-quoted path whose bytes
         # are not UTF-8 raises UnicodeDecodeError, a ValueError subclass,
