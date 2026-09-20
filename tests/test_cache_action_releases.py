@@ -347,6 +347,16 @@ def test_an_escaped_reference_is_refused_by_the_decoder_cross_check(tmp):
             f"{V610}' matches no recognised pin"], (spelling, refusals)
 
 
+def test_an_escaped_reference_into_a_subpath_is_refused(tmp):
+    mod = _verifier()
+    root = _one_pin(tmp, f'"actions/cache/x\\x40{V610}"  # v1.0.0')
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        f".github/workflows/tests.yml:4: decoded uses 'actions/cache/x@"
+        f"{V610}' matches no recognised pin"], refusals
+
+
 def test_an_escaped_reference_in_any_job_is_cross_checked(tmp):
     mod = _verifier()
     root = _workflow(tmp, (
