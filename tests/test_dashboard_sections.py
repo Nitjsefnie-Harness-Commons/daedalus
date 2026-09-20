@@ -448,6 +448,108 @@ def test_an_emptied_list_reads_zero_slash_zero(_tmp):
         'nextDisabled': True}, seen
 
 
+_CAPTURE_HARNESS = _DOM + r"""
+(async () => {
+const commands = [];
+const imageTargets = [];
+let envelope;
+globalThis.fetch = async (target, init = {}) => {
+  if (target === '/tabs') {
+    return jsonResponse([
+      { tabId: '11', title: 'first', url: '', age: 0 },
+      { tabId: '22', title: 'second', url: '', age: 0 },
+    ]);
+  }
+  if (target.startsWith('/upload?')) return jsonResponse({ items: [] });
+  if (target === '/command') {
+    const command = JSON.parse(init.body);
+    commands.push(command);
+    envelope = {
+      id: command.id, deliveryId: 'delivery-' + commands.length,
+      resultGeneration: 'generation-' + commands.length,
+      result: { path: token + '/' + command.id + '/capture-'
+        + commands.length + '.png', size: 3, format: 'png', tabUrl: '' },
+      error: null, world: 'extension',
+    };
+    return jsonResponse({ ok: true, did: envelope.deliveryId });
+  }
+  if (target.startsWith('/result?')) {
+    return jsonResponse({ ...envelope, consumed: true });
+  }
+  if (target.startsWith('/screenshot?')) {
+    imageTargets.push(target);
+    return { ok: true, blob: async () => ({}) };
+  }
+  throw new Error('unexpected request ' + target);
+};
+URL.createObjectURL = () => 'blob:capture';
+URL.revokeObjectURL = () => {};
+phase('dashboard module import started');
+const { mount } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
+phase('dashboard module imported');
+phase('dashboard call started');
+const bus = { on() {} };
+let container = new El('div');
+mount(container, bus);
+await bounded(settle(), 'initial mount', _dashnodeStepTimeoutMs);
+function capture(tabId) {
+  const panelButton = container.find('[data-role=capture]');
+  if (panelButton) {
+    container.find('[data-role=tab]').value = tabId;
+    container.find('[data-role=fmt]').value = 'png';
+    panelButton.click();
+  } else {
+    container.all().find((el) => el.dataset.tid === tabId)
+      .byText('shot').click();
+  }
+}
+capture('11');
+await bounded(settle(), 'first capture', _dashnodeStepTimeoutMs);
+capture('11');
+await bounded(settle(), 'repeat capture', _dashnodeStepTimeoutMs);
+capture('22');
+await bounded(settle(), 'different tab capture', _dashnodeStepTimeoutMs);
+container = new El('div');
+mount(container, bus);
+await bounded(settle(), 'remount', _dashnodeStepTimeoutMs);
+capture('11');
+await bounded(settle(), 'remounted capture', _dashnodeStepTimeoutMs);
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({ commands, imageTargets }));
+phase('dashboard harness finished');
+})().catch(leave);
+"""
+
+
+def _repeated_captures(section):
+    harness = _dashnode.DashboardNodeHarness(
+        _CAPTURE_HARNESS, bounded_steps=7, module=True, arguments=(
+            ROOT / 'dashboard' / 'sections' / (section + '.js'),))
+    seen = json.loads(_dashnode.run_dashboard_node(harness).stdout)
+    commands = seen['commands']
+    assert [cmd['tabId'] for cmd in commands] == [11, 11, 22, 11], seen
+    assert all(cmd['type'] == 'screenshot' for cmd in commands), seen
+    assert all(cmd['tab'] == 'extension' for cmd in commands), seen
+    ids = [cmd['id'] for cmd in commands]
+    assert all(ids) and len(set(ids)) == 1, ids
+    return seen
+
+
+def test_screenshot_panel_reuses_one_upload_id(_tmp):
+    seen = _repeated_captures('screenshot')
+    assert all(cmd['format'] == 'png' for cmd in seen['commands']), seen
+    assert len(seen['imageTargets']) == 4, seen
+    for index, target in enumerate(seen['imageTargets'], start=1):
+        assert target.endswith(f'%2Fcapture-{index}.png'), target
+
+
+def test_tab_row_captures_reuse_one_upload_id(_tmp):
+    _repeated_captures('tabs')
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashsections_')
 

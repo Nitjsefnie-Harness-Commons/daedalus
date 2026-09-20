@@ -100,7 +100,7 @@ export function mount(container, bus) {
   }
   async function shoot(tabId) {
     try {
-      const r = await extCmd('screenshot', { tabId: Number(tabId) }, { timeout: 20000 });
+      const r = await extCmd('screenshot', { tabId: Number(tabId) }, { id: '_screenshot', timeout: 20000 });
       toast('captured: ' + r.path, 'ok');
     } catch (e) { toast(errMsg(e), 'err'); }
   }
