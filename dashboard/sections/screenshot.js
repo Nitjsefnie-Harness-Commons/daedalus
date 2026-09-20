@@ -96,13 +96,21 @@ export function mount(container, bus) {
     const token = getToken();
     if (!token) return;
     try {
-      const resp = await api.get('/upload?limit=200&offset=0');
-      const files = (resp.items || []).filter(f => /\.(png|jpe?g)$/i.test(f.filename));
+      const shown = [];
+      // Listings group by id, then filename ascending; recent captures may
+      // be on any page. Keep only the newest candidates between pages.
+      for (let offset = 0, total = 1; offset < total; offset += 200) {
+        const resp = await api.get(`/upload?limit=200&offset=${offset}`);
+        total = resp.total;
+        shown.push(...(resp.items || []).filter(f => /\.(png|jpe?g)$/i.test(f.filename)));
+        // The listing rounds mtimes to seconds; capture filenames retain ms.
+        shown.sort((a, b) => b.mtime - a.mtime || b.filename.localeCompare(a.filename));
+        shown.splice(24);
+      }
       for (const held of recentUrls) URL.revokeObjectURL(held);
       recentUrls = [];
       clear(recent);
-      if (files.length === 0) { recent.appendChild(h('div', { class: 'dim italic small' }, 'no screenshots.')); return; }
-      const shown = files.slice(0, 24);
+      if (shown.length === 0) { recent.appendChild(h('div', { class: 'dim italic small' }, 'no screenshots.')); return; }
       // Fetched together, not one after another: an <img src> used to let the
       // browser load the grid in parallel, and awaiting each in turn would
       // trade the token in the URL for a serial round trip per thumbnail. A
