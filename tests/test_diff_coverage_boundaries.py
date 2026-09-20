@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Direct boundary coverage for the patch coverage reporter."""
 import contextlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,6 +11,32 @@ from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 import diff_coverage  # noqa: E402
+
+
+def test_cli_diff_file_preserves_internal_bare_cr(tmp):
+    coverage_xml = Path(tmp) / 'coverage.xml'
+    coverage_xml.write_text(
+        '<coverage><class filename="extension/content.js"><lines>'
+        '<line number="1" hits="1"/>'
+        '<line number="2" hits="0"/>'
+        '</lines></class></coverage>\n', encoding='utf-8')
+    diff = Path(tmp) / 'patch.diff'
+    diff.write_bytes(
+        b'--- /dev/null\n'
+        b'+++ b/extension/content.js\n'
+        b'@@ -0,0 +1,2 @@\n'
+        b'+first();\r second();\n'
+        b'+missed();\n')
+    done = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts/ci/diff_coverage.py'),
+         '--coverage', str(coverage_xml), '--diff', str(diff)],
+        cwd=tmp, env=_util.child_coverage('scrub'),
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert '**50.0%** of added lines covered (1/2).' in done.stdout, (
+        done.stdout)
+    assert '| `extension/content.js` | 1 | 2 | 2 |' in done.stdout, (
+        done.stdout)
 
 
 def test_added_lines_split_only_on_git_newlines(tmp):
@@ -63,14 +90,43 @@ def test_omissions_follow_current_config_and_keep_other_source(tmp):
         'pkg/vendored/helper.py': {1},
         'report_only.py': {1},
         'generated_elsewhere/helper.py': {1},
+        'xgenerated/nested/helper.py': {1},
         'pkg/helper.py': {1},
         'extension/content.js': {1},
     }
     with contextlib.chdir(tmp):
         missing = diff_coverage.unmeasured_sources({}, added)
+    body = diff_coverage.render([], 0, 0, missing)
+    assert 'Unmeasured changed source files:' in body, body
+    for path in (
+            'generated_elsewhere/helper.py', 'xgenerated/nested/helper.py',
+            'pkg/helper.py', 'extension/content.js'):
+        assert f'- `{path}`' in body, body
+    for path in (
+            'absolute.py', 'generated/nested/helper.py',
+            'pkg/vendored/helper.py', 'report_only.py'):
+        assert f'`{path}`' not in body, body
     assert missing == {
-        'generated_elsewhere/helper.py', 'pkg/helper.py',
+        'generated_elsewhere/helper.py', 'xgenerated/nested/helper.py',
+        'pkg/helper.py',
         'extension/content.js'}, missing
+
+
+def test_omission_near_misses_stay_in_the_complaint(tmp):
+    del tmp
+    added = {
+        '.claude/yes.py': {1},
+        '.claude2/foo.py': {1},
+        'x.claude/foo.py': {1},
+        'pkg/helper.py': {1},
+    }
+    with contextlib.chdir(ROOT):
+        missing = diff_coverage.unmeasured_sources({}, added)
+    body = diff_coverage.render([], 0, 0, missing)
+    assert 'Unmeasured changed source files:' in body, body
+    for path in ('.claude2/foo.py', 'x.claude/foo.py', 'pkg/helper.py'):
+        assert f'- `{path}`' in body, body
+    assert '`.claude/yes.py`' not in body, body
 
 
 def test_decode_git_path_keeps_a_final_unmatched_backslash(tmp):

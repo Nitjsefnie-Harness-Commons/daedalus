@@ -33,6 +33,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import cast
 
 from coverage import Coverage
 from coverage.exceptions import CoverageException
@@ -298,9 +299,11 @@ def unmeasured_sources(measured, added):
     another is not: a boolean all-or-nothing guard would hide the latter.
     """
     config = Coverage(config_file=True)
-    omitted = GlobMatcher(prep_patterns(
-        (config.get_option('run:omit') or [])
-        + (config.get_option('report:omit') or [])))
+    patterns = [
+        pattern
+        for option in ('run:omit', 'report:omit')
+        for pattern in cast(list[str], config.get_option(option) or [])]
+    omitted = GlobMatcher(prep_patterns(patterns))
     return {path for path in added
             if _measured_source(path) and path not in measured
             and not (path.lower().endswith('.py')
@@ -397,7 +400,7 @@ def main():
     args = parser.parse_args()
 
     diff_text = (sys.stdin.read() if args.diff == '-'
-                 else Path(args.diff).read_text(encoding='utf-8'))
+                 else Path(args.diff).read_bytes().decode('utf-8'))
     try:
         # Inside the guard with its sibling: a git-quoted path whose bytes
         # are not UTF-8 raises UnicodeDecodeError, a ValueError subclass,
