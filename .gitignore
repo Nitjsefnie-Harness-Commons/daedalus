@@ -280,6 +280,7 @@
 !/tests/_jsroute_timeline.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mcp_guard_floor.py
+!/tests/_mcp_load.py
 !/tests/_mcp_tool_commands.py
 !/tests/_noglibc.py
 !/tests/_overlap.py

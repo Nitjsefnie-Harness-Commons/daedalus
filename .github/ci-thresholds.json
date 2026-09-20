@@ -15,14 +15,14 @@
     "tests/_pyroute_state.py": 779,
     "tests/test_bridge_results.py": 981,
     "tests/test_cli.py": 1222,
-    "tests/test_mcp_server.py": 1700,
+    "tests/test_mcp_server.py": 1658,
     "tests/test_tab_routing.py": 793
   },
   "long_line_baseline": {
     "scripts/check_versions.py": 9,
     "tests/test_bridge_startup.py": 2,
     "tests/test_cli.py": 16,
-    "tests/test_mcp_server.py": 22,
+    "tests/test_mcp_server.py": 21,
     "tests/test_repo_layout.py": 5,
     "tests/test_segment_jobs.py": 14,
     "tests/test_version_contract.py": 22
