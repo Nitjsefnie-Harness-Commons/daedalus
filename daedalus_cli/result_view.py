@@ -8,12 +8,5 @@ def relative_upload_path(path):
 
 def public_result(body):
     result = dict(body)
-    credential = result.pop('token', None)
-    value = result.get('result')
-    if isinstance(value, dict):
-        path = value.get('path')
-        if (isinstance(path, str) and credential
-                and path.startswith(credential + '/')):
-            result['result'] = {
-                **value, 'path': relative_upload_path(path)}
+    result.pop('token', None)
     return result
