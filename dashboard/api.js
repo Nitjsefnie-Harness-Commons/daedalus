@@ -86,7 +86,7 @@ export const api = {
 
 let _idCounter = 0;
 
-export function nextId(prefix = 'dash') {
+function nextId(prefix = 'dash') {
   _idCounter++;
   return `_${prefix}_${_idCounter}_${Date.now().toString(36)}`;
 }

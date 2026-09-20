@@ -1,7 +1,7 @@
 // §03 SCREENSHOT — capture + latest image viewer per tab.
 
 import { h, field, spacer, clear, fmtSize, fmtDateTime, truncate, errMsg, toast, bindTabSelector } from './_util.js';
-import { api, extCmd, getToken, nextId, objectUrl } from '../api.js';
+import { api, extCmd, getToken, objectUrl } from '../api.js';
 
 export function mount(container, bus) {
   const root = h('div', {},
@@ -61,9 +61,8 @@ export function mount(container, bus) {
     const fields = { format: fmtSel.value };
     if (fmtSel.value === 'jpeg') fields.quality = Math.max(1, Math.min(100, Number(qEl.value) || 80));
     if (tabSel.value) fields.tabId = Number(tabSel.value);
-    const id = nextId('ss');
     try {
-      const r = await extCmd('screenshot', fields, { id, timeout: 20000 });
+      const r = await extCmd('screenshot', fields, { id: '_ss', timeout: 20000 });
       if (captureUrl) URL.revokeObjectURL(captureUrl);
       captureUrl = await objectUrl(
         '/screenshot?path=' + encodeURIComponent(r.path));
