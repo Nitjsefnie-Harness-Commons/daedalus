@@ -347,5 +347,82 @@ def test_a_complete_error_answer_is_still_reported_by_status(tmp):
     assert 'Connection failed' not in r.stderr, r.stderr
 
 
+_RAISING_URLOPEN = """
+import builtins, sys, urllib.request
+from daedalus_cli import transport
+family, where, entry = sys.argv[1:4]
+exc = getattr(builtins, family)
+attempts = []
+
+
+class Response:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self):
+        raise exc(f'{family} from read')
+
+
+def urlopen(req, timeout=None):
+    attempts.append(req.full_url)
+    if where == 'open':
+        raise exc(f'{family} from open')
+    return Response()
+
+
+urllib.request.urlopen = urlopen
+if entry == 'wait':
+    out = transport.wait_for_result('c', 't', 'd', 0.2, interval=0)
+    print('WAIT', out, len(attempts))
+else:
+    transport.api('GET', '/tabs')
+"""
+
+
+def _check_transport_family(family):
+    """Every entry point survives `family` raised by urlopen and by read.
+
+    A stub urlopen stands in for the socket, so the exception the CLI
+    meets is exactly the family named and nothing else. api() reports it
+    as a connection failure; the result wait treats it as a failed peek
+    and returns None at its deadline, having tried at least once.
+    """
+    env = cli_env(DAEDALUS_TOKEN=TOK)
+    for where in ('open', 'read'):
+        r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
+                  'api'], env)
+        assert r.returncode != 0, (where, r.returncode, r.stdout)
+        assert 'Traceback' not in r.stderr, (where, r.stderr)
+        assert f'Connection failed: {family} from {where}' in r.stderr, (
+            where, r.stderr)
+        r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
+                  'wait'], env)
+        assert r.returncode == 0, (where, r.returncode, r.stderr)
+        assert 'Traceback' not in r.stderr, (where, r.stderr)
+        verdict, outcome, attempts = r.stdout.strip().split()
+        assert (verdict, outcome) == ('WAIT', 'None'), (where, r.stdout)
+        assert int(attempts) >= 1, (where, r.stdout)
+
+
+def test_a_connection_reset_is_a_connection_failure_on_every_entry(tmp):
+    """ConnectionResetError is an OSError that is not a URLError.
+
+    The cut-off controls above raise IncompleteRead, an HTTPException, so
+    they stay green when OSError leaves _exchange's transport clause
+    (issue 699) while a reset by the proxy escapes as a traceback.
+    """
+    del tmp
+    _check_transport_family('ConnectionResetError')
+
+
+def test_a_timeout_is_a_connection_failure_on_every_entry(tmp):
+    """TimeoutError is the other OSError a socket raises past urlopen."""
+    del tmp
+    _check_transport_family('TimeoutError')
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
