@@ -11,6 +11,18 @@ let watchdogTimer = null;
 let keepaliveTimer = null;
 // bumped on every (re)start/stop; only the current gen reconnects
 let streamGen = 0;
+// Consecutive non-OK /stream answers back off exponentially; a connected
+// stream resets the count. An auth refusal (401/400) is not transient: it
+// records the credential pair that was refused, and connecting stays idle
+// until the token or bridge URL changes.
+const _STREAM_RETRY_BASE_MS = 1000;
+const _STREAM_RETRY_MAX_MS = 60000;
+let _streamFailures = 0;
+let _authRefusedFor = null;
+
+function _streamCredential() {
+  return JSON.stringify([config.serverUrl, config.token]);
+}
 
 // ─── SSE stream ───
 
@@ -97,6 +109,10 @@ async function startStream() {
   // against the extension's own chrome-extension:// origin and the watchdog
   // retries that forever. Stay idle instead.
   if (!config.serverUrl) return;
+  // A retry cannot fix a refused credential, and re-asking hits the bridge
+  // with a 401 every few seconds. Stay idle; the storage listener re-enters
+  // here once the token or server URL changes, and that fresh pair resumes.
+  if (_streamCredential() === _authRefusedFor) return;
   // tear down any existing stream (also bumps streamGen)
   stopStream();
   // this invocation owns reconnection for its generation
@@ -128,10 +144,27 @@ async function startStream() {
     if (!resp.ok || !resp.body) {
       console.error('[Daedalus] Stream failed:', resp.status);
       if (myGen === streamGen) {
+        if (resp.status === 401 || resp.status === 400) {
+          _authRefusedFor = _streamCredential();
+          // clear this attempt's watchdog; the bump also silences any
+          // reschedule from this generation
+          stopStream();
+          console.error('[Daedalus] Stream auth refused; not retrying '
+            + 'until the token or bridge URL changes');
+          return;
+        }
         sseAbort = null;
-        setTimeout(() => { if (myGen === streamGen) startStream(); }, 3000);
+        const delay = Math.min(
+          _STREAM_RETRY_BASE_MS * 2 ** _streamFailures,
+          _STREAM_RETRY_MAX_MS);
+        _streamFailures++;
+        setTimeout(() => { if (myGen === streamGen) startStream(); }, delay);
       }
       return;
+    }
+    if (myGen === streamGen) {
+      _streamFailures = 0;
+      _authRefusedFor = null;
     }
     // Re-register all tabs on stream connect
     registerAllTabs();

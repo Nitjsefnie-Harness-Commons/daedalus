@@ -426,7 +426,7 @@ async function runStreamTimers() {
     .filter((timer) => !timer.cleared)
     .map((timer) => timer.delay);
   const retry = timers.find(
-    (timer) => !timer.cleared && timer.delay === 3000);
+    (timer) => !timer.cleared && timer.delay === 1000);
   retry.callback();
   await settle();
 

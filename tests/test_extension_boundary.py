@@ -114,7 +114,7 @@ def test_stream_timers_drive_reconnect_watchdog_and_keepalive(tmp):
     del tmp
     actual = run_extension_result_boundary('stream-timers')
     assert actual == {
-        'reconnectDelays': [5000, 3000],
+        'reconnectDelays': [5000, 1000],
         'reconnectFetches': 2,
         'watchdogDelays': [5000],
         'watchdogAborted': True,
