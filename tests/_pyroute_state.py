@@ -543,8 +543,7 @@ def dedupe_states(states):
     for state in states:
         signature = state_signature(state, occupancy=False)
         kept = found.get(signature)
-        found[signature] = (state if kept is None
-                            else join_clean_occupancy(kept, state))
+        found[signature] = join_clean_occupancy(kept, state) if kept else state
     return list(found.values())
 
 
@@ -711,7 +710,6 @@ def record_exit(exits, kind, states):
 
 
 def record_returns(exits, states, node):
-    """A return statement returns its value; a lambda body is the value."""
     value = node.value if isinstance(node, ast.Return) else node
     if exits is not None and value is not None:
         exits['returns'].extend(evaluated_value(value, state)
