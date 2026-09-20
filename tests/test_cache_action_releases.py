@@ -56,11 +56,7 @@ _ANNOTATED_TAG = {
     'tag': 'v3.13.0',
     'message': 'Python 3.13.0\n',
 }
-_NOT_FOUND = json.dumps({
-    'message': 'Not Found',
-    'documentation_url': 'docs: rest/git/refs#get-a-reference',
-    'status': '404',
-})
+_NOT_FOUND = json.dumps({'message': 'Not Found', 'status': '404'})
 _NOT_FOUND_STDERR = 'gh: Not Found (HTTP 404)\n'
 
 _PLAIN = (
@@ -138,6 +134,14 @@ def test_every_cache_family_pin_shape_is_recognised(tmp):
         ('.github/workflows/tests.yml', 11, 'actions/cache/SAVE', V610,
          'v6.1.0'),
     ], pins
+
+
+def test_both_workflow_extensions_github_accepts_are_scanned(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, _PLAIN, name='other.yaml')
+    _workflow(tmp, 'jobs: {}\n')
+    assert [pin.path for pin in mod.scan(root)] == [
+        '.github/workflows/other.yaml'] * 3, mod.scan(root)
 
 
 def _one_pin(tmp, uses):
