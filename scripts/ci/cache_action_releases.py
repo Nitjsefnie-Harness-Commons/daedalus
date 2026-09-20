@@ -24,11 +24,9 @@ import sys
 from collections import namedtuple
 from pathlib import Path
 
-if __package__:
-    # pylint: disable-next=relative-beyond-top-level,no-name-in-module
-    from . import workflow_yaml
-else:
-    workflow_yaml = importlib.import_module('workflow_yaml')
+# By name from this script's directory, as CI runs it; a relative import
+# would have the type checker read the decoder a second time as a package.
+workflow_yaml = importlib.import_module('workflow_yaml')
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = Path('.github') / 'workflows'
@@ -132,8 +130,6 @@ def _cache_reference(uses):
 
 
 def decoder_refusals(relative, text, pins):
-    """Every cache reference the workflow decoder finds that the line
-    scanner did not recognise at that step with the same value."""
     try:
         jobs = workflow_yaml.job_names(text) or []
         steps = [(job, item) for job in jobs
