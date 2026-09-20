@@ -211,6 +211,24 @@ def test_lambda_body_value_is_its_return(tmp):
                    for label, store, expected in rows])
 
 
+def test_callee_replay_keeps_occupancy_apart(tmp):
+    """A callee analysed from a state where a clean key is occupied and
+    again from one where it is missing must be walked twice: the joined
+    signature would merge the two entries, and a replay applies no join."""
+    use = 'd = {"k": ordinary}\ndef use(): return d.get("k", relay())\n'
+    rows = []
+    for removal in ('d.pop("k")', 'del d["k"]'):
+        for flag, taken in (('args.flag', True), ('not args.flag', False)):
+            rows.append((f'occupied-first-{removal[:3]}-{flag}',
+                         f'{use}if {flag}: x = use()\nelse: {removal}; '
+                         'x = use()', (int(not taken), 1)))
+            rows.append((f'missing-first-{removal[:3]}-{flag}',
+                         f'{use}if {flag}: {removal}; x = use()\n'
+                         'else: x = use()', (int(taken), 1)))
+    verdicts(tmp, [(label, body(store, 'x()'), expected)
+                   for label, store, expected in rows])
+
+
 def test_starred_sender_suffix_alignment(tmp):
     shapes = [
         ('prefix-star', 'def pair2(): return ordinary, relay()\n'
