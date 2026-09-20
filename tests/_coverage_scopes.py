@@ -12,6 +12,7 @@ from _coverage_memo import nodes as memo_nodes
 
 
 _ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
+_ALL_NAMES = '*'
 
 
 _REFLECTIVE_READS = frozenset({'getattr', 'hasattr'})
@@ -72,6 +73,29 @@ def _escapes(node, parents):
                 and parent.args[0] is node and _reads_attribute(parent))
 
 
+def _import_bound_name(node, alias):
+    if isinstance(node, ast.Import):
+        return alias.asname or alias.name.split('.')[0]
+    return alias.asname or alias.name
+
+
+def _import_rebound_names(tree):
+    """Names an import binds to anything but a root module; `*` is any."""
+    rebound = set()
+    for node in memo_nodes(tree):
+        if isinstance(node, ast.ImportFrom):
+            rebound.update(_bound_names(node))
+        elif isinstance(node, ast.Import):
+            rebound.update(_import_bound_name(node, alias)
+                           for alias in node.names
+                           if alias.name not in _ROOT_MODULES)
+    return rebound
+
+
+def _rebound_by_import(name, rebound):
+    return name in rebound or _ALL_NAMES in rebound
+
+
 def root_owner_names(tree):
     """Import-bound names of a root module reached only by attribute reads."""
     modules = {}
@@ -98,7 +122,11 @@ def root_owner_names(tree):
                 and _escapes(node, parents)):
             retired.add(node.id)
     gone = {modules[name] for name in retired if name in modules}
-    return {name for name, module in modules.items() if module not in gone}
+    # A mutation retires the module every alias shares; an import rebinding
+    # retires only the name it rebinds.
+    rebound = _import_rebound_names(tree)
+    return {name for name, module in modules.items()
+            if module not in gone and not _rebound_by_import(name, rebound)}
 
 
 def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):
@@ -191,6 +219,8 @@ def _shadowed_names(tree):
         if any(isinstance(target, ast.Name) and target.id == 'ROOT'
                for target in targets):
             root_values.append(value)
+    if _rebound_by_import('_util', _import_rebound_names(tree)):
+        names.add('_util')
     if (root_values and not {'Path', '_util'} & names
             and all(_is_repository_root_binding(value)
                     for value in root_values)):
@@ -354,7 +384,6 @@ def _scope_shadows(tree, layout=None):
 _FUNCTION_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 _TYPE_PARAMETERS = tuple(getattr(ast, name) for name in (
     'TypeVar', 'ParamSpec', 'TypeVarTuple') if hasattr(ast, name))
-_ALL_NAMES = '*'
 
 
 def _bound_names(node):
@@ -368,11 +397,8 @@ def _bound_names(node):
         return {node.name} if node.name else set()
     if isinstance(node, ast.MatchMapping):
         return {node.rest} if node.rest else set()
-    if isinstance(node, ast.Import):
-        return {alias.asname or alias.name.split('.')[0]
-                for alias in node.names}
-    if isinstance(node, ast.ImportFrom):
-        return {alias.asname or alias.name for alias in node.names}
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return {_import_bound_name(node, alias) for alias in node.names}
     return set()
 
 
