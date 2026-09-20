@@ -16,8 +16,11 @@ neutral, cancelled) is held past the debounce window as well, because a filling
 matrix goes quiet between cells and every partial tally is superseded by the
 next. Such a batch is released when something worth reading arrives — which
 makes it no longer quiet, so the ordinary debounce applies — or when every
-check on that head has concluded, `speed` included. An unanswerable completion
-query keeps it holding: a failed query must never look like a settled matrix.
+workflow run on that head has concluded, `speed` included. The runs are read
+through `actions/runs?head_sha=`, never the check-runs list: that list is
+appended to while a matrix fills, so "every check run has concluded" is true
+early and repeatedly. An unanswerable completion query keeps it holding: a
+failed query must never look like a settled matrix.
 
 This is a true debounce: the window restarts on every arrival, so nothing
 is emitted while either watcher is still producing. `ci_watch.py` chose a
@@ -165,36 +168,53 @@ def _repo_slug():
     return match.group(1) if match else None
 
 
-def _all_concluded(sha):
-    """Whether every check on `sha` has finished.
-
-    Returns None when the answer cannot be established, and the caller keeps
-    holding on None: a failed query must never look like a settled matrix.
-    `speed` counts like any other check; the max-hold cap, not this function,
-    bounds how long the slowest check may hold a batch.
-    """
-    slug = _repo_slug()
-    if not (slug and sha):
-        return None
+def _runs_on(slug, sha):
+    """Every workflow run on `sha`, or None when the query fails."""
     try:
-        done = subprocess.run(
+        pages = subprocess.run(
             ['gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',
-             f'repos/{slug}/commits/{sha}/check-runs?per_page=100'],
+             f'repos/{slug}/actions/runs?head_sha={sha}&per_page=100'],
             capture_output=True, text=True, timeout=120, check=True).stdout
     except (OSError, subprocess.SubprocessError):
         return None
     runs = []
-    for chunk in done.split('\n'):
+    for chunk in pages.split('\n'):
         if not chunk.strip():
             continue
         try:
-            runs.extend(json.loads(chunk).get('check_runs', []))
+            runs.extend(json.loads(chunk).get('workflow_runs') or [])
         except (ValueError, AttributeError):
             return None
-    named = runs
-    if not named:
+    return runs
+
+
+def _settled(runs):
+    """None with no run yet, False while one is open, True otherwise.
+
+    A conclusion is the batch's business, not the hold's: a completed
+    failure settles the matrix as much as a completed success does.
+    """
+    if not runs:
         return None
-    return all(run.get('status') == 'completed' for run in named)
+    return all(run.get('status') == 'completed' for run in runs)
+
+
+def _all_concluded(sha):
+    """Whether every workflow run on `sha` has finished.
+
+    None when the answer cannot be established, and the caller keeps holding
+    on None: a failed query must never look like a settled matrix. Workflow
+    runs, not check runs: a queued run has no check run yet, so the check-runs
+    list reads complete mid-matrix. The max-hold cap, not this function,
+    bounds how long the slowest run may hold a batch.
+    """
+    slug = _repo_slug()
+    if not (slug and sha):
+        return None
+    runs = _runs_on(slug, sha)
+    if runs is None:
+        return None
+    return _settled(runs)
 
 
 def _pump(name, stream, sink, kind):
