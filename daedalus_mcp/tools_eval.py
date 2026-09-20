@@ -2,6 +2,8 @@
 
 import json
 
+from daedalus_cli.result_view import public_result
+
 
 def register(mcp, bridge):
     def _flatten_eval(body: dict | None) -> dict | None:
@@ -12,6 +14,8 @@ def register(mcp, bridge):
     (e.g. JSON.stringify output), parse it so the structure surfaces directly;
     non-JSON strings stay untouched. The `world` marker stays unchanged,
     including a `page:<hostname>` prefix."""
+        if isinstance(body, dict):
+            body = public_result(body)
         if isinstance(body, dict) and 'result' in body:
             v = body.pop('result')
             if isinstance(v, str):

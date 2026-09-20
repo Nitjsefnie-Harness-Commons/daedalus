@@ -63,7 +63,7 @@ class BridgeProbe:
         self.calls = []
         self.transport = object()
         # A case sets these to drive a branch the default bodies cannot reach.
-        self.get_bodies = {}
+        self.get_bodies = {'/upload': []}
         self.http_bodies = {'/segment-job': (200, {'sig': self.marker})}
         self.ext_bodies = {}
         self.poll_body = None

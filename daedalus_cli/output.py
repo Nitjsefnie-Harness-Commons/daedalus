@@ -9,6 +9,8 @@ import json
 import os
 import sys
 
+from .result_view import public_result
+
 
 def _output_markers():
     """Pick the decorative markers this console can actually represent.
@@ -72,7 +74,7 @@ MARK = _output_markers()
 
 def validate_result(res):
     """Check result JSON has expected fields, warn on missing."""
-    expected = {'id', 'result', 'error', 'ts', 'token'}
+    expected = {'id', 'result', 'error', 'ts'}
     missing = expected - set(res.keys())
     if missing:
         print(f'{MARK["warn"]} Missing fields: {", ".join(sorted(missing))}',
@@ -88,6 +90,7 @@ def _format_eval_world(world):
 
 
 def print_result(res, raw=False):
+    res = public_result(res)
     if raw:
         print(json.dumps(res, indent=2, ensure_ascii=False))
         return
