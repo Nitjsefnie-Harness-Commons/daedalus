@@ -350,6 +350,7 @@
 !/tests/test_claim_workflow.py
 !/tests/test_cli.py
 !/tests/test_cli_arg_audit.py
+!/tests/test_cli_argument_types.py
 !/tests/test_cli_result_wait.py
 !/tests/test_cli_segment_origins.py
 !/tests/test_cli_waits.py
