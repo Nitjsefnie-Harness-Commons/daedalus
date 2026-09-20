@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Closing the MCP transport's cached clients for the running loop.
 
-The loop's entry is popped before any close, so a failure that escaped
-early would leave every later client open and unreachable. These drive
-the real cache with a clean close that yields before it records, and read
-the record at the moment the close call returns: a first failure that
-propagated early shows that client still open.
+The record is read when the close call returns, so a first failure that
+propagated before every client closed shows the clean one still open.
 """
 import asyncio
 import importlib.util
@@ -30,7 +27,9 @@ def _transport():
 
 
 class ClosingClient:
-    """Stands in for a cached httpx client; `aclose` records and may raise."""
+    """A cached client whose clean close yields before it records. A
+    raising close never yields: the test can only see an early propagation
+    while the raiser stays ahead of the clean close."""
 
     def __init__(self, base_url, failure=None, closed=None, **_kwargs):
         self.base_url = base_url
@@ -47,9 +46,6 @@ class ClosingClient:
 
 
 def _close_registered_clients(transport, failures):
-    """Register one client per failure through the real cache, close the
-    loop's clients, and report (urls closed when the call returned, what
-    it raised, whether the loop's entry survived, the urls registered)."""
     urls = [f'http://127.0.0.1:{18100 + index}'
             for index in range(len(failures))]
     closed = []

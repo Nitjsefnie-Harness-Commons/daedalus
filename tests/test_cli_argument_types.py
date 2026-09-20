@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""The net-capture --max and the -t/--timeout types, against the real parser.
+"""The net-capture --max and -t/--timeout types, through the real parser.
 
-Each case drives `build_parser` the way cli.main does and reads the refusal
-argparse writes, so a type that stops refusing is caught here rather than
-by the comment above its raise.
+A type that stops refusing fails here rather than by the comment above
+its raise.
 """
 import contextlib
 import io
@@ -31,7 +30,6 @@ def refused(argv):
 
 
 def accepted(argv):
-    """The namespace argparse built; a refusal fails the test, not the run."""
     err = io.StringIO()
     try:
         with contextlib.redirect_stderr(err):
