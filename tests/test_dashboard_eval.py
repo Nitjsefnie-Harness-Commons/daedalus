@@ -258,6 +258,106 @@ def test_settings_caveat_says_where_an_untargeted_command_runs(_tmp):
     assert 'every tab' not in lowered, seen
 
 
+_SETTINGS_STREAM_HARNESS = _dashnode.DashboardNodeHarness(_dashnode.DOM + r"""
+(async () => {
+token = '';
+localStorage.setItem = (key, value) => {
+  if (key === 'daedalus-token') token = value;
+};
+globalThis.window = { addEventListener() {} };
+document.querySelectorAll = () => [];
+const timers = new Map();
+let timerId = 0;
+globalThis.setTimeout = (callback) => {
+  timers.set(++timerId, callback);
+  return timerId;
+};
+globalThis.clearTimeout = (id) => timers.delete(id);
+const streams = [];
+const probes = [];
+let available = false;
+globalThis.fetch = (target, init) => {
+  if (target === '/tabs') {
+    return new Promise((resolve, reject) => probes.push({ resolve, reject }));
+  }
+  if (target !== '/stream?tab=dashboard') {
+    throw new Error('unexpected request ' + target);
+  }
+  streams.push({ auth: init.headers.Authorization, signal: init.signal });
+  if (!available) return Promise.reject(new Error('bridge unavailable'));
+  return Promise.resolve({ ok: true, body: { getReader: () => ({
+    read: () => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(
+        Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    }),
+  }) } });
+};
+phase('dashboard module import started');
+const [settings, sse] = await bounded(Promise.all([
+  import(pathToFileURL(process.argv[1]).href),
+  import(pathToFileURL(process.argv[2]).href),
+]), 'dashboard module import', _dashnodeStepTimeoutMs);
+phase('dashboard module imported');
+phase('dashboard call started');
+const statuses = [];
+sse.subscribe((event) => statuses.push(event.status));
+sse.start();
+const initial = statuses.slice();
+const container = new El('div');
+settings.mount(container);
+container.find('[data-role=token]').value = 'first-token';
+container.find('[data-role=save]').click();
+probes[0].reject(new Error('bridge unavailable'));
+await bounded(settle(), 'failed first save', _dashnodeStepTimeoutMs);
+const failed = { statuses: statuses.slice(), retries: timers.size,
+  status: container.find('[data-role=status]').textContent, token };
+available = true;
+for (const [id, callback] of [...timers]) {
+  timers.delete(id);
+  callback();
+}
+await bounded(settle(), 'stream recovery', _dashnodeStepTimeoutMs);
+const recovered = statuses.at(-1);
+const previous = streams.at(-1);
+container.find('[data-role=token]').value = 'replacement-token';
+container.find('[data-role=save]').click();
+await bounded(settle(), 'save with pending probe', _dashnodeStepTimeoutMs);
+const pending = { status: statuses.at(-1),
+  auth: streams.at(-1)?.auth, previousAborted: previous?.signal.aborted };
+probes[1].reject(new Error('probe unavailable'));
+await bounded(settle(), 'replacement probe failure', _dashnodeStepTimeoutMs);
+const final = statuses.at(-1);
+sse.stop();
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({ initial, failed, recovered,
+  pending, final, auth: streams.map((stream) => stream.auth) }));
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=5, module=True, arguments=(
+    ROOT / 'dashboard' / 'sections' / 'settings.js',
+    ROOT / 'dashboard' / 'sse.js'))
+
+
+def test_saving_token_restarts_stream_independently_of_probe(_tmp):
+    result = _dashnode.run_dashboard_node(_SETTINGS_STREAM_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['initial'] == ['no-token'], seen
+    assert seen['failed']['token'] == 'first-token', seen
+    assert 'bridge unavailable' in seen['failed']['status'], seen
+    assert seen['failed']['statuses'][-1] == 'reconnecting', seen
+    assert seen['failed']['retries'] == 1, seen
+    assert seen['recovered'] == 'connected', seen
+    assert seen['pending'] == {
+        'status': 'connected', 'auth': 'Bearer replacement-token',
+        'previousAborted': True,
+    }, seen
+    assert seen['final'] == 'connected', seen
+    assert seen['auth'] == [
+        'Bearer first-token', 'Bearer first-token',
+        'Bearer replacement-token',
+    ], seen
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dasheval_')
 

@@ -69,6 +69,7 @@ export function mount(container, bus) {
     if (!tok) { toast('token is empty', 'warn'); return; }
     setToken(tok);
     setServer(srv);
+    restartSse();
     statusEl.textContent = 'saved — verifying…';
     // Update top bar meta
     for (const el of document.querySelectorAll('[data-meta=token]')) el.textContent = tok.slice(0, 8) + '…' + tok.slice(-4);
@@ -78,7 +79,6 @@ export function mount(container, bus) {
       await api.get('/tabs');
       setStatus(h('span', { class: 'green' }, 'connected'));
       toast('settings saved', 'ok');
-      restartSse();
     } catch (e) {
       setStatus(h('span', { class: 'red' }, 'server unreachable: ' + errMsg(e)));
     }
