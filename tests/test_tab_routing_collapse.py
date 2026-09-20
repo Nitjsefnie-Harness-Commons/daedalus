@@ -290,6 +290,64 @@ def test_assigned_pop_updates_aliases_and_keeps_return(tmp):
     verdicts(tmp, cases)
 
 
+def test_pop_effect_follows_expression_evaluation(tmp):
+    shapes = [
+        ('tuple', 'x = (d.pop("k"), ordinary)', 'x[0]()'),
+        ('list', 'x = [d.pop("k")]', 'x[0]()'),
+        ('argument', 'ordinary(d.pop("k"))', None),
+        ('returned-argument', 'def keep(value): return value\n'
+         'x = keep(d.pop("k"))', 'x()'),
+        ('same-expression', 'x = (d.pop("k"), d.get("k", ordinary))',
+         'x[0]()'),
+    ]
+    cases = []
+    for label, expression, invoke in shapes:
+        store = 'd = {"k": relay()}\n' + expression
+        calls = [('removed', 'd.get("k", ordinary)()', (0, 0))]
+        if invoke is not None:
+            calls.append(('returned', invoke, (1, 1)))
+        if label == 'same-expression':
+            calls.append(('later-read', 'x[1]()', (0, 0)))
+        for direction, call, expected in calls:
+            source = body(store, call)
+            cases.append((label + '-' + direction, source, expected))
+            cases.append((label + '-' + direction + '-clean', source.replace(
+                'lambda: send(', 'lambda: ordinary('), (0, 0)))
+    verdicts(tmp, cases)
+
+
+def test_pop_uses_resolved_receiver_identity(tmp):
+    receivers = [
+        ('name', 'd = {"k": relay()}', 'd'),
+        ('attribute', 'class C: pass\nc = C()\n'
+         'c.d = {"k": relay()}', 'c.d'),
+        ('subscript', 'box = {"d": {"k": relay()}}', 'box["d"]'),
+    ]
+    cases = []
+    for label, setup, owner in receivers:
+        for form in ('standalone', 'assigned', 'inline'):
+            store = setup + '\nalias = ' + owner
+            if form != 'inline':
+                store += '\n' + ('x = ' if form == 'assigned' else '')
+                store += owner + '.pop("k")'
+            calls = [('returned', owner + '.pop("k")()', (1, 1))] \
+                if form == 'inline' else [
+                    ('removed', owner + '.get("k", ordinary)()', (0, 0)),
+                    ('alias', 'alias.get("k", ordinary)()', (0, 0)),
+                    ('second-pop', owner + '.pop("k", relay())()', (1, 1))]
+            if form == 'assigned':
+                calls.append(('returned', 'x()', (1, 1)))
+            for direction, invoke, expected in calls:
+                initial = store.replace('{"k": relay()}', '{"k": ordinary}') \
+                    if direction == 'second-pop' else store
+                source = body(initial, invoke)
+                name = label + '-' + form + '-' + direction
+                cases.append((name, source, expected))
+                cases.append((name + '-clean', source.replace(
+                    'lambda: send(', 'lambda: ordinary('), (0, 0)))
+    verdicts(tmp, cases)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 

@@ -293,7 +293,9 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
             return _setdefault_value(node, state)
         owner = mapping_lookup_owner(node, state)
         if owner is not None:
-            return _mapping_item_value(node, owner, state)
+            value = _mapping_item_value(node, owner, state)
+            _apply_pop(state, node)
+            return value
         if isinstance(node.func, ast.Attribute) \
                 and node.func.attr == 'fromkeys' \
                 and isinstance(node.func.value, ast.Name):
@@ -404,17 +406,17 @@ def _apply_setdefault(state, call, owner_name):
 def _apply_pop(state, call):
     owner = mapping_lookup_owner(call, state)
     if owner is None or call.func.attr != 'pop' \
-            or not isinstance(call.func.value, ast.Name) or not call.args \
+            or not call.args \
             or not isinstance(call.args[0], ast.Constant):
         return
     items = dict(owner.items)
     items.pop(call.args[0].value, None)
-    _replace_container(state, call.func.value.id, owner, items)
+    replacement = DeferredContainer(
+        items, owner.length, owner.kind, owner.identity)
+    replace_deferred_storage(state, owner, replacement)
 
 
 def apply_deferred_store(statement, state):
-    if isinstance(statement, (ast.Expr, ast.Assign, ast.AnnAssign)):
-        _apply_pop(state, statement.value)
     if isinstance(statement, ast.Expr) \
             and isinstance(statement.value, ast.Call):
         call = statement.value
