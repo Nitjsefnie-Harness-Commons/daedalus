@@ -34,6 +34,19 @@ check-runs list is appended to while a matrix fills, so "every check run
 has concluded" is true early and repeatedly during a run that is still
 starting jobs.
 
+One distinction more, in the other direction: a cancelled run whose
+workflow has a strictly newer run against the same SHA is ignored. It is
+the remnant of a re-run - GitHub cancels the in-progress run a newer run
+supersedes and keeps the cancelled record on the SHA beside its
+replacement - so it says nothing about the commit, and it gates nothing.
+A cancelled run with no newer same-workflow sibling is a deliberate
+cancel, a real non-success, and still fails the wait. The grouping is by
+workflow, same workflow_id with the workflow path standing in when the
+id is absent; "newer" is ordered by run_started_at, created_at standing
+in when that is missing, ties broken by numeric id. Only a cancelled run
+is ever superseded: an older failure beside a newer success fails
+exactly as before.
+
 Run --once before a long wait. A polling loop is never armed without one
 trial cycle: an unsupported flag or a renamed endpoint makes every fetch
 fail, and the trial proves the query shape on the real repository first.
@@ -46,6 +59,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 
 DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
 DEFAULT_INTERVAL = 60
@@ -53,6 +67,7 @@ DEFAULT_TIMEOUT = 5400
 GH_TIMEOUT = 120
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
+OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
 class RefusingParser(argparse.ArgumentParser):
@@ -109,12 +124,51 @@ def runs_on(repo, sha):
     return runs
 
 
+def _workflow_of(run):
+    """The workflow a run belongs to: its id, or its path when id is absent."""
+    return run.get('workflow_id') or run.get('path')
+
+
+def _started_key(run):
+    """(start, id): the instant the run began, tie-broken by numeric id.
+
+    run_started_at is read first, created_at stands in when it is missing,
+    and an absent or unparseable stamp sorts as the oldest instant so a
+    run with no readable start can never be the newer of two.
+    """
+    text = run.get('run_started_at') or run.get('created_at')
+    stamp = OLDEST
+    if text:
+        try:
+            stamp = datetime.fromisoformat(str(text).replace('Z', '+00:00'))
+        except ValueError:
+            stamp = OLDEST
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp, int(run.get('id') or 0)
+
+
+def _superseded(run, runs):
+    """True when a strictly newer run of the same workflow exists."""
+    mine = _workflow_of(run)
+    started = _started_key(run)
+    return any(_workflow_of(other) == mine and _started_key(other) > started
+               for other in runs)
+
+
+def _superseded_cancelled(run, runs):
+    """A cancelled run a newer run of the same workflow has replaced."""
+    return (run.get('conclusion') == 'cancelled' and _superseded(run, runs))
+
+
 def verdict(runs):
     """Classify runs as a state, with the offending runs for the bad one.
 
     States: acceptable (exit 0), unacceptable (exit 1), waiting. Zero runs
-    is waiting - "no run yet" must not read as "all concluded".
+    is waiting - "no run yet" must not read as "all concluded". A
+    superseded cancelled run is ignored: it gates nothing.
     """
+    runs = [run for run in runs if not _superseded_cancelled(run, runs)]
     if not runs:
         return 'waiting', []
     if any(run.get('status') != 'completed' for run in runs):

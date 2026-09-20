@@ -338,6 +338,7 @@
 !/tests/test_ci_pip_cache.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_thresholds.py
+!/tests/test_ci_wait.py
 !/tests/test_ci_workflows.py
 !/tests/test_claim_workflow.py
 !/tests/test_cli.py
