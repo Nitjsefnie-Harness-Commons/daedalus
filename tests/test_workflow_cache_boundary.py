@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Fail-closed inventory of statically classified cache-writing jobs.
-Direct shell detection is bounded literal scanning; arbitrary shell, checked-in
-scripts, constructed names, and downloaded code are not interpreted."""
+"""Direct shell detection is bounded literal scanning; arbitrary shell,
+checked-in scripts, constructed names, and downloaded code are not interpreted.
+"""
 import csv
 import io
 import re
@@ -21,9 +21,7 @@ _CACHE_WRITING_JOBS = frozenset((
 ))
 
 
-# Each reviewed actions/cache commit and the release tag that resolves to
-# it; the pip-cache suite reads the comment a pinned `uses:` line must
-# carry from here, so a bump is approved in one place.
+# The pip-cache suite shares this review point for pinned `uses:` comments.
 REVIEWED_CACHE_RELEASES = {
     '0057852bfaa89a56745cba8c7296529d2fc39830': 'v4.3.0',
     '55cc8345863c7cc4c66a329aec7e433d2d1c52a9': 'v6.1.0',
@@ -85,7 +83,6 @@ def _boundary_error(job, step_number, detail):
 
 
 def _split_action(uses, job, step_number):
-    """Return a literal lower-case action identity and its unchanged ref."""
     if not isinstance(uses, str):
         raise _boundary_error(
             job, step_number, f'uses is not a literal string: {uses!r}')
@@ -116,7 +113,6 @@ def _split_action(uses, job, step_number):
 
 
 def _literal_control(inputs, name, default, job, step_number, action):
-    """Read one case-insensitive literal action input."""
     if inputs is None:
         inputs = {}
     if not isinstance(inputs, dict):
@@ -163,7 +159,6 @@ def _cache_to_records(value):
 
 
 def _gha_cache_destination(value, job, step_number, owner):
-    """A GHA exporter or an undecodable destination may write cache."""
     values = value if isinstance(value, list) else [value]
     if not values or any(not isinstance(item, str) for item in values):
         raise _boundary_error(
@@ -214,7 +209,6 @@ _BUILDX_CACHE_TO = re.compile(
 
 
 def _direct_cache_run(run):
-    """Return a reason for a bounded literal direct cache writer, or None."""
     if not isinstance(run, str):
         raise AssertionError('cache boundary run is not a literal string')
     if len(run) > _MAX_RUN_LITERAL:
@@ -289,7 +283,6 @@ def _decisive_opt_out(inputs, controls, context):
 
 
 def _cache_write_reason(step, job, step_number):
-    """Return a writer reason, prove no writer with None, or refuse."""
     if not isinstance(step, dict):
         raise _boundary_error(job, step_number, 'step is not a mapping')
     has_uses = 'uses' in step

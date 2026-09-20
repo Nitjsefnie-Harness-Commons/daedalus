@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """Execute the tests workflow's pip-cache invariants that GitHub
-otherwise fails silently.
-
-These tests parse the tests workflow's pip cache steps: what the six
-cached jobs restore and save, gated on which events, and pinned to one
-reviewed actions/cache release across the workflow, with comments naming
-its tag.
-"""
+otherwise fails silently."""
 import re
 import sys
 from pathlib import Path
@@ -21,7 +15,7 @@ from test_workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
 
 _CACHE_JOBS = (
     # (job, the key's python component, the step a save must follow, the
-    # step the restore must precede). Rows carrying a literal 3.13 fix it.
+    # step the restore must precede).
     ('suites', '${{ matrix.python }}', 'Run every suite',
      'Install the test dependencies and project'),
     ('coverage-matrix', '${{ matrix.python }}', 'Measure',
@@ -41,7 +35,6 @@ _PIP_CACHE_PATHS = (
 
 
 def _cache_step(steps, action):
-    """Return (index, step) for the job's one actions/cache/<action> step."""
     matches = [(index, step) for index, step in enumerate(steps)
                if step.get('uses', '').startswith(f'actions/cache/{action}@')]
     assert len(matches) == 1, f'expected one cache/{action} step: {matches}'
@@ -49,7 +42,6 @@ def _cache_step(steps, action):
 
 
 def _uses_version_comment(workflow, job, action):
-    """The version comment on the job's one cache step's `uses:` line."""
     lines = [line.strip() for line in _job_section(workflow, job)
              if f'actions/cache/{action}@' in line]
     assert len(lines) == 1, (job, action, lines)
@@ -58,7 +50,6 @@ def _uses_version_comment(workflow, job, action):
 
 
 def _named_step_index(steps, name):
-    """Return the index of the job's one step carrying this name."""
     matches = [index for index, step in enumerate(steps)
                if step.get('name') == name]
     assert len(matches) == 1, f'expected one {name!r} step: {matches}'
@@ -70,7 +61,7 @@ def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
 
     That post step is the cache-poisoning shape issue #166 took out of the
     speed cells: a pull_request run would write what a later main run
-    restores. These six jobs take the cache as two steps instead.
+    restores.
     """
     del tmp
     workflow = _tests_yml()
@@ -87,16 +78,9 @@ def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
 def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
     """Restore is safe on every event: a pull request reads what main wrote.
 
-    The key names the platform, the interpreter and the requirements hash.
-    An exact match restores what a same-platform run of the same
-    dependency set wrote; missing it, the restore-keys prefix falls back
-    to the newest cache sharing the prefix, possibly an older set's.
-    Where the interpreter is 3.13 that is six jobs on one namespace
-    rather than one apiece — the cache holds fetched packages any such
-    install reuses. Key and restore-keys prefix are pinned exactly:
-    neither a deleted fallback nor a renamed prefix can silently
-    fragment it. Gating a restore cannot make it safer — a gate there
-    would be the save gate wearing the wrong step's name.
+    A prefix fallback can reuse an older dependency set's fetched packages.
+    Jobs on Python 3.13 share that namespace. Pinning the key and prefix
+    exactly prevents a deleted fallback or renamed prefix fragmenting it.
     """
     del tmp
     workflow = _tests_yml()
@@ -124,15 +108,9 @@ def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
 
 
 def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
-    """The event gate between restore and save is the whole answer.
+    """Only main pushes may save: the repository produced their checkout.
 
-    A pull_request or workflow_dispatch run, or a push that is not main,
-    restores and never writes; only a push of main, whose checkout the
-    repository itself produced, may. Evaluated as Actions would evaluate it
-    rather than substring-matched, so an `||` or a widened ref reads as the
-    defect it is, and a cancelled run writes nothing either way. The save
-    follows the per-row recorded step: suites, measurement or lint — but
-    the install itself for `coverage`.
+    Evaluate the gate: substring matches alone miss `||` or a widened ref.
     """
     del tmp
     workflow = _tests_yml()
