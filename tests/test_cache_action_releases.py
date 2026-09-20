@@ -240,12 +240,13 @@ def test_a_reference_the_grammar_did_not_account_for_is_refused(tmp):
         f'      - "uses": actions/cache@{V610}  # v6.1.0\n'
         f'      - {{uses: actions/cache/save@{V610}}}\n'
         '      - run: |\n'
-        f'          echo actions/cache@{V610}\n'))
+        f'          echo actions/cache@{V610}\n'
+        f'      - {{uses: Actions/Cache/Save@{V610}}}\n'))
     verified, refusals = mod.verify(root, _refusing_run)
     assert verified == [], verified
     assert refusals == [
         f'.github/workflows/tests.yml:{line}: unclassified actions/cache '
-        'reference' for line in (6, 7, 8, 10)], refusals
+        'reference' for line in (6, 7, 8, 10, 11)], refusals
 
 
 def test_a_comment_line_naming_a_reference_is_not_refused(tmp):
