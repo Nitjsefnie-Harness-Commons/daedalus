@@ -272,11 +272,25 @@ def test_a_near_name_action_is_neither_a_pin_nor_refused(tmp):
         'jobs:\n  j:\n    steps:\n'
         f'      - uses: actions/cache-warmer@{V610}  # v1.0.0\n'
         f'      - uses: actions/cachex@{V610}  # v1.0.0\n'
-        f'      - uses: actions/cache/x@{V610}  # v1.0.0\n'
         f'      - uses: >-  # v1.0.0\n'
         f'          x/actions/cache@{V610}\n'
-        f'      - uses: actions/cache/restorer@{V610}  # v1.0.0\n'))
+        f'      - uses: actions-cache/restore@{V610}  # v1.0.0\n'))
     assert mod.scan(root) == ([], []), mod.scan(root)
+
+
+def test_a_reference_into_the_cache_repository_is_never_silent(tmp):
+    """`actions/cache/` with an empty or unknown subpath is not one of the
+    three actions, and whether GitHub runs it is not this guard's to
+    guess: it is refused, never verified and never skipped."""
+    mod = _verifier()
+    for action in ('actions/cache/', 'actions/cache/x', 'Actions/Cache/',
+                   'actions/cache/restorer'):
+        root = _one_pin(tmp, f'{action}@{V610}  # v1.0.0')
+        verified, refusals = mod.verify(root, _refusing_run)
+        assert verified == [], (action, verified)
+        assert refusals == [
+            '.github/workflows/tests.yml:4: unclassified actions/cache '
+            'reference'], (action, refusals)
 
 
 def test_the_refusal_filter_matches_the_action_name_case_insensitively(tmp):
