@@ -6,7 +6,8 @@ from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
                              DeferredInstance, _known_value, is_deferred_value,
-                             merge_yielded, sender_value, sync_cells)
+                             mapping_lookup_owner, merge_yielded,
+                             sender_value, sync_cells)
 
 
 def _selected_values(value, key, attribute=False):
@@ -212,6 +213,16 @@ def _setdefault_value(node, state):
     return _known_value(node.args[1], state) if len(node.args) > 1 else None
 
 
+def _mapping_item_value(node, owner, state):
+    default = _known_value(node.args[1], state) if len(node.args) > 1 else None
+    key = node.args[0] if node.args else None
+    if isinstance(key, ast.Constant):
+        if DYNAMIC_KEY not in owner.items:
+            return owner.items.get(key.value, default)
+        return merge_yielded((*_selected_values(owner, key.value), default))
+    return merge_yielded((*owner.items.values(), default))
+
+
 def resolve_expression_value(node, state, generator_factory, sender_resolver,
                              unprovable_sender):
     known = _known_value(node, state)
@@ -280,6 +291,9 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
                 and node.func.attr == 'setdefault'
                 and isinstance(node.func.value, ast.Name)):
             return _setdefault_value(node, state)
+        owner = mapping_lookup_owner(node, state)
+        if owner is not None:
+            return _mapping_item_value(node, owner, state)
         if isinstance(node.func, ast.Attribute) \
                 and node.func.attr == 'fromkeys' \
                 and isinstance(node.func.value, ast.Name):
@@ -387,7 +401,20 @@ def _apply_setdefault(state, call, owner_name):
     _mark_unprovable(state, owner_name)
 
 
+def _apply_pop(state, call):
+    owner = mapping_lookup_owner(call, state)
+    if owner is None or call.func.attr != 'pop' \
+            or not isinstance(call.func.value, ast.Name) or not call.args \
+            or not isinstance(call.args[0], ast.Constant):
+        return
+    items = dict(owner.items)
+    items.pop(call.args[0].value, None)
+    _replace_container(state, call.func.value.id, owner, items)
+
+
 def apply_deferred_store(statement, state):
+    if isinstance(statement, (ast.Expr, ast.Assign, ast.AnnAssign)):
+        _apply_pop(state, statement.value)
     if isinstance(statement, ast.Expr) \
             and isinstance(statement.value, ast.Call):
         call = statement.value
