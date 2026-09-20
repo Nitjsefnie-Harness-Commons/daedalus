@@ -1,11 +1,11 @@
-"""Environment isolation for in-process MCP loads."""
+"""MCP test environment isolation."""
 import contextlib
 import os
 
 
 @contextlib.contextmanager
 def isolated(applied):
-    """Replace DAEDALUS_* settings for a load and restore its environment."""
+    """Keep shell settings out of test imports."""
     saved = {key: value for key, value in os.environ.items()
              if key.startswith('DAEDALUS_')}
     other = {key: os.environ.get(key) for key in applied
