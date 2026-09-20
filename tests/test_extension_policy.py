@@ -196,6 +196,10 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
     """
     del tmp
     offenders = []
+    access = re.compile(r'\.\s*token\b|(?<=[\w$)\]])\s*\[([^\]]*)\]')
+    literal_key = re.compile(r"(['\"])([^'\"\\]*)\1")
+    prefix = re.compile(
+        r'\s*\.\s*(?:substring|slice)\s*\(\s*0\s*,\s*[1-8]\s*\)')
     paths = [
         *worker_source_paths(),
         _util.ROOT / 'extension' / 'content.js',
@@ -208,14 +212,23 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
             continue
         for number, line in enumerate(
                 path.read_text(encoding='utf-8').splitlines(), 1):
-            if 'console.' not in line or '.token' not in line:
+            if 'console.' not in line:
                 continue
-            # A short prefix is a legitimate diagnostic — the version banner
-            # prints one to identify which bridge this extension is talking
-            # to. The whole value is the credential itself.
-            if '.token.substring(' in line or '.token.slice(' in line:
-                continue
-            offenders.append(f'{name}:{number}: {line.strip()}')
+            for match in access.finditer(line):
+                if match.group(1) is not None:
+                    key = literal_key.fullmatch(match.group(1).strip())
+                    # An unresolved key might select the credential.
+                    if key is None:
+                        offenders.append(
+                            f'{name}:{number}: {line.strip()}')
+                        break
+                    if key.group(2) != 'token':
+                        continue
+                # Only this read is exempt, up to the banner's eight chars.
+                if prefix.match(line, match.end()):
+                    continue
+                offenders.append(f'{name}:{number}: {line.strip()}')
+                break
     assert not offenders, offenders
 
 
