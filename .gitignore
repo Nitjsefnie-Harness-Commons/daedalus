@@ -492,6 +492,7 @@
 !/tests/test_wfscalars.py
 !/tests/test_worker_close_tab.py
 !/tests/test_worker_module_boundary.py
+!/tests/test_worker_register_throttle.py
 !/tests/test_worker_route_guard.py
 !/tests/test_worker_runtime.py
 !/tests/test_worker_runtime_candidates.py

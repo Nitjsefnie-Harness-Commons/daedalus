@@ -51,9 +51,18 @@ async function registerTab(chromeTabId) {
 
 // ─── Tab tracking ───
 
+const _registerTimers = new Map();
+function scheduleRegisterTab(chromeTabId) {
+  if (_registerTimers.has(chromeTabId)) return;
+  _registerTimers.set(chromeTabId, setTimeout(() => {
+    _registerTimers.delete(chromeTabId);
+    registerTab(chromeTabId);
+  }, 250));
+}
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (configured() && (changeInfo.url || changeInfo.title)) {
-    registerTab(tabId);
+    scheduleRegisterTab(tabId);
   }
 });
 
