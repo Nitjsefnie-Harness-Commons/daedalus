@@ -160,13 +160,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         keep = deferred.locals | blocked | (deferred.captured - chain)
         # A deferred body's walk is pure in its entry state, so callers that
         # project onto the same state reuse the first walk's findings. The
-        # payload key exists because state_signature collapses dict contents;
-        # the stored caller keeps the deferred objects the key's ids name
-        # alive, and ids die with the file, hence the per-scan clear.
+        # key is the exact signature: a replay applies no occupancy join, so
+        # entries the join would merge must be walked apart. The payload key
+        # exists because state_signature collapses dict contents; the stored
+        # caller keeps the key's ids alive, hence the per-scan clear.
         cached = _CALL_CACHE.setdefault((key, active_callables),
                                         (deferred, {}))[1]
-        outputs = []
-        returned = []
+        outputs, returned = [], []
         body = ([deferred.scope.body] if isinstance(
             deferred.scope, ast.Lambda) else deferred.scope.body)
         rebound = rebound_names(deferred.scope)
