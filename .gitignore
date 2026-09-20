@@ -123,6 +123,7 @@
 !/daedalus_cli/invoke.py
 !/daedalus_cli/output.py
 !/daedalus_cli/parser.py
+!/daedalus_cli/result_view.py
 !/daedalus_cli/transport.py
 
 # ─── daedalus_mcp ───
@@ -350,6 +351,7 @@
 !/tests/test_cli_result_wait.py
 !/tests/test_cli_segment_origins.py
 !/tests/test_cli_waits.py
+!/tests/test_client_credentials.py
 !/tests/test_cmdqueue.py
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py
