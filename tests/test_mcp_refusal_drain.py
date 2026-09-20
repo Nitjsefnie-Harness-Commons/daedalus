@@ -253,6 +253,7 @@ def test_isolated_restores_environment_after_exception(_tmp):
         }
         os.environ.pop('DAEDALUS_ISOLATED_NEW', None)
         snapshot = dict(os.environ)
+        escaped = False
         try:
             with _daedalus_env.isolated(applied):
                 assert os.environ['TOKEN'] == 'applied-token'
@@ -262,9 +263,8 @@ def test_isolated_restores_environment_after_exception(_tmp):
                 assert 'DAEDALUS_ISOLATED_PROBE' not in os.environ
                 raise RuntimeError('isolated body failed')
         except RuntimeError as error:
-            assert str(error) == 'isolated body failed'
-        else:
-            raise AssertionError('body exception did not escape')
+            escaped = str(error) == 'isolated body failed'
+        assert escaped, 'body exception did not escape'
         assert os.environ == snapshot, 'environment leaked'
     finally:
         os.environ.clear()
