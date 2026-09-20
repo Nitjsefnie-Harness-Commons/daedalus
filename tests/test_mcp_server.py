@@ -27,6 +27,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _mcp_load  # noqa: E402
+from _mcp_load import (  # noqa: E402
+    BRIDGE_ENV, TOK, _load_mcp, _load_mcp_at_port, _start_in_thread,
+    _start_mcp_in_process, _wait_for_mcp,
+)
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 from _queueread import queued_command, queued_commands  # noqa: E402
 
@@ -38,90 +43,12 @@ if DEPS:
     import logging
     logging.getLogger('httpx').setLevel(logging.WARNING)  # quiet per-request logs
 
-TOK = 'mcptok'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
 os.environ.update(BRIDGE_ENV)
 
 
 def _need_deps():
     if not DEPS:
         _util.skip('daedalus_mcp.server dependencies (httpx/mcp/starlette) not installed')
-
-
-def _load_mcp(base_url, mcp_port=None, max_body_size=None):
-    """Load daedalus_mcp/server.py seeing only the caller's own settings."""
-    saved = {key: os.environ[key] for key in os.environ
-             if key.startswith('DAEDALUS_')}
-    for key in saved:
-        del os.environ[key]
-    applied = dict(BRIDGE_ENV, DAEDALUS_LOCAL_URL=base_url)
-    if mcp_port is not None:
-        applied['DAEDALUS_MCP_PORT'] = str(mcp_port)
-    if max_body_size is not None:
-        applied['DAEDALUS_MCP_MAX_BODY_SIZE'] = str(max_body_size)
-    os.environ.update(applied)
-    try:
-        return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
-                          'mcp_server_under_test_' + str(time.time_ns()))
-    finally:
-        for key in applied:
-            if key.startswith('DAEDALUS_') and key not in saved:
-                del os.environ[key]
-        os.environ.update(saved)
-
-
-def _wait_for_mcp(port, deadline=20):
-    """Wait until the live MCP listener answers — and refuse any other listener.
-
-    A bare TCP accept proves only that SOMETHING bound the port, and a port
-    collision then failed every request with the bridge's bad-token 400.
-    Probe with an unauthenticated POST /mcp: the real middleware answers 401
-    'missing Bearer token'; any other answer fails with the response attached.
-    """
-    probe = {'jsonrpc': '2.0', 'id': 'wait-for-mcp',
-             'method': 'initialize', 'params': {}}
-    url = f'http://127.0.0.1:{port}/mcp'
-    deadline = time.time() + deadline
-    while True:
-        try:
-            status, raw = _util.request(url, 'POST', body=probe, timeout=1)
-        except (OSError, http.client.HTTPException):
-            if time.time() > deadline:
-                raise AssertionError('MCP port never came up') from None
-            time.sleep(0.1)
-            continue
-        try:
-            error = json.loads(raw).get('error')
-        except json.JSONDecodeError:
-            error = None
-        if status == 401 and error == 'missing Bearer token':
-            return
-        raise AssertionError(
-            f'port {port} is answered by something that is not the MCP '
-            f'server: {status} {raw[:200]!r}')
-
-
-def _load_mcp_at_port(base_url, port, max_body_size=None):
-    """Load the MCP front end with one explicit listener port."""
-    return _load_mcp(base_url, mcp_port=port, max_body_size=max_body_size)
-
-
-def _start_mcp_in_process(base, max_body_size=None):
-    """Load and start the MCP listener on port 0; return (mod, port).
-
-    No draw, no retry: the bound port and any startup crash arrive verbatim.
-    """
-    mod = _load_mcp_at_port(base, 0, max_body_size=max_body_size)
-    mod.start_in_thread()
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if mod._bound.wait(timeout=0.05):
-            port = mod.bound_port
-            _wait_for_mcp(port)
-            return mod, port
-        if mod.startup_error:
-            raise AssertionError(mod.startup_error)
-    raise AssertionError('MCP listener did not announce its port in 10s')
 
 
 def _await_mcp_line(output, proc):
@@ -476,17 +403,48 @@ def test_mcp_lifespan_closes_loop_clients(tmp):
     assert asyncio.run(drive_lifespan())
 
 
+def test_a_poisoned_shell_cannot_redirect_start_in_thread(tmp):
+    del tmp
+    _need_deps()
+    poison = {'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:9',
+              'DAEDALUS_PORT': '9'}
+    saved = {key: os.environ.get(key) for key in poison}
+    os.environ.update(poison)
+    snapshot = dict(os.environ)
+    try:
+        mod = _load_mcp('http://127.0.0.1:1')
+        mod._serve = lambda: None
+        thread = _start_in_thread(mod, 'http://127.0.0.1:1111')
+        thread.join(timeout=5)
+        assert mod.bridge.transport._base_url == (
+            'http://127.0.0.1:1111'), mod.bridge.transport._base_url
+
+        mod = _load_mcp('http://127.0.0.1:1')
+        mod._serve = lambda: None
+        thread = _start_in_thread(mod)
+        thread.join(timeout=5)
+        assert mod.bridge.transport._base_url == (
+            'http://127.0.0.1:1'), mod.bridge.transport._base_url
+        assert dict(os.environ) == snapshot
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def test_start_in_thread_rejects_a_second_start(tmp):
     """A module-owned listener cannot be rebound to a second bridge."""
     del tmp
     _need_deps()
     mod = _load_mcp('http://127.0.0.1:1')
     mod._serve = lambda: None
-    thread = mod.start_in_thread('http://127.0.0.1:1111')
+    thread = _start_in_thread(mod, 'http://127.0.0.1:1111')
     thread.join(timeout=5)
     assert mod.bridge.transport._base_url == 'http://127.0.0.1:1111'
     try:
-        mod.start_in_thread('http://127.0.0.1:2222')
+        _start_in_thread(mod, 'http://127.0.0.1:2222')
     except RuntimeError as exc:
         assert 'start_in_thread' in str(exc)
         assert 'more than once' in str(exc)
@@ -1485,7 +1443,7 @@ def test_mcp_port_zero_announces_the_actual_bound_port(tmp):
     mod = _load_mcp_at_port('http://127.0.0.1:1', 0)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        mod.start_in_thread()
+        _start_in_thread(mod)
         assert mod._bound.wait(timeout=10), mod.startup_error or 'never bound'
     line = out.getvalue().strip()
     assert f'127.0.0.1:{mod.bound_port}' in line, line
@@ -1567,7 +1525,7 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    real_loader = _load_mcp_at_port
+    real_loader = _mcp_load._load_mcp_at_port
 
     def crashing_loader(base, port, **kwargs):
         mod = real_loader(base, port, **kwargs)
@@ -1577,7 +1535,7 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
         mod.mcp.streamable_http_app = crash
         return mod
 
-    globals()['_load_mcp_at_port'] = crashing_loader
+    _mcp_load._load_mcp_at_port = crashing_loader
     try:
         try:
             _start_mcp_in_process('http://127.0.0.1:1')
@@ -1587,7 +1545,7 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
         else:
             raise AssertionError('a crashed MCP listener started')
     finally:
-        globals()['_load_mcp_at_port'] = real_loader
+        _mcp_load._load_mcp_at_port = real_loader
 
 
 def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
