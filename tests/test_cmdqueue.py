@@ -15,6 +15,7 @@ from _cmdqueue_faults import (  # noqa: E402
     _queued_file,
     _refuse_first_queue_read,
     _refuse_path_operation,
+    _rewrite_on_first_read,
     _vanish_during_read,
     _vanish_during_unlink,
     _virtual_cmdqueue_clock,
@@ -383,41 +384,35 @@ def test_a_permanent_read_refusal_bounds_the_multi_command_wait(tmp):
         assert commands is None, commands
 
 
-def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
+def _whole_set_retry_returns_the_rewrite(tmp, error):
     queue, first = _queued_file(tmp)
     second = queue / '1700000000001_000002.json'
-    second.write_text(json.dumps({'id': 'second', 'type': 'reload'}),
-                      encoding='utf-8')
-    original = Path.read_text
     files = (first, second)
     stale = [{'id': 'stale-first', 'type': 'reload'},
              {'id': 'stale-second', 'type': 'reload'}]
     fresh = [{'id': 'fresh-first', 'type': 'reload'},
              {'id': 'fresh-second', 'type': 'reload'}]
-    missing_file = [None]
-    armed = [False]
-
-    def missing(candidate, *args, **kwargs):
-        if candidate == missing_file[0] and armed[0]:
-            armed[0] = False
-            # Rewrite both so freshness proves a retry for either read order.
-            for queued, command in zip(files, fresh):
-                queued.write_text(json.dumps(command), encoding='utf-8')
-            raise FileNotFoundError(
-                2, 'injected transient read error', str(missing_file[0]))
-        return original(candidate, *args, **kwargs)
-
-    for refused_file in (first, second):
+    # Refusing either file, with both rewritten at that moment, proves the
+    # retry re-reads the whole set whichever order the helper reads in.
+    for refused_file in files:
         for queued, command in zip(files, stale):
             queued.write_text(json.dumps(command), encoding='utf-8')
-        missing_file[0] = refused_file
-        armed[0] = True
-        Path.read_text = missing
-        try:
+        with _rewrite_on_first_read(
+                refused_file, error(refused_file), list(zip(files, fresh))):
             commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
-        finally:
-            Path.read_text = original
-        assert commands == fresh, commands
+        assert commands == fresh, (refused_file.name, commands)
+
+
+def test_a_transient_file_not_found_read_retries_the_whole_set(tmp):
+    _whole_set_retry_returns_the_rewrite(
+        tmp, lambda path: FileNotFoundError(
+            2, 'injected transient read error', str(path)))
+
+
+def test_a_transient_read_refusal_retries_the_whole_set(tmp):
+    _whole_set_retry_returns_the_rewrite(
+        tmp, lambda path: PermissionError(
+            32, 'injected sharing violation', str(path)))
 
 
 def test_the_multi_command_wait_honors_a_count_other_than_two(tmp):
