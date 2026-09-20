@@ -602,18 +602,13 @@ def test_extension_command_surfaces_result_error(tmp):
 
 
 def _shielded_environment():
-    """No shell setting may rebind the session away from the front end."""
     return mock.patch.dict('os.environ', {}, clear=False)
 
 
 def test_poll_survives_a_truncated_peek_from_a_real_front_end(tmp):
-    """The peek that a real proxy cuts off raises RemoteProtocolError.
-
-    The scripted controls raise ReadError, so narrowing the poll's clause
-    to that one class kept them green (issue 699) while httpx's answer to
-    a body shorter than its Content-Length escaped poll_result on the
-    first GET. This one drives a real client at a real front end.
-    """
+    """The scripted controls raise ReadError, so narrowing the poll's
+    clause to that class kept them green (issue 699) while a real
+    cut-off body, httpx's RemoteProtocolError, escaped on the first GET."""
     del tmp
     transport = _transport()
     with _shielded_environment() as environ, truncating_front_end(1) as base:
@@ -633,12 +628,8 @@ def test_poll_survives_a_truncated_peek_from_a_real_front_end(tmp):
 
 
 def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
-    """Bounded by the deadline, and the failure it survives is named.
-
-    The direct probe pins the family: a future httpx that reports a
-    cut-off body as something other than RemoteProtocolError changes
-    what the poll's clause has to admit, and this is where it shows.
-    """
+    """Bounded by the deadline; the direct probe pins the family an
+    httpx that changes it would move out of the poll's clause."""
     del tmp
     transport = _transport()
 
