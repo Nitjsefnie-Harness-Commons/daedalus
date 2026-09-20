@@ -30,6 +30,18 @@ def refused(argv):
     raise AssertionError(f'{argv} parsed instead of being refused')
 
 
+def accepted(argv):
+    """The namespace argparse built; a refusal fails the test, not the run."""
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            return build_parser().parse_args(argv)
+    except SystemExit as exit_request:
+        raise AssertionError(
+            f'{argv} refused: exit {exit_request.code}, '
+            f'{err.getvalue()!r}') from None
+
+
 def test_net_capture_refuses_a_max_outside_one_to_the_ceiling(tmp):
     del tmp
     for value in ('0', '-1', str(NET_CAPTURE_MAX + 1)):
@@ -39,7 +51,7 @@ def test_net_capture_refuses_a_max_outside_one_to_the_ceiling(tmp):
         assert 'argument --max:' in message, (value, message)
         assert value in message, (value, message)
     for value in ('1', str(NET_CAPTURE_MAX)):
-        args = build_parser().parse_args(['net-capture', '--max', value])
+        args = accepted(['net-capture', '--max', value])
         assert args.max == int(value), (value, args.max)
 
 

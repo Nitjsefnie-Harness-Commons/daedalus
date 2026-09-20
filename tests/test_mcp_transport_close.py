@@ -3,8 +3,9 @@
 
 The loop's entry is popped before any close, so a failure that escaped
 early would leave every later client open and unreachable. These drive
-the real cache and pin that every client is closed before the first
-failure propagates.
+the real cache with a clean close that yields before it records, and read
+the record at the moment the close call returns: a first failure that
+propagated early shows that client still open.
 """
 import asyncio
 import importlib.util
@@ -37,6 +38,9 @@ class ClosingClient:
         self.closed = closed
 
     async def aclose(self):
+        if self.failure is None:
+            for _ in range(3):
+                await asyncio.sleep(0)
         self.closed.append(self.base_url)
         if self.failure is not None:
             raise self.failure
@@ -44,8 +48,8 @@ class ClosingClient:
 
 def _close_registered_clients(transport, failures):
     """Register one client per failure through the real cache, close the
-    loop's clients, and report (closed urls, what the close raised, whether
-    the loop's entry survived, the urls registered)."""
+    loop's clients, and report (urls closed when the call returned, what
+    it raised, whether the loop's entry survived, the urls registered)."""
     urls = [f'http://127.0.0.1:{18100 + index}'
             for index in range(len(failures))]
     closed = []
@@ -65,10 +69,11 @@ def _close_registered_clients(transport, failures):
             raised = failure
         else:
             raised = None
-        return raised, loop in transport.BridgeTransport.clients
+        return (list(closed), raised,
+                loop in transport.BridgeTransport.clients)
 
-    raised, entry_kept = asyncio.run(exercise())
-    return closed, raised, entry_kept, urls
+    closed_on_return, raised, entry_kept = asyncio.run(exercise())
+    return closed_on_return, raised, entry_kept, urls
 
 
 def test_closing_reports_the_first_client_close_failure_after_closing_all(
