@@ -144,6 +144,27 @@ def test_assignment_targets_use_updated_owners(tmp):
     verdicts(tmp, cases)
 
 
+def test_setdefault_respects_occupied_clean_keys(tmp):
+    stores = [
+        ('ordinary', 'd = {"k": ordinary}', (0, 0)),
+        ('deferred-clean', 'd = {"k": lambda: ordinary()}', (0, 0)),
+        ('other-deferred-key', 'd = {"k": ordinary, "j": relay()}', (0, 0)),
+        ('constructor', 'd = dict(k=ordinary)', (0, 0)),
+        ('subscript', 'd = {}\nd["k"] = ordinary', (0, 0)),
+        ('updated', 'd = {}\nd.update(k=ordinary)', (0, 0)),
+        ('prior-default', 'd = {}\nd.setdefault("k", ordinary)', (0, 0)),
+        ('missing', 'd = {}', (1, 1)),
+        ('unknown', 'd = args.__dict__', (1, 1)),
+    ]
+    cases = []
+    for label, store, expected in stores:
+        source = body(store + '\nx = d.setdefault("k", relay())', 'x()')
+        cases.append((label, source, expected))
+        clean = source.replace('lambda: send(', 'lambda: ordinary(')
+        cases.append((label + '-clean', clean, (0, 0)))
+    verdicts(tmp, cases)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 
