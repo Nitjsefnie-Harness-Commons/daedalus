@@ -1,4 +1,4 @@
-"""Isolated MCP module loading and in-process startup for test suites."""
+"""Shell settings must not override fixture-selected bridge URLs."""
 import contextlib
 import http.client
 import json
@@ -6,7 +6,6 @@ import os
 import time
 
 import _util
-from _util import ROOT
 
 TOK = 'mcptok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
@@ -29,14 +28,13 @@ def _shield_environment(**seeds):
 
 
 def _load_mcp(base_url, mcp_port=None, max_body_size=None):
-    """Load daedalus_mcp/server.py seeing only the caller's own settings."""
     applied = dict(BRIDGE_ENV, DAEDALUS_LOCAL_URL=base_url)
     if mcp_port is not None:
         applied['DAEDALUS_MCP_PORT'] = str(mcp_port)
     if max_body_size is not None:
         applied['DAEDALUS_MCP_MAX_BODY_SIZE'] = str(max_body_size)
     with _shield_environment(**applied):
-        return _util.load(ROOT / 'daedalus_mcp' / 'server.py',
+        return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
                           'mcp_server_under_test_' + str(time.time_ns()))
 
 
@@ -47,7 +45,6 @@ def _start_in_thread(mod, local_url=None):
 
 
 def _wait_for_mcp(port, deadline=20):
-    """Require an MCP authentication refusal, not just a TCP listener."""
     probe = {'jsonrpc': '2.0', 'id': 'wait-for-mcp',
              'method': 'initialize', 'params': {}}
     url = f'http://127.0.0.1:{port}/mcp'
@@ -72,12 +69,10 @@ def _wait_for_mcp(port, deadline=20):
 
 
 def _load_mcp_at_port(base_url, port, max_body_size=None):
-    """Load the MCP front end with one explicit listener port."""
     return _load_mcp(base_url, mcp_port=port, max_body_size=max_body_size)
 
 
 def _start_mcp_in_process(base, max_body_size=None):
-    """Return (mod, bound port), surfacing startup crashes without retries."""
     mod = _load_mcp_at_port(base, 0, max_body_size=max_body_size)
     _start_in_thread(mod)
     deadline = time.time() + 10
