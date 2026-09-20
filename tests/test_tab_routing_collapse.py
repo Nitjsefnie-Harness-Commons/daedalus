@@ -195,6 +195,7 @@ def test_lambda_body_value_is_its_return(tmp):
     lookup = 'read = lambda: d.get("k", relay())'
     rows = [
         ('lambda-get', 'd = {}\n' + lookup, (1, 1)),
+        ('lambda-get-occupied', 'd = {"k": ordinary}\n' + lookup, (0, 0)),
         ('lambda-get-then-store',
          'd = {}\n' + lookup + '\nif args.flag: d["k"] = ordinary', (0, 1)),
         ('lambda-get-then-store-other',
@@ -217,12 +218,12 @@ def test_callee_replay_keeps_occupancy_apart(tmp):
     signature would merge the two entries, and a replay applies no join."""
     use = 'd = {"k": ordinary}\ndef use(): return d.get("k", relay())\n'
     rows = []
-    for removal in ('d.pop("k")', 'del d["k"]'):
+    for arm, removal in (('pop', 'd.pop("k")'), ('del', 'del d["k"]')):
         for flag, taken in (('args.flag', True), ('not args.flag', False)):
-            rows.append((f'occupied-first-{removal[:3]}-{flag}',
+            rows.append((f'occupied-first-{arm}-{flag}',
                          f'{use}if {flag}: x = use()\nelse: {removal}; '
                          'x = use()', (int(not taken), 1)))
-            rows.append((f'missing-first-{removal[:3]}-{flag}',
+            rows.append((f'missing-first-{arm}-{flag}',
                          f'{use}if {flag}: {removal}; x = use()\n'
                          'else: x = use()', (int(taken), 1)))
     verdicts(tmp, [(label, body(store, 'x()'), expected)
