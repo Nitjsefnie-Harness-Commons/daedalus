@@ -531,6 +531,7 @@ def test_numeric_environment_settings_fail_cleanly_at_startup(tmp):
         ('DAEDALUS_MAX_SEGMENTS_PER_JOB', '-1', 'non-negative integer'),
         ('DAEDALUS_MAX_SEGMENT_JOB_SIZE', '-1', 'non-negative integer'),
         ('DAEDALUS_CMD_TTL', '0', 'finite positive number'),
+        ('DAEDALUS_CMD_TTL', 'not-a-number', 'finite positive number'),
         ('DAEDALUS_REQUEST_TIMEOUT', '0', 'finite positive number'),
         ('DAEDALUS_MAX_REQUEST_WORKERS', '0', 'integer from 1 to 4096'),
     )
