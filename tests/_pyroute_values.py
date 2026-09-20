@@ -42,12 +42,11 @@ def _items_signature(items, occupancy):
 def stored_signature(value, occupancy=True):
     """Signature of a stored value by contents rather than object identity.
 
-    Every shape is ``(tag, token, length, kind, items)``, None where a
-    kind has no such slot. A None item is a key occupied by an ordinary
-    value. With ``occupancy`` off, the top-level container's None items are
-    left out, so two paths that differ only in which clean keys they wrote
-    can be joined; nested containers, instance attributes and alternatives
-    keep occupancy on, because the join intersects one level only."""
+    A None item is a key occupied by an ordinary value. With ``occupancy``
+    off, the top-level container's None items are left out, so two paths
+    that differ only in which clean keys they wrote can be joined; nested
+    containers, instance attributes and alternatives keep occupancy on,
+    because the join intersects one level only."""
     if isinstance(value, DeferredContainer):
         return ('container', identity_token(value), value.length, value.kind,
                 _items_signature(value.items, occupancy))
