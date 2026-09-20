@@ -153,12 +153,22 @@ floor because a regression in one language must not hide inside the
 other's. The JavaScript number needs no new dependency and no separate
 test run: the suites already execute the shipped extension and
 dashboard source in Node, and `NODE_V8_COVERAGE` is a Node built-in
-their child processes inherit. It also needs one piece of context: no
-suite executes the dashboard UI modules beyond the shared
-`sections/_util.js` helper, or the extension options page, so a large
-share of the shipped JavaScript reads as zero. That is the true state
-of the tests, not a shortfall in the measurement — the fix is tests,
-not tooling.
+their child processes inherit. It also needs one piece of context.
+`tests/test_dashboard_eval.py` mounts `sections/eval.js` and
+`sections/settings.js` over `api.js`, `sse.js` and the shared
+`sections/_util.js` helper; `tests/test_dashboard_sections.py` mounts
+`sections/screenshot.js`, `sections/tabs.js` and `sections/uploads.js`
+over `api.js` and `_util.js`; `tests/test_dashboard_behaviour.py`
+and `tests/test_dashboard_harness.py` drive `api.js` and `_util.js`
+beside `extension/content.js`; and the extension's background, worker,
+content and page scripts run under `tests/test_extension_boundary.py`,
+`tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
+`tests/test_gm_*.py` suites. No suite reaches `dashboard/app.js`, the
+`block-rules`, `cdp`, `cookies`, `css-injector`, `fetch-timings`,
+`hotfixes`, `net-capture` and `overview` sections, or the extension
+options page, so those modules read as zero — about a fifth of the
+shipped code lines. That is the true state of the tests, not a
+shortfall in the measurement — the fix is tests, not tooling.
 
 The matrix is not ceremony. This code reads paths and decodes bytes, so Windows
 path spellings, the `/var` → `/private/var` aliasing macOS applies to temp
