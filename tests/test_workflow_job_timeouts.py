@@ -316,6 +316,21 @@ def test_an_external_caller_target_is_refused(tmp):
     assert any('owner/repo' in line for line in violations), violations
 
 
+def test_a_caller_naming_no_target_is_refused_not_passed(tmp):
+    """`uses:` with nothing after it is a caller of nothing, not a pass.
+
+    The decoder reads the bare field as `None`, which is also what an
+    absent field reads as; a job declaring the key without a target is
+    neither a runner nor a verifiable caller, so it is named, not skipped.
+    """
+    root = _fixture(tmp, 'null-caller', 'jobs:\n  call:\n    uses:\n')
+    violations = _timeout_violations(root)
+    assert len(violations) == 1, violations
+    assert 'probe.yml:' in violations[0], violations
+    assert 'uses' in violations[0] and 'no target' in violations[0], (
+        violations)
+
+
 def test_an_external_caller_in_an_inline_job_is_refused(tmp):
     """The issue's own inline spelling of the same external caller."""
     root = _planted(tmp)
@@ -433,6 +448,8 @@ def _unbounded(workflow, name, job):
     runs_on = 'runs-on' in job
     uses = job.get('uses')
     bound = job.get('timeout-minutes')
+    if 'uses' in job and uses is None:
+        return f'{where}: job {name!r} declares uses with no target'
     if uses is not None:
         if runs_on:
             return f'{where}: a job cannot be a caller and a runner'
