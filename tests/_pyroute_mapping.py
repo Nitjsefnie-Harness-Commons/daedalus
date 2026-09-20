@@ -379,6 +379,11 @@ def _apply_setdefault(state, call, owner_name):
             _replace_container(state, owner_name, owner,
                                {**owner.items, key.value: default})
         return
+    if isinstance(owner, DeferredContainer):
+        value = merge_yielded((owner.items.get(DYNAMIC_KEY), default))
+        _replace_container(state, owner_name, owner,
+                           {**owner.items, DYNAMIC_KEY: value})
+        return
     _mark_unprovable(state, owner_name)
 
 

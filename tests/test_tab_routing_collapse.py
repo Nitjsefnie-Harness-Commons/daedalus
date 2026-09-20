@@ -192,6 +192,26 @@ def test_setdefault_unknown_existing_sender(tmp):
     assert observed == [(1, 1), (1, 0)], observed
 
 
+def test_dynamic_setdefault_stores_default(tmp):
+    shapes = [
+        ('dynamic', 'x = {}\n'
+         'x.setdefault(str(args.chrome_tab), relay())',
+         'x[str(args.chrome_tab)]()'),
+        ('constant', 'x = {}\nx.setdefault("k", relay())', 'x["k"]()'),
+        ('alias', 'x = {}\nalias = x\n'
+         'alias.setdefault(str(args.chrome_tab), relay())',
+         'x[str(args.chrome_tab)]()'),
+    ]
+    cases = []
+    for label, store, invoke in shapes:
+        cases.append((label, body(store, invoke), (1, 1)))
+        cases.append((label + '-ordinary',
+                      body(store.replace('relay()', 'ordinary'), invoke),
+                      (0, 0)))
+        cases.append((label + '-discarded', body(store, '0'), (0, 0)))
+    verdicts(tmp, cases)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 
