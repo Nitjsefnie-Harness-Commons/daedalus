@@ -153,6 +153,8 @@ def _serve():
     global bound_port, startup_error
     try:
         app = mcp.streamable_http_app(
+            # SDK needs >0; auth enforces 0.
+            max_request_body_size=max(MAX_BODY_SIZE, 1),
             transport_security=TransportSecuritySettings(
                 enable_dns_rebinding_protection=True,
                 allowed_hosts=ALLOWED_HOSTS,

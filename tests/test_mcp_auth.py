@@ -194,6 +194,83 @@ def test_live_listeners_keep_auth_state_and_body_limits_separate(tmp):
             assert status == 200 and session_id, (status, session_id, raw)
 
 
+def test_sdk_body_limit_follows_configured_value(tmp):
+    test_mcp_server._need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+
+    configured_limit = 6 * 1024 * 1024
+    with _util.bridge(tmp, env=test_mcp_server.BRIDGE_ENV) as (
+            base, _docroot):
+        mod, _port = _start_listener(base, configured_limit)
+        assert mod.MAX_BODY_SIZE == configured_limit, mod.MAX_BODY_SIZE
+        actual = mod.mcp.session_manager.max_request_body_size
+        assert actual == mod.MAX_BODY_SIZE, (actual, configured_limit)
+
+
+def test_live_body_limit_accepts_above_sdk_default(tmp):
+    test_mcp_server._need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+
+    configured_limit = 6 * 1024 * 1024
+    with _util.bridge(tmp, env=test_mcp_server.BRIDGE_ENV) as (
+            base, _docroot):
+        _mod, port = _start_listener(base, configured_limit)
+        accepted = _initialize_body(padding=5 * 1024 * 1024)
+        assert 4 * 1024 * 1024 < len(accepted) < configured_limit
+        status, session_id, raw = test_mcp_server._mcp_request(
+            port, accepted)
+        assert b'Request body too large' not in raw, (status, raw)
+        assert status == 200 and session_id, (status, session_id, raw)
+
+        refused = _initialize_body(padding=configured_limit)
+        assert len(refused) > configured_limit
+        status, _session_id, raw = test_mcp_server._mcp_request(
+            port, refused)
+        assert status == 413, (status, raw)
+        assert json.loads(raw) == {'error': 'request body too large'}, raw
+
+
+def test_live_body_limit_distinguishes_two_configured_values(tmp):
+    test_mcp_server._need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+
+    lower_limit = 6 * 1024 * 1024
+    higher_limit = 10 * 1024 * 1024
+    body = _initialize_body(padding=9 * 1024 * 1024)
+    assert lower_limit < len(body) < higher_limit
+    with _util.bridge(tmp, env=test_mcp_server.BRIDGE_ENV) as (
+            base, _docroot):
+        _lower_mod, lower_port = _start_listener(base, lower_limit)
+        _higher_mod, higher_port = _start_listener(base, higher_limit)
+        status, _session_id, raw = test_mcp_server._mcp_request(
+            lower_port, body)
+        assert status == 413, (status, raw)
+        assert json.loads(raw) == {'error': 'request body too large'}, raw
+
+        status, session_id, raw = test_mcp_server._mcp_request(
+            higher_port, body)
+        assert b'Request body too large' not in raw, (status, raw)
+        assert status == 200 and session_id, (status, session_id, raw)
+
+
+def test_zero_body_limit_starts_and_refuses_nonempty_body(tmp):
+    test_mcp_server._need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+
+    with _util.bridge(tmp, env=test_mcp_server.BRIDGE_ENV) as (
+            base, _docroot):
+        mod, port = _start_listener(base, 0)
+        assert mod.bound_port == port and port > 0, (mod.bound_port, port)
+        assert not mod.startup_error, mod.startup_error
+        status, _session_id, raw = test_mcp_server._mcp_request(port, b'x')
+        assert status == 413, (status, raw)
+        assert json.loads(raw) == {'error': 'request body too large'}, raw
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals())),
                           tmp_prefix='mcpauth_'))
