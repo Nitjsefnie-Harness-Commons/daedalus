@@ -239,6 +239,31 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
     assert 'exit 1' in step, step
 
 
+def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
+    """The online half of the cache-pin guard runs in the actionlint job.
+
+    zizmor proves a pinned SHA belongs to actions/cache; only this step
+    proves it is the release the comment names. It needs the token for
+    the API, and it runs when actionlint is red so one push reports
+    every gate this job holds. Decoded scalars, not substrings, so a
+    dropped env or a narrowed condition cannot hide behind a lookalike.
+    """
+    del tmp
+    steps = complete_job_mapping(_tests_yml(), 'actionlint')['steps']
+    matches = [
+        (index, step) for index, step in enumerate(steps)
+        if step.get('name')
+        == 'Verify the actions/cache release annotations upstream']
+    assert len(matches) == 1, matches
+    index, step = matches[0]
+    assert step.get('run') == 'python3 scripts/ci/cache_action_releases.py', (
+        step)
+    assert step.get('if') == '${{ !cancelled() }}', step
+    assert step.get('env') == {'GH_TOKEN': '${{ github.token }}'}, step
+    zizmor = [i for i, s in enumerate(steps) if s.get('name') == 'zizmor']
+    assert zizmor and index > zizmor[0], (index, zizmor)
+
+
 def test_the_audit_covers_every_python_dependency_surface(tmp):
     """pip-audit is handed each requirements file and every declared extra.
 

@@ -521,6 +521,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: zizmor --no-progress .github/workflows/
 
+      - name: Verify the actions/cache release annotations upstream
+        # zizmor's impostor-commit audit proves a pinned SHA belongs to the
+        # action's repository; only this proves it is the release the
+        # comment beside it names. Runs when actionlint is red too, so one
+        # push reports every gate this job holds.
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/cache_action_releases.py
+
   suites:
     needs:
       - changes
