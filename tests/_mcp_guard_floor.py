@@ -555,21 +555,7 @@ UNWITNESSED_GUARDS = {
 # the gap. missing_citations holds the mapping both ways: a None row with
 # no entry here reports, and an entry whose row cites a test or is gone
 # reports as stale.
-STATED_GAPS = {
-    ('daedalus_mcp.transport', 'close_current_loop_clients',
-     'isinstance(outcome, BaseException)'): 545,
-    ('daedalus_bridge.env_config', 'env_positive_float',
-     "raise SystemExit(f'{name} must be a finite positive number; "
-     'got {raw!r}\') from None'): 545,
-    ('daedalus_cli.transport', 'capture_limit',
-     "raise argparse.ArgumentTypeError(f'--max must be an integer from 1 "
-     'to {NET_CAPTURE_MAX}; got {value!r}\') from None'): 545,
-    ('daedalus_cli.transport', 'capture_limit',
-     'limit < 1 or limit > NET_CAPTURE_MAX'): 545,
-    ('daedalus_cli.transport', 'positive_timeout',
-     "raise argparse.ArgumentTypeError(f'timeout must be a whole number of "
-     "seconds; got {value!r}') from None"): 545,
-}
+STATED_GAPS = {}
 
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own
@@ -581,7 +567,9 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_mcp.server', 'start_in_thread', "_start_state['started']",
      'tests/test_mcp_server.py::test_start_in_thread_rejects_a_second_start'),
     ('daedalus_mcp.transport', 'close_current_loop_clients',
-     'isinstance(outcome, BaseException)', None),
+     'isinstance(outcome, BaseException)',
+     'tests/test_mcp_transport_close.py::test_closing_reports_the_first_'
+     'client_close_failure_after_closing_all'),
     ('daedalus_mcp.transport', 'token', 'not t',
      'tests/test_mcp_transport_guards.py::test_empty_token_context_is_'
      'rejected'),
@@ -608,7 +596,9 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'test_mcp_and_bridge_config_use_one_env_parser'),
     ('daedalus_bridge.env_config', 'env_positive_float',
      "raise SystemExit(f'{name} must be a finite positive number; "
-     'got {raw!r}\') from None', None),
+     'got {raw!r}\') from None',
+     'tests/test_stream_lifecycle.py::'
+     'test_numeric_environment_settings_fail_cleanly_at_startup'),
     ('daedalus_bridge.env_config', 'env_positive_float',
      'not math.isfinite(value) or value <= 0',
      'tests/test_stream_lifecycle.py::'
@@ -617,12 +607,18 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'tests/test_cli.py::test_missing_token_is_an_error'),
     ('daedalus_cli.transport', 'capture_limit',
      "raise argparse.ArgumentTypeError(f'--max must be an integer from 1 "
-     'to {NET_CAPTURE_MAX}; got {value!r}\') from None', None),
+     'to {NET_CAPTURE_MAX}; got {value!r}\') from None',
+     'tests/test_cli_argument_types.py::'
+     'test_net_capture_still_refuses_a_non_integer_max'),
     ('daedalus_cli.transport', 'capture_limit',
-     'limit < 1 or limit > NET_CAPTURE_MAX', None),
+     'limit < 1 or limit > NET_CAPTURE_MAX',
+     'tests/test_cli_argument_types.py::'
+     'test_net_capture_refuses_a_max_outside_one_to_the_ceiling'),
     ('daedalus_cli.transport', 'positive_timeout',
      "raise argparse.ArgumentTypeError(f'timeout must be a whole number of "
-     "seconds; got {value!r}') from None", None),
+     "seconds; got {value!r}') from None",
+     'tests/test_cli_argument_types.py::'
+     'test_a_non_integer_timeout_is_refused'),
     ('daedalus_cli.transport', 'positive_timeout', 'seconds < 0',
      'tests/test_cli.py::'
      'test_a_negative_timeout_is_refused_before_the_command_is_sent'),
