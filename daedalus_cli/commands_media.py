@@ -14,20 +14,14 @@ from .transport import (URL, _http_error_detail, _query_path, api,
 
 
 def do_segment_job(args):
-    # Minting is idempotent for the owning token, so this both creates a job
-    # and re-fetches its capability. The printed sig substitutes for __SIG__
-    # in examples/hls-segment-relay.js; it authorizes segment writes to this
-    # one job only, which is why the relay script never needs the bridge token.
+    # Minting is idempotent. The sig substitutes for __SIG__ in
+    # examples/hls-segment-relay.js, authorizing only this job's writes.
     res = api('POST', '/segment-job', {'token': token(), 'job': args.job})
     print(res['sig'])
 
 
 def do_segment_status(args):
-    # /segment-status takes the job-scoped capability, not the bridge token.
-    # Look the capability up rather than POSTing for it: POST /segment-job
-    # MINTS a job that does not exist yet, so asking the status of a mistyped
-    # name used to create it and then report zero segments as though the name
-    # had been right.
+    # Look up the job capability: POST would create a mistyped job name.
     req = urllib.request.Request(
         _query_path(f'{URL}/segment-job', {'job': args.job}), method='GET',
         headers={'Authorization': f'Bearer {token()}'})
@@ -59,9 +53,6 @@ def do_segment_status(args):
 
 
 def do_screenshot(args):
-    """Send screenshot command to extension, wait for upload, optionally save
-    to local file.
-    """
     cmd = {'token': token(), 'id': args.id or '_ss', 'code': '',
            'tab': 'extension'}
     cmd_payload = {'id': cmd['id'], 'type': 'screenshot'}
@@ -88,12 +79,9 @@ def do_screenshot(args):
     size = result.get('size', 0)
     shown_path = relative_upload_path(path)
     print(f'{MARK["in"]} uploaded: {shown_path} ({size} bytes)')
-    # Optionally save locally
     if args.output:
-        # Fetch the exact file this capture produced. Screenshot ids are
-        # reused -- `_ss` is the default one -- so an id names a directory
-        # rather than a capture, and asking for it returns whichever
-        # invocation finished last.
+        # Reused ids select whichever capture finished last; the path selects
+        # this invocation's file.
         selector = {'path': path} if path else {'id': cmd['id']}
         ss_url = _query_path('/screenshot', selector)
         img = api_raw('GET', ss_url)
@@ -103,11 +91,8 @@ def do_screenshot(args):
 
 
 def do_uploads(args):
-    """List or delete uploads."""
     if args.delete:
-        # A filename names a file inside an id. Without one the bridge has no
-        # narrower target than the whole token, which is not what naming a
-        # single file asks for.
+        # Without an id, the bridge would delete the token's entire namespace.
         if args.filename and not args.id:
             sys.exit('--filename needs --id: '
                      'a filename alone would delete every upload')

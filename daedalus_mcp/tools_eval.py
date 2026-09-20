@@ -7,13 +7,11 @@ from daedalus_cli.result_view import public_result
 
 def register(mcp, bridge):
     def _flatten_eval(body: dict | None) -> dict | None:
-        """The MCP client renders a tool's dict return under a top-level
-    `result` key, and an eval body carries its own `result` field (the JS
-    return value), so callers would see a confusing `result.result`. Surface
-    it as `value` — same info, no double nesting. If the value is a JSON string
-    (e.g. JSON.stringify output), parse it so the structure surfaces directly;
-    non-JSON strings stay untouched. The `world` marker stays unchanged,
-    including a `page:<hostname>` prefix."""
+        """Use `value` to avoid the MCP client's `result.result` nesting.
+
+        Parse JSON strings for structured display; preserve other strings and
+        the server's exact `world` marker.
+        """
         if isinstance(body, dict):
             body = public_result(body)
         if isinstance(body, dict) and 'result' in body:
@@ -22,9 +20,6 @@ def register(mcp, bridge):
                 try:
                     v = json.loads(v)
                 except ValueError:
-                    # A result that is not JSON is a plain string
-                    # result, which is the ordinary case. It travels
-                    # through unchanged.
                     pass
             body['value'] = v
         return body
