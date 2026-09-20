@@ -530,7 +530,18 @@ def iterable_deferred(value):
     return None
 
 
+def mapping_lookup_owner(node, state):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+            and node.func.attr in ('get', 'pop'):
+        owner = _known_value(node.func.value, state)
+        if isinstance(owner, DeferredContainer) and owner.kind == 'dict':
+            return owner
+    return None
+
+
 def expression_callables(node, state):
+    if mapping_lookup_owner(node, state) is not None:
+        return callable_candidates(_known_value(node, state))
     values = [_known_value(child, state) for child in ast.walk(node)]
     return tuple(candidate for value in values if value is not None
                  for candidate in callable_candidates(value))
@@ -547,6 +558,9 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
             if value is not None:
                 returned.append(value)
         return dedupe_states(invoked), merge_yielded(returned)
+    if states and all(mapping_lookup_owner(call, state) is not None
+                      for state in states):
+        return states, None
     callbacks = {id(candidate): candidate
                  for argument in arguments for state in states
                  for candidate in expression_callables(argument, state)}
