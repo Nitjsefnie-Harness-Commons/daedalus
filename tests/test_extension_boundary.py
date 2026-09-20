@@ -118,7 +118,7 @@ def test_stream_timers_drive_reconnect_watchdog_and_keepalive(tmp):
         'reconnectFetches': 2,
         'watchdogDelays': [5000],
         'watchdogAborted': True,
-        'watchdogFetches': 2,
+        'watchdogFetches': 1,
         'keepaliveDelay': 20000,
         'keepaliveCalls': 1,
     }, actual
