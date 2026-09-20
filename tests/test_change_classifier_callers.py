@@ -76,6 +76,15 @@ def test_documentation_only_refuses_unsupported_patterns_in_mixed_paths(tmp):
                 f'documentation_only accepted {patterns!r}')
 
 
+def test_the_cache_verifier_alone_runs_the_workflow_gate(tmp):
+    """The actionlint job is what executes the verifier, so a change to
+    the script alone must select that job; its sibling scripts do not."""
+    del tmp
+    mod = _classifier()
+    assert mod.workflows_changed(['scripts/ci/cache_action_releases.py'])
+    assert not mod.workflows_changed(['scripts/ci/classify_changes.py'])
+
+
 def test_workflows_changed_refuses_unsupported_patterns_in_mixed_paths(tmp):
     del tmp
     mod = _classifier()

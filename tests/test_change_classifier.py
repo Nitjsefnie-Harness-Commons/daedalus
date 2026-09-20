@@ -142,15 +142,11 @@ def test_workflows_changed_reports_whether_any_path_matches(tmp):
     del tmp
     mod = _classifier()
     assert mod.workflows_changed(['README.md', '.github/dependabot.yml'])
-    assert mod.workflows_changed(['scripts/ci/cache_action_releases.py'])
     assert not mod.workflows_changed(['README.md', 'scripts/server.py'])
-    assert not mod.workflows_changed(['scripts/ci/classify_changes.py'])
 
 
 def test_workflow_patterns_pin_the_actionlint_paths_filter(tmp):
-    """The classifier retains the deleted actionlint workflow's filter,
-    plus the verifier the actionlint job runs: a change to that script
-    alone must run the job that executes it."""
+    """The actionlint filter, plus the verifier that job alone executes."""
     del tmp
     mod = _classifier()
     assert mod.WORKFLOW_PATTERNS == (
