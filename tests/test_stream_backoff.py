@@ -227,6 +227,20 @@ async function run() {
     outcome.resumedAuth = streamFetches[outcome.bootFetches].auth;
     await settle();
     outcome.pending = timeoutTimers.map((item) => item.delay);
+  } else if (plan.scenario === 'reopen') {
+    await settle();
+    outcome.bootFetches = streamFetches.length;
+    let seen = streamFetches.length;
+    for (const value of plan.changes) {
+      const change = {};
+      change['daedalus-token'] = { oldValue: null, newValue: value };
+      for (const listener of changeListeners) listener(change, 'local');
+      seen += 1;
+      await waitFor(() => streamFetches.length >= seen, 'changed fetch');
+      await settle();
+    }
+    outcome.returnedAuth = streamFetches[seen - 1].auth;
+    await settle();
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   return outcome;
@@ -295,6 +309,17 @@ def test_a_new_bridge_url_resumes_connecting(tmp):
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + TOKEN, outcome
     assert outcome['pending'] == [1000], outcome
+
+
+def test_a_connected_stream_reopens_the_stopped_pair(tmp):
+    """The success that cleared the stop lets the old pair be retried."""
+    del tmp
+    outcome = _run({'scenario': 'reopen',
+                    'statuses': [401, 'ok', 503],
+                    'changes': [NEW_TOKEN, TOKEN]})
+    assert outcome['bootFetches'] == 1, outcome
+    assert outcome['answered'] == [401, 'ok', 503], outcome
+    assert outcome['returnedAuth'] == 'Bearer ' + TOKEN, outcome
 
 
 def main():
