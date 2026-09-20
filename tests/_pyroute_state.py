@@ -710,7 +710,9 @@ def record_exit(exits, kind, states):
         exits[kind].extend(state.copy() for state in states)
 
 
-def record_returns(exits, states, value):
+def record_returns(exits, states, node):
+    """A return statement returns its value; a lambda body is the value."""
+    value = node.value if isinstance(node, ast.Return) else node
     if exits is not None and value is not None:
         exits['returns'].extend(evaluated_value(value, state)
                                 for state in states)

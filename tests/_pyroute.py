@@ -698,8 +698,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             apply_state_dict_statement(statement, state)
             apply_alias_statement(statement, state)
             store_deferred_value(statement, state)
-        if isinstance(statement, ast.Return):
-            record_returns(flow_exits, pairs, statement.value)
+        if isinstance(statement, (ast.Return, ast.expr)):
+            record_returns(flow_exits, pairs, statement)
         if isinstance(statement, (ast.Return, ast.Raise)):
             record_exit(flow_exits, 'terminal', pairs)
             pairs = []
