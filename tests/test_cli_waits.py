@@ -258,19 +258,93 @@ def test_a_truncated_answer_is_a_connection_failure_not_a_traceback(tmp):
     """
     del tmp
     with truncating_front_end(truncate=None) as base:
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
-        outcomes = {
-            'api': run_cli(['tabs'], env),
-            'api_delete': run_cli(['uploads', '--delete', '--id', 'x'], env),
-            'api_raw': run_python(
-                'from daedalus_cli.transport import api_raw\n'
-                'api_raw("GET", "/screenshot?path=x")\n', env),
-        }
+        outcomes = _every_api_entry(base)
+    _assert_connection_failed(outcomes, 'IncompleteRead')
+
+
+def _every_api_entry(base):
+    """One subprocess per public request entry point, against `base`."""
+    env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+    return {
+        'api': run_cli(['tabs'], env),
+        'api_delete': run_cli(['uploads', '--delete', '--id', 'x'], env),
+        'api_raw': run_python(
+            'from daedalus_cli.transport import api_raw\n'
+            'api_raw("GET", "/screenshot?path=x")\n', env),
+    }
+
+
+def _assert_connection_failed(outcomes, cause):
     for name, r in outcomes.items():
         assert r.returncode != 0, (name, r.returncode, r.stdout)
         assert 'Traceback' not in r.stderr, (name, r.stderr)
         assert 'Connection failed' in r.stderr, (name, r.stderr)
-        assert 'IncompleteRead' in r.stderr, (name, r.stderr)
+        assert cause in r.stderr, (name, r.stderr)
+
+
+def test_the_result_wait_outlives_a_truncated_error_peek(tmp):
+    """A 502 cut off mid-body is the same failed peek as a 200 cut off.
+
+    The HTTPError handler read the body to report `HTTP 502: <detail>`,
+    and that read is where the truncation surfaces — so IncompleteRead
+    was raised inside the handler and escaped the wait as a traceback
+    (issue 700), for a command the browser was already running.
+    """
+    del tmp
+    with truncating_front_end(truncate=2, status=502) as base:
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
+        r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
+        seen = list(TruncatingFrontEndHandler.seen)
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    assert 'Traceback' not in r.stderr, r.stderr
+    assert 'Survived' in r.stdout, r.stdout
+    puts = [path for verb, path in seen if verb == 'PUT']
+    assert puts == ['/command'], seen
+    peeks = [path for verb, path in seen
+             if verb == 'GET' and 'consume=1' not in path]
+    assert peeks == ['/result?tab=tab4&delivery=d1'] * 3, seen
+
+
+def test_the_result_wait_reports_a_timeout_when_every_error_peek_is_cut(
+        tmp):
+    del tmp
+    with truncating_front_end(truncate=None, status=502) as base:
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
+        r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
+        seen = list(TruncatingFrontEndHandler.seen)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'Traceback' not in r.stderr, r.stderr
+    assert 'Timeout (1s)' in r.stderr, r.stderr
+    puts = [path for verb, path in seen if verb == 'PUT']
+    assert puts == ['/command'], seen
+    peeks = [path for verb, path in seen if verb == 'GET']
+    assert len(peeks) >= 2, seen
+
+
+def test_a_truncated_error_answer_is_a_connection_failure(tmp):
+    """An error body cut off mid-read is reported like any other cut."""
+    del tmp
+    with truncating_front_end(truncate=None, status=502) as base:
+        outcomes = _every_api_entry(base)
+    _assert_connection_failed(outcomes, 'IncompleteRead')
+
+
+def test_a_complete_error_answer_is_still_reported_by_status(tmp):
+    """Only an error body that cannot be read is a connection failure.
+
+    A whole 502 body keeps the `HTTP <code>: <detail>` report, with the
+    detail JSON-decoded — tests/test_cli.py pins the same words against
+    the bridge's own refusals.
+    """
+    del tmp
+    body = b'{"error": "bad gateway"}'
+    with truncating_front_end(truncate=None, status=502, body=body) as base:
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        r = run_cli(['tabs'], env)
+    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+    assert 'Traceback' not in r.stderr, r.stderr
+    assert "HTTP 502: {'error': 'bad gateway'}" in r.stderr, r.stderr
+    assert 'Connection failed' not in r.stderr, r.stderr
 
 
 if __name__ == '__main__':
