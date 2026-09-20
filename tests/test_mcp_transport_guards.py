@@ -266,6 +266,33 @@ def test_poll_survives_a_transport_failure_on_the_peek(tmp):
     assert len(peeks) == 3, client.calls
 
 
+def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
+    """The clause admits TransportError itself, not members met so far."""
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    wanted = {
+        'id': 'command',
+        'deliveryId': 'wanted',
+        'resultGeneration': 'generation-1',
+        'result': {'value': 1},
+    }
+    client = ClientProbe((
+        transport.httpx.TransportError('any transport failure'),
+        wanted,
+        {'consumed': True, 'resultGeneration': 'generation-1'},
+    ))
+    session.http_client = lambda: client
+
+    result = _capture(session.poll_result(
+        '', 1, interval=0, expect_id='command',
+        expect_delivery='wanted'))
+
+    assert result == wanted, (result, wanted)
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert len(peeks) == 3, client.calls
+
+
 def test_poll_reports_timeout_after_only_transport_failures(tmp):
     """Retrying a failed peek is bounded by the same deadline."""
     del tmp
@@ -646,16 +673,18 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
         environ.pop('DAEDALUS_LOCAL_URL', None)
         environ.pop('DAEDALUS_PORT', None)
         session = _session(transport, url=base)
+        # Two admitted peeks, then the clock steps past the deadline.
+        session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
         result = _capture(session.poll_result(
-            '', 0.3, interval=0, expect_id='job4', expect_delivery='d1'),
+            '', 0.001, interval=0, expect_id='job4', expect_delivery='d1'),
             transport)
         raised = _capture(probe(session), transport)
         seen = list(TruncatingFrontEndHandler.seen)
-    expected = 'raised TimeoutError: no result within 0.3s'
+    expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
     assert raised == 'RemoteProtocolError', raised
-    peeks = [path for verb, path in seen if verb == 'GET']
-    assert len(peeks) >= 2, seen
+    gets = [path for verb, path in seen if verb == 'GET']
+    assert gets == ['/result?delivery=d1'] * 2 + ['/result'], seen
 
 
 def main():
