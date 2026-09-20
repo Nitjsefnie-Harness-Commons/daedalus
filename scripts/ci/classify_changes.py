@@ -20,7 +20,10 @@ import subprocess
 
 DOCUMENTATION_PATTERNS = ('**/*.md', 'LICENSE', '.gitignore')
 
-WORKFLOW_PATTERNS = ('.github/workflows/**', '.github/dependabot.yml')
+# The verifier is listed because the actionlint job is what runs it: a
+# change to the script alone must reach the step that executes it.
+WORKFLOW_PATTERNS = ('.github/workflows/**', '.github/dependabot.yml',
+                     'scripts/ci/cache_action_releases.py')
 
 # Every stable minor requires-python admits. 3.14 was accepted by the
 # metadata and executed nowhere, so the oldest and the newest supported
