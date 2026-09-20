@@ -1,12 +1,4 @@
-"""A stub front end that answers the way a proxy in front of the bridge does.
-
-The bridge answers /result at once, so a reset or a truncated body on that
-read is the proxy's doing. The shape here is the one issue 647 reports: the
-headers arrive whole and the body stops short of its declared length, which
-the client sees as IncompleteRead while it is reading the response — after
-urlopen has already returned. Issue 700 is the same cut with an error
-status, where the read happens inside the HTTPError handler instead.
-"""
+"""A stub proxy that cuts a body off mid-read (issues 647 and 700)."""
 import contextlib
 import http.server
 import json
@@ -14,12 +6,10 @@ import threading
 
 
 class TruncatingFrontEndHandler(http.server.BaseHTTPRequestHandler):
-    """Answers `truncate` GETs with the fault, then answers properly.
+    """Answers `truncate` GETs (None: all) with the fault, then properly.
 
-    None faults every one. `status` is the fault's status line. `body`
-    None sends 5 of 40 declared bytes; bytes are sent whole, so the same
-    front end can answer a complete error body. Every request is recorded
-    so a test can say the PUT was not retried.
+    `body` None sends 5 of 40 declared bytes; bytes are sent whole, so a
+    complete error body is one fault too. Every request is recorded.
     """
 
     truncate = 0
@@ -38,9 +28,6 @@ class TruncatingFrontEndHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def _fault(self):
-        # HTTP/1.0, the handler's default, closes the connection when the
-        # handler returns; a cut-off client is left with 5 of the 40 bytes
-        # it was promised.
         raw = b'{"pen' if self.body is None else self.body
         declared = 40 if self.body is None else len(raw)
         self.send_response(self.status)
