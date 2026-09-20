@@ -6,13 +6,15 @@ one more repository literal: a SHA and release that agree with each other
 pass whether or not the release exists. This resolves each pinned release
 through the GitHub API and fails closed on anything it cannot read.
 
-The line-based scanner verifies two `uses:` shapes: an inline scalar
-with a trailing `# vX.Y.Z` comment, and a `>-` or `|-` block whose comment
-sits on the header line and whose one content line is the reference. A
-`uses:` value naming a cache action that fits neither is refused, and so
-is every other line carrying an `actions/cache…@` reference that is not
-a comment: a quoted key, a flow mapping, a continued value or a run
-script is never skipped.
+A line scanner recognises the pins and is the only source of the
+`# vX.Y.Z` comment: an inline `uses:` scalar with a trailing comment, or
+a `>-` / `|-` block with the comment on its header and one content line.
+It refuses a `uses:` value it cannot classify when that value or the line
+after it spells `actions/cache`, and any other non-comment line spelling
+an `actions/cache…@` reference. A file the scanner finds clean is then
+read by the repository's workflow decoder: every step whose decoded
+`uses` names a cache action must hold exactly one recognised pin with
+that value, and a file the decoder cannot read is refused by path.
 """
 import importlib
 import json
