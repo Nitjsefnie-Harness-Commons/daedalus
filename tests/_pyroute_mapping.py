@@ -78,6 +78,7 @@ def _assignment_values(target, value, state):
 
 def apply_assignment_bindings(targets, value, state, binder):
     entries = [entry for target in targets
+               if isinstance(target, (ast.Name, ast.Tuple, ast.List))
                for entry in _assignment_values(target, value, state)]
     aliases = {}
     # Pending RHS references must follow storage mutations, but not rebindings.
@@ -134,7 +135,7 @@ def _dict_value(node, state):
     for key, item in zip(node.keys, node.values):
         if key is not None:
             value = _known_value(item, state)
-            if isinstance(key, ast.Constant) and value is not None:
+            if isinstance(key, ast.Constant):
                 items[key.value] = value
             continue
         if isinstance(item, ast.Dict):
@@ -149,7 +150,7 @@ def _dict_value(node, state):
                 {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
         items.update(value.items)
     return DeferredContainer(
-        items, len(node.values), 'dict', node) if items else None
+        items, len(node.values), 'dict', node)
 
 
 def _merge_or_value(node, state):
@@ -192,8 +193,7 @@ def _dict_call_value(node, state):
             return DeferredContainer(
                 {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
         known = _known_value(keyword.value, state)
-        if known is not None: items[keyword.arg] = known
-    if not items: return None
+        items[keyword.arg] = known
     return DeferredContainer(items, len(node.keywords), 'dict', node)
 
 
@@ -208,8 +208,7 @@ def _setdefault_value(node, state):
             else None
         return merge_yielded((default, UNPROVABLE_SENDER)) \
             if default is not None else None
-    item = owner.items.get(key.value)
-    if item is not None: return item
+    if key.value in owner.items: return owner.items[key.value]
     return _known_value(node.args[1], state) if len(node.args) > 1 else None
 
 
@@ -345,12 +344,12 @@ def _apply_mapping_store(state, owner_name, sources, keywords, node):
         if known is not None:
             items[key] = known
         elif state.evaluated.get(id(value)) is not None:
-            items.pop(key, None)
+            items[key] = None
         elif isinstance(value, ast.Call):
             _mark_unprovable(state, owner_name)
             return
         else:
-            items.pop(key, None)
+            items[key] = None
     owner = state.callables.get(owner_name)
     if items:
         if owner is None:
@@ -367,9 +366,9 @@ def _apply_setdefault(state, call, owner_name):
     key = call.args[0] if call.args else None
     default = _known_value(call.args[1], state) if len(call.args) > 1 \
         else None
-    if default is None:
-        if len(call.args) > 1 and isinstance(call.args[1], ast.Call):
-            _mark_unprovable(state, owner_name)
+    if default is None and len(call.args) > 1 \
+            and isinstance(call.args[1], ast.Call):
+        _mark_unprovable(state, owner_name)
         return
     if (isinstance(key, ast.Constant) and isinstance(key.value, str)
             and (owner is None or isinstance(owner, DeferredContainer))):
@@ -463,6 +462,8 @@ def store_deferred_target(target, value, state, removing=False,
                 items[target.slice.value] = UNPROVABLE_SENDER
         elif dynamic:
             return
-        else:
+        elif removing:
             items.pop(target.slice.value, None)
+        else:
+            items[target.slice.value] = None
         _replace_container(state, owner_name, owner, items)
