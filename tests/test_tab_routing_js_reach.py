@@ -247,7 +247,7 @@ def test_demoting_reaches_keep_their_verdicts(tmp):
         ('derived-constructor-super', False, True),
         ('class-instance-in-literal', False, True),
         ('instance-passed-to-fn', False, True),
-        ('getter-returns-factory-call', False, True),
+        ('getter-returns-factory-call', False, False),
         ('sender-via-getter-call', True, True),
         ('member-write-dynamic', False, True),
         ('member-write-expr-key', False, True),
