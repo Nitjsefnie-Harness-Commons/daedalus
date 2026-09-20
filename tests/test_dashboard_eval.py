@@ -372,7 +372,8 @@ def test_saving_token_restarts_stream_independently_of_probe(_tmp):
             'count': seen['beforeProbeCount'], 'sameSignal': True,
             'aborted': False,
             'status': ('connected' if outcome == 'success' else
-                       'server unreachable: probe unavailable'),
+                       'server check failed: probe unavailable. '
+                       'Cross-origin bridge URLs need a CORS-enabled proxy.'),
         }, seen
         assert seen['requests'] == [
             {'target': 'https://example.com/first/stream?tab=dashboard',
