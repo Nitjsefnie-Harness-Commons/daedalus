@@ -90,7 +90,6 @@ def test_callable_join_defaults(tmp):
         ('both-ordinary', 'lambda: ordinary()', 'lambda: ordinary()'),
     ]
     for label, first, second in choices:
-        # Both runtime branches are exercised; static analysis sees both.
         for flag in (True, False):
             store = (f'if args.flag:\n    x = {first}\n'
                      f'else:\n    x = {second}\n'
