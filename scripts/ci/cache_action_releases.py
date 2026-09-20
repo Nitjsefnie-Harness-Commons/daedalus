@@ -180,13 +180,13 @@ def verify(root, run):
         groups.setdefault((pin.ref, pin.comment), []).append(pin)
     verified = []
     for (ref, tag), members in sorted(groups.items()):
+        where = ', '.join(f'{pin.path}:{pin.line}' for pin in members)
         try:
             commit = upstream_commit(tag, run)
         except Refused as refusal:
-            refusals.append(str(refusal))
+            refusals.append(f'{refusal} at {where}')
             continue
         if commit != ref:
-            where = ', '.join(f'{pin.path}:{pin.line}' for pin in members)
             refusals.append(
                 f'{tag}: upstream is {commit}, pinned {ref} at {where}')
             continue

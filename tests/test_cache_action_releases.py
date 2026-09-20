@@ -291,8 +291,8 @@ def test_a_tag_object_that_names_no_commit_is_refused(tmp):
     verified, refusals = mod.verify(root, run)
     assert verified == [], verified
     assert refusals == [
-        f"v3.13.0: tag object {CPYTHON_TAG} names a 'tag', not a commit"
-    ], refusals
+        f"v3.13.0: tag object {CPYTHON_TAG} names a 'tag', not a commit "
+        'at .github/workflows/tests.yml:4'], refusals
     assert len(calls) == 2, calls
 
 
@@ -303,7 +303,8 @@ def test_a_release_that_does_not_exist_is_refused_with_the_error(tmp):
     verified, refusals = mod.verify(root, run)
     assert verified == [], verified
     assert refusals == [
-        'v99.99.99: gh api exited 1: gh: Not Found (HTTP 404)'], refusals
+        'v99.99.99: gh api exited 1: gh: Not Found (HTTP 404) at '
+        '.github/workflows/tests.yml:4'], refusals
 
 
 def test_a_commit_under_the_wrong_release_is_refused_with_upstream(tmp):
@@ -323,7 +324,9 @@ def test_a_response_that_is_not_json_is_refused(tmp):
     _calls, run = _upstream({_REF + 'v6.1.0': '<html>'})
     verified, refusals = mod.verify(root, run)
     assert verified == [], verified
-    assert refusals == ["v6.1.0: response is not JSON: '<html>'"], refusals
+    assert refusals == [
+        "v6.1.0: response is not JSON: '<html>' at "
+        '.github/workflows/tests.yml:4'], refusals
 
 
 def test_a_response_without_the_ref_fields_is_refused(tmp):
@@ -336,8 +339,8 @@ def test_a_response_without_the_ref_fields_is_refused(tmp):
         verified, refusals = mod.verify(root, run)
         assert verified == [], (body, verified)
         assert refusals == [
-            f'v6.1.0: response names no commit or tag object: {body!r}'
-        ], (body, refusals)
+            f'v6.1.0: response names no commit or tag object: {body!r} '
+            'at .github/workflows/tests.yml:4'], (body, refusals)
 
 
 def test_every_resolution_refusal_is_reported(tmp):
@@ -353,7 +356,8 @@ def test_every_resolution_refusal_is_reported(tmp):
     assert refusals == [
         f'v6.1.0: upstream is {V610}, pinned {V430} at '
         '.github/workflows/tests.yml:4',
-        'v99.99.99: gh api exited 1: gh: Not Found (HTTP 404)'], refusals
+        'v99.99.99: gh api exited 1: gh: Not Found (HTTP 404) at '
+        '.github/workflows/tests.yml:6'], refusals
     assert len(calls) == 3, calls
 
 
