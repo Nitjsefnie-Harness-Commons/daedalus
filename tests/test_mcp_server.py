@@ -406,6 +406,8 @@ def test_mcp_lifespan_closes_loop_clients(tmp):
 def test_a_poisoned_shell_cannot_redirect_start_in_thread(tmp):
     del tmp
     _need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
     poison = {'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:9',
               'DAEDALUS_PORT': '9'}
     saved = {key: os.environ.get(key) for key in poison}
@@ -423,6 +425,10 @@ def test_a_poisoned_shell_cannot_redirect_start_in_thread(tmp):
         mod._serve = lambda: None
         thread = _start_in_thread(mod)
         thread.join(timeout=5)
+        assert mod.bridge.transport._base_url == (
+            'http://127.0.0.1:1'), mod.bridge.transport._base_url
+
+        mod, _port = _start_mcp_in_process('http://127.0.0.1:1')
         assert mod.bridge.transport._base_url == (
             'http://127.0.0.1:1'), mod.bridge.transport._base_url
         assert dict(os.environ) == snapshot
@@ -1431,11 +1437,7 @@ def test_bearer_middleware_fails_closed_without_configured_token(tmp):
 
 
 def test_mcp_port_zero_announces_the_actual_bound_port(tmp):
-    """DAEDALUS_MCP_PORT=0 must print the bound port, not the configured one.
-
-    The line used to interpolate the configured value and print '127.0.0.1:0';
-    it now follows the bind and names the bound socket.
-    """
+    """Port zero announces the bound listener and preserves the bridge URL."""
     del tmp
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1448,16 +1450,13 @@ def test_mcp_port_zero_announces_the_actual_bound_port(tmp):
     line = out.getvalue().strip()
     assert f'127.0.0.1:{mod.bound_port}' in line, line
     assert mod.bound_port > 0, line
+    assert mod.bridge.transport._base_url == (
+        'http://127.0.0.1:1'), mod.bridge.transport._base_url
     _wait_for_mcp(mod.bound_port)
 
 
 def test_the_mcp_fixture_ignores_a_squatted_draw(tmp):
-    """A squatted drawn port cannot reach the MCP listener: it does not draw.
-
-    Same regression shape as the bridge fixture's lost-draw test: rig the
-    draw to a taken port, then start through the fixture. The listener binds
-    port 0, so the taken number is never involved.
-    """
+    """Binding port zero avoids collisions with a squatted drawn port."""
     del tmp
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
