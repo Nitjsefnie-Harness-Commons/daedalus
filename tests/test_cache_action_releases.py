@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """The upstream release verifier for the actions/cache pins.
 
-scripts/ci/cache_action_releases.py is the online half of the cache-pin
-guard: the offline suites pin every cached job to REVIEWED_CACHE_RELEASES,
-and this script is what makes that mapping true, by resolving each pinned
-release through the GitHub API. These tests drive its pure core through the
-injected `run` seam with bodies captured from the real endpoint, and one
-test spans the three modules to prove the scanner sees the same pins the
-offline guard sees.
+These tests drive scripts/ci/cache_action_releases.py through its injected
+`run` seam with bodies captured from the real endpoint; one test spans the
+three modules so the scanner sees the pins the offline guard reviews.
 """
 import contextlib
 import io
@@ -25,8 +21,7 @@ from test_workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
 
 V610 = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
 V430 = '0057852bfaa89a56745cba8c7296529d2fc39830'
-# python/cpython's v3.13.0 is an annotated tag: the ref names a tag object,
-# which names the commit.
+# python/cpython's v3.13.0 is an annotated tag; actions/cache has none.
 CPYTHON_TAG = '3f27099d916c7b885e3daf1fabedcc119462014d'
 CPYTHON_COMMIT = '60403a5409ff2c3f3b07dd2ca91a7a3e096839c7'
 
@@ -92,13 +87,8 @@ def _refusing_run(argv):
 
 
 def _upstream(responses):
-    """A `run` double answering `gh api` by path, 404 for the rest.
-
-    `responses` maps a request path to a body (a mapping, serialized, or
-    a string handed back as-is). A path it lacks raises exactly what
-    `check=True` raises for the real 404: the JSON error body on stdout,
-    the one-line summary on stderr, exit status 1.
-    """
+    """A `run` double answering `gh api` by path; an unknown path raises
+    what `check=True` raised for the real 404."""
     calls = []
 
     def run(argv):
@@ -123,11 +113,8 @@ def test_zero_workflow_files_is_a_refusal_not_a_clean_run(tmp):
 
 
 def test_every_cache_family_pin_shape_is_recognised(tmp):
-    """Plain, list-item and folded `uses:`, any case, all three actions.
-
-    A folded scalar's comment sits on its header line: inside the block,
-    `#` is content, so that is the only place YAML lets a comment go.
-    """
+    """Plain, list-item and folded `uses:`, any case, all three actions;
+    a folded scalar's comment can only sit on its header line."""
     mod = _verifier()
     root = _workflow(tmp, _PLAIN)
     pins, refusals = mod.scan(root)
@@ -142,9 +129,8 @@ def test_every_cache_family_pin_shape_is_recognised(tmp):
 
 
 def test_a_comment_inside_a_folded_scalar_is_content_and_refused(tmp):
-    """`uses: >-` then `actions/cache@<sha>  # v6.1.0`: YAML hands GitHub
-    the whole line as the action reference. Not a pin the scanner can
-    classify, so it is refused rather than read as a commented pin."""
+    """Inside a block scalar `#` is content: YAML hands GitHub the whole
+    line as the reference."""
     mod = _verifier()
     root = _workflow(tmp, (
         'jobs:\n  j:\n    steps:\n'
@@ -186,9 +172,8 @@ def test_a_pin_continued_from_an_empty_uses_line_is_refused(tmp):
 
 
 def test_a_line_no_deeper_than_the_key_is_not_block_content(tmp):
-    """An empty block followed by a shallower line: YAML parses that line
-    as the next node, so it is not the reference, even when it is one
-    token naming a cache action."""
+    """A shallower line after an empty block is the next node to YAML,
+    not the reference."""
     mod = _verifier()
     root = _workflow(tmp, (
         'jobs:\n  j:\n    steps:\n'
@@ -203,8 +188,7 @@ def test_a_line_no_deeper_than_the_key_is_not_block_content(tmp):
 
 
 def test_a_hash_glued_to_a_quoted_reference_is_not_a_comment(tmp):
-    """A comment needs whitespace before its `#`; without it the value
-    is unclassifiable and no release is requested."""
+    """A comment needs whitespace before its `#`."""
     mod = _verifier()
     root = _one_pin(tmp, f'"actions/cache@{V610}"#v6.1.0')
     verified, refusals = mod.verify(root, _refusing_run)
@@ -273,8 +257,7 @@ def test_a_comment_that_is_not_a_full_release_is_refused(tmp):
 
 
 def test_one_malformed_pin_stops_every_request(tmp):
-    """A refused shape never reaches a request path, and no healthy pin
-    beside it is resolved either: the tree is refused as a whole."""
+    """One refused shape refuses the tree: no sibling pin is resolved."""
     mod = _verifier()
     root = _workflow(tmp, _PLAIN.replace('uses: >-  # v6.1.0', 'uses: >-'))
     verified, refusals = mod.verify(root, _refusing_run)
@@ -391,7 +374,6 @@ def test_every_resolution_refusal_is_reported(tmp):
 
 
 def _main(mod, root, stdout):
-    """Run main() against `root` with subprocess.run answering `stdout`."""
     calls = []
 
     def fake_run(command, **kwargs):
@@ -406,9 +388,8 @@ def _main(mod, root, stdout):
 
 
 def test_main_binds_gh_api_with_check_and_a_timeout(tmp):
-    """main() runs the real `gh` with the seam every test above drove:
-    captured text, check=True (so a 404 arrives as CalledProcessError),
-    and a bound so a hung API fails the step rather than holding it."""
+    """check=True makes a 404 a CalledProcessError; the timeout keeps a
+    hung API from holding the step."""
     mod = _verifier()
     root = _one_pin(tmp, _cache_pin(V610, 'v6.1.0'))
     status, out, err, calls = _main(mod, root, json.dumps(_LIGHTWEIGHT))
@@ -439,9 +420,8 @@ def test_main_reports_every_refusal_and_exits_nonzero(tmp):
 
 
 def test_the_real_tree_pins_are_the_ones_the_offline_guard_reviews(tmp):
-    """The scanner sees exactly the pins test_ci_pip_cache pins, and they
-    name only reviewed releases: the assertion that spans the three
-    modules, so the online check cannot quietly verify a different set."""
+    """The online check verifies exactly the pins the offline guard
+    reviews, never a quietly different set."""
     del tmp
     mod = _verifier()
     pins, refusals = mod.scan(ROOT)

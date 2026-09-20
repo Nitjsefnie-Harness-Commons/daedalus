@@ -240,14 +240,9 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
 
 
 def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
-    """The online half of the cache-pin guard runs in the actionlint job.
-
-    zizmor proves a pinned SHA belongs to actions/cache; only this step
-    proves it is the release the comment names. It needs the token for
-    the API, and it runs when actionlint is red so one push reports
-    every gate this job holds. Decoded scalars, not substrings, so a
-    dropped env or a narrowed condition cannot hide behind a lookalike.
-    """
+    """Decoded scalars, not substrings, so a dropped env or a narrowed
+    condition cannot hide behind a lookalike; the step's own comment says
+    why it exists."""
     del tmp
     steps = complete_job_mapping(_tests_yml(), 'actionlint')['steps']
     matches = [

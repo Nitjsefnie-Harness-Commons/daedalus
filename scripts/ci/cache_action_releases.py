@@ -106,10 +106,8 @@ def scan(root):
 
 
 def shape_refusal(pin):
-    """Why `pin` may not be resolved upstream, or None when it may be.
-
-    The regex is the only thing that admits a comment into a request path.
-    """
+    """The regex is the only thing that admits a comment into a request
+    path."""
     where = f'{pin.path}:{pin.line}'
     if not _COMMIT.fullmatch(pin.ref):
         return (f'{where}: {pin.action}@{pin.ref} is not pinned to a '
