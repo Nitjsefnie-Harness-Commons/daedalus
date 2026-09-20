@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Direct boundary coverage for the patch coverage reporter."""
+import contextlib
 import sys
 from pathlib import Path
 
@@ -9,6 +10,49 @@ from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 import diff_coverage  # noqa: E402
+
+
+def test_configured_omissions_do_not_demand_coverage(tmp):
+    del tmp
+    added = {
+        '.claude/skills/changing-daedalus/watch_all.py': {1},
+        '.venv/lib/helper.py': {1},
+        'build/lib/helper.py': {1},
+        'dist/helper.py': {1},
+        'vendor/site-packages/helper.py': {1},
+        'node_modules/pkg/helper.py': {1},
+        'tests/test_helper.py': {1},
+    }
+    with contextlib.chdir(ROOT):
+        missing = diff_coverage.unmeasured_sources({}, added)
+    assert missing == set(), missing
+    body = diff_coverage.render([], 0, 0, missing)
+    assert 'no patch coverage to report' in body, body
+
+
+def test_omissions_follow_current_config_and_keep_other_source(tmp):
+    config = Path(tmp) / 'pyproject.toml'
+    absolute = (Path(tmp) / 'absolute.py').as_posix()
+    config.write_text(
+        '[tool.coverage.run]\n'
+        f'omit = ["generated/*", "*/vendored/*", "{absolute}"]\n'
+        '[tool.coverage.report]\n'
+        'omit = ["report_only.py", "extension/*"]\n',
+        encoding='utf-8')
+    added = {
+        'absolute.py': {1},
+        'generated/nested/helper.py': {1},
+        'pkg/vendored/helper.py': {1},
+        'report_only.py': {1},
+        'generated_elsewhere/helper.py': {1},
+        'pkg/helper.py': {1},
+        'extension/content.js': {1},
+    }
+    with contextlib.chdir(tmp):
+        missing = diff_coverage.unmeasured_sources({}, added)
+    assert missing == {
+        'generated_elsewhere/helper.py', 'pkg/helper.py',
+        'extension/content.js'}, missing
 
 
 def test_decode_git_path_keeps_a_final_unmatched_backslash(tmp):

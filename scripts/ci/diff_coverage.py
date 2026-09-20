@@ -36,6 +36,7 @@ from pathlib import Path
 
 from coverage import Coverage
 from coverage.exceptions import CoverageException
+from coverage.files import GlobMatcher, canonical_filename, prep_patterns
 
 # `+++ b/path`, with git's optional quoting and the /dev/null of a deletion.
 _TARGET = re.compile(r'^\+\+\+ (.*)$')
@@ -296,8 +297,14 @@ def unmeasured_sources(measured, added):
     absent path matters when one changed source file is measured and
     another is not: a boolean all-or-nothing guard would hide the latter.
     """
+    config = Coverage(config_file=True)
+    omitted = GlobMatcher(prep_patterns(
+        (config.get_option('run:omit') or [])
+        + (config.get_option('report:omit') or [])))
     return {path for path in added
-            if _measured_source(path) and path not in measured}
+            if _measured_source(path) and path not in measured
+            and not (path.lower().endswith('.py')
+                     and omitted.match(canonical_filename(path)))}
 
 
 def _scope_note(languages):
