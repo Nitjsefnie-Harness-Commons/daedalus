@@ -3,7 +3,8 @@ import ast
 import operator
 from dataclasses import dataclass, field
 
-from _pyroute_mapping import alias_target_pairs, store_deferred_target
+from _pyroute_mapping import (alias_target_pairs, apply_assignment_bindings,
+                              store_deferred_target)
 from _pyroute_values import (CellState, DeferredGenerator,
                              cell_state_signature, deferred_signature,
                              is_deferred_value, merge_cell_states,
@@ -484,13 +485,7 @@ def apply_alias_statement(node, state):
     targets = (node.targets if isinstance(node, (ast.Assign, ast.Delete))
                else [node.target] if isinstance(
                    node, (ast.AnnAssign, ast.AugAssign)) else None)
-    if targets is None:
-        return
-    bindings = ({}, {}, {})
-    if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
-        for target in targets:
-            if isinstance(target, (ast.Name, ast.Tuple, ast.List)):
-                bind_alias_target(target, node.value, state, bindings)
+    if targets is None: return
     names = set().union(*(bound_names(target) for target in targets))
     if isinstance(node, ast.Delete):
         delete_builtin_names(state, names)
@@ -498,13 +493,14 @@ def apply_alias_statement(node, state):
     elif not isinstance(node, ast.AnnAssign) or node.value is not None:
         bind_builtin_names(state, names)
         state.bound.update(names)
+    if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
+        apply_assignment_bindings(
+            targets, node.value, state, bind_alias_target)
+        return
     for name in names:
         aliases.pop(name, None)
         state.generators.pop(name, None)
         state.callables.pop(name, None)
-    aliases.update(bindings[0])
-    state.generators.update(bindings[1])
-    state.callables.update(bindings[2])
     sync_cells(state, names)
 
 

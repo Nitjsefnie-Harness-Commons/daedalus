@@ -63,6 +63,48 @@ def alias_target_pairs(target, value):
     return pairs
 
 
+def _assignment_values(target, value, state):
+    resolved = _known_value(value, state) if isinstance(value, ast.AST) \
+        else value
+    if isinstance(target, (ast.Tuple, ast.List)):
+        pairs = alias_target_pairs(target, resolved if is_deferred_value(
+            resolved) else value)
+        if pairs is not None:
+            for nested, item in pairs:
+                yield from _assignment_values(nested, item, state)
+            return
+    yield target, value
+
+
+def apply_assignment_bindings(targets, value, state, binder):
+    entries = [entry for target in targets
+               for entry in _assignment_values(target, value, state)]
+    aliases = {}
+    # Pending RHS references must follow storage mutations, but not rebindings.
+    for target, expression in entries:
+        state.evaluated[id(target)] = _known_value(expression, state) \
+            if isinstance(expression, ast.AST) else expression
+        if isinstance(target, ast.Name):
+            bindings = ({}, {}, {})
+            binder(target, expression, state, bindings)
+            aliases[id(target)] = bindings[0]
+    for target, _ in entries:
+        bindings = ({}, {}, {})
+        binder(target, state.evaluated[id(target)], state, bindings)
+        bindings[0].update(aliases.get(id(target), {}))
+        names = {node.id for node in ast.walk(target)
+                 if isinstance(node, ast.Name)
+                 and isinstance(node.ctx, ast.Store)}
+        for values, updates in zip(
+                (state.aliases, state.generators, state.callables), bindings):
+            for name in names:
+                values.pop(name, None)
+            values.update(updates)
+        sync_cells(state, names)
+    for target, _ in entries:
+        state.evaluated.pop(id(target), None)
+
+
 def _display_value(node, state):
     items = {}
     index = 0
