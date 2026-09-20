@@ -334,14 +334,16 @@ def test_an_escaped_reference_is_refused_by_the_decoder_cross_check(tmp):
     """The line grammar sees no `@` or no `actions/cache`; the decoder
     sees the runnable reference, and the two must agree."""
     mod = _verifier()
-    for spelling in (f'"actions/cache\\x40{V610}"',
-                     f'"actions\\x2fcache@{V610}"',
-                     f'"actions/cache\\u0040{V610}"'):
+    for spelling, action in (
+            (f'"actions/cache\\x40{V610}"', 'actions/cache'),
+            (f'"actions\\x2fcache@{V610}"', 'actions/cache'),
+            (f'"actions/cache\\u0040{V610}"', 'actions/cache'),
+            (f'"Actions/Cache\\x40{V610}"', 'Actions/Cache')):
         root = _one_pin(tmp, f'{spelling}  # v6.1.0')
         verified, refusals = mod.verify(root, _refusing_run)
         assert verified == [], (spelling, verified)
         assert refusals == [
-            f".github/workflows/tests.yml:4: decoded uses 'actions/cache@"
+            f".github/workflows/tests.yml:4: decoded uses '{action}@"
             f"{V610}' matches no recognised pin"], (spelling, refusals)
 
 
