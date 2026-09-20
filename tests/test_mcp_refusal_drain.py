@@ -194,6 +194,83 @@ def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
                 os.environ[name] = previous
 
 
+def test_isolated_restores_an_absent_token(_tmp):
+    original = dict(os.environ)
+    try:
+        os.environ.pop('TOKEN', None)
+        os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
+        snapshot = dict(os.environ)
+        with _daedalus_env.isolated({'TOKEN': 'applied-token'}):
+            assert os.environ['TOKEN'] == 'applied-token'
+            assert 'DAEDALUS_ISOLATED_PROBE' not in os.environ
+        assert os.environ == snapshot, 'environment leaked'
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
+def test_isolated_restores_a_different_prior_token(_tmp):
+    original = dict(os.environ)
+    try:
+        os.environ['TOKEN'] = 'shell-token'
+        os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
+        snapshot = dict(os.environ)
+        with _daedalus_env.isolated({'TOKEN': 'applied-token'}):
+            assert os.environ['TOKEN'] == 'applied-token'
+            assert 'DAEDALUS_ISOLATED_PROBE' not in os.environ
+        assert os.environ == snapshot, 'environment leaked'
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
+def test_isolated_restores_an_overlapping_daedalus_key(_tmp):
+    original = dict(os.environ)
+    try:
+        os.environ['DAEDALUS_ISOLATED_SHARED'] = 'shell-value'
+        os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
+        snapshot = dict(os.environ)
+        applied = {'DAEDALUS_ISOLATED_SHARED': 'applied-value'}
+        with _daedalus_env.isolated(applied):
+            assert os.environ['DAEDALUS_ISOLATED_SHARED'] == 'applied-value'
+            assert 'DAEDALUS_ISOLATED_PROBE' not in os.environ
+        assert os.environ == snapshot, 'environment leaked'
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
+def test_isolated_restores_environment_after_exception(_tmp):
+    original = dict(os.environ)
+    try:
+        os.environ['TOKEN'] = 'shell-token'
+        os.environ['DAEDALUS_ISOLATED_SHARED'] = 'shell-value'
+        os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
+        applied = {
+            'TOKEN': 'applied-token',
+            'DAEDALUS_ISOLATED_SHARED': 'applied-value',
+            'DAEDALUS_ISOLATED_NEW': 'new-value',
+        }
+        os.environ.pop('DAEDALUS_ISOLATED_NEW', None)
+        snapshot = dict(os.environ)
+        try:
+            with _daedalus_env.isolated(applied):
+                assert os.environ['TOKEN'] == 'applied-token'
+                assert os.environ['DAEDALUS_ISOLATED_SHARED'] == (
+                    'applied-value')
+                assert os.environ['DAEDALUS_ISOLATED_NEW'] == 'new-value'
+                assert 'DAEDALUS_ISOLATED_PROBE' not in os.environ
+                raise RuntimeError('isolated body failed')
+        except RuntimeError as error:
+            assert str(error) == 'isolated body failed'
+        else:
+            raise AssertionError('body exception did not escape')
+        assert os.environ == snapshot, 'environment leaked'
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
 def test_request_token_is_public_guard_state(tmp):
     del tmp
     _need_deps()
