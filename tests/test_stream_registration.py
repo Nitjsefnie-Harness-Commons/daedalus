@@ -59,9 +59,7 @@ def _server(tmp, name):
 
 
 def _request_stream(server, tab):
-    """Drive the real do_GET against a peer that fails the header flush.
-
-    The BrokenPipeError the flush raises propagates out of do_GET whether
+    """The BrokenPipeError the flush raises propagates out of do_GET whether
     or not the registration is released; what the handler leaves in the
     registry afterwards is the contract, read through the service's own
     public snapshot.
