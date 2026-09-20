@@ -22,7 +22,7 @@ def _load_mcp(base_url, mcp_port=None, max_body_size=None):
 
 
 def _start_in_thread(mod, local_url=None):
-    # Rebinding reads the environment again after the load shield has ended.
+    # Rebinding reads the environment again after import isolation has ended.
     with _daedalus_env.isolated({}):
         return mod.start_in_thread(local_url)
 
