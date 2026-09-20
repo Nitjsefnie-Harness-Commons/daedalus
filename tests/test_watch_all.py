@@ -39,9 +39,8 @@ def _fake_gh(mod, answers, seen=None):
     real module is left alone, so the next load's `git rev-parse` is real.
     """
     def run(argv, **kwargs):
-        del kwargs
         if seen is not None:
-            seen.append(list(argv))
+            seen.append((list(argv), kwargs))
         path = argv[-1]
         for fragment, answer in answers.items():
             if fragment in path:
@@ -107,13 +106,17 @@ def test_a_failed_query_cannot_look_settled(tmp):
     assert mod._all_concluded(SHA) is None
     _fake_gh(mod, {'/actions/runs': 'not json'})
     assert mod._all_concluded(SHA) is None
+    one_good_page = _runs_body(_run(1, 'completed', 'success')) + 'not json'
+    _fake_gh(mod, {'/actions/runs': one_good_page})
+    assert mod._all_concluded(SHA) is None
 
 
 def test_paginated_pages_are_all_read(tmp):
     del tmp
     mod = _watch_all()
-    pages = (_runs_body(_run(1, 'completed', 'success')) + '\n'
-             + _runs_body(_run(2, 'queued', None)) + '\n')
+    pages = (_runs_body(_run(1, 'completed', 'success'))
+             + _runs_body(_run(2, 'queued', None)))
+    assert '\n' not in pages
     _fake_gh(mod, {'/actions/runs': pages})
     assert mod._all_concluded(SHA) is False
 
@@ -125,7 +128,9 @@ def test_the_query_is_fresh_paginated_and_pinned_to_the_sha(tmp):
     _fake_gh(mod, {'/actions/runs': _runs_body()}, seen)
     mod._all_concluded(SHA)
     assert len(seen) == 1
-    argv = seen[0]
+    argv, kwargs = seen[0]
+    assert kwargs.get('check') is True
+    assert kwargs.get('timeout')
     assert '--paginate' in argv
     assert 'Cache-Control: no-cache' in argv
     assert f'actions/runs?head_sha={SHA}' in argv[-1]
