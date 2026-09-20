@@ -82,6 +82,41 @@ def test_state_neutral_short_circuits_scale_linearly(tmp):
     assert wide <= narrow * 2, (narrow, wide)
 
 
+def _conditional_store_copies(tmp, width):
+    source = Path(tmp) / f'conditional_stores_{width}.py'
+    stores = ''.join(f'    if args.flag{index}: cmd["key{index}"] = None\n'
+                     for index in range(width))
+    source.write_text(
+        'def f(args):\n'
+        '    cmd = {"id": "_focus", "type": "focus-tab"}\n'
+        f'{stores}'
+        '    sent = api("PUT", "/command", cmd)\n'
+        '    if sent.get("error"):\n'
+        '        return None\n'
+        '    return sent\n',
+        encoding='utf-8')
+    copies = 0
+    original = _pyroute._copy_state_pair
+
+    def counted_copy(state):
+        nonlocal copies
+        copies += 1
+        return original(state)
+
+    _pyroute._copy_state_pair = counted_copy
+    try:
+        assert not _pyroute.py_tab_routing_violations(source, source.name)
+    finally:
+        _pyroute._copy_state_pair = original
+    return copies
+
+
+def test_conditional_ordinary_stores_scale_linearly(tmp):
+    narrow = _conditional_store_copies(tmp, 4)
+    wide = _conditional_store_copies(tmp, 8)
+    assert wide <= narrow * 2, (narrow, wide)
+
+
 def _js_member_scan_operations(tmp, count):
     source = Path(tmp) / f'js_member_calls_{count}.js'
     lines = ["const ordinary = () => undefined;\n"]

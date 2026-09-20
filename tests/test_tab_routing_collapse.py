@@ -165,6 +165,30 @@ def test_setdefault_respects_occupied_clean_keys(tmp):
     verdicts(tmp, cases)
 
 
+def test_clean_occupancy_joins_keep_only_shared_keys(tmp):
+    """A key occupied on only some paths is missing at the join: setdefault
+    binds the default there, as the runtime does on the path lacking it.
+    The bodies define no nested scope, so the join is decided by the
+    deferred state alone."""
+    stores = [
+        ('conditional', 'd = {}\nif args.flag: d["k"] = ordinary', (0, 1)),
+        ('conditional-removal',
+         'd = {"k": ordinary}\nif args.flag: del d["k"]', (1, 1)),
+        ('literal-condition', 'd = {}\nif True: d["k"] = ordinary', (0, 0)),
+        ('both-arms', 'd = {}\nif args.flag: d["k"] = ordinary\n'
+         'else: d["k"] = ordinary', (0, 0)),
+        ('other-key', 'd = {"k": ordinary}\n'
+         'if args.flag: d["j"] = ordinary', (0, 0)),
+        ('loop', 'd = {}\nfor _ in args.values: d["k"] = ordinary', (0, 1)),
+        ('loop-shared', 'd = {"k": ordinary}\n'
+         'for _ in args.values: d["j"] = ordinary', (0, 0)),
+    ]
+    cases = [(label, store + '\nx = d.setdefault("k", ext_cmd)\n'
+              'x("_focus", "focus-tab", tab=int(args.chrome_tab))', expected)
+             for label, store, expected in stores]
+    verdicts(tmp, cases)
+
+
 def test_starred_sender_suffix_alignment(tmp):
     shapes = [
         ('prefix-star', 'def pair2(): return ordinary, relay()\n'

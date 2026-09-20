@@ -1,6 +1,8 @@
 """Shared storage updates for deferred aggregate values."""
 from dataclasses import replace
 
+from _pyroute_values import DeferredContainer, sync_cells
+
 
 def _replace_value(value, identity, replacement, memo):
     cached = memo.get(id(value))
@@ -54,3 +56,28 @@ def replace_deferred_storage(state, owner, replacement):
                 or generator is not binding.generator:
             state.cells.values[key] = replace(
                 binding, deferred=deferred, generator=generator)
+
+
+def join_clean_occupancy(kept, other):
+    """The kept state, with a clean key the other path lacks made missing.
+
+    Both states carry one join signature, so they differ at most in which
+    keys ordinary values occupy. A key that is missing on either path is
+    missing after the join: setdefault, get and pop then bind their deferred
+    default, which is what the path lacking the key does. The kept state is
+    left untouched, as other lists may still hold it."""
+    joined = kept
+    for name, owner in kept.callables.items():
+        if not isinstance(owner, DeferredContainer):
+            continue
+        partner = other.callables[name]
+        items = {key: item for key, item in owner.items.items()
+                 if item is not None or key in partner.items}
+        if len(items) == len(owner.items):
+            continue
+        if joined is kept:
+            joined = kept.copy()
+        replace_deferred_storage(joined, owner, DeferredContainer(
+            items, owner.length, owner.kind, owner.identity))
+        sync_cells(joined, {name})
+    return joined
