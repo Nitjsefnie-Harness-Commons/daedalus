@@ -184,14 +184,21 @@ async function startStream() {
   } catch (e) {
     if (e.name !== 'AbortError') {
       console.error('[Daedalus] Stream error:', e);
+      // a dropped connection is a failed attempt, like a refused answer
+      _streamFailures++;
     }
   }
   // Only the current generation reschedules. If a stop/restart bumped
   // streamGen while we were running, stay silent — the newer stream owns
-  // reconnection, so we never stack overlapping SSE loops.
+  // reconnection, so we never stack overlapping SSE loops. A clean EOF
+  // lands here with the counter still at its connect-time zero, so its
+  // retry stays at the 1 s base.
   if (myGen === streamGen) {
     sseAbort = null;
-    setTimeout(() => { if (myGen === streamGen) startStream(); }, 1000);
+    const delay = Math.min(
+      _STREAM_RETRY_BASE_MS * 2 ** _streamFailures,
+      _STREAM_RETRY_MAX_MS);
+    setTimeout(() => { if (myGen === streamGen) startStream(); }, delay);
   }
 }
 
