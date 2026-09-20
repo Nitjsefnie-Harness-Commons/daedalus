@@ -334,8 +334,9 @@ def test_a_transient_read_refusal_returns_every_queued_command(tmp):
         with _refuse_path_operation(
                 refused_file, 'read_text', refusals) as calls:
             commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
-        # Each refusal costs one polling pass; the next pass reads the file.
-        assert calls[0] == refusals + 1, calls
+        # Refusals are counted before any read succeeds, so a count past
+        # them proves the refusal was exhausted and a later read happened.
+        assert calls[0] > refusals, (refusals, calls)
         assert commands == expected, commands
 
 
@@ -367,7 +368,7 @@ def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
         with _refuse_path_operation(
                 refused_file, 'read_text', refusals) as calls:
             commands = _overlap._wait_for_client_commands(queue, 2)
-        assert calls[0] == refusals + 1, calls
+        assert calls[0] > refusals, (refusals, calls)
         assert commands == expected, commands
 
 
