@@ -235,8 +235,9 @@ def test_both_workflow_extensions_github_accepts_are_scanned(tmp):
 
 
 def test_a_reference_the_grammar_did_not_account_for_is_refused(tmp):
-    """Whatever spelling carries it, a line with an actions/cache reference
-    is a pin, a refusal, or a comment; there is no fourth outcome."""
+    """A non-comment line spelling an `actions/cache…@` reference
+    literally is a pin or a refusal; a spelling that hides the reference
+    from the line grammar is the decoder cross-check's to catch."""
     mod = _verifier()
     root = _workflow(tmp, (
         'jobs:\n  j:\n    steps:\n'
