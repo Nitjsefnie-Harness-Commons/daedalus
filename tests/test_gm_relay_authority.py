@@ -265,7 +265,8 @@ async function run() {
     : mode === 'create-refused' || mode === 'create-sync-throw'
       ? [['https://example.com/', true]]
       : [['chrome://settings', true], ['javascript:alert(1)', true],
-        ['not a url', true], ['https://example.com/', true],
+        ['file:///etc/passwd', true], ['not a url', true],
+        ['https://example.com/', true],
         ['http://example.com/plain', false], ['http://example.com/omitted']];
   const outcomes = [];
   for (const [url, active] of requests) {
@@ -362,7 +363,8 @@ def test_a_page_can_open_only_web_urls(tmp):
     del tmp
     outcome = _run_relay_authority('open')
     by_url = {item['url']: item for item in outcome['outcomes']}
-    for url in ('chrome://settings', 'javascript:alert(1)', 'not a url'):
+    for url in ('chrome://settings', 'javascript:alert(1)',
+                'file:///etc/passwd', 'not a url'):
         refused = by_url[url]
         assert refused['error'], refused
         assert refused['tabId'] is None, refused
