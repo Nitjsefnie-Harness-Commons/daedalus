@@ -165,6 +165,33 @@ def test_setdefault_respects_occupied_clean_keys(tmp):
     verdicts(tmp, cases)
 
 
+def test_starred_sender_suffix_alignment(tmp):
+    shapes = [
+        ('prefix-star', 'def pair2(): return ordinary, relay()\n'
+         '*rest, y = pair2()', 'rest[0]()'),
+        ('middle-star', 'def pair2():\n'
+         '    return ordinary, ordinary, ordinary, relay()\n'
+         'first, *rest, y = pair2()', 'first()'),
+    ]
+    cases = [(label + direction, body(store, invoke), expected)
+             for label, store, clean in shapes
+             for direction, invoke, expected in (
+                 ('-suffix', 'y()', (1, 1)), ('-prefix', clean, (0, 0)),
+                 ('-discarded', '0', (0, 0)))]
+    verdicts(tmp, cases)
+
+
+def test_setdefault_unknown_existing_sender(tmp):
+    prefix = ('d = args.__dict__\n'
+              'x = d.setdefault("k", lambda *a, **kw: ordinary())\n')
+    observed = [_tracked_focus_verdict(
+        tmp, prefix + invoke, before='_args.k = ext_cmd', counts=True)
+        for invoke in (
+            'return x("_focus", "focus-tab", tab=args.chrome_tab)',
+            'return x("_focus", "focus-tab")')]
+    assert observed == [(1, 1), (1, 0)], observed
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 
