@@ -302,6 +302,24 @@ def test_dynamic_setdefault_stores_default(tmp):
     verdicts(tmp, cases)
 
 
+def test_mixed_key_containers_join(tmp):
+    """A container holding string and dynamic keys still has a signature
+    order at a join and on callee replay; keys are ordered by type name."""
+    stores = [
+        ('setdefault', 'd = {"k": relay()}\n'
+         'd.setdefault(str(args.chrome_tab), relay())\nif args.flag: pass'),
+        ('update', 'd = {"k": relay()}\n'
+         'd.update({str(n): relay() for n in args.values})\n'
+         'if args.flag: pass'),
+    ]
+    cases = [(label, body(store, 'd["k"]()'), (1, 1))
+             for label, store in stores]
+    cases.extend((label + '-clean', body(store, 'd["k"]()').replace(
+        'lambda: send(', 'lambda: ordinary('), (0, 0))
+                 for label, store in stores)
+    verdicts(tmp, cases)
+
+
 def _opaque_mapping_verdicts(tmp, store):
     source = body(store, 'x["k"]()')
     clean = source.replace('lambda: send(', 'lambda: ordinary(')
