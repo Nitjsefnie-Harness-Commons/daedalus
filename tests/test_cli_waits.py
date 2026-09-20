@@ -340,7 +340,7 @@ def test_a_complete_error_answer_is_still_reported_by_status(tmp):
 
 
 _RAISING_URLOPEN = """
-import builtins, sys, urllib.request
+import builtins, sys, urllib.error, urllib.request
 from daedalus_cli import transport
 family, where, entry = sys.argv[1:4]
 exc = getattr(builtins, family)
@@ -355,13 +355,19 @@ class Response:
         return False
 
     def read(self):
-        raise exc(f'{family} from read')
+        raise exc(f'{family} from {where}')
+
+    def close(self):
+        pass
 
 
 def urlopen(req, timeout=None):
     attempts.append(req.full_url)
     if where == 'open':
         raise exc(f'{family} from open')
+    if where == 'error':
+        raise urllib.error.HTTPError(
+            req.full_url, 502, 'Bad Gateway', None, Response())
     return Response()
 
 
@@ -375,9 +381,10 @@ else:
 
 
 def _check_transport_family(family):
-    """`family` from urlopen and from read, through both entry points."""
+    """`family` from urlopen, from the body read and from the read of
+    an HTTPError's body, through both entry points."""
     env = cli_env(DAEDALUS_TOKEN=TOK)
-    for where in ('open', 'read'):
+    for where in ('open', 'read', 'error'):
         r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
                   'api'], env)
         assert r.returncode != 0, (where, r.returncode, r.stdout)
@@ -404,6 +411,12 @@ def test_a_connection_reset_is_a_connection_failure_on_every_entry(tmp):
 def test_a_timeout_is_a_connection_failure_on_every_entry(tmp):
     del tmp
     _check_transport_family('TimeoutError')
+
+
+def test_a_bare_oserror_is_a_connection_failure_on_every_entry(tmp):
+    """The clause admits the family, not the members met so far."""
+    del tmp
+    _check_transport_family('OSError')
 
 
 if __name__ == '__main__':
