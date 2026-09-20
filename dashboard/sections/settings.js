@@ -84,7 +84,7 @@ export function mount(container, bus) {
       toast('settings saved', 'ok');
     } catch (e) {
       setStatus(h('span', { class: 'red' },
-        'server check failed (network error or cross-origin CORS proxy needed): ' + errMsg(e)));
+        'server check failed: ' + errMsg(e) + '. Cross-origin bridge URLs need a CORS-enabled proxy.'));
     }
   });
 

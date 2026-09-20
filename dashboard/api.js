@@ -12,7 +12,8 @@ export function setToken(t) {
   localStorage.setItem(KEY_TOKEN, (t || '').trim());
 }
 export function getServer() {
-  // Empty string = same origin. Users can override via §12 Settings to hit a different host.
+  // Empty string = same origin. A cross-origin bridge needs a CORS-enabled
+  // reverse proxy in front of it; the bridge sends no CORS headers.
   return localStorage.getItem(KEY_SERVER) || '';
 }
 export function setServer(s) {
