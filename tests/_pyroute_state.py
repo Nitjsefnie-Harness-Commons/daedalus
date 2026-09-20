@@ -3,6 +3,7 @@ import ast
 import operator
 from dataclasses import dataclass, field
 
+from _pyroute_mapping import alias_target_pairs, store_deferred_target
 from _pyroute_values import (CellState, DeferredGenerator,
                              cell_state_signature, deferred_signature,
                              is_deferred_value, merge_cell_states,
@@ -415,37 +416,30 @@ def deferred_generator(expr, yielded=None):
 
 
 def bind_alias_target(target, value, state, bindings):
+    expression = isinstance(value, ast.AST)
+    resolved = evaluated_value(value, state) if expression else value
     if isinstance(target, ast.Name):
-        resolved = evaluated_value(value, state)
         if isinstance(resolved, DeferredGenerator):
             bindings[1][target.id] = resolved
         elif is_deferred_value(resolved):
-            bindings[2][target.id] = resolved  # Alias sender: string, no func.
+            bindings[2][target.id] = resolved
             sender = (resolve_sender_name(value, state.aliases)
-                      or sender_value(resolved))
+                      if expression else None) or sender_value(resolved)
             if sender is not None: bindings[0][target.id] = sender
-        elif resolved is not None:
-            bindings[0][target.id] = sender_value(resolved) or resolved
+        elif sender_value(resolved) is not None:
+            bindings[0][target.id] = sender_value(resolved)
+        return
+    if isinstance(target, (ast.Attribute, ast.Subscript)):
+        store_deferred_target(target, resolved, state)
         return
     if not isinstance(target, (ast.Tuple, ast.List)):
         return
-    pairs = None
-    if isinstance(value, (ast.Tuple, ast.List)):
-        stars = [index for index, item in enumerate(target.elts)
-                 if isinstance(item, ast.Starred)]
-        if not stars and len(target.elts) == len(value.elts):
-            pairs = zip(target.elts, value.elts)
-        elif len(stars) == 1 and len(value.elts) >= len(target.elts) - 1:
-            star = stars[0]
-            suffix = len(target.elts) - star - 1
-            pairs = [*zip(target.elts[:star], value.elts[:star]),
-                     *(zip(target.elts[-suffix:], value.elts[-suffix:])
-                       if suffix else ())]
+    pairs = alias_target_pairs(target, resolved if is_deferred_value(
+        resolved) else value)
     if pairs is not None:
         for nested_target, nested_value in pairs:
             bind_alias_target(nested_target, nested_value, state, bindings)
         return
-    resolved = evaluated_value(value, state)
     if resolved is not None and not isinstance(resolved, DeferredGenerator):
         for name in bound_names(target):
             bindings[0][name] = UNPROVABLE_SENDER
@@ -495,7 +489,8 @@ def apply_alias_statement(node, state):
     bindings = ({}, {}, {})
     if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
         for target in targets:
-            bind_alias_target(target, node.value, state, bindings)
+            if isinstance(target, (ast.Name, ast.Tuple, ast.List)):
+                bind_alias_target(target, node.value, state, bindings)
     names = set().union(*(bound_names(target) for target in targets))
     if isinstance(node, ast.Delete):
         delete_builtin_names(state, names)
