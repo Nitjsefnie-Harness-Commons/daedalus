@@ -266,11 +266,16 @@ async function run() {
       ? [['https://example.com/', true]]
       : [['chrome://settings', true], ['javascript:alert(1)', true],
         ['not a url', true], ['https://example.com/', true],
-        ['http://example.com/plain', false]];
+        ['http://example.com/plain', false], ['http://example.com/omitted']];
   const outcomes = [];
   for (const [url, active] of requests) {
+    // A one-element row sends no `active` key at all, as a page that left
+    // the field out does: JSON drops an undefined member, so `active:
+    // undefined` would not be the wire form.
+    const message = { type: 'openTab', url };
+    if (active !== undefined) message.active = active;
     try {
-      const relayed = await send({ type: 'openTab', url, active });
+      const relayed = await send(message);
       outcomes.push({
         url,
         tabId: relayed.answer.tabId === undefined
@@ -348,9 +353,11 @@ def test_a_page_can_open_only_web_urls(tmp):
     `chrome://` pages, or a `javascript:` URL, with the extension's authority.
     A refused URL is answered `{error}` and never reaches the browser, and
     every outcome answers exactly once. Each accepted web scheme drives its
-    own control, so a gate narrowed to `https:` alone fails, and the
-    `active` each control sends is observed at the create call, so a relay
-    that forces the tab to the foreground fails too.
+    own control, so a gate narrowed to `https:` alone fails. The `active`
+    each control sends, or leaves out, is observed at the create call, and
+    the controls vary it independently of scheme, so a relay that forces
+    the tab to the foreground, or derives `active` from anything but the
+    page's field, fails too.
     """
     del tmp
     outcome = _run_relay_authority('open')
@@ -362,17 +369,20 @@ def test_a_page_can_open_only_web_urls(tmp):
         assert refused['threw'] is None, refused
         assert refused['responses'] == 1, refused
     for url, tab_id in (('https://example.com/', 101),
-                        ('http://example.com/plain', 102)):
+                        ('http://example.com/plain', 102),
+                        ('http://example.com/omitted', 103)):
         opened = by_url[url]
         assert opened['error'] is None, opened
         assert opened['tabId'] == tab_id, opened
         assert opened['responses'] == 1, opened
     assert outcome['created'] == [
-        'https://example.com/', 'http://example.com/plain'], outcome
+        'https://example.com/', 'http://example.com/plain',
+        'http://example.com/omitted'], outcome
     assert outcome['createDetails'] == [
         {'url': 'https://example.com/', 'active': True},
-        {'url': 'http://example.com/plain', 'active': False}], outcome
-    assert outcome['createCalls'] == 2, outcome
+        {'url': 'http://example.com/plain', 'active': False},
+        {'url': 'http://example.com/omitted', 'active': True}], outcome
+    assert outcome['createCalls'] == 3, outcome
 
 
 def test_a_refused_tab_creation_answers_an_error(tmp):
