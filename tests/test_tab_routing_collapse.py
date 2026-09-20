@@ -251,6 +251,7 @@ def test_callee_replay_keeps_occupancy_apart(tmp):
             rows.append((f'missing-first-{arm}-{flag}',
                          f'{use}if {flag}: {removal}; x = use()\n'
                          'else: x = use()', (int(taken), 1)))
+    rows.append(('occupied-alone', use + 'x = use()', (0, 0)))
     verdicts(tmp, [(label, body(store, 'x()'), expected)
                    for label, store, expected in rows])
 
