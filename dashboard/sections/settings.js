@@ -33,7 +33,10 @@ export function mount(container, bus) {
     h('div', { class: 'dim small' },
       h('p', {}, h('b', {}, 'Token:'), ' single shared secret between the extension and server. Get it from the Chrome extension\'s options page (puzzle icon → Daedalus → Options). Stored in ',
         h('code', {}, 'localStorage.daedalus-token'), '.'),
-      h('p', {}, h('b', {}, 'Server:'), ' leave blank to hit the same origin that serves this page. Useful if you point the dashboard at a different host.'),
+      h('p', {}, h('b', {}, 'Server:'),
+        ' leave blank to hit the same origin that serves this page. ',
+        'Useful if you point the dashboard at a different host; the bridge sends no CORS headers by design, ',
+        'so put a CORS-enabled reverse proxy in front of it.'),
       h('p', { class: 'amber' }, h('b', {}, 'Caveat:'), ' the Daedalus extension injects ',
         h('code', {}, 'content.js + page.js'),
         ' into every URL including this dashboard. A command that names no tab (',
@@ -80,7 +83,8 @@ export function mount(container, bus) {
       setStatus(h('span', { class: 'green' }, 'connected'));
       toast('settings saved', 'ok');
     } catch (e) {
-      setStatus(h('span', { class: 'red' }, 'server unreachable: ' + errMsg(e)));
+      setStatus(h('span', { class: 'red' },
+        'server check failed (network error or cross-origin CORS proxy needed): ' + errMsg(e)));
     }
   });
 
