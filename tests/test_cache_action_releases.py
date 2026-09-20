@@ -291,12 +291,17 @@ def test_every_resolution_refusal_is_reported(tmp):
 
 def _main(mod, root, stdout):
     """Run main() against `root` with subprocess.run answering `stdout`."""
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout, '')
+
     out, err = io.StringIO(), io.StringIO()
-    with mock.patch.object(subprocess, 'run') as run:
-        run.return_value = subprocess.CompletedProcess([], 0, stdout, '')
+    with mock.patch.object(subprocess, 'run', fake_run):
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             status = mod.main([str(root)])
-    return status, out.getvalue(), err.getvalue(), run.call_args_list
+    return status, out.getvalue(), err.getvalue(), calls
 
 
 def test_main_binds_gh_api_with_check_and_a_timeout(tmp):
@@ -309,9 +314,10 @@ def test_main_binds_gh_api_with_check_and_a_timeout(tmp):
     assert status == 0, (status, err)
     assert out == f'{V610} v6.1.0 1 pin(s)\n', out
     assert err == '', err
-    assert calls == [mock.call(
-        [*_GH_API, _REF + 'v6.1.0'], capture_output=True, text=True,
-        check=True, timeout=60)], calls
+    assert calls == [(
+        [*_GH_API, _REF + 'v6.1.0'],
+        {'capture_output': True, 'text': True, 'check': True,
+         'timeout': 60})], calls
 
 
 def test_main_reports_every_refusal_and_exits_nonzero(tmp):
