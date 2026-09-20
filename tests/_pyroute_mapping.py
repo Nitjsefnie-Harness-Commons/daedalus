@@ -213,6 +213,14 @@ def _setdefault_value(node, state):
     return _known_value(node.args[1], state) if len(node.args) > 1 else None
 
 
+def _unknown_lookup_default(node, state):
+    """A known default of a get or pop on an owner the model cannot read."""
+    if not isinstance(node.func, ast.Attribute) \
+            or node.func.attr not in ('get', 'pop') or len(node.args) < 2:
+        return None
+    return _known_value(node.args[1], state)
+
+
 def _mapping_item_value(node, owner, state):
     default = _known_value(node.args[1], state) if len(node.args) > 1 else None
     key = node.args[0] if node.args else None
@@ -296,6 +304,9 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
             value = _mapping_item_value(node, owner, state)
             _apply_pop(state, node)
             return value
+        default = _unknown_lookup_default(node, state)
+        if default is not None:
+            return merge_yielded((default, UNPROVABLE_SENDER))
         if isinstance(node.func, ast.Attribute) \
                 and node.func.attr == 'fromkeys' \
                 and isinstance(node.func.value, ast.Name):

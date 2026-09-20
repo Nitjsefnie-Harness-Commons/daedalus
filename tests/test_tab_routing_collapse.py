@@ -83,6 +83,32 @@ def test_unknown_setdefault_keeps_default_body(tmp):
     verdicts(tmp, cases)
 
 
+def test_unknown_lookup_keeps_default_body(tmp):
+    """get and pop on an owner the model cannot read keep a known default
+    beside the unprovable sender, as setdefault does."""
+    shapes = [
+        ('bound-get', 'd = args.__dict__\nx = d.get("k", relay())', 'x()',
+         (1, 1), (0, 0)),
+        ('inline-get', 'x = args.__dict__.get("k", relay())', 'x()',
+         (1, 1), (0, 0)),
+        ('inline-pop', 'x = args.__dict__.pop("k", relay())', 'x()',
+         (1, 1), (0, 0)),
+        ('unbound-call', '', 'args.__dict__.get("k", relay())()',
+         (1, 1), (0, 0)),
+        # The call carrying tab is reported as well: x may be the sender.
+        ('keyword-call', 'x = args.__dict__.get("k", lambda tab: relay()())',
+         'x(tab=args.chrome_tab)', (1, 2), (0, 1)),
+    ]
+    cases = [(label, body(store, invoke), expected)
+             for label, store, invoke, expected, _ in shapes]
+    cases.extend((label + '-clean', body(store, invoke).replace(
+        'lambda: send(', 'lambda: ordinary('), clean)
+                 for label, store, invoke, _, clean in shapes)
+    cases.append(('no-default', body(
+        'd = args.__dict__\nx = d.get("k")', 'x'), (0, 0)))
+    verdicts(tmp, cases)
+
+
 def test_callable_join_defaults(tmp):
     choices = [
         ('bad-first', 'relay()', 'lambda: ordinary()'),
