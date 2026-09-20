@@ -130,12 +130,7 @@ def _workflow_of(run):
 
 
 def _started_key(run):
-    """(start, id): the instant the run began, tie-broken by numeric id.
-
-    run_started_at is read first, created_at stands in when it is missing,
-    and an absent or unparseable stamp sorts as the oldest instant so a
-    run with no readable start can never be the newer of two.
-    """
+    """(start, id): the instant the run began, tie-broken by numeric id."""
     text = run.get('run_started_at') or run.get('created_at')
     stamp = OLDEST
     if text:
