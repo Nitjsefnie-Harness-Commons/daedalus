@@ -10,6 +10,7 @@ its own buttons, and judges the fetches it makes, the hrefs it renders
 and the object URLs it lets go of.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -452,6 +453,7 @@ _CAPTURE_HARNESS = _DOM + r"""
 (async () => {
 const commands = [];
 const imageTargets = [];
+const uploads = [];
 let envelope;
 globalThis.fetch = async (target, init = {}) => {
   if (target === '/tabs') {
@@ -460,7 +462,13 @@ globalThis.fetch = async (target, init = {}) => {
       { tabId: '22', title: 'second', url: '', age: 0 },
     ]);
   }
-  if (target.startsWith('/upload?')) return jsonResponse({ items: [] });
+  if (target.startsWith('/upload?')) {
+    const query = new URLSearchParams(target.split('?')[1]);
+    const limit = Number(query.get('limit'));
+    const offset = Number(query.get('offset'));
+    return jsonResponse({ items: uploads.slice(offset, offset + limit),
+      total: uploads.length, limit, offset });
+  }
   if (target === '/command') {
     const command = JSON.parse(init.body);
     commands.push(command);
@@ -471,6 +479,9 @@ globalThis.fetch = async (target, init = {}) => {
         + commands.length + '.png', size: 3, format: 'png', tabUrl: '' },
       error: null, world: 'extension',
     };
+    uploads.push({ id: command.id,
+      filename: 'capture-' + commands.length + '.png', size: 3,
+      mtime: commands.length, path: envelope.result.path });
     return jsonResponse({ ok: true, did: envelope.deliveryId });
   }
   if (target.startsWith('/result?')) {
@@ -541,13 +552,90 @@ def _repeated_captures(section):
 def test_screenshot_panel_reuses_one_upload_id(_tmp):
     seen = _repeated_captures('screenshot')
     assert all(cmd['format'] == 'png' for cmd in seen['commands']), seen
-    assert len(seen['imageTargets']) == 4, seen
-    for index, target in enumerate(seen['imageTargets'], start=1):
-        assert target.endswith(f'%2Fcapture-{index}.png'), target
+    for index in range(1, 5):
+        assert any(target.endswith(f'%2Fcapture-{index}.png')
+                   for target in seen['imageTargets']), seen
 
 
 def test_tab_row_captures_reuse_one_upload_id(_tmp):
     _repeated_captures('tabs')
+
+
+_RECENT_HARNESS = _DOM + r"""
+import { readFileSync } from 'node:fs';
+(async () => {
+const pages = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+globalThis.fetch = async (target) => {
+  if (target === '/tabs') return jsonResponse([]);
+  if (target.startsWith('/upload?')) {
+    if (!(target in pages)) throw new Error('unexpected page ' + target);
+    return jsonResponse(pages[target]);
+  }
+  const path = new URLSearchParams(target.split('?')[1]).get('path');
+  return { ok: true, blob: async () => ({ path }) };
+};
+URL.createObjectURL = (blob) => 'blob:' + blob.path;
+URL.revokeObjectURL = () => {};
+phase('dashboard module import started');
+const { mount } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs);
+phase('dashboard module imported');
+phase('dashboard call started');
+const container = new El('div');
+mount(container, { on() {} });
+await bounded(settle(), 'recent listing', _dashnodeStepTimeoutMs);
+const paths = container.find('[data-role=recent]').all()
+  .filter(el => el.tag === 'img').map(el => el.attrs.src.slice(5));
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify(paths));
+phase('dashboard harness finished');
+})().catch(leave);
+"""
+
+
+def _recent_captures(tmp, count, ids):
+    routes = _util.load(ROOT / 'daedalus_bridge' / 'upload_routes.py',
+                        'recent_upload_routes')
+    upload_dir = Path(tmp) / 'uploads'
+    captures = []
+    for index in range(count + 3):
+        stamp = 1_700_000_000_000 + index * 250
+        suffix = 'png' if index < count else 'txt'
+        path = (upload_dir / 'dashboard-token' / ids[index % len(ids)]
+                / f'{stamp}.{suffix}')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'capture')
+        os.utime(path, (stamp / 1000, stamp / 1000))
+        os.utime(path.parent, (stamp / 1000, stamp / 1000))
+        if index < count:
+            captures.append(path.relative_to(upload_dir).as_posix())
+    pages = {}
+    for offset in range(0, count + 3, 200):
+        status, page = routes.list_uploads(upload_dir, 'dashboard-token', {
+            'limit': ['200'], 'offset': [str(offset)]})
+        assert status == 200, page
+        pages[f'/upload?limit=200&offset={offset}'] = page
+    fixture = Path(tmp) / 'listing.json'
+    fixture.write_text(json.dumps(pages), encoding='utf-8')
+    harness = _dashnode.DashboardNodeHarness(
+        _RECENT_HARNESS, bounded_steps=2, module=True, arguments=(
+            ROOT / 'dashboard' / 'sections' / 'screenshot.js', fixture))
+    actual = json.loads(_dashnode.run_dashboard_node(harness).stdout)
+    expected = list(reversed(captures[-24:]))
+    assert actual == expected, {'actual': actual, 'expected': expected}
+
+
+def test_recent_captures_show_newest_24_within_one_id(tmp):
+    _recent_captures(tmp, 25, ['_ss'])
+
+
+def test_recent_captures_find_newest_beyond_the_first_page(tmp):
+    _recent_captures(tmp, 225, ['_ss'])
+
+
+def test_recent_captures_merge_surface_ids_across_all_pages(tmp):
+    _recent_captures(tmp, 450, ['_ss', '_screenshot'])
 
 
 def main():
