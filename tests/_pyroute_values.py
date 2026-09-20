@@ -29,6 +29,50 @@ def identity_token(value):
     return token
 
 
+def _key_order(item):
+    return type(item[0]).__name__, repr(item[0])
+
+
+def _items_signature(items, occupancy):
+    return tuple(sorted(((key, stored_signature(item))
+                         for key, item in items.items()
+                         if occupancy or item is not None), key=_key_order))
+
+
+def stored_signature(value, occupancy=True):
+    """Signature of a stored value by contents rather than object identity.
+
+    A None item is a key occupied by an ordinary value. With ``occupancy``
+    off, a top-level container's None items are left out, so two paths that
+    differ only in which clean keys they wrote can be joined."""
+    if isinstance(value, DeferredContainer):
+        return ('container', identity_token(value), value.length, value.kind,
+                _items_signature(value.items, occupancy))
+    if isinstance(value, DeferredInstance):
+        return ('instance', identity_token(value),
+                _items_signature(value.attributes, True))
+    if isinstance(value, DeferredAlternatives):
+        return ('alternatives', tuple(
+            stored_signature(item) for item in value.values))
+    if is_deferred_value(value):
+        return ('deferred', id(value))
+    return ('plain', value)
+
+
+def is_clean_container(value):
+    """Whether a container carries occupancy alone, no deferred item."""
+    return isinstance(value, DeferredContainer) \
+        and all(item is None for item in value.items.values())
+
+
+def value_signature(value):
+    if isinstance(value, DeferredGenerator):
+        return ('generator', value.expression.lineno,
+                value.expression.col_offset, value.remaining,
+                value.evaluate_zero)
+    return deferred_signature(value) or value
+
+
 def deferred_signature(value):
     """Dedupe signature of a deferred value; None for plain values."""
     signature = _SIGNATURE_MEMO.get(id(value))
@@ -242,7 +286,7 @@ def merge_cell_states(states):
     return CellState(origins, values)
 
 
-def _binding_signature(binding):
+def _binding_signature(binding, deferred_key=id):
     if binding is None:
         return None
     generator = binding.generator
@@ -252,17 +296,19 @@ def _binding_signature(binding):
         if isinstance(generator, DeferredGenerator) else None
     payload = (tuple(sorted(
         ((key, value[0], id(value[1]))
-         for key, value in binding.payload.items()),
-        key=lambda item: (type(item[0]).__name__, repr(item[0]))))
+         for key, value in binding.payload.items()), key=_key_order))
         if binding.payload is not None else None)
     return (binding.alias, generator_key,
-            id(binding.deferred) if binding.deferred is not None else None,
+            deferred_key(binding.deferred)
+            if binding.deferred is not None else None,
             payload, binding.bound)
 
 
-def cell_state_signature(cells):
+def cell_state_signature(cells, occupancy=True):
+    def deferred_key(value):
+        return stored_signature(value, occupancy)
     return (tuple(sorted(cells.origins.items())),
-            tuple(sorted((key, _binding_signature(binding))
+            tuple(sorted((key, _binding_signature(binding, deferred_key))
                          for key, binding in cells.values.items())))
 
 

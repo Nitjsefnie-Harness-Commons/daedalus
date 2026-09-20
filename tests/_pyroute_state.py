@@ -5,10 +5,12 @@ from dataclasses import dataclass, field
 
 from _pyroute_mapping import (alias_target_pairs, apply_assignment_bindings,
                               store_deferred_target)
+from _pyroute_storage import join_clean_occupancy
 from _pyroute_values import (CellState, DeferredGenerator,
-                             cell_state_signature, deferred_signature,
+                             cell_state_signature, is_clean_container,
                              is_deferred_value, merge_cell_states,
-                             sender_value, sync_cells)
+                             sender_value, stored_signature, sync_cells,
+                             value_signature)
 
 OPAQUE_TAB_SPREAD = object()
 UNPROVABLE_SENDER = '?ext_cmd'
@@ -504,14 +506,6 @@ def apply_alias_statement(node, state):
     sync_cells(state, names)
 
 
-def value_signature(value):
-    if isinstance(value, DeferredGenerator):
-        expr = value.expression
-        return ('generator', expr.lineno, expr.col_offset, value.remaining,
-                value.evaluate_zero)
-    return deferred_signature(value) or value
-
-
 def payload_state_signature(keys):
     tab = ('opaque' if OPAQUE_TAB_SPREAD in keys else 'absent'
            if 'tab' not in keys else 'extension'
@@ -519,7 +513,7 @@ def payload_state_signature(keys):
     return 'type' in keys, tab
 
 
-def state_signature(state):
+def state_signature(state, occupancy=True):
     payloads = [(name, *payload_state_signature(keys))
                 for name, keys in sorted(state.dicts.items())]
     namespaces = tuple(sorted(
@@ -527,29 +521,30 @@ def state_signature(state):
         for scope, values in state.dict_namespaces.items()
         for name, keys in values.items()))
     generators = tuple(sorted(
-        (name, value.expression.lineno, value.expression.col_offset,
-         value.remaining, value.evaluate_zero)
+        (name, *value_signature(value)[1:])
         for name, value in state.generators.items()))
-    found, evaluated = state.evaluated, []
-    for key in sorted(found):
-        value = found[key]
-        if value is None: continue
-        evaluated.append((key, value_signature(value)))
+    evaluated = tuple((key, value_signature(value)) for key, value in
+                      sorted(state.evaluated.items()) if value is not None
+                      and (occupancy or not is_clean_container(value)))
     return (tuple(payloads), tuple(sorted(state.aliases.items())),
-            generators, tuple(evaluated),
+            generators, evaluated,
             tuple(sorted(state.builtin_globals)),
             tuple(sorted(state.builtin_locals)),
-            tuple(sorted((name, id(value))
+            tuple(sorted((name, stored_signature(value, occupancy))
                          for name, value in state.callables.items())),
             tuple(sorted(state.bound)),
             tuple(sorted(state.dict_origins.items())),
-            namespaces, state.namespace, cell_state_signature(state.cells))
+            namespaces, state.namespace,
+            cell_state_signature(state.cells, occupancy))
 
 
 def dedupe_states(states):
     found = {}
     for state in states:
-        found.setdefault(state_signature(state), state)
+        signature = state_signature(state, occupancy=False)
+        kept = found.get(signature)
+        found[signature] = (state if kept is None
+                            else join_clean_occupancy(kept, state))
     return list(found.values())
 
 
