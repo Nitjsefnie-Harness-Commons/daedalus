@@ -21,10 +21,8 @@ def register(mcp, bridge):
         if format:
             fields['format'] = format
         if quality is not None:
-            # The extension reads quality || 80, so 0 and a negative
-            # silently capture at the default and an enormous one reaches
-            # Chrome unvalidated; 1-100 is the CLI's own -q range. One raise
-            # per condition: each refusal case witnesses exactly one site.
+            # Enforce the CLI's 1-100 range before the extension's fallback.
+            # Separate raises give each refusal case a distinct test witness.
             if not isinstance(quality, int):
                 raise ValueError('quality must be an integer')
             if isinstance(quality, bool):
@@ -47,9 +45,8 @@ def register(mcp, bridge):
                 'size': result_blob.get('size', 0)}
         if not include_image:
             return meta
-        # By path, not by id: ids are reused, so an id names a directory rather
-        # than a capture and its newest file belongs to whichever invocation
-        # finished last.
+        # Reused ids select whichever capture finished last; the path selects
+        # this invocation's file.
         selector = {'path': path} if path else {'id': cmd_id}
         img_bytes = await bridge.get_raw('/screenshot', **selector)
         return [meta, Image(data=img_bytes, format=format)]
