@@ -16,6 +16,7 @@ its caveat paragraph.
 import json
 import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -260,9 +261,10 @@ def test_settings_caveat_says_where_an_untargeted_command_runs(_tmp):
 
 _SETTINGS_STREAM_HARNESS = _dashnode.DashboardNodeHarness(_dashnode.DOM + r"""
 (async () => {
-token = '';
-localStorage.setItem = (key, value) => {
-  if (key === 'daedalus-token') token = value;
+const storage = new Map();
+globalThis.localStorage = {
+  getItem: (key) => storage.get(key) || null,
+  setItem: (key, value) => storage.set(key, value),
 };
 globalThis.window = { addEventListener() {} };
 document.querySelectorAll = () => [];
@@ -277,13 +279,14 @@ const streams = [];
 const probes = [];
 let available = false;
 globalThis.fetch = (target, init) => {
-  if (target === '/tabs') {
+  if (target.endsWith('/tabs')) {
     return new Promise((resolve, reject) => probes.push({ resolve, reject }));
   }
-  if (target !== '/stream?tab=dashboard') {
+  if (!target.endsWith('/stream?tab=dashboard')) {
     throw new Error('unexpected request ' + target);
   }
-  streams.push({ auth: init.headers.Authorization, signal: init.signal });
+  streams.push({ target, auth: init.headers.Authorization,
+    signal: init.signal });
   if (!available) return Promise.reject(new Error('bridge unavailable'));
   return Promise.resolve({ ok: true, body: { getReader: () => ({
     read: () => new Promise((_resolve, reject) => {
@@ -306,11 +309,13 @@ const initial = statuses.slice();
 const container = new El('div');
 settings.mount(container);
 container.find('[data-role=token]').value = 'first-token';
+container.find('[data-role=server]').value = 'https://example.com/first';
 container.find('[data-role=save]').click();
 probes[0].reject(new Error('bridge unavailable'));
 await bounded(settle(), 'failed first save', _dashnodeStepTimeoutMs);
 const failed = { statuses: statuses.slice(), retries: timers.size,
-  status: container.find('[data-role=status]').textContent, token };
+  status: container.find('[data-role=status]').textContent,
+  token: localStorage.getItem('daedalus-token') };
 available = true;
 for (const [id, callback] of [...timers]) {
   timers.delete(id);
@@ -320,17 +325,25 @@ await bounded(settle(), 'stream recovery', _dashnodeStepTimeoutMs);
 const recovered = statuses.at(-1);
 const previous = streams.at(-1);
 container.find('[data-role=token]').value = 'replacement-token';
+container.find('[data-role=server]').value = 'https://example.com/second';
 container.find('[data-role=save]').click();
 await bounded(settle(), 'save with pending probe', _dashnodeStepTimeoutMs);
 const pending = { status: statuses.at(-1),
   auth: streams.at(-1)?.auth, previousAborted: previous?.signal.aborted };
-probes[1].reject(new Error('probe unavailable'));
-await bounded(settle(), 'replacement probe failure', _dashnodeStepTimeoutMs);
+const beforeProbe = { count: streams.length, signal: streams.at(-1)?.signal };
+if (process.argv[3] === 'success') probes[1].resolve(jsonResponse([]));
+else probes[1].reject(new Error('probe unavailable'));
+await bounded(settle(), 'replacement probe settled', _dashnodeStepTimeoutMs);
+const afterProbe = { count: streams.length,
+  sameSignal: streams.at(-1)?.signal === beforeProbe.signal,
+  aborted: beforeProbe.signal?.aborted,
+  status: container.find('[data-role=status]').textContent };
 const final = statuses.at(-1);
 sse.stop();
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({ initial, failed, recovered,
-  pending, final, auth: streams.map((stream) => stream.auth) }));
+  pending, final, beforeProbeCount: beforeProbe.count, afterProbe,
+  requests: streams.map(({ target, auth }) => ({ target, auth })) }));
 phase('dashboard harness finished');
 })().catch(leave);
 """, bounded_steps=5, module=True, arguments=(
@@ -339,23 +352,36 @@ phase('dashboard harness finished');
 
 
 def test_saving_token_restarts_stream_independently_of_probe(_tmp):
-    result = _dashnode.run_dashboard_node(_SETTINGS_STREAM_HARNESS)
-    seen = json.loads(result.stdout)
-    assert seen['initial'] == ['no-token'], seen
-    assert seen['failed']['token'] == 'first-token', seen
-    assert 'bridge unavailable' in seen['failed']['status'], seen
-    assert seen['failed']['statuses'][-1] == 'reconnecting', seen
-    assert seen['failed']['retries'] == 1, seen
-    assert seen['recovered'] == 'connected', seen
-    assert seen['pending'] == {
-        'status': 'connected', 'auth': 'Bearer replacement-token',
-        'previousAborted': True,
-    }, seen
-    assert seen['final'] == 'connected', seen
-    assert seen['auth'] == [
-        'Bearer first-token', 'Bearer first-token',
-        'Bearer replacement-token',
-    ], seen
+    for outcome in ('failure', 'success'):
+        result = _dashnode.run_dashboard_node(
+            replace(_SETTINGS_STREAM_HARNESS, arguments=(
+                *_SETTINGS_STREAM_HARNESS.arguments, outcome)))
+        seen = json.loads(result.stdout)
+        assert seen['initial'] == ['no-token'], seen
+        assert seen['failed']['token'] == 'first-token', seen
+        assert 'bridge unavailable' in seen['failed']['status'], seen
+        assert seen['failed']['statuses'][-1] == 'reconnecting', seen
+        assert seen['failed']['retries'] == 1, seen
+        assert seen['recovered'] == 'connected', seen
+        assert seen['pending'] == {
+            'status': 'connected', 'auth': 'Bearer replacement-token',
+            'previousAborted': True,
+        }, seen
+        assert seen['final'] == 'connected', seen
+        assert seen['afterProbe'] == {
+            'count': seen['beforeProbeCount'], 'sameSignal': True,
+            'aborted': False,
+            'status': ('connected' if outcome == 'success' else
+                       'server unreachable: probe unavailable'),
+        }, seen
+        assert seen['requests'] == [
+            {'target': 'https://example.com/first/stream?tab=dashboard',
+             'auth': 'Bearer first-token'},
+            {'target': 'https://example.com/first/stream?tab=dashboard',
+             'auth': 'Bearer first-token'},
+            {'target': 'https://example.com/second/stream?tab=dashboard',
+             'auth': 'Bearer replacement-token'},
+        ], seen
 
 
 def main():
