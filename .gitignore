@@ -510,6 +510,7 @@
 !/tests/test_workflow_parsing.py
 !/tests/test_workflow_spellings.py
 !/tests/test_workflow_triggers.py
+!/tests/test_workflow_yaml_uses.py
 !/tests/test_yamlblock.py
 !/tests/test_yamlread.py
 !/tests/test_yamlread_anchor_edges.py
