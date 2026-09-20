@@ -425,6 +425,10 @@ async function runStreamTimers() {
   const reconnectDelays = timers
     .filter((timer) => !timer.cleared)
     .map((timer) => timer.delay);
+  // The find names the retry and only the retry: the first non-OK answer
+  // computes its delay while the failure count is still 0 (the increment
+  // follows), and the retried attempt is a later generation, so no earlier
+  // timer lingers uncleared at 1000 ms.
   const retry = timers.find(
     (timer) => !timer.cleared && timer.delay === 1000);
   retry.callback();
