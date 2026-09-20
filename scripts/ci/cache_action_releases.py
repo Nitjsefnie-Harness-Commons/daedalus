@@ -32,6 +32,8 @@ _COMMENT = r'(?:\s+#\s*(.*))?'
 _INLINE = re.compile(
     r'("[^"]*"|\'[^\']*\'|[^\s"\'#>|]\S*)' + _COMMENT + '$')
 _BLOCK_HEADER = re.compile(r'([>|][-+]?)' + _COMMENT + '$')
+_REFERENCE = re.compile(
+    r'(?<![A-Za-z0-9_./-])actions/cache(?:/restore|/save)?@', re.IGNORECASE)
 _COMMIT = re.compile(r'[0-9a-f]{40}')
 _RELEASE = re.compile(r'v[0-9]+\.[0-9]+\.[0-9]+')
 
@@ -65,7 +67,7 @@ def _block_content(lines, index, key_indent):
 def pins_in(root, path):
     lines = path.read_text(encoding='utf-8').splitlines()
     relative = path.relative_to(root).as_posix()
-    pins, refusals = [], []
+    pins, refusals, accounted = [], [], set()
     for index, line in enumerate(lines):
         match = _USES.match(line)
         if not match:
@@ -88,10 +90,19 @@ def pins_in(root, path):
             if 'actions/cache' in text.casefold():
                 refusals.append(f'{relative}:{index + 1}: uses value '
                                 f'cannot be classified: {text}')
+                accounted.update((index + 1, index + 2))
             continue
         pin = _pin(relative, index + 1, token, comment)
         if pin is not None:
             pins.append(pin)
+            accounted.update((index + 1, index + 2 if header else index + 1))
+    # Every line carrying a reference is a pin, a refusal or a comment;
+    # a spelling the grammar above did not classify is refused here.
+    for number, line in enumerate(lines, 1):
+        if (number not in accounted and not line.lstrip().startswith('#')
+                and _REFERENCE.search(line)):
+            refusals.append(
+                f'{relative}:{number}: unclassified actions/cache reference')
     return pins, refusals
 
 

@@ -66,6 +66,8 @@ _PLAIN = (
     '      - name: Save\n'
     '        uses: >-  # v6.1.0\n'
     f'          actions/cache/SAVE@{V610}\n'
+    f"      - uses: 'actions/cache/restore@{V610}'  # v6.1.0\n"
+    f'      - uses: "actions/cache/save@{V610}"  # v6.1.0\n'
 )
 
 
@@ -124,6 +126,10 @@ def test_every_cache_family_pin_shape_is_recognised(tmp):
          'v6.1.0'),
         ('.github/workflows/tests.yml', 6, 'Actions/Cache', V610, 'v6.1.0'),
         ('.github/workflows/tests.yml', 10, 'actions/cache/SAVE', V610,
+         'v6.1.0'),
+        ('.github/workflows/tests.yml', 12, 'actions/cache/restore', V610,
+         'v6.1.0'),
+        ('.github/workflows/tests.yml', 13, 'actions/cache/save', V610,
          'v6.1.0'),
     ], pins
 
@@ -218,7 +224,62 @@ def test_both_workflow_extensions_github_accepts_are_scanned(tmp):
     pins, refusals = mod.scan(root)
     assert refusals == [], refusals
     assert [pin.path for pin in pins] == [
-        '.github/workflows/other.yaml'] * 3, pins
+        '.github/workflows/other.yaml'] * 5, pins
+
+
+def test_a_reference_the_grammar_did_not_account_for_is_refused(tmp):
+    """Whatever spelling carries it, a line with an actions/cache reference
+    is a pin, a refusal, or a comment; there is no fourth outcome."""
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses:\n'
+        '\n'
+        f'          actions/cache/restore@{V610}\n'
+        f'      - "uses": actions/cache@{V610}  # v6.1.0\n'
+        f'      - {{uses: actions/cache/save@{V610}}}\n'
+        '      - run: |\n'
+        f'          echo actions/cache@{V610}\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        f'.github/workflows/tests.yml:{line}: unclassified actions/cache '
+        'reference' for line in (6, 7, 8, 10)], refusals
+
+
+def test_a_comment_line_naming_a_reference_is_not_refused(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, _PLAIN + (
+        f'      # - uses: actions/cache@{V610}  # v6.1.0\n'
+        f'#actions/cache/save@{V610}\n'))
+    pins, refusals = mod.scan(root)
+    assert refusals == [], refusals
+    assert len(pins) == 5, pins
+
+
+def test_a_near_name_action_is_neither_a_pin_nor_refused(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        f'      - uses: actions/cache-warmer@{V610}  # v1.0.0\n'
+        f'      - uses: actions/cachex@{V610}  # v1.0.0\n'
+        f'      - uses: actions/cache/x@{V610}  # v1.0.0\n'
+        f'      - uses: >-  # v1.0.0\n'
+        f'          x/actions/cache@{V610}\n'
+        f'      - {{uses: actions/cache/restorer@{V610}}}\n'))
+    assert mod.scan(root) == ([], []), mod.scan(root)
+
+
+def test_the_refusal_filter_matches_the_action_name_case_insensitively(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses: >-\n'
+        f'          Actions/Cache@{V610}  # v6.1.0\n'))
+    _verified, refusals = mod.verify(root, _refusing_run)
+    assert refusals == [
+        '.github/workflows/tests.yml:4: uses value cannot be classified: '
+        f"'>-' then 'Actions/Cache@{V610}  # v6.1.0'"], refusals
 
 
 def _one_pin(tmp, uses):
@@ -278,7 +339,7 @@ def test_a_lightweight_tag_verifies_the_commit_it_names(tmp):
     calls, run = _upstream({_REF + 'v6.1.0': _LIGHTWEIGHT})
     verified, refusals = mod.verify(root, run)
     assert refusals == [], refusals
-    assert verified == [f'{V610} v6.1.0 3 pin(s)'], verified
+    assert verified == [f'{V610} v6.1.0 5 pin(s)'], verified
     assert calls == [_GH_API + [_REF + 'v6.1.0']], calls
 
 
