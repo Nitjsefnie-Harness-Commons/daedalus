@@ -256,20 +256,21 @@ async function run() {
       downloadCalls,
     };
   }
-  const urls = mode === 'open-guard'
+  const requests = mode === 'open-guard'
     ? [
-        ['https://example.com/'],
-        { toString: () => 'https://example.com/toString' },
-        'https://example.com/guard',
+        [['https://example.com/'], true],
+        [{ toString: () => 'https://example.com/toString' }, true],
+        ['https://example.com/guard', true],
       ]
     : mode === 'create-refused' || mode === 'create-sync-throw'
-      ? ['https://example.com/']
-      : ['chrome://settings', 'javascript:alert(1)', 'not a url',
-        'https://example.com/'];
+      ? [['https://example.com/', true]]
+      : [['chrome://settings', true], ['javascript:alert(1)', true],
+        ['not a url', true], ['https://example.com/', true],
+        ['http://example.com/plain', false]];
   const outcomes = [];
-  for (const url of urls) {
+  for (const [url, active] of requests) {
     try {
-      const relayed = await send({ type: 'openTab', url, active: true });
+      const relayed = await send({ type: 'openTab', url, active });
       outcomes.push({
         url,
         tabId: relayed.answer.tabId === undefined
@@ -287,6 +288,8 @@ async function run() {
   return {
     outcomes,
     created: created.map((details) => details.url),
+    createDetails: created.map(
+      (details) => ({ url: details.url, active: details.active })),
     createCalls,
   };
 }
@@ -344,7 +347,10 @@ def test_a_page_can_open_only_web_urls(tmp):
     and the relay handed it the page's URL unread — so a page could open
     `chrome://` pages, or a `javascript:` URL, with the extension's authority.
     A refused URL is answered `{error}` and never reaches the browser, and
-    every outcome answers exactly once.
+    every outcome answers exactly once. Each accepted web scheme drives its
+    own control, so a gate narrowed to `https:` alone fails, and the
+    `active` each control sends is observed at the create call, so a relay
+    that forces the tab to the foreground fails too.
     """
     del tmp
     outcome = _run_relay_authority('open')
@@ -355,11 +361,18 @@ def test_a_page_can_open_only_web_urls(tmp):
         assert refused['tabId'] is None, refused
         assert refused['threw'] is None, refused
         assert refused['responses'] == 1, refused
-    opened = by_url['https://example.com/']
-    assert opened['error'] is None, opened
-    assert opened['tabId'] == 101, opened
-    assert opened['responses'] == 1, opened
-    assert outcome['created'] == ['https://example.com/'], outcome
+    for url, tab_id in (('https://example.com/', 101),
+                        ('http://example.com/plain', 102)):
+        opened = by_url[url]
+        assert opened['error'] is None, opened
+        assert opened['tabId'] == tab_id, opened
+        assert opened['responses'] == 1, opened
+    assert outcome['created'] == [
+        'https://example.com/', 'http://example.com/plain'], outcome
+    assert outcome['createDetails'] == [
+        {'url': 'https://example.com/', 'active': True},
+        {'url': 'http://example.com/plain', 'active': False}], outcome
+    assert outcome['createCalls'] == 2, outcome
 
 
 def test_a_refused_tab_creation_answers_an_error(tmp):
