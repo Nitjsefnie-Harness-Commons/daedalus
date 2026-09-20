@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Title and URL updates share a non-resetting per-tab register window."""
+"""Resetting the timer would starve registration during continuous updates."""
 import json
 import shutil
 import sys
@@ -151,7 +151,7 @@ def _posts(observation):
 
 
 def test_title_burst_arms_once_without_resetting(tmp):
-    """Direct registration or clearing and re-arming breaks this control."""
+    """Catches direct registration or a resetting timer."""
     del tmp
     *events, fired = _observe(
         _update(title='A'), _update(title='B'), _update(title='C'),
@@ -165,7 +165,7 @@ def test_title_burst_arms_once_without_resetting(tmp):
 
 
 def test_register_reads_live_tab_state_when_timer_fires(tmp):
-    """Direct calls or payloads taken from changeInfo lose the live state."""
+    """Catches direct calls or payloads built from changeInfo."""
     del tmp
     *_, fired = _observe(
         _update(title='A'), _update(title='B'),
@@ -179,7 +179,7 @@ def test_register_reads_live_tab_state_when_timer_fires(tmp):
 
 
 def test_different_tabs_keep_independent_timers(tmp):
-    """Direct registration or a shared timer loses per-tab coalescing."""
+    """Catches direct registration or a shared timer."""
     del tmp
     *_, pending, fired = _observe(
         _update(7, title='A'), _update(8, title='X'),
@@ -191,7 +191,7 @@ def test_different_tabs_keep_independent_timers(tmp):
 
 
 def test_fired_tab_can_arm_a_new_registration(tmp):
-    """Direct calls or a map entry never deleted prevent a fresh window."""
+    """Catches direct calls or a map entry that is never deleted."""
     del tmp
     first, fired, again, twice = _observe(
         _update(title='A'), {'fire': True}, _update(title='B'),
@@ -205,7 +205,7 @@ def test_fired_tab_can_arm_a_new_registration(tmp):
 
 
 def test_url_burst_uses_the_same_coalescing_path(tmp):
-    """A direct registerTab call for URL changes bypasses the window."""
+    """Catches direct registerTab calls for URL changes."""
     del tmp
     _, pending, fired = _observe(
         _update(url='https://page.example.com/a'),
@@ -218,7 +218,7 @@ def test_url_burst_uses_the_same_coalescing_path(tmp):
 
 
 def test_registration_window_is_250_milliseconds(tmp):
-    """Direct registration or a changed scheduler delay violates the window."""
+    """Catches direct registration or a changed scheduler delay."""
     del tmp
     pending, fired = _observe(_update(title='A'), {'fire': True})
     assert pending['delays'] == [250], pending
