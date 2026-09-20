@@ -255,6 +255,7 @@
 !/tests/_coverage_memo.py
 !/tests/_coverage_scopes.py
 !/tests/_coverage_suite_fixture.py
+!/tests/_daedalus_env.py
 !/tests/_dashnode.py
 !/tests/_deliveries.py
 !/tests/_drain.py
