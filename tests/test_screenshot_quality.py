@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _cli_parse import refused  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
@@ -34,17 +35,6 @@ class RecordingApi:
         del timeout, headers
         self.calls.append((method, path, body))
         return self.answers.pop(0)
-
-
-def refused(argv):
-    """(exit code, stderr): argparse refused argv at parse time."""
-    err = io.StringIO()
-    try:
-        with contextlib.redirect_stderr(err):
-            build_parser().parse_args(argv)
-    except SystemExit as exit_request:
-        return exit_request.code, err.getvalue()
-    raise AssertionError(f'{argv} parsed instead of being refused')
 
 
 def run_cli(argv, answers):
