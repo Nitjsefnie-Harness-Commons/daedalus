@@ -8,6 +8,7 @@ import urllib.request
 
 from . import SEGMENT_SIG_HEADER
 from .output import MARK
+from .result_view import relative_upload_path
 from .transport import (URL, _http_error_detail, _query_path, api,
                         api_delete, api_raw, token, wait_for_result)
 
@@ -85,7 +86,8 @@ def do_screenshot(args):
     result = res.get('result', {})
     path = result.get('path', '')
     size = result.get('size', 0)
-    print(f'{MARK["in"]} uploaded: {path} ({size} bytes)')
+    shown_path = relative_upload_path(path)
+    print(f'{MARK["in"]} uploaded: {shown_path} ({size} bytes)')
     # Optionally save locally
     if args.output:
         # Fetch the exact file this capture produced. Screenshot ids are

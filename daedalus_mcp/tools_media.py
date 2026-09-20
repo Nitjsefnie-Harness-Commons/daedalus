@@ -2,6 +2,7 @@
 
 from mcp.server.mcpserver import Image
 from daedalus_cli import SEGMENT_SIG_HEADER
+from daedalus_cli.result_view import relative_upload_path
 
 
 def register(mcp, bridge):
@@ -11,7 +12,8 @@ def register(mcp, bridge):
                          include_image: bool = False, timeout: float = 15.0):
         """Capture a screenshot via extension.
 
-    Default: returns {path, size} — client can fetch the image separately.
+    Default: returns {path, size}, relative to the token's upload directory.
+    Fetch that path via /upload with the token in the Authorization header.
     `include_image=True`: also returns the image bytes inline as an MCP Image
     so the caller can Read it directly without another round-trip.
     """
@@ -40,14 +42,15 @@ def register(mcp, bridge):
             fields['tabId'] = int(chrome_tab)
         result_blob = await bridge.ext_cmd(
             cmd_id, 'screenshot', timeout=timeout, **fields)
-        meta = {'path': result_blob.get('path', ''),
+        path = result_blob.get('path', '')
+        meta = {'path': relative_upload_path(path),
                 'size': result_blob.get('size', 0)}
         if not include_image:
             return meta
         # By path, not by id: ids are reused, so an id names a directory rather
         # than a capture and its newest file belongs to whichever invocation
         # finished last.
-        selector = {'path': meta['path']} if meta['path'] else {'id': cmd_id}
+        selector = {'path': path} if path else {'id': cmd_id}
         img_bytes = await bridge.get_raw('/screenshot', **selector)
         return [meta, Image(data=img_bytes, format=format)]
 
@@ -121,7 +124,13 @@ def register(mcp, bridge):
             params['limit'] = limit
         if offset is not None:
             params['offset'] = offset
-        return await bridge.get('/upload', **params)
+        listing = await bridge.get('/upload', **params)
+        items = listing['items'] if isinstance(listing, dict) else listing
+        public_items = [{**item, 'path': relative_upload_path(item['path'])}
+                        for item in items]
+        if isinstance(listing, dict):
+            return {**listing, 'items': public_items}
+        return public_items
 
     @mcp.tool()
     async def delete_upload(upload_id: str = '', filename: str = '') -> dict:

@@ -1047,7 +1047,7 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
         with _surface_responder_errors(responder, failure, 30):
             answer = asyncio.run(mod.screenshot(include_image=True, timeout=25))
         meta, image = answer
-        assert meta == {'path': f'{TOK}/_ss/mine.png',
+        assert meta == {'path': '_ss/mine.png',
                         'size': len(b'this-invocation')}, meta
         assert image.data == b'this-invocation', image.data
 
