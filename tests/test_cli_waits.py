@@ -335,6 +335,24 @@ def test_a_complete_error_answer_is_still_reported_by_status(tmp):
     assert 'Connection failed' not in r.stderr, r.stderr
 
 
+def test_a_refused_connect_is_reported_by_its_reason_alone(tmp):
+    """The URLError clause is met before the OSError one.
+
+    URLError is an OSError, so swapping the two clauses still exits
+    cleanly but reports the whole `<urlopen error ...>` wrapper instead
+    of its `.reason`; this pins the order by the wrapper's absence.
+    """
+    del tmp
+    port = _util.free_port()  # nothing listens here
+    env = cli_env(DAEDALUS_URL=f'http://127.0.0.1:{port}',
+                  DAEDALUS_TOKEN=TOK)
+    r = run_cli(['tabs'], env)
+    assert r.returncode != 0, (r.returncode, r.stdout)
+    assert 'Traceback' not in r.stderr, r.stderr
+    assert 'Connection failed: ' in r.stderr, r.stderr
+    assert 'urlopen error' not in r.stderr, r.stderr
+
+
 _RAISING_URLOPEN = """
 import builtins, sys, urllib.error, urllib.request
 from daedalus_cli import transport
