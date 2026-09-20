@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Deferred callable bodies remain reachable through binders and joins."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
+from test_tab_routing import _tracked_focus_verdict  # noqa: E402
+
+
+PREFIX = (
+    'send = ordinary\n'
+    'def maker():\n'
+    '    return lambda: send("_focus", "focus-tab", tab=args.chrome_tab)\n'
+    'def relay(): return maker()\n'
+    'def pair(): return relay(), ordinary\n')
+
+
+def body(store, invoke, prefix=PREFIX):
+    return prefix + store + '\nsend = ext_cmd\nreturn ' + invoke
+
+
+def verdicts(tmp, cases):
+    observed = [(label, *_tracked_focus_verdict(tmp, source, counts=True))
+                for label, source, _ in cases]
+    expected = [(label, *value) for label, _, value in cases]
+    assert observed == expected, observed
+
+
+def test_returned_container_destructuring(tmp):
+    shapes = [
+        ('tuple', 'x, y = pair()', 'x()', 'y()'),
+        ('list-target', '[x, y] = pair()', 'x()', 'y()'),
+        ('star-prefix', 'x, *rest = pair()', 'x()', 'rest[0]()'),
+        ('star-suffix', '*rest, y = pair()', 'rest[0]()', 'y()'),
+        ('nested', 'def nested(): return pair(), ordinary\n'
+         '(x, y), z = nested()', 'x()', 'z()'),
+        ('literal', 'x, y = relay(), ordinary', 'x()', 'y()'),
+        ('literal-star', '*rest, y = relay(), ordinary',
+         'rest[0]()', 'y()'),
+        ('attribute', 'class C: pass\nc = C()\nc.fn, y = pair()',
+         'c.fn()', 'y()'),
+        ('literal-attribute', 'class C: pass\nc = C()\n'
+         'c.fn, y = relay(), ordinary', 'c.fn()', 'y()'),
+        ('nested-attribute', 'class C: pass\nc = C()\n'
+         'def nested(): return pair(), ordinary\n'
+         '(c.fn, y), z = nested()', 'c.fn()', 'y()'),
+        ('subscript', 'd = {}\nd["k"], y = pair()',
+         'd["k"]()', 'y()'),
+        ('alternatives', 'def choose():\n'
+         '    if args.flag: return pair()\n'
+         '    return (lambda: ordinary()), ordinary\n'
+         'x, y = choose()', 'x()', 'y()'),
+        ('partial-alternatives', 'def choose():\n'
+         '    if args.flag: return pair()\n'
+         '    return (lambda: ordinary(),)\n'
+         'x, y = choose()', 'x()', 'y()'),
+    ]
+    cases = [(label + direction, body(store, invoke), expected)
+             for label, store, bad, good in shapes
+             for direction, invoke, expected in (
+                 ('-called', bad, (1, 1)), ('-other', good, (0, 0)),
+                 ('-discarded', '0', (0, 0)))]
+    verdicts(tmp, cases)
+
+
+def test_unknown_setdefault_keeps_default_body(tmp):
+    shapes = [
+        ('unknown-owner', 'd = args.__dict__\n'
+         'x = d.setdefault("k", relay())', 'x()'),
+        ('unknown-key', 'd = {}\n'
+         'x = d.setdefault(str(args.chrome_tab), relay())', 'x()'),
+        ('nested-default', 'd = args.__dict__\n'
+         'x = d.setdefault("k", [relay()])', 'x[0]()'),
+    ]
+    cases = [(label + direction, body(store, invoke), expected)
+             for label, store, call in shapes
+             for direction, invoke, expected in (
+                 ('-called', call, (1, 1)), ('-discarded', '0', (0, 0)))]
+    cases.extend((label + '-ordinary',
+                  body(store.replace('relay()', 'ordinary'), call), (0, 0))
+                 for label, store, call in shapes)
+    verdicts(tmp, cases)
+
+
+def test_callable_join_defaults(tmp):
+    choices = [
+        ('bad-first', 'relay()', 'lambda: ordinary()'),
+        ('bad-second', 'lambda: ordinary()', 'relay()'),
+        ('both-ordinary', 'lambda: ordinary()', 'lambda: ordinary()'),
+    ]
+    for label, first, second in choices:
+        # Both runtime branches are exercised; static analysis sees both.
+        for flag in (True, False):
+            store = (f'if args.flag:\n    x = {first}\n'
+                     f'else:\n    x = {second}\n'
+                     'def invoke(value=x): return value()')
+            expected = (int((label == 'bad-first' and flag)
+                            or (label == 'bad-second' and not flag)),
+                        int(label != 'both-ordinary'))
+            source = body(store, 'invoke()')
+            before = f'_args.flag = {flag}'
+            actual = _tracked_focus_verdict(
+                tmp, source, before=before, counts=True)
+            assert actual == expected, (label, flag, actual)
+
+
+def test_existing_collapse_controls(tmp):
+    cases = [
+        ('direct', body('x = relay()', 'x()'), (1, 1)),
+        ('unused', body('x = relay()', '0'), (0, 0)),
+        ('attribute', body('class C: pass\nc = C()\nc.fn = relay()',
+                           'c.fn()'), (1, 1)),
+        ('conditional', body('x = relay() if args.flag else ordinary',
+                             'x()'), (1, 1)),
+        ('known-tabless', body('', 'send("_focus", "focus-tab")'), (1, 0)),
+    ]
+    verdicts(tmp, cases)
+
+
+def main():
+    return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
