@@ -186,12 +186,20 @@ def _exchange(req, timeout, read):
     the bridge, and they are the same class of failure as a refused
     connection: no answer arrived. HTTPError is a URLError and URLError is
     an OSError, so the order of the clauses is the order of specificity.
+
+    An HTTPError's body is read too, inside its handler, so an error
+    answer cut off mid-body raised IncompleteRead from there and escaped
+    the clauses below it. It is the same no-answer failure.
     """
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return read(r)
     except urllib.error.HTTPError as e:
-        sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
+        try:
+            detail = _http_error_detail(e)
+        except (OSError, http.client.HTTPException) as failure:
+            raise ConnectionFailed(failure) from failure
+        sys.exit(f'HTTP {e.code}: {detail}')
     except urllib.error.URLError as e:
         raise ConnectionFailed(e.reason) from e
     except (OSError, http.client.HTTPException) as e:
