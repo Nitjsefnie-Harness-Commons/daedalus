@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _noglibc  # noqa: E402
 import _util  # noqa: E402
 
@@ -270,19 +271,10 @@ def test_live_child_startup_timeout_reports_observations(tmp):
 
 def test_server_uses_the_shared_log_safe_function(tmp):
     """The bridge entry point must use the contract-tested shared renderer."""
-    saved = {key: os.environ[key] for key in os.environ
-             if key.startswith('DAEDALUS_')}
-    for key in saved:
-        del os.environ[key]
-    os.environ.update({'DAEDALUS_DIR': str(tmp), 'DAEDALUS_PORT': '0'})
-    try:
+    with _daedalus_env.isolated({
+            'DAEDALUS_DIR': str(tmp), 'DAEDALUS_PORT': '0'}):
         mod = _util.load(
             _util.ROOT / 'server.py', 'server_shared_log_safe_binding')
-    finally:
-        for key in ('DAEDALUS_DIR', 'DAEDALUS_PORT'):
-            if key not in saved:
-                del os.environ[key]
-        os.environ.update(saved)
 
     assert mod.log_safe is sys.modules['daedalus_bridge.log_safe'].log_safe
 
