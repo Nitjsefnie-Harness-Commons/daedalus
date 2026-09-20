@@ -227,6 +227,69 @@ def test_opaque_constructor_payload_signature_answers(tmp):
     _opaque_mapping_verdicts(tmp, 'x = dict(k=relay(), **args.__dict__)')
 
 
+def test_mapping_get_and_pop_follow_deferred_items(tmp):
+    prefix = ('send = ordinary\n'
+              'def forward(**kw):\n'
+              '    return send("_focus", "focus-tab", **kw)\n')
+    cases = []
+    for method in ('get', 'pop'):
+        shapes = [
+            ('assigned', 'd = {"k": forward}\nx = d.' + method + '("k")',
+             'x(tab=args.chrome_tab)', (1, 1)),
+            ('inline', 'd = {"k": forward}',
+             'd.' + method + '("k")(tab=args.chrome_tab)', (1, 1)),
+            ('missing', 'd = {"k": forward}',
+             'd.' + method + '("missing", ordinary)(tab=args.chrome_tab)',
+             (0, 0)),
+            ('default', 'd = {}',
+             'd.' + method + '("missing", forward)(tab=args.chrome_tab)',
+             (1, 1)),
+            ('occupied', 'd = {"k": ordinary}',
+             'd.' + method + '("k", forward)(tab=args.chrome_tab)', (0, 0)),
+            ('dynamic', 'd = {key: forward for key in ["k"]}',
+             'd.' + method + '("k", ordinary)(tab=args.chrome_tab)',
+             (1, 1)),
+            ('dynamic-default', 'd = {key: (lambda **kw: ordinary())\n'
+             '     for key in ["k"]}',
+             'd.' + method + '("missing", forward)(tab=args.chrome_tab)',
+             (1, 1)),
+        ]
+        for label, store, invoke, expected in shapes:
+            source = body(store, invoke, prefix)
+            cases.append((method + '-' + label, source, expected))
+            clean = source.replace('return send(', 'return ordinary(')
+            cases.append((method + '-' + label + '-clean', clean, (0, 0)))
+    cases.append(('subscript', body('d = {"k": forward}\nx = d["k"]',
+                                    'x(tab=args.chrome_tab)', prefix), (1, 1)))
+    verdicts(tmp, cases)
+
+
+def test_standalone_pop_removes_deferred_item(tmp):
+    cases = []
+    for alias in ('d', 'alias'):
+        store = ('d = {"k": relay()}\nalias = d\n'
+                 + alias + '.pop("k")')
+        cases.append((alias, body(store, 'd.get("k", ordinary)()'), (0, 0)))
+        cases.append((alias + '-default', body(
+            store, 'd.get("k", relay())()'), (1, 1)))
+    verdicts(tmp, cases)
+
+
+def test_assigned_pop_updates_aliases_and_keeps_return(tmp):
+    cases = []
+    for target in ('x', 'd', 'x: object'):
+        store = ('d = {"k": relay()}\nalias = d\n'
+                 + target + ' = d.pop("k")')
+        cases.append((target + '-removed', body(
+            store, 'alias.get("k", ordinary)()'), (0, 0)))
+        invoke = target.split(':', maxsplit=1)[0] + '()'
+        source = body(store, invoke)
+        cases.append((target + '-returned', source, (1, 1)))
+        cases.append((target + '-clean', source.replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)))
+    verdicts(tmp, cases)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 
