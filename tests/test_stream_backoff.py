@@ -36,6 +36,7 @@ const alarmListeners = [];
 const changeListeners = [];
 const streamFetches = [];
 const timeoutTimers = [];
+const intervalTimers = [];
 let nextTimerId = 0;
 const storageStore = {
   'daedalus-token': 'tok-1',
@@ -146,6 +147,19 @@ function scheduleTimeout(callback, ms) {
   return timer.id;
 }
 
+function scheduleInterval(callback, ms) {
+  const timer = {
+    id: ++nextTimerId, callback, delay: ms, cleared: false,
+  };
+  intervalTimers.push(timer);
+  return timer.id;
+}
+
+function clearScheduledInterval(id) {
+  const timer = intervalTimers.find((item) => item.id === id);
+  if (timer) timer.cleared = true;
+}
+
 const context = vm.createContext({
   chrome,
   fetch: bridgeFetch,
@@ -158,8 +172,8 @@ const context = vm.createContext({
   btoa,
   setTimeout: scheduleTimeout,
   clearTimeout() {},
-  setInterval() { return ++nextTimerId; },
-  clearInterval() {},
+  setInterval: scheduleInterval,
+  clearInterval: clearScheduledInterval,
   console: { log() {}, warn() {}, error() {} },
 });
 """ + import_scripts_stub('context') + r"""
@@ -216,6 +230,9 @@ async function run() {
     }
     await settle();
     outcome.fetchesAfterHeartbeat = streamFetches.length - before;
+    outcome.intervals = intervalTimers.map((item) => ({
+      delay: item.delay, cleared: item.cleared,
+    }));
   } else if (plan.scenario === 'resume') {
     await settle();
     outcome.bootFetches = streamFetches.length;
@@ -289,6 +306,16 @@ def test_an_auth_refusal_stops_the_reconnect(tmp):
         assert outcome['fetches'] == 1, (status, outcome)
         assert outcome['pendingTimers'] == 0, (status, outcome)
         assert outcome['fetchesAfterHeartbeat'] == 0, (status, outcome)
+
+
+def test_the_auth_stop_tears_down_the_watchdog_interval(tmp):
+    """The refused attempt's watchdog does not tick into the stop."""
+    del tmp
+    for status in (401, 400):
+        outcome = _run({'scenario': 'stop', 'statuses': [status]})
+        assert outcome['intervals'] == [
+            {'delay': 20000, 'cleared': False},
+            {'delay': 5000, 'cleared': True}], (status, outcome)
 
 
 def test_a_new_token_resumes_connecting(tmp):
