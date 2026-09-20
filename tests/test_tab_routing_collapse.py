@@ -118,6 +118,32 @@ def test_existing_collapse_controls(tmp):
     verdicts(tmp, cases)
 
 
+def test_assignment_targets_use_updated_owners(tmp):
+    setup = 'class C: pass\nc = C()\nold = c\nc.fn = ordinary\n'
+    shapes = [
+        ('new-alias', 'alias, c.fn = c, relay()', 'alias.fn()', (1, 1)),
+        ('new-owner', 'other = C()\nc, c.fn = other, relay()',
+         'c.fn()', (1, 1)),
+        ('old-owner', 'other = C()\nc, c.fn = other, relay()',
+         'old.fn()', (0, 0)),
+        ('later-alias', 'c.fn, alias = relay(), c', 'alias.fn()', (1, 1)),
+        ('closure-alias', 'alias, c.fn = c, relay()\n'
+         'def invoke(): return alias.fn()', 'invoke()', (1, 1)),
+        ('frozen-rhs', 'other = C()\nother.fn = relay()\n'
+         'c, alias = other, c', 'alias.fn()', (0, 0)),
+        ('repeated-target', 'c.fn, c.fn = relay(), ordinary',
+         'c.fn()', (0, 0)),
+    ]
+    cases = []
+    for label, store, invoke, expected in shapes:
+        source = body(setup + store, invoke)
+        cases.append((label, source, expected))
+        clean = source.replace('tab=args.chrome_tab', 'tab="extension"')
+        clean = clean.replace('lambda: send(', 'lambda: ordinary(')
+        cases.append((label + '-clean', clean, (0, 0)))
+    verdicts(tmp, cases)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 
