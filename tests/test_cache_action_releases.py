@@ -222,6 +222,15 @@ def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
     assert refusals == [], refusals
 
 
+def test_a_block_header_ending_the_file_is_left_alone(tmp):
+    """No content line can follow, so there is nothing to classify and
+    nothing that names a cache action: no refusal, and no crash."""
+    mod = _verifier()
+    root = _workflow(
+        tmp, 'jobs:\n  j:\n    steps:\n      - uses: >-  # v6.1.0')
+    assert mod.scan(root) == ([], []), mod.scan(root)
+
+
 def test_both_workflow_extensions_github_accepts_are_scanned(tmp):
     mod = _verifier()
     root = _workflow(tmp, _PLAIN, name='other.yaml')
