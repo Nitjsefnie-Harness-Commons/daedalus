@@ -520,9 +520,8 @@ def state_signature(state, occupancy=True):
         (scope, name, *payload_state_signature(keys))
         for scope, values in state.dict_namespaces.items()
         for name, keys in values.items()))
-    generators = tuple(sorted(
-        (name, *value_signature(value)[1:])
-        for name, value in state.generators.items()))
+    generators = tuple(sorted((name, *value_signature(value)[1:])
+                              for name, value in state.generators.items()))
     evaluated = tuple((key, value_signature(value)) for key, value in
                       sorted(state.evaluated.items()) if value is not None
                       and (occupancy or not is_clean_container(value)))
@@ -543,7 +542,8 @@ def dedupe_states(states):
     for state in states:
         signature = state_signature(state, occupancy=False)
         kept = found.get(signature)
-        found[signature] = join_clean_occupancy(kept, state) if kept else state
+        found[signature] = (state if kept is None
+                            else join_clean_occupancy(kept, state))
     return list(found.values())
 
 
