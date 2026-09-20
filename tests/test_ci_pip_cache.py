@@ -3,8 +3,9 @@
 otherwise fails silently.
 
 These tests parse the tests workflow's pip cache steps: what the six
-cached jobs restore and save, gated on which events, and pinned to
-which actions/cache release the comment names.
+cached jobs restore and save, gated on which events, and pinned to one
+reviewed actions/cache release across the workflow, with comments naming
+its tag.
 """
 import re
 import sys
@@ -15,6 +16,7 @@ import _util  # noqa: E402
 from _wfgraph import _job_section, _tests_yml  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
+from test_workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
 
 
 _CACHE_JOBS = (
@@ -36,11 +38,6 @@ _CACHE_JOBS = (
 # actions/cache ignores the two that do not exist on the running platform.
 _PIP_CACHE_PATHS = (
     '~/.cache/pip', '~/Library/Caches/pip', '~\\AppData\\Local\\pip\\Cache')
-
-# The release the pinned actions/cache commit resolves to, as its tag spells
-# it on the `uses:` line; a Dependabot bump rewrites the SHA, the comment and
-# this constant together.
-_CACHE_ACTION_VERSION = 'v6.1.0'
 
 
 def _cache_step(steps, action):
@@ -109,7 +106,10 @@ def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
         assert re.fullmatch(r'actions/cache/restore@[0-9a-f]{40}',
                             restore['uses']), restore['uses']
         comment = _uses_version_comment(workflow, job, 'restore')
-        assert comment == _CACHE_ACTION_VERSION, (job, comment)
+        sha = restore['uses'].split('@')[1]
+        assert sha in REVIEWED_CACHE_RELEASES, (job, 'restore', sha)
+        expected_tag = REVIEWED_CACHE_RELEASES[sha]
+        assert comment == expected_tag, (job, comment, expected_tag)
         assert 'if' not in restore, (job, restore.get('if'))
         assert set(restore['with']['path'].splitlines()) == set(
             _PIP_CACHE_PATHS), (job, restore['with']['path'])
@@ -143,7 +143,10 @@ def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
         assert re.fullmatch(r'actions/cache/save@[0-9a-f]{40}',
                             save['uses']), save['uses']
         comment = _uses_version_comment(workflow, job, 'save')
-        assert comment == _CACHE_ACTION_VERSION, (job, comment)
+        sha = save['uses'].split('@')[1]
+        assert sha in REVIEWED_CACHE_RELEASES, (job, 'save', sha)
+        expected_tag = REVIEWED_CACHE_RELEASES[sha]
+        assert comment == expected_tag, (job, comment, expected_tag)
         assert save['with']['key'] == restore['with']['key'], (job, save)
         assert save['with']['path'] == restore['with']['path'], (job, save)
         gate = save.get('if')
@@ -173,6 +176,18 @@ def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
         assert save_index > _named_step_index(steps, save_after), (
             job, save_index, save_after)
         assert save_index > restore_index, (job, save_index, restore_index)
+
+
+def test_the_cached_jobs_pin_one_cache_release(tmp):
+    del tmp
+    workflow = _tests_yml()
+    shas = set()
+    for job, _python, _save_after, _install in _CACHE_JOBS:
+        steps = complete_job_mapping(workflow, job)['steps']
+        for action in ('restore', 'save'):
+            _index, step = _cache_step(steps, action)
+            shas.add(step['uses'].split('@')[1])
+    assert len(shas) == 1, f'distinct actions/cache SHAs: {sorted(shas)}'
 
 
 def main():
