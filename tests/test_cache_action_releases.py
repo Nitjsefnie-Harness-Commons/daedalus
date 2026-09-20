@@ -185,6 +185,35 @@ def test_a_pin_continued_from_an_empty_uses_line_is_refused(tmp):
         f"'' then 'actions/cache@{V610}  # v6.1.0'"], refusals
 
 
+def test_a_line_no_deeper_than_the_key_is_not_block_content(tmp):
+    """An empty block followed by a shallower line: YAML parses that line
+    as the next node, so it is not the reference, even when it is one
+    token naming a cache action."""
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses: >-  # v6.1.0\n'
+        f'  actions/cache@{V610}:\n'
+        '    runs-on: ubuntu-latest\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        '.github/workflows/tests.yml:4: uses value cannot be classified: '
+        f"'>-  # v6.1.0' then 'actions/cache@{V610}:'"], refusals
+
+
+def test_a_hash_glued_to_a_quoted_reference_is_not_a_comment(tmp):
+    """A comment needs whitespace before its `#`; without it the value
+    is unclassifiable and no release is requested."""
+    mod = _verifier()
+    root = _one_pin(tmp, f'"actions/cache@{V610}"#v6.1.0')
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        '.github/workflows/tests.yml:4: uses value cannot be classified: '
+        f"'\"actions/cache@{V610}\"#v6.1.0'"], refusals
+
+
 def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
     mod = _verifier()
     root = _workflow(tmp, (
