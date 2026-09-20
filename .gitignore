@@ -486,6 +486,7 @@
 !/tests/test_version_empty_values.py
 !/tests/test_version_set_atomic.py
 !/tests/test_vm_file_load_guard.py
+!/tests/test_watch_all.py
 !/tests/test_wf_suite_boundaries.py
 !/tests/test_wfcheckout.py
 !/tests/test_wfjobs.py
