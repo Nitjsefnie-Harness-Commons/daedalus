@@ -6,19 +6,18 @@ the CLI is always run as a subprocess, the way a shell would run it, against
 a real bridge() or against a stub front end that answers the way a proxy in
 front of the bridge does.
 """
-import contextlib
-import http.server
 import json
 import os
 import subprocess
 import sys
-import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _util  # noqa: E402
 from _cmdqueue import clear_command_queue  # noqa: E402
+from _frontend import (  # noqa: E402
+    TruncatingFrontEndHandler, truncating_front_end)
 from _queueread import queued_command  # noqa: E402
 
 # Keep bridge children off the fixed MCP port (see tests/_bridge.py).
@@ -59,84 +58,6 @@ def run_cli(args, env):
 
 def run_python(code, env):
     return _run([sys.executable, '-c', code], env)
-
-
-class _TruncatingFrontEndHandler(http.server.BaseHTTPRequestHandler):
-    """A proxy that cuts the body off mid-read, then answers properly.
-
-    The bridge answers /result at once, so a reset or a truncated body on
-    that read is the proxy's doing. The shape here is the one issue 647
-    reports: the headers arrive whole and the body stops short of its
-    declared length, which the client sees as IncompleteRead while it is
-    reading the response — after urlopen has already returned.
-
-    `truncate` is how many GETs are cut off before they are answered;
-    None cuts every one. Every request is recorded so a test can say the
-    PUT was not retried.
-    """
-
-    truncate = 0
-    seen = []
-    result = {'id': 'job4', 'deliveryId': 'd1', 'resultGeneration': 'g1',
-              'result': 'Survived', 'error': None, 'ts': 1, 'world': 'cdp'}
-
-    def _answer(self, body):
-        raw = json.dumps(body).encode()
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def _cut_off(self):
-        # HTTP/1.0, the handler's default, closes the connection when the
-        # handler returns; the client is left with 5 of the 40 bytes it
-        # was promised.
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', '40')
-        self.end_headers()
-        self.wfile.write(b'{"pen')
-        self.wfile.flush()
-
-    def do_PUT(self):  # noqa: N802  (http.server's spelling)
-        self.rfile.read(int(self.headers.get('Content-Length') or 0))
-        self.seen.append(('PUT', self.path))
-        self._answer({'ok': True, 'did': 'd1', 'target': 'tab=tab4'})
-
-    def do_DELETE(self):  # noqa: N802
-        self.rfile.read(int(self.headers.get('Content-Length') or 0))
-        self.seen.append(('DELETE', self.path))
-        self._cut_off()
-
-    def do_GET(self):  # noqa: N802
-        self.seen.append(('GET', self.path))
-        cut = sum(1 for verb, _ in self.seen if verb == 'GET') - 1
-        if self.truncate is None or cut < self.truncate:
-            self._cut_off()
-        elif 'consume=1' in self.path:
-            self._answer({'consumed': True, 'resultGeneration': 'g1'})
-        else:
-            self._answer(self.result)
-
-    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
-        del format, args
-
-
-@contextlib.contextmanager
-def _truncating_front_end(truncate):
-    _TruncatingFrontEndHandler.truncate = truncate
-    _TruncatingFrontEndHandler.seen = []
-    server = http.server.ThreadingHTTPServer(
-        ('127.0.0.1', 0), _TruncatingFrontEndHandler)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    try:
-        yield f'http://127.0.0.1:{server.server_address[1]}'
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=10)
 
 
 def _answer_ext(base, docroot, argv, env, result):
@@ -296,10 +217,10 @@ def test_the_result_wait_outlives_a_truncated_peek(tmp):
     retried.
     """
     del tmp
-    with _truncating_front_end(truncate=2) as base:
+    with truncating_front_end(truncate=2) as base:
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
         r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
-        seen = list(_TruncatingFrontEndHandler.seen)
+        seen = list(TruncatingFrontEndHandler.seen)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     assert 'Traceback' not in r.stderr, r.stderr
     assert 'Survived' in r.stdout, r.stdout
@@ -314,10 +235,10 @@ def test_the_result_wait_outlives_a_truncated_peek(tmp):
 def test_the_result_wait_reports_a_timeout_when_every_peek_is_cut_off(tmp):
     """Retrying is bounded by the deadline, and ends the usual way."""
     del tmp
-    with _truncating_front_end(truncate=None) as base:
+    with truncating_front_end(truncate=None) as base:
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
         r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
-        seen = list(_TruncatingFrontEndHandler.seen)
+        seen = list(TruncatingFrontEndHandler.seen)
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
     assert 'Traceback' not in r.stderr, r.stderr
     assert 'Timeout (1s)' in r.stderr, r.stderr
@@ -336,7 +257,7 @@ def test_a_truncated_answer_is_a_connection_failure_not_a_traceback(tmp):
     request met it.
     """
     del tmp
-    with _truncating_front_end(truncate=None) as base:
+    with truncating_front_end(truncate=None) as base:
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         outcomes = {
             'api': run_cli(['tabs'], env),
