@@ -390,11 +390,14 @@ def _whole_set_retry_returns_the_rewrite(tmp, error):
     files = (first, second)
     stale = [{'id': 'stale-first', 'type': 'reload'},
              {'id': 'stale-second', 'type': 'reload'}]
-    fresh = [{'id': 'fresh-first', 'type': 'reload'},
-             {'id': 'fresh-second', 'type': 'reload'}]
     # Refusing either file, with both rewritten at that moment, proves the
     # retry re-reads the whole set whichever order the helper reads in.
+    # Each round's fresh ids are its own, so a set kept from an earlier
+    # call cannot satisfy a later one.
     for refused_file in files:
+        fresh = [{'id': f'fresh-first-{refused_file.name}', 'type': 'reload'},
+                 {'id': f'fresh-second-{refused_file.name}',
+                  'type': 'reload'}]
         for queued, command in zip(files, stale):
             queued.write_text(json.dumps(command), encoding='utf-8')
         with _rewrite_on_first_read(
