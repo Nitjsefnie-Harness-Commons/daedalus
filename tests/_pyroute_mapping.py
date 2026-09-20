@@ -24,6 +24,45 @@ def _selected_values(value, key, attribute=False):
     return []
 
 
+def alias_target_pairs(target, value):
+    if isinstance(value, DeferredAlternatives):
+        branches = [alias_target_pairs(target, item) for item in value.values]
+        unknown = [UNPROVABLE_SENDER] if None in branches else []
+        branches = [branch for branch in branches if branch is not None]
+        if not branches:
+            return None
+        paired = []
+        for index, (nested, _) in enumerate(branches[0]):
+            values = [branch[index][1] for branch in branches]
+            paired.append((nested, merge_yielded(values + unknown)))
+        return paired
+    if isinstance(value, DeferredContainer):
+        if value.kind not in ('tuple', 'list') or value.length is None:
+            return None
+        items = [value.items.get(index) for index in range(value.length)]
+    elif isinstance(value, (ast.Tuple, ast.List)):
+        items = value.elts
+    else:
+        return None
+    stars = [index for index, item in enumerate(target.elts)
+             if isinstance(item, ast.Starred)]
+    if not stars:
+        return list(zip(target.elts, items)) \
+            if len(target.elts) == len(items) else None
+    if len(stars) != 1 or len(items) < len(target.elts) - 1:
+        return None
+    star = stars[0]
+    suffix = len(target.elts) - star - 1
+    end = len(items) - suffix
+    pairs = [*zip(target.elts[:star], items[:star])]
+    if isinstance(value, DeferredContainer):
+        rest = items[star:end]
+        pairs.append((target.elts[star].value, DeferredContainer(
+            dict(enumerate(rest)), len(rest), 'list')))
+    pairs.extend(zip(target.elts[star + 1:], items[end:]))
+    return pairs
+
+
 def _display_value(node, state):
     items = {}
     index = 0
@@ -125,7 +164,8 @@ def _setdefault_value(node, state):
             or not isinstance(key.value, str)):
         default = _known_value(node.args[1], state) if len(node.args) > 1 \
             else None
-        return UNPROVABLE_SENDER if default is not None else None
+        return merge_yielded((default, UNPROVABLE_SENDER)) \
+            if default is not None else None
     item = owner.items.get(key.value)
     if item is not None: return item
     return _known_value(node.args[1], state) if len(node.args) > 1 else None
@@ -340,43 +380,47 @@ def apply_deferred_store(statement, state):
                else [statement.target] if not isinstance(
                    statement, ast.Delete) else statement.targets)
     for target in targets:
-        owner_name = getattr(getattr(target, 'value', None), 'id', None)
-        owner = state.callables.get(owner_name)
-        if isinstance(target, ast.Attribute) \
-                and isinstance(owner, DeferredInstance):
-            attributes = dict(owner.attributes)
-            if value is None:
-                attributes.pop(target.attr, None)
-            else:
-                attributes[target.attr] = value
-            replacement = DeferredInstance(attributes, owner.identity)
-            replace_deferred_storage(state, owner, replacement)
-            sync_cells(state, {owner_name})
-        elif isinstance(target, ast.Subscript) \
-                and isinstance(target.value, ast.Name):
-            dynamic = not isinstance(target.slice, ast.Constant)
-            removing = isinstance(statement, ast.Delete)
-            unknown_call = (value is None and raw is None
-                            and isinstance(statement,
-                                           (ast.Assign, ast.AnnAssign))
-                            and isinstance(statement.value, ast.Call))
-            if owner is None:
-                if value is None and (removing or not unknown_call):
-                    continue
-                owner = DeferredContainer({}, None, 'dict', target)
-                state.callables[owner_name] = owner
-            elif not isinstance(owner, DeferredContainer):
-                continue
-            items = dict(owner.items)
-            if value is not None:
-                items[DYNAMIC_KEY if dynamic else target.slice.value] = value
-            elif unknown_call:
-                if dynamic:
-                    items.setdefault(DYNAMIC_KEY, UNPROVABLE_SENDER)
-                elif items.get(target.slice.value) is None:
-                    items[target.slice.value] = UNPROVABLE_SENDER
-            elif dynamic:
-                continue
-            else:
-                items.pop(target.slice.value, None)
-            _replace_container(state, owner_name, owner, items)
+        store_deferred_target(
+            target, value, state, isinstance(statement, ast.Delete),
+            value is None and raw is None
+            and isinstance(statement, (ast.Assign, ast.AnnAssign))
+            and isinstance(statement.value, ast.Call))
+
+
+def store_deferred_target(target, value, state, removing=False,
+                          unknown_call=False):
+    owner_name = getattr(getattr(target, 'value', None), 'id', None)
+    owner = state.callables.get(owner_name)
+    if isinstance(target, ast.Attribute) \
+            and isinstance(owner, DeferredInstance):
+        attributes = dict(owner.attributes)
+        if value is None:
+            attributes.pop(target.attr, None)
+        else:
+            attributes[target.attr] = value
+        replacement = DeferredInstance(attributes, owner.identity)
+        replace_deferred_storage(state, owner, replacement)
+        sync_cells(state, {owner_name})
+    elif isinstance(target, ast.Subscript) \
+            and isinstance(target.value, ast.Name):
+        dynamic = not isinstance(target.slice, ast.Constant)
+        if owner is None:
+            if value is None and (removing or not unknown_call):
+                return
+            owner = DeferredContainer({}, None, 'dict', target)
+            state.callables[owner_name] = owner
+        elif not isinstance(owner, DeferredContainer):
+            return
+        items = dict(owner.items)
+        if value is not None:
+            items[DYNAMIC_KEY if dynamic else target.slice.value] = value
+        elif unknown_call:
+            if dynamic:
+                items.setdefault(DYNAMIC_KEY, UNPROVABLE_SENDER)
+            elif items.get(target.slice.value) is None:
+                items[target.slice.value] = UNPROVABLE_SENDER
+        elif dynamic:
+            return
+        else:
+            items.pop(target.slice.value, None)
+        _replace_container(state, owner_name, owner, items)

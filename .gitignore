@@ -460,6 +460,7 @@
 !/tests/test_suite_runner.py
 !/tests/test_tab_registry.py
 !/tests/test_tab_routing.py
+!/tests/test_tab_routing_collapse.py
 !/tests/test_tab_routing_dict_stores.py
 !/tests/test_tab_routing_js.py
 !/tests/test_tab_routing_js_bodies.py
