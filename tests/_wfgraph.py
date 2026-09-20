@@ -142,9 +142,12 @@ def _matrix_job_running(workflow, matrix, command):
     matches = []
     for name in _job_names(workflow):
         job = complete_job_mapping(workflow, name)
-        if (job.get('strategy', {}).get('matrix') == matrix
-                and any(command in step.get('run', '')
-                        for step in job.get('steps', []))):
+        strategy = job.get('strategy')
+        steps = job.get('steps')
+        if (isinstance(strategy, dict) and strategy.get('matrix') == matrix
+                and isinstance(steps, list)
+                and any(command in (step.get('run') or '')
+                        for step in steps)):
             matches.append((name, job))
     assert len(matches) == 1, matches
     return matches[0]
