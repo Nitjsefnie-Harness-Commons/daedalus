@@ -189,7 +189,8 @@ the attachment longer.
 The bridge listens on loopback and speaks plain HTTP. If you expose it through
 a reverse proxy, terminate TLS there and preserve token authentication. The
 bridge intentionally does not supply deployment-specific CORS or public upload
-hosting policy.
+hosting policy. A dashboard server-URL override aimed at another origin
+therefore needs a CORS-enabled reverse proxy in front of that bridge.
 
 ## Release verification
 
