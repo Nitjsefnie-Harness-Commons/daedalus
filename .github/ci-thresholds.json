@@ -12,7 +12,7 @@
   },
   "module_size_baseline": {
     "tests/_pyroute.py": 738,
-    "tests/_pyroute_state.py": 770,
+    "tests/_pyroute_state.py": 765,
     "tests/test_bridge_results.py": 981,
     "tests/test_cli.py": 1222,
     "tests/test_mcp_server.py": 1700,
