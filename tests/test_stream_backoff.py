@@ -25,7 +25,7 @@ NEW_TOKEN = 'tok-2'
 NEW_BRIDGE = 'https://other.example.com'
 
 
-_STREAM_HARNESS = (r"""
+_STREAM_HARNESS = r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -238,7 +238,7 @@ run().then((result) => {
   process.stderr.write((error.stack || String(error)) + '\n');
   process.exitCode = 1;
 });
-""")
+"""
 
 
 def _run(plan):
