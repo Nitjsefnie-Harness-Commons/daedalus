@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 from _bridge import (BRIDGE_ENV, TOK, next_stream_data,  # noqa: E402
                      put_command, read_stream_data, stream_response)
@@ -360,18 +361,9 @@ def _wait_for_delivery(trace, key, after=0):
 def _load_server_for_drain(tmp, name):
     root = Path(tmp) / name
     root.mkdir()
-    saved = {key: os.environ[key] for key in os.environ
-             if key.startswith('DAEDALUS_')}
-    for key in saved:
-        del os.environ[key]
-    os.environ.update({'DAEDALUS_DIR': str(root), 'DAEDALUS_PORT': '0'})
-    try:
+    with _daedalus_env.isolated({
+            'DAEDALUS_DIR': str(root), 'DAEDALUS_PORT': '0'}):
         return _util.load(_util.ROOT / 'server.py', name=name)
-    finally:
-        for key in ('DAEDALUS_DIR', 'DAEDALUS_PORT'):
-            if key not in saved:
-                del os.environ[key]
-        os.environ.update(saved)
 
 
 def test_an_inherited_export_cannot_kill_the_in_process_server_load(tmp):
