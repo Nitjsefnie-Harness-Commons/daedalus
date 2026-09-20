@@ -195,8 +195,12 @@ def wait(repo, sha, interval, timeout, out):
         state, offenders = verdict(runs)
         print_matrix(runs, sha, out)
         if state == 'acceptable':
-            print(f'all {len(runs)} run(s) on {sha[:12]} acceptable',
-                  file=out, flush=True)
+            ignored = sum(1 for run in runs
+                          if _superseded_cancelled(run, runs))
+            note = (f' ({ignored} superseded cancelled ignored)'
+                    if ignored else '')
+            print(f'all {len(runs) - ignored} run(s) on {sha[:12]}'
+                  f' acceptable{note}', file=out, flush=True)
             return 0
         if state == 'unacceptable':
             print(f'run matrix on {sha[:12]} UNACCEPTABLE:', file=out,
