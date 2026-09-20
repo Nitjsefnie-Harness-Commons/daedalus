@@ -107,6 +107,19 @@ def test_a_failed_query_cannot_look_settled(tmp):
     one_good_page = _runs_body(_run(1, 'completed', 'success')) + 'not json'
     _fake_gh(mod, {'/actions/runs': one_good_page})
     assert mod._all_concluded(SHA) is None
+    _fake_gh(mod, {'/actions/runs': OSError('gh missing')})
+    assert mod._all_concluded(SHA) is None
+    for not_an_object in ('[]', '1'):
+        _fake_gh(mod, {'/actions/runs': not_an_object})
+        assert mod._all_concluded(SHA) is None
+
+
+def test_without_a_repo_slug_nothing_is_queried(tmp):
+    del tmp
+    mod = _watch_all()
+    mod._repo_slug = lambda: None
+    _fake_gh(mod, {})
+    assert mod._all_concluded(SHA) is None
 
 
 def test_paginated_pages_are_all_read(tmp):
@@ -129,6 +142,7 @@ def test_the_query_is_fresh_paginated_and_pinned_to_the_sha(tmp):
     argv, kwargs = seen[0]
     assert kwargs.get('check') is True
     assert kwargs.get('timeout')
+    assert kwargs.get('encoding') == 'utf-8'
     assert '--paginate' in argv
     assert 'Cache-Control: no-cache' in argv
     assert f'actions/runs?head_sha={SHA}' in argv[-1]
