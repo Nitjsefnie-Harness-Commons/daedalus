@@ -6,10 +6,13 @@ one more repository literal: a SHA and release that agree with each other
 pass whether or not the release exists. This resolves each pinned release
 through the GitHub API and fails closed on anything it cannot read.
 
-The line-based scanner admits two `uses:` shapes: an inline scalar with
-an optional trailing comment, and a block scalar whose comment sits on
-the header line and whose one content line is the reference (inside the
-block a `#` is content). Any other value naming a cache action is refused.
+The line-based scanner verifies two `uses:` shapes: an inline scalar
+with a trailing `# vX.Y.Z` comment, and a `>-` or `|-` block whose comment
+sits on the header line and whose one content line is the reference. A
+`uses:` value naming a cache action that fits neither is refused, and so
+is every other line carrying an `actions/cache…@` reference that is not
+a comment: a quoted key, a flow mapping, a continued value or a run
+script is never skipped.
 """
 import json
 import re
@@ -31,7 +34,7 @@ _USES = re.compile(r'^(\s*(?:-\s+)?)uses:(?:\s+(.*?))?\s*$')
 _COMMENT = r'(?:\s+#\s*(.*))?'
 _INLINE = re.compile(
     r'("[^"]*"|\'[^\']*\'|[^\s"\'#>|]\S*)' + _COMMENT + '$')
-_BLOCK_HEADER = re.compile(r'([>|][-+]?)' + _COMMENT + '$')
+_BLOCK_HEADER = re.compile(r'([>|]-)' + _COMMENT + '$')
 _REFERENCE = re.compile(
     r'(?<![A-Za-z0-9_./-])actions/cache(?:/restore|/save)?@', re.IGNORECASE)
 _COMMIT = re.compile(r'[0-9a-f]{40}')
@@ -65,8 +68,11 @@ def _block_content(lines, index, key_indent):
 
 
 def pins_in(root, path):
-    lines = path.read_text(encoding='utf-8').splitlines()
     relative = path.relative_to(root).as_posix()
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except UnicodeDecodeError:
+        return [], [f'{relative}: not UTF-8']
     pins, refusals, accounted = [], [], set()
     for index, line in enumerate(lines):
         match = _USES.match(line)

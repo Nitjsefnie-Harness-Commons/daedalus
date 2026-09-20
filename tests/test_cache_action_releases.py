@@ -29,8 +29,9 @@ _GH_API = ['gh', 'api', '-H', 'Cache-Control: no-cache']
 _REF = 'repos/actions/cache/git/ref/tags/'
 _TAG = 'repos/actions/cache/git/tags/'
 
-# Bodies as `gh api` returned them from the live endpoint, less their `url`
-# fields, which name API hosts the release scanner refuses in the tree.
+# Bodies as `gh api` returned them from the live endpoint, less the `url`
+# fields (they name API hosts the release scanner refuses in the tree) and,
+# on the tag object, the PGP signature and `verification` block.
 _LIGHTWEIGHT = {
     'ref': 'refs/tags/v6.1.0',
     'node_id': 'MDM6UmVmMjE1NTY2NDYyOnJlZnMvdGFncy92Ni4xLjA=',
@@ -280,6 +281,33 @@ def test_the_refusal_filter_matches_the_action_name_case_insensitively(tmp):
     assert refusals == [
         '.github/workflows/tests.yml:4: uses value cannot be classified: '
         f"'>-' then 'Actions/Cache@{V610}  # v6.1.0'"], refusals
+
+
+def test_a_workflow_that_is_not_utf8_is_refused_by_path(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, _PLAIN)
+    (root / '.github' / 'workflows' / 'legacy.yml').write_bytes(
+        b'# caf\xe9\njobs: {}\n')
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == ['.github/workflows/legacy.yml: not UTF-8'], refusals
+
+
+def test_a_block_header_that_keeps_a_newline_is_refused(tmp):
+    """Only strip chomping (`>-`, `|-`) yields a bare reference; `>`, `|`
+    and `+` leave a trailing newline in the value."""
+    mod = _verifier()
+    for header in ('>', '|', '>+', '|+'):
+        root = _workflow(tmp, (
+            'jobs:\n  j:\n    steps:\n'
+            f'      - uses: {header}  # v6.1.0\n'
+            f'          actions/cache@{V610}\n'))
+        verified, refusals = mod.verify(root, _refusing_run)
+        assert verified == [], (header, verified)
+        assert refusals == [
+            '.github/workflows/tests.yml:4: uses value cannot be '
+            f"classified: '{header}  # v6.1.0' then 'actions/cache@{V610}'"
+        ], (header, refusals)
 
 
 def _one_pin(tmp, uses):
