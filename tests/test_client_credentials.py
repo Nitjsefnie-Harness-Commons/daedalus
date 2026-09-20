@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import test_cli as cli  # noqa: E402
 import test_mcp_server as mcp  # noqa: E402
+import test_mcp_tools as mcp_tools  # noqa: E402
 
 from daedalus_cli.output import print_result  # noqa: E402
 
@@ -52,7 +53,7 @@ def test_mcp_url_drops_bridge_token(tmp):
     _eval(tmp, 'url')
 
 
-def test_mcp_result_drops_bridge_token(tmp):
+def test_mcp_result_drops_only_envelope_token(tmp):
     mcp._need_deps()
     with _util.bridge(tmp, env=mcp.BRIDGE_ENV) as (base, _root):
         mod = mcp._load_mcp(base)
@@ -63,9 +64,9 @@ def test_mcp_result_drops_bridge_token(tmp):
                 'result': {'path': f'{mcp.TOK}/shot/image.png', 'size': 4}})
             assert status == 200, body
             value = asyncio.run(mod.result(consume=consume))
-            _no_token(value, mcp.TOK)
             assert 'token' not in value, value
-            assert value['value'] == {'path': 'shot/image.png', 'size': 4}
+            assert value['value'] == {
+                'path': f'{mcp.TOK}/shot/image.png', 'size': 4}, value
 
 
 def test_cli_raw_result_drops_bridge_token(tmp):
@@ -95,7 +96,7 @@ def test_cli_raw_cdp_drops_bridge_token(tmp):
         assert value['result'] == {'enabled': True}, value
 
 
-def test_cli_result_screenshot_path_omits_token(tmp):
+def test_cli_generic_result_preserves_screenshot_path(tmp):
     del tmp
     for raw in (False, True):
         body = {'token': 'bridge-secret', 'id': 'shot', 'ts': 1,
@@ -105,8 +106,9 @@ def test_cli_result_screenshot_path_omits_token(tmp):
         with contextlib.redirect_stdout(output), \
                 contextlib.redirect_stderr(errors):
             print_result(body, raw=raw)
-        _no_token(output.getvalue(), 'bridge-secret')
-        assert 'shot/image.png' in output.getvalue(), output.getvalue()
+        if raw:
+            assert 'token' not in json.loads(output.getvalue())
+        assert 'bridge-secret/shot/image.png' in output.getvalue()
         assert errors.getvalue() == '', errors.getvalue()
         assert body['token'] == 'bridge-secret', body
         assert body['result']['path'].startswith('bridge-secret/'), body
@@ -183,6 +185,79 @@ def test_mcp_uploads_paths_omit_token(tmp):
 
 def test_mcp_paged_uploads_paths_omit_token(tmp):
     _uploads(tmp, True)
+
+
+def _application_envelopes():
+    for path in ('project/src/main.py', 'mcptok/assets/config.json'):
+        yield {'token': 'mcptok', 'id': 'application', 'ts': 1,
+               'error': None, 'world': 'page-main',
+               'result': {'token': 'application-token', 'path': path}}
+
+
+def _cli_preserves_application_paths(raw):
+    for body in _application_envelopes():
+        expected = json.dumps(body['result'], indent=2)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            print_result(body, raw=raw)
+        if raw:
+            value = json.loads(output.getvalue())
+            assert 'token' not in value, value
+            rendered = json.dumps(value['result'], indent=2)
+        else:
+            rendered = output.getvalue().split('\n', 1)[1].rstrip('\n')
+        assert rendered == expected, (
+            'application path rewritten', raw, expected, rendered)
+
+
+def test_cli_raw_preserves_application_paths(tmp):
+    del tmp
+    _cli_preserves_application_paths(True)
+
+
+def test_cli_formatted_preserves_application_paths(tmp):
+    del tmp
+    _cli_preserves_application_paths(False)
+
+
+def _mcp_preserves_application_paths(name):
+    mod = mcp_tools._load_composition('application-paths-' + name)
+    arguments = {'cmd_id': 'application', 'code': 'value'} \
+        if name in ('exec', 'put') else {}
+    for body in _application_envelopes():
+        expected = json.dumps(body['result'])
+        mod.bridge.poll_body = body
+        mod.bridge.get_bodies['/result'] = body
+        value = asyncio.run(mod.mcp.registered[name](**arguments))
+        assert 'token' not in value, value
+        assert value['world'] == 'page-main', value
+        assert json.dumps(value['value']) == expected, (
+            'application path rewritten', name, body['result'], value)
+
+
+def test_mcp_exec_preserves_application_paths(tmp):
+    del tmp
+    _mcp_preserves_application_paths('exec')
+
+
+def test_mcp_put_preserves_application_paths(tmp):
+    del tmp
+    _mcp_preserves_application_paths('put')
+
+
+def test_mcp_result_preserves_application_paths(tmp):
+    del tmp
+    _mcp_preserves_application_paths('result')
+
+
+def test_mcp_title_preserves_application_paths(tmp):
+    del tmp
+    _mcp_preserves_application_paths('title')
+
+
+def test_mcp_url_preserves_application_paths(tmp):
+    del tmp
+    _mcp_preserves_application_paths('url')
 
 
 if __name__ == '__main__':
