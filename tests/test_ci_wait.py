@@ -78,6 +78,15 @@ def test_the_ignored_run_cannot_complete_the_wait_either(tmp):
     assert _verdict(runs) == ('waiting', [])
 
 
+def test_an_in_progress_run_is_never_superseded(tmp):
+    del tmp
+    runs = [
+        _run(1, None, '2026-09-07T10:00:00Z', status='in_progress'),
+        _run(2, 'success', '2026-09-07T10:05:00Z'),
+    ]
+    assert _verdict(runs) == ('waiting', [])
+
+
 def test_an_older_failure_is_never_superseded(tmp):
     del tmp
     runs = [
