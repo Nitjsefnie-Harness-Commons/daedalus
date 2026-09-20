@@ -59,9 +59,12 @@ def _close_registered_clients(transport, failures):
                     base_url, factories[base_url], closed, **kw)):
             for url in urls:
                 transport.BridgeTransport(url).client()
+        # CancelledError is what gather hands back for a cancelled close,
+        # so it is admitted by name; a bare BaseException catch would also
+        # swallow a runner abort.
         try:
             await transport.BridgeTransport.close_current_loop_clients()
-        except Exception as failure:  # noqa: BLE001
+        except (Exception, asyncio.CancelledError) as failure:  # noqa: BLE001
             raised = failure
         else:
             raised = None
@@ -82,6 +85,18 @@ def test_closing_reports_the_first_client_close_failure_after_closing_all(
         transport, [first, None, last])
     assert sorted(closed) == urls, (closed, urls)
     assert raised is first, (raised, first)
+    assert not entry_kept
+
+
+def test_closing_reports_a_cancelled_client_close(tmp):
+    """gather marks a close that raised CancelledError as cancelled and
+    hands back a fresh CancelledError, which is not an Exception."""
+    del tmp
+    transport = _transport()
+    closed, raised, entry_kept, urls = _close_registered_clients(
+        transport, [asyncio.CancelledError(), None])
+    assert sorted(closed) == urls, (closed, urls)
+    assert isinstance(raised, asyncio.CancelledError), raised
     assert not entry_kept
 
 
