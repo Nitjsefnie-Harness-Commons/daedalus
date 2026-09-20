@@ -198,7 +198,7 @@ def _runs_on(slug, sha):
 
 
 def _settled(runs):
-    """None with no run yet, False while one is open, True otherwise.
+    """None with no run yet, which is not settled.
 
     A conclusion is the batch's business, not the hold's: a completed
     failure settles the matrix as much as a completed success does.
@@ -209,13 +209,10 @@ def _settled(runs):
 
 
 def _all_concluded(sha):
-    """Whether every workflow run on `sha` has finished.
+    """Whether every workflow run on `sha` has finished, or None.
 
-    None when the answer cannot be established, and the caller keeps holding
-    on None: a failed query must never look like a settled matrix. Workflow
-    runs, not check runs: a queued run has no check run yet, so the check-runs
-    list reads complete mid-matrix. The max-hold cap, not this function,
-    bounds how long the slowest run may hold a batch.
+    None keeps the batch held: a failed query must never look settled.
+    Runs rather than check runs for the reason in the module docstring.
     """
     slug = _repo_slug()
     if not (slug and sha):
@@ -332,12 +329,9 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
 
         if batch and last is not None and time.monotonic() - last >= debounce:
             # A batch of nothing but settled, actionless conclusions is a
-            # matrix still filling in. Emitting it now spends a notification
-            # on a tally the next arrival supersedes, so hold it until either
-            # something worth reading lands — which makes the batch no longer
-            # quiet, and the debounce above takes over — or every run on
-            # that head has concluded and the tally is final. The cap ends
-            # the hold too, and says so: its tally is not final.
+            # matrix still filling in, and every partial tally is superseded
+            # by the next: hold it until something worth reading lands or
+            # every workflow run on that head has concluded.
             held_for = time.monotonic() - (held_since or time.monotonic())
             if _batch_is_only_quiet_ci(batch):
                 sha = _latest_sha(batch)
