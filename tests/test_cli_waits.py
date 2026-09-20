@@ -263,7 +263,6 @@ def test_a_truncated_answer_is_a_connection_failure_not_a_traceback(tmp):
 
 
 def _every_api_entry(base):
-    """One subprocess per public request entry point, against `base`."""
     env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
     return {
         'api': run_cli(['tabs'], env),
@@ -285,10 +284,9 @@ def _assert_connection_failed(outcomes, cause):
 def test_the_result_wait_outlives_a_truncated_error_peek(tmp):
     """A 502 cut off mid-body is the same failed peek as a 200 cut off.
 
-    The HTTPError handler read the body to report `HTTP 502: <detail>`,
-    and that read is where the truncation surfaces — so IncompleteRead
-    was raised inside the handler and escaped the wait as a traceback
-    (issue 700), for a command the browser was already running.
+    The HTTPError handler reads the body for its report, so the cut
+    raised IncompleteRead inside the handler and escaped the wait as a
+    traceback (issue 700) for a command the browser was already running.
     """
     del tmp
     with truncating_front_end(truncate=2, status=502) as base:
@@ -322,7 +320,6 @@ def test_the_result_wait_reports_a_timeout_when_every_error_peek_is_cut(
 
 
 def test_a_truncated_error_answer_is_a_connection_failure(tmp):
-    """An error body cut off mid-read is reported like any other cut."""
     del tmp
     with truncating_front_end(truncate=None, status=502) as base:
         outcomes = _every_api_entry(base)
@@ -330,12 +327,7 @@ def test_a_truncated_error_answer_is_a_connection_failure(tmp):
 
 
 def test_a_complete_error_answer_is_still_reported_by_status(tmp):
-    """Only an error body that cannot be read is a connection failure.
-
-    A whole 502 body keeps the `HTTP <code>: <detail>` report, with the
-    detail JSON-decoded — tests/test_cli.py pins the same words against
-    the bridge's own refusals.
-    """
+    """A whole 502 body keeps the decoded `HTTP <code>: <detail>` report."""
     del tmp
     body = b'{"error": "bad gateway"}'
     with truncating_front_end(truncate=None, status=502, body=body) as base:
@@ -383,13 +375,7 @@ else:
 
 
 def _check_transport_family(family):
-    """Every entry point survives `family` raised by urlopen and by read.
-
-    A stub urlopen stands in for the socket, so the exception the CLI
-    meets is exactly the family named and nothing else. api() reports it
-    as a connection failure; the result wait treats it as a failed peek
-    and returns None at its deadline, having tried at least once.
-    """
+    """`family` from urlopen and from read, through both entry points."""
     env = cli_env(DAEDALUS_TOKEN=TOK)
     for where in ('open', 'read'):
         r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
@@ -408,18 +394,14 @@ def _check_transport_family(family):
 
 
 def test_a_connection_reset_is_a_connection_failure_on_every_entry(tmp):
-    """ConnectionResetError is an OSError that is not a URLError.
-
-    The cut-off controls above raise IncompleteRead, an HTTPException, so
-    they stay green when OSError leaves _exchange's transport clause
-    (issue 699) while a reset by the proxy escapes as a traceback.
-    """
+    """The cut-off controls raise IncompleteRead, an HTTPException, so
+    they stayed green with OSError gone from _exchange's transport clause
+    (issue 699) while a reset by the proxy escaped as a traceback."""
     del tmp
     _check_transport_family('ConnectionResetError')
 
 
 def test_a_timeout_is_a_connection_failure_on_every_entry(tmp):
-    """TimeoutError is the other OSError a socket raises past urlopen."""
     del tmp
     _check_transport_family('TimeoutError')
 
