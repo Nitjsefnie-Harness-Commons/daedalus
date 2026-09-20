@@ -260,6 +260,7 @@
 !/tests/_deliveries.py
 !/tests/_drain.py
 !/tests/_evalpages.py
+!/tests/_frontend.py
 !/tests/_ghexpr.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
