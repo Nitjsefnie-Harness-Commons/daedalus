@@ -226,19 +226,19 @@ def _all_concluded(sha):
     return _settled(runs)
 
 
-def _hold_verdict(settled, held_for, max_hold):
-    """'emit' once settled; else 'hold' under the cap, 'emit-capped' at it."""
-    if settled is True:
-        return 'emit'
-    if held_for < max_hold:
-        return 'hold'
-    return 'emit-capped'
-
-
 def _cap_line(sha, max_hold):
     """The line a cap release adds, so its tally cannot pass for settled."""
     return (f'[watch_all] hold cap {max_hold:.0f}s reached on {sha}; '
             'runs still open or unknown — tally is partial')
+
+
+def _hold_release(settled, held_for, max_hold, sha):
+    """None to keep holding, else the lines to add before emitting."""
+    if settled is True:
+        return []
+    if held_for < max_hold:
+        return None
+    return [_cap_line(sha, max_hold)]
 
 
 def _pump(name, stream, sink, kind):
@@ -341,15 +341,14 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
             held_for = time.monotonic() - (held_since or time.monotonic())
             if _batch_is_only_quiet_ci(batch):
                 sha = _latest_sha(batch)
-                verdict = _hold_verdict(_all_concluded(sha), held_for,
-                                        max_hold)
-                if verdict == 'hold':
+                extra = _hold_release(_all_concluded(sha), held_for,
+                                      max_hold, sha)
+                if extra is None:
                     if held_since is None:
                         held_since = time.monotonic()
                     last = time.monotonic()
                     continue
-                if verdict == 'emit-capped':
-                    batch.append(_cap_line(sha, max_hold))
+                batch.extend(extra)
             _emit(batch, limit, log_path)
             batch = []
             last = None
