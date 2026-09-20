@@ -99,6 +99,39 @@ LAUNCH_REFUSAL_ROWS = (
      "subprocess.run(['git', 'status'], check=True)\n"
      "sys.modules['subprocess'].run(['git', 'status'], check=True)\n",
      'calls through a receiver the audit cannot resolve'),
+    ('callee-through-subscript',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "[subprocess.run][0](['git', 'status'], check=True)\n",
+     'calls through a receiver the audit cannot resolve'),
+    ('exec-call',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "exec('pass')\n",
+     'calls exec, which the audit cannot resolve'),
+    ('importlib-machinery-member-call',
+     "import subprocess\n"
+     "import importlib\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "importlib.reload(subprocess)\n",
+     'calls importlib.reload, which the audit cannot resolve'),
+    ('receiver-through-getattr',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "getattr(subprocess, 'run').__call__(['git', 'status'], check=True)\n",
+     'calls through a receiver the audit cannot resolve'),
+    ('receiver-through-partial-builtin-alias',
+     "import subprocess\n"
+     "from functools import partial as list\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "list(subprocess.run).__call__(['git', 'status'], check=True)\n",
+     'calls through a receiver the audit cannot resolve'),
+    ('receiver-through-import-module-builtin-alias',
+     "import subprocess\n"
+     "from importlib import import_module as list\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "list('subprocess').run(['git', 'status'], check=True)\n",
+     'calls through a receiver the audit cannot resolve'),
     ('no-visible-launch',
      "import subprocess\n"
      "print('git status')\n",
