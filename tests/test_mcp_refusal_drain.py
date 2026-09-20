@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _daedalus_env  # noqa: E402
+import _mcp_load  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -192,6 +193,36 @@ def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = previous
+
+
+def test_mcp_load_restores_an_absent_token(_tmp):
+    _need_deps()
+    original = dict(os.environ)
+    try:
+        os.environ.pop('TOKEN', None)
+        os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
+        snapshot = dict(os.environ)
+        _mcp_load._load_mcp('http://127.0.0.1:1')
+        assert 'TOKEN' not in os.environ, 'TOKEN remained set after load'
+        assert os.environ == snapshot, 'environment leaked'
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
+def test_mcp_load_restores_a_different_prior_token(_tmp):
+    _need_deps()
+    original = dict(os.environ)
+    try:
+        os.environ['TOKEN'] = 'shell-token'
+        os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
+        snapshot = dict(os.environ)
+        _mcp_load._load_mcp('http://127.0.0.1:1')
+        assert os.environ['TOKEN'] == 'shell-token', 'prior TOKEN was lost'
+        assert os.environ == snapshot, 'environment leaked'
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
 
 
 def test_isolated_restores_an_absent_token(_tmp):

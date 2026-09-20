@@ -1,30 +1,13 @@
 """Shell settings must not override fixture-selected bridge URLs."""
-import contextlib
 import http.client
 import json
-import os
 import time
 
+import _daedalus_env
 import _util
 
 TOK = 'mcptok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
-
-
-@contextlib.contextmanager
-def _shield_environment(**seeds):
-    saved = {key: value for key, value in os.environ.items()
-             if key.startswith('DAEDALUS_')}
-    for key in saved:
-        del os.environ[key]
-    try:
-        os.environ.update(seeds)
-        yield
-    finally:
-        for key in tuple(os.environ):
-            if key.startswith('DAEDALUS_'):
-                del os.environ[key]
-        os.environ.update(saved)
 
 
 def _load_mcp(base_url, mcp_port=None, max_body_size=None):
@@ -33,14 +16,14 @@ def _load_mcp(base_url, mcp_port=None, max_body_size=None):
         applied['DAEDALUS_MCP_PORT'] = str(mcp_port)
     if max_body_size is not None:
         applied['DAEDALUS_MCP_MAX_BODY_SIZE'] = str(max_body_size)
-    with _shield_environment(**applied):
+    with _daedalus_env.isolated(applied):
         return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
                           'mcp_server_under_test_' + str(time.time_ns()))
 
 
 def _start_in_thread(mod, local_url=None):
     # Rebinding reads the environment again after the load shield has ended.
-    with _shield_environment():
+    with _daedalus_env.isolated({}):
         return mod.start_in_thread(local_url)
 
 
