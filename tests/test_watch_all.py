@@ -149,13 +149,16 @@ def test_newline_separated_pages_are_still_read(tmp):
 def test_a_cap_release_is_announced_in_the_batch(tmp):
     del tmp
     mod = _watch_all()
-    assert mod._hold_verdict(None, 600.0, 600.0) == 'emit-capped'
-    assert mod._hold_verdict(False, 601.0, 600.0) == 'emit-capped'
+    cap_line = mod._cap_line(SHA, 600.0)
+    assert SHA in cap_line and '600s' in cap_line
+    other = mod._cap_line('b' * 7, 30.0)
+    assert 'b' * 7 in other and '30s' in other and other != cap_line
+    assert mod._hold_release(None, 600.0, 600.0, SHA) == [cap_line]
+    assert mod._hold_release(False, 601.0, 600.0, SHA) == [cap_line]
     batch = [f'[ci] CI b {SHA} pylint: success https://github.com/o/r/1',
-             f'[ci] CI b {SHA} pyright: success https://github.com/o/r/2',
-             mod._cap_line(SHA, 600.0)]
-    text = mod._condense(batch, 1000, 'log')
-    lines = text.splitlines()
+             f'[ci] CI b {SHA} pyright: success https://github.com/o/r/2']
+    batch.extend(mod._hold_release(None, 600.0, 600.0, SHA))
+    lines = mod._condense(batch, 1000, 'log').splitlines()
     assert lines[0] == f'CI {SHA}: 2 success'
     assert lines[1].startswith('[watch_all] hold cap 600s reached on ' + SHA)
     assert lines[1].endswith('tally is partial')
@@ -164,15 +167,15 @@ def test_a_cap_release_is_announced_in_the_batch(tmp):
 def test_a_settled_release_carries_no_cap_line(tmp):
     del tmp
     mod = _watch_all()
-    assert mod._hold_verdict(True, 0.0, 600.0) == 'emit'
-    assert mod._hold_verdict(True, 601.0, 600.0) == 'emit'
+    assert mod._hold_release(True, 0.0, 600.0, SHA) == []
+    assert mod._hold_release(True, 601.0, 600.0, SHA) == []
 
 
 def test_under_the_cap_an_unsettled_batch_keeps_holding(tmp):
     del tmp
     mod = _watch_all()
-    assert mod._hold_verdict(None, 0.0, 600.0) == 'hold'
-    assert mod._hold_verdict(False, 599.0, 600.0) == 'hold'
+    assert mod._hold_release(None, 0.0, 600.0, SHA) is None
+    assert mod._hold_release(False, 599.0, 600.0, SHA) is None
 
 
 def main():
