@@ -101,9 +101,9 @@ def test_unknown_lookup_keeps_default_body(tmp):
     ]
     cases = [(label, body(store, invoke), expected)
              for label, store, invoke, expected, _ in shapes]
-    cases.extend((label + '-clean', body(store, invoke).replace(
-        'lambda: send(', 'lambda: ordinary('), clean)
-                 for label, store, invoke, _, clean in shapes)
+    for label, store, invoke, _, clean in shapes:
+        cases.append((label + '-clean', body(store, invoke).replace(
+            'lambda: send(', 'lambda: ordinary('), clean))
     cases.append(('no-default', body(
         'd = args.__dict__\nx = d.get("k")', 'x'), (0, 0)))
     verdicts(tmp, cases)
@@ -315,9 +315,9 @@ def test_mixed_key_containers_join(tmp):
     ]
     cases = [(label, body(store, 'd["k"]()'), (1, 1))
              for label, store in stores]
-    cases.extend((label + '-clean', body(store, 'd["k"]()').replace(
-        'lambda: send(', 'lambda: ordinary('), (0, 0))
-                 for label, store in stores)
+    for label, store in stores:
+        cases.append((label + '-clean', body(store, 'd["k"]()').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)))
     verdicts(tmp, cases)
 
 
