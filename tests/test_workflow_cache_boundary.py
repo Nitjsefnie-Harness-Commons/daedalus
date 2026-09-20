@@ -21,12 +21,18 @@ _CACHE_WRITING_JOBS = frozenset((
 ))
 
 
+# Each reviewed actions/cache commit and the release tag that resolves to
+# it; the pip-cache suite reads the comment a pinned `uses:` line must
+# carry from here, so a bump is approved in one place.
+REVIEWED_CACHE_RELEASES = {
+    '0057852bfaa89a56745cba8c7296529d2fc39830': 'v4.3.0',
+    '55cc8345863c7cc4c66a329aec7e433d2d1c52a9': 'v6.1.0',
+}
+
 _REVIEWED_REFS = {
     'actions/cache': frozenset((
-        'v4', 'v4.3.0', 'v6', 'v6.1.0',
-        '0057852bfaa89a56745cba8c7296529d2fc39830',
-        '55cc8345863c7cc4c66a329aec7e433d2d1c52a9',
-    )),
+        'v4', 'v6', *REVIEWED_CACHE_RELEASES,
+        *REVIEWED_CACHE_RELEASES.values())),
     'actions/setup-go': frozenset((
         'v6', '924ae3a1cded613372ab5595356fb5720e22ba16',
     )),
