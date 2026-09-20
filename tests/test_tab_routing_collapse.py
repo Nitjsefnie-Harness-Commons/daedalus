@@ -212,6 +212,21 @@ def test_dynamic_setdefault_stores_default(tmp):
     verdicts(tmp, cases)
 
 
+def _opaque_mapping_verdicts(tmp, store):
+    source = body(store, 'x["k"]()')
+    clean = source.replace('lambda: send(', 'lambda: ordinary(')
+    # Issue 815 owns the remaining miss; issue 816 must return a verdict.
+    verdicts(tmp, [('sender', source, (1, 0)), ('clean', clean, (0, 0))])
+
+
+def test_opaque_dict_payload_signature_answers(tmp):
+    _opaque_mapping_verdicts(tmp, 'x = {"k": relay(), **args.__dict__}')
+
+
+def test_opaque_constructor_payload_signature_answers(tmp):
+    _opaque_mapping_verdicts(tmp, 'x = dict(k=relay(), **args.__dict__)')
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 
