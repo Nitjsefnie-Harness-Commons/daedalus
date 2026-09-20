@@ -69,8 +69,8 @@ _PLAIN = (
     '      - uses: >-\n'
     '          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n'
     '      - name: Save\n'
-    '        uses: >-\n'
-    f'          actions/cache/SAVE@{V610}  # v6.1.0\n'
+    '        uses: >-  # v6.1.0\n'
+    f'          actions/cache/SAVE@{V610}\n'
 )
 
 
@@ -123,25 +123,89 @@ def test_zero_workflow_files_is_a_refusal_not_a_clean_run(tmp):
 
 
 def test_every_cache_family_pin_shape_is_recognised(tmp):
-    """Plain, list-item and folded `uses:`, any case, all three actions."""
+    """Plain, list-item and folded `uses:`, any case, all three actions.
+
+    A folded scalar's comment sits on its header line: inside the block,
+    `#` is content, so that is the only place YAML lets a comment go.
+    """
     mod = _verifier()
     root = _workflow(tmp, _PLAIN)
-    pins = mod.scan(root)
+    pins, refusals = mod.scan(root)
+    assert refusals == [], refusals
     assert pins == [
         ('.github/workflows/tests.yml', 5, 'actions/cache/restore', V610,
          'v6.1.0'),
         ('.github/workflows/tests.yml', 6, 'Actions/Cache', V610, 'v6.1.0'),
-        ('.github/workflows/tests.yml', 11, 'actions/cache/SAVE', V610,
+        ('.github/workflows/tests.yml', 10, 'actions/cache/SAVE', V610,
          'v6.1.0'),
     ], pins
+
+
+def test_a_comment_inside_a_folded_scalar_is_content_and_refused(tmp):
+    """`uses: >-` then `actions/cache@<sha>  # v6.1.0`: YAML hands GitHub
+    the whole line as the action reference. Not a pin the scanner can
+    classify, so it is refused rather than read as a commented pin."""
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses: >-\n'
+        f'          actions/cache/save@{V610}  # v6.1.0\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        '.github/workflows/tests.yml:4: uses value cannot be classified: '
+        f"'>-' then 'actions/cache/save@{V610}  # v6.1.0'"], refusals
+
+
+def test_a_folded_scalar_that_keeps_going_is_refused(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses: >-  # v6.1.0\n'
+        f'          actions/cache/save@{V610}\n'
+        '          and-more\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        '.github/workflows/tests.yml:4: uses value cannot be classified: '
+        f"'>-  # v6.1.0' then 'actions/cache/save@{V610}'"], refusals
+
+
+def test_a_pin_continued_from_an_empty_uses_line_is_refused(tmp):
+    """`uses:` then a deeper line is one plain scalar to YAML."""
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses:\n'
+        f'          actions/cache@{V610}  # v6.1.0\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        '.github/workflows/tests.yml:4: uses value cannot be classified: '
+        f"'' then 'actions/cache@{V610}  # v6.1.0'"], refusals
+
+
+def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses: >-\n'
+        '          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n'
+        '          and-more\n'
+        f'      - uses: actions/cache@{V610}  # v6.1.0\n'))
+    pins, refusals = mod.scan(root)
+    assert refusals == [], refusals
+    assert [pin.line for pin in pins] == [7], pins
 
 
 def test_both_workflow_extensions_github_accepts_are_scanned(tmp):
     mod = _verifier()
     root = _workflow(tmp, _PLAIN, name='other.yaml')
     _workflow(tmp, 'jobs: {}\n')
-    assert [pin.path for pin in mod.scan(root)] == [
-        '.github/workflows/other.yaml'] * 3, mod.scan(root)
+    pins, refusals = mod.scan(root)
+    assert refusals == [], refusals
+    assert [pin.path for pin in pins] == [
+        '.github/workflows/other.yaml'] * 3, pins
 
 
 def _one_pin(tmp, uses):
@@ -150,7 +214,8 @@ def _one_pin(tmp, uses):
 
 def test_a_ref_that_is_not_a_full_lowercase_commit_is_refused(tmp):
     mod = _verifier()
-    for ref in ('v4', V610[:-1], V610.upper(), 'main'):
+    for ref in ('v4', V610[:-1], V610.upper(), 'main', V610 + 'x',
+                'x' + V610, V610 + '#v6.1.0'):
         root = _one_pin(tmp, f'actions/cache@{ref}  # v6.1.0')
         verified, refusals = mod.verify(root, _refusing_run)
         assert verified == [], (ref, verified)
@@ -182,12 +247,11 @@ def test_one_malformed_pin_stops_every_request(tmp):
     """A refused shape never reaches a request path, and no healthy pin
     beside it is resolved either: the tree is refused as a whole."""
     mod = _verifier()
-    root = _workflow(tmp, _PLAIN.replace(
-        f'actions/cache/SAVE@{V610}  # v6.1.0', f'actions/cache/SAVE@{V610}'))
+    root = _workflow(tmp, _PLAIN.replace('uses: >-  # v6.1.0', 'uses: >-'))
     verified, refusals = mod.verify(root, _refusing_run)
     assert verified == [], verified
     assert refusals == [
-        f'.github/workflows/tests.yml:11: actions/cache/SAVE@{V610} '
+        f'.github/workflows/tests.yml:10: actions/cache/SAVE@{V610} '
         'carries no release comment'], refusals
 
 
@@ -347,7 +411,8 @@ def test_the_real_tree_pins_are_the_ones_the_offline_guard_reviews(tmp):
     modules, so the online check cannot quietly verify a different set."""
     del tmp
     mod = _verifier()
-    pins = mod.scan(ROOT)
+    pins, refusals = mod.scan(ROOT)
+    assert refusals == [], refusals
     assert len(pins) == 2 * len(_CACHE_JOBS), pins
     assert all(mod.shape_refusal(pin) is None for pin in pins), pins
     pairs = {(pin.ref, pin.comment) for pin in pins}
