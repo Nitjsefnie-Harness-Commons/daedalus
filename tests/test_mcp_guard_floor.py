@@ -308,14 +308,25 @@ def test_module_level_class_citations_are_reported_missing(_tmp):
 
 
 def test_module_level_async_function_citations_are_accepted(_tmp):
-    """An async function is a valid test function citation target."""
+    """An async test function is a valid citation target."""
+    suite = Path(_tmp) / 'tests' / 'test_probe.py'
+    suite.parent.mkdir()
+    suite.write_text('async def test_probe():\n    pass\n', encoding='utf-8')
+    citation = 'tests/test_probe.py::test_probe'
+    missing = _mcp_guard_floor.missing_citations(
+        [('m', 'f', 'c', citation)], _tmp)
+    assert citation not in missing, missing
+
+
+def test_a_module_level_helper_citation_is_reported_missing(_tmp):
+    """A helper the runner never collects pins nothing (issue 864)."""
     del _tmp
     citation = 'tests/test_mcp_tools.py::_bridge_interactions'
     missing = _mcp_guard_floor.missing_citations([
         *_mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE,
         ('m', 'f', 'c', citation),
     ], _util.ROOT)
-    assert citation not in missing, missing
+    assert citation in missing, missing
 
 
 def test_a_stated_gap_is_data_the_suite_holds_true(_tmp):
