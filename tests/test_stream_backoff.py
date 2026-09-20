@@ -79,6 +79,42 @@ function streamResponse(answer) {
       },
     };
   }
+  if (answer === 'ok-data') {
+    let reads = 0;
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            async read() {
+              reads += 1;
+              if (reads === 1) {
+                return {
+                  done: false,
+                  value: new TextEncoder().encode(': ping'),
+                };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+    };
+  }
+  if (answer === 'kill') {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            read: () => Promise.reject(new TypeError('killed')),
+          };
+        },
+      },
+    };
+  }
   if (answer === 'ok') {
     return {
       ok: true,
@@ -179,6 +215,7 @@ const context = vm.createContext({
   Date: { now: () => clockNow },
   AbortController,
   TextDecoder,
+  TextEncoder,
   URL,
   performance,
   atob,
@@ -279,6 +316,32 @@ async function run() {
     outcome.fetchesAfterWatchdog = streamFetches.length - before;
     await settle();
     outcome.scheduled = timeoutTimers.map((item) => item.delay);
+  } else if (plan.scenario === 'killed') {
+    const delays = [];
+    await waitFor(() => timeoutTimers.length > 0, 'eof timer');
+    let timer = timeoutTimers.shift();
+    delays.push(timer.delay);
+    timer.callback();
+    await waitFor(() => streamFetches.length >= 2, 'killed fetch');
+    await waitFor(() => timeoutTimers.length > 0, 'kill retry');
+    timer = timeoutTimers.shift();
+    delays.push(timer.delay);
+    timer.callback();
+    await waitFor(() => streamFetches.length >= 3, 'killed fetch two');
+    await waitFor(() => timeoutTimers.length > 0, 'kill retry two');
+    timer = timeoutTimers.shift();
+    delays.push(timer.delay);
+    outcome.delays = delays;
+  } else if (plan.scenario === 'eof-data') {
+    const delays = [];
+    await waitFor(() => timeoutTimers.length > 0, 'eof timer');
+    let timer = timeoutTimers.shift();
+    delays.push(timer.delay);
+    timer.callback();
+    await waitFor(() => streamFetches.length >= 2, 'next fetch');
+    await waitFor(() => timeoutTimers.length > 0, 'next retry');
+    delays.push(timeoutTimers[0].delay);
+    outcome.delays = delays;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   return outcome;
@@ -345,6 +408,21 @@ def test_a_silent_stream_reconnects_through_the_backoff(tmp):
     outcome = _run({'scenario': 'watchdog', 'statuses': ['silent']})
     assert outcome['fetchesAfterWatchdog'] == 0, outcome
     assert outcome['scheduled'] == [1000], outcome
+
+
+def test_a_killed_connection_counts_toward_the_backoff(tmp):
+    """A non-abort reader failure counts once from its connect reset."""
+    del tmp
+    outcome = _run(
+        {'scenario': 'killed', 'statuses': ['ok', 'kill', 'kill']})
+    assert outcome['delays'] == [1000, 2000, 2000], outcome
+
+
+def test_a_clean_data_carrying_eof_still_retries_at_1000(tmp):
+    """A good connection keeps its EOF retry at the flat 1 s scale."""
+    del tmp
+    outcome = _run({'scenario': 'eof-data', 'statuses': ['ok-data', 503]})
+    assert outcome['delays'] == [1000, 1000], outcome
 
 
 def test_a_new_token_resumes_connecting(tmp):
