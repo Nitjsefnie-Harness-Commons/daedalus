@@ -251,8 +251,9 @@ def _binding_signature(binding):
                      generator.remaining, generator.evaluate_zero) \
         if isinstance(generator, DeferredGenerator) else None
     payload = (tuple(sorted(
-        (key, value[0], id(value[1]))
-        for key, value in binding.payload.items()))
+        ((key, value[0], id(value[1]))
+         for key, value in binding.payload.items()),
+        key=lambda item: (type(item[0]).__name__, repr(item[0]))))
         if binding.payload is not None else None)
     return (binding.alias, generator_key,
             id(binding.deferred) if binding.deferred is not None else None,
