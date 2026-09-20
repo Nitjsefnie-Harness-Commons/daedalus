@@ -141,6 +141,9 @@ async function bridgeFetch(target, init = {}) {
       auth: (init.headers || {}).Authorization || null,
       answered: next,
     });
+    if (next === 'down') {
+      throw new TypeError('Failed to fetch');
+    }
     return streamResponse(next);
   }
   if (/\/(register|sync-tabs|unregister)$/.test(url)) {
@@ -342,6 +345,15 @@ async function run() {
     await waitFor(() => timeoutTimers.length > 0, 'next retry');
     delays.push(timeoutTimers[0].delay);
     outcome.delays = delays;
+  } else if (plan.scenario === 'unreachable') {
+    const delays = [];
+    for (let round = 0; round < 6; round++) {
+      await waitFor(() => timeoutTimers.length > 0, 'retry timer');
+      const timer = timeoutTimers.shift();
+      delays.push(timer.delay);
+      timer.callback();
+    }
+    outcome.delays = delays;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   return outcome;
@@ -423,6 +435,15 @@ def test_a_clean_data_carrying_eof_still_retries_at_1000(tmp):
     del tmp
     outcome = _run({'scenario': 'eof-data', 'statuses': ['ok-data', 503]})
     assert outcome['delays'] == [1000, 1000], outcome
+
+
+def test_rejected_connects_grow_to_the_cap(tmp):
+    """An unreachable bridge never connects, so the counter only grows."""
+    del tmp
+    outcome = _run({'scenario': 'unreachable',
+                    'statuses': ['down'] * 6})
+    assert outcome['delays'] == [
+        2000, 4000, 8000, 16000, 32000, 60000], outcome
 
 
 def test_a_new_token_resumes_connecting(tmp):
