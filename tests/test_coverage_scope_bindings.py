@@ -23,9 +23,9 @@ def _unresolved_dict(line):
             'cwd=tmp declares no env=']
 
 
-def _rebound_owner(line):
+def _rebound_owner(line, spelling='behaviour.ROOT'):
     return [f'tests/synthetic.py:{line}: subprocess.run '
-            'cwd=behaviour.ROOT declares no env=']
+            f'cwd={spelling} declares no env=']
 
 
 def _import_bindings():
@@ -88,11 +88,48 @@ def go():
     from _repo import ROOT
     subprocess.run(['python3', 'child.py'], cwd=ROOT)
 """, []),
-        ('a later alias leaves an owner an owner', """import subprocess
+        ('a later alias rebinds the owner', """import subprocess
 import _util
 import helpers as _util
 subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
-""", []),
+""", _rebound_owner(4, '_util.ROOT')),
+        ('a from-import rebinds the owner', """import subprocess
+import _util
+from helpers import _util
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""", _rebound_owner(4, '_util.ROOT')),
+        ('a from-import alias rebinds the owner', """import subprocess
+import _util
+from helpers import x as _util
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""", _rebound_owner(4, '_util.ROOT')),
+        ('a from-import rebinds an aliased owner', """import subprocess
+import _util as u
+from helpers import u
+subprocess.run(['python3', 'child.py'], cwd=u.ROOT)
+""", _rebound_owner(4, 'u.ROOT')),
+        ('a function-local import rebinds the owner', """import subprocess
+import _util
+def go():
+    from helpers import _util
+    subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""", _rebound_owner(5, '_util.ROOT')),
+        ('a star import rebinds every owner', """import subprocess
+import _util
+from helpers import *
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""", _rebound_owner(4, '_util.ROOT')),
+        ('a submodule import is not the genuine binding', """import subprocess
+import _util
+import _util.sub
+subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)
+""", _rebound_owner(4, '_util.ROOT')),
+        ('ROOT through a rebound owner is not root', """import subprocess
+import _util
+from helpers import _util
+ROOT = _util.ROOT
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(5, 'ROOT')),
         ('a root helper import is not a rebinding', """import subprocess
 import test_dashboard_behaviour as behaviour
 subprocess.run(['python3', 'child.py'], cwd=behaviour.ROOT)

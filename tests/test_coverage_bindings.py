@@ -523,16 +523,26 @@ def _mutation_specs():
         "",
     )
     import_bindings = (
-        "    if isinstance(node, ast.ImportFrom):\n"
-        "        return {alias.asname or alias.name "
+        "    if isinstance(node, (ast.Import, ast.ImportFrom)):\n"
+        "        return {_import_bound_name(node, alias) "
         "for alias in node.names}\n",
-        "    if isinstance(node, ast.ImportFrom):\n        return set()\n",
+        "    if isinstance(node, (ast.Import, ast.ImportFrom)):\n"
+        "        return set()\n",
     )
     narrowed_bindings = (
-        "        return {alias.asname or alias.name "
-        "for alias in node.names}\n",
-        "        return {alias.asname or alias.name for alias in node.names\n"
-        "                if alias.name != '_util'}\n",
+        "    return alias.asname or alias.name\n",
+        "    if alias.name == '_util':\n        return alias.name\n"
+        "    return alias.asname or alias.name\n",
+    )
+    rebinding_retires = (
+        "            if module not in gone "
+        "and not _rebound_by_import(name, rebound)}\n",
+        "            if module not in gone}\n",
+    )
+    rebinding_shadows = (
+        "    if _rebound_by_import('_util', _import_rebound_names(tree)):\n"
+        "        names.add('_util')\n",
+        "",
     )
     binding_aliasing = (
         "    return shadows\n\n\n_FUNCTION_SCOPES",
@@ -605,6 +615,10 @@ def _mutation_specs():
          _SCOPE_BINDING_INVOKE),
         ('imports contaminate shadows', 'scopes', (binding_aliasing,),
          _ROOT_PROVENANCE_INVOKE),
+        ('import rebinding retires the owner', 'scopes',
+         (rebinding_retires,), _ROOT_PROVENANCE_INVOKE),
+        ('import rebinding shadows _util', 'scopes',
+         (rebinding_shadows,), _ROOT_PROVENANCE_INVOKE),
         ('variadic annotations', 'scopes', (variadic_annotations,),
          _ANNOTATION_INVOKE),
         ('MatchAs global', 'scopes', (match_as_names,),
