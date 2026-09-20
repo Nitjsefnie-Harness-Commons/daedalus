@@ -54,6 +54,9 @@ else:
     )
 
 
+_DECODED_STEP_KEYS = ('name', 'id', 'uses')
+
+
 @dataclass(frozen=True)
 class StepItem:
     """One actual mapping item in a named job's steps sequence."""
@@ -65,6 +68,7 @@ class StepItem:
     end: int
     name: str | None
     identity: str | None
+    uses: str | None = None
 
 
 @dataclass(frozen=True)
@@ -95,9 +99,8 @@ def _first_child(lines, scalar, start, end, parent_indent):
     return None
 
 
-def _mapping_entry(lines, scalar, start, end, parent_indent, name):
+def _mapping_entries(lines, scalar, start, end, parent_indent):
     child_indent = None
-    matches = []
     for index in range(start, end):
         if index in scalar or not _meaningful(lines[index]):
             continue
@@ -113,8 +116,12 @@ def _mapping_entry(lines, scalar, start, end, parent_indent, name):
             raise YAMLReadError('mapping body contains a sequence item')
         raw_key, rest = _split_field(field, 'mapping')
         key = decode_inline_scalar(raw_key, 'mapping key')
-        if key == name:
-            matches.append(_Entry(index, indent, rest))
+        yield key, _Entry(index, indent, rest)
+
+
+def _mapping_entry(lines, scalar, start, end, parent_indent, name):
+    matches = [entry for key, entry in _mapping_entries(
+        lines, scalar, start, end, parent_indent) if key == name]
     if len(matches) > 1:
         raise YAMLReadError(f'duplicate mapping key: {name}')
     return matches[0] if matches else None
@@ -331,9 +338,9 @@ def _decoded_step_fields(
         field_end = fields[offset + 1][0] if offset + 1 < len(fields) else end
         raw_key, raw_value = _split_field(field, 'step')
         key = decode_inline_scalar(raw_key, 'step key')
-        if key in values and key in ('name', 'id'):
+        if key in values and key in _DECODED_STEP_KEYS:
             raise YAMLReadError(f'duplicate mapping key: {key}')
-        if key in ('name', 'id'):
+        if key in _DECODED_STEP_KEYS:
             values[key] = _step_value(
                 lines,
                 texts,
@@ -348,6 +355,19 @@ def _decoded_step_fields(
         else:
             values[key] = None
     return values
+
+
+def job_names(workflow):
+    """Return the decoded keys of the jobs mapping, in file order."""
+    lines = _lines(workflow)
+    texts = [line.text for line in lines]
+    scalar, _opaque = _scalar_regions(lines, texts)
+    jobs = _mapping_entry(lines, scalar, 0, len(lines), -1, 'jobs')
+    jobs_body = _mapping_body(lines, scalar, jobs, 'jobs')
+    if jobs is None or jobs_body is None:
+        return None
+    return [key for key, _entry in _mapping_entries(
+        lines, scalar, *jobs_body, jobs.indent)]
 
 
 def workflow_step_items(workflow, job):
@@ -412,5 +432,6 @@ def workflow_step_items(workflow, job):
             end=lines[last].end,
             name=fields.get('name'),
             identity=fields.get('id'),
+            uses=fields.get('uses'),
         ))
     return items

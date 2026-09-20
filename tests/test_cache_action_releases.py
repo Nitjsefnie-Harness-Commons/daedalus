@@ -14,6 +14,8 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(
+    1, str(Path(__file__).resolve().parents[1] / 'scripts' / 'ci'))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from test_ci_pip_cache import _CACHE_JOBS  # noqa: E402
@@ -206,6 +208,8 @@ def test_a_hash_glued_to_a_quoted_reference_is_not_a_comment(tmp):
 
 
 def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
+    """The line grammar leaves it alone; the decoder still has to read
+    the file, and refuses what it cannot."""
     mod = _verifier()
     root = _workflow(tmp, (
         'jobs:\n  j:\n    steps:\n'
@@ -214,14 +218,16 @@ def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
         '          and-more\n'
         f'      - uses: actions/cache@{V610}  # v6.1.0\n'))
     pins, refusals = mod.scan(root)
-    assert refusals == [], refusals
     assert [pin.line for pin in pins] == [7], pins
+    assert refusals == [
+        '.github/workflows/tests.yml: mapping has an unsupported mapping '
+        'field'], refusals
 
 
 def test_both_workflow_extensions_github_accepts_are_scanned(tmp):
     mod = _verifier()
     root = _workflow(tmp, _PLAIN, name='other.yaml')
-    _workflow(tmp, 'jobs: {}\n')
+    _workflow(tmp, 'jobs:\n  j:\n    runs-on: ubuntu-latest\n')
     pins, refusals = mod.scan(root)
     assert refusals == [], refusals
     assert [pin.path for pin in pins] == [
@@ -268,7 +274,7 @@ def test_a_near_name_action_is_neither_a_pin_nor_refused(tmp):
         f'      - uses: actions/cache/x@{V610}  # v1.0.0\n'
         f'      - uses: >-  # v1.0.0\n'
         f'          x/actions/cache@{V610}\n'
-        f'      - {{uses: actions/cache/restorer@{V610}}}\n'))
+        f'      - uses: actions/cache/restorer@{V610}  # v1.0.0\n'))
     assert mod.scan(root) == ([], []), mod.scan(root)
 
 
@@ -309,6 +315,48 @@ def test_a_block_header_that_keeps_a_newline_is_refused(tmp):
             '.github/workflows/tests.yml:4: uses value cannot be '
             f"classified: '{header}  # v6.1.0' then 'actions/cache@{V610}'"
         ], (header, refusals)
+
+
+def test_an_escaped_reference_is_refused_by_the_decoder_cross_check(tmp):
+    """The line grammar sees no `@` or no `actions/cache`; the decoder
+    sees the runnable reference, and the two must agree."""
+    mod = _verifier()
+    for spelling in (f'"actions/cache\\x40{V610}"',
+                     f'"actions\\x2fcache@{V610}"',
+                     f'"actions/cache\\u0040{V610}"'):
+        root = _one_pin(tmp, f'{spelling}  # v6.1.0')
+        verified, refusals = mod.verify(root, _refusing_run)
+        assert verified == [], (spelling, verified)
+        assert refusals == [
+            f".github/workflows/tests.yml:4: decoded uses 'actions/cache@"
+            f"{V610}' matches no recognised pin"], (spelling, refusals)
+
+
+def test_an_escaped_reference_in_any_job_is_cross_checked(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n'
+        f'  first:\n    steps:\n      - uses: actions/cache@{V610}  # v6.1.0\n'
+        f'  second:\n    steps:\n      - uses: "actions/cache\\x40{V610}"\n'
+        f'  third:\n    steps:\n      - uses: "actions/cache\\x40{V610}"\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        f".github/workflows/tests.yml:{line}: decoded uses 'actions/cache@"
+        f"{V610}' matches no recognised pin" for line in (7, 10)], refusals
+
+
+def test_a_reference_split_by_a_quoted_line_continuation_is_refused(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses: "actions/\\\n'
+        f'          cache@{V610}"  # v6.1.0\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        '.github/workflows/tests.yml: mapping has an unsupported mapping '
+        'field'], refusals
 
 
 def _one_pin(tmp, uses):
