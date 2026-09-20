@@ -270,9 +270,8 @@ async function run() {
         ['http://example.com/plain', false], ['http://example.com/omitted']];
   const outcomes = [];
   for (const [url, active] of requests) {
-    // A one-element row sends no `active` key at all, as a page that left
-    // the field out does: JSON drops an undefined member, so `active:
-    // undefined` would not be the wire form.
+    // A one-element row sends no `active` key: JSON drops an undefined member,
+    // so `active: undefined` is not what a page that left it out sends.
     const message = { type: 'openTab', url };
     if (active !== undefined) message.active = active;
     try {
@@ -347,18 +346,17 @@ def test_a_relayed_page_request_carries_no_cookies(tmp):
 
 
 def test_a_page_can_open_only_web_urls(tmp):
-    """`GM.openInTab` refuses anything but http: and https:.
+    """`GM.openInTab` opens web URLs only, with the `active` the page sent.
 
     `chrome.tabs.create` accepts URLs a page could never navigate to itself,
     and the relay handed it the page's URL unread — so a page could open
     `chrome://` pages, or a `javascript:` URL, with the extension's authority.
     A refused URL is answered `{error}` and never reaches the browser, and
-    every outcome answers exactly once. Each accepted web scheme drives its
-    own control, so a gate narrowed to `https:` alone fails. The `active`
-    each control sends, or leaves out, is observed at the create call, and
-    the controls vary it independently of scheme, so a relay that forces
-    the tab to the foreground, or derives `active` from anything but the
-    page's field, fails too.
+    every outcome answers exactly once. Both web schemes drive a control
+    each, and `active` — true, false, or left out for the default — is
+    observed at the create call independently of scheme, so a gate narrowed
+    to `https:`, a forced foreground, or an `active` derived from the
+    scheme fails too.
     """
     del tmp
     outcome = _run_relay_authority('open')
