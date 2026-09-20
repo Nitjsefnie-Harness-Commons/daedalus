@@ -336,7 +336,8 @@ def test_a_transient_read_refusal_returns_every_queued_command(tmp):
                 refused_file, 'read_text', refusals) as calls:
             commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
         # Refusals are counted before any read succeeds, so a count past
-        # them proves the refusal was exhausted and a later read happened.
+        # them proves the refused path was read again after its refusals;
+        # the freshness controls are the whole-set witness.
         assert calls[0] > refusals, (refusals, calls)
         assert commands == expected, commands
 
@@ -369,6 +370,7 @@ def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
         with _refuse_path_operation(
                 refused_file, 'read_text', refusals) as calls:
             commands = _overlap._wait_for_client_commands(queue, 2)
+        # Same bound as the multi-command control above.
         assert calls[0] > refusals, (refusals, calls)
         assert commands == expected, commands
 
@@ -390,10 +392,9 @@ def _whole_set_retry_returns_the_rewrite(tmp, error):
     files = (first, second)
     stale = [{'id': 'stale-first', 'type': 'reload'},
              {'id': 'stale-second', 'type': 'reload'}]
-    # Refusing either file, with both rewritten at that moment, proves the
-    # retry re-reads the whole set whichever order the helper reads in.
-    # Each round's fresh ids are its own, so a set kept from an earlier
-    # call cannot satisfy a later one.
+    # Refusing each file in turn, with both rewritten at that moment, proves
+    # the whole-set retry for either read order; per-round fresh ids stop a
+    # set kept from an earlier call from passing.
     for refused_file in files:
         fresh = [{'id': f'fresh-first-{refused_file.name}', 'type': 'reload'},
                  {'id': f'fresh-second-{refused_file.name}',

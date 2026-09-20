@@ -247,11 +247,8 @@ def _disappear_on_first_open(path):
 
 @contextlib.contextmanager
 def _rewrite_on_first_read(path, error, rewrites):
-    """Raise `error` from the first read of `path`, rewriting `rewrites`.
-
-    Each rewrite is a `(path, command)` pair written at the moment of the
-    refusal, so only a whole-set retry can return the rewritten content.
-    """
+    """Rewrite queue files at the moment of the refusal, so only a whole-set
+    retry can return the rewritten content."""
     original = io.open
     target_key = _target_key(path)
     armed = [True]
