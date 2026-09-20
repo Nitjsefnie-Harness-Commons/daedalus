@@ -239,20 +239,35 @@ def _vanish_during_read(path, clock, remove_queue=False):
 
 @contextlib.contextmanager
 def _disappear_on_first_open(path):
+    with _rewrite_on_first_read(
+            path, FileNotFoundError(2, 'injected disappearance', str(path)),
+            ()):
+        yield
+
+
+@contextlib.contextmanager
+def _rewrite_on_first_read(path, error, rewrites):
+    """Raise `error` from the first read of `path`, rewriting `rewrites`.
+
+    Each rewrite is a `(path, command)` pair written at the moment of the
+    refusal, so only a whole-set retry can return the rewritten content.
+    """
     original = io.open
     target_key = _target_key(path)
     armed = [True]
 
-    def missing(candidate, *args, **kwargs):
+    def refused(candidate, *args, **kwargs):
         if _target_key(candidate) == target_key and armed[0]:
             handle = _native_read_handle(original, candidate, args, kwargs)
             if handle is not None:
                 return handle
             armed[0] = False
-            raise FileNotFoundError(2, 'injected disappearance', str(path))
+            for queued, command in rewrites:
+                queued.write_text(json.dumps(command), encoding='utf-8')
+            raise error
         return original(candidate, *args, **kwargs)
 
-    io.open = missing
+    io.open = refused
     try:
         yield
     finally:
