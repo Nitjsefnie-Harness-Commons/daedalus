@@ -269,6 +269,7 @@
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
 !/tests/_jsroute_factory_cases.py
+!/tests/_jsroute_getter_cases.py
 !/tests/_jsroute_harness.py
 !/tests/_jsroute_keys.py
 !/tests/_jsroute_net.py

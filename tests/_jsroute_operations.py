@@ -97,8 +97,8 @@ def operation_call(position, scope, status, body=None, args=(),
         'start': position, 'order': position, 'binding': None,
         'args': list(args), 'body': body, 'status': status, 'scope': scope,
         'name': None, 'member': None, 'source': None, 'parent': False,
-        'form': None, 'argument_calls': [], 'consumed': (),
-        'argument_status': argument_status}
+        'form': None, 'returned': None, 'argument_calls': [],
+        'consumed': (), 'argument_status': argument_status}
 
 
 def unwrap_parens(mask, span, pair_end):

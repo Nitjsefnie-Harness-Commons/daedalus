@@ -139,12 +139,28 @@ def callable_body(receiver, binding, position, seen=frozenset()):
         receiver, value['binding'], span[0], seen | {binding})
 
 
+def invoked_body(receiver, value, position):
+    """Body a known callable value runs when called at `position`."""
+    if value['status'] != 'known':
+        return None
+    if value['body'] is not None:
+        return value['body']
+    return callable_body(receiver, value['binding'], position)
+
+
+def getter_call_body(receiver, getter, position):
+    """Body the callable a getter returns runs when called at `position`.
+
+    None when the return does not resolve to a body: the call then stays
+    unprovable rather than crediting a getter body alone.
+    """
+    return invoked_body(receiver, getter_value(receiver, getter), position)
+
+
 def _invoke_callable(receiver, value, args, position):
     if value['status'] != 'known':
         return _target(value['status'], form=value['form'])
-    body = value['body']
-    if body is None:
-        body = callable_body(receiver, value['binding'], position)
+    body = invoked_body(receiver, value, position)
     if body is None:
         return _target('unprovable', form=value['form'])
     scope = receiver._scope_for(body)
