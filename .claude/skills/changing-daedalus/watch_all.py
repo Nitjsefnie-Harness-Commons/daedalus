@@ -169,7 +169,11 @@ def _repo_slug():
 
 
 def _runs_on(slug, sha):
-    """Every workflow run on `sha`, or None when the query fails."""
+    """Every workflow run on `sha`, or None when the query fails.
+
+    `--paginate` joins the object pages with no separator, so the body is
+    decoded value by value.
+    """
     try:
         pages = subprocess.run(
             ['gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',
@@ -177,12 +181,16 @@ def _runs_on(slug, sha):
             capture_output=True, text=True, timeout=120, check=True).stdout
     except (OSError, subprocess.SubprocessError):
         return None
+    decoder = json.JSONDecoder()
     runs = []
-    for chunk in pages.split('\n'):
-        if not chunk.strip():
+    index = 0
+    while index < len(pages):
+        if pages[index].isspace():
+            index += 1
             continue
         try:
-            runs.extend(json.loads(chunk).get('workflow_runs') or [])
+            page, index = decoder.raw_decode(pages, index)
+            runs.extend(page.get('workflow_runs') or [])
         except (ValueError, AttributeError):
             return None
     return runs
