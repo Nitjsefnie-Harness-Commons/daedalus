@@ -44,8 +44,10 @@ _COMMENT = r'(?:\s+#\s*(.*))?'
 _INLINE = re.compile(
     r'("[^"]*"|\'[^\']*\'|[^\s"\'#>|]\S*)' + _COMMENT + '$')
 _BLOCK_HEADER = re.compile(r'([>|]-)' + _COMMENT + '$')
+# The family is the repository: any path under it is a reference to
+# account for, whether or not it is one of the three actions.
 _REFERENCE = re.compile(
-    r'(?<![A-Za-z0-9_./-])actions/cache(?:/restore|/save)?@', re.IGNORECASE)
+    r'(?<![A-Za-z0-9_./-])actions/cache(?:/[^\s@]*)?@', re.IGNORECASE)
 _COMMIT = re.compile(r'[0-9a-f]{40}')
 _RELEASE = re.compile(r'v[0-9]+\.[0-9]+\.[0-9]+')
 
@@ -126,7 +128,7 @@ def pins_in(root, path):
 
 def _cache_reference(uses):
     action, at, _ref = uses.partition('@')
-    return bool(at) and action.casefold() in CACHE_ACTIONS
+    return bool(at) and (action.casefold() + '/').startswith('actions/cache/')
 
 
 def decoder_refusals(relative, text, pins):
