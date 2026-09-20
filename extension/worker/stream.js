@@ -128,7 +128,11 @@ async function startStream() {
     if (myGen !== streamGen) return; // superseded — a newer stream is live
     if (Date.now() - lastDataTime > 30000) {
       console.warn('[Daedalus] Watchdog: no data in 30s, reconnecting');
-      startStream(); // stopStream() inside handles teardown of this generation
+      const delay = Math.min(
+        _STREAM_RETRY_BASE_MS * 2 ** _streamFailures,
+        _STREAM_RETRY_MAX_MS);
+      _streamFailures++;
+      setTimeout(() => { if (myGen === streamGen) startStream(); }, delay);
     }
   }, 5000);
 

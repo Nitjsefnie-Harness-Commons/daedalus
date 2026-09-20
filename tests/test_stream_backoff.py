@@ -38,6 +38,7 @@ const streamFetches = [];
 const timeoutTimers = [];
 const intervalTimers = [];
 let nextTimerId = 0;
+let clockNow = 0;
 const storageStore = {
   'daedalus-token': 'tok-1',
   'daedalus-server': 'https://bridge.example.com',
@@ -67,6 +68,17 @@ function eventTarget(listeners = null) {
 }
 
 function streamResponse(answer) {
+  if (answer === 'silent') {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return { read: () => new Promise(() => {}) };
+        },
+      },
+    };
+  }
   if (answer === 'ok') {
     return {
       ok: true,
@@ -164,6 +176,7 @@ const context = vm.createContext({
   chrome,
   fetch: bridgeFetch,
   crypto: { randomUUID: () => 'relay-1' },
+  Date: { now: () => clockNow },
   AbortController,
   TextDecoder,
   URL,
@@ -258,6 +271,14 @@ async function run() {
     }
     outcome.returnedAuth = streamFetches[seen - 1].auth;
     await settle();
+  } else if (plan.scenario === 'watchdog') {
+    const before = streamFetches.length;
+    clockNow = 31000;
+    const watchdog = intervalTimers.find((item) => item.delay === 5000);
+    watchdog.callback();
+    outcome.fetchesAfterWatchdog = streamFetches.length - before;
+    await settle();
+    outcome.scheduled = timeoutTimers.map((item) => item.delay);
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   return outcome;
@@ -316,6 +337,14 @@ def test_the_auth_stop_tears_down_the_watchdog_interval(tmp):
         assert outcome['intervals'] == [
             {'delay': 20000, 'cleared': False},
             {'delay': 5000, 'cleared': True}], (status, outcome)
+
+
+def test_a_silent_stream_reconnects_through_the_backoff(tmp):
+    """The watchdog counts as a failed attempt, not a free reconnect."""
+    del tmp
+    outcome = _run({'scenario': 'watchdog', 'statuses': ['silent']})
+    assert outcome['fetchesAfterWatchdog'] == 0, outcome
+    assert outcome['scheduled'] == [1000], outcome
 
 
 def test_a_new_token_resumes_connecting(tmp):
