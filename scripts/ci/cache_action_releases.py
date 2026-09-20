@@ -14,12 +14,19 @@ is every other line carrying an `actions/cache…@` reference that is not
 a comment: a quoted key, a flow mapping, a continued value or a run
 script is never skipped.
 """
+import importlib
 import json
 import re
 import subprocess
 import sys
 from collections import namedtuple
 from pathlib import Path
+
+if __package__:
+    # pylint: disable-next=relative-beyond-top-level,no-name-in-module
+    from . import workflow_yaml
+else:
+    workflow_yaml = importlib.import_module('workflow_yaml')
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = Path('.github') / 'workflows'
@@ -70,9 +77,10 @@ def _block_content(lines, index, key_indent):
 def pins_in(root, path):
     relative = path.relative_to(root).as_posix()
     try:
-        lines = path.read_text(encoding='utf-8').splitlines()
+        text = path.read_text(encoding='utf-8')
     except UnicodeDecodeError:
         return [], [f'{relative}: not UTF-8']
+    lines = text.splitlines()
     pins, refusals, accounted = [], [], set()
     for index, line in enumerate(lines):
         match = _USES.match(line)
@@ -109,7 +117,36 @@ def pins_in(root, path):
                 and _REFERENCE.search(line)):
             refusals.append(
                 f'{relative}:{number}: unclassified actions/cache reference')
-    return pins, refusals
+    if refusals:
+        return pins, refusals
+    return pins, decoder_refusals(relative, text, pins)
+
+
+def _cache_reference(uses):
+    action, at, _ref = uses.partition('@')
+    return bool(at) and action.casefold() in CACHE_ACTIONS
+
+
+def decoder_refusals(relative, text, pins):
+    """Every cache reference the workflow decoder finds that the line
+    scanner did not recognise at that step with the same value."""
+    try:
+        jobs = workflow_yaml.job_names(text) or []
+        steps = [(job, item) for job in jobs
+                 for item in workflow_yaml.workflow_step_items(text, job)
+                 or []]
+    except workflow_yaml.YAMLReadError as error:
+        return [f'{relative}: {error}']
+    refusals = []
+    for _job, item in steps:
+        if item.uses is None or not _cache_reference(item.uses):
+            continue
+        seen = [pin for pin in pins
+                if item.index < pin.line <= item.end_index]
+        if [f'{pin.action}@{pin.ref}' for pin in seen] != [item.uses]:
+            refusals.append(f'{relative}:{item.index + 1}: decoded uses '
+                            f'{item.uses!r} matches no recognised pin')
+    return refusals
 
 
 def scan(root):
