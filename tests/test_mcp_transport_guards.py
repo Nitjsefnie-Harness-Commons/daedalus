@@ -633,9 +633,9 @@ def _shielded_environment():
 
 
 def test_poll_survives_a_truncated_peek_from_a_real_front_end(tmp):
-    """The scripted controls raise ReadError, so narrowing the poll's
-    clause to that class kept them green (issue 699) while a real
-    cut-off body, httpx's RemoteProtocolError, escaped on the first GET."""
+    """The scripted controls raise ReadError; a real cut-off body is
+    httpx's RemoteProtocolError, a TransportError that is no ReadError
+    (issue 699)."""
     del tmp
     transport = _transport()
     with _shielded_environment() as environ, truncating_front_end(1) as base:

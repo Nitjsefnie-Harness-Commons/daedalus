@@ -186,8 +186,6 @@ def _exchange(req, timeout, read):
     the bridge, and they are the same class of failure as a refused
     connection: no answer arrived. HTTPError is a URLError and URLError is
     an OSError, so the order of the clauses is the order of specificity.
-    The HTTPError body is read inside its handler, so a cut-off error
-    answer raised IncompleteRead past the clauses below; same failure.
     """
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:

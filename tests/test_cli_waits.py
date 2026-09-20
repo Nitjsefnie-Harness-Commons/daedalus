@@ -282,12 +282,8 @@ def _assert_connection_failed(outcomes, cause):
 
 
 def test_the_result_wait_outlives_a_truncated_error_peek(tmp):
-    """A 502 cut off mid-body is the same failed peek as a 200 cut off.
-
-    The HTTPError handler reads the body for its report, so the cut
-    raised IncompleteRead inside the handler and escaped the wait as a
-    traceback (issue 700) for a command the browser was already running.
-    """
+    """A 502 cut off mid-body is the same failed peek as a 200 cut off:
+    the HTTPError handler reads the body for its report (issue 700)."""
     del tmp
     with truncating_front_end(truncate=2, status=502) as base:
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
@@ -381,8 +377,7 @@ else:
 
 
 def _check_transport_family(family):
-    """`family` from urlopen, from the body read and from the read of
-    an HTTPError's body, through both entry points."""
+    """`family` from urlopen, the body read and an HTTPError's body read."""
     env = cli_env(DAEDALUS_TOKEN=TOK)
     for where in ('open', 'read', 'error'):
         r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
@@ -401,9 +396,8 @@ def _check_transport_family(family):
 
 
 def test_a_connection_reset_is_a_connection_failure_on_every_entry(tmp):
-    """The cut-off controls raise IncompleteRead, an HTTPException, so
-    they stayed green with OSError gone from _exchange's transport clause
-    (issue 699) while a reset by the proxy escaped as a traceback."""
+    """The cut-off controls raise IncompleteRead, an HTTPException; this
+    is the OSError half of _exchange's transport clauses (issue 699)."""
     del tmp
     _check_transport_family('ConnectionResetError')
 
