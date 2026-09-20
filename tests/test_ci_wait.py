@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ci_wait.py's verdict: the superseded-cancelled rule and its edges."""
+import io
 import sys
 from pathlib import Path
 
@@ -180,6 +181,41 @@ def test_the_zero_and_green_contracts_are_unchanged(tmp):
         _run(3, 'skipped', '2026-09-07T10:10:00Z'),
     ]
     assert _verdict(runs) == ('acceptable', [])
+
+
+def test_the_success_line_counts_judged_runs_only(tmp):
+    del tmp
+    mod = _ci_wait()
+    runs = [
+        _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
+        _run(2, 'success', '2026-09-07T10:05:00Z'),
+    ]
+    mod.runs_on = lambda repo, sha: runs
+    out = io.StringIO()
+    code = mod.wait('o/r', 'a' * 40, 60, 60, out)
+    assert code == 0
+    assert out.getvalue() == (
+        'aaaaaaaaaaaa 2 run(s)\n'
+        '  run 1: completed/cancelled\n'
+        '  run 2: completed/success\n'
+        'all 1 run(s) on aaaaaaaaaaaa acceptable'
+        ' (1 superseded cancelled ignored)\n'
+    )
+
+
+def test_the_success_line_is_unchanged_without_ignored_runs(tmp):
+    del tmp
+    mod = _ci_wait()
+    mod.runs_on = lambda repo, sha: [
+        _run(1, 'success', '2026-09-07T10:00:00Z')]
+    out = io.StringIO()
+    code = mod.wait('o/r', 'b' * 40, 60, 60, out)
+    assert code == 0
+    assert out.getvalue() == (
+        'bbbbbbbbbbbb 1 run(s)\n'
+        '  run 1: completed/success\n'
+        'all 1 run(s) on bbbbbbbbbbbb acceptable\n'
+    )
 
 
 def main():
