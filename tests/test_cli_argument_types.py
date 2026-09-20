@@ -4,40 +4,16 @@
 A type that stops refusing fails here rather than by the comment above
 its raise.
 """
-import contextlib
-import io
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _cli_parse import accepted, refused  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
-from daedalus_cli.parser import build_parser  # noqa: E402
 from daedalus_cli.transport import NET_CAPTURE_MAX  # noqa: E402
-
-
-def refused(argv):
-    """(exit code, stderr): argparse refused argv at parse time."""
-    err = io.StringIO()
-    try:
-        with contextlib.redirect_stderr(err):
-            build_parser().parse_args(argv)
-    except SystemExit as exit_request:
-        return exit_request.code, err.getvalue()
-    raise AssertionError(f'{argv} parsed instead of being refused')
-
-
-def accepted(argv):
-    err = io.StringIO()
-    try:
-        with contextlib.redirect_stderr(err):
-            return build_parser().parse_args(argv)
-    except SystemExit as exit_request:
-        raise AssertionError(
-            f'{argv} refused: exit {exit_request.code}, '
-            f'{err.getvalue()!r}') from None
 
 
 def test_net_capture_refuses_a_max_outside_one_to_the_ceiling(tmp):
@@ -47,7 +23,7 @@ def test_net_capture_refuses_a_max_outside_one_to_the_ceiling(tmp):
         assert code != 0, (value, code, message)
         assert 'usage:' in message, (value, message)
         assert 'argument --max:' in message, (value, message)
-        assert value in message, (value, message)
+        assert f'got {int(value)}' in message, (value, message)
     for value in ('1', str(NET_CAPTURE_MAX)):
         args = accepted(['net-capture', '--max', value])
         assert args.max == int(value), (value, args.max)
