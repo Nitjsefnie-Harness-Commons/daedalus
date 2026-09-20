@@ -4,12 +4,14 @@ import asyncio
 import gc
 import importlib
 import inspect
+import os
 import sys
 import weakref
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _mcp_guard_floor  # noqa: E402
 import _mcp_tool_commands  # noqa: E402
 import _util  # noqa: E402
@@ -154,9 +156,27 @@ def _load_composition(marker):
     with mock.patch.object(mcpserver, 'MCPServer', ToolRegistry), \
             mock.patch.object(
                 mcp_transport, 'BridgeSession', bridge_session):
-        return _util.load(
-            _util.ROOT / 'daedalus_mcp' / 'server.py',
-            f'mcp_server_tools_{marker}')
+        with _daedalus_env.isolated({}):
+            return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
+                              f'mcp_server_tools_{marker}')
+
+
+def test_a_poisoned_shell_cannot_reach_the_in_process_loads(_tmp):
+    for name, value in (('DAEDALUS_MCP_PORT', 'abc'),
+                        ('DAEDALUS_MCP_MAX_BODY_SIZE', 'bad')):
+        previous = os.environ.get(name)
+        os.environ[name] = value
+        try:
+            expected_env = dict(os.environ)
+            composition = _load_composition(f'poisoned-{name}')
+            assert os.environ == expected_env, 'environment leaked'
+            assert composition.MCP_PORT == 8086
+            assert composition.MAX_BODY_SIZE == 64 * 1024 * 1024
+        finally:
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
 
 
 def _assert_inventory_matches_registry(composition):

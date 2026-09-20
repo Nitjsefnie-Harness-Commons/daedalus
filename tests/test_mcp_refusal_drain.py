@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -164,19 +165,33 @@ def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
 
 
 def _load_mcp(max_body_size=None):
-    setting = 'DAEDALUS_MCP_MAX_BODY_SIZE'
-    previous = os.environ.get(setting)
+    applied = {'TOKEN': '', 'DAEDALUS_TOKEN': TOK}
     if max_body_size is not None:
-        os.environ[setting] = str(max_body_size)
-    try:
+        applied['DAEDALUS_MCP_MAX_BODY_SIZE'] = str(max_body_size)
+    with _daedalus_env.isolated(applied):
         return _util.load(
             _util.ROOT / 'daedalus_mcp' / 'server.py',
             'mcp_refusal_drain_' + str(time.time_ns()))
-    finally:
-        if previous is None:
-            os.environ.pop(setting, None)
-        else:
-            os.environ[setting] = previous
+
+
+def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
+    del tmp
+    _need_deps()
+    for name, value in (('DAEDALUS_MCP_PORT', 'abc'),
+                        ('DAEDALUS_MCP_MAX_BODY_SIZE', 'bad')):
+        previous = os.environ.get(name)
+        os.environ[name] = value
+        try:
+            expected_env = dict(os.environ)
+            mod = _load_mcp()
+            assert os.environ == expected_env, 'environment leaked'
+            assert mod.MCP_PORT == 8086
+            assert mod.MAX_BODY_SIZE == 64 * 1024 * 1024
+        finally:
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
 
 
 def test_request_token_is_public_guard_state(tmp):
