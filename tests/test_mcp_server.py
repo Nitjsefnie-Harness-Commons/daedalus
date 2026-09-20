@@ -28,10 +28,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _mcp_load  # noqa: E402
-from _mcp_load import (  # noqa: E402
-    BRIDGE_ENV, TOK, _load_mcp, _load_mcp_at_port, _start_in_thread,
-    _start_mcp_in_process, _wait_for_mcp,
-)
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 from _queueread import queued_command, queued_commands  # noqa: E402
 
@@ -43,6 +39,12 @@ if DEPS:
     import logging
     logging.getLogger('httpx').setLevel(logging.WARNING)  # quiet per-request logs
 
+TOK, BRIDGE_ENV = _mcp_load.TOK, _mcp_load.BRIDGE_ENV
+_load_mcp = _mcp_load._load_mcp
+_load_mcp_at_port = _mcp_load._load_mcp_at_port
+_start_in_thread = _mcp_load._start_in_thread
+_start_mcp_in_process = _mcp_load._start_mcp_in_process
+_wait_for_mcp = _mcp_load._wait_for_mcp
 os.environ.update(BRIDGE_ENV)
 
 
@@ -1437,7 +1439,6 @@ def test_bearer_middleware_fails_closed_without_configured_token(tmp):
 
 
 def test_mcp_port_zero_announces_the_actual_bound_port(tmp):
-    """Port zero announces the bound listener and preserves the bridge URL."""
     del tmp
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1456,7 +1457,6 @@ def test_mcp_port_zero_announces_the_actual_bound_port(tmp):
 
 
 def test_the_mcp_fixture_ignores_a_squatted_draw(tmp):
-    """Binding port zero avoids collisions with a squatted drawn port."""
     del tmp
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1524,7 +1524,7 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    real_loader = _mcp_load._load_mcp_at_port
+    real_loader = _mcp_load._load_mcp_at_port  # Patch the fixture's globals.
 
     def crashing_loader(base, port, **kwargs):
         mod = real_loader(base, port, **kwargs)
