@@ -179,7 +179,8 @@ def _runs_on(slug, sha):
         pages = subprocess.run(
             ['gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',
              f'repos/{slug}/actions/runs?head_sha={sha}&per_page=100'],
-            capture_output=True, text=True, timeout=120, check=True).stdout
+            capture_output=True, text=True, encoding='utf-8', timeout=120,
+            check=True).stdout
     except (OSError, subprocess.SubprocessError):
         return None
     decoder = json.JSONDecoder()
@@ -328,10 +329,6 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
             continue
 
         if batch and last is not None and time.monotonic() - last >= debounce:
-            # A batch of nothing but settled, actionless conclusions is a
-            # matrix still filling in, and every partial tally is superseded
-            # by the next: hold it until something worth reading lands or
-            # every workflow run on that head has concluded.
             held_for = time.monotonic() - (held_since or time.monotonic())
             if _batch_is_only_quiet_ci(batch):
                 sha = _latest_sha(batch)
@@ -373,7 +370,9 @@ def main():
                              'without a cap a batch held across a force-push '
                              'would wait forever on runs nobody will finish '
                              '— silence indistinguishable from a clean '
-                             'matrix.')
+                             'matrix. A batch the cap releases is emitted '
+                             'with a line naming the SHA and that runs are '
+                             'still open, so its tally reads as partial.')
     parser.add_argument('--debounce', type=float, default=60.0,
                         help='seconds of silence before a batch is emitted')
     parser.add_argument('--max-chars', type=int, default=1000,

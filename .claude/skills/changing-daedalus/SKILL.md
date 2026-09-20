@@ -312,7 +312,9 @@ What the aggregator does, and why each part is load-bearing:
   so without the cap a batch held across a force-push waits forever on a matrix
   nobody will finish, which is silence indistinguishable from a clean run. A
   cap rather than head-movement detection, because it also covers a deleted
-  branch and a query that starts failing permanently.
+  branch and a query that starts failing permanently. A batch the cap
+  releases is announced as partial in the emission itself: a line naming the
+  SHA and that runs on it are still open or unknown follows the tally.
 - **It condenses**, because a watcher truncates a long event and a settled
   matrix runs past 70 lines - which is how a failure hides. Every non-success
   conclusion is named in full with its URL, successes and superseded runs
