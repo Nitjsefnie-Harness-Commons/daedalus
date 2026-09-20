@@ -26,6 +26,7 @@ import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 import _mcp_load  # noqa: E402
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
@@ -229,26 +230,19 @@ def test_local_url_derives_from_the_bridge_port(tmp):
     """
     del tmp
     _need_deps()
-    saved = {key: os.environ[key] for key in os.environ
-             if key.startswith('DAEDALUS_')}
-    for key in saved:
-        del os.environ[key]
-    try:
-        def fresh(tag):
-            return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
-                              'mcp_server_url_' + tag + str(time.time_ns()))
-        os.environ['DAEDALUS_PORT'] = '54321'
+
+    def fresh(tag):
+        return _util.load(_util.ROOT / 'daedalus_mcp' / 'server.py',
+                          'mcp_server_url_' + tag + str(time.time_ns()))
+
+    with _daedalus_env.isolated({'DAEDALUS_PORT': '54321'}):
         assert fresh('derived').LOCAL_URL == 'http://127.0.0.1:54321'
-        os.environ['DAEDALUS_LOCAL_URL'] = 'http://127.0.0.1:9999'
+    with _daedalus_env.isolated({
+            'DAEDALUS_PORT': '54321',
+            'DAEDALUS_LOCAL_URL': 'http://127.0.0.1:9999'}):
         assert fresh('override').LOCAL_URL == 'http://127.0.0.1:9999'
-        del os.environ['DAEDALUS_LOCAL_URL']
-        del os.environ['DAEDALUS_PORT']
+    with _daedalus_env.isolated({}):
         assert fresh('fallback').LOCAL_URL == 'http://127.0.0.1:8081'
-    finally:
-        for key in ('DAEDALUS_PORT', 'DAEDALUS_LOCAL_URL'):
-            if key not in saved and key in os.environ:
-                del os.environ[key]
-        os.environ.update(saved)
 
 
 def _module_list_tabs(mod):
@@ -631,19 +625,10 @@ def test_mcp_and_bridge_config_use_one_env_parser(tmp):
     from daedalus_bridge import env_config
 
     mod = _load_mcp('http://127.0.0.1:1')
-    saved = {key: os.environ[key] for key in os.environ
-             if key.startswith('DAEDALUS_')}
-    for key in saved:
-        del os.environ[key]
-    os.environ['DAEDALUS_DIR'] = str(Path(tmp) / 'envcontract')
-    os.environ['DAEDALUS_PORT'] = '0'
-    try:
+    with _daedalus_env.isolated({
+            'DAEDALUS_DIR': str(Path(tmp) / 'envcontract'),
+            'DAEDALUS_PORT': '0'}):
         bridge_config = _util.load(_util.ROOT / 'daedalus_bridge' / 'config.py')
-    finally:
-        for key in ('DAEDALUS_DIR', 'DAEDALUS_PORT'):
-            if key not in saved:
-                del os.environ[key]
-        os.environ.update(saved)
 
     assert mod.env_int is bridge_config.env_int is env_config.env_int
     cases = (
