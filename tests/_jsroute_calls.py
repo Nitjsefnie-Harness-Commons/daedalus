@@ -2,6 +2,7 @@
 import re
 
 from _jsroute_keys import decode_string_literal, source_key
+from _jsroute_returns import getter_call_body
 from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
@@ -366,6 +367,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         name = None
         source = None
         form = None
+        returned = None
         call_mode = None
         start = opening
         if before >= 1 and mask[before - 1:before + 1] == '?.':
@@ -501,6 +503,12 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             start = inner
         else:
             continue
+        if form == 'get' and status == 'known':
+            # `obj.p()` runs the getter, then the callable it returned.
+            returned = getter_call_body(
+                resolution['receivers'], target, start)
+            if returned is None:
+                status = 'unprovable'
         args = split_top_level(
             mask, text, opening + 1, close - 1)
         # The spans the resolution reads: naming the callee or the
@@ -540,7 +548,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             'binding': binding, 'args': args, 'body': body,
             'status': status, 'scope': scope_at(start), 'name': name,
             'member': member, 'source': source, 'parent': False,
-            'form': form, 'argument_calls': [],
+            'form': form, 'returned': returned, 'argument_calls': [],
             'consumed': consumed})
     calls.sort(key=lambda call: (call['order'], call['start']))
     nesting = []
