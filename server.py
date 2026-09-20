@@ -219,21 +219,24 @@ class Handler(RequestMixin):
         # registered, tabless ones included: one that is not is a worker and a
         # command consumer that /health cannot see.
         stream_id, killed_event = stream_service.register(token, tab)
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/event-stream')
-        self.send_header('Cache-Control', 'no-cache')
-        # MUST be 'close', not 'keep-alive'. BaseHTTPRequestHandler.send_header
-        # reads this value: 'keep-alive' sets close_connection=False, so when
-        # the stream loop below ends the handler returns and the socket is
-        # held open for a next request that never comes. The client then sees
-        # silence, not EOF — its reconnect waits out a watchdog instead of
-        # firing immediately (measured: ~25s direct, and several times that
-        # through a proxy). A stream response is the connection's last, so
-        # say so.
-        self.send_header('Connection', 'close')
-        self.send_header('X-Accel-Buffering', 'no')
-        self.end_headers()
+        # From registration on, every exit must unregister — a header flush
+        # to a peer that was already gone raises before the stream loop is
+        # ever entered, and the registration would leak.
         try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            # MUST be 'close', not 'keep-alive'. send_header reads this
+            # value: 'keep-alive' sets close_connection=False, so when the
+            # stream loop below ends the handler returns and the socket is
+            # held open for a next request that never comes. The client
+            # then sees silence, not EOF — its reconnect waits out a
+            # watchdog instead of firing immediately (measured: ~25s
+            # direct, and several times that through a proxy). A stream
+            # response is the connection's last, so say so.
+            self.send_header('Connection', 'close')
+            self.send_header('X-Accel-Buffering', 'no')
+            self.end_headers()
             stream_route.serve_stream(
                 self.wfile, cmd_dir=CMD_DIR, token=token, tab=tab,
                 targets=targets, killed_event=killed_event,
