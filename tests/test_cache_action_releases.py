@@ -208,8 +208,8 @@ def test_a_hash_glued_to_a_quoted_reference_is_not_a_comment(tmp):
 
 
 def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
-    """The line grammar leaves it alone; the decoder still has to read
-    the file, and refuses what it cannot."""
+    """The line grammar leaves it alone and the decoder, reading the
+    file, finds the cache pin matched by its own step: no refusal."""
     mod = _verifier()
     root = _workflow(tmp, (
         'jobs:\n  j:\n    steps:\n'
@@ -219,9 +219,7 @@ def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
         f'      - uses: actions/cache@{V610}  # v6.1.0\n'))
     pins, refusals = mod.scan(root)
     assert [pin.line for pin in pins] == [7], pins
-    assert refusals == [
-        '.github/workflows/tests.yml: mapping has an unsupported mapping '
-        'field'], refusals
+    assert refusals == [], refusals
 
 
 def test_both_workflow_extensions_github_accepts_are_scanned(tmp):
@@ -380,8 +378,30 @@ def test_a_reference_split_by_a_quoted_line_continuation_is_refused(tmp):
     verified, refusals = mod.verify(root, _refusing_run)
     assert verified == [], verified
     assert refusals == [
-        '.github/workflows/tests.yml: mapping has an unsupported mapping '
-        'field'], refusals
+        '.github/workflows/tests.yml: step uses has an unsupported '
+        'multiline scalar'], refusals
+
+
+def test_the_decoder_reads_the_file_past_an_unclassifiable_uses(tmp):
+    """A `uses:` the line grammar cannot classify and leaves alone must
+    not stop the decoder cross-check from seeing the file: an escaped
+    cache pin after it is still refused by its step line."""
+    mod = _verifier()
+    checkout = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+    for shape, line in ((f'&co {checkout}  # v7.0.1\n', 5),
+                        (f'>-\n          {checkout}\n          and-more\n',
+                         7)):
+        root = _workflow(tmp, (
+            'jobs:\n  j:\n    steps:\n'
+            f'      - uses: {shape}'
+            '      - name: Restore\n'
+            f'        uses: "actions/cache\\x40{V610}"  # v6.1.0\n'))
+        verified, refusals = mod.verify(root, _refusing_run)
+        assert verified == [], (shape, verified)
+        assert refusals == [
+            f".github/workflows/tests.yml:{line}: decoded uses "
+            f"'actions/cache@{V610}' matches no recognised pin"
+        ], (shape, refusals)
 
 
 def _one_pin(tmp, uses):

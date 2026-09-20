@@ -100,12 +100,12 @@ def pins_in(root, path):
             token, comment = None, None
         if token is None:
             # The next line is where a continued value would hide a pin.
-            text = ' then '.join(
+            shown = ' then '.join(
                 repr(part.strip()) for part in
                 [value, *lines[index + 1:index + 2]])
-            if 'actions/cache' in text.casefold():
+            if 'actions/cache' in shown.casefold():
                 refusals.append(f'{relative}:{index + 1}: uses value '
-                                f'cannot be classified: {text}')
+                                f'cannot be classified: {shown}')
                 accounted.update((index + 1, index + 2))
             continue
         pin = _pin(relative, index + 1, token, comment)
