@@ -132,6 +132,12 @@ LAUNCH_REFUSAL_ROWS = (
      "subprocess.run(['git', 'status'], check=True)\n"
      "list('subprocess').run(['git', 'status'], check=True)\n",
      'calls through a receiver the audit cannot resolve'),
+    ('aliased-machinery-member-call',
+     "import subprocess\n"
+     "import importlib as il\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "il.reload(subprocess)\n",
+     'calls il.reload, which the audit cannot resolve'),
     ('no-visible-launch',
      "import subprocess\n"
      "print('git status')\n",
