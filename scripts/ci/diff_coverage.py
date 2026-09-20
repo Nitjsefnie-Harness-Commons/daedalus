@@ -149,7 +149,7 @@ def added_lines(diff_text):
     line_number = 0
     in_hunk = False
     old_remaining = new_remaining = 0
-    for line in diff_text.splitlines():
+    for line in diff_text.split('\n'):
         if line.startswith('Binary files '):
             raise ValueError(
                 f'binary diff record is not measurable: {line}')
