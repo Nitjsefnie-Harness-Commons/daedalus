@@ -12,6 +12,24 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 import diff_coverage  # noqa: E402
 
 
+def test_added_lines_split_only_on_git_newlines(tmp):
+    del tmp
+    separators = '\v\f\r\x1c\x1d\x1e\x85\u2028\u2029'
+    actual = {}
+    for char in separators:
+        diff = (
+            '--- /dev/null\n'
+            '+++ b/sample.py\n'
+            '@@ -0,0 +1,2 @@\n'
+            f'+first = 1{char}\n'
+            '+second = 2\n')
+        actual[f'U+{ord(char):04X}'] = diff_coverage.added_lines(diff)
+    expected = {
+        f'U+{ord(char):04X}': {'sample.py': {1, 2}}
+        for char in separators}
+    assert actual == expected, actual
+
+
 def test_configured_omissions_do_not_demand_coverage(tmp):
     del tmp
     added = {
