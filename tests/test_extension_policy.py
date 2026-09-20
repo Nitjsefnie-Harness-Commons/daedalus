@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsread import (blank_js_comments, js_bracket_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
+from _jsroute_keys import decode_string_literal  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
 
@@ -185,6 +186,46 @@ def test_every_registry_call_checks_its_http_status(tmp):
     assert 'console.error' in helper, helper
 
 
+def _console_arguments(mask):
+    member = re.compile(
+        r'(?<![\w$])console\s*(?:\??\.\s*[\w$]+|(?:\?\.\s*)?\[)')
+    for sink in member.finditer(mask):
+        end = sink.end()
+        if mask[end - 1] == '[':
+            # Every computed console member is a potential logging sink.
+            end = js_bracket_end(mask, end - 1)
+        call = re.match(r'\s*(?:\?\.\s*)?\(', mask[end:])
+        if call:
+            start = end + call.end() - 1
+            yield start + 1, js_bracket_end(mask, start) - 1
+
+
+def _logs_bridge_token(line, mask):
+    access = re.compile(
+        r'\.\s*token\b|(?<=[\w$)\]])\s*(?:\?\.\s*)?\[')
+    prefix = re.compile(
+        r'\s*\.\s*(?:substring|slice)\s*\(\s*0\s*,\s*[1-8]\s*\)')
+    for start, end in _console_arguments(mask):
+        arguments = mask[start:end]
+        for match in access.finditer(arguments):
+            read_end = match.end()
+            if arguments[read_end - 1] == '[':
+                read_end = js_bracket_end(arguments, read_end - 1)
+                raw = line[start + match.end():start + read_end - 1]
+                raw = blank_js_comments(raw).strip()
+                key = decode_string_literal(raw)
+                if key is None:
+                    if re.fullmatch(r'[0-9]+', raw):
+                        continue
+                    return True
+                if key != 'token':
+                    continue
+            # A prefix exempts this read only, never a neighbouring read.
+            if not prefix.match(arguments, read_end):
+                return True
+    return False
+
+
 def test_the_extension_never_logs_the_bridge_token(tmp):
     """The token is a reusable browser-control credential, not a diagnostic.
 
@@ -196,10 +237,6 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
     """
     del tmp
     offenders = []
-    access = re.compile(r'\.\s*token\b|(?<=[\w$)\]])\s*\[([^\]]*)\]')
-    literal_key = re.compile(r"(['\"])([^'\"\\]*)\1")
-    prefix = re.compile(
-        r'\s*\.\s*(?:substring|slice)\s*\(\s*0\s*,\s*[1-8]\s*\)')
     paths = [
         *worker_source_paths(),
         _util.ROOT / 'extension' / 'content.js',
@@ -210,26 +247,125 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
         name = path.relative_to(_util.ROOT / 'extension').as_posix()
         if not path.is_file():
             continue
-        for number, line in enumerate(
-                path.read_text(encoding='utf-8').splitlines(), 1):
-            if 'console.' not in line:
-                continue
-            for match in access.finditer(line):
-                if match.group(1) is not None:
-                    key = literal_key.fullmatch(match.group(1).strip())
-                    # An unresolved key might select the credential.
-                    if key is None:
-                        offenders.append(
-                            f'{name}:{number}: {line.strip()}')
-                        break
-                    if key.group(2) != 'token':
-                        continue
-                # Only this read is exempt, up to the banner's eight chars.
-                if prefix.match(line, match.end()):
-                    continue
+        source = path.read_text(encoding='utf-8')
+        # Mask once to retain comment/template state across line boundaries;
+        # call argument matching remains line-local (multiline is #848).
+        lines = zip(source.splitlines(), js_mask(source).splitlines())
+        for number, (line, mask) in enumerate(lines, 1):
+            if _logs_bridge_token(line, mask):
                 offenders.append(f'{name}:{number}: {line.strip()}')
-                break
     assert not offenders, offenders
+
+
+def test_token_log_scanner_distinguishes_code_from_text(tmp):
+    del tmp
+    cases = [
+        (True,
+         'console.log(config.token);'),
+        (True,
+         "console.log(config['token']);"),
+        (True,
+         'console.log(config["token"]);'),
+        (True,
+         "const key = 'token'; console.log(config[key]);"),
+        (True,
+         "console.log(config?.['token']);"),
+        (True,
+         "const key = 'token'; console.log(config?.[key]);"),
+        (True,
+         'console.log(config ?. token);'),
+        (True,
+         "console['log'](config.token);"),
+        (True,
+         'console . log(config.token);'),
+        (True,
+         'console?.log(config.token);'),
+        (True,
+         "console.log(config [ 'token' ]);"),
+        (True,
+         'console.log(config . token);'),
+        (True,
+         "console.log(config\t[\t'token'\t]);"),
+        (True,
+         'console.log(config./* diagnostic */token);'),
+        (True,
+         "console.log(config /* diagnostic */ ['token']);"),
+        (False,
+         'console.log(config.token.substring(0, 8));'),
+        (False,
+         'console.log(config.token.slice(0, 8));'),
+        (False,
+         "console.log(config['token'].slice(0, 8));"),
+        (True,
+         'console.log(config.token.slice(0, 9));'),
+        (True,
+         'const n = 32; console.log(config.token.slice(0, n));'),
+        (True,
+         'console.log(config.token.slice(0, 8), config.token);'),
+        (True,
+         "console.log(config.token.slice(0, 8), config['token']);"),
+        (True,
+         "const keys = ['token']; console.log(config[keys[0]]);"),
+        (True,
+         "console.log(config['token']['toString']());"),
+        (True,
+         "const keys = ['token']; console.log(config?.[keys[0]]);"),
+        (True,
+         'console.log(config[`token`]);'),
+        (True,
+         "const key = 'token'; console.log(config[`${key}`]);"),
+        (True,
+         "console.log(`credential=${config['token']}`);"),
+        (False,
+         "console.log(config['tabId']);"),
+        (False,
+         "console.log('token');"),
+        (False,
+         'console.log("config[\'token\']");'),
+        (False,
+         "console.log('config.token');"),
+        (False,
+         "console.log('status[ready]');"),
+        (False,
+         "console.log(`config['token']`);"),
+        (False,
+         'console.log(`status[ready]`);'),
+        (False,
+         "const value = config['token']; void value;"),
+        (False,
+         'const value = config.token; void value;'),
+        (False,
+         "console.log('ready'); const value = config['token']; void value;"),
+        (False,
+         "console.log(['ready'][0]);"),
+        (False,
+         "// console.log(config['token']);"),
+        (False,
+         "console.log(config['tab]Id']);"),
+        (False,
+         "console.log(config['tab\\u0049d']);"),
+        (True,
+         "console.log(config['to\\u006ben']);"),
+        (True,
+         'console[method](config.token);'),
+        (True,
+         "console?.['log'](config.token);"),
+        (True,
+         'console.log(config[key].substring(0, 8));'),
+        (True,
+         "console.log(config['token'].slice(0));"),
+    ]
+    for refused, source in cases:
+        assert _logs_bridge_token(source, js_mask(source)) == refused, (
+            source, refused)
+
+
+def test_token_log_prefix_budget_accepts_each_literal_bound(tmp):
+    del tmp
+    for method in ('slice', 'substring'):
+        for bound in range(1, 9):
+            source = f"console.log(config.token.{method}(0, {bound}));"
+            assert not _logs_bridge_token(source, js_mask(source)), source
 
 
 def test_extension_ships_no_default_server(tmp):
