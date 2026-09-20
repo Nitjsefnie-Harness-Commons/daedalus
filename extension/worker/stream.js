@@ -14,7 +14,8 @@ let streamGen = 0;
 // Consecutive non-OK /stream answers back off exponentially; a connected
 // stream resets the count. An auth refusal (401/400) is not transient: it
 // records the credential pair that was refused, and connecting stays idle
-// until the token or bridge URL changes.
+// until the token or bridge URL changes. Both records are globals, so a
+// restarted worker asks once more before re-stopping.
 const _STREAM_RETRY_BASE_MS = 1000;
 const _STREAM_RETRY_MAX_MS = 60000;
 let _streamFailures = 0;
