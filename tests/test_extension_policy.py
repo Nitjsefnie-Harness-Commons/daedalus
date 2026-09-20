@@ -10,6 +10,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -194,25 +195,47 @@ def _console_arguments(mask):
         if mask[end - 1] == '[':
             # Every computed console member is a potential logging sink.
             end = js_bracket_end(mask, end - 1)
+        grouped = re.match(r'\s*(?:\)\s*)*', mask[end:])
+        end += grouped.end()
+        wrapper = re.match(r'\??\.\s*([\w$]+)|(?:\?\.\s*)?\[', mask[end:])
+        if wrapper:
+            if wrapper.group(1) not in ('call', 'apply'):
+                yield None
+                continue
+            end += wrapper.end()
         call = re.match(r'\s*(?:\?\.\s*)?\(', mask[end:])
         if call:
             start = end + call.end() - 1
             yield start + 1, js_bracket_end(mask, start) - 1
+        elif wrapper:
+            yield None
 
 
 def _logs_bridge_token(line, mask):
+    # Identifier escapes are unsupported; a slash after a brace is ambiguous
+    # to js_mask (function expressions versus blocks). Neither certifies clean.
+    if '\\' in mask or re.search(r'}\s*/', mask):
+        return True
     access = re.compile(
-        r'\.\s*token\b|(?<=[\w$)\]])\s*(?:\?\.\s*)?\[')
+        r'\.\s*([\w$]+)|(?<=[\w$)\]])\s*(?:\?\.\s*)?\[')
     prefix = re.compile(
         r'\s*\.\s*(?:substring|slice)\s*\(\s*0\s*,\s*[1-8]\s*\)')
-    for start, end in _console_arguments(mask):
+    for bounds in _console_arguments(mask):
+        if bounds is None:
+            return True
+        start, end = bounds
         arguments = mask[start:end]
         for match in access.finditer(arguments):
             read_end = match.end()
+            if match.group(1) is not None and match.group(1) != 'token':
+                continue
             if arguments[read_end - 1] == '[':
                 read_end = js_bracket_end(arguments, read_end - 1)
                 raw = line[start + match.end():start + read_end - 1]
                 raw = blank_js_comments(raw).strip()
+                # The shared decoder does not resolve legacy numeric escapes.
+                if re.search(r'\\[0-9\u2028\u2029]', raw):
+                    return True
                 key = decode_string_literal(raw)
                 if key is None:
                     if re.fullmatch(r'[0-9]+', raw):
@@ -234,6 +257,8 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
     collected from them — all places a credential outlives the moment it was
     useful in. A truncated prefix is not what this pins: the version banner
     logs eight characters to say which bridge is configured, and that stays.
+    This line-local policy refuses potential reads in console arguments;
+    it does not evaluate control flow or the values of argument expressions.
     """
     del tmp
     offenders = []
@@ -250,7 +275,9 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
         source = path.read_text(encoding='utf-8')
         # Mask once to retain comment/template state across line boundaries;
         # call argument matching remains line-local (multiline is #848).
-        lines = zip(source.splitlines(), js_mask(source).splitlines())
+        normalized = source.translate(dict.fromkeys(
+            map(ord, '\ufeff\u2028\u2029'), ' '))
+        lines = zip(source.split('\n'), js_mask(normalized).split('\n'))
         for number, (line, mask) in enumerate(lines, 1):
             if _logs_bridge_token(line, mask):
                 offenders.append(f'{name}:{number}: {line.strip()}')
@@ -366,6 +393,86 @@ def test_token_log_prefix_budget_accepts_each_literal_bound(tmp):
         for bound in range(1, 9):
             source = f"console.log(config.token.{method}(0, {bound}));"
             assert not _logs_bridge_token(source, js_mask(source)), source
+
+
+def _check_token_sources(tmp, cases):
+    root = Path(tmp)
+    target = root / 'extension' / 'content.js'
+    target.parent.mkdir(exist_ok=True)
+    failures = []
+    for refused, source in cases:
+        target.write_text(source, encoding='utf-8')
+        with (patch.object(_util, 'ROOT', root),
+              patch(__name__ + '.worker_source_paths', return_value=[])):
+            try:
+                test_the_extension_never_logs_the_bridge_token(None)
+            except AssertionError:
+                actual = True
+            else:
+                actual = False
+        if actual != refused:
+            failures.append((source, refused, actual))
+    assert not failures, failures
+
+
+def test_token_guard_refuses_identifier_and_key_escapes(tmp):
+    _check_token_sources(tmp, [
+        (True, r'console.log(config.\u0074oken);'),
+        (True, r'console.log(config.to\u006ben);'),
+        (True, r'console.log(config.\u{74}oken);'),
+        (True, r'console.\u006cog(config.token);'),
+        (True, r'con\u0073ole.log(config.token);'),
+        (True, r"console.log(config['\164oken']);"),
+        (True, r"console.log(config['\164oken'].slice(0, 8));"),
+        (False, 'console.log(config.token$);'),
+        (False, 'console.log(config.token_more);'),
+    ])
+
+
+def test_token_guard_recognizes_wrapped_console_calls(tmp):
+    _check_token_sources(tmp, [
+        (True, '(console.log)(config.token);'),
+        (True, "(console['log'])(config['token']);"),
+        (True, 'console.log.call(console, config.token);'),
+        (True, 'console.log.apply(console, [config.token]);'),
+        (True, 'console.log?.apply(console, [config.token]);'),
+        (True, 'console.log.bind(console)(config.token);'),
+        (True, 'console.log[wrapper](console)(config.token);'),
+        (False, '(console.log)(config.token.slice(0, 8));'),
+        (False, 'console.log.call(console, config.token.slice(0, 8));'),
+        (True, "console.assert(true, config['token']);"),
+        (True, 'console.log(() => config.token);'),
+    ])
+
+
+def test_token_guard_recognizes_javascript_whitespace(tmp):
+    _check_token_sources(tmp, [
+        (True, source)
+        for space in ('\ufeff', '\u00a0', '\u2028', '\u2029', '\t')
+        for source in (f'console{space}.log(config.token);',
+                       f'console.log(config{space}["token"]);')
+    ])
+
+
+def test_token_guard_masks_whole_sources(tmp):
+    _check_token_sources(tmp, [
+        (False, "/* open\n*/ const value = config['token'];"),
+        (False, "/* open\nconsole.log(config['token']);\n*/"),
+        (False, "const text = `open\nconsole.log(config.token);\nend`;"),
+        (True, "/* open\n*/ console.log(config['token']);"),
+        (True, 'const text = `open\n${console.log(config.token)}\nend`;'),
+    ])
+
+
+def test_token_guard_refuses_ambiguous_masking(tmp):
+    _check_token_sources(tmp, [
+        (True, "const n = function() {} / /'/.source.length; "
+         'console.log(config.token);'),
+        (True, "const n = function() {} / /'/.source.length;\n"
+         'console.log(config.token);'),
+        (False, "console.log(/'/.source);"),
+        (False, "const text = `function() {} / /'/`;"),
+    ])
 
 
 def test_extension_ships_no_default_server(tmp):
