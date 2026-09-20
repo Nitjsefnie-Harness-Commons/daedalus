@@ -35,7 +35,7 @@ export function mount(container, bus) {
         h('code', {}, 'localStorage.daedalus-token'), '.'),
       h('p', {}, h('b', {}, 'Server:'),
         ' leave blank to hit the same origin that serves this page. ',
-        'Useful if you point the dashboard at a different host; the bridge sends no CORS headers by design, ',
+        'Useful if you point the dashboard at a bridge on another origin; the bridge sends no CORS headers by design, ',
         'so put a CORS-enabled reverse proxy in front of it.'),
       h('p', { class: 'amber' }, h('b', {}, 'Caveat:'), ' the Daedalus extension injects ',
         h('code', {}, 'content.js + page.js'),
