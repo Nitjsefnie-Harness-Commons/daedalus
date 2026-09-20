@@ -189,6 +189,28 @@ def test_clean_occupancy_joins_keep_only_shared_keys(tmp):
     verdicts(tmp, cases)
 
 
+def test_lambda_body_value_is_its_return(tmp):
+    """A lambda returns what its body evaluates to, as a def's return does,
+    so a deferred default handed back by a mapping lookup is followed."""
+    lookup = 'read = lambda: d.get("k", relay())'
+    rows = [
+        ('lambda-get', 'd = {}\n' + lookup, (1, 1)),
+        ('lambda-get-then-store',
+         'd = {}\n' + lookup + '\nif args.flag: d["k"] = ordinary', (0, 1)),
+        ('lambda-get-then-store-other',
+         'd = {}\n' + lookup + '\nif not args.flag: d["k"] = ordinary',
+         (1, 1)),
+        ('def-get', 'd = {}\ndef read(): return d.get("k", relay())',
+         (1, 1)),
+        ('lambda-setdefault',
+         'd = {}\nread = lambda: d.setdefault("k", relay())', (1, 1)),
+        ('lambda-pop', 'd = {}\nread = lambda: d.pop("k", relay())', (1, 1)),
+        ('lambda-call', 'read = lambda: relay()', (1, 1)),
+    ]
+    verdicts(tmp, [(label, body(store, 'read()()'), expected)
+                   for label, store, expected in rows])
+
+
 def test_starred_sender_suffix_alignment(tmp):
     shapes = [
         ('prefix-star', 'def pair2(): return ordinary, relay()\n'
