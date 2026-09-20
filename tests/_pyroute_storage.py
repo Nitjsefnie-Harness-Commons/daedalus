@@ -59,13 +59,11 @@ def replace_deferred_storage(state, owner, replacement):
 
 
 def join_clean_occupancy(kept, other):
-    """The kept state, with a clean key the other path lacks made missing.
+    """Join two states that differ only in which keys ordinary values occupy.
 
-    Both states carry one join signature, so they differ at most in which
-    keys ordinary values occupy. A key that is missing on either path is
-    missing after the join: setdefault, get and pop then bind their deferred
-    default, which is what the path lacking the key does. The kept state is
-    left untouched, as other lists may still hold it."""
+    A key missing on either path is missing after the join, so setdefault,
+    get and pop bind their deferred default as the path lacking the key
+    does. The kept state is left untouched: other lists may still hold it."""
     joined = kept
     for name, owner in kept.callables.items():
         if not isinstance(owner, DeferredContainer):
