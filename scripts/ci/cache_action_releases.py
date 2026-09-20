@@ -6,12 +6,10 @@ one more repository literal: a SHA and release that agree with each other
 pass whether or not the release exists. This resolves each pinned release
 through the GitHub API and fails closed on anything it cannot read.
 
-The scanner is line-based and admits the two `uses:` shapes the workflows
-use: an inline scalar with an optional trailing comment, and a `>-`
-folded scalar whose comment sits on the header line and whose one content
-line is the reference. Any other `uses:` value naming a cache action is
-refused, because inside a block scalar a `#` is content and a value this
-reader cannot classify is one it cannot verify.
+The line-based scanner admits two `uses:` shapes: an inline scalar with
+an optional trailing comment, and a block scalar whose comment sits on
+the header line and whose one content line is the reference (inside the
+block a `#` is content). Any other value naming a cache action is refused.
 """
 import json
 import re
@@ -52,8 +50,6 @@ def _pin(path, number, token, comment):
 
 
 def _block_content(lines, index, key_indent):
-    """The one content line of a block scalar opened at `index`, or None
-    when the block is empty or runs past one line."""
     if index + 1 >= len(lines):
         return None
     content = lines[index + 1]
@@ -67,7 +63,6 @@ def _block_content(lines, index, key_indent):
 
 
 def pins_in(root, path):
-    """The (pins, refusals) one workflow file yields."""
     lines = path.read_text(encoding='utf-8').splitlines()
     relative = path.relative_to(root).as_posix()
     pins, refusals = [], []
@@ -81,14 +76,12 @@ def pins_in(root, path):
         if inline:
             token, comment = inline.groups()
         elif header:
-            # The key's column is the block's indentation reference.
             token = _block_content(lines, index, len(match.group(1)))
             comment = header.group(2)
         else:
             token, comment = None, None
         if token is None:
-            # An empty or multi-line value may continue on the next line,
-            # which is where a hidden pin would sit.
+            # The next line is where a continued value would hide a pin.
             text = ' then '.join(
                 repr(part.strip()) for part in
                 [value, *lines[index + 1:index + 2]])
@@ -103,8 +96,6 @@ def pins_in(root, path):
 
 
 def scan(root):
-    """Every actions/cache-family pin under `root`, and every `uses:` line
-    naming one that could not be classified."""
     root = Path(root)
     pins, refusals = [], []
     for path in workflow_files(root):
