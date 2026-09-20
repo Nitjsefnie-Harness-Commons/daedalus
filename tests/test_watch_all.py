@@ -137,6 +137,44 @@ def test_the_query_is_fresh_paginated_and_pinned_to_the_sha(tmp):
     assert 'check-runs' not in argv[-1]
 
 
+def test_newline_separated_pages_are_still_read(tmp):
+    del tmp
+    mod = _watch_all()
+    pages = (_runs_body(_run(1, 'completed', 'success')) + '\n'
+             + _runs_body(_run(2, 'queued', None)) + '\n')
+    _fake_gh(mod, {'/actions/runs': pages})
+    assert mod._all_concluded(SHA) is False
+
+
+def test_a_cap_release_is_announced_in_the_batch(tmp):
+    del tmp
+    mod = _watch_all()
+    assert mod._hold_verdict(None, 600.0, 600.0) == 'emit-capped'
+    assert mod._hold_verdict(False, 601.0, 600.0) == 'emit-capped'
+    batch = [f'[ci] CI b {SHA} pylint: success https://github.com/o/r/1',
+             f'[ci] CI b {SHA} pyright: success https://github.com/o/r/2',
+             mod._cap_line(SHA, 600.0)]
+    text = mod._condense(batch, 1000, 'log')
+    lines = text.splitlines()
+    assert lines[0] == f'CI {SHA}: 2 success'
+    assert lines[1].startswith('[watch_all] hold cap 600s reached on ' + SHA)
+    assert lines[1].endswith('tally is partial')
+
+
+def test_a_settled_release_carries_no_cap_line(tmp):
+    del tmp
+    mod = _watch_all()
+    assert mod._hold_verdict(True, 0.0, 600.0) == 'emit'
+    assert mod._hold_verdict(True, 601.0, 600.0) == 'emit'
+
+
+def test_under_the_cap_an_unsettled_batch_keeps_holding(tmp):
+    del tmp
+    mod = _watch_all()
+    assert mod._hold_verdict(None, 0.0, 600.0) == 'hold'
+    assert mod._hold_verdict(False, 599.0, 600.0) == 'hold'
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='watchall_')
 

@@ -20,7 +20,8 @@ workflow run on that head has concluded, `speed` included. The runs are read
 through `actions/runs?head_sha=`, never the check-runs list: that list is
 appended to while a matrix fills, so "every check run has concluded" is true
 early and repeatedly. An unanswerable completion query keeps it holding: a
-failed query must never look like a settled matrix.
+failed query must never look like a settled matrix. A batch the `--max-hold`
+cap releases instead is announced as partial, so it never reads as settled.
 
 This is a true debounce: the window restarts on every arrival, so nothing
 is emitted while either watcher is still producing. `ci_watch.py` chose a
@@ -225,6 +226,21 @@ def _all_concluded(sha):
     return _settled(runs)
 
 
+def _hold_verdict(settled, held_for, max_hold):
+    """'emit' once settled; else 'hold' under the cap, 'emit-capped' at it."""
+    if settled is True:
+        return 'emit'
+    if held_for < max_hold:
+        return 'hold'
+    return 'emit-capped'
+
+
+def _cap_line(sha, max_hold):
+    """The line a cap release adds, so its tally cannot pass for settled."""
+    return (f'[watch_all] hold cap {max_hold:.0f}s reached on {sha}; '
+            'runs still open or unknown — tally is partial')
+
+
 def _pump(name, stream, sink, kind):
     """Feed every line of one child stream into the shared queue."""
     try:
@@ -319,16 +335,21 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
             # matrix still filling in. Emitting it now spends a notification
             # on a tally the next arrival supersedes, so hold it until either
             # something worth reading lands — which makes the batch no longer
-            # quiet, and the debounce above takes over — or every check on
-            # that head has concluded and the tally is final.
+            # quiet, and the debounce above takes over — or every run on
+            # that head has concluded and the tally is final. The cap ends
+            # the hold too, and says so: its tally is not final.
             held_for = time.monotonic() - (held_since or time.monotonic())
-            if _batch_is_only_quiet_ci(batch) and held_for < max_hold:
-                settled = _all_concluded(_latest_sha(batch))
-                if settled is not True:
+            if _batch_is_only_quiet_ci(batch):
+                sha = _latest_sha(batch)
+                verdict = _hold_verdict(_all_concluded(sha), held_for,
+                                        max_hold)
+                if verdict == 'hold':
                     if held_since is None:
                         held_since = time.monotonic()
                     last = time.monotonic()
                     continue
+                if verdict == 'emit-capped':
+                    batch.append(_cap_line(sha, max_hold))
             _emit(batch, limit, log_path)
             batch = []
             last = None
