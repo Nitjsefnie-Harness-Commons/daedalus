@@ -31,12 +31,10 @@ def _runs_body(*runs):
 
 
 def _fake_gh(mod, answers, seen=None):
-    """Give the module a path-keyed subprocess double of its own.
+    """A path-keyed subprocess double installed on the module alone.
 
-    `answers` maps a path fragment to the stdout it yields, or to an
-    exception to raise. An argv naming no known fragment is an
-    AssertionError: the double must fail on what it does not model. The
-    real module is left alone, so the next load's `git rev-parse` is real.
+    An unmodelled argv is an AssertionError, and the real `subprocess` is
+    left alone so the next load's `git rev-parse` stays real.
     """
     def run(argv, **kwargs):
         if seen is not None:
