@@ -10,6 +10,10 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _frontend import (  # noqa: E402
+    TruncatingFrontEndHandler, truncating_front_end)
+from _mcp_transport_probes import (  # noqa: E402
+    ClientProbe, ResponseProbe, clock_script)
 
 
 DEPS = importlib.util.find_spec('httpx') is not None
@@ -23,71 +27,26 @@ def _transport():
         'mcp_transport_guards_' + str(time.time_ns()))
 
 
-def _session(transport, token='mcptok'):
+def _session(transport, token='mcptok', url='http://127.0.0.1:18001'):
     token_var = ContextVar(
         'mcp_transport_guard_token_' + str(time.time_ns()),
         default=token)
-    return transport.BridgeSession('http://127.0.0.1:18001', token_var)
+    return transport.BridgeSession(url, token_var)
 
 
-class ResponseProbe:
-    def __init__(self, body, status_error=None):
-        self.body = body
-        self.status_error = status_error
+def _capture(coroutine, transport=None):
+    """Run one coroutine; with `transport`, close the run's real clients."""
+    async def run():
+        try:
+            return await coroutine
+        finally:
+            if transport is not None:
+                await transport.BridgeTransport.close_current_loop_clients()
 
-    def raise_for_status(self):
-        if self.status_error is not None:
-            raise self.status_error
-
-    def json(self):
-        return self.body
-
-
-class ClientProbe:
-    def __init__(self, replies=(), post_response=None,
-                 delete_response=None):
-        self.replies = list(replies)
-        self.calls = []
-        self.post_response = post_response or ResponseProbe({'ok': True})
-        self.delete_response = (
-            delete_response or ResponseProbe({'deleted': True}))
-
-    async def get(self, path, **kwargs):
-        self.calls.append(('get', path, kwargs))
-        if not self.replies:
-            raise RuntimeError('unexpected result poll')
-        reply = self.replies.pop(0)
-        # A scripted exception is what the transport raised on that GET.
-        if isinstance(reply, BaseException):
-            raise reply
-        return ResponseProbe(reply)
-
-    async def post(self, path, **kwargs):
-        self.calls.append(('post', path, kwargs))
-        return self.post_response
-
-    async def request(self, method, path, **kwargs):
-        self.calls.append((method, path, kwargs))
-        return self.delete_response
-
-
-def _capture(coroutine):
     try:
-        return asyncio.run(coroutine)
+        return asyncio.run(run())
     except Exception as failure:  # noqa: BLE001
         return f'raised {type(failure).__name__}: {failure}'
-
-
-def _clock_script(*values):
-    """Stands in for the poll clock: values replay in order, last repeats."""
-    remaining = list(values)
-
-    def read():
-        if len(remaining) > 1:
-            return remaining.pop(0)
-        return remaining[0]
-
-    return read
 
 
 def test_explicit_http_client_uses_the_explicit_url(tmp):
@@ -316,7 +275,7 @@ def test_poll_reports_timeout_after_only_transport_failures(tmp):
         [transport.httpx.ReadError('connection reset by peer')] * 3)
     session.http_client = lambda: client
     # Three admitted peeks, then the clock steps past the deadline.
-    session.monotonic = _clock_script(100.0, 100.0, 100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -352,7 +311,7 @@ def test_poll_deadline_is_not_the_wall_clock(tmp):
 
     # The session clock admits exactly one peek; a wall-clock deadline
     # sits an epoch past every scripted read, so entry never ends.
-    session.monotonic = _clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
     with mock.patch.object(time, 'time', stepped_back):
         result = _capture(session.poll_result(
             '', 0.001, interval=0, expect_id='command',
@@ -388,7 +347,7 @@ def test_poll_honors_the_session_clock_for_loop_entry(tmp):
     client = ClientProbe(({'pending': True},))
     session.http_client = lambda: client
     # The deadline read sees 100.0; every later read is 100.5, past it.
-    session.monotonic = _clock_script(100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.5)
 
     result = _capture(session.poll_result('', 0.001, interval=0))
 
@@ -420,7 +379,7 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
     ))
     session.http_client = lambda: client
     # 100.0009 is inside 100.001 but outside a deadline shortened by 10%.
-    session.monotonic = _clock_script(100.0, 100.0009, 100.5)
+    session.monotonic = clock_script(100.0, 100.0009, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -448,7 +407,7 @@ def test_poll_rejects_a_read_exactly_at_the_deadline(tmp):
     client = ClientProbe((body,))
     session.http_client = lambda: client
     # The read equals 100.0 + timeout, so entry turns on < vs <=.
-    session.monotonic = _clock_script(100.0, 100.001, 100.5)
+    session.monotonic = clock_script(100.0, 100.001, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -477,7 +436,7 @@ def test_poll_rejects_a_body_without_a_delivery_id(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = _clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
@@ -503,7 +462,7 @@ def test_poll_rejects_an_empty_delivery_id(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = _clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
@@ -529,7 +488,7 @@ def test_poll_rejects_a_delivery_id_when_none_is_expected(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = _clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
@@ -555,7 +514,7 @@ def test_poll_rejects_a_matching_delivery_with_a_foreign_command_id(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = _clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -582,7 +541,7 @@ def test_poll_rejects_a_matching_command_id_with_a_foreign_delivery_id(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = _clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -612,7 +571,7 @@ def test_poll_rejects_an_empty_delivery_expectation(tmp):
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = _clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command', expect_delivery=''))
@@ -640,6 +599,72 @@ def test_extension_command_surfaces_result_error(tmp):
 
     expected = 'raised RuntimeError: ext screenshot: capture failed'
     assert result == expected, (result, expected)
+
+
+def _shielded_environment():
+    """No shell setting may rebind the session away from the front end."""
+    return mock.patch.dict('os.environ', {}, clear=False)
+
+
+def test_poll_survives_a_truncated_peek_from_a_real_front_end(tmp):
+    """The peek that a real proxy cuts off raises RemoteProtocolError.
+
+    The scripted controls raise ReadError, so narrowing the poll's clause
+    to that one class kept them green (issue 699) while httpx's answer to
+    a body shorter than its Content-Length escaped poll_result on the
+    first GET. This one drives a real client at a real front end.
+    """
+    del tmp
+    transport = _transport()
+    with _shielded_environment() as environ, truncating_front_end(1) as base:
+        environ.pop('DAEDALUS_LOCAL_URL', None)
+        environ.pop('DAEDALUS_PORT', None)
+        session = _session(transport, url=base)
+        result = _capture(session.poll_result(
+            '', 10, interval=0, expect_id='job4', expect_delivery='d1'),
+            transport)
+        seen = list(TruncatingFrontEndHandler.seen)
+    assert result == TruncatingFrontEndHandler.result, result
+    assert seen == [
+        ('GET', '/result?delivery=d1'),
+        ('GET', '/result?delivery=d1'),
+        ('GET', '/result?delivery=d1&consume=1&expected=g1'),
+    ], seen
+
+
+def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
+    """Bounded by the deadline, and the failure it survives is named.
+
+    The direct probe pins the family: a future httpx that reports a
+    cut-off body as something other than RemoteProtocolError changes
+    what the poll's clause has to admit, and this is where it shows.
+    """
+    del tmp
+    transport = _transport()
+
+    async def probe(session):
+        try:
+            await session.http_client().get(
+                '/result', headers=session.auth())
+        except transport.httpx.TransportError as failure:
+            return type(failure).__name__
+        return 'no failure'
+
+    with _shielded_environment() as environ, truncating_front_end(None) as (
+            base):
+        environ.pop('DAEDALUS_LOCAL_URL', None)
+        environ.pop('DAEDALUS_PORT', None)
+        session = _session(transport, url=base)
+        result = _capture(session.poll_result(
+            '', 0.3, interval=0, expect_id='job4', expect_delivery='d1'),
+            transport)
+        raised = _capture(probe(session), transport)
+        seen = list(TruncatingFrontEndHandler.seen)
+    expected = 'raised TimeoutError: no result within 0.3s'
+    assert result == expected, (result, expected)
+    assert raised == 'RemoteProtocolError', raised
+    peeks = [path for verb, path in seen if verb == 'GET']
+    assert len(peeks) >= 2, seen
 
 
 def main():
