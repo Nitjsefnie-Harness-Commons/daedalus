@@ -45,11 +45,14 @@ def resolve_targets(cmd_dir, token, tab):
         broadcast_name, broadcast_legacy_name = (
             command_queue.command_target_names(token))
         return StreamTargets(
-            queue=path_safety.under(cmd_dir, queue_name),
-            legacy=path_safety.under(cmd_dir, legacy_name),
-            broadcast_queue=path_safety.under(cmd_dir, broadcast_name),
+            queue=path_safety.under(
+                cmd_dir, queue_name, secret=token),
+            legacy=path_safety.under(
+                cmd_dir, legacy_name, secret=token),
+            broadcast_queue=path_safety.under(
+                cmd_dir, broadcast_name, secret=token),
             broadcast_legacy=path_safety.under(
-                cmd_dir, broadcast_legacy_name),
+                cmd_dir, broadcast_legacy_name, secret=token),
             legacy_name=legacy_name)
     except ValueError:
         print('[STREAM] REJECTED unsafe derived target', flush=True)

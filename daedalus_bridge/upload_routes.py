@@ -56,7 +56,8 @@ def stored_uploads(token_dir, upload_id):
     meaningful if the sequence it slices is stable between requests.
     """
     if upload_id:
-        id_dirs = [path_safety.under(token_dir, upload_id)]
+        id_dirs = [path_safety.under(
+            token_dir, upload_id, secret=token_dir.name)]
     else:
         try:
             with os.scandir(token_dir) as entries:
@@ -119,7 +120,7 @@ def list_uploads(upload_dir, token, params):
         lim = max(1, min(lim, 1000))
         off = max(0, off)
     try:
-        token_dir = path_safety.under(upload_dir, token)
+        token_dir = path_safety.under(upload_dir, token, secret=token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
     try:
@@ -200,13 +201,15 @@ def store_upload(upload_dir, body):
     except Exception:
         return 400, {'error': 'invalid base64'}
     try:
-        dest_dir = path_safety.under(upload_dir, token, upload_id)
+        dest_dir = path_safety.under(
+            upload_dir, token, upload_id, secret=token)
         if filename:
-            dest = path_safety.under(dest_dir, filename)
+            dest = path_safety.under(dest_dir, filename, secret=token)
         else:
             ts = int(time.time() * 1000)
             dest = path_safety.under(
-                dest_dir, f'{ts:013d}_{next(_name_counter):06d}.{fmt}')
+                dest_dir, f'{ts:013d}_{next(_name_counter):06d}.{fmt}',
+                secret=token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
     # Same-named writers must not share a temp.
@@ -261,19 +264,20 @@ def delete_upload(upload_dir, body):
     try:
         if filename and upload_id:
             target = path_safety.under(
-                upload_dir, token, upload_id, filename)
+                upload_dir, token, upload_id, filename, secret=token)
             if not target.is_file():
                 return 404, {'error': 'file not found'}
             target.unlink()
             print(f'[DELETE] {token}/{upload_id}/{filename}', flush=True)
         elif upload_id:
-            target = path_safety.under(upload_dir, token, upload_id)
+            target = path_safety.under(
+                upload_dir, token, upload_id, secret=token)
             if not target.is_dir():
                 return 404, {'error': 'id not found'}
             shutil.rmtree(target)
             print(f'[DELETE] {token}/{upload_id}/', flush=True)
         else:
-            target = path_safety.under(upload_dir, token)
+            target = path_safety.under(upload_dir, token, secret=token)
             if not target.is_dir():
                 return 404, {'error': 'token not found'}
             shutil.rmtree(target)
@@ -300,7 +304,7 @@ def _stored_file(upload_dir, token, parts, missing):
     rather than refused: this is what a browser downloads any upload by.
     """
     try:
-        target = path_safety.under(upload_dir, token, *parts)
+        target = path_safety.under(upload_dir, token, *parts, secret=token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
     if not target.is_file():
@@ -364,7 +368,7 @@ def latest_screenshot(upload_dir, token, params):
     if upload_id and path_safety.unsafe_component(upload_id):
         return 400, {'error': 'invalid path component'}
     try:
-        token_dir = path_safety.under(upload_dir, token)
+        token_dir = path_safety.under(upload_dir, token, secret=token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
     try:
