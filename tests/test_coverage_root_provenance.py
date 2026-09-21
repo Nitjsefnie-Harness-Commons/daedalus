@@ -124,7 +124,7 @@ def _assert_root_binding_site(form):
               else _ROOT_PREFIX)
     source = prefix + binding
     if name in {'comprehension', 'parameter', 'vararg', 'kwarg',
-                'uninitialized-annotation'}:
+                'uninitialized-annotation', 'same-name-alias'}:
         assert _synthetic_violations(
             source + 'subprocess.run(c, cwd=ROOT)\n') == [], binding
         assert 'ROOT' not in _shadowed_names(ast.parse(source)), binding
@@ -264,6 +264,10 @@ _SITE_MUTANTS = {
     'import': ("    if isinstance(node, (ast.Import, ast.ImportFrom)):\n"
                "        return {_import_bound_name(node, alias) "
                "for alias in node.names}\n", ''),
+    'same-name-alias': (
+        "        return (alias.name == 'ROOT'\n"
+        "                and alias.asname in (None, alias.name))\n",
+        "        return alias.name == 'ROOT' and alias.asname is None\n"),
     'star-import': ("        if not _bound_names(node) "
                     "& {'ROOT', _ALL_NAMES}:\n",
                     "        if 'ROOT' not in _bound_names(node):\n"),
@@ -287,7 +291,7 @@ _SITE_KINDS = {
     'comprehension': 'scope', 'parameter': 'scope',
     'vararg': 'scope', 'kwarg': 'scope',
     'uninitialized-annotation': 'annotation',
-    'from-alias': 'import', 'same-name-alias': 'import',
+    'from-alias': 'import', 'same-name-alias': 'same-name-alias',
     'mixed-import': 'import',
 }
 _ROOT_PROVENANCE_MUTATIONS += tuple(
