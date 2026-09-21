@@ -27,9 +27,13 @@ _ROOT_PROVENANCE_MUTATIONS = (
     ('a rebound proof name is unprovable', 'scopes',
      (("    names = _import_rebound_names(tree) & _PROOF_NAMES\n",
        "    names = set()\n"),), _ROOT_PROVENANCE_INVOKE),
-    ('Path and str are proof names', 'scopes',
+    ('Path is independently a proof name', 'scopes',
      (("_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n",
-       "_PROOF_NAMES = frozenset({_ALL_NAMES})\n"),), _ROOT_PROVENANCE_INVOKE),
+       "_PROOF_NAMES = frozenset({'str', _ALL_NAMES})\n"),), _ROOT_PROVENANCE_INVOKE),
+    ('str is independently a proof name', 'scopes',
+     (("_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n",
+       "_PROOF_NAMES = frozenset({'Path', _ALL_NAMES})\n"),),
+     _ROOT_PROVENANCE_INVOKE),
     ('a canonical import is exact', 'scopes',
      (("            and (node.module, alias.name) == "
        "_CANONICAL_MEMBERS.get(bound))\n",
@@ -225,15 +229,17 @@ subprocess.run(['python3', 'child.py'], cwd=ROOT)
 """, _rebound_owner(4, 'ROOT')),
         ('an import binding str leaves str(ROOT) unprovable',
          """import subprocess
+from _repo import ROOT
 from helpers import str
 subprocess.run(['python3', 'child.py'], cwd=str(ROOT))
-""", _rebound_owner(3, 'str(ROOT)')),
+""", _rebound_owner(4, 'str(ROOT)')),
         ('a function-local import binding str is a rebinding',
          """import subprocess
+from _repo import ROOT
 def go():
     from helpers import str
     subprocess.run(['python3', 'child.py'], cwd=str(ROOT))
-""", _rebound_owner(4, 'str(ROOT)')),
+""", _rebound_owner(5, 'str(ROOT)')),
         ('a ROOT bound nowhere is unprovable', """import subprocess
 subprocess.run(['python3', 'child.py'], cwd=ROOT)
 """, _rebound_owner(2, 'ROOT')),
