@@ -894,6 +894,7 @@ def test_ping_tool_round_trip(tmp):
                     'error': None, 'ts': 1, 'world': world,
                     '_did': command['_did']})
                 assert status == 200, status
+                queued[0].unlink()  # ping repeats one payload; drain it
             except Exception as exc:  # test-thread diagnosis, surfaced below
                 failure.append(exc)
 
@@ -906,8 +907,7 @@ def test_ping_tool_round_trip(tmp):
             assert res['title'] == 'MCP Title', res
             assert res['world'] == world, res
             assert isinstance(res['ms'], int) and res['ms'] >= 0, res
-        # The command really went through the bridge's queue.
-        assert list(qdir.glob('*.json'))
+        assert len(answered) == 2, answered
 
 
 def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):

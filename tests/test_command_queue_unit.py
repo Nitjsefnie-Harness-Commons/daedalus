@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -80,7 +81,8 @@ def test_enqueue_waits_for_the_shared_filesystem_lock(tmp):
     def publish():
         try:
             delivery_ids.append(
-                queue.enqueue(cmd_dir, 'tok', 'tab', {'id': 'queued'}))
+                queue.enqueue(cmd_dir, 'tok', 'tab', {'id': 'queued'},
+                              command_ttl=90))
         except Exception as error:  # preserve a worker assertion failure
             failures.append(error)
         finally:
@@ -99,7 +101,7 @@ def test_enqueue_waits_for_the_shared_filesystem_lock(tmp):
     worker.join()
     assert failures == []
     assert len(delivery_ids) == 1, delivery_ids
-    delivery_id = delivery_ids[0]
+    delivery_id = delivery_ids[0][0]
     assert (cmd_dir / 'tok_tab' / f'{delivery_id}.json').exists()
 
 
@@ -284,11 +286,113 @@ def test_event_reuses_one_wake_event_per_token(_tmp):
 def test_enqueue_atomically_publishes_a_waking_delivery(tmp):
     queue = _load_queue('command_queue_enqueue')
     cmd_dir = Path(tmp) / 'commands'
-    delivery_id = queue.enqueue(cmd_dir, 'tok', 'tab', {'id': 'queued'})
+    delivery_id, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'queued'}, command_ttl=90)
+    assert duplicate is False
     destination = cmd_dir / 'tok_tab' / f'{delivery_id}.json'
     assert json.loads(destination.read_text(encoding='utf-8')) == {
         'id': 'queued', '_did': delivery_id}
     assert queue.event('tok').is_set()
+
+
+def test_an_identical_live_command_admits_one_delivery(tmp):
+    queue = _load_queue('command_queue_dedup_live')
+    cmd_dir = Path(tmp) / 'commands'
+    command = {'id': 'same', 'code': '1'}
+    first_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', command, command_ttl=90)
+    assert duplicate is False
+    replay_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', command, command_ttl=90)
+    assert duplicate is True
+    assert replay_did == first_did
+    published = sorted((cmd_dir / 'tok_tab').glob('*.json'))
+    assert len(published) == 1, published
+    assert json.loads(published[0].read_text(encoding='utf-8')) == {
+        'id': 'same', 'code': '1', '_did': first_did}
+
+
+def test_a_same_id_with_a_changed_payload_enqueues_fresh(tmp):
+    queue = _load_queue('command_queue_dedup_payload')
+    cmd_dir = Path(tmp) / 'commands'
+    first_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'},
+        command_ttl=90)
+    assert duplicate is False
+    second_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '2'},
+        command_ttl=90)
+    assert duplicate is False
+    assert second_did != first_did
+    published = list((cmd_dir / 'tok_tab').glob('*.json'))
+    assert len(published) == 2, published
+
+
+def test_a_same_id_with_changed_typed_fields_enqueues_fresh(tmp):
+    queue = _load_queue('command_queue_dedup_typed')
+    cmd_dir = Path(tmp) / 'commands'
+    first_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'extension',
+        {'id': 'same', 'type': 'shot', 'quality': 'low'}, command_ttl=90)
+    assert duplicate is False
+    second_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'extension',
+        {'id': 'same', 'type': 'shot', 'quality': 'high'}, command_ttl=90)
+    assert duplicate is False
+    assert second_did != first_did
+    published = list((cmd_dir / 'tok_extension').glob('*.json'))
+    assert len(published) == 2, published
+
+
+def test_the_same_payload_for_another_tab_enqueues_fresh(tmp):
+    queue = _load_queue('command_queue_dedup_tab')
+    cmd_dir = Path(tmp) / 'commands'
+    first_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab1', {'id': 'same', 'code': '1'},
+        command_ttl=90)
+    assert duplicate is False
+    second_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab2', {'id': 'same', 'code': '1'},
+        command_ttl=90)
+    assert duplicate is False
+    assert second_did != first_did
+    assert (cmd_dir / 'tok_tab1' / f'{first_did}.json').exists()
+    assert (cmd_dir / 'tok_tab2' / f'{second_did}.json').exists()
+
+
+def test_a_drained_command_enqueues_fresh(tmp):
+    queue = _load_queue('command_queue_dedup_drained')
+    cmd_dir = Path(tmp) / 'commands'
+    first_did, _ = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'},
+        command_ttl=90)
+    (cmd_dir / 'tok_tab' / f'{first_did}.json').unlink()
+    second_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'},
+        command_ttl=90)
+    assert duplicate is False
+    assert second_did != first_did
+    published = sorted((cmd_dir / 'tok_tab').glob('*.json'))
+    assert len(published) == 1, published
+
+
+def test_an_expired_entry_is_not_a_live_duplicate(tmp):
+    queue = _load_queue('command_queue_dedup_expired')
+    cmd_dir = Path(tmp) / 'commands'
+    first_did, _ = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'},
+        command_ttl=90)
+    aged = cmd_dir / 'tok_tab' / f'{first_did}.json'
+    stamp = time.time() - 91
+    os.utime(aged, (stamp, stamp))
+    second_did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'},
+        command_ttl=90)
+    assert duplicate is False
+    assert second_did != first_did
+    assert aged.exists()
+    published = sorted((cmd_dir / 'tok_tab').glob('*.json'))
+    assert len(published) == 2, published
 
 
 def test_collect_expired_removes_old_commands_and_empty_queues(tmp):
