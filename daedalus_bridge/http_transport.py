@@ -14,7 +14,7 @@ and limits as parameters. That is also why the answer types are defined in
 one would inherit that requirement.
 """
 import ctypes, ctypes.util
-import hmac, json, shutil
+import hmac, json, os, shutil
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -434,13 +434,19 @@ class RequestMixin(BaseHTTPRequestHandler):
     def send_file(self, path, mime):
         """Serve a binary file, streamed so large files aren't fully
         buffered in RAM."""
-        size = path.stat().st_size
-        self.send_response(200)
-        self.send_header('Content-Type', mime)
-        self.send_header('Content-Length', str(size))
-        self.send_header('Cache-Control', 'no-cache')
-        self.end_headers()
-        with open(path, 'rb') as fh:
+        try:
+            fh = open(path, 'rb')
+        except OSError:
+            # A concurrent delete can remove the selected file before open.
+            self._json(404, {'error': 'file not found'})
+            return
+        with fh:
+            size = os.fstat(fh.fileno()).st_size
+            self.send_response(200)
+            self.send_header('Content-Type', mime)
+            self.send_header('Content-Length', str(size))
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
             shutil.copyfileobj(fh, self.wfile, 256 * 1024)
         if size > TRIM_THRESHOLD:
             malloc_trim()

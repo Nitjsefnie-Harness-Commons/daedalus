@@ -10,9 +10,11 @@ still answer 200.
 import base64
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -55,6 +57,168 @@ def test_list_uploads_answers_a_page_shape_when_paging_is_asked_for(tmp):
     assert [item['filename'] for item in payload['items']] == ['b.png']
 
 
+def test_list_uploads_skips_an_entry_deleted_during_the_walk(tmp):
+    routes = _load('fixture_upload_routes_vanished_entry')
+
+    def check_case(remove_id):
+        root = Path(tmp) / str(remove_id)
+        gone = _store(root, 'tok', 'id1', 'a.png')
+        _store(root, 'tok', 'id2', 'survivor.png')
+        real_stat = routes.os.stat
+        removed = []
+
+        def delete_then_stat(path, *args, **kwargs):
+            if Path(path) == gone and not removed:
+                removed.append(True)
+                gone.unlink()
+                if remove_id:
+                    gone.parent.rmdir()
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch.object(routes.os, 'stat', delete_then_stat):
+            status, payload = routes.list_uploads(
+                root, 'tok', {'limit': ['10']})
+        assert removed, remove_id
+        assert status == 200, (status, payload)
+        assert [item['path'] for item in payload['items']] == [
+            'tok/id2/survivor.png'], payload
+
+    for remove_id in (False, True):
+        check_case(remove_id)
+
+
+def test_list_uploads_answers_empty_when_token_vanishes_before_scan(tmp):
+    routes = _load('fixture_upload_routes_vanished_token')
+
+    def check_case(params, expected):
+        _store(tmp, 'tok', 'id1', 'a.png')
+        token_dir = Path(tmp) / 'tok'
+        real_scan = routes.os.scandir
+        removed = []
+
+        def delete_then_scan(path):
+            if path == token_dir and not removed:
+                removed.append(True)
+                shutil.rmtree(token_dir)
+            return real_scan(path)
+
+        with mock.patch.object(routes.os, 'scandir', delete_then_scan):
+            answer = routes.list_uploads(Path(tmp), 'tok', params)
+        assert removed, params
+        assert answer == (200, expected), answer
+
+    for params, expected in (({}, []), ({'limit': ['10']}, {
+            'items': [], 'total': 0, 'limit': 10, 'offset': 0})):
+        check_case(params, expected)
+
+
+def test_list_uploads_skips_an_id_deleted_before_sorting(tmp):
+    routes = _load('fixture_upload_routes_vanished_id')
+    _store(tmp, 'tok', 'gone', 'a.png')
+    _store(tmp, 'tok', 'kept', 'b.png')
+    gone = Path(tmp) / 'tok' / 'gone'
+    real_stat = routes.os.stat
+    removed = []
+
+    def delete_then_stat(path, *args, **kwargs):
+        if Path(path) == gone and not removed:
+            removed.append(True)
+            shutil.rmtree(gone)
+        return real_stat(path, *args, **kwargs)
+
+    with mock.patch.object(routes.os, 'stat', delete_then_stat):
+        status, payload = routes.list_uploads(Path(tmp), 'tok', {})
+    assert removed
+    assert status == 200, (status, payload)
+    assert [item['path'] for item in payload] == ['tok/kept/b.png'], payload
+
+
+def test_list_uploads_skips_an_id_deleted_before_its_scan(tmp):
+    routes = _load('fixture_upload_routes_vanished_id_scan')
+
+    def check_case(error):
+        root = Path(tmp) / error.__name__
+        _store(root, 'tok', 'gone', 'a.png')
+        _store(root, 'tok', 'kept', 'b.png')
+        gone = root / 'tok' / 'gone'
+        real_scan = routes.os.scandir
+        removed = []
+
+        def delete_then_scan(path):
+            if path == gone and not removed:
+                removed.append(True)
+                shutil.rmtree(gone)
+                if error is not FileNotFoundError:
+                    raise error('injected deletion race')
+            return real_scan(path)
+
+        with mock.patch.object(routes.os, 'scandir', delete_then_scan):
+            status, payload = routes.list_uploads(root, 'tok', {})
+        assert removed, error
+        assert status == 200, (status, payload)
+        assert [item['path'] for item in payload] == [
+            'tok/kept/b.png'], payload
+
+    for error in (PermissionError, NotADirectoryError, FileNotFoundError):
+        check_case(error)
+
+
+def test_upload_reads_answer_absent_when_token_stat_fails(tmp):
+    routes = _load('fixture_upload_routes_token_stat')
+
+    def check_case(route, expected):
+        _store(tmp, 'tok', 'id1', 'a.png')
+        token_dir = Path(tmp) / 'tok'
+        real_stat = routes.pathlib.Path.stat
+        removed = []
+
+        def delete_then_stat(path, *args, **kwargs):
+            if path == token_dir and not removed:
+                removed.append(True)
+                shutil.rmtree(token_dir)
+                raise PermissionError('injected deletion race')
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch.object(routes.pathlib.Path, 'stat', delete_then_stat):
+            answer = route(Path(tmp), 'tok', {})
+        assert removed, route
+        assert answer == expected, answer
+
+    for route, expected in (
+            (routes.list_uploads, (200, [])),
+            (routes.latest_screenshot, (404, {'error': 'no uploads'}))):
+        check_case(route, expected)
+
+
+def test_list_uploads_skips_only_the_entry_whose_type_check_fails(tmp):
+    routes = _load('fixture_upload_routes_entry_type')
+    gone = _store(tmp, 'tok', 'id1', 'gone.png')
+    _store(tmp, 'tok', 'id1', 'kept.png')
+    real_scan = routes.os.scandir
+
+    def delete_then_check():
+        gone.unlink()
+        raise PermissionError('injected deletion race')
+
+    @contextmanager
+    def scan(path):
+        with real_scan(path) as entries:
+            files = []
+            for entry in entries:
+                if Path(entry.path) == gone:
+                    entry = mock.Mock(wraps=entry, path=entry.path)
+                    entry.name = gone.name
+                    entry.is_file.side_effect = delete_then_check
+                files.append(entry)
+            yield iter(files)
+
+    with mock.patch.object(routes.os, 'scandir', scan):
+        status, payload = routes.list_uploads(Path(tmp), 'tok', {})
+    assert not gone.exists()
+    assert status == 200, (status, payload)
+    assert [item['path'] for item in payload] == ['tok/id1/kept.png'], payload
+
+
 def test_list_uploads_refuses_a_bad_limit_before_the_directory_exists(tmp):
     """Well-formedness is decided without looking at storage."""
     routes = _load('fixture_upload_routes_badlimit')
@@ -73,6 +237,88 @@ def test_list_uploads_refuses_an_unsafe_id(tmp):
         400, {'error': 'invalid path component'}), (status, payload)
 
 
+def test_latest_screenshot_skips_a_file_deleted_during_the_scan(tmp):
+    routes = _load('fixture_upload_routes_vanished_screenshot')
+
+    def check_case(survivor, params):
+        root = Path(tmp) / str(survivor) / str(bool(params))
+        gone = _store(root, 'tok', 'id1', 'gone.png')
+        if survivor:
+            kept = _store(root, 'tok', 'id1', 'kept.png')
+        real_stat = routes.pathlib.Path.stat
+        removed = []
+
+        def delete_then_stat(path, *args, **kwargs):
+            if path == gone and not removed:
+                removed.append(True)
+                gone.unlink()
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch.object(routes.pathlib.Path, 'stat', delete_then_stat):
+            answer = routes.latest_screenshot(root, 'tok', params)
+        assert removed, (survivor, params)
+        if survivor:
+            assert answer.path == kept, answer
+            assert answer.mime == 'image/png', answer
+        else:
+            assert answer == (404, {'error': 'no screenshot'}), answer
+
+    for survivor in (True, False):
+        for params in ({}, {'id': ['id1']}):
+            check_case(survivor, params)
+
+
+def test_latest_screenshot_answers_no_uploads_when_token_vanishes(tmp):
+    routes = _load('fixture_upload_routes_screenshot_token')
+    _store(tmp, 'tok', 'id1', 'gone.png')
+    token_dir = Path(tmp) / 'tok'
+    real_stat = routes.pathlib.Path.stat
+    removed = []
+
+    def stat_then_delete(path, *args, **kwargs):
+        info = real_stat(path, *args, **kwargs)
+        if path == token_dir and not removed:
+            removed.append(True)
+            shutil.rmtree(token_dir)
+        return info
+
+    with mock.patch.object(routes.pathlib.Path, 'stat', stat_then_delete):
+        answer = routes.latest_screenshot(Path(tmp), 'tok', {})
+    assert removed
+    assert answer == (404, {'error': 'no uploads'}), answer
+
+
+def test_latest_screenshot_skips_an_id_deleted_before_scan(tmp):
+    routes = _load('fixture_upload_routes_screenshot_id')
+
+    def check_case(survivor):
+        root = Path(tmp) / str(survivor)
+        _store(root, 'tok', 'gone', 'a.png')
+        gone = root / 'tok' / 'gone'
+        if survivor:
+            kept = _store(root, 'tok', 'kept', 'b.png')
+        real_stat = routes.pathlib.Path.stat
+        removed = []
+
+        def stat_then_delete(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if path == gone and not removed:
+                removed.append(True)
+                shutil.rmtree(gone)
+            return info
+
+        with mock.patch.object(routes.pathlib.Path, 'stat', stat_then_delete):
+            answer = routes.latest_screenshot(root, 'tok', {})
+        assert removed, survivor
+        if survivor:
+            assert answer.path == kept, answer
+        else:
+            assert answer == (404, {'error': 'no screenshot'}), answer
+
+    for survivor in (True, False):
+        check_case(survivor)
+
+
 def test_store_upload_writes_a_timestamped_screenshot(tmp):
     routes = _load('fixture_upload_routes_store')
     body = {'token': 'tok', 'id': 'id1', 'format': 'png',
@@ -88,19 +334,20 @@ def test_store_upload_writes_a_timestamped_screenshot(tmp):
 def test_store_upload_names_same_millisecond_captures_distinctly(tmp):
     """Two unnamed captures in one millisecond must not share a file."""
     routes = _load('fixture_upload_routes_same_ms')
-    paths = []
-    with mock.patch.object(routes.time, 'time', return_value=1700000000.5):
-        for data in (b'FIRST', b'SECOND'):
-            body = {'token': 'tok', 'id': 'id1', 'format': 'png',
-                    'data': base64.b64encode(data).decode('ascii')}
-            status, payload = routes.store_upload(Path(tmp), body)
-            assert status == 200, (status, payload)
-            paths.append(payload['path'])
-    assert paths[0] != paths[1], paths
-    for rel, data in zip(paths, (b'FIRST', b'SECOND')):
-        assert re.fullmatch(r'tok/id1/\d{13}_\d{6}\.png', rel), rel
-        assert (Path(tmp) / rel).is_file(), rel
-        assert (Path(tmp) / rel).read_bytes() == data, rel
+    for clock in (1700000000.5, 1.5):
+        paths = []
+        with mock.patch.object(routes.time, 'time', return_value=clock):
+            for data in (b'FIRST', b'SECOND'):
+                body = {'token': 'tok', 'id': 'id1', 'format': 'png',
+                        'data': base64.b64encode(data).decode('ascii')}
+                status, payload = routes.store_upload(Path(tmp), body)
+                assert status == 200, (status, payload)
+                paths.append(payload['path'])
+        assert paths[0] != paths[1], paths
+        for rel, data in zip(paths, (b'FIRST', b'SECOND')):
+            assert re.fullmatch(r'tok/id1/\d{13}_\d{6}\.png', rel), rel
+            assert (Path(tmp) / rel).is_file(), rel
+            assert (Path(tmp) / rel).read_bytes() == data, rel
 
 
 def test_store_upload_publishes_through_a_temp_sibling(tmp):
