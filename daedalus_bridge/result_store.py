@@ -95,7 +95,7 @@ def delivery_result_paths(res_dir, token, tab, did):
         raise ValueError('invalid delivery id')
     root = delivery_root(res_dir)
     key = path_safety.derived_component(result_key(token, tab))
-    delivery_dir = path_safety.under(root, key)
+    delivery_dir = path_safety.under(root, key, secret=token)
     # The stripe is keyed on `key`, so the resolved directory must be the
     # one-to-one namespace entry that key names, not an alias to another one.
     alias_attempts = []
@@ -103,10 +103,11 @@ def delivery_result_paths(res_dir, token, tab, did):
         delivery_dir.parent, root, alias_attempts)
     if not parent_matches or delivery_dir.name != key:
         path_safety.log_path_refusal(
-            'alias', root, (key,), alias_attempts)
+            'alias', root, (key,), alias_attempts, secret=token)
         raise ValueError('delivery target is an alias')
     delivery_file = path_safety.under(
-        delivery_dir, path_safety.derived_component(f'{did}.json'))
+        delivery_dir, path_safety.derived_component(f'{did}.json'),
+        secret=token)
     return delivery_dir, delivery_file
 
 
@@ -129,9 +130,10 @@ def find_delivery_result(res_dir, token, tab, did):
     for name in names:
         try:
             candidate_dir = path_safety.under(
-                root, path_safety.derived_component(name))
+                root, path_safety.derived_component(name), secret=token)
             candidate_file = path_safety.under(
-                candidate_dir, path_safety.derived_component(f'{did}.json'))
+                candidate_dir, path_safety.derived_component(f'{did}.json'),
+                secret=token)
         except ValueError:
             continue
         if candidate_file.exists():

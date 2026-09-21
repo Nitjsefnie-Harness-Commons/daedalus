@@ -11,6 +11,8 @@ The assertion is deliberately not just the status code. A handler can answer
 400 and still have written the file, so each test checks the filesystem
 OUTSIDE the docroot as well — that is the part that actually matters.
 """
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -428,6 +430,72 @@ def test_the_validation_helpers_import_without_the_bridge_environment(tmp):
     assert answer['escape'] == 'refused', (proc.stdout, proc.stderr, answer)
     assert answer['derived'] == 'tok_tab', (
         proc.stdout, proc.stderr, answer)
+
+
+def test_a_refusal_line_redacts_the_credential_it_names(tmp):
+    """The printed evidence keeps its shape; the credential inside it shrinks.
+
+    The evidence is the point of the line — a refusal that cannot be
+    diagnosed is useless — so the parts and the resolved attempts render
+    exactly as before, with the secret replaced by the 8-character prefix
+    the stream connect line already prints. The substitution is substring
+    replacement, because the secret reaches the line inside derived names
+    (`<token>.json`) and resolved absolute paths, never only as a bare
+    component.
+    """
+    safety = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'path_safety.py', 'fixture_psr')
+    root = '/tmp/docroot/uploads'
+    parts = ('tok-verify', 'shot', 'a.txt')
+    attempts = [('/tmp/docroot/uploads/tok-verify/shot/a.txt',
+                 '/tmp/docroot/uploads/tok-verify/shot/a.txt'),
+                ('/tmp/docroot/uploads/tok-verify/shot/a.txt',
+                 '/tmp/docroot/uploads/tok-verify/shot/a.txt')]
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        safety.log_path_refusal(
+            'containment', root, parts, attempts, secret='tok-verify')
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
+    assert "parts=('tok-veri…', 'shot', 'a.txt')" in line, line
+    assert "tok-veri…/shot/a.txt" in line, line
+
+
+def test_a_refusal_line_without_a_secret_is_byte_identical(tmp):
+    """The no-secret arm is the control: today's rendering, unchanged."""
+    safety = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'path_safety.py', 'fixture_psc')
+    root = '/tmp/docroot/uploads'
+    parts = ('tok-verify', 'shot', 'a.txt')
+    attempts = [('/tmp/docroot/uploads/tok-verify/shot/a.txt',
+                 '/tmp/docroot/uploads/tok-verify/shot/a.txt')]
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        safety.log_path_refusal('containment', root, parts, attempts)
+    expected = (
+        f'[PATH-REFUSAL] kind=containment root={root!r} '
+        f'parts={parts!r} attempts={tuple(attempts)!r}\n')
+    assert output.getvalue() == expected, output.getvalue()
+
+
+def test_under_refuses_with_the_credential_redacted(tmp):
+    """A containment refusal raised through `under` redacts too."""
+    safety = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'path_safety.py', 'fixture_psu')
+    root = Path(tmp) / 'uploads'
+    output = io.StringIO()
+    refused = False
+    with contextlib.redirect_stdout(output):
+        try:
+            safety.under(root, 'tok-verify', '..', '..', 'escaped.txt',
+                         secret='tok-verify')
+        except ValueError:
+            refused = True
+    assert refused, output.getvalue()
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
 
 
 _STRIPE_PROBE = r"""

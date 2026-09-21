@@ -31,12 +31,13 @@ def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
         return 400, {'error': 'invalid path component'}
     try:
         token_result_slot = path_safety.under(
-            res_dir, path_safety.derived_component(f'{token}.json'))
+            res_dir, path_safety.derived_component(f'{token}.json'),
+            secret=token)
         tab_result_slot = (
             path_safety.under(
                 res_dir,
                 path_safety.derived_component(
-                    f'{token}_{tab_id}.json'))
+                    f'{token}_{tab_id}.json'), secret=token)
             if tab_id else None)
     except ValueError:
         return 400, {'error': 'invalid path component'}
@@ -174,7 +175,8 @@ def fetch_result(res_dir, token, params):
             res_file = path_safety.under(
                 res_dir,
                 path_safety.derived_component(
-                    f'{result_store.result_key(token, tab)}.json'))
+                    f'{result_store.result_key(token, tab)}.json'),
+                secret=token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
     try:
@@ -200,7 +202,7 @@ def fetch_result(res_dir, token, params):
                                 slot = path_safety.under(
                                     res_dir,
                                     path_safety.derived_component(
-                                        slot_name))
+                                        slot_name), secret=token)
                                 result_store.remove_matching_result_file(
                                     slot, generation)
         elif consume:

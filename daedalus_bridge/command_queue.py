@@ -196,7 +196,7 @@ def notify_dashboard(cmd_dir, token, payload):
         return
     try:
         queue_name, _ = command_target_names(token, 'dashboard')
-        dash_dir = path_safety.under(cmd_dir, queue_name)
+        dash_dir = path_safety.under(cmd_dir, queue_name, secret=token)
     except ValueError:
         return
     try:
@@ -244,7 +244,7 @@ def enqueue(cmd_dir, token, tab, cmd):
     if tab and path_safety.unsafe_component(tab):
         raise ValueError(f'unsafe tab component: {tab!r}')
     queue_name, _ = command_target_names(token, tab)
-    qdir = path_safety.under(cmd_dir, queue_name)
+    qdir = path_safety.under(cmd_dir, queue_name, secret=token)
     with command_fs_lock:
         qdir.mkdir(parents=True, exist_ok=True)
         seq = next_seq()
