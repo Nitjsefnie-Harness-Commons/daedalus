@@ -301,7 +301,10 @@ def test_an_audit_run_validates_the_threshold_document(tmp):
     expensive gates; the price was that a malformed hand edit pushed alone
     to main waited for the next unrelated push to be told it was invalid.
     audit.yml's push trigger is unfiltered, so the validation itself runs
-    there, on every audit run.
+    there, on every audit run -- and it runs unconditionally: neither the
+    job nor its validating step may carry an `if` condition or
+    `continue-on-error`, either of which would let the audit go green
+    without the validation having gated it.
     """
     del tmp
     workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
@@ -312,8 +315,16 @@ def test_an_audit_run_validates_the_threshold_document(tmp):
         job = complete_job_mapping(workflow, name)
         for step in job.get('steps', []):
             if step.get('run', '').splitlines() == [command]:
-                validating.append(name)
-    assert validating == ['thresholds'], validating
+                validating.append((name, job, step))
+    assert len(validating) == 1, [name for name, _, _ in validating]
+    job_name, job, step = validating[0]
+    carried = {
+        'job-level': [key for key in ('if', 'continue-on-error')
+                      if key in job],
+        'step-level': [key for key in ('if', 'continue-on-error')
+                       if key in step],
+    }
+    assert not any(carried.values()), {'job': job_name, **carried}
 
 
 def _pinned_actions():
