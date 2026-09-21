@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Standalone publication and lifecycle guarantees for the command queue."""
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -153,6 +155,26 @@ def test_notify_dashboard_publishes_no_final_name_before_the_replace(tmp):
     final = dash_dir / names[0]
     assert json.loads(final.read_text(encoding='utf-8')) == {
         'id': final.stem, 'kind': 'event', **payload}
+
+
+def test_the_notify_failure_line_redacts_the_credential(tmp):
+    """The failure diagnostic is not a second copy of the credential.
+
+    An OSError str() renders the path it failed on, and the queue
+    directory is named from the token, so a queue directory blocked by a
+    file spelled the whole credential on the [DASH-NOTIFY-FAIL] line.
+    """
+    queue = _load_queue('command_queue_notify_redact')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    (cmd_dir / 'tok-verify_dashboard').write_text(
+        'a file, not a directory', encoding='utf-8')
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        queue.notify_dashboard(cmd_dir, 'tok-verify', {'type': 'result'})
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
 
 
 # Runs in a child whose preferred encoding is verified not to be UTF-8, then

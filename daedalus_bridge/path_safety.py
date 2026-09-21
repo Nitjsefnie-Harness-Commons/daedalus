@@ -105,7 +105,7 @@ def same_path(left, right, attempts=None):
     return False
 
 
-def _redacted(value, secret):
+def redacted(value, secret):
     """One rendered evidence string with the credential shortened.
 
     Substring replacement, because the secret reaches the line inside
@@ -127,14 +127,14 @@ def log_path_refusal(kind, root, parts, attempts, secret=''):
     call site that carries no credential renders exactly as before.
     """
     safe_parts = tuple(
-        _redacted(log_safe(part), secret) for part in parts)
+        redacted(log_safe(part), secret) for part in parts)
     safe_attempts = tuple(
-        (_redacted(log_safe(left), secret),
-         _redacted(log_safe(right), secret))
+        (redacted(log_safe(left), secret),
+         redacted(log_safe(right), secret))
         for left, right in attempts)
     print(
         f'[PATH-REFUSAL] kind={kind} '
-        f'root={_redacted(log_safe(root), secret)!r} '
+        f'root={redacted(log_safe(root), secret)!r} '
         f'parts={safe_parts!r} attempts={safe_attempts!r}',
         flush=True)
 
