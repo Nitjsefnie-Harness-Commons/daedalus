@@ -81,7 +81,8 @@ def print_result(res, raw=False):
 
     err = res.get('error')
     if err:
-        print(f'{hdr}  ERROR: {err}')
+        # stdout carries only result data; the diagnostic is stderr's.
+        print(f'{hdr}  ERROR: {err}', file=sys.stderr)
         sys.exit(1)
 
     print(hdr)

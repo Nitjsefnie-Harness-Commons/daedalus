@@ -17,8 +17,8 @@ def do_inject_css(args):
     else:
         css = args.css
     fields: dict = {'css': css}
-    if args.chrome_tab:
-        fields['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        fields['tabId'] = args.chrome_tab
     if args.all_frames:
         fields['allFrames'] = True
     result = ext_cmd('_inject_css', 'inject-css', **fields)
@@ -34,8 +34,8 @@ def do_remove_css(args):
     else:
         css = args.css
     fields: dict = {'css': css}
-    if args.chrome_tab:
-        fields['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        fields['tabId'] = args.chrome_tab
     if args.all_frames:
         fields['allFrames'] = True
     result = ext_cmd('_remove_css', 'remove-css', **fields)
@@ -48,8 +48,8 @@ def do_block_requests(args):
     cmd = {'id': '_block', 'type': 'block-requests', 'token': token(),
            'tab': 'extension',
            'pattern': args.pattern}
-    if args.chrome_tab:
-        cmd['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        cmd['tabId'] = args.chrome_tab
     sent = api('PUT', '/command', cmd)
     res = wait_for_result('_block', 'extension', sent.get('did'), 10)
     if res is None:
@@ -120,8 +120,8 @@ def do_list_block_rules(args):
 def do_net_capture(args):
     """Start network capture on a Chrome tab via CDP."""
     fields = {}
-    if args.chrome_tab:
-        fields['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        fields['tabId'] = args.chrome_tab
     if args.max:
         fields['maxRequests'] = args.max
     result = ext_cmd('_net_cap', 'net-capture', timeout=15, **fields)
@@ -135,8 +135,8 @@ def do_net_capture(args):
 def do_net_capture_stop(args):
     """Stop network capture and dump results."""
     fields = {}
-    if args.chrome_tab:
-        fields['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        fields['tabId'] = args.chrome_tab
     if args.bodies:
         fields['bodies'] = True
     result = ext_cmd('_net_stop', 'net-capture-stop', timeout=30, **fields)
@@ -159,8 +159,8 @@ def do_net_capture_stop(args):
 def do_net_capture_get(args):
     """Get current network capture buffer."""
     fields = {}
-    if args.chrome_tab:
-        fields['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        fields['tabId'] = args.chrome_tab
     if args.filter:
         fields['filter'] = args.filter
     if args.bodies:

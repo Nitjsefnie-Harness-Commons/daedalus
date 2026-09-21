@@ -42,7 +42,7 @@ def do_set_cookie(args):
     if args.http_only: cmd['httpOnly'] = True
     if args.secure: cmd['secure'] = True
     if args.same_site: cmd['sameSite'] = args.same_site
-    if args.expires: cmd['expirationDate'] = float(args.expires)
+    if args.expires is not None: cmd['expirationDate'] = args.expires
     sent = api('PUT', '/command', cmd)
     res = wait_for_result(
         '_set_cookie', 'extension', sent.get('did'), 10)
@@ -93,9 +93,8 @@ def do_clear_cookies(args):
 
 def do_cdp(args):
     """Send raw CDP command via extension."""
-    params = json.loads(args.params) if args.params else {}
     cmd = {'id': '_cdp', 'type': 'cdp', 'method': args.method,
-           'params': params,
+           'params': {} if args.params is None else args.params,
            'token': token(), 'tab': 'extension'}
     if args.chrome_tab:
         cmd['tabId'] = args.chrome_tab
@@ -110,7 +109,7 @@ def do_cdp(args):
 
 def do_close_tab(args):
     """Close one or more Chrome tabs via extension."""
-    ids = [int(x) for x in args.chrome_tabs]
+    ids = args.chrome_tabs
     cmd: dict = {'id': '_close_tab', 'type': 'close-tab', 'token': token(),
                  'tab': 'extension'}
     if len(ids) == 1:
@@ -218,7 +217,7 @@ def do_open_tabs(args):
 
 def do_focus_tab(args):
     """Focus a Chrome tab via extension."""
-    result = ext_cmd('_focus', 'focus-tab', tabId=int(args.chrome_tab))
+    result = ext_cmd('_focus', 'focus-tab', tabId=args.chrome_tab)
     print(f'Focused tab {result.get("tabId", "?")} '
           f'window={result.get("windowId", "?")}')
 
@@ -228,8 +227,8 @@ def do_ext_navigate(args):
     chrome://).
     """
     fields = {'url': args.url}
-    if args.chrome_tab:
-        fields['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        fields['tabId'] = args.chrome_tab
     result = ext_cmd('_nav', 'navigate', **fields)
     print(f'Navigated tab {result.get("tabId", "?")} {MARK["out"]} {args.url}')
 
@@ -237,8 +236,8 @@ def do_ext_navigate(args):
 def do_ext_reload(args):
     """Reload a tab via extension."""
     fields = {}
-    if args.chrome_tab:
-        fields['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        fields['tabId'] = args.chrome_tab
     if args.bypass_cache:
         fields['bypassCache'] = True
     result = ext_cmd('_reload', 'reload', **fields)

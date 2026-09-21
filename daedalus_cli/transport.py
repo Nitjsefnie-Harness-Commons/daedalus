@@ -141,6 +141,46 @@ def quality_limit(value):
     return quality
 
 
+def chrome_tab_id(value):
+    """A Chrome tab id: the integer Chrome numbers its tabs with.
+
+    The handlers converted the string with bare int() after the command was
+    shaped, so `--chrome-tab abc` died with a ValueError traceback instead
+    of argparse's refusal before anything is sent.
+    """
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'{value!r} is not an integer') from None
+
+
+def expiration_timestamp(value):
+    """A cookie expiry: float()'s whole domain, inf and nan included.
+
+    The point is to move the crash to argparse, not to tighten what a shell
+    one-liner may pass a cookie.
+    """
+    try:
+        return float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f'{value!r} is not a number') from None
+
+
+def json_params(value):
+    """CDP --params: json.loads()'s whole domain, not only JSON objects.
+
+    A non-object value (`[1,2]`, `3`) is what the operator typed and travels
+    as it parsed; only a body json.loads() itself refuses is refused.
+    """
+    try:
+        return json.loads(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f'{value!r} is not valid JSON: {error}') from None
+
+
 def _query_path(path, params):
     """Build one bridge path with every query value percent-encoded."""
     query = urllib.parse.urlencode(params)
@@ -173,7 +213,16 @@ class ConnectionFailed(Exception):
 
 
 def _json_body(response):
-    return json.loads(response.read())
+    """Decode a 200's body, refusing a non-JSON one as a broken transport.
+
+    An HTML page where the bridge's JSON should be is the front end's
+    answer, not the bridge's — the same class of failure as a refused
+    connection, and it exits like one.
+    """
+    try:
+        return json.loads(response.read())
+    except ValueError as error:
+        raise ConnectionFailed(error) from error
 
 
 def _exchange(req, timeout, read):

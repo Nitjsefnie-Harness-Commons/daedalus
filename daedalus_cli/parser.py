@@ -10,7 +10,8 @@ import argparse
 from . import __version__
 from .commands_content import (_boolean_argument,  # noqa: F401
                                _positive_rule_id)
-from .transport import (NET_CAPTURE_MAX, capture_limit, positive_count,
+from .transport import (NET_CAPTURE_MAX, capture_limit, chrome_tab_id,
+                        expiration_timestamp, json_params, positive_count,
                         positive_timeout, quality_limit)
 
 
@@ -98,7 +99,8 @@ def build_parser():
                    help='Image format (default png)')
     s.add_argument('-q', '--quality', type=quality_limit,
                    help='JPEG quality (1-100)')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active tab)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active tab)')
     s.add_argument('-t', '--timeout', type=positive_timeout, default=15,
                    help='Timeout seconds')
 
@@ -122,7 +124,8 @@ def build_parser():
     s.add_argument('--secure', action='store_true', help='Secure flag')
     s.add_argument('--same-site', choices=['no_restriction', 'lax', 'strict'],
                    help='SameSite policy')
-    s.add_argument('--expires', help='Expiration as Unix timestamp')
+    s.add_argument('--expires', type=expiration_timestamp,
+                   help='Expiration as Unix timestamp')
 
     # remove-cookie (extension)
     s = sub.add_parser('remove-cookie', help='Remove a specific cookie')
@@ -139,8 +142,9 @@ def build_parser():
     # cdp (extension)
     s = sub.add_parser('cdp', help='Send raw CDP command via extension')
     s.add_argument('method', help='CDP method (e.g. Page.captureScreenshot)')
-    s.add_argument('-p', '--params', help='JSON params string')
-    s.add_argument('--chrome-tab', help='Chrome tab ID')
+    s.add_argument('-p', '--params', type=json_params,
+                   help='JSON params string')
+    s.add_argument('--chrome-tab', type=chrome_tab_id, help='Chrome tab ID')
     s.add_argument('--keep-session', action='store_true',
                    help='Hold the chrome.debugger session after this call '
                         '(for Profiler.enable/start/stop, HeapProfiler, '
@@ -176,32 +180,37 @@ def build_parser():
 
     # focus-tab (extension)
     s = sub.add_parser('focus-tab', help='Focus a Chrome tab via extension')
-    s.add_argument('chrome_tab', help='Chrome tab ID to focus')
+    s.add_argument('chrome_tab', type=chrome_tab_id,
+                   help='Chrome tab ID to focus')
 
     # ext-navigate (extension)
     s = sub.add_parser('ext-navigate',
                        help='Navigate tab to URL via extension '
                             '(works on chrome:// pages)')
     s.add_argument('url', help='Target URL')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active tab)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active tab)')
 
     # ext-reload (extension)
     s = sub.add_parser('ext-reload',
                        help='Reload tab via extension (supports cache bypass)')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active tab)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active tab)')
     s.add_argument('--bypass-cache', action='store_true',
                    help='Bypass cache on reload')
 
     # close-tab (extension)
     s = sub.add_parser('close-tab', help='Close Chrome tab(s) via extension')
-    s.add_argument('chrome_tabs', nargs='+', help='Chrome tab ID(s) to close')
+    s.add_argument('chrome_tabs', nargs='+', type=chrome_tab_id,
+                   help='Chrome tab ID(s) to close')
 
     # inject-css (extension)
     s = sub.add_parser('inject-css', help='Inject CSS into a tab')
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument('--css', help='CSS string to inject')
     g.add_argument('--file', help='CSS file to inject')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active tab)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active tab)')
     s.add_argument('--all-frames', action='store_true',
                    help='Inject into all frames')
 
@@ -210,7 +219,8 @@ def build_parser():
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument('--css', help='CSS string to remove (must match injected)')
     g.add_argument('--file', help='CSS file to remove')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active tab)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active tab)')
     s.add_argument('--all-frames', action='store_true',
                    help='Remove from all frames')
 
@@ -220,7 +230,8 @@ def build_parser():
     s.add_argument('pattern',
                    help='URL filter pattern '
                         '(e.g. "*.cdn.example.com/vod/*/seg-*")')
-    s.add_argument('--chrome-tab', help='Restrict to specific Chrome tab ID')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Restrict to specific Chrome tab ID')
 
     # unblock-requests (extension)
     s = sub.add_parser('unblock-requests', help='Remove block rules')
@@ -233,7 +244,8 @@ def build_parser():
     # net-capture (extension)
     s = sub.add_parser('net-capture',
                        help='Start CDP network capture on a tab')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active)')
     s.add_argument('--max', type=capture_limit, default=1000,
                    help=f'Max requests to buffer, 1-{NET_CAPTURE_MAX} '
                         '(default: 1000)')
@@ -241,7 +253,8 @@ def build_parser():
     # net-capture-stop (extension)
     s = sub.add_parser('net-capture-stop',
                        help='Stop network capture and dump results')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active)')
     s.add_argument('--bodies', action='store_true',
                    help='Fetch response bodies before stopping')
     s.add_argument('--raw', action='store_true', help='Print raw JSON')
@@ -249,7 +262,8 @@ def build_parser():
     # net-capture-get (extension)
     s = sub.add_parser('net-capture-get',
                        help='Get current network capture buffer')
-    s.add_argument('--chrome-tab', help='Chrome tab ID (default: active)')
+    s.add_argument('--chrome-tab', type=chrome_tab_id,
+                   help='Chrome tab ID (default: active)')
     s.add_argument('--filter', help='Regex filter on URL or type')
     s.add_argument('--bodies', action='store_true',
                    help='Fetch response bodies')

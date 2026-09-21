@@ -37,6 +37,10 @@ def do_segment_status(args):
         sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
+    except ValueError as e:
+        # A 200 whose body is the front end's HTML page, not the bridge's
+        # JSON: no answer arrived, and it exits like a refused connection.
+        sys.exit(f'Connection failed: {e}')
     res = api('GET', _query_path('/segment-status', {'job': args.job}),
               headers={SEGMENT_SIG_HEADER: sig})
     count = res.get('count', 0)
@@ -60,8 +64,8 @@ def do_screenshot(args):
         cmd_payload['format'] = args.format
     if args.quality:
         cmd_payload['quality'] = args.quality
-    if args.chrome_tab:
-        cmd_payload['tabId'] = int(args.chrome_tab)
+    if args.chrome_tab is not None:
+        cmd_payload['tabId'] = args.chrome_tab
 
     resp = api('PUT', '/command',
                {**cmd_payload, 'token': token(), 'tab': 'extension'})
