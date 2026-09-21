@@ -1,8 +1,7 @@
 """Getter-returned callables handed to a callee as an argument.
 
-The binding path must not read a handed-away callable as
-nothing-to-replay: the callee's invocation of the parameter reports
-like the method and data-property twins do.
+The callee's invocation of the parameter must report, like the method
+and data-property twins do, rather than read as nothing-to-replay.
 """
 
 _LET = "let promote = ordinary;\n"
@@ -16,26 +15,31 @@ _METHOD = "const obj = { p() { %s } };\n"
 _DATA = "const obj = { p: %s };\n"
 
 
-def _row(label, getter_body, call, expected):
-    return (label, _LET + _GETTER % getter_body + _RUN + call + _TAIL,
+def _row(label, getter_body, call, expected, prelude=''):
+    return (label,
+            _LET + _GETTER % getter_body + prelude + _RUN + call + _TAIL,
             expected)
 
 
 GETTER_ARG_CASES = [
-    # The issue rows: a getter-returned callable passed as an argument.
+    # The issue rows and their sibling spellings.
     _row('getter-arrow-argument', '() => { ' + _PRO + ' }',
          'runIt(obj.p)', True),
     _row('curried-getter-argument', '() => () => { ' + _PRO + ' }',
          'runIt(obj.p())', True),
     _row('computed-getter-argument', '() => { ' + _PRO + ' }',
          "runIt(obj['p'])", True),
+    _row('optional-chain-getter-argument', '() => { ' + _PRO + ' }',
+         'runIt(obj?.p)', True),
+    _row('nested-member-getter-argument', '() => { ' + _PRO + ' }',
+         'runIt(holder.inner.p)', True,
+         'const holder = { inner: obj };\n'),
 
     # What must not change: resolvable arguments keep their verdicts.
     ('identifier-argument-promotion',
      _LET + _PRO + ';\n' + _RUN + 'runIt(promote)' + _TAIL, True),
     # An alias demoter beside a live promotion is already an over-report
-    # on the base tree (the closing net flags the mention); the alias
-    # binding path itself stays untouched by the fix.
+    # on the base tree (the closing net flags it); the fix leaves it be.
     ('identifier-argument-demotion',
      _LET + _PRO + ';\nconst demoter = () => { ' + _DEM + ' };\n'
      + _RUN + 'runIt(demoter)' + _TAIL, (False, True)),
@@ -59,4 +63,9 @@ GETTER_ARG_CASES = [
     _row('getter-argument-demotion', '() => { ' + _DEM + ' }',
          'runIt(obj.p)', (False, True)),
     _row('getter-argument-inert', '() => {}', 'runIt(obj.p)', (False, True)),
+    # A structured declaration leaves its binding no timeline entry, so
+    # the alias path carries it empty too: fail closed (Node runs clean).
+    ('alias-empty-timeline-argument',
+     _LET + "const { handler: extracted } = { handler: ordinary };\n"
+     + _RUN + 'runIt(extracted)' + _TAIL, (False, True)),
 ]
