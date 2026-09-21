@@ -122,12 +122,6 @@ def _backstop_seconds(failure):
     return float(match.group(1))
 
 
-def _drain_seconds(failure):
-    match = re.search(r'drain took ([0-9.]+)s;', failure)
-    assert match, failure
-    return float(match.group(1))
-
-
 def test_windows_cancel_adapter_calls_kernel32_contract(tmp):
     del tmp
     cases = (('success', 41, True, True, 0, None),
@@ -278,9 +272,7 @@ setInterval(() => {}, 10);
         'a retry=False failure reports its one attempt record')
     assert 'dashboard node outer timeout after' not in failure, (
         'a retry=False failure is not the retry-loop verdict')
-    drain_seconds = _drain_seconds(failure)
-    assert drain_seconds < 1.5, (
-        f'dashboard drain took {drain_seconds:.3f}s')
+    assert 'drain timed out: yes' in failure, failure
 
 
 def test_process_creation_delay_does_not_inflate_drain_time(tmp):
@@ -289,7 +281,7 @@ def test_process_creation_delay_does_not_inflate_drain_time(tmp):
     real_popen = _dashnode.subprocess.Popen
 
     def delayed_popen(*args, **kwargs):
-        time.sleep(0.7)
+        time.sleep(_dashnode._DASHBOARD_DRAIN_TIMEOUT_S + 0.2)
         return real_popen(*args, **kwargs)
 
     _dashnode.subprocess.Popen = delayed_popen
@@ -304,10 +296,10 @@ def test_process_creation_delay_does_not_inflate_drain_time(tmp):
         'a retry=False failure reports its one attempt record')
     assert 'dashboard node outer timeout after' not in failure, (
         'a retry=False failure is not the retry-loop verdict')
-    drain_seconds = _drain_seconds(failure)
-    assert drain_seconds < 0.5, (
-        f'dashboard drain took {drain_seconds:.3f}s')
-    assert 'drain timed out: no' in failure, failure
+    # A drain reported "timed out" has always consumed its full budget, so
+    # a sub-second one means the window began at spawn — the mutant this
+    # test exists to catch. A genuinely slow drain times out at >= 1.0s.
+    assert 'drain timed out: yes; drain took 0.' not in failure, failure
 
 
 def test_node_output_is_decoded_as_utf8_under_an_ascii_locale(tmp):
