@@ -13,6 +13,8 @@ its own token and its own delivery ids, because the accepted-delivery
 record is process-wide.
 """
 import atexit
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -67,6 +69,37 @@ def _configured_tree():
     RES_DIR.mkdir(parents=True, exist_ok=True)
     return sorted(str(path.relative_to(RES_DIR))
                   for path in RES_DIR.rglob('*'))
+
+
+def test_a_slot_refusal_redacts_the_credential(tmp):
+    """The slot's containment refusal is a [PATH-REFUSAL] line like any other.
+
+    The per-site threading is what makes the invariant true, so this pin
+    drives the real print machinery with whatever secret the route threads
+    to its slot resolution: dropping the secret shows the credential on
+    the line again.
+    """
+    routes = _load('fixture_result_routes_fetch_redact')
+    safety = routes.path_safety
+    real_under = safety.under
+    output = io.StringIO()
+
+    def refusing_under(root, *parts, **kwargs):
+        safety.log_path_refusal(
+            'containment', root, parts, [], secret=kwargs.get('secret', ''))
+        raise ValueError('path escapes its root')
+
+    try:
+        safety.under = refusing_under
+        with contextlib.redirect_stdout(output):
+            status, payload = routes.fetch_result(
+                RES_DIR, 'tok-verify', {'tab': ['t1']})
+    finally:
+        safety.under = real_under
+    assert (status, payload) == (400, {'error': 'invalid path component'})
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
 
 
 def test_accept_writes_both_slots_and_the_delivery_file(tmp):

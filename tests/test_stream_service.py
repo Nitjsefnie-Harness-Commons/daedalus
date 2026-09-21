@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Standalone state and lifecycle guarantees for the SSE stream service."""
+import contextlib
+import io
 import os
 import subprocess
 import threading
@@ -450,6 +452,84 @@ def test_poll_refuses_an_unsafe_token_name(tmp):
     answer = svc.poll_legacy(Path(tmp), 'ba..d')
 
     assert answer == (400, {'error': 'invalid path component'}), answer
+
+
+def test_the_delivered_queue_line_carries_no_full_token(tmp):
+    """The queue name is <token>_<tab>: the delivery line may not spell it.
+
+    Every drain fires this line, so a full name here was the credential
+    printed on every delivered command, against the invariant the upload
+    and refusal lines already follow.
+    """
+    service = _load_service('stream_service_deliver_redact')
+    qdir = Path(tmp) / 'commands' / 'tok-verify_tab1'
+    qdir.mkdir(parents=True)
+    (qdir / '0000000000001_000001.json').write_text(
+        '{"id":"fresh"}', encoding='utf-8')
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        delivered = service.drain_queue(
+            qdir, None, None, command_ttl=100,
+            frame_writer=lambda frame: None, secret='tok-verify')
+    assert delivered == 1, delivered
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
+
+
+def test_the_ttl_drop_line_carries_no_full_token(tmp):
+    """The expiry sweep names the queue too, so it redacts like delivery."""
+    service = _load_service('stream_service_ttldrop_redact')
+    qdir = Path(tmp) / 'commands' / 'tok-verify_tab2'
+    qdir.mkdir(parents=True)
+    expired = qdir / '0000000000002_000002.json'
+    expired.write_text('{"id":"expired"}', encoding='utf-8')
+    stale = time.time() - 150
+    os.utime(expired, (stale, stale))
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        service.drain_queue(
+            qdir, None, None, command_ttl=100,
+            frame_writer=lambda frame: None, secret='tok-verify')
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert '[STREAM] TTL-DROP tok-veri…_tab2/' in line, line
+
+
+def test_the_refused_line_carries_no_full_token(tmp):
+    """A refused candidate is named with its queue: redacted the same way.
+
+    The refusal path also redacts the reason, which an OSError can render
+    with the token-bearing path inside it.
+    """
+    service = _load_service('stream_service_refused_redact')
+    qdir = Path(tmp) / 'commands' / 'tok-verify_tab3'
+    qdir.mkdir(parents=True)
+    (qdir / 'refused-entry.json').mkdir()
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        service.drain_queue(
+            qdir, None, None, command_ttl=100,
+            frame_writer=lambda frame: None, secret='tok-verify')
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert '[STREAM] REFUSED q=tok-veri…_tab3/' in line, line
+
+
+def test_the_legacy_delivered_line_carries_no_full_token(tmp):
+    """A legacy drop's own name is <token>[_<tab>].json: redacted too."""
+    service = _load_service('stream_service_legacy_redact')
+    legacy = Path(tmp) / 'tok-verify_tab4.json'
+    legacy.write_text('{"id":"legacy"}', encoding='utf-8')
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        delivered = service.drain_legacy_file(
+            legacy, 'tab4', command_ttl=100,
+            frame_writer=lambda frame: None, secret='tok-verify')
+    assert delivered == 1, delivered
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
 
 
 if __name__ == '__main__':

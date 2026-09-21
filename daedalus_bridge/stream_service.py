@@ -31,7 +31,7 @@ _REFUSED_CANDIDATE_LIMIT = 4096
 _refused_lock = threading.Lock()
 
 
-def _refusal_once(key, name, reason):
+def _refusal_once(key, name, reason, secret=''):
     """Report one refused candidate the first time this process refuses it."""
     with _refused_lock:
         if key in _refused_candidates:
@@ -39,8 +39,9 @@ def _refusal_once(key, name, reason):
         _refused_candidates[key] = None
         while len(_refused_candidates) > _REFUSED_CANDIDATE_LIMIT:
             del _refused_candidates[next(iter(_refused_candidates))]
-    print(f'[STREAM] REFUSED {log_safe(name)}: {log_safe(reason)}',
-          flush=True)
+    print(f'[STREAM] REFUSED '
+          f'{path_safety.redacted(log_safe(name), secret)}: '
+          f'{path_safety.redacted(log_safe(reason), secret)}', flush=True)
 
 
 def register(token, tab):
@@ -111,7 +112,7 @@ def write_frame(stream, data):
 
 
 def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
-                frame_writer):
+                frame_writer, secret=''):
     """Deliver every ready command from a directory queue in FIFO order.
 
     TTL-expired and non-object entries are removed; unreadable or invalid-JSON
@@ -120,7 +121,9 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
     against the name it was found under, so an aliased entry is never
     delivered. The socket write happens before unlink, so a failed write
     leaves the command queued for redelivery and propagates to tear the stream
-    down. Returns the number of commands handed to `frame_writer`.
+    down. `secret` is the credential the queue directory is named from, kept
+    to its 8-character prefix in the lines this drain prints. Returns the
+    number of commands handed to `frame_writer`.
     """
     if not qdir.is_dir():
         return 0
@@ -146,7 +149,7 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                 if reason is not None:
                     _refusal_once(
                         f'queue:{qdir.name}/{name}',
-                        f'q={qdir.name}/{name}', reason)
+                        f'q={qdir.name}/{name}', reason, secret=secret)
                 continue  # absent, or refused: never delivered or unlinked
             # Read and decide with the descriptor open, then act with it
             # closed: Windows cannot unlink a file it still holds open.
@@ -175,8 +178,9 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                     pass  # expired either way, or the sweep takes it
                 if expired:
                     print(
-                        f'[STREAM] TTL-DROP {log_safe(qdir.name)}/'
-                        f'{log_safe(name)}', flush=True)
+                        f'[STREAM] TTL-DROP '
+                        f'{path_safety.redacted(log_safe(qdir.name), secret)}'
+                        f'/{log_safe(name)}', flush=True)
                 continue
             if chrome_tab is not None:
                 data['chromeTab'] = chrome_tab
@@ -191,7 +195,8 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
             record_delivery()
             count += 1
             print(
-                f'[STREAM] DELIVERED q={log_safe(qdir.name)} '
+                f'[STREAM] DELIVERED '
+                f'q={path_safety.redacted(log_safe(qdir.name), secret)} '
                 f'id={log_safe(data.get("id", ""))} '
                 f'did={log_safe(data.get("_did", ""))}', flush=True)
     return count
@@ -227,7 +232,8 @@ def poll_legacy(cmd_dir, token):
             if opened is None:
                 if reason is not None:
                     _refusal_once(legacy_claim_key(cmd_file.name),
-                                  f'legacy={cmd_file.name}', reason)
+                                  f'legacy={cmd_file.name}', reason,
+                                  secret=token)
                 return 200, data
             try:
                 with opened:
@@ -251,14 +257,17 @@ def poll_legacy(cmd_dir, token):
         return 200, data
 
 
-def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
+def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
+                      secret=''):
     """Deliver one atomically published legacy command file.
 
     A malformed visible file may still have an open writer from an older,
     non-atomic publisher. Leave it in place and retry on the next scan;
     deleting it would discard the writer's eventual complete command. The
     candidate is read through a descriptor checked against the name it was
-    found under, so an aliased name is never delivered.
+    found under, so an aliased name is never delivered. `secret` is the
+    credential the file's name is derived from, kept to its 8-character
+    prefix in the lines this drain prints.
     """
     # Use the logical filename: path spellings can differ between routes;
     # result_store.delivery_lock_for documents its logical target key.
@@ -269,7 +278,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
         if opened is None:
             if reason is not None:
                 _refusal_once(legacy_claim_key(path.name),
-                              f'legacy={path.name}', reason)
+                              f'legacy={path.name}', reason, secret=secret)
             return 0  # absent, or refused: left in place
         with opened:
             try:
@@ -301,7 +310,8 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer):
             pass  # a redelivery is deduplicated by _did
         record_delivery()
         print(
-            f'[STREAM] DELIVERED legacy={log_safe(path.name)} '
+            f'[STREAM] DELIVERED '
+            f'legacy={path_safety.redacted(log_safe(path.name), secret)} '
             f'id={log_safe(data.get("id", ""))}', flush=True)
         return 1
 
@@ -331,5 +341,5 @@ def drain_legacy_ext(cmd_dir, token, killed_event, *,
             continue
         count += drain_legacy_file(
             path, sub, command_ttl=command_ttl,
-            frame_writer=frame_writer)
+            frame_writer=frame_writer, secret=token)
     return count
