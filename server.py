@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Daedalus debug server — SSE command bridge + tab registry."""
-import sys
+import socket, sys
 import threading, time
 from http.server import HTTPServer
 from socketserver import TCPServer, ThreadingMixIn
@@ -74,6 +74,14 @@ class _WorkerCount:
 _workers = _WorkerCount(MAX_REQUEST_WORKERS)
 
 
+# Windows reads SO_REUSEADDR as consent to share a live listener's port, so
+# a second bridge on a different data root could bind this one's port and
+# the data-root lock would not cover it. The platform is read once here so
+# the decision is one patchable name (tests/test_exclusive_bind.py drives
+# both arms of it).
+WIN32 = sys.platform == 'win32'
+
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
@@ -125,6 +133,10 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         library assigns it, so an address the stdlib method binds is not
         rejected here.
         """
+        if WIN32:
+            self.allow_reuse_address = False
+            self.socket.setsockopt(
+                socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         TCPServer.server_bind(self)
         host, port = self.server_address[:2]
         self.server_name = str(host)
