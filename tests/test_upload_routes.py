@@ -652,6 +652,55 @@ def test_named_upload_serves_exactly_the_path_a_result_carried(tmp):
     assert answer.mime == 'image/png', answer
 
 
+def test_named_upload_serves_the_relative_selector_of_the_same_file(tmp):
+    """The upload answer's relative path names the same file token-led.
+
+    The relative `<id>/<file>` form is what POST /upload now answers and
+    the extension forwards, and what the token-led form resolves to once
+    the leading component is checked against the caller's own credential.
+    A relative selector to a stored non-screenshot is still refused: only
+    a screenshot type is answered here.
+    """
+    routes = _load('fixture_upload_routes_named_rel')
+    target = _store(tmp, 'tok', 'id1', 'shot.png', b'IMG')
+    _store(tmp, 'tok', 'id1', 'notes.txt', b'text')
+    answer = routes.named_upload(Path(tmp), 'tok', 'id1/shot.png')
+    assert answer.path == target, answer
+    assert answer.mime == 'image/png', answer
+    by_ledger = routes.named_upload(Path(tmp), 'tok', 'tok/id1/shot.png')
+    assert by_ledger.path == target, by_ledger
+    assert routes.named_upload(Path(tmp), 'tok', 'id1/notes.txt') == (
+        404, {'error': 'no screenshot'})
+
+
+def test_named_upload_refuses_a_one_component_selector(tmp):
+    """A selector with no separator has no id directory to resolve under."""
+    routes = _load('fixture_upload_routes_named_one')
+    _store(tmp, 'tok', 'id1', 'shot.png')
+    assert routes.named_upload(Path(tmp), 'tok', 'shot.png') == (
+        400, {'error': 'path must be <id>/<file>'})
+    assert routes.named_upload(Path(tmp), 'tok', 'tok') == (
+        400, {'error': 'path must be <id>/<file>'})
+
+
+def test_a_token_led_selector_deeper_than_three_components_still_resolves(tmp):
+    """Today's resolution of longer token-led selectors is preserved.
+
+    The legacy form checks the leading component against the token and
+    resolves whatever follows under the caller's namespace; the new
+    relative branch takes exactly two components, so the deep form cannot
+    become a refusal without shrinking the stored paths it already names.
+    """
+    routes = _load('fixture_upload_routes_named_deep')
+    nested = Path(tmp) / 'tok' / 'a' / 'b'
+    nested.mkdir(parents=True)
+    (nested / 'c.png').write_bytes(b'IMG')
+    answer = routes.named_upload(Path(tmp), 'tok', 'tok/a/b/c.png')
+    assert answer.path == nested / 'c.png', answer
+    assert routes.named_upload(Path(tmp), 'tok', 'other/a/b/c.png') == (
+        404, {'error': 'no screenshot'})
+
+
 def test_named_upload_refuses_another_tokens_path(tmp):
     """The leading component must be the caller's own token."""
     routes = _load('fixture_upload_routes_named_other')

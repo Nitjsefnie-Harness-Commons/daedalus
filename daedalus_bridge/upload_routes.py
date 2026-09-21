@@ -346,21 +346,30 @@ def named_file(upload_dir, token, named):
 def named_upload(upload_dir, token, named):
     """Serve exactly the screenshot a result named, not whatever is newest.
 
-    `named` is the `path` POST /upload answered with and the result
-    carries, token component included. Screenshot ids are reused — `_ss`
-    is the default one — so an id identifies a directory rather than a
-    capture, and the newest file in it belongs to whichever invocation
-    finished last. Every component is checked the way each was checked
-    on the way in, and the leading one has to be the caller's own token:
-    one token's paths never name another's storage. The rest is resolved
-    as any stored file is; only a screenshot type is answered here.
+    `named` is the `path` the upload answer returned and the result
+    carries, in either of two forms: the relative `<id>/<file>` the
+    answer has carried since it stopped naming the token directory, and
+    the legacy token-led `<token>/<id>/<file>` that results already
+    stored under earlier bridges keep using — back-compat, not an
+    invitation: the leading component still has to be the caller's own
+    token, so one token's paths never name another's storage. Screenshot
+    ids are reused — `_ss` is the default one — so an id identifies a
+    directory rather than a capture, and the newest file in it belongs
+    to whichever invocation finished last. Every component is checked
+    the way each was checked on the way in; only a screenshot type is
+    answered here.
     """
     parts = named.split('/')
     if any(path_safety.unsafe_component(part) for part in parts):
         return 400, {'error': 'invalid path component'}
-    if parts[0] != token:
+    if len(parts) < 2:
+        return 400, {'error': 'path must be <id>/<file>'}
+    if len(parts) == 2:
+        answer = _stored_file(upload_dir, token, parts, 'no screenshot')
+    elif parts[0] != token:
         return 404, {'error': 'no screenshot'}
-    answer = _stored_file(upload_dir, token, parts[1:], 'no screenshot')
+    else:
+        answer = _stored_file(upload_dir, token, parts[1:], 'no screenshot')
     if not isinstance(answer, FileAnswer):
         return answer
     if _format_of(answer.path) not in SCREENSHOT_TYPES:
