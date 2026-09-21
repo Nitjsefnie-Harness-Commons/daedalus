@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
-"""The /upload and /screenshot routes as plain functions.
-
-`daedalus_bridge/upload_routes.py` owns the upload namespace walk and the
-five routes that read or write it. Each takes the upload directory as a
-parameter rather than importing `config`, so every control here pins the
-route against the root it was handed: a route reading somewhere else would
-still answer 200.
+"""The /upload and /screenshot routes as plain functions, each pinned to the
+upload root passed by the caller rather than configured storage.
 """
 import base64
 import os
@@ -166,7 +161,7 @@ def test_list_uploads_skips_an_id_deleted_before_its_scan(tmp):
 def test_upload_reads_answer_absent_when_token_is_not_a_directory(tmp):
     routes = _load('fixture_upload_routes_token_not_directory')
 
-    def check_case(route, expected):
+    def check_case(route, expected, error):
         _store(tmp, 'tok', 'id1', 'a.png')
         token_dir = Path(tmp) / 'tok'
         assert token_dir.is_dir()
@@ -174,10 +169,11 @@ def test_upload_reads_answer_absent_when_token_is_not_a_directory(tmp):
 
         def token_is_not_a_directory(path, *args, **kwargs):
             if path == token_dir:
+                if error:
+                    raise error('injected deletion race')
                 return False
             return real_is_dir(path, *args, **kwargs)
 
-        # is_dir swallows stat errors on newer Python versions.
         with mock.patch.object(routes.pathlib.Path, 'is_dir',
                                token_is_not_a_directory):
             answer = route(Path(tmp), 'tok', {})
@@ -186,7 +182,8 @@ def test_upload_reads_answer_absent_when_token_is_not_a_directory(tmp):
     for route, expected in (
             (routes.list_uploads, (200, [])),
             (routes.latest_screenshot, (404, {'error': 'no uploads'}))):
-        check_case(route, expected)
+        for error in (None, PermissionError):
+            check_case(route, expected, error)
 
 
 def test_list_uploads_skips_only_the_entry_whose_type_check_fails(tmp):
@@ -269,7 +266,6 @@ def test_latest_screenshot_skips_a_file_deleted_during_the_scan(tmp):
 
 def test_latest_screenshot_answers_no_uploads_when_token_vanishes(tmp):
     routes = _load('fixture_upload_routes_screenshot_token')
-    _store(tmp, 'tok', 'id1', 'gone.png')
     token_dir = Path(tmp) / 'tok'
     real_is_dir = routes.pathlib.Path.is_dir
     removed = []
@@ -281,11 +277,14 @@ def test_latest_screenshot_answers_no_uploads_when_token_vanishes(tmp):
             shutil.rmtree(token_dir)
         return is_dir
 
-    # Patch the route's call; is_dir need not delegate to Path.stat.
-    with mock.patch.object(routes.pathlib.Path, 'is_dir', is_dir_then_delete):
-        answer = routes.latest_screenshot(Path(tmp), 'tok', {})
-    assert removed
-    assert answer == (404, {'error': 'no uploads'}), answer
+    for params in ({}, {'id': ['id1']}):
+        _store(tmp, 'tok', 'id1', 'gone.png')
+        removed.clear()
+        with mock.patch.object(routes.pathlib.Path, 'is_dir',
+                               is_dir_then_delete):
+            answer = routes.latest_screenshot(Path(tmp), 'tok', params)
+        assert removed, params
+        assert answer == (404, {'error': 'no uploads'}), (params, answer)
 
 
 def test_latest_screenshot_skips_an_id_deleted_before_scan(tmp):
@@ -439,42 +438,44 @@ def test_store_upload_answers_500_and_leaves_no_temp_when_publish_fails(tmp):
 
 def test_named_file_refuses_a_temp_name(tmp):
     routes = _load('fixture_upload_routes_named_file_tmp')
-    _store(tmp, 'tok', 'id1', '.abc.png.tmp', b'part')
-    status, payload = routes.named_file(
-        Path(tmp), 'tok', 'id1/.abc.png.tmp')
-    assert (status, payload) == (
-        400, {'error': 'invalid path component'}), (status, payload)
+    for name in ('.abc.png.tmp', '.abc.png.TMP', '.abc.png.Tmp'):
+        _store(tmp, 'tok', 'id1', name, b'part')
+        answer = routes.named_file(Path(tmp), 'tok', f'id1/{name}')
+        assert answer == (400, {'error': 'invalid path component'}), answer
 
 
 def test_delete_upload_refuses_a_temp_name(tmp):
     routes = _load('fixture_upload_routes_delete_tmp')
-    temp = _store(tmp, 'tok', 'id1', '.abc.png.tmp', b'part')
-    status, payload = routes.delete_upload(
-        Path(tmp), {'token': 'tok', 'id': 'id1', 'filename': '.abc.png.tmp'})
-    assert (status, payload) == (
-        400, {'error': 'invalid path component'}), (status, payload)
-    assert temp.exists(), 'an in-progress temp was unlinked'
+    for name in ('.abc.png.tmp', '.abc.png.TMP', '.abc.png.Tmp'):
+        temp = _store(tmp, 'tok', 'id1', name, b'part')
+        answer = routes.delete_upload(
+            Path(tmp), {'token': 'tok', 'id': 'id1', 'filename': name})
+        assert answer == (400, {'error': 'invalid path component'}), answer
+        assert temp.exists(), 'an in-progress temp was unlinked'
 
 
 def test_store_upload_refuses_a_caller_name_ending_in_tmp(tmp):
-    """`.tmp` is the store's reservation; an accepted upload must never be
-    hidden from the listing by it."""
     routes = _load('fixture_upload_routes_tmp_name')
-    body = {'token': 'tok', 'id': 'id1', 'filename': 'x.tmp',
-            'data': base64.b64encode(b'x').decode('ascii')}
-    status, payload = routes.store_upload(Path(tmp), body)
-    assert (status, payload) == (
-        400, {'error': 'invalid path component'}), (status, payload)
-    assert not (Path(tmp) / 'tok').exists(), 'something was written'
+    for name in ('x.tmp', 'x.TMP', 'x.Tmp'):
+        body = {'token': 'tok', 'id': 'id1', 'filename': name,
+                'data': base64.b64encode(b'x').decode('ascii')}
+        answer = routes.store_upload(Path(tmp), body)
+        assert answer == (400, {'error': 'invalid path component'}), answer
+        assert not (Path(tmp) / 'tok').exists(), 'something was written'
+    body['filename'] = 'x.tmpx'
+    assert routes.store_upload(Path(tmp), body) == (
+        200, {'ok': True, 'path': 'tok/id1/x.tmpx', 'size': 1})
+    assert (Path(tmp) / 'tok' / 'id1' / 'x.tmpx').read_bytes() == b'x'
 
 
 def test_listing_skips_an_in_progress_temp_sibling(tmp):
     routes = _load('fixture_upload_routes_skip_tmp')
     real = _store(tmp, 'tok', 'id1', 'abc.png', b'done')
-    temp = _store(tmp, 'tok', 'id1', '.abc.png.tmp', b'part')
     now = time.time()
     os.utime(real, (now - 100, now - 100))
-    os.utime(temp, (now, now))
+    for name in ('.abc.png.tmp', '.abc.png.TMP', '.abc.png.Tmp'):
+        temp = _store(tmp, 'tok', 'id1', name, b'part')
+        os.utime(temp, (now, now))
     status, payload = routes.list_uploads(Path(tmp), 'tok', {})
     assert status == 200, (status, payload)
     assert [item['filename'] for item in payload] == ['abc.png'], payload

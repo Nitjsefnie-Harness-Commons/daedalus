@@ -169,14 +169,15 @@ def test_send_file_keeps_opened_bytes_when_the_path_is_replaced(tmp):
     path = Path(tmp) / 'shot.png'
     original = b'original image'
     path.write_bytes(original)
-    replacement = Path(tmp) / 'replacement.png'
-    replacement.write_bytes(b'new')
+    backing = Path(tmp) / 'opened.png'
+    backing.write_bytes(original)
     stub = _Stub()
     real_open = open
 
-    def open_then_replace(*args, **kwargs):
-        handle = real_open(*args, **kwargs)
-        replacement.replace(path)
+    def open_then_replace(opened_path, mode):
+        assert opened_path == path and mode == 'rb'
+        handle = real_open(backing, mode)
+        path.write_bytes(b'new')
         return handle
 
     with mock.patch.object(transport, 'open', open_then_replace, create=True):
@@ -186,6 +187,35 @@ def test_send_file_keeps_opened_bytes_when_the_path_is_replaced(tmp):
     assert stub.wfile.getvalue() == original, stub.wfile.getvalue()
     assert stub.headers_sent['Content-Length'] == str(len(original)), (
         stub.headers_sent)
+
+
+def test_send_file_propagates_a_copy_error_after_partial_output(tmp):
+    path = Path(tmp) / 'shot.png'
+    path.write_bytes(b'complete image')
+    stub = _Stub()
+    statuses, handles, caught = [], [], []
+    real_response = stub.send_response
+    error = OSError('injected copy failure')
+
+    def record_response(code):
+        statuses.append(code)
+        real_response(code)
+
+    def partial_copy(source, destination, _length):
+        handles.append(source)
+        destination.write(source.read(4))
+        raise error
+
+    with mock.patch.object(transport.shutil, 'copyfileobj', partial_copy), \
+            mock.patch.object(stub, 'send_response', record_response):
+        try:
+            stub.answer(transport.FileAnswer(path, 'image/png'))
+        except OSError as exc:
+            caught.append(exc)
+    assert statuses == [200], statuses
+    assert stub.wfile.getvalue() == b'comp', stub.wfile.getvalue()
+    assert len(handles) == 1 and handles[0].closed, handles
+    assert caught == [error], caught
 
 
 def test_answer_writes_a_bytes_answer_with_extra_headers(_tmp):
