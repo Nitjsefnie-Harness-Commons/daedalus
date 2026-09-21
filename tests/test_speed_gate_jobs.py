@@ -51,6 +51,8 @@ def wait_only_jobs(workflow):
         runs = [step['run'] for step in
                 complete_job_mapping(workflow, job).get('steps') or []
                 if 'run' in step]
+        assert all(isinstance(script, str) for script in runs), (
+            f'job {job!r} has a run step carrying no script')
         if runs and all(_wait_only(script) for script in runs):
             waiters.append(job)
     return waiters
@@ -115,6 +117,19 @@ _WORK_SCRIPTS = (
     'sleep 300#touch marker',
     'sleep ' + '0' * 28 + '!',
 )
+
+
+def test_a_run_step_carrying_no_script_is_refused_not_classified(tmp):
+    """A bare ``run:`` decodes to ``None``; the pin names it rather than
+    reading it as a wait or as work."""
+    del tmp
+    source = 'jobs:\n  hollow:\n    steps:\n      - run:\n'
+    try:
+        wait_only_jobs(source)
+    except AssertionError as error:
+        assert 'hollow' in str(error) and 'run' in str(error), str(error)
+        return
+    raise AssertionError('a run step with no script was classified')
 
 
 def test_the_pin_refuses_a_synthetic_waiting_job_end_to_end(tmp):
