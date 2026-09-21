@@ -10,14 +10,15 @@ refused. Each guard is planted in a copy of a real workflow written to a
 temp directory, because a synthetic fixture only shows what the reader
 thinks it reads.
 """
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _yamlread import YAMLReadError, job_scalar  # noqa: E402
+from _wffixtures import (  # noqa: E402
+    BLOCK_NEEDS, BLOCK_OUTPUTS, _real, _refuses, _replaced)
+from _yamlread import job_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _wfgraph import (  # noqa: E402
     _job_if_expression, _job_needs, _job_output_mapping,
@@ -25,46 +26,6 @@ from _wfgraph import (  # noqa: E402
 
 
 PLAIN_IF = '    if: ${{ !cancelled() && !failure() }}\n'
-BLOCK_NEEDS = (
-    '    needs:\n'
-    '      - changes\n'
-    '      - pycodestyle\n'
-    '      - pylint\n'
-    '      - pyright\n'
-    '      - eslint\n'
-    '      - actionlint\n')
-BLOCK_OUTPUTS = (
-    '    outputs:\n'
-    '      matrix: ${{ steps.classify.outputs.matrix }}\n'
-    '      docs_only: ${{ steps.classify.outputs.docs_only }}\n'
-    '      workflows: ${{ steps.classify.outputs.workflows }}\n')
-
-
-def _real(tmp, source, name='tests.yml'):
-    """Write one mutated real workflow out and read it back as a target."""
-    path = os.path.join(tmp, name)
-    with open(path, 'w', encoding='utf-8', newline='') as handle:
-        handle.write(source)
-    with open(path, encoding='utf-8', newline='') as handle:
-        return handle.read()
-
-
-def _replaced(old, new):
-    """Return tests.yml with one real block swapped for a rewrite of it."""
-    workflow = _tests_yml()
-    assert old in workflow, old
-    mutated = workflow.replace(old, new, 1)
-    assert mutated != workflow
-    return mutated
-
-
-def _refuses(call, *args):
-    """Return the message from the refusal `call` must raise."""
-    try:
-        call(*args)
-    except (AssertionError, ValueError, YAMLReadError) as error:
-        return f'{type(error).__name__}: {error}'
-    raise AssertionError(f'{call.__name__} accepted the planted defect')
 
 
 def test_quoted_job_if_reads_like_the_plain_spelling(tmp):

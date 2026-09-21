@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wffixtures import _refuses  # noqa: E402
 from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -453,17 +454,6 @@ def _insert_wheel_step(workflow, step):
     return workflow[:steps] + step + workflow[steps:]
 
 
-def _refuses(call, *args, contains=None):
-    try:
-        call(*args)
-    except AssertionError as error:
-        message = str(error)
-        if contains is not None:
-            assert contains in message, message
-        return message
-    raise AssertionError(f'{call.__name__} accepted the planted ambiguity')
-
-
 def _assert_writer_inventory(workflow):
     actual = _cache_writing_jobs(workflow)
     assert actual == set(_CACHE_WRITING_JOBS), (
@@ -574,7 +564,7 @@ def test_unknown_and_dynamic_actions_fail_with_exact_context(tmp):
              "manifest for job 'wheel' step 1 action 'actions/cache' "
              "ref 'deadbeef'")):
         assert _refuses(_cache_write_reason, {'uses': uses}, 'wheel', 1,
-                        contains=expected) == expected
+                        contains=expected) == f'AssertionError: {expected}'
 
 
 def test_local_docker_and_empty_actions_are_not_silently_cache_free(tmp):
