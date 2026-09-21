@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """The aggregate job's verdict: which `needs` results gate this run.
 
-Branch protection names one required check, the aggregate. The job runs
-with `if: always()` and used to fail a `cancelled` dependency blindly, so
-with `cancel-in-progress` on (concurrency group `tests-` + ref) every push
-superseding an in-flight run left a red aggregate on the old SHA. The rule
-ci_wait.py settled ports here: a cancelled run with a strictly newer run of
-the same workflow is the remnant of that supersession and gates nothing;
-with no newer sibling the cancel is deliberate and stays a failure.
+A `cancelled` dependency used to fail the aggregate blindly: with
+`cancel-in-progress` on, every superseding push left a red aggregate on
+the old SHA. The rule ci_wait.py settled ports here — a cancelled run
+with a strictly newer run of the same workflow gates nothing, while a
+deliberate cancel stays a failure.
 
-`github.head_branch` names the population the query reads: the pushed
-branch on `push`, the pull request's head branch on `pull_request` — the
-branch a newer run of the same workflow appears on in both events, which a
-head-SHA-scoped query could never see. One known edge: a fork pull request
-reusing another pull request's branch name shares that branch's run
-population without sharing its concurrency group, so one run can be proven
-superseded by the other's newer run. Accepted: rare, and the older run's
-cancel was then deliberate while a newer run of that branch name was
-running anyway.
+The supersession query reads `github.head_branch` — the pushed branch on
+`push`, the pull request's head branch on `pull_request` — where a newer
+run of the same workflow appears in both events. One known edge: a fork
+pull request reusing another pull request's branch name shares that
+branch's run population without sharing its concurrency group, so one
+run can be proven superseded by the other's newer run. Accepted: rare,
+and the newer run of that branch name was re-reporting anyway.
 """
 import json
 import os
@@ -45,16 +41,14 @@ GREEN = frozenset({PASSED, CANCEL_SUPERSEDED})
 
 
 class QueryError(RuntimeError):
-    """One failed API read; the caller answers conservatively."""
+    pass
 
 
 def allowed_results(name):
-    """The results that pass for one dependency, strict or not."""
     return frozenset({'success'}) if name in STRICT else ALLOWED
 
 
 def classify_needs(needs):
-    """Split the refused dependencies into hard and cancelled ones."""
     refused = [name for name, details in needs.items()
                if details['result'] not in allowed_results(name)]
     hard = [name for name in refused
@@ -65,12 +59,10 @@ def classify_needs(needs):
 
 
 def _workflow_of(run):
-    """The workflow a run belongs to: its id, or its path when id is absent."""
     return run.get('workflow_id') or run.get('path')
 
 
 def _started_key(run):
-    """(start, id): the instant the run began, tie-broken by numeric id."""
     text = run.get('run_started_at') or run.get('created_at')
     stamp = OLDEST
     if text:
@@ -84,7 +76,6 @@ def _started_key(run):
 
 
 def superseding_run(mine, runs):
-    """The strictly newest same-workflow run, or None when there is none."""
     newer = [run for run in runs
              if _workflow_of(run) == _workflow_of(mine)
              and _started_key(run) > _started_key(mine)]
@@ -92,17 +83,11 @@ def superseding_run(mine, runs):
 
 
 def superseded(mine, runs):
-    """Whether a strictly newer run of the same workflow exists."""
     return superseding_run(mine, runs) is not None
 
 
 def decide(needs, mine=None, runs=None):
-    """Return (verdict, message) for one needs mapping and query evidence.
-
-    `mine` and `runs` carry the supersession query's answer; either None
-    means the query failed and a cancelled dependency cannot be proven
-    superseded.
-    """
+    """Return (verdict, message); None evidence means the query failed."""
     hard, cancelled = classify_needs(needs)
     if not hard and not cancelled:
         return PASSED, ('All dependencies succeeded: '
@@ -129,7 +114,6 @@ def decide(needs, mine=None, runs=None):
 
 
 def _decode(payload):
-    """Parse one JSON value, or several concatenated by --paginate."""
     payload = payload.strip()
     if not payload:
         return []
@@ -148,7 +132,6 @@ def _decode(payload):
 
 
 def own_run(repository, run_id, read):
-    """This run's record, or None when the query or its shape fails."""
     if not (REPOSITORY.fullmatch(repository or '')
             and str(run_id or '').isascii()
             and str(run_id or '').isdigit()):
@@ -164,7 +147,6 @@ def own_run(repository, run_id, read):
 
 
 def branch_runs(repository, branch, read):
-    """Every run of this workflow on one branch, or None on failure."""
     if not (REPOSITORY.fullmatch(repository or '') and branch):
         return None
     runs = []
@@ -181,7 +163,6 @@ def branch_runs(repository, branch, read):
 
 
 def evaluate(needs, repository, run_id, branch, read):
-    """The verdict, reading the supersession evidence only when needed."""
     if not classify_needs(needs)[1]:
         return decide(needs)
     mine = own_run(repository, run_id, read)
@@ -190,7 +171,6 @@ def evaluate(needs, repository, run_id, branch, read):
 
 
 def gh_read(argv):
-    """One fresh gh read; any failure raises QueryError."""
     try:
         proc = subprocess.run(
             argv, capture_output=True, text=True, timeout=120)
