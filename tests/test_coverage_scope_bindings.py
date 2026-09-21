@@ -31,9 +31,13 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n",
        "_PROOF_NAMES = frozenset({_ALL_NAMES})\n"),), _ROOT_PROVENANCE_INVOKE),
     ('a canonical import is exact', 'scopes',
-     (("    return (node.module, alias.name) == "
-       "_CANONICAL_MEMBERS.get(bound)\n",
-       "    return bound in _CANONICAL_MEMBERS\n"),), _ROOT_PROVENANCE_INVOKE),
+     (("            and (node.module, alias.name) == "
+       "_CANONICAL_MEMBERS.get(bound))\n",
+       "            and bound in _CANONICAL_MEMBERS)\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('a relative import is not canonical', 'scopes',
+     (("    return (not node.level\n", "    return (True\n"),),
+     _ROOT_PROVENANCE_INVOKE),
     ('scope shadows carry the unprovable names', 'scopes',
      (("    shadows[tree].update(_unprovable_names(tree))\n", ""),),
      _ROOT_PROVENANCE_INVOKE),
@@ -211,6 +215,11 @@ subprocess.run(['python3', 'child.py'], cwd=ROOT)
 """, _rebound_owner(4, 'ROOT')),
         ('pathlib itself aliased as Path is a rebinding', """import subprocess
 import pathlib as Path
+ROOT = Path(__file__).resolve().parents[1]
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(4, 'ROOT')),
+        ('a relative pathlib import is a rebinding', """import subprocess
+from .pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 subprocess.run(['python3', 'child.py'], cwd=ROOT)
 """, _rebound_owner(4, 'ROOT')),

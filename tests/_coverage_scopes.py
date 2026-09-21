@@ -84,7 +84,8 @@ def _import_bound_name(node, alias):
 def _canonical_import(node, alias, bound):
     if isinstance(node, ast.Import):
         return alias.name in _ROOT_MODULES
-    return (node.module, alias.name) == _CANONICAL_MEMBERS.get(bound)
+    return (not node.level
+            and (node.module, alias.name) == _CANONICAL_MEMBERS.get(bound))
 
 
 def _import_rebound_names(tree):
