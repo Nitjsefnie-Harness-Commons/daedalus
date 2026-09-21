@@ -216,13 +216,44 @@ def test_module_products_are_shared_only_within_one_analysis(tmp):
     profile.runcall(_coverage_guard._ModuleFacts, tree)
     calls = {entry.code: entry.callcount for entry in profile.getstats()}
     expected = {
-        '_evaluation_scopes': 2, '_binding_destinations': 2,
+        '_evaluation_scopes': 1, '_binding_destinations': 1,
         '_import_rebound_names': 1, '_root_assignments': 1,
         'root_owner_names': 1, '_parents': 1, '_unprovable_names': 1,
     }
     for name, count in expected.items():
         actual = calls.get(getattr(_coverage_scopes, name).__code__, 0)
         assert actual == count, (name, actual, count)
+
+
+def test_binding_consumers_do_not_mutate_shared_products(tmp):
+    del tmp
+    tree = ast.parse('def f():\n    global dict\n')
+    facts = _coverage_scopes._ScopeFacts(tree)
+    before = {scope: names.copy()
+              for scope, names in facts.bindings[0].items()}
+    bindings = _coverage_scopes._scope_bindings(
+        *facts.binding_layout, facts.binding_products)
+    assert bindings[tree] == {'f', 'dict'}, bindings
+    assert facts.bindings[0] == before, facts.bindings
+    module = _coverage_guard._ModuleFacts(tree)
+    assert module.scope_parents is not module.binding_parents
+
+
+def test_type_syntax_keeps_distinct_binding_derivations(tmp):
+    del tmp
+    if not hasattr(ast, 'TypeAlias'):
+        return
+    for source in ('type Alias = int', 'type Alias[T] = T',
+                   'def f[T](value: T): pass', 'class C[T]: pass'):
+        tree = ast.parse(source)
+        profile = cProfile.Profile()
+        facts = _coverage_scopes._ScopeFacts(tree)
+        profile.runcall(_coverage_guard._ModuleFacts, tree)
+        calls = {entry.code: entry.callcount for entry in profile.getstats()}
+        for name in ('_evaluation_scopes', '_binding_destinations'):
+            actual = calls[getattr(_coverage_scopes, name).__code__]
+            assert actual == 2, (source, name, actual)
+        assert facts.binding_layout is not facts.layout, source
 
 
 def test_a_later_analysis_recomputes_changed_import_fields(tmp):
