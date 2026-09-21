@@ -172,11 +172,10 @@ def test_equal_start_ties_break_by_id_both_ways(tmp):
 def test_created_at_stands_in_for_a_missing_started_at(tmp):
     del tmp
     mod = _gate()
-    older = _run(1, None, None, status='in_progress',
-                 created_at='2026-09-07T10:00:00Z')
-    newer = _run(2, None, None, created_at='2026-09-07T10:05:00Z')
-    assert mod.superseded(older, [older, newer])
-    assert not mod.superseded(newer, [older, newer])
+    started = _run(1, None, '2026-09-07T10:00:00Z', status='in_progress')
+    created = _run(2, None, None, created_at='2026-09-07T10:05:00Z')
+    assert mod.superseded(started, [started, created])
+    assert not mod.superseded(created, [started, created])
 
 
 def test_equal_keys_are_not_superseded(tmp):
@@ -265,6 +264,70 @@ def test_every_single_dependency_result_is_tabled(tmp):
                 else 'strict-skipped',
                 'cancelled': 'query-failed',
             }[state], (name, state, verdict)
+
+
+JOINT_STATES = ('success', 'failure', 'skipped', 'cancelled')
+JOINT_CONTEXTS = (
+    ('query-failed', None, None),
+    ('cancelled-deliberate', MINE, [MINE]),
+    ('cancelled-superseded', MINE, [MINE, NEWER]),
+)
+NO_CANCEL_CONTEXT = JOINT_CONTEXTS[:1]
+_CANCEL_MESSAGES = {
+    'query-failed':
+        'the supersession query failed, so the cancel could not be '
+        'proven superseded: ',
+    'cancelled-deliberate':
+        'no newer run of this workflow exists, so the cancel is '
+        'deliberate: ',
+    'cancelled-superseded':
+        'the cancelled dependencies were superseded by run '
+        + str(NEWER['id']) + ' (' + NEWER['html_url'] + '): ',
+}
+
+
+def _joint_expectation(names, states, context):
+    """The joint contract: verdict and exact message for two deps."""
+    deviants = [
+        (name, state) for name, state in zip(names, states)
+        if state != 'success'
+        and (state != 'skipped' or name in STRICT_JOBS)]
+    if not deviants:
+        return 'passed', (
+            'All dependencies succeeded: ' + ', '.join(sorted(names)))
+    hard = [pair for pair in deviants if pair[1] != 'cancelled']
+    cancelled = [pair for pair in deviants if pair[1] == 'cancelled']
+    named = ', '.join(
+        f'{name}={state}' for name, state in hard + cancelled)
+    if hard:
+        verdict = 'failed'
+        if all(state == 'skipped' for _, state in hard):
+            verdict = 'strict-skipped'
+        return verdict, f'Dependencies not successful: {named}'
+    return context, _CANCEL_MESSAGES[context] + named
+
+
+def test_two_dependencies_are_decided_jointly(tmp):
+    """The joint table: two deviating dependencies, one verdict."""
+    del tmp
+    mod = _gate()
+    deps = STRICT_JOBS + SKIPPABLE_JOBS
+    for index, first in enumerate(deps):
+        for second in deps[index + 1:]:
+            for first_state in JOINT_STATES:
+                for second_state in JOINT_STATES:
+                    names = (first, second)
+                    states = (first_state, second_state)
+                    needs = _needs(**dict(zip(names, states)))
+                    if 'cancelled' in states:
+                        contexts = JOINT_CONTEXTS
+                    else:
+                        contexts = NO_CANCEL_CONTEXT
+                    for expected, mine, runs in contexts:
+                        verdict, message = mod.decide(needs, mine, runs)
+                        assert (verdict, message) == _joint_expectation(
+                            names, states, expected), (
+                            names, states, expected, verdict, message)
 
 
 def test_main_exits_zero_only_for_green_verdicts(tmp):

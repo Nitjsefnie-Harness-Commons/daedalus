@@ -11,11 +11,10 @@ The supersession query reads the head branch from
 `github.event.pull_request.head.ref || github.ref_name` — the pushed
 branch on `push`, the pull request's head branch on `pull_request` —
 where a newer run of the same workflow appears in both events. One
-known edge: a fork pull request reusing another pull request's branch
-name shares that branch's run population without sharing its
-concurrency group, so one run can be proven superseded by the other's
-newer run. Accepted: rare, and the newer run of that branch name was
-re-reporting anyway.
+accepted edge: runs group by branch name, so a fork pull request
+reusing a branch name from another fork or the base repository is
+superseded by whatever newer run shares that name, even one testing
+different commits — a rare, accepted false green.
 """
 import json
 import os
