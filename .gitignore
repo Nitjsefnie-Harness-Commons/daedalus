@@ -317,6 +317,7 @@
 !/tests/_util.py
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
+!/tests/_wffixtures.py
 !/tests/_wfgraph.py
 !/tests/_wfjobs.py
 !/tests/_wfpins.py

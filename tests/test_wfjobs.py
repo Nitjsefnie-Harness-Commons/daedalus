@@ -7,14 +7,14 @@ to the same value, a construct the reader cannot classify is refused rather
 than read as an empty jobs set, and a bare-empty value reads as `None`
 wherever it can sit, against `yaml.safe_load` and the shipped workflows.
 """
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import yaml  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _wffixtures import (  # noqa: E402
+    BLOCK_NEEDS, BLOCK_OUTPUTS, _real, _refuses, _replaced)
 from _wfgraph import (  # noqa: E402
     _job_needs, _job_output_mapping, _matrix_job_running, _tests_yml)
 from _wfjobs import jobs_mapping, load, workflow_files  # noqa: E402
@@ -242,49 +242,6 @@ def _assert_refusal(reader, source, expected):
         assert expected in str(error), str(error)
         return
     raise AssertionError(f'{source!r} was accepted, expected {expected!r}')
-
-
-def _real(tmp, source, name='tests.yml'):
-    """Write one workflow out and read it back as a target."""
-    path = os.path.join(tmp, name)
-    with open(path, 'w', encoding='utf-8', newline='') as handle:
-        handle.write(source)
-    with open(path, encoding='utf-8', newline='') as handle:
-        return handle.read()
-
-
-def _replaced(old, new, name='tests.yml'):
-    """Return a shipped workflow with one real block swapped for a rewrite."""
-    workflow = _tests_yml() if name == 'tests.yml' else (
-        ROOT / '.github' / 'workflows' / name).read_text(encoding='utf-8')
-    assert old in workflow, old
-    mutated = workflow.replace(old, new, 1)
-    assert mutated != workflow
-    return mutated
-
-
-def _refuses(call, *args):
-    """Return the message from the refusal `call` must raise."""
-    try:
-        call(*args)
-    except (AssertionError, ValueError, YAMLReadError) as error:
-        return f'{type(error).__name__}: {error}'
-    raise AssertionError(f'{call.__name__} accepted the planted defect')
-
-
-BLOCK_NEEDS = (
-    '    needs:\n'
-    '      - changes\n'
-    '      - pycodestyle\n'
-    '      - pylint\n'
-    '      - pyright\n'
-    '      - eslint\n'
-    '      - actionlint\n')
-BLOCK_OUTPUTS = (
-    '    outputs:\n'
-    '      matrix: ${{ steps.classify.outputs.matrix }}\n'
-    '      docs_only: ${{ steps.classify.outputs.docs_only }}\n'
-    '      workflows: ${{ steps.classify.outputs.workflows }}\n')
 
 
 BOUNDED_JOB = (
