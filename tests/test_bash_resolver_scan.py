@@ -103,6 +103,54 @@ _BASH_MUTATION_SPECS = (
 )
 
 
+_CACHE_INVOKE = (
+    'import tempfile; from pathlib import Path; '
+    'import test_static_guard_regressions as regression; '
+    'scratch = tempfile.TemporaryDirectory(); ')
+_CACHE_MUTATIONS = (
+    ('mutation children start cache-free', 'runner',
+     (("            clear_bytecode(root)\n", ''),),
+     _CACHE_INVOKE + 'regression.test_mutation_gate_clears_caches_before_'
+     'every_child(Path(scratch.name)); scratch.cleanup()'),
+    ('nested mutation children inherit bytecode prevention', 'runner',
+     (("                    **os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}),\n",
+       "                    **os.environ, "
+       "'PYTHONDONTWRITEBYTECODE': ''}),\n"),),
+     _CACHE_INVOKE + 'regression.test_mutation_gate_rejects_a_cached_'
+     'equivalent_edit(Path(scratch.name)); scratch.cleanup()'),
+    ('bytecode cleanup descends through the copied tree', 'owned',
+     (("    for cache in root.rglob('__pycache__'):\n",
+       "    for cache in root.glob('__pycache__'):\n"),),
+     _CACHE_INVOKE + 'regression.test_mutation_gate_clears_caches_before_'
+     'every_child(Path(scratch.name)); scratch.cleanup()'),
+    ('bytecode cleanup refuses checkout destinations', 'owned',
+     (("        raise ValueError(\n"
+       "            f'clear_bytecode root lies inside the checkout: {root}')"
+       "\n", "        pass\n"),),
+     _CACHE_INVOKE + 'regression.test_bytecode_cleanup_refuses_checkout_'
+     'paths(Path(scratch.name)); scratch.cleanup()'),
+    ('bytecode cleanup is a control-owned writer', 'calls',
+     (("                   ('_owned_writes', 'clear_bytecode'): ('root', 0)}",
+       "                   }"),),
+     _CACHE_INVOKE + 'regression.test_bytecode_cleanup_refuses_checkout_'
+     'paths(Path(scratch.name)); scratch.cleanup()'),
+    ('mutation environment may defer its helper import', 'calls',
+     (("    ('_util', 'child_coverage'),\n", ''),),
+     _CACHE_INVOKE + 'regression.test_bytecode_cleanup_refuses_checkout_'
+     'paths(Path(scratch.name)); scratch.cleanup()'),
+    ('mutation children skip site initialization', 'runner',
+     (("[sys.executable, '-B', '-S', '-c', program]",
+       "[sys.executable, '-B', '-c', program]"),),
+     _CACHE_INVOKE + 'regression.test_mutation_gate_rejects_a_cached_'
+     'equivalent_edit(Path(scratch.name)); scratch.cleanup()'),
+    ('mutation children verify site isolation', 'runner',
+     (('                "assert sys.flags.no_site, '
+       "'site initialization enabled'\\n\"\n", ''),),
+     _CACHE_INVOKE + 'regression.test_mutation_gate_refuses_site_'
+     'initialization(Path(scratch.name)); scratch.cleanup()'),
+)
+
+
 def test_every_launch_names_the_shared_resolver(tmp):
     del tmp
     violations = _bash_resolver_scan._tree_violations(ROOT)
@@ -516,11 +564,15 @@ def test_binding_mutation_gate_requires_fresh_source(tmp):
     copy_test_tree(root)
     target = root / 'tests' / 'test_coverage_bindings.py'
     source = target.read_text(encoding='utf-8')
-    needle = ("[sys.executable, '-B', '-c', program], cwd=root,\n"
-              "                env=_util.child_coverage('scrub', {")
+    needle = ("[sys.executable, '-B', '-S', '-c', program], cwd=root,\n"
+              "                env=child_coverage('scrub', {")
     assert source.count(needle) == 1
-    target.write_text(source.replace(
-        needle, needle.replace("'-B', ", ''), 1), encoding='utf-8')
+    mutated = source.replace(needle, needle.replace("'-B', ", ''), 1)
+    inherited = "'PYTHONDONTWRITEBYTECODE': '1'"
+    assert mutated.count(inherited) == 1
+    mutated = mutated.replace(inherited,
+                              "'PYTHONDONTWRITEBYTECODE': ''", 1)
+    target.write_text(mutated, encoding='utf-8')
     mutation_tmp = Path(tmp) / 'freshness-mutations'
     program = (
         "import sys\nsys.path.insert(0, 'tests')\n"
@@ -536,7 +588,7 @@ def test_binding_mutation_gate_requires_fresh_source(tmp):
     caches = sorted((mutation_tmp / 'repository' / 'tests').glob(
         '__pycache__/*.pyc'))
     assert caches, 'the mutant left no cached bytecode'
-    assert result.returncode != 0, 'the missing -B mutation was false-green'
+    assert result.returncode != 0, 'bytecode-writing mutant was false-green'
     assert 'cached bytecode' in result.stderr, result.stderr
 
 

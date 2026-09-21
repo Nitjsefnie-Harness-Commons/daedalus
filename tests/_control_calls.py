@@ -16,6 +16,7 @@ _PURE_NAMES = frozenset({
     'AssertionError', 'Path', 'SystemExit', 'ValueError', 'all', 'any',
     'dict', 'len', 'list', 'locals', 'repr', 'sorted', 'str'})
 _PURE_IMPORTS = frozenset({
+    ('_util', 'child_coverage'),
     ('pathlib', 'Path'),
     ('_control_writes', 'control_write_violations'),
     ('_coverage_guard', '_coverage_environment_violations'),
@@ -35,7 +36,8 @@ _WRITER_METHODS = {'write_bytes': (None, None), 'write_text': (None, None),
                    '_runner_tree': (None, 0)}
 _WRITER_MODULE_CALLS = {'_util.load': (None, 0),
                         'subprocess.run': ('cwd', None)}
-_WRITER_IMPORTS = {('_owned_writes', 'copy_test_tree'): ('root', 0)}
+_WRITER_IMPORTS = {('_owned_writes', 'copy_test_tree'): ('root', 0),
+                   ('_owned_writes', 'clear_bytecode'): ('root', 0)}
 
 
 def argument(call, name, position):
