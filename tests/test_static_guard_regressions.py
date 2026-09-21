@@ -156,17 +156,17 @@ def test_mutation_gate_refuses_site_initialization(tmp):
 
 def test_bytecode_cleanup_refuses_checkout_paths(tmp):
     from unittest.mock import patch
-    import _owned_writes as owned
+    from _owned_writes import clear_bytecode
     from _control_writes import control_write_violations
 
     checkout = Path(tmp) / 'checkout'
     cache = checkout / 'child/__pycache__'
     cache.mkdir(parents=True)
     (cache / 'keep.pyc').write_bytes(b'untouched')
-    with patch.object(owned, 'ROOT', checkout):
+    with patch('_owned_writes.ROOT', checkout):
         for root in (checkout, checkout / 'child'):
             try:
-                owned.clear_bytecode(root)
+                clear_bytecode(root)
             except ValueError as error:
                 assert 'inside the checkout' in str(error)
             else:
