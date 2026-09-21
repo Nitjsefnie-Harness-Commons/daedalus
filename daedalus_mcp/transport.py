@@ -181,12 +181,19 @@ class BridgeSession:
         auth = self.auth()
         deadline = self.monotonic() + timeout
         wait = 0.02
-        while self.monotonic() < deadline:
-            await asyncio.sleep(wait)
+        while True:
+            remaining = deadline - self.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(wait, remaining))
             wait = min(wait * 2, interval)
+            remaining = deadline - self.monotonic()
+            if remaining <= 0:
+                break
             try:
                 r = await self.http_client().get(
-                    '/result', params=peek, headers=auth)
+                    '/result', params=peek, headers=auth,
+                    timeout=remaining)
             except httpx.TransportError:
                 # The bridge answers /result at once, so a reset or a
                 # cut-off body on the peek is the proxy's. The command is
@@ -207,6 +214,9 @@ class BridgeSession:
             if not generation:
                 continue
             take = {**peek, 'consume': '1', 'expected': generation}
+            # The consume is allowed to finish: it is what claims the
+            # result, and giving up here leaves one nobody takes. Still
+            # bounded, by the ordinary client timeout.
             consumed = await self.http_client().get(
                 '/result', params=take, headers=auth)
             consumed.raise_for_status()

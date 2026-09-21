@@ -24,6 +24,11 @@ class ClientProbe:
             delete_response or ResponseProbe({'deleted': True}))
 
     async def get(self, path, **kwargs):
+        unmodeled = set(kwargs) - {'params', 'headers', 'timeout'}
+        if unmodeled:
+            raise AssertionError(
+                'ClientProbe.get does not model: ' + ', '.join(
+                    sorted(unmodeled)))
         self.calls.append(('get', path, kwargs))
         if not self.replies:
             raise RuntimeError('unexpected result poll')
