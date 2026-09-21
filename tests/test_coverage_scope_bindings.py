@@ -16,6 +16,31 @@ _IMPORT_LAUNCH = "dict(['python3', 'child.py'], cwd=tmp)"
 _ANNOTATED_LAUNCH = "subprocess.run(['python3', 'child.py'])"
 _DECLARATION = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
 _REAL_MODULE = 'tests/test_diff_coverage.py'
+_ROOT_PROVENANCE_INVOKE = (
+    'import test_coverage_scope_bindings as binding_suite; '
+    'binding_suite.test_import_bindings_do_not_rebind_root_'
+    'spellings(None)')
+_ROOT_PROVENANCE_MUTATIONS = (
+    ('a star import refuses every root spelling', 'scopes',
+     (("    if _ALL_NAMES in shadowed_names:\n        return False\n",
+       ""),), _ROOT_PROVENANCE_INVOKE),
+    ('a rebound proof name is unprovable', 'scopes',
+     (("    return _import_rebound_names(tree) & _PROOF_NAMES\n",
+       "    return set()\n"),), _ROOT_PROVENANCE_INVOKE),
+    ('Path and str are proof names', 'scopes',
+     (("_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n",
+       "_PROOF_NAMES = frozenset({_ALL_NAMES})\n"),), _ROOT_PROVENANCE_INVOKE),
+    ('a canonical import is exact', 'scopes',
+     (("    return (node.module, alias.name) == "
+       "_CANONICAL_MEMBERS.get(bound)\n",
+       "    return bound in _CANONICAL_MEMBERS\n"),), _ROOT_PROVENANCE_INVOKE),
+    ('scope shadows carry the unprovable names', 'scopes',
+     (("    shadows[tree].update(_unprovable_names(tree))\n", ""),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('module shadows carry the unprovable names', 'scopes',
+     (("    names.update(_unprovable_names(tree))\n", ""),),
+     _ROOT_PROVENANCE_INVOKE),
+)
 
 
 def _unresolved_dict(line):
@@ -130,6 +155,67 @@ from helpers import _util
 ROOT = _util.ROOT
 subprocess.run(['python3', 'child.py'], cwd=ROOT)
 """, _rebound_owner(5, 'ROOT')),
+        ('a star import leaves a bare ROOT unprovable', """import subprocess
+from helpers import *
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(3, 'ROOT')),
+        ('a star import leaves a derived ROOT unprovable', """import subprocess
+from pathlib import Path
+from helpers import *
+ROOT = Path(__file__).resolve().parents[1]
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(5, 'ROOT')),
+        ('a star import leaves str(ROOT) unprovable', """import subprocess
+from helpers import *
+subprocess.run(['python3', 'child.py'], cwd=str(ROOT))
+""", _rebound_owner(3, 'str(ROOT)')),
+        ('a star import leaves an imported ROOT unprovable',
+         """import subprocess
+from _repo import ROOT
+from helpers import *
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(4, 'ROOT')),
+        ('a star import leaves a chdir to ROOT unprovable', """import os
+import subprocess
+from helpers import *
+os.chdir(ROOT)
+subprocess.run(['python3', 'child.py'])
+""", ['tests/synthetic.py:5: subprocess.run os.chdir at line 4 '
+            'may have moved the cwd declares no env=']),
+        ('a derived ROOT with no star import stays provable',
+         """import subprocess
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", []),
+        ('an import rebinding Path leaves ROOT unprovable',
+         """import subprocess
+from helpers import Path
+ROOT = Path(__file__).resolve().parents[1]
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(4, 'ROOT')),
+        ('a module import named Path leaves ROOT unprovable',
+         """import subprocess
+import helpers as Path
+ROOT = Path(__file__).resolve().parents[1]
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(4, 'ROOT')),
+        ('pathlib itself aliased as Path is a rebinding', """import subprocess
+import pathlib as Path
+ROOT = Path(__file__).resolve().parents[1]
+subprocess.run(['python3', 'child.py'], cwd=ROOT)
+""", _rebound_owner(4, 'ROOT')),
+        ('an import binding str leaves str(ROOT) unprovable',
+         """import subprocess
+from helpers import str
+subprocess.run(['python3', 'child.py'], cwd=str(ROOT))
+""", _rebound_owner(3, 'str(ROOT)')),
+        ('a function-local import binding str is a rebinding',
+         """import subprocess
+def go():
+    from helpers import str
+    subprocess.run(['python3', 'child.py'], cwd=str(ROOT))
+""", _rebound_owner(4, 'str(ROOT)')),
         ('a root helper import is not a rebinding', """import subprocess
 import test_dashboard_behaviour as behaviour
 subprocess.run(['python3', 'child.py'], cwd=behaviour.ROOT)
