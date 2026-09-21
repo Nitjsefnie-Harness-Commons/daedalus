@@ -207,8 +207,8 @@ class InvocationReplay:
         if call['returned'] is None:
             return self._replay(call, inherited, seen, inherited_optional,
                                 limits, active_sources, execution)
-        # A getter call: its body runs first with no arguments, then the
-        # arguments and the callable it returned.
+        # Node's order: the getter body, then the arguments and the
+        # callable it returned.
         stages = (dict(call, returned=None, args=[], argument_calls=[]),
                   dict(call, returned=None, body=call['returned']))
         results = [self._replay(stage, inherited, seen, inherited_optional,
