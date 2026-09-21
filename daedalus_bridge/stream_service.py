@@ -213,7 +213,7 @@ def poll_legacy(cmd_dir, token):
         # Both of these raise ValueError on a name that cannot be a safe
         # component or a path that leaves the queue root.
         _, legacy_name = command_queue.command_target_names(token)
-        cmd_file = path_safety.under(cmd_dir, legacy_name)
+        cmd_file = path_safety.under(cmd_dir, legacy_name, secret=token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
     # Keyed off the resolved name, as `drain_legacy_file` is: both
