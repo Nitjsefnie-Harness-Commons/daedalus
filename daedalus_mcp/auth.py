@@ -21,11 +21,8 @@ class BearerAuth(BaseHTTPMiddleware):
             return refusal
 
         if request.method == 'POST':
-            raw = await request.body()
-            # A body sent without a declared length is bounded here rather than
-            # by the check above; it has still been read, which is why the
-            # declared case is refused before reading at all.
-            if len(raw) > self.max_body_size:
+            raw = await _read_post_body(request, self.max_body_size)
+            if raw is None:
                 return JSONResponse(
                     {'error': 'request body too large'}, status_code=413)
             duplicate = ambiguous_json_carrier(raw)
@@ -34,6 +31,33 @@ class BearerAuth(BaseHTTPMiddleware):
                     {'error': f'duplicate {duplicate}'}, status_code=400)
 
         return await call_next(request)
+
+
+async def _read_post_body(request, max_body_size):
+    """Read a POST body, refusing an undeclared one mid-read.
+
+    A declared body was already measured by the early refusal before any
+    read, so by the time it reaches here request.body() is bounded. An
+    undeclared body has no such early check, so the stream is the bound:
+    the read stops at the first chunk that crosses the limit, one byte past
+    the limit is the most the middleware ever pulls, and the same 413 the
+    declared path answers before reading is answered here mid-stream. No
+    refused-body drain runs on this path, because a drain would pull into
+    a stream of unknown total size; the connection is left for the ASGI
+    server to close. The joined body is cached on the request the way
+    Request.body() caches it, which is what replays it to the inner app.
+    """
+    if request.headers.get('content-length') is not None:
+        return await request.body()
+    chunks = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_body_size:
+            return None
+        chunks.append(chunk)
+    request._body = b''.join(chunks)
+    return request._body
 
 
 class CarrierJSONObject(dict):
