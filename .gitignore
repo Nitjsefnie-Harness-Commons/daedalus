@@ -390,6 +390,7 @@
 !/tests/test_dashboard_harness_metadata.py
 !/tests/test_dashboard_node_retry.py
 !/tests/test_dashboard_sections.py
+!/tests/test_dashboard_tab_events.py
 !/tests/test_delivery_matching.py
 !/tests/test_delivery_stripe_acceptance.py
 !/tests/test_delivery_stripes.py
