@@ -89,11 +89,9 @@ export function mount(container, bus) {
     tbodyEl = body;
   }
 
-  // An event-driven refresh reconciles rows instead of rebuilding the table:
-  // a row whose tab only aged stays the same element (its age cell is
-  // rewritten in place, even under an open editor), a row whose title or url
-  // changed is replaced — ending any editor or armed confirm aimed at stale
-  // data — and a row whose tab is gone leaves with its interaction.
+  // An event-driven refresh reconciles rows instead of rebuilding them, so
+  // an open editor or armed confirm survives events about other rows; a row
+  // whose own title or url changed is replaced, ending its stale interaction.
   function patch() {
     const rows = tabs.filter(visible);
     setCounter(rows);
@@ -142,8 +140,8 @@ export function mount(container, bus) {
     return tr;
   }
 
-  // A burst of events coalesces into one listing fetch, whose render shows
-  // the final listing.
+  // A burst of events coalesces into one listing fetch; patch applies the
+  // final listing.
   let refreshQueued = false;
   function scheduleRefresh() {
     if (refreshQueued) return;

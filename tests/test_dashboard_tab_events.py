@@ -18,12 +18,10 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
-# The shared DOM double learns parent links and the tree surgeries the
-# section's reconcile performs, so an unmodeled call fails loud instead of
-# silently doing nothing. Timers of a second or more park (the interaction
-# reset timers must not run under test) while shorter ones run for real, so
-# the section's own coalescing window elapses and the pins stay fetch counts
-# rather than timings.
+# The shared DOM double learns parent links and the reconcile's tree
+# surgeries, failing loud on an unmodeled call. Timers of a second or more
+# park (the interaction resets must not run) while shorter ones run real, so
+# the coalescing window elapses and the pins stay fetch counts.
 _TABS_PREFIX = _dashnode.DOM + r"""
 import { setTimeout as realSetTimeout, clearTimeout as realClearTimeout }
   from 'node:timers';
