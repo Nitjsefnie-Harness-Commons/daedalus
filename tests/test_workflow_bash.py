@@ -157,7 +157,7 @@ def test_workflow_shell_caller_uses_shared_bash_helper(tmp):
     try:
         _util.workflow_bash = lambda: calls.append(True) or sys.executable
         result = comment_suite._run_shell_block(
-            tmp, "print('caller-used', end='')", _COVERAGE_ENV)
+            tmp, "print('caller-used', end='')", env=_COVERAGE_ENV)
     finally:
         _util.workflow_bash = original
     assert result.returncode == 0, (result.stdout, result.stderr)

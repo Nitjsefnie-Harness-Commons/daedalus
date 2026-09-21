@@ -318,8 +318,19 @@ def test_the_aggregate_job_runs_the_module(tmp):
         'GH_TOKEN': '${{ github.token }}',
         'REPOSITORY': '${{ github.repository }}',
         'RUN_ID': '${{ github.run_id }}',
-        'HEAD_BRANCH': '${{ github.head_branch }}',
+        'HEAD_BRANCH': '${{ github.event.pull_request.head.ref'
+                       ' || github.ref_name }}',
     }
+
+
+def test_the_head_branch_env_falls_back_to_the_pushed_branch(tmp):
+    del tmp
+    job = complete_job_mapping(_tests_yml(), 'aggregate')
+    gates = [step for step in job['steps'] if 'run' in step]
+    value = gates[0]['env']['HEAD_BRANCH']
+    assert 'github.event.pull_request.head.ref' in value, value
+    assert '||' in value, value
+    assert 'github.ref_name' in value, value
 
 
 def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
