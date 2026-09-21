@@ -504,7 +504,6 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         else:
             continue
         if form == 'get' and status == 'known':
-            # `obj.p()` runs the getter, then the callable it returned.
             returned = getter_call_body(
                 resolution['receivers'], target, start)
             if returned is None:

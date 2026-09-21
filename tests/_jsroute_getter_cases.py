@@ -9,8 +9,8 @@ _TAIL = ";\npromote();\n"
 def _both(label, define, call='obj.p()'):
     """One getter shape in both directions.
 
-    `define` builds the receiver around the write its returned callable
-    performs; a demotion follows a promotion so the verdict rests on it.
+    `define` wraps the write its returned callable performs; the demotion
+    row promotes first so the verdict rests on that write.
     """
     return [
         (label + '-demotion',
@@ -39,11 +39,12 @@ def _order(label, first, second, call, expected):
 
 
 _ARROW = _literal('() =>')
+_ASYNC_ARROW = _literal('async () =>')
 
 GETTER_CASES = [
     *_both('getter-returns-arrow', _ARROW),
     *_both('getter-returns-function', _literal('function ()')),
-    *_both('getter-returns-async-arrow', _literal('async () =>')),
+    *_both('getter-returns-async-arrow', _ASYNC_ARROW),
     *_both('getter-returns-declared-name', lambda write: (
         "function dem() { " + write + " }\n"
         "const obj = { get p() { return dem; } };\n")),
@@ -66,12 +67,17 @@ GETTER_CASES = [
     *_both('optional-getter-call', _ARROW, 'obj?.p()'),
     *_both('computed-getter-call', _ARROW, "obj['p']()"),
     ('getter-returns-awaiting-arrow-demotion',
-     _LET + _PRO + "\n" + _ARROW("await 0; " + _DEM).replace(
-         'return () =>', 'return async () =>') + "obj.p()" + _TAIL, True),
+     _LET + _PRO + "\n" + _ASYNC_ARROW("await 0; " + _DEM) + "obj.p()"
+     + _TAIL, True),
     ('getter-returns-awaiting-arrow-promotion',
-     _LET + _ARROW("await 0; " + _PRO).replace(
-         'return () =>', 'return async () =>') + "obj.p()" + _TAIL,
+     _LET + _ASYNC_ARROW("await 0; " + _PRO) + "obj.p()" + _TAIL,
      (False, True)),
+    ('getter-returns-arrow-naming-awaitable',
+     _LET + _PRO + "\n" + _ARROW("const awaitable = 1; " + _DEM)
+     + "obj.p()" + _TAIL, False),
+    ('getter-returns-arrow-quoting-await',
+     _LET + _PRO + "\n" + _ARROW("void 'await 0'; " + _DEM)
+     + "obj.p()" + _TAIL, False),
     ('getter-returns-global-or-demoter',
      _LET + _PRO + "\nfunction dem() { " + _DEM + " }\n"
      "const obj = { get p() { return globalThis.mystery || dem; } };\n"

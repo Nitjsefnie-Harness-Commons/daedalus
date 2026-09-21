@@ -153,9 +153,8 @@ def invoked_body(receiver, value, position):
 def getter_call_body(receiver, getter, position):
     """Body the callable a getter returns runs when called at `position`.
 
-    None when the return does not resolve to a body, or resolves to one
-    that awaits: the replay has no await boundary, so the call stays
-    unprovable rather than crediting a getter body alone.
+    None when the return is unresolved or that body awaits, which the
+    replay cannot order.
     """
     body = invoked_body(receiver, getter_value(receiver, getter), position)
     if body is None or _AWAIT.search(receiver.mask, body[1], body[2]):
