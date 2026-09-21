@@ -285,6 +285,97 @@ def test_collect_expired_removes_old_commands_and_empty_queues(tmp):
     assert not legacy.exists(), legacy
 
 
+def test_collect_expired_sweeps_an_expired_legacy_temp(tmp):
+    queue = _load_queue('command_queue_legacy_temp_expired')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    temp = cmd_dir / 'tok.json.tmp'
+    temp.write_text('{"id":"queued"}', encoding='utf-8')
+    os.utime(temp, (0, 0))
+    queue.collect_expired(cmd_dir, 1)
+    assert not temp.exists(), temp
+
+
+def test_collect_expired_sweeps_an_expired_legacy_tab_temp(tmp):
+    queue = _load_queue('command_queue_legacy_tab_temp_expired')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    temp = cmd_dir / 'tok_tab.json.tmp'
+    temp.write_text('{"id":"queued"}', encoding='utf-8')
+    os.utime(temp, (0, 0))
+    queue.collect_expired(cmd_dir, 1)
+    assert not temp.exists(), temp
+
+
+def test_collect_expired_retains_an_expired_legacy_temp_partial_json(tmp):
+    """An expired temp that does not parse is retained.
+
+    A crashed legacy writer's partial temp is indistinguishable from a
+    live writer's, so the sweep keeps both — the same protection a
+    malformed legacy final already gets.
+    """
+    queue = _load_queue('command_queue_legacy_temp_partial')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    temp = cmd_dir / 'tok.json.tmp'
+    temp.write_text('{"id":"que', encoding='utf-8')
+    os.utime(temp, (0, 0))
+    queue.collect_expired(cmd_dir, 1)
+    assert temp.exists(), temp
+
+
+def test_collect_expired_retains_fresh_legacy_temps(tmp):
+    queue = _load_queue('command_queue_legacy_temp_fresh')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    complete = cmd_dir / 'tok.json.tmp'
+    partial = cmd_dir / 'tok_tab.json.tmp'
+    complete.write_text('{"id":"queued"}', encoding='utf-8')
+    partial.write_text('{"id":"que', encoding='utf-8')
+    queue.collect_expired(cmd_dir, 60)
+    assert complete.exists(), complete
+    assert partial.exists(), partial
+
+
+def test_collect_expired_leaves_a_hidden_temp_alone(tmp):
+    queue = _load_queue('command_queue_hidden_temp')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    hidden = cmd_dir / '.tok.json.tmp'
+    hidden.write_text('{"id":"queued"}', encoding='utf-8')
+    os.utime(hidden, (0, 0))
+    queue.collect_expired(cmd_dir, 1)
+    assert hidden.exists(), hidden
+
+
+def test_collect_expired_leaves_a_bare_tmp_name_alone(tmp):
+    queue = _load_queue('command_queue_bare_tmp')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    stray = cmd_dir / 'tok.tmp'
+    stray.write_text('{"id":"queued"}', encoding='utf-8')
+    os.utime(stray, (0, 0))
+    queue.collect_expired(cmd_dir, 1)
+    assert stray.exists(), stray
+
+
+def test_remove_expired_retains_a_refused_legacy_temp(tmp):
+    queue = _load_queue('command_queue_legacy_temp_refused')
+    cmd_dir = Path(tmp) / 'commands'
+    cmd_dir.mkdir()
+    target = cmd_dir / 'target.json'
+    temp = cmd_dir / 'tok.json.tmp'
+    target.write_text('{"id":"queued"}', encoding='utf-8')
+    try:
+        temp.symlink_to(target)
+        os.utime(temp, (0, 0), follow_symlinks=False)
+    except (OSError, NotImplementedError):
+        _util.skip('this platform cannot create or timestamp symlinks')
+    queue.remove_expired(temp, 2, 1, legacy=True)
+    assert temp.is_symlink(), temp
+    assert target.exists(), target
+
+
 def test_gc_loop_forwards_directory_and_ttl_after_sleep(_tmp):
     queue = _load_queue('command_queue_gc_loop')
     cmd_dir = Path('commands')

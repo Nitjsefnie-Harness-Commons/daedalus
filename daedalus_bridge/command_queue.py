@@ -139,7 +139,8 @@ def remove_expired(path, now, ttl, legacy=False):
         if now - path.lstat().st_mtime <= ttl:
             return
         if legacy:
-            if path.name.startswith('.') or not path.name.endswith('.json'):
+            if (path.name.startswith('.')
+                    or not path.name.endswith(('.json', '.json.tmp'))):
                 return
             opened, _ = open_command_candidate(path)
             if opened is None:
