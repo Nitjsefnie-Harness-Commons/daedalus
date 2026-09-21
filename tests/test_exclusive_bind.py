@@ -37,6 +37,7 @@ class _StubSocket:
     def __init__(self, created):
         self.events = []
         self.created = created
+        self.bound = ('127.0.0.1', 0)
         created.append(self)
 
     def setsockopt(self, level, option, value):
@@ -47,7 +48,7 @@ class _StubSocket:
         self.bound = address
 
     def getsockname(self):
-        return getattr(self, 'bound', ('127.0.0.1', 0))
+        return self.bound
 
 
 class _StubSocketModule:
@@ -66,9 +67,7 @@ class _StubSocketModule:
 
     def __init__(self, created):
         self.created = created
-
-    def socket(self, _family, _type):
-        return _StubSocket(self.created)
+        self.socket = lambda _family, _type: _StubSocket(created)
 
 
 def _exclusive_events():
