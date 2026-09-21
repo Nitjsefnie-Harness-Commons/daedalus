@@ -295,6 +295,95 @@ def test_enqueue_atomically_publishes_a_waking_delivery(tmp):
     assert queue.event('tok').is_set()
 
 
+def test_an_identical_enqueue_scans_under_the_shared_lock(tmp):
+    """The dedup scan shares one lock section with the publish.
+
+    A scan that runs outside the lock reads the queue between another
+    producer's scan and its publish, so two identical enqueues can both
+    admit fresh deliveries — the defect this branch fixes, back as a race.
+    """
+    queue = _load_queue('command_queue_dedup_lock')
+    cmd_dir = Path(tmp) / 'commands'
+    parked, gate = threading.Event(), threading.Event()
+
+    class Observed:
+        def __init__(self):
+            self._inner = threading.Lock()
+            self._count_lock = threading.Lock()
+            self.attempts = 0
+            self.reacquired = threading.Event()
+
+        def acquire(self):
+            with self._count_lock:
+                self.attempts += 1
+                if self.attempts >= 2:
+                    self.reacquired.set()
+            return self._inner.acquire()
+
+        def release(self):
+            self._inner.release()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            self.release()
+
+    real_publish = queue._publish
+
+    def parked_publish(*args, **kwargs):
+        parked.set()
+        gate.wait(5)
+        return real_publish(*args, **kwargs)
+
+    queue._publish = parked_publish
+    lock = Observed()
+    queue.command_fs_lock = lock
+    payload = {'id': 'same', 'code': '1'}
+    producer_done = threading.Event()
+    replay_done = threading.Event()
+    results, failures = [], []
+
+    def enqueue_into(sink, done):
+        try:
+            sink.append(queue.enqueue(
+                cmd_dir, 'tok', 'tab', payload, command_ttl=90))
+        except Exception as error:  # preserve a worker assertion failure
+            failures.append(error)
+        finally:
+            done.set()
+
+    producer = threading.Thread(
+        target=enqueue_into, args=(results, producer_done))
+    producer.start()
+    assert parked.wait(5), 'the first enqueue never reached its publish'
+    replay = threading.Thread(
+        target=enqueue_into, args=(results, replay_done))
+    replay.start()
+    try:
+        assert lock.reacquired.wait(5), (
+            'the identical enqueue never attempted the shared lock while '
+            'the first delivery was still publishing')
+    finally:
+        gate.set()
+        producer.join(5)
+        replay.join(5)
+    assert producer_done.wait(5) and replay_done.wait(5), (
+        'an enqueue stayed blocked after the gate released')
+    assert failures == [], failures
+    assert len(results) == 2, results
+    first_did, first_duplicate = results[0]
+    assert first_duplicate is False
+    second_did, second_duplicate = results[1]
+    assert second_did == first_did, (first_did, second_did)
+    assert second_duplicate is True
+    published = sorted((cmd_dir / 'tok_tab').glob('*.json'))
+    assert len(published) == 1, published
+    assert json.loads(published[0].read_text(encoding='utf-8')) == {
+        'id': 'same', 'code': '1', '_did': first_did}
+
+
 def test_an_identical_live_command_admits_one_delivery(tmp):
     queue = _load_queue('command_queue_dedup_live')
     cmd_dir = Path(tmp) / 'commands'
