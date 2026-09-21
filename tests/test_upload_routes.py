@@ -163,25 +163,24 @@ def test_list_uploads_skips_an_id_deleted_before_its_scan(tmp):
         check_case(error)
 
 
-def test_upload_reads_answer_absent_when_token_stat_fails(tmp):
-    routes = _load('fixture_upload_routes_token_stat')
+def test_upload_reads_answer_absent_when_token_is_not_a_directory(tmp):
+    routes = _load('fixture_upload_routes_token_not_directory')
 
     def check_case(route, expected):
         _store(tmp, 'tok', 'id1', 'a.png')
         token_dir = Path(tmp) / 'tok'
-        real_stat = routes.pathlib.Path.stat
-        removed = []
+        assert token_dir.is_dir()
+        real_is_dir = routes.pathlib.Path.is_dir
 
-        def delete_then_stat(path, *args, **kwargs):
-            if path == token_dir and not removed:
-                removed.append(True)
-                shutil.rmtree(token_dir)
-                raise PermissionError('injected deletion race')
-            return real_stat(path, *args, **kwargs)
+        def token_is_not_a_directory(path, *args, **kwargs):
+            if path == token_dir:
+                return False
+            return real_is_dir(path, *args, **kwargs)
 
-        with mock.patch.object(routes.pathlib.Path, 'stat', delete_then_stat):
+        # is_dir swallows stat errors on newer Python versions.
+        with mock.patch.object(routes.pathlib.Path, 'is_dir',
+                               token_is_not_a_directory):
             answer = route(Path(tmp), 'tok', {})
-        assert removed, route
         assert answer == expected, answer
 
     for route, expected in (
@@ -272,17 +271,18 @@ def test_latest_screenshot_answers_no_uploads_when_token_vanishes(tmp):
     routes = _load('fixture_upload_routes_screenshot_token')
     _store(tmp, 'tok', 'id1', 'gone.png')
     token_dir = Path(tmp) / 'tok'
-    real_stat = routes.pathlib.Path.stat
+    real_is_dir = routes.pathlib.Path.is_dir
     removed = []
 
-    def stat_then_delete(path, *args, **kwargs):
-        info = real_stat(path, *args, **kwargs)
+    def is_dir_then_delete(path, *args, **kwargs):
+        is_dir = real_is_dir(path, *args, **kwargs)
         if path == token_dir and not removed:
             removed.append(True)
             shutil.rmtree(token_dir)
-        return info
+        return is_dir
 
-    with mock.patch.object(routes.pathlib.Path, 'stat', stat_then_delete):
+    # Patch the route's call; is_dir need not delegate to Path.stat.
+    with mock.patch.object(routes.pathlib.Path, 'is_dir', is_dir_then_delete):
         answer = routes.latest_screenshot(Path(tmp), 'tok', {})
     assert removed
     assert answer == (404, {'error': 'no uploads'}), answer
@@ -297,17 +297,19 @@ def test_latest_screenshot_skips_an_id_deleted_before_scan(tmp):
         gone = root / 'tok' / 'gone'
         if survivor:
             kept = _store(root, 'tok', 'kept', 'b.png')
-        real_stat = routes.pathlib.Path.stat
+        real_is_dir = routes.pathlib.Path.is_dir
         removed = []
 
-        def stat_then_delete(path, *args, **kwargs):
-            info = real_stat(path, *args, **kwargs)
+        def is_dir_then_delete(path, *args, **kwargs):
+            is_dir = real_is_dir(path, *args, **kwargs)
             if path == gone and not removed:
                 removed.append(True)
                 shutil.rmtree(gone)
-            return info
+            return is_dir
 
-        with mock.patch.object(routes.pathlib.Path, 'stat', stat_then_delete):
+        # Patch the route's call; is_dir need not delegate to Path.stat.
+        with mock.patch.object(routes.pathlib.Path, 'is_dir',
+                               is_dir_then_delete):
             answer = routes.latest_screenshot(root, 'tok', {})
         assert removed, survivor
         if survivor:
