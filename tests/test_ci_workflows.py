@@ -300,11 +300,11 @@ def test_an_audit_run_validates_the_threshold_document(tmp):
     .github/ci-thresholds.json, so a ratchet commit does not re-run the
     expensive gates; the price was that a malformed hand edit pushed alone
     to main waited for the next unrelated push to be told it was invalid.
-    audit.yml's push trigger is unfiltered, so the validation itself runs
-    there, on every audit run -- and it runs unconditionally: neither the
+    audit.yml's push trigger is unfiltered, so the validation runs there
+    instead: exactly one job may run it, unconditionally -- neither that
     job nor its validating step may carry an `if` condition or
-    `continue-on-error`, either of which would let the audit go green
-    without the validation having gated it.
+    `continue-on-error`, either of which would go green without the
+    validation having gated anything.
     """
     del tmp
     workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
