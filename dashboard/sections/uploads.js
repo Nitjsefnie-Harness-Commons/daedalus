@@ -52,10 +52,9 @@ export function mount(container) {
 
   function fileUrl(f) {
     if (!held.has(f.path)) {
-      // `<id>/<file>`, relative to the namespace the Bearer header
-      // establishes, and never the listed path: that one begins with the
-      // token, and a request target reaches the proxy access log whether
-      // or not a link carried it. encodeURIComponent, because `#`, `%`
+      // `<id>/<file>` — the shape the listing's own `path` names, relative
+      // to the namespace the Bearer header establishes, so no request
+      // target carries the token. encodeURIComponent, because `#`, `%`
       // and `&` are legal in a filename and each would end or split the
       // query otherwise.
       const selector = encodeURIComponent(f.id + '/' + f.filename);
