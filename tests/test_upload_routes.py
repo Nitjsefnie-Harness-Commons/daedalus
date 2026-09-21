@@ -3,6 +3,8 @@
 upload root passed by the caller rather than configured storage.
 """
 import base64
+import contextlib
+import io
 import os
 import re
 import shutil
@@ -327,9 +329,32 @@ def test_store_upload_writes_a_timestamped_screenshot(tmp):
     status, payload = routes.store_upload(Path(tmp), body)
     assert status == 200, (status, payload)
     rel = payload['path']
-    assert rel.startswith('tok/id1/') and rel.endswith('.png'), rel
+    assert rel.startswith('id1/') and rel.endswith('.png'), rel
     assert payload['size'] == 7, payload
-    assert (Path(tmp) / rel).read_bytes() == b'PNGDATA'
+    assert (Path(tmp) / 'tok' / rel).read_bytes() == b'PNGDATA'
+
+
+def test_store_upload_logs_and_answers_the_token_free_path(tmp):
+    """The answer's path and its log line stop at the token directory.
+
+    The answer's `path` is what the extension forwards into the result
+    envelope it posts, so a token-led path there was a second copy of the
+    credential in every stored screenshot result, and the log line printed
+    it on every upload. Relative to the token directory, both agree with
+    the GET /upload?path= selector and with the client sanitizers' no-op
+    case.
+    """
+    routes = _load('fixture_upload_routes_store_log')
+    output = io.StringIO()
+    body = {'token': 'tok-verify', 'id': 'shot', 'filename': 'a.txt',
+            'data': base64.b64encode(b'hi').decode('ascii')}
+    with contextlib.redirect_stdout(output):
+        status, payload = routes.store_upload(Path(tmp), body)
+    assert status == 200, (status, payload)
+    assert payload['path'] == 'shot/a.txt', payload
+    assert payload['size'] == 2, payload
+    assert output.getvalue() == '[UPLOAD] shot/a.txt (2 bytes)\n', (
+        output.getvalue())
 
 
 def test_store_upload_names_same_millisecond_captures_distinctly(tmp):
