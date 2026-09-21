@@ -365,11 +365,14 @@ family, where, entry = sys.argv[1:4]
 exc = getattr(builtins, family)
 attempts = []
 peeks = 0
+consumes = 0
 FAILURES = %(failures)d
 TIMEOUT = %(timeout)d
 RESULT = %(result)s
 CONSUMED = {'consumed': True,
             'resultGeneration': RESULT['resultGeneration']}
+REFUSED = {'consumed': False,
+           'resultGeneration': RESULT['resultGeneration']}
 
 
 class Response:
@@ -392,12 +395,15 @@ class Response:
 
 
 def urlopen(req, timeout=None):
-    global peeks
+    global peeks, consumes
     attempts.append(req.full_url)
     if 'consume=1' in req.full_url:
         expected = f"expected={RESULT['resultGeneration']}"
         if expected not in req.full_url:
             raise AssertionError(f'unexpected consume: {req.full_url}')
+        consumes += 1
+        if consumes == 1:
+            return Response(json.dumps(REFUSED).encode())
         return Response(json.dumps(CONSUMED).encode())
     peeks += 1
     if peeks > FAILURES:
@@ -418,6 +424,7 @@ else:
     transport.api('GET', '/tabs')
 """
 
+# A literal % in the template breaks this interpolation at import time.
 _RAISING_URLOPEN %= {
     'failures': WAIT_FAILURES,
     'timeout': WAIT_TIMEOUT,
@@ -431,10 +438,11 @@ def _check_transport_family(family):
     The wait pin is causal, not a wall clock: WAIT_TIMEOUT leaves the
     sub-second scheduler stalls that flaked the 0.2s budget no way to
     expire the wait, WAIT_FAILURES failed peeks must be survived, and
-    the peek that lands must be consumed — attempts is failures + 2,
-    exactly (issue 893). The stub answers a consume only when its URL
-    names the peeked generation, so a transport that drops `expected`
-    from the consume fails here rather than passing.
+    the peek that lands must survive a refused consume and be accepted
+    on the second — attempts is failures + 4, exactly (issues 893,
+    900). The stub answers a consume only when its URL names the
+    peeked generation, so a transport that drops `expected` from the
+    consume fails here rather than passing.
     """
     env = cli_env(DAEDALUS_TOKEN=TOK)
     for where in ('open', 'read', 'error'):
@@ -452,7 +460,7 @@ def _check_transport_family(family):
         assert verdict == 'WAIT', (where, r.stdout)
         report = json.loads(payload)
         assert report['out'] == WAIT_RESULT, (where, r.stdout)
-        assert report['attempts'] == WAIT_FAILURES + 2, (where, r.stdout)
+        assert report['attempts'] == WAIT_FAILURES + 4, (where, r.stdout)
 
 
 def test_a_connection_reset_is_a_connection_failure_on_every_entry(tmp):
