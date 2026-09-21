@@ -7,6 +7,7 @@ for a helper: running the scalar suite then imports both other suites, and a
 change to one lands in every run. Each suite is imported in a fresh
 subprocess, and only its own name may land in `sys.modules`.
 """
+import ast
 import json
 import os
 import subprocess
@@ -51,6 +52,45 @@ def test_importing_a_workflow_suite_loads_no_other_suite_module(tmp):
     assert not failures, (
         'importing a workflow suite loaded other suite modules: '
         f'{failures}')
+
+
+def test_shared_workflow_fixtures_are_bound_only_in_their_module(tmp):
+    """The five shared fixture names are bound only in tests/_wffixtures.py.
+
+    A module-level def or assignment elsewhere is either a reintroduced
+    copy of a helper the shared module replaced or a shadow that wins over
+    the import, so the suite reading the name stops reading the shared one.
+    Only module-level bindings count: `_real_step` is a different name and
+    a function-local binding never reaches another module's import.
+    """
+    del tmp
+    shared = frozenset((
+        'BLOCK_NEEDS', 'BLOCK_OUTPUTS', '_real', '_replaced', '_refuses'))
+    named = subprocess.run(
+        ['git', 'ls-files', 'tests/*.py'], cwd=ROOT, capture_output=True,
+        text=True, check=True).stdout.splitlines()
+    assert named, 'git ls-files named no tests module'
+    shadows = []
+    for name in named:
+        if name == 'tests/_wffixtures.py':
+            continue
+        tree = ast.parse((ROOT / name).read_text(encoding='utf-8'))
+        bound = set()
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                bound.add(node.name)
+            elif isinstance(node, ast.Assign):
+                bound.update(target.id for target in node.targets
+                             if isinstance(target, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(
+                    node.target, ast.Name):
+                bound.add(node.target.id)
+        hits = sorted(bound & shared)
+        if hits:
+            shadows.append((name, hits))
+    assert not shadows, (
+        'shared workflow fixtures bound outside tests/_wffixtures.py: '
+        f'{shadows}')
 
 
 if __name__ == '__main__':
