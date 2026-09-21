@@ -152,3 +152,18 @@ jobs:
           echo "pip-audit could not reach PyPI after 3 attempts:" >&2
           cat audit.out >&2
           exit 1
+
+  # tests.yml and codeql.yml skip pushes that touch only
+  # .github/ci-thresholds.json, so this unfiltered workflow is what
+  # validates the document a threshold-only push changes.
+  thresholds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the threshold document
+        run: python3 scripts/ci/thresholds.py --check
