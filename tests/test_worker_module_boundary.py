@@ -19,7 +19,7 @@ from _worker_sources import (directive_entries,  # noqa: E402
 
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
-    'Promise', 'Set', 'String', 'TextDecoder', 'URL',
+    'Promise', 'Set', 'String', 'TextDecoder', 'TextEncoder', 'URL',
     'Uint8Array', 'atob', 'btoa', 'chrome', 'clearInterval', 'clearTimeout',
     'console', 'crypto', 'fetch', 'parseInt', 'performance', 'setInterval',
     'setTimeout',
