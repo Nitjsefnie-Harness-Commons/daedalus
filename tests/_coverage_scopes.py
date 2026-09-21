@@ -50,8 +50,28 @@ class _ScopeFacts:
         return root_owner_names(self.tree, self.imports)
 
     @cached_property
+    def bindings(self):
+        return _binding_destinations(*self.layout)
+
+    @property
     def destinations(self):
-        return _binding_destinations(*self.layout)[1]
+        return self.bindings[1]
+
+    @cached_property
+    def binding_layout(self):
+        # Only type syntax separates these layouts. Reuse the ordinary
+        # walk instead of repeating it with type_scopes=True everywhere.
+        alias = getattr(ast, 'TypeAlias', ())
+        if any(isinstance(node, alias) or getattr(node, 'type_params', ())
+               for node in memo_nodes(self.tree)):
+            return _evaluation_scopes(self.tree, type_scopes=True)
+        return self.layout
+
+    @cached_property
+    def binding_products(self):
+        if self.binding_layout is self.layout:
+            return self.bindings
+        return _binding_destinations(*self.binding_layout)
 
     @cached_property
     def unprovable(self):
@@ -544,13 +564,15 @@ def _routed_bindings(local, destinations):
     return routed
 
 
-def _scope_bindings(scoped, parents):
+def _scope_bindings(scoped, parents, products=None):
     """All grammar-bound names, independent of the rebinding product.
 
     Declarations bind their destination even without an assignment:
     uncertainty cannot prove a builtin. Star imports bind every name.
     """
-    local, destinations = _binding_destinations(scoped, parents)
+    local, destinations = (products if products is not None
+                           else _binding_destinations(scoped, parents))
+    local = {scope: names.copy() for scope, names in local.items()}
     for scope, declared in destinations.items():
         local[scope].update(declared)
     return _routed_bindings(local, destinations)
