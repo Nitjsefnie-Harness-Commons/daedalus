@@ -123,11 +123,11 @@ def log_path_refusal(kind, root, parts, attempts, secret=''):
     `secret` is a credential the caller knows can reach the evidence, and
     every rendered string it appears in — the root, the parts and the
     resolved attempts — is shortened to the prefix the stream connect line
-    already prints. That prefix is the prescribed residual exposure, which
-    is why the clear-text-logging alert on the print is suppressed in
-    place rather than by printing less. Empty by default and
-    byte-identical without it, so a call site that carries no credential
-    renders exactly as before.
+    already prints. That prefix is the same by-design residual that line
+    prints as token[:8], so the clear-text-logging alert this print earns
+    is tracked and dispositioned on the Security tab (issue 890). Empty
+    by default and byte-identical without it, so a call site that carries
+    no credential renders exactly as before.
     """
     safe_parts = tuple(
         redacted(log_safe(part), secret) for part in parts)
@@ -135,7 +135,6 @@ def log_path_refusal(kind, root, parts, attempts, secret=''):
         (redacted(log_safe(left), secret),
          redacted(log_safe(right), secret))
         for left, right in attempts)
-    # codeql[py/clear-text-logging-sensitive-data]
     print(
         f'[PATH-REFUSAL] kind={kind} '
         f'root={redacted(log_safe(root), secret)!r} '
