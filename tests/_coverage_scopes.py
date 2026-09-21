@@ -13,6 +13,8 @@ from _coverage_memo import nodes as memo_nodes
 
 _ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
 _ALL_NAMES = '*'
+_CANONICAL_MEMBERS = {'Path': ('pathlib', 'Path')}
+_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})
 
 
 _REFLECTIVE_READS = frozenset({'getattr', 'hasattr'})
@@ -79,16 +81,21 @@ def _import_bound_name(node, alias):
     return alias.asname or alias.name
 
 
+def _canonical_import(node, alias, bound):
+    if isinstance(node, ast.Import):
+        return alias.name in _ROOT_MODULES
+    return (node.module, alias.name) == _CANONICAL_MEMBERS.get(bound)
+
+
 def _import_rebound_names(tree):
-    """Names an import binds to anything but a root module; `*` is any."""
+    """Names an import binds to anything but their canonical source."""
     rebound = set()
     for node in memo_nodes(tree):
-        if isinstance(node, ast.ImportFrom):
-            rebound.update(_bound_names(node))
-        elif isinstance(node, ast.Import):
-            rebound.update(_import_bound_name(node, alias)
-                           for alias in node.names
-                           if alias.name not in _ROOT_MODULES)
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bound = _import_bound_name(node, alias)
+                if not _canonical_import(node, alias, bound):
+                    rebound.add(bound)
     return rebound
 
 
@@ -131,6 +138,8 @@ def root_owner_names(tree):
 
 def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):
     """Whether an expression provably names the repository root."""
+    if _ALL_NAMES in shadowed_names:
+        return False
     if any(isinstance(part, ast.Name) and part.id in shadowed_names
            for part in ast.walk(node)):
         return False
@@ -187,6 +196,10 @@ def _is_repository_root_binding(value):
             and constructor.args[0].id == '__file__')
 
 
+def _unprovable_names(tree):
+    return _import_rebound_names(tree) & _PROOF_NAMES
+
+
 def _shadowed_names(tree):
     """Names whose source value is replaced somewhere in the module."""
     walked = memo_nodes(tree)
@@ -219,6 +232,7 @@ def _shadowed_names(tree):
         if any(isinstance(target, ast.Name) and target.id == 'ROOT'
                for target in targets):
             root_values.append(value)
+    names.update(_unprovable_names(tree))
     if _rebound_by_import('_util', _import_rebound_names(tree)):
         names.add('_util')
     if (root_values and not {'Path', '_util'} & names
@@ -378,6 +392,8 @@ def _scope_shadows(tree, layout=None):
             shadows[scope].add(node.name)
         elif isinstance(node, ast.MatchMapping) and node.rest:
             shadows[scope].add(node.rest)
+    # Import-derived facts are module-wide, like owner retirement.
+    shadows[tree].update(_unprovable_names(tree))
     return shadows
 
 
