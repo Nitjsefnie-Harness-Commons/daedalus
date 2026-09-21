@@ -484,6 +484,70 @@ def test_an_expired_entry_is_not_a_live_duplicate(tmp):
     assert len(published) == 2, published
 
 
+def test_hidden_and_temp_entries_are_not_live_duplicates(tmp):
+    """A crashed publish's temp and a hidden file are not deliveries.
+
+    `_live_duplicate` skips both names, so an identical payload in a
+    `<seq>.json.tmp` — the shape a crashed publisher leaves — cannot
+    absorb a retry onto a delivery the drain will never make: the drain
+    skips those names too.
+    """
+    queue = _load_queue('command_queue_dedup_skip_names')
+    cmd_dir = Path(tmp) / 'commands'
+    qdir = cmd_dir / 'tok_tab'
+    qdir.mkdir(parents=True)
+    crashed = qdir / '1700000000000_000001.json.tmp'
+    crashed.write_text(json.dumps(
+        {'id': 'same', 'code': '1', '_did': 'crashed-did'},
+        ensure_ascii=False), encoding='utf-8')
+    hidden = qdir / '.hidden.json'
+    hidden.write_text(json.dumps(
+        {'id': 'same', 'code': '1', '_did': 'hidden-did'},
+        ensure_ascii=False), encoding='utf-8')
+    did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'}, command_ttl=90)
+    assert duplicate is False
+    assert did not in ('crashed-did', 'hidden-did')
+    assert crashed.exists()
+    assert hidden.exists()
+    published = sorted(
+        path.name for path in qdir.iterdir()
+        if not path.name.startswith('.') and path.name.endswith('.json'))
+    assert published == [f'{did}.json'], published
+
+
+def test_a_refused_entry_is_not_a_live_duplicate(tmp):
+    """An entry the drain would refuse is not a delivery to wait on.
+
+    The alias is the drain's own refusal shape: a symlinked queue name is
+    never delivered, so the identical payload behind it must not absorb a
+    retry. `open_command_candidate` refuses the linked name where
+    `O_NOFOLLOW` exists and by its identity check where it does not, so
+    the scan matches nothing on every platform.
+    """
+    queue = _load_queue('command_queue_dedup_refused')
+    cmd_dir = Path(tmp) / 'commands'
+    qdir = cmd_dir / 'tok_tab'
+    qdir.mkdir(parents=True)
+    outside = Path(tmp) / 'outside.json'
+    outside.write_text(json.dumps(
+        {'id': 'same', 'code': '1'}, ensure_ascii=False), encoding='utf-8')
+    alias = qdir / '1700000000000_000001.json'
+    try:
+        alias.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        _util.skip('this platform cannot create symlinks')
+    did, duplicate = queue.enqueue(
+        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'}, command_ttl=90)
+    assert duplicate is False
+    assert alias.is_symlink()
+    assert outside.exists()
+    published = sorted(
+        path.name for path in qdir.iterdir()
+        if not path.name.startswith('.') and path.name.endswith('.json'))
+    assert published == sorted([f'{did}.json', alias.name]), published
+
+
 def test_collect_expired_removes_old_commands_and_empty_queues(tmp):
     queue = _load_queue('command_queue_collect_expired')
     cmd_dir = Path(tmp) / 'commands'
