@@ -38,6 +38,8 @@ def do_segment_status(args):
         sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
+    # URLError is an OSError, so its clause must stay above this one for
+    # the reason-only form to survive; the tuple is the fallback order.
     except (OSError, http.client.HTTPException, ValueError, TypeError) as e:
         # The 200 never became the bridge's JSON object: an HTML page, a
         # body cut off before its declared length, or a JSON value that is
