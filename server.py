@@ -401,7 +401,8 @@ class Handler(RequestMixin):
         # overwrote the routing value: both silently hit the active tab.
         cmd = {k: v for k, v in body.items() if k not in ('token', 'tab')}
         try:
-            did = command_queue.enqueue(CMD_DIR, token, tab, cmd)
+            did, duplicate = command_queue.enqueue(
+                CMD_DIR, token, tab, cmd, command_ttl=CMD_TTL)
         except UnicodeEncodeError:
             # A lone surrogate in a body value fails the queue-file encode;
             # that is an unencodable body, not a bad path component. Must
@@ -415,7 +416,10 @@ class Handler(RequestMixin):
         print(
             f'[PUT-CMD] {target} id={log_safe(cmd_id)} did={did}',
             flush=True)
-        return self._json(200, {'ok': True, 'target': target, 'did': did})
+        answer = {'ok': True, 'target': target, 'did': did}
+        if duplicate:
+            answer['duplicate'] = True
+        return self._json(200, answer)
 
     def _handle_health(self):
         """GET /health — bridge liveness for detecting a silently-dead stream.

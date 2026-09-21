@@ -28,6 +28,9 @@ def send_and_wait(cmd_id, code, target_tab, wait, timeout):
     target = resp.get('target', '?')
     print(f'{MARK["out"]} {cmd_id} {MARK["out"]} {target}  '
           f'({len(code)} bytes)')
+    if resp.get('duplicate'):
+        print(f"{MARK['warn']} command id {cmd_id!r} is already queued "
+              f"for {target}; waiting on that delivery's result")
 
     if not wait:
         return

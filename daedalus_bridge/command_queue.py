@@ -236,10 +236,49 @@ def event(token):
         return ev
 
 
-def enqueue(cmd_dir, token, tab, cmd):
+def _live_duplicate(qdir, cmd, command_ttl):
+    """Return the delivery id of a live queued copy of `cmd`, or None.
+
+    A live candidate is a complete, non-hidden `.json` entry young enough to
+    be delivered — `remove_expired`'s boundary — read through the same
+    descriptor check the drain reads with. A refused or unreadable entry
+    matches nothing: a delivery the drain will not make through this name
+    is not a live delivery.
+    """
+    now = time.time()
+    try:
+        entries = sorted(qdir.iterdir())
+    except OSError:
+        return None
+    for path in entries:
+        name = path.name
+        if name.startswith('.') or not name.endswith('.json'):
+            continue  # skip .tmp in-flight writes
+        opened, _ = open_command_candidate(path)
+        if opened is None:
+            continue
+        with opened:
+            if now - os.fstat(opened.fileno()).st_mtime > command_ttl:
+                continue
+            try:
+                parsed = json.loads(opened.read().decode('utf-8'))
+            except (OSError, json.JSONDecodeError, RecursionError,
+                    ValueError):
+                continue
+        if isinstance(parsed, dict) and {
+                k: v for k, v in parsed.items() if k != '_did'} == cmd:
+            return name[:-len('.json')]
+    return None
+
+
+def enqueue(cmd_dir, token, tab, cmd, *, command_ttl):
     """Append a command to the target's directory queue.
 
-    Returns the delivery id.
+    Returns ``(delivery_id, duplicate)``. While an identical copy of `cmd`
+    is still queued for the target, a retry admits nothing and returns the
+    live delivery's id: a caller whose wait timed out cannot retract what
+    it queued, so its retry must wait on the first execution instead of
+    queueing a second one.
 
     Refuses an unsafe `tab` itself rather than trusting the caller: this is the
     single place the value becomes a directory name, and the handler that used
@@ -251,10 +290,15 @@ def enqueue(cmd_dir, token, tab, cmd):
     qdir = path_safety.under(cmd_dir, queue_name, secret=token)
     with command_fs_lock:
         qdir.mkdir(parents=True, exist_ok=True)
-        seq = next_seq()
-        _publish(qdir, seq, {**cmd, '_did': seq})
+        live = _live_duplicate(qdir, cmd, command_ttl)
+        if live is not None:
+            seq, duplicate = live, True
+        else:
+            seq = next_seq()
+            _publish(qdir, seq, {**cmd, '_did': seq})
+            duplicate = False
     event(token).set()
-    return seq
+    return seq, duplicate
 
 
 def collect_expired(cmd_dir, ttl):

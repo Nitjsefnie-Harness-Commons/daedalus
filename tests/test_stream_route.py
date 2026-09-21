@@ -183,7 +183,8 @@ def test_the_loop_waits_on_the_registry_event_publication_sets(tmp):
         # must reach its wait. Publishing only after that is what makes the
         # recorded wait a fact rather than a race with the first scan.
         waited.wait()
-        cq.enqueue(root, 'waketok', 'extension', {'id': 'x', 'code': '1'})
+        cq.enqueue(root, 'waketok', 'extension', {'id': 'x', 'code': '1'},
+                   command_ttl=90)
         sink.await_frames(1)
     finally:
         killed.set()
@@ -222,11 +223,13 @@ def test_each_scan_is_preceded_by_its_own_clear_and_idle_waits(tmp):
     ev = Recording()
     with cq._cmd_events_lock:
         cq._cmd_events['seqtok'] = ev
-    cq.enqueue(root, 'seqtok', 'extension', {'id': 'first'})
+    cq.enqueue(root, 'seqtok', 'extension', {'id': 'first'},
+               command_ttl=90)
     sink = _FrameSink(
         log=log,
         on_first_frame=lambda: cq.enqueue(
-            root, 'seqtok', 'extension', {'id': 'second'}))
+            root, 'seqtok', 'extension', {'id': 'second'},
+            command_ttl=90))
     steps = iter((0.0,) * 7)
     route._now = lambda: next(steps, 5000.0)
     targets = route.resolve_targets(root, 'seqtok', 'extension')
@@ -248,9 +251,10 @@ def test_the_extension_stream_delivers_every_queue_it_owns(tmp):
     route = _load_route('stream_route_extension_queues')
     cq = route.command_queue
     root = Path(tmp)
-    cq.enqueue(root, 'tok', 'extension', {'id': 'ext-queue'})
-    cq.enqueue(root, 'tok', 'other', {'id': 'per-tab'})
-    cq.enqueue(root, 'tok', '', {'id': 'broadcast-queue'})
+    cq.enqueue(root, 'tok', 'extension', {'id': 'ext-queue'},
+               command_ttl=90)
+    cq.enqueue(root, 'tok', 'other', {'id': 'per-tab'}, command_ttl=90)
+    cq.enqueue(root, 'tok', '', {'id': 'broadcast-queue'}, command_ttl=90)
     (root / 'tok_extension.json').write_text(
         '{"id": "ext-legacy"}', encoding='utf-8')
     (root / 'tok_other.json').write_text(
@@ -272,8 +276,9 @@ def test_a_named_tab_stream_reads_its_own_and_the_broadcast_targets(tmp):
     route = _load_route('stream_route_named_tab')
     cq = route.command_queue
     root = Path(tmp)
-    cq.enqueue(root, 'tok', 'chrome1', {'id': 'tab-queue'})
-    cq.enqueue(root, 'tok', '', {'id': 'broadcast-queue'})
+    cq.enqueue(root, 'tok', 'chrome1', {'id': 'tab-queue'},
+               command_ttl=90)
+    cq.enqueue(root, 'tok', '', {'id': 'broadcast-queue'}, command_ttl=90)
     (root / 'tok_chrome1.json').write_text(
         '{"id": "tab-legacy"}', encoding='utf-8')
     (root / 'tok.json').write_text(
@@ -291,7 +296,8 @@ def test_a_dashboard_stream_leaves_the_broadcast_legacy_file_alone(tmp):
     route = _load_route('stream_route_dashboard')
     cq = route.command_queue
     root = Path(tmp)
-    cq.enqueue(root, 'tok', 'dashboard', {'id': 'dash-event'})
+    cq.enqueue(root, 'tok', 'dashboard', {'id': 'dash-event'},
+               command_ttl=90)
     broadcast = root / 'tok.json'
     broadcast.write_text('{"id": "broadcast-legacy"}', encoding='utf-8')
     sink = _FrameSink()
@@ -306,7 +312,7 @@ def test_a_killed_stream_leaves_the_loop_without_a_frame(tmp):
     route = _load_route('stream_route_killed')
     cq = route.command_queue
     root = Path(tmp)
-    cq.enqueue(root, 'tok', 'extension', {'id': 'never'})
+    cq.enqueue(root, 'tok', 'extension', {'id': 'never'}, command_ttl=90)
     sink = _FrameSink()
     killed = threading.Event()
     killed.set()
@@ -324,7 +330,7 @@ def test_an_aged_out_stream_leaves_the_loop_without_a_frame(tmp):
     route = _load_route('stream_route_max_age')
     cq = route.command_queue
     root = Path(tmp)
-    cq.enqueue(root, 'tok', 'extension', {'id': 'never'})
+    cq.enqueue(root, 'tok', 'extension', {'id': 'never'}, command_ttl=90)
     clock = iter((0.0, 0.0))
     route._now = lambda: next(clock, 5000.0)
     sink = _FrameSink()
@@ -342,7 +348,7 @@ def test_a_write_error_ends_the_loop_and_is_not_raised(tmp):
     route = _load_route('stream_route_write_error')
     cq = route.command_queue
     root = Path(tmp)
-    cq.enqueue(root, 'tok', 'extension', {'id': 'doomed'})
+    cq.enqueue(root, 'tok', 'extension', {'id': 'doomed'}, command_ttl=90)
     sink = _FrameSink(fail_at='write')
     targets = route.resolve_targets(root, 'tok', 'extension')
 
@@ -357,7 +363,8 @@ def test_a_write_error_ends_the_loop_and_is_not_raised(tmp):
 def test_keepalive_is_written_when_the_clock_passes_the_interval(tmp):
     route = _load_route('stream_route_keepalive')
     root = Path(tmp)
-    route.command_queue.enqueue(root, 'tok', 'extension', {'id': 'only'})
+    route.command_queue.enqueue(
+        root, 'tok', 'extension', {'id': 'only'}, command_ttl=90)
     sink = _FrameSink()
 
     _one_tick(route, sink, root, 'tok', 'extension',
@@ -370,7 +377,8 @@ def test_keepalive_is_written_when_the_clock_passes_the_interval(tmp):
 def test_no_keepalive_before_the_clock_reaches_the_interval(tmp):
     route = _load_route('stream_route_keepalive_early')
     root = Path(tmp)
-    route.command_queue.enqueue(root, 'tok', 'extension', {'id': 'only'})
+    route.command_queue.enqueue(
+        root, 'tok', 'extension', {'id': 'only'}, command_ttl=90)
     sink = _FrameSink()
 
     _one_tick(route, sink, root, 'tok', 'extension',
