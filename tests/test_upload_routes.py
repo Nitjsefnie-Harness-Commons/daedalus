@@ -52,7 +52,6 @@ def test_list_uploads_answers_a_page_shape_when_paging_is_asked_for(tmp):
     assert [item['filename'] for item in payload['items']] == ['b.png']
 
 
-
 def test_store_upload_writes_a_timestamped_screenshot(tmp):
     routes = _load('fixture_upload_routes_store')
     body = {'token': 'tok', 'id': 'id1', 'format': 'png',
@@ -86,7 +85,6 @@ def test_store_upload_logs_and_answers_the_token_free_path(tmp):
     assert payload['size'] == 2, payload
     assert output.getvalue() == '[UPLOAD] shot/a.txt (2 bytes)\n', (
         output.getvalue())
-
 
 
 def test_store_upload_refuses_a_non_string_format(tmp):

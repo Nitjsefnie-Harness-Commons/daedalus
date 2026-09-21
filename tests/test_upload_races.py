@@ -34,6 +34,7 @@ def _store(root, token, upload_id, name, data=b'x'):
     path.write_bytes(data)
     return path
 
+
 def test_list_uploads_skips_an_entry_deleted_during_the_walk(tmp):
     routes = _load('fixture_upload_routes_vanished_entry')
 
@@ -300,6 +301,7 @@ def test_latest_screenshot_skips_an_id_deleted_before_scan(tmp):
 
     for survivor in (True, False):
         check_case(survivor)
+
 
 def test_store_upload_names_same_millisecond_captures_distinctly(tmp):
     routes = _load('fixture_upload_routes_same_ms')
