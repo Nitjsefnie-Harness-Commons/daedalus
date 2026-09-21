@@ -26,12 +26,7 @@ _COMPREHENSION_SCOPES = (
 
 
 class _ScopeFacts:
-    """Share derivations within one analysis; never cache a mutable tree.
-
-    Previously each consumer recomputed these whole-module products.
-    Keeping this object local to the analysis also releases parent maps
-    that hold the root, without adding a process-wide invalidation rule.
-    """
+    """Analysis-local lifetime avoids invalidating caches of mutable ASTs."""
 
     def __init__(self, tree, layout=None):
         self.tree = tree
@@ -149,7 +144,6 @@ def _canonical_import(node, alias, bound):
 
 
 def _import_rebound_names(tree):
-    """Owner retirements and proof shadows, from one import enumeration."""
     rebound, proof_shadows = set(), {}
     root_imported = False
     for node in memo_nodes(tree):
@@ -313,7 +307,7 @@ def _unprovable_names(tree, layout=None, facts=None):
 
 
 def _shadowed_names(tree, facts=None):
-    """Names whose source value is replaced somewhere in the module."""
+    """For chdir, unrelated scopes can still invalidate a proof."""
     facts = facts or _ScopeFacts(tree)
     names = set().union(*(_bound_names(node) for node in memo_nodes(tree)
                           if not isinstance(node, (ast.Import,
@@ -462,8 +456,6 @@ def _scope_shadows(tree, layout=None, facts=None):
         shadows[scope].update(imports.get(node, ()))
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             shadows[scope].update(_bound_names(node))
-    # A star import is a SyntaxError inside a function, so module-wide
-    # is its real scope.
     shadows[tree].update(unprovable)
     destinations = facts.destinations
     return _routed_bindings(shadows, destinations)
@@ -530,9 +522,7 @@ def _routed_bindings(local, destinations):
 
 
 def _scope_bindings(scoped, parents, products=None):
-    """All grammar-bound names, independent of the rebinding product.
-
-    Declarations bind their destination even without an assignment:
+    """Declarations bind their destination even without an assignment:
     uncertainty cannot prove a builtin. Star imports bind every name.
     """
     local, destinations = (products if products is not None
