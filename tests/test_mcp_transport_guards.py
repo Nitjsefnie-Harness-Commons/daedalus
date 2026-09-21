@@ -302,7 +302,8 @@ def test_poll_reports_timeout_after_only_transport_failures(tmp):
         [transport.httpx.ReadError('connection reset by peer')] * 3)
     session.http_client = lambda: client
     # Three admitted peeks, then the clock steps past the deadline.
-    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.0, 100.5)
+    session.monotonic = clock_script(
+        100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -338,7 +339,7 @@ def test_poll_deadline_is_not_the_wall_clock(tmp):
 
     # The session clock admits exactly one peek; a wall-clock deadline
     # sits an epoch past every scripted read, so entry never ends.
-    session.monotonic = clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
     with mock.patch.object(time, 'time', stepped_back):
         result = _capture(session.poll_result(
             '', 0.001, interval=0, expect_id='command',
@@ -406,7 +407,7 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
     ))
     session.http_client = lambda: client
     # 100.0009 is inside 100.001 but outside a deadline shortened by 10%.
-    session.monotonic = clock_script(100.0, 100.0009, 100.5)
+    session.monotonic = clock_script(100.0, 100.0009, 100.0009, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -433,8 +434,8 @@ def test_poll_rejects_a_read_exactly_at_the_deadline(tmp):
     }
     client = ClientProbe((body,))
     session.http_client = lambda: client
-    # The read equals 100.0 + timeout, so entry turns on < vs <=.
-    session.monotonic = clock_script(100.0, 100.001, 100.5)
+    # Both reads equal 100.0 + timeout, so the wait turns on < vs <=.
+    session.monotonic = clock_script(100.0, 100.001, 100.001, 100.5)
 
     result = _capture(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
@@ -446,167 +447,137 @@ def test_poll_rejects_a_read_exactly_at_the_deadline(tmp):
     assert result == expected, (result, expected)
 
 
-def test_poll_rejects_a_body_without_a_delivery_id(tmp):
+def test_poll_bounds_the_peek_by_the_time_remaining(tmp):
+    """The peek carries what is left of the deadline, not the 30s default.
+
+    The shared client bounds each request at 30s, so a peek issued late
+    in the wait could outlive the caller's timeout by that much against
+    a stalled bridge.
+    """
     del tmp
     transport = _transport()
     session = _session(transport)
-    body = {
+    wanted = {
         'id': 'command',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    # The receipt after the body proves the only thing that stopped the
-    # hand-over is the matching rule: the consume itself would have succeeded.
-    # The clock script admits exactly one peek, then steps past the deadline.
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.5)
-
-    result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command'))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
-def test_poll_rejects_an_empty_delivery_id(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'command',
-        'deliveryId': '',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.5)
-
-    result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command'))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
-def test_poll_rejects_a_delivery_id_when_none_is_expected(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'command',
-        'deliveryId': 'someone-elses',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.5)
-
-    result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command'))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
-def test_poll_rejects_a_matching_delivery_with_a_foreign_command_id(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'other',
         'deliveryId': 'wanted',
         'resultGeneration': 'generation-1',
         'result': {'value': 1},
     }
     client = ClientProbe((
-        body,
+        wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.5)
+    # Deadline read, then the peek issued with a quarter second left.
+    session.monotonic = clock_script(100.0, 100.0, 100.25, 100.5)
 
     result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command',
+        '', 0.5, interval=0, expect_id='command',
         expect_delivery='wanted'))
 
-    peeks = [call for call in client.calls if call[1] == '/result']
+    assert result == wanted, (result, wanted)
+    peeks = [call for call in client.calls if call[1] == '/result'
+             and 'consume' not in call[2].get('params', {})]
     assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+    actual = peeks[0][2].get('timeout')
+    assert actual == 0.25, actual
 
 
-def test_poll_rejects_a_matching_command_id_with_a_foreign_delivery_id(tmp):
+def test_poll_ends_without_the_peek_when_the_ramp_spends_the_wait(tmp):
+    """A deadline crossed during the ramp sleep admits no peek.
+
+    The loop checked the clock only at entry, so the ramp could run past
+    the caller's timeout and send the peek out anyway, riding the
+    client's 30s default against a wait already spent.
+    """
     del tmp
     transport = _transport()
     session = _session(transport)
-    body = {
+    client = ClientProbe(({'pending': True},))
+    session.http_client = lambda: client
+    # The post-sleep read lands past the deadline: the ramp spent the
+    # whole wait.
+    session.monotonic = clock_script(100.0, 100.0, 100.5)
+
+    result = _capture(session.poll_result(
+        '', 0.05, interval=0, expect_id='command',
+        expect_delivery='wanted'))
+
+    peeks = [call for call in client.calls if call[1] == '/result']
+    assert not peeks, client.calls
+    expected = 'raised TimeoutError: no result within 0.05s'
+    assert result == expected, (result, expected)
+
+
+def test_poll_hands_over_a_success_just_inside_the_deadline(tmp):
+    """A peek admitted with almost nothing left still returns the result.
+
+    The spent checks and the remaining-time budget are about failure at
+    the boundary; a success just inside it must not be caught by them.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    wanted = {
         'id': 'command',
-        'deliveryId': 'stale',
+        'deliveryId': 'wanted',
         'resultGeneration': 'generation-1',
         'result': {'value': 1},
     }
     client = ClientProbe((
-        body,
+        wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.5)
+    # 0.0001 left at the peek: inside the deadline, barely.
+    session.monotonic = clock_script(100.0, 100.0, 100.0499, 100.5)
 
     result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command',
+        '', 0.5, interval=0, expect_id='command',
         expect_delivery='wanted'))
 
-    peeks = [call for call in client.calls if call[1] == '/result']
+    assert result == wanted, (result, wanted)
+    peeks = [call for call in client.calls if call[1] == '/result'
+             and 'consume' not in call[2].get('params', {})]
     assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+    actual = peeks[0][2].get('timeout')
+    expected = 100.0 + 0.5 - 100.0499
+    assert actual == expected, (actual, expected)
 
 
-def test_poll_rejects_an_empty_delivery_expectation(tmp):
+def test_poll_lets_the_consume_ride_the_ordinary_client_timeout(tmp):
+    """The consume carries no remaining-time budget of its own.
+
+    The consume is what claims the result: cutting it off at the
+    deadline would leave a result nobody takes. It stays bounded by the
+    ordinary client timeout, the same convention as the CLI waiter.
+    """
     del tmp
     transport = _transport()
     session = _session(transport)
-    # The empty string is the one value where a truthiness check and an
-    # `is None` check disagree, so the body has to report the same empty
-    # string the caller sent to catch the weaker spelling.
-    body = {
+    wanted = {
         'id': 'command',
-        'deliveryId': '',
+        'deliveryId': 'wanted',
         'resultGeneration': 'generation-1',
         'result': {'value': 1},
     }
     client = ClientProbe((
-        body,
+        wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
     ))
     session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.5)
+    session.monotonic = clock_script(100.0, 100.0, 100.25, 100.5)
 
     result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command', expect_delivery=''))
+        '', 0.5, interval=0, expect_id='command',
+        expect_delivery='wanted'))
 
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+    assert result == wanted, (result, wanted)
+    consumes = [call for call in client.calls if call[1] == '/result'
+                and 'consume' in call[2].get('params', {})]
+    assert len(consumes) == 1, client.calls
+    actual = consumes[0][2].get('timeout')
+    assert actual is None, actual
 
 
 def test_extension_command_surfaces_result_error(tmp):
@@ -673,8 +644,9 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
         environ.pop('DAEDALUS_LOCAL_URL', None)
         environ.pop('DAEDALUS_PORT', None)
         session = _session(transport, url=base)
-        # Two admitted peeks, then the clock steps past the deadline.
-        session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
+        # Two admitted attempts, then the clock steps past the deadline.
+        session.monotonic = clock_script(
+            100.0, 100.0, 100.0, 100.0, 100.0, 100.5)
         result = _capture(session.poll_result(
             '', 0.001, interval=0, expect_id='job4', expect_delivery='d1'),
             transport)
@@ -683,8 +655,12 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
     assert raised == 'RemoteProtocolError', raised
+    # A peek whose remaining budget expires can die before it reaches
+    # the server, so the count of visible peeks is not exact; that none
+    # of them is a consume is.
     gets = [path for verb, path in seen if verb == 'GET']
-    assert gets == ['/result?delivery=d1'] * 2 + ['/result'], seen
+    assert gets[-1] == '/result', seen
+    assert all(path == '/result?delivery=d1' for path in gets[:-1]), seen
 
 
 def main():
