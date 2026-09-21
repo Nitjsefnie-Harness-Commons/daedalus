@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 from unittest import mock
 from pathlib import Path
@@ -61,6 +62,15 @@ def _recorder(own, pages):
         return json.dumps(own)
 
     return calls, read
+
+
+def _query_error(mod, call):
+    """Return the QueryError `call` raised; fail the test when it did not."""
+    try:
+        call()
+    except mod.QueryError as exc:
+        return exc
+    raise AssertionError('QueryError was not raised')
 
 
 MINE = _run(1, 'cancelled', '2026-09-07T10:00:00Z')
@@ -241,6 +251,67 @@ def test_a_failed_gh_read_answers_query_failed(tmp):
                                     'o/r', '1', 'main', read)
     assert verdict == 'query-failed'
     assert 'query failed' in message, message
+
+
+def test_a_malformed_started_at_sorts_oldest_and_ignores_created_at(tmp):
+    del tmp
+    mod = _gate()
+    broken = _run(7, None, 'definitely-not-a-stamp',
+                  created_at='2026-09-07T10:05:00Z', status='in_progress')
+    earlier = _run(8, 'success', '2026-09-07T09:00:00Z')
+    assert mod._started_key(broken) == (mod.OLDEST, 7)
+    assert mod.superseded(broken, [broken, earlier])
+    assert not mod.superseded(earlier, [broken, earlier])
+
+
+def test_the_raw_decoder_answers_an_empty_list_for_an_empty_payload(tmp):
+    del tmp
+    decode = _gate()._decode
+    assert decode('') == []
+    assert decode(' \n\t ') == []
+
+
+def test_the_raw_decoder_reads_whitespace_separated_documents(tmp):
+    del tmp
+    assert _gate()._decode('{"a": 1}\n  [2]') == [{'a': 1}, [2]]
+
+
+def test_the_raw_decoder_refuses_garbage_after_a_valid_document(tmp):
+    del tmp
+    mod = _gate()
+    error = _query_error(mod, lambda: mod._decode('{"a": 1} oops'))
+    assert 'unparseable gh output' in str(error), str(error)
+
+
+def test_gh_read_turns_a_timeout_or_oserror_into_a_query_error(tmp):
+    del tmp
+    mod = _gate()
+    for effect in (subprocess.TimeoutExpired(cmd='gh', timeout=120),
+                   OSError(5, 'input/output error')):
+        with mock.patch.object(mod.subprocess, 'run', side_effect=effect):
+            error = _query_error(mod, lambda: mod.gh_read(['gh', 'api']))
+        assert 'gh failed' in str(error), str(error)
+
+
+def test_gh_read_refuses_a_nonzero_exit_with_the_clipped_stderr(tmp):
+    del tmp
+    mod = _gate()
+    proc = mock.Mock(returncode=1, stdout='irrelevant',
+                     stderr=' ' + 'e' * 501)
+    run = mock.Mock(return_value=proc)
+    with mock.patch.object(mod.subprocess, 'run', run):
+        error = _query_error(mod, lambda: mod.gh_read(['gh', 'api']))
+    assert str(error) == 'e' * 400, str(error)
+
+
+def test_gh_read_returns_the_stdout_when_gh_exits_zero(tmp):
+    del tmp
+    mod = _gate()
+    proc = mock.Mock(returncode=0, stdout='the payload', stderr='noise')
+    run = mock.Mock(return_value=proc)
+    with mock.patch.object(mod.subprocess, 'run', run):
+        assert mod.gh_read(['gh', 'api', 'repos/o/r']) == 'the payload'
+    assert run.call_args.args == (['gh', 'api', 'repos/o/r'],)
 
 
 def test_every_single_dependency_result_is_tabled(tmp):
