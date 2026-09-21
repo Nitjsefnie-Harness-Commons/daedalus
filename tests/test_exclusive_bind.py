@@ -168,7 +168,9 @@ def test_the_posix_bridge_listener_keeps_reuse_address(tmp):
 
     getsockopt on the bound socket is the only proof that survives the
     factory: the flag is applied by the standard library inside the bind
-    the bridge overrides, so no call record of the override's own shows it.
+    the bridge overrides, so no call record of the override's own shows
+    it. Darwin reports the flag as the option's bit value (4), Linux as
+    1; zero is unset on both.
     """
     if sys.platform == 'win32':
         _util.skip('the Windows arm is pinned by the recorded binds')
@@ -179,7 +181,7 @@ def test_the_posix_bridge_listener_keeps_reuse_address(tmp):
     try:
         observed = server.socket.getsockopt(
             socket.SOL_SOCKET, socket.SO_REUSEADDR)
-        assert observed == 1, (
+        assert observed != 0, (
             sys.platform, observed, socket.SO_REUSEADDR,
             socket.SOL_SOCKET, server.allow_reuse_address)
     finally:
@@ -202,7 +204,11 @@ def test_the_windows_mcp_arm_excludes_the_port(tmp):
 
 
 def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
-    """The non-win32 front end keeps the reuse flag on its real socket."""
+    """The non-win32 front end keeps the reuse flag on its real socket.
+
+    Darwin reports the flag as the option's bit value (4), Linux as 1;
+    zero is unset on both.
+    """
     del tmp
     _need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
@@ -214,7 +220,7 @@ def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
     assert mod.bound_port == sock.getsockname()[1]
     assert mod.bound_port > 0
     observed = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
-    assert observed == 1, (
+    assert observed != 0, (
         sys.platform, observed, socket.SO_REUSEADDR, socket.SOL_SOCKET)
     sock.close()
 
