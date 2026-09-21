@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""The jobs decode both workflow-structure gates are built on.
+"""The complete decode both workflow-structure gates are built on.
 
 Each gate is only as good as the decode underneath it, so the decode gets
 its own pins: every spelling a valid workflow may write a job with decodes
-to the same value, and a construct the reader cannot classify is refused
-rather than read as an empty jobs set.
+to the same value, a construct the reader cannot classify is refused rather
+than read as an empty jobs set, and a bare-empty value reads as `None`
+wherever it can sit, against `yaml.safe_load` and the shipped workflows.
 """
 import os
 import sys
@@ -293,8 +294,7 @@ BOUNDED_JOB = (
     '    timeout-minutes: 5\n'
     '    steps:\n'
     '      - run: echo\n')
-# Every position a bare-empty mapping value can sit in, each paired with
-# the paths that must read as `None` and the paths that must read as `''`.
+# Each fixture: name, source, the paths reading `None`, the paths reading ''.
 BARE_EMPTY_FIXTURES = (
     ('last-field-at-end-of-document',
      'name: x\n' + BOUNDED_JOB + 'on:\n  workflow_dispatch:\n',
@@ -341,11 +341,7 @@ SHIPPED_WITH_BARE_TRIGGERS = {
 
 
 def _at(document, path):
-    """Return the value at one decoded path, whichever reader decoded it.
-
-    `yaml.safe_load` reads the `on` key as the YAML 1.1 Boolean `True`;
-    the bespoke reader keeps the spelling, so the lookup accepts either.
-    """
+    """Look up one path; `yaml.safe_load` spells the `on` key `True`."""
     for step in path:
         if step == 'on' and 'on' not in document and True in document:
             step = True
@@ -371,7 +367,7 @@ def _none_paths(document, path=()):
 
 
 def test_a_trigger_key_with_nothing_under_it_reads_as_none(tmp):
-    """The issue's exact source: `pull_request:` with no filters is null."""
+    """The issue's exact source."""
     source = _real(tmp, 'name: x\non:\n  pull_request:\njobs:\n  probe:\n'
                    '    runs-on: ubuntu-latest\n    timeout-minutes: 5\n')
     decoded = workflow_mapping(source)
@@ -416,11 +412,7 @@ def test_the_sweep_admits_any_bare_trigger_not_only_the_shipped_two(tmp):
 
 
 def test_a_bare_empty_value_reads_as_none_in_every_position(tmp):
-    """Every position decodes to `None`, matching `yaml.safe_load`.
-
-    `''` stays `''`: a quoted empty scalar is a value, a bare key is not,
-    which is where this reader deliberately parts from `yaml.BaseLoader`.
-    """
+    """Every position matches `yaml.safe_load`; `''` stays `''`."""
     compared = 0
     for name, text, none_paths, empty_paths in BARE_EMPTY_FIXTURES:
         source = _real(tmp, text, name + '.yml')
@@ -440,7 +432,7 @@ def test_a_bare_empty_value_reads_as_none_in_every_position(tmp):
 
 
 def test_a_bare_empty_job_field_reads_as_none_through_every_job_reader(tmp):
-    """The job readers share the decoder, so a job-level null is one value."""
+    """Every job reader reads the same null."""
     name, text, none_paths, _empty = BARE_EMPTY_FIXTURES[6]
     assert name == 'sequence-item-mapping', name
     source = _real(tmp, text, name + '.yml')
@@ -470,11 +462,7 @@ def test_a_bare_empty_outputs_is_refused_as_not_a_mapping(tmp):
 
 
 def test_a_bare_empty_strategy_elsewhere_still_finds_the_matrix_job(tmp):
-    """A null strategy or steps on another job is not a crash.
-
-    The lookup asks which job runs a command under a matrix; a job whose
-    `strategy:` or `steps:` carries nothing runs nothing under any matrix.
-    """
+    """A job whose strategy, steps or run is null runs nothing."""
     real = _tests_yml()
     matrix = {'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
               'python': ['3.13']}
@@ -506,7 +494,7 @@ def test_a_bare_empty_strategy_elsewhere_still_finds_the_matrix_job(tmp):
 
 
 def test_a_bare_empty_step_field_is_still_refused(tmp):
-    """The step reader keeps refusing an empty field: `with:` is no mapping."""
+    """The step reader still refuses an empty field."""
     source = _real(tmp, 'jobs:\n  sample:\n    steps:\n      - run: echo\n'
                    '        with:\n')
     message = _refuses(step_mappings, source, 'sample')
@@ -514,7 +502,7 @@ def test_a_bare_empty_step_field_is_still_refused(tmp):
 
 
 def test_spelled_null_literals_still_read_as_their_spelling(tmp):
-    """`null`, `~` and `Null` are plain scalars here, not the null value."""
+    """Spelled nulls stay plain scalars."""
     for spelling in ('null', '~', 'Null'):
         source = _real(tmp, BOUNDED_JOB + '    env: ' + spelling + '\n')
         assert workflow_mapping(source)['jobs']['probe']['env'] == spelling
@@ -522,7 +510,7 @@ def test_spelled_null_literals_still_read_as_their_spelling(tmp):
 
 
 def test_shapes_beside_a_bare_empty_value_keep_their_verdicts(tmp):
-    """Each neighbour of the accepted shape keeps the class it had before."""
+    """Neighbours of the accepted shape keep their verdicts."""
     cases = (
         ('A:\n  two\n' + BOUNDED_JOB, 'unsupported mapping field'),
         (BOUNDED_JOB + '    needs:\n      - \n', 'unsupported plain scalar'),

@@ -317,12 +317,8 @@ def test_an_external_caller_target_is_refused(tmp):
 
 
 def test_a_caller_naming_no_target_is_refused_not_passed(tmp):
-    """`uses:` with nothing after it is a caller of nothing, not a pass.
-
-    The decoder reads the bare field as `None`, which is also what an
-    absent field reads as; a job declaring the key without a target is
-    neither a runner nor a verifiable caller, so it is named, not skipped.
-    """
+    """A bare `uses:` decodes like an absent one; the key's presence is
+    the signal, and the job is named rather than passed as no runner."""
     root = _fixture(tmp, 'null-caller', 'jobs:\n  call:\n    uses:\n')
     violations = _timeout_violations(root)
     assert len(violations) == 1, violations
