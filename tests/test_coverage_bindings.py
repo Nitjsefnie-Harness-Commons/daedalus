@@ -12,6 +12,8 @@ from _coverage_guard import _synthetic_violations  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from test_bash_resolver_scan import _BASH_MUTATION_SPECS  # noqa: E402
+from test_coverage_root_provenance import (  # noqa: E402
+    _ROOT_PROVENANCE_MUTATIONS as _DESTINATION_MUTATIONS)
 from test_coverage_scope_bindings import (  # noqa: E402
     _ROOT_PROVENANCE_INVOKE, _ROOT_PROVENANCE_MUTATIONS)
 
@@ -543,12 +545,14 @@ def _mutation_specs():
         "    owners = {'_util'}\n",
     )
     binding_aliasing = (
-        "    return shadows\n\n\n_FUNCTION_SCOPES",
+        "    return _routed_bindings(shadows, destinations)\n\n"
+        "\n_FUNCTION_SCOPES",
         "    for node, scope in scoped:\n"
         "        if isinstance(node, (ast.Import, ast.ImportFrom)):\n"
         "            shadows[scope].update(\n"
         "                alias.asname or alias.name for alias in node.names)\n"
-        "    return shadows\n\n\n_FUNCTION_SCOPES",
+        "    return _routed_bindings(shadows, destinations)\n\n"
+        "\n_FUNCTION_SCOPES",
     )
     variadic_annotations = (
         "        variadic = [value for value in (arguments.vararg, "
@@ -625,7 +629,8 @@ def _mutation_specs():
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
         ('MatchMapping global', 'scopes', (match_rest_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
-    ) + _BASH_MUTATION_SPECS + _ROOT_PROVENANCE_MUTATIONS
+    ) + _BASH_MUTATION_SPECS + _ROOT_PROVENANCE_MUTATIONS \
+        + _DESTINATION_MUTATIONS
 
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
