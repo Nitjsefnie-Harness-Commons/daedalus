@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsread import (blank_js_comments, js_bracket_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
-from _token_policy import _logs_bridge_token  # noqa: E402
+from _token_policy import (_logs_bridge_token,  # noqa: E402
+                           _token_log_offenders)
 from _token_mask import token_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
@@ -196,8 +197,9 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
     collected from them — all places a credential outlives the moment it was
     useful in. A truncated prefix is not what this pins: the version banner
     logs eight characters to say which bridge is configured, and that stays.
-    This line-local policy refuses potential reads in console arguments;
-    it does not evaluate control flow or the values of argument expressions.
+    This whole-source policy refuses potential reads in console arguments
+    however the statement wraps across lines; it does not evaluate control
+    flow or the values of argument expressions.
     """
     del tmp
     offenders = []
@@ -212,12 +214,18 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
         if not path.is_file():
             continue
         source = path.read_bytes().decode('utf-8')
-        # Mask once to retain comment/template state across line boundaries;
-        # call argument matching remains line-local (multiline is #848).
-        lines = token_mask(source).lines(source)
-        for number, (line, mask, unresolved) in enumerate(lines, 1):
-            if unresolved or _logs_bridge_token(line, mask):
+        # Comment, string and template state is lexical, so the mask is
+        # whole-file, and the sink scan and its argument policy run over the
+        # whole masked source: a console call and the reads in its arguments
+        # match however the statement wraps across lines.
+        masked = token_mask(source)
+        lines = masked.lines(source)
+        for number, (line, _, unresolved) in enumerate(lines, 1):
+            if unresolved:
                 offenders.append(f'{name}:{number}: {line.strip()}')
+        offenders.extend(
+            f'{name}:{number}: {line.strip()}'
+            for number, line in _token_log_offenders(source, masked.text))
     assert not offenders, offenders
 
 
@@ -433,6 +441,11 @@ def test_token_guard_lexical_boundaries(tmp):
     uncertain = token_mask("of / /'/;\n'closed';\nconsole.log(config.token)")
     assert all(refused for _, _, refused in uncertain.lines(
         "of / /'/;\n'closed';\nconsole.log(config.token)"))
+
+
+def test_token_guard_refuses_multiline_console_calls(tmp):
+    from _token_policy_cases import multiline_cases
+    _check_token_sources(tmp, multiline_cases())
 
 
 def test_extension_ships_no_default_server(tmp):
