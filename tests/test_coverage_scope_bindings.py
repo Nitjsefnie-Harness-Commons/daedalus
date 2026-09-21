@@ -50,14 +50,14 @@ _ROOT_PROVENANCE_MUTATIONS = (
      _ROOT_PROVENANCE_INVOKE),
     ('an unbound ROOT is unprovable', 'scopes',
      (("    if not facts.root_assignments and not root_imported:\n"
-       "        names.add('ROOT')\n", ""),), _ROOT_PROVENANCE_INVOKE),
+       "        names.add('ROOT()')\n", ""),), _ROOT_PROVENANCE_INVOKE),
     ('owner imports never prove constructors or builtins', 'scopes',
      (("    if isinstance(node, ast.Import):\n        return False\n",
        "    if isinstance(node, ast.Import):\n"
        "        return alias.name in _ROOT_MODULES\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('proof shadows distinguish calls from owner attributes', 'scopes',
-     (("                              if bound in {'Path', 'str'} else bound)"
+     (("                              if bound in {'Path', 'str', 'ROOT'} else bound)"
        "\n", "                              if False else bound)\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('str calls consult their import proof shadow', 'scopes',
@@ -109,7 +109,8 @@ _ROOT_PROVENANCE_MUTATIONS = (
        ""),), _ROOT_PROVENANCE_INVOKE),
     ('an assignment cannot erase a ROOT import shadow', 'scopes',
      (("            and not _other_root_bindings(facts, root_values)\n",
-       ""),), _ROOT_PROVENANCE_INVOKE),
+       ""),), 'import test_coverage_root_provenance as root_suite; '
+     'root_suite._assert_root_binding_site(17)'),
 )
 
 
@@ -599,6 +600,17 @@ def test_local_root_parameter_keeps_the_module_derivation(tmp):
     source = ('import subprocess\nimport _util\nROOT = _util.ROOT\n'
               'def f(ROOT):\n    pass\nsubprocess.run(c, cwd=ROOT)\n')
     assert _synthetic_violations(source) == []
+
+
+def test_root_owner_alias_keeps_only_its_attribute_proof(tmp):
+    del tmp
+    for module in ('_util', 'test_dashboard_behaviour'):
+        prefix = f'import subprocess\nimport {module} as ROOT\n'
+        assert _synthetic_violations(
+            prefix + 'subprocess.run(c, cwd=ROOT.ROOT)\n') == []
+        assert _synthetic_violations(
+            prefix + 'subprocess.run(c, cwd=ROOT)\n') == _rebound_owner(
+                3, 'ROOT')
 
 
 if __name__ == '__main__':

@@ -192,6 +192,19 @@ def test_local_root_bindings_leave_the_module_root_alone(tmp):
         prefix + 'subprocess.run(c, cwd=ROOT)\n') == []
 
 
+def test_root_alias_owner_and_bare_roles_reach_both_consumers(tmp):
+    del tmp
+    for module in ('_util', 'test_dashboard_behaviour'):
+        prefix = f'import os\nimport subprocess\nimport {module} as ROOT\n'
+        _assert_launch(prefix, '', 'ROOT', False)
+        _assert_launch(prefix, '', 'ROOT', True)
+        for expression in ('ROOT.ROOT', 'str(ROOT.ROOT)'):
+            assert _synthetic_violations(
+                prefix + f'subprocess.run(c, cwd={expression})\n') == []
+            assert _synthetic_violations(
+                prefix + f'os.chdir({expression})\nsubprocess.run(c)\n') == []
+
+
 _INVOKE = 'import test_coverage_root_provenance as root_suite; '
 _ROUTING = (
     "    return _routed_bindings(shadows, destinations)\n",
@@ -352,6 +365,25 @@ _ROOT_PROVENANCE_MUTATIONS += (
        "is self.tree\n", "                if scope is self.tree\n"),),
      _INVOKE + 'root_suite.test_local_root_bindings_leave_the_module_'
      'root_alone(None)'),
+)
+
+_ROOT_PROVENANCE_MUTATIONS += (
+    ('ROOT imports preserve the owner role', 'scopes',
+     (("                              if bound in {'Path', 'str', 'ROOT'} "
+       "else bound)\n",
+       "                              if bound in {'Path', 'str'} "
+       "else bound)\n"),),
+     _INVOKE + 'root_suite.test_root_alias_owner_and_bare_roles_'
+     'reach_both_consumers(None)'),
+    ('absent bare ROOT leaves the owner role alone', 'scopes',
+     (("        names.add('ROOT()')\n", "        names.add('ROOT')\n"),),
+     _INVOKE + 'root_suite.test_root_alias_owner_and_bare_roles_'
+     'reach_both_consumers(None)'),
+    ('bare ROOT consults its proof marker', 'scopes',
+     (("        return 'ROOT()' not in shadowed_names\n",
+       "        return True\n"),),
+     _INVOKE + 'root_suite.test_root_alias_owner_and_bare_roles_'
+     'reach_both_consumers(None)'),
 )
 
 

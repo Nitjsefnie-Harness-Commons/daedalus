@@ -161,7 +161,7 @@ def _import_rebound_names(tree):
                 canonical = _canonical_import(node, alias, bound)
                 if not canonical and bound in _PROOF_NAMES:
                     shadow = (f'{bound}()'
-                              if bound in {'Path', 'str'} else bound)
+                              if bound in {'Path', 'str', 'ROOT'} else bound)
                     proof_shadows.setdefault(node, set()).add(shadow)
                 if canonical and bound == 'ROOT':
                     root_imported = True
@@ -214,7 +214,7 @@ def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):
            for part in ast.walk(node)):
         return False
     if isinstance(node, ast.Name) and node.id == 'ROOT':
-        return True
+        return 'ROOT()' not in shadowed_names
     if (isinstance(node, ast.Attribute) and node.attr == 'ROOT'
             and isinstance(node.value, ast.Name)
             and node.value.id in owners):
@@ -306,7 +306,7 @@ def _unprovable_names(tree, layout=None, facts=None):
     destinations = facts.destinations
     names = _routed_bindings(imports, destinations)[tree]
     if not facts.root_assignments and not root_imported:
-        names.add('ROOT')
+        names.add('ROOT()')
     return names, proof_shadows
 
 
